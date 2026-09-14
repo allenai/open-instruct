@@ -1,0 +1,102 @@
+
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+WARNING: The NVIDIA Driver was not detected.  GPU functionality will not be available.
+   Use the NVIDIA Container Toolkit to start this container with GPU support; see
+   https://docs.nvidia.com/datacenter/cloud-native/ .
+
+........................................................................ [  8%]
+........................................................................ [ 16%]
+........................................................................ [ 25%]
+........................................................................ [ 33%]
+........................................................................ [ 42%]
+........................................................................ [ 50%]
+........................................................................ [ 58%]
+........................................................................ [ 67%]
+...............ss............s.s................................sssssss. [ 75%]
+....ssssssssssssssssssssssssssssssssssssssssss.......................... [ 84%]
+........................................................................ [ 92%]
+.................................................................        [100%]
+=============================== warnings summary ===============================
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:1112
+../../usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:1112
+tests/miles/test_packing_loss.py::test_packing_preserves_rl_objective_and_gradients[False-False]
+  /usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:1112: UserWarning: Can't initialize NVML
+    raw_cnt = _raw_device_count_nvml()
+
+../../sgl-workspace/sglang/python/sglang/srt/layers/quantization/awq/awq.py:52
+  /sgl-workspace/sglang/python/sglang/srt/layers/quantization/awq/awq.py:52: UserWarning: Only CUDA, HIP and XPU support AWQ currently.
+    warnings.warn(f"Only CUDA, HIP and XPU support AWQ currently.")
+
+../../sgl-workspace/sglang/python/sglang/srt/layers/quantization/gguf.py:69
+  /sgl-workspace/sglang/python/sglang/srt/layers/quantization/gguf.py:69: UserWarning: Only CUDA, MUSA and NPU support GGUF quantization currently.
+    warnings.warn(f"Only CUDA, MUSA and NPU support GGUF quantization currently.")
+
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:1488
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:1488
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:1488
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:1488: DeprecationWarning: `torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../src/Megatron-LM/megatron/core/tensor_parallel/random.py:83
+  /src/Megatron-LM/megatron/core/tensor_parallel/random.py:83: DeprecationWarning: Using deprecated internal API from Transformer Engine. transformer_engine.pytorch.fp8 will be removed in a future release.
+    from transformer_engine.pytorch.fp8 import FP8GlobalStateManager, fp8_autocast
+
+../../src/Megatron-LM/megatron/core/extensions/transformer_engine.py:3510
+  /src/Megatron-LM/megatron/core/extensions/transformer_engine.py:3510: DeprecationWarning: transformer_engine.pytorch.float8_tensor is deprecated and will be removed in a future release. Float8Tensor should be imported directly through `from transformer_engine.pytorch import Float8Tensor`
+    from transformer_engine.pytorch.float8_tensor import Float8Tensor
+
+../../src/Megatron-LM/megatron/core/inference/contexts/__init__.py:9
+  /src/Megatron-LM/megatron/core/inference/contexts/__init__.py:9: DeprecationWarning: The following imports from `dynamic_context.py` will be removed in this file in `megatron-core` 0.14. The imports here result in a cyclic import issue that causes rotary embeddings to import from Apex rather than Transformer Engine.
+    warnings.warn(
+
+../../usr/local/lib/python3.12/dist-packages/fla/utils/_device.py:100
+  /usr/local/lib/python3.12/dist-packages/fla/utils/_device.py:100: UserWarning: Triton is not supported on current platform, roll back to CPU.
+    _cpu_device_warning()
+
+tests/miles/test_checkpoint_drift.py::test_actual_flat_dcp_stream_roundtrip_preserves_experts_and_master_precision
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[False-32-4]
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[False-48-8]
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[True-32-4]
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[True-48-8]
+tests/miles/test_hero_conversion.py::test_rejects_same_shape_different_attention_semantics
+tests/miles/test_hero_conversion.py::test_rejects_different_sliding_window
+tests/miles/test_runtime.py::test_pinned_parser_selects_core[kda]
+tests/miles/test_runtime.py::test_pinned_parser_selects_core[kda_latent]
+  /usr/local/lib/python3.12/dist-packages/transformers/modeling_rope_utils.py:1036: FutureWarning: `rope_config_validation` is deprecated and has been removed. Its functionality has been moved to RotaryEmbeddingConfigMixin.validate_rope method. PreTrainedConfig inherits this class, so please call self.validate_rope() instead. Also, make sure to use the new rope_parameters syntax. You can call self.standardize_rope_params() in the meantime.
+    warnings.warn(
+
+tests/miles/test_checkpoint_drift.py::test_actual_flat_dcp_stream_roundtrip_preserves_experts_and_master_precision
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[False-32-4]
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[False-48-8]
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[True-32-4]
+tests/miles/test_hero_conversion.py::test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip[True-48-8]
+  /usr/local/lib/python3.12/dist-packages/torch/distributed/checkpoint/utils.py:485: UserWarning: torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process.
+    return func(*args, **kwargs)
+
+tests/miles/test_packing_loss.py::test_packing_preserves_rl_objective_and_gradients[False-True]
+tests/miles/test_packing_loss.py::test_packing_preserves_rl_objective_and_gradients[True-True]
+tests/miles/test_scoring_pass_loss.py::test_skip_preserves_tis_and_reference_kl[False-True-False]
+tests/miles/test_scoring_pass_loss.py::test_skip_preserves_tis_and_reference_kl[False-True-True]
+tests/miles/test_scoring_pass_loss.py::test_skip_preserves_tis_and_reference_kl[True-True-False]
+tests/miles/test_scoring_pass_loss.py::test_skip_preserves_tis_and_reference_kl[True-True-True]
+  /opt/core-rl/sources/miles/miles/backends/training_utils/loss.py:217: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
+    torch.tensor(num_tokens if args.calculate_per_token_loss else 1, device=logits.device),
+
+tests/miles/test_update_zero_megatron.py::test_actual_megatron_scheduler_constructs_without_optimizer_updates
+  /src/Megatron-LM/megatron/core/_rank_utils.py:39: UserWarning: Could not determine rank from torch.distributed, RANK, or SLURM_PROCID. Defaulting to rank 0.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+804 passed, 53 skipped, 47 warnings in 264.11s (0:04:24)

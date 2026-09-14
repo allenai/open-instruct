@@ -1,0 +1,345 @@
+{
+  "current_policy_token_fraction": 0.1729109980060228,
+  "provenance_active_tokens": 4599852,
+  "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
+  "completed_updates": 24,
+  "validated_trainer_ranks": 2,
+  "training_components_rank0": {
+    "standalone_scoring": {
+      "count": 0,
+      "total_seconds": 0,
+      "median_seconds": null
+    },
+    "forward_backward_optimizer": {
+      "count": 18,
+      "total_seconds": 304.8210947723128,
+      "median_seconds": 16.360480887524318
+    }
+  },
+  "warmup_updates": 6,
+  "measured_updates": 18,
+  "warm_cycle_seconds": 903.8735499521717,
+  "useful_response_tokens": 4599852,
+  "useful_response_tokens_per_second": 5089.043705553061,
+  "trainer_wait_fraction": 0.5808278808313577,
+  "batch_collection_breakdown": {
+    "scope": "Completed-buffer get time includes expiry filtering; the remainder includes collection and handoff, not solely transfer.",
+    "completed_queue_get_seconds": 468.5651578773977,
+    "completed_queue_get_cycle_fraction": 0.5183968021878632,
+    "other_collection_seconds": 56.429800680838525,
+    "other_collection_cycle_fraction": 0.06243107864349443
+  },
+  "discarded_response_tokens": 36515,
+  "discarded_token_fraction": 0.00787577859992533,
+  "mixed_responses": 1124,
+  "per_update": [
+    {
+      "rollout_id": 6,
+      "response_tokens": 281150,
+      "mixed_responses": 56,
+      "completed_queue_get_seconds": 10.136183132883161,
+      "other_collection_seconds": 3.4362431971821934,
+      "generation_wait_seconds": 13.572426330065355,
+      "training_seconds": 22.34734431002289,
+      "publication_seconds": 2.9453982409322634
+    },
+    {
+      "rollout_id": 7,
+      "response_tokens": 252285,
+      "mixed_responses": 83,
+      "completed_queue_get_seconds": 27.358115811366588,
+      "other_collection_seconds": 2.8973784387344494,
+      "generation_wait_seconds": 30.255494250101037,
+      "training_seconds": 16.55325649806764,
+      "publication_seconds": 2.98252786998637
+    },
+    {
+      "rollout_id": 8,
+      "response_tokens": 281576,
+      "mixed_responses": 73,
+      "completed_queue_get_seconds": 32.10128164116759,
+      "other_collection_seconds": 3.4072976207826287,
+      "generation_wait_seconds": 35.50857926195022,
+      "training_seconds": 19.878242462989874,
+      "publication_seconds": 4.4396553370170295
+    },
+    {
+      "rollout_id": 9,
+      "response_tokens": 237339,
+      "mixed_responses": 48,
+      "completed_queue_get_seconds": 19.99747729592491,
+      "other_collection_seconds": 3.051924905157648,
+      "generation_wait_seconds": 23.049402201082557,
+      "training_seconds": 15.893946788040921,
+      "publication_seconds": 3.6948344990378246
+    },
+    {
+      "rollout_id": 10,
+      "response_tokens": 211932,
+      "mixed_responses": 57,
+      "completed_queue_get_seconds": 24.804354128893465,
+      "other_collection_seconds": 3.055478657130152,
+      "generation_wait_seconds": 27.859832786023617,
+      "training_seconds": 17.024130423902534,
+      "publication_seconds": 2.9455748009495437
+    },
+    {
+      "rollout_id": 11,
+      "response_tokens": 260981,
+      "mixed_responses": 64,
+      "completed_queue_get_seconds": 30.221570935449563,
+      "other_collection_seconds": 3.5357524305582047,
+      "generation_wait_seconds": 33.75732336600777,
+      "training_seconds": 17.40442792302929,
+      "publication_seconds": 2.9985413199756294
+    },
+    {
+      "rollout_id": 12,
+      "response_tokens": 253102,
+      "mixed_responses": 57,
+      "completed_queue_get_seconds": 30.373949611908756,
+      "other_collection_seconds": 3.4239371500443667,
+      "generation_wait_seconds": 33.79788676195312,
+      "training_seconds": 17.26252155797556,
+      "publication_seconds": 3.0143712379503995
+    },
+    {
+      "rollout_id": 13,
+      "response_tokens": 261043,
+      "mixed_responses": 68,
+      "completed_queue_get_seconds": 22.140831804135814,
+      "other_collection_seconds": 4.0608187288744375,
+      "generation_wait_seconds": 26.201650533010252,
+      "training_seconds": 18.392855303012766,
+      "publication_seconds": 2.977395883994177
+    },
+    {
+      "rollout_id": 14,
+      "response_tokens": 228173,
+      "mixed_responses": 61,
+      "completed_queue_get_seconds": 20.654661725391634,
+      "other_collection_seconds": 2.8947927296394482,
+      "generation_wait_seconds": 23.549454455031082,
+      "training_seconds": 15.09360270597972,
+      "publication_seconds": 2.923015241045505
+    },
+    {
+      "rollout_id": 15,
+      "response_tokens": 262682,
+      "mixed_responses": 73,
+      "completed_queue_get_seconds": 33.386439264635555,
+      "other_collection_seconds": 3.040518941357732,
+      "generation_wait_seconds": 36.42695820599329,
+      "training_seconds": 19.128221509046853,
+      "publication_seconds": 2.887967273942195
+    },
+    {
+      "rollout_id": 16,
+      "response_tokens": 313309,
+      "mixed_responses": 71,
+      "completed_queue_get_seconds": 36.988247693981975,
+      "other_collection_seconds": 3.7202274119481444,
+      "generation_wait_seconds": 40.70847510593012,
+      "training_seconds": 22.759508415008895,
+      "publication_seconds": 2.9477627460146323
+    },
+    {
+      "rollout_id": 17,
+      "response_tokens": 262522,
+      "mixed_responses": 39,
+      "completed_queue_get_seconds": 19.577396727749147,
+      "other_collection_seconds": 3.0168189422693104,
+      "generation_wait_seconds": 22.594215670018457,
+      "training_seconds": 17.634076133952476,
+      "publication_seconds": 2.884486519964412
+    },
+    {
+      "rollout_id": 18,
+      "response_tokens": 239820,
+      "mixed_responses": 65,
+      "completed_queue_get_seconds": 22.34534643101506,
+      "other_collection_seconds": 3.4194145200308412,
+      "generation_wait_seconds": 25.7647609510459,
+      "training_seconds": 15.642031862051226,
+      "publication_seconds": 3.1199448980623856
+    },
+    {
+      "rollout_id": 19,
+      "response_tokens": 256615,
+      "mixed_responses": 71,
+      "completed_queue_get_seconds": 30.692512900568545,
+      "other_collection_seconds": 2.9454628044040874,
+      "generation_wait_seconds": 33.63797570497263,
+      "training_seconds": 17.31350669101812,
+      "publication_seconds": 2.8996625879080966
+    },
+    {
+      "rollout_id": 20,
+      "response_tokens": 279213,
+      "mixed_responses": 63,
+      "completed_queue_get_seconds": 32.33587576739956,
+      "other_collection_seconds": 2.554148412658833,
+      "generation_wait_seconds": 34.89002418005839,
+      "training_seconds": 18.662421862012707,
+      "publication_seconds": 2.9046776910545304
+    },
+    {
+      "rollout_id": 21,
+      "response_tokens": 248032,
+      "mixed_responses": 60,
+      "completed_queue_get_seconds": 27.173450416419655,
+      "other_collection_seconds": 3.0444619925692677,
+      "generation_wait_seconds": 30.217912408988923,
+      "training_seconds": 19.417655456927605,
+      "publication_seconds": 2.977430828032084
+    },
+    {
+      "rollout_id": 22,
+      "response_tokens": 242649,
+      "mixed_responses": 54,
+      "completed_queue_get_seconds": 18.98668561212253,
+      "other_collection_seconds": 2.0447219838388264,
+      "generation_wait_seconds": 21.031407595961355,
+      "training_seconds": 16.019483907031827,
+      "publication_seconds": 2.842041871044785
+    },
+    {
+      "rollout_id": 23,
+      "response_tokens": 227429,
+      "mixed_responses": 61,
+      "completed_queue_get_seconds": 29.290776976384223,
+      "other_collection_seconds": 2.8804018136579543,
+      "generation_wait_seconds": 32.17117879004218,
+      "training_seconds": 17.202423735987395,
+      "publication_seconds": 2.8636450009653345
+    }
+  ],
+  "median_seconds": {
+    "generation_wait": 30.23670332954498,
+    "training": 17.358967307023704,
+    "publication": 2.946668773482088
+  },
+  "all_driver_stage_seconds": {
+    "close_weight_transport": 0.5848217729944736,
+    "final_generation_drain": 182.91142562101595,
+    "generation_wait": 706.6962344592903,
+    "initial_publication": 36.757948876940645,
+    "placement": 9.552230520988815,
+    "publication": 72.45789813995361,
+    "rollout_dispose": 1.0395040439907461,
+    "serving_startup": 343.54102077591233,
+    "startup_cache_prepare": 0.20026379195041955,
+    "trainer_dispose": 1.9762857409659773,
+    "trainer_startup": 132.72231058904435,
+    "training": 1193.9531777282245
+  },
+  "workflow": {
+    "finished_unix": 1789357772.3638527,
+    "result": {
+      "completed_rollout_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "export_hf": null,
+      "start_rollout_id": 0
+    },
+    "spec_sha256": "570250292ed3400cd977af8e6d9e6bedcf417dd2f1e462839e90c81c86fa23a9",
+    "started_unix": 1789355042.5864804,
+    "status": "complete",
+    "training_started_unix": 1789355047.9384756
+  },
+  "terminal_inventory": [
+    {
+      "event": "shutdown_start",
+      "completed_queue": {
+        "groups": 143,
+        "samples": 572,
+        "response_tokens": 1193865
+      },
+      "producer_ready": {
+        "groups": 0,
+        "samples": 0,
+        "response_tokens": 0
+      },
+      "shutdown_unqueued": {
+        "groups": 0,
+        "samples": 0,
+        "response_tokens": 0
+      },
+      "completed_put_wait_seconds": 744.197823276394,
+      "completed_put_current_wait_seconds": 0.0,
+      "time_unix": 1789357753.1640382,
+      "producer_owned_groups": 0,
+      "producer_active_group_tasks": 0,
+      "producer_admission_open": false,
+      "producer_unfinished_samples": null,
+      "completed_queue_groups": 143,
+      "completed_queue_capacity_groups": 160,
+      "http_capacity_requests": 64,
+      "http_active_requests": 0,
+      "http_waiting_requests": 0
+    },
+    {
+      "event": "shutdown_complete",
+      "completed_queue": {
+        "groups": 143,
+        "samples": 572,
+        "response_tokens": 1193865
+      },
+      "producer_ready": {
+        "groups": 0,
+        "samples": 0,
+        "response_tokens": 0
+      },
+      "shutdown_unqueued": {
+        "groups": 0,
+        "samples": 0,
+        "response_tokens": 0
+      },
+      "completed_put_wait_seconds": 744.197823276394,
+      "completed_put_current_wait_seconds": 0.0,
+      "time_unix": 1789357753.1675923,
+      "producer_owned_groups": 0,
+      "producer_active_group_tasks": 0,
+      "producer_admission_open": false,
+      "producer_unfinished_samples": null,
+      "completed_queue_groups": 143,
+      "completed_queue_capacity_groups": 160,
+      "http_capacity_requests": 64,
+      "http_active_requests": 0,
+      "http_waiting_requests": 0
+    }
+  ],
+  "terminal_unused_work": {
+    "groups": 143,
+    "samples": 572,
+    "response_tokens": 1193865,
+    "delivered_response_tokens_all_updates": 6117690,
+    "stale_dropped_response_tokens_all_updates": 854414,
+    "fraction_of_accounted_response_tokens": 0.14620004068102635,
+    "scope": "Final buffered, producer-ready and shutdown-unqueued completions; distinct from stale drops. Denominator excludes unobserved aborted or dynamically filtered work."
+  },
+  "end_to_end_passed": true
+}

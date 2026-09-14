@@ -30,8 +30,8 @@ that the full-SFT model and optimizer fit on one trainer GPU, or measure GSM8K
 learning. Core's trainer remains resident in colocated mode.
 
 The full-model profiles use experimental mixed-policy refresh, FIFO whole groups,
-lag at most two updates, historical behavior log probabilities, standalone scoring
-and TIS. Faster inference does not make already-generated tokens current-policy:
+lag at most two updates, historical behavior log probabilities and TIS. Small now uses guarded scoring
+skip; large retains standalone scoring pending its faster EP8 qualification. Faster inference does not make already-generated tokens current-policy:
 in the EP2/batch-128 warm window every delivered group was age two. The goal here
 is useful throughput within that explicit age contract. A different lag or batch
 is an RL configuration change and should be evaluated as such.
@@ -49,9 +49,11 @@ is an RL configuration change and should be evaluated as such.
   include source/configuration identity; new configurations can still start cold.
 * Publish every optimizer step using flattened 1-GiB buckets and per-expert
   export. Warm publication was about three to four seconds in these trials.
-* The small example enables 6144-token trainer packing. Recomputation and
-  standalone scoring remain on pending a live qualification of the faster
-  trainer-screen combination; see [the matched screen](measurements/trainer-capacity-20260914.md).
+* The small example enables 6144-token trainer packing, disables activation
+  recomputation and uses guarded scoring skip. The full-SFT EP2 live test passed
+  all 24 updates, with an initial bit-exact scoring check. It used about 197 GiB
+  per trainer GPU in the matched screen; restore recomputation for smaller memory
+  budgets. See [qualification and the larger baseline](measurements/full-sft-basket-20260914.md).
 * Keep the completed FIFO to one collection. Small explicitly uses the measured
   512-sample producer budget; it can retain substantial work at shutdown.
   The automatic producer default, when not overridden, is

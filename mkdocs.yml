@@ -87,18 +87,20 @@ nav:
     - algorithms/dpo.md
     - algorithms/grpo.md
     - algorithms/olmo_core_sharding.md
-    - algorithms/tool_training.md
     - algorithms/reward_modeling.md
     - verify-tokenization.md
     - slack-alerts.md
   - MILES + OLMo-core:
     - Start here: miles/index.md
+    - Sharing candidate: miles/sharing-candidate.md
+    - Support and gaps: miles/feature-parity.md
     - Workflow: miles/workflow.md
     - Launching: miles/launching.md
     - Configuration: miles/configuration.md
     - Native options: miles/native-options.md
     - Models and checkpoints: miles/models-and-checkpoints.md
     - Topology: miles/topology.md
+    - Long sequences: miles/long-sequences.md
     - Data and evaluation: miles/data-and-evaluation.md
     - Managed judges: miles/managed-judges.md
     - Operations: miles/operations.md
@@ -107,6 +109,9 @@ nav:
     - Compiler cache: miles/compiler-cache.md
     - Measurements: miles/measurements/index.md
     - Historical plans: miles/plans/index.md
+  - Deprecated GRPO:
+    - Legacy CLI and reproduction: algorithms/legacy_grpo.md
+    - Legacy tools and environments: algorithms/tool_training.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md
 

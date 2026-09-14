@@ -1,5 +1,7 @@
 # Local learning-run watcher
 
+> Historical diagnostic procedure for the September 10–11 comparisons. It may require the recorded external olmo-miles checkout and immutable artifacts. For new runs use the [operating guide](index.md); for current support use the [support matrix](feature-parity.md). Historical pending-job statements below are not live status.
+
 `python scripts/miles/watch_learning_runs.py` observes the already-authorized Core500,
 Megatron500, explicitly supplied Light Core200 experiment, and the authorized
 scorer diagnostic `01M27BKYTF9N7JMYBTKAV0HS9A`. The scorer is capture-only and

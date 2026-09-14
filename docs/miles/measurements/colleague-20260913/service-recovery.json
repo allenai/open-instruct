@@ -1,0 +1,126 @@
+{
+  "passed": true,
+  "retry_budget": 8,
+  "backoff_factor": 1.0,
+  "upstream": "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod",
+  "cases": [
+    {
+      "name": "function-transient-gateway",
+      "passed": true,
+      "attempts": [
+        503,
+        502,
+        504,
+        200
+      ],
+      "forwarded": 1,
+      "seconds": 6.287857393035665,
+      "score": 1.0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 24,
+        "tests": 1,
+        "stdio": false
+      },
+      "error": null
+    },
+    {
+      "name": "stdio-transient-gateway",
+      "passed": true,
+      "attempts": [
+        503,
+        502,
+        504,
+        200
+      ],
+      "forwarded": 1,
+      "seconds": 6.306343166856095,
+      "score": 1.0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      },
+      "error": null
+    },
+    {
+      "name": "exhausted-gateway",
+      "passed": true,
+      "attempts": [
+        503,
+        503,
+        503,
+        503,
+        503,
+        503,
+        503,
+        503,
+        503
+      ],
+      "forwarded": 0,
+      "seconds": 246.0210890690796,
+      "score": null,
+      "diagnostics": null,
+      "error": "code verifier request failed for http://127.0.0.1:38879/test_program_stdio: 503 Server Error: Service Unavailable for url: http://127.0.0.1:38879/test_program_stdio"
+    },
+    {
+      "name": "healthy-after-exhaustion",
+      "passed": true,
+      "attempts": [
+        200
+      ],
+      "forwarded": 1,
+      "seconds": 0.6719595841132104,
+      "score": 1.0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      },
+      "error": null
+    },
+    {
+      "name": "rate-limit-retry-after",
+      "passed": true,
+      "attempts": [
+        429,
+        200
+      ],
+      "forwarded": 1,
+      "seconds": 0.28918682294897735,
+      "score": 1.0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      },
+      "error": null
+    },
+    {
+      "name": "sample-rejection",
+      "passed": true,
+      "attempts": [
+        500
+      ],
+      "forwarded": 0,
+      "seconds": 0.0033748920541256666,
+      "score": 0.0,
+      "diagnostics": {
+        "status": "rejected",
+        "http_status": 500,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      },
+      "error": null
+    }
+  ],
+  "limits": "Real HTTP retry/verifier boundary with local fault injection. Does not establish distributed trainer/engine replacement or in-loop recovery."
+}

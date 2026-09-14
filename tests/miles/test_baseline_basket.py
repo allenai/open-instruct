@@ -110,5 +110,10 @@ def test_preparation_writes_separate_partitions_and_canary_receipt(tmp_path, mon
         "eval-general.jsonl",
     }
     assert all(len(path.read_text().splitlines()) == 128 for path in paths if path.name.startswith("eval-"))
+    prepare_baseline_basket.verify(spec)
+    with (tmp_path / "frozen/train.jsonl").open("a") as handle:
+        handle.write("corruption\n")
+    with pytest.raises(ValueError, match="artifact changed"):
+        prepare_baseline_basket.verify(spec)
     with pytest.raises(ValueError, match="already exists"):
         prepare_baseline_basket.prepare(spec)

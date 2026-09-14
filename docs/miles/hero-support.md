@@ -1,7 +1,8 @@
 # Hero support in the MILES / OLMo-core integration
 
-The hero checkpoint work is on the integration branch `robertb/miles-olmo-core`. The older SFT GSM8K
-trial continues with its original image and checkpoint.
+Hero conversion support is incorporated in the project branch. Full hero RL is
+**not qualified**: the full-checkpoint probability gate below failed. The earlier
+KDA/latent SFT model is a separate, exercised baseline; see the [support matrix](feature-parity.md).
 
 ## Architecture and source lineage
 
@@ -14,9 +15,8 @@ The audited training revision is `89bf37a87d955b8ff8a76ac11df6dd3bec976d30`
 on `allenai/OLMo-core:codex/small-hero-20260907`. The support port uses
 `codex/small-hero-hf-20260909` at
 `b1fd2c9746e88baeb20e372bdca340d788d0f7e5`, which includes the later HF
-implementation of per-head Q/K gains and scalable softmax. The original
-gdn2 adapter patch is not directly applicable to this branch; conversion and
-router changes must be reconciled and retested.
+implementation of per-head Q/K gains and scalable softmax. The adapter port reconciles the earlier gdn2 conversion/router changes with this
+lineage. The runtime lock pins the base and the reviewed patch.
 
 ## What changes
 
@@ -81,14 +81,6 @@ scales. Then compare real-checkpoint Core and rollout log probabilities and run 
 short training trial. Start with TP1 serving; larger TP and distributed training
 need their own qualification. EMO is outside this first non-EMO target.
 
-The existing SFT run is a separate experiment:
-[100-update GSM8K trial](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2),
-[W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/un6so0cr).
-Its held-out scores so far are 97/128 initially, 101/128 after 20 updates, and
-94/128 after 40. These fluctuate; they do not yet establish a learning improvement.
-Those measurements concern the older SFT architecture and do not qualify hero.
-
-
 ## Standard Olmo 3 trainer
 
 `open_instruct/miles/models.py` is the shared actor-facing façade. The specialized
@@ -101,8 +93,8 @@ expert parallelism before allocating model weights.
 Actual tiny Olmo 3 full/sliding models pass HF logit checks and exact weight
 roundtrips. Both also pass a real MILES loss/update and exact next-update restore
 check on a local GPU, alongside Qwen3, KDA and latent KDA. The checks found and
-fixed a duplicated sliding-window decrement on this newer Core lineage. Full
-size dense Olmo 3 serving/training remains a separate qualification target.
+fixed a duplicated sliding-window decrement on this newer Core lineage. Full-size dense lifecycle evidence is described in the [dense guide](olmo3-pre-rl.md);
+hero qualification does not transfer to that model, or vice versa.
 
 ## Current local evidence
 

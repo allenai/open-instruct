@@ -1,9 +1,11 @@
 # Welcome to Open Instruct
 
-For GRPO on supported models, start with [MILES + OLMo-core](miles/index.md).
-See the [three implementation choices](algorithms/grpo.md#implemented-variants),
-[laptop/session launch guide](miles/launching.md), and
-[configuration reference](miles/configuration.md).
+For new GRPO work, use `python -m open_instruct.miles` and start with
+[MILES + OLMo-core](miles/index.md), its [support matrix](miles/feature-parity.md),
+[launch guide](miles/launching.md), and [configuration reference](miles/configuration.md).
+For the colleague pilot, see the [sharing candidate](miles/sharing-candidate.md).
+The older `grpo.py` and `grpo_fast.py` entry points are **deprecated**; their
+[legacy instructions](algorithms/legacy_grpo.md) are for existing runs and reproduction.
 
 This repo serves as an open effort on instruction-tuning and post-training popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
 

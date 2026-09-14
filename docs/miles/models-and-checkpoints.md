@@ -10,11 +10,11 @@ There is no Megatron checkpoint conversion in this path.
 | Conventional Olmo MoE | Tiny local and EP2 lifecycle/parity checks; choose a compatible HF descriptor |
 | Earlier KDA/latent MoE SFT model | Primary full-SFT GSM8K comparison and async/replay evidence on B300 |
 | Small hero, new attention features | Adapter/conversion work exists; see [hero support](hero-support.md) for exact scope before selecting it |
-| Dense Olmo 3 | Separate FSDP adapter; two-GPU 7B smoke and audit passed, with zero-advantage batches. Nonzero-gradient full-model learning/resume remain unqualified; see [qualification](olmo3-pre-rl.md) |
-| Other HF architectures | Do not infer support from safetensors or tokenizer compatibility; inspect the model factory or use an existing GRPO implementation |
+| Dense Olmo 3 | Separate FSDP adapter; two-GPU 7B smoke, fresh-process resume, HF export and fresh serving reload passed, with zero-advantage batches. Nonzero-gradient full-model learning remains unqualified; see [qualification](olmo3-pre-rl.md) |
+| Other HF architectures | Do not infer support from safetensors or tokenizer compatibility; inspect the model factory and identify any support gap before choosing a backend; deprecated GRPO is not an automatic fallback |
 
 For the authoritative factories inspect `open_instruct/miles/models.py`,
-`moe_models.py`, and `standard_models.py`. Both native `grpo.py` and the MILES path
+`moe_models.py`, and `standard_models.py`. Both deprecated `grpo.py` and the MILES path
 use OLMo-core, but have different orchestration and serving implementations.
 
 ## Inputs

@@ -5,8 +5,13 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Faster trainer and 200-update task baseline](full-sft-basket-20260914.md) | EP2 qualification, fixed multi-domain data and EP8 baseline |
+| [Published RL performance anchors](rl-performance-literature-20260914.md) | Scope-labeled AReaL, DeepSeek and NeMo measurements |
 | [Throughput and queue qualification](throughput-20260913.md) | September 13 steady-state configuration comparisons, occupancy figures and limitations |
 | [Throughput campaign log](throughput-campaign-20260913.md) | Chronological controls, runtime repairs and allocation decisions |
+| [Sharing consolidation and documentation audit](sharing-20260913/README.md) | Branch decisions, complete document inventory and candidate validation |
+| [Length guidance exercise](length-guidance-20260913/README.md) | Measured 16K/32K/64K serving capacity and audited natural long-response Core RL probes |
+| [Colleague readiness qualification](colleague-20260913/README.md) | Dense resume/export/reload, mixed services, long contexts, replay, and remaining gates |
 | [Fixed FLA tuner choices eliminate the measured prefill divergence](autotune-pinned-controls-20260911.md) | autotune-pinned-controls-20260911 |
 | [Compiler-cache publication: local proxy, 2026-09-12](cache-publication-20260912/README.md) | README |
 | [Native checkpoint performance qualification](checkpoint-perf-20260911.md) | checkpoint-perf-20260911 |

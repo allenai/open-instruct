@@ -49,7 +49,7 @@ expert_parallel_size = 2
 micro_batch_size = 1
 sequence_packing = true
 packing_max_tokens = 6144
-activation_recompute = true
+activation_recompute = false
 trainer_flash_attention_version = 4
 
 [inference]
@@ -103,7 +103,7 @@ row_specialization = "dynamic"
 publication_mode = "refresh"
 refresh_request_timeout = 1800.0
 engine_drain_timeout = 900.0
-scoring_pass_required = true
+scoring_pass_required = false
 pipeline_observation_interval = 2.0
 replay_diagnostics = false # Qualification enabled this extra audit.
 router_aux_loss_weight = 0.01

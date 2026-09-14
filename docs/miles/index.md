@@ -1,11 +1,15 @@
 # MILES + OLMo-core GRPO
 
-MILES is the preferred GRPO path in this project for **supported models and workloads**.
+Use **`python -m open_instruct.miles`** for new GRPO work in this project.
 Open Instruct owns the researcher configuration and data/reward integration; MILES
 owns rollout orchestration and shared RL machinery; the adapter trains through
-OLMo-core and serves through SGLang. The existing `grpo.py` Core/vLLM and
-`grpo_fast.py` DeepSpeed/vLLM paths remain available. See the
-[GRPO implementation chooser](../algorithms/grpo.md#implemented-variants).
+OLMo-core and serves through SGLang. Check model and workload support below.
+
+The older `grpo.py` Core/vLLM and `grpo_fast.py` DeepSpeed/vLLM entry points are
+**deprecated** and retained for existing runs and historical reproduction only.
+Their [legacy reference](../algorithms/legacy_grpo.md) does not define MILES behavior.
+If a required capability is missing here, identify the gap rather than silently
+switching to a deprecated backend.
 
 ## Start here
 
@@ -19,6 +23,8 @@ OLMo-core and serves through SGLang. The existing `grpo.py` Core/vLLM and
 
 | Document | Use it when |
 |---|---|
+| [Sharing candidate](sharing-candidate.md) | Finding consolidated work, image qualification and tester setup |
+| [Support matrix](feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
 | [Workflow](workflow.md) | Editing one TOML from preparation through training and export |
 | [Launching](launching.md) | Submitting from a laptop or Beaker session, or executing in an allocation |
 | [Configuration reference](configuration.md) | Looking up fields, defaults, aliases, restrictions and overrides |
@@ -31,6 +37,7 @@ OLMo-core and serves through SGLang. The existing `grpo.py` Core/vLLM and
 | [Managed judges](managed-judges.md) | Binding named rubrics and placing fixed-weight judge services |
 | [Operations](operations.md) | Reading metrics, diagnosing failures and establishing run completion |
 | [Architecture and development](architecture.md) | Understanding adapter ownership, runtime images and local checks |
+| [Long sequences](long-sequences.md) | Choosing prompt/response budgets, admission, memory controls and interpreting length qualification |
 | [Packing](sequence-packing.md) | Understanding document isolation, loss semantics and qualification |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
 | [Run-control semantics](run-controls.md) | Comparing Core controls with olmo-miles/Megatron terminology |

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "experimental hero support; conversion and serving qualification in progress",
+  "status": "MILES/Core internal sharing candidate; see docs/miles/feature-parity.md for qualified scope",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
@@ -16,9 +16,9 @@
     "miles": {
       "repository": "https://github.com/radixark/miles.git",
       "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
-      "development_commit": "edca455105ef0fa7e703002f5fb5c9aa426f761b",
+      "development_commit": "b18b71b1825a7d4795a0399081807b9c40c4f557",
       "patch": "patches/miles.patch",
-      "patch_sha256": "bda937c720b2af6c88a6c5ba36e7736736655508feae27cea59de069d29608c6"
+      "patch_sha256": "9aa21f8e62823faadbe737cfbeeaeae7fc5ff9905123b2b276f9abce74e19af6"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",

@@ -132,8 +132,10 @@ CPU tests have demonstrated independent progress, version checks, admission orde
 last-reader snapshot retention, deadlines and saturated-buffer lifecycle behavior.
 The six-update rolling run passed weight equality, useful learning, checkpoints,
 evaluation and shutdown; the slow peer allowed 71 responses from the updated
-engine. Fresh-process resume, complete optimizer overlap, and deliberate failure
-are separate follow-up gates. See the [qualification measurements](measurements/engine-drain-20260913/README.md)
+engine. Fresh-process resume through update 12, complete optimizer overlap with a slow
+peer drain, pinned immutable transfer, and deliberate terminal failure also passed
+the follow-up gates. The failure probe establishes bounded failure, not automatic
+recovery. See [final audits](measurements/engine-drain-20260913/final-resume-audits.json). See the [qualification measurements](measurements/engine-drain-20260913/README.md)
 for exact images, attempts, timings and limitations. Per-update full audits remain
 disabled; initial weight equality and fixed-byte snapshot tests are separate
 numerical checks.

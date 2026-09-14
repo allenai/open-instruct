@@ -1,0 +1,131 @@
+{
+  "code_outcomes": {
+    "eval:code:ok": 2,
+    "eval:code_stdio:ok": 2,
+    "train:code:ok": 32,
+    "train:code_stdio:ok": 32
+  },
+  "counts": {
+    "eval:code": 2,
+    "eval:code_stdio": 2,
+    "eval:general-quality": 2,
+    "eval:general-quality_ref": 2,
+    "eval:ifeval": 2,
+    "eval:math": 2,
+    "train:code": 32,
+    "train:code_stdio": 32,
+    "train:general-quality": 32,
+    "train:general-quality_ref": 32,
+    "train:ifeval": 64,
+    "train:math": 64
+  },
+  "dumps": [
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts/0.pt",
+      "samples": 64,
+      "sha256": "bc04626790fa9d2f0c1214d03b68bd20ba92e2c5c20ce55f3afe43532d2e573d"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts/1.pt",
+      "samples": 64,
+      "sha256": "8439f117191dcee502b262c7209a13ed4a9c1c205176015041792771b420c260"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts/2.pt",
+      "samples": 64,
+      "sha256": "543133c408d61ec24ca35e686675b60b312ae2e773a0557ea122a98fc9eea62a"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts/3.pt",
+      "samples": 64,
+      "sha256": "47d1f6b3580c5a8c5cb0b1e309b3d8f3028e40b12855819a12b6ff32a30313ae"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts/eval_0.pt",
+      "samples": 6,
+      "sha256": "bfc23d39683de4dc9c1d887460f553593bfaf0865545fcd6c86adfeb09c5e7f9"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts/eval_3.pt",
+      "samples": 6,
+      "sha256": "d343c11cfa7cb91f760e10b8f79883ef441885732ebdefdaf7fae3b82c7f18ce"
+    }
+  ],
+  "limitations": [
+    "Retained rewards/accounting checked; deterministic math/IF/code rewards have not been independently re-executed.",
+    "Judge grades reparsed from retained replies, without new stochastic model requests.",
+    "No optimizer/checkpoint numerical-equivalence claim from this sample audit."
+  ],
+  "mixed_reward_groups": {
+    "code": 0,
+    "code_stdio": 0,
+    "general-quality": 8,
+    "general-quality_ref": 8,
+    "ifeval": 6,
+    "math": 0
+  },
+  "passed": true,
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912",
+  "score_counts": {
+    "eval:code": {
+      "0.0": 2
+    },
+    "eval:code_stdio": {
+      "0.0": 2
+    },
+    "eval:general-quality": {
+      "0.2": 1,
+      "0.9": 1
+    },
+    "eval:general-quality_ref": {
+      "0.4": 1,
+      "0.9": 1
+    },
+    "eval:ifeval": {
+      "0.0": 1,
+      "0.3333333333333333": 1
+    },
+    "eval:math": {
+      "0.0": 2
+    },
+    "train:code": {
+      "0.0": 28,
+      "1.0": 4
+    },
+    "train:code_stdio": {
+      "0.0": 32
+    },
+    "train:general-quality": {
+      "0.1": 6,
+      "0.2": 10,
+      "0.3": 6,
+      "0.4": 4,
+      "0.6": 2,
+      "0.8": 2,
+      "0.9": 2
+    },
+    "train:general-quality_ref": {
+      "0.1": 3,
+      "0.2": 8,
+      "0.3": 8,
+      "0.4": 4,
+      "0.5": 2,
+      "0.6": 2,
+      "0.7": 3,
+      "0.9": 2
+    },
+    "train:ifeval": {
+      "0.0": 38,
+      "0.25": 9,
+      "0.3333333333333333": 4,
+      "0.4": 3,
+      "0.5": 7,
+      "0.6": 1,
+      "1.0": 2
+    },
+    "train:math": {
+      "0.0": 64
+    }
+  },
+  "examples_location": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912/rollouts (see dumps and SHA256s below)"
+}

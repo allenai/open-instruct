@@ -1,3 +1,4 @@
+# Copy this template into Git-ignored runs/ before editing.
 # Full-SFT B300 training: one node of Core trainers (EP8) and one node of TP1 SGLang engines.
 # Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
 schema_version = 1
@@ -98,6 +99,9 @@ eps_clip = 0.2
 eps_clip_high = 0.28
 
 [tracking]
+# Offline retains W&B metrics in the job artifacts without a WANDB_API_KEY.
+# Use "disabled" to turn W&B off, or "online" with your secret mapping below.
+# For online tracking, select a project/group (and team if needed) you can write to.
 wandb_mode = "offline"
 wandb_project = "olmo-rl-comparison"
 wandb_group = "core-workflow-async"
@@ -106,6 +110,9 @@ wandb_group = "core-workflow-async"
 row_specialization = "dynamic"
 
 [core]
+# Keep the full serving-weight audit at startup/resume only. Periodic
+# audits also reset and republish weights; reserve them for qualification.
+diagnostic_interval = 0
 max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
@@ -143,3 +150,11 @@ off_policy_correction = "tis"
 enabled = true
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 restore = true
+
+# Optional service credentials: leave commented for this starter.
+# Beaker login and access to the requested resources are still required.
+# Values below are Beaker secret NAMES available in launch.workspace, never tokens.
+# The existing runtime image needs no GITHUB_TOKEN to fetch source.
+# [launch.secrets]
+# HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"           # Only for restricted HF downloads.
+# WANDB_API_KEY = "YOUR_USERNAME_WANDB_API_KEY" # Only with tracking.wandb_mode = "online".

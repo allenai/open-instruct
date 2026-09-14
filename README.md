@@ -98,35 +98,36 @@ bash scripts/train/tulu3/dpo_8b.sh
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
-For new runs on supported models, use **MILES + OLMo-core with SGLang**.
-Open Instruct supplies the run configuration and data/reward integration; MILES
-coordinates rollouts, and the Core adapter trains the model. Check
-[model support and qualification limits](docs/miles/models-and-checkpoints.md) first.
+Use **`python -m open_instruct.miles`** for new GRPO runs. Open Instruct supplies
+configuration and data/reward integration; MILES coordinates rollouts, the Core
+adapter trains the model, and SGLang serves it. Start with the
+[MILES guide](docs/miles/index.md) and check
+[model support and qualification limits](docs/miles/models-and-checkpoints.md).
+If a required capability is missing, identify the support gap before choosing a backend.
 
-| Path | Trainer / inference | Use it for |
-|---|---|---|
-| `python -m open_instruct.miles` | OLMo-core / SGLang | Preferred supported-model workflow; TOML, async, multi-node placement and named judges |
-| `open_instruct/grpo.py` | OLMo-core / vLLM | Existing native Core recipes and capabilities outside the MILES support matrix |
-| `open_instruct/grpo_fast.py` | DeepSpeed / vLLM | Existing DeepSpeed recipes and their reproduction workflows |
-
-See the [GRPO implementation guide](docs/algorithms/grpo.md) for the alternatives.
-The MILES runtime has separate pinned dependencies; the general Docker image
-and the older GRPO CLI flags are not interchangeable with it.
+**Deprecated:** `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` remain
+runnable for existing experiments and historical reproduction. Do not use them as
+starting points for new recipes. Their [legacy reference](docs/algorithms/legacy_grpo.md)
+is separate from the current workflow. Their CLI flags and the general Docker image
+are not interchangeable with the pinned MILES runtime.
 
 ```bash
-# Python 3.12, from the checkout. Edit checkpoint and output paths after copying.
-mkdir -p "$HOME/miles-runs"
-cp configs/miles/examples/grpo-basic.toml "$HOME/miles-runs/check.toml"
-python -m open_instruct.miles plan "$HOME/miles-runs/check.toml"
-python -m open_instruct.miles validate "$HOME/miles-runs/check.toml"
-# After selecting/building a compatible image and authenticating Beaker:
-python -m open_instruct.miles run "$HOME/miles-runs/check.toml"
+# Python 3.12, from the candidate checkout. Edit name/output.root after copying.
+mkdir -p runs
+cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
+python -m open_instruct.miles plan runs/my-grpo.toml
+python -m open_instruct.miles validate runs/my-grpo.toml
+# After authenticating Beaker and checking resource access:
+export MILES_EXISTING_IMAGE=01M2E5QR5C60WF7H0TDEF4CD3S
+python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
 The [async training starter](configs/miles/examples/grpo-async-disaggregated.toml)
-requests one eight-GPU trainer node and one eight-GPU inference node. The tiny
-colocated example above is intended for development.
+requests one eight-GPU trainer node and one eight-GPU inference node. The sharing
+starter above uses three B300 GPUs and the supplied full-SFT checkpoint. `runs/`
+is Git-ignored. W&B is offline by default; optional HF/W&B credentials stay commented
+out. The separate `grpo-basic.toml` is for tiny-model colocated development.
 
 ## MILES documentation
 
@@ -135,6 +136,8 @@ Current instructions are separate from historical evidence.
 
 | Document | Use it when |
 |---|---|
+| [Sharing candidate](docs/miles/sharing-candidate.md) | Finding consolidated work, image qualification and tester setup |
+| [Support matrix](docs/miles/feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
 | [Workflow and examples](docs/miles/workflow.md) | Choosing and editing a run recipe |
 | [Launching jobs](docs/miles/launching.md) | Submitting from a laptop or Beaker session |
 | [Configuration reference](docs/miles/configuration.md) | Looking up every structured/Core field and native passthrough |

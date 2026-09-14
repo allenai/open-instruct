@@ -1,0 +1,10 @@
+{
+  "replay_observations": 352,
+  "packing_observations": 8,
+  "passed": true,
+  "source_sha256": {
+    "training_contract_rank1.jsonl": "a74cbd273d68f10df13eedc180967b55b7babe9a72651695f4f90b53dea2f9a3",
+    "training_contract_rank0.jsonl": "628438fab95c938161af81e89503f2d7d6583c25d374135387e12b9c4cd46c54"
+  },
+  "run": "moe-resume"
+}

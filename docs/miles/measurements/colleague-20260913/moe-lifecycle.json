@@ -1,0 +1,132 @@
+{
+  "boundaries": [
+    {
+      "clock": {
+        "completed_steps": 1,
+        "next_rollout_id": 1,
+        "published_step": 0
+      },
+      "cursor_sha256": "bda05c63e9f01ef31a9554db6a69bc30759c45f021b8c942153b37ebbf15be9f",
+      "native_entries": 2014,
+      "rollout_id": 0
+    },
+    {
+      "clock": {
+        "completed_steps": 2,
+        "next_rollout_id": 2,
+        "published_step": 1
+      },
+      "cursor_sha256": "0aba76da0c2eeac41154a24e66947dc3fbd3f2d4162a163c646635f26b021e83",
+      "native_entries": 2014,
+      "rollout_id": 1
+    },
+    {
+      "clock": {
+        "completed_steps": 3,
+        "next_rollout_id": 3,
+        "published_step": 2
+      },
+      "cursor_sha256": "e92f4f82334172980e066e3e757091023a7f2070259ffedbaf9f7e53bbd80e01",
+      "native_entries": 2014,
+      "rollout_id": 2
+    },
+    {
+      "clock": {
+        "completed_steps": 4,
+        "next_rollout_id": 4,
+        "published_step": 3
+      },
+      "cursor_sha256": "0be486c829e85390e7aeb3ec481e0bda0c5bdbfabde83d024fa8383c92848484",
+      "native_entries": 2014,
+      "rollout_id": 3
+    }
+  ],
+  "limitations": [
+    "Restore lifecycle and saved optimizer descriptors checked; not an uninterrupted-versus-resumed numerical-equivalence experiment."
+  ],
+  "passed": true,
+  "publication_versions": [
+    0,
+    1,
+    2,
+    2,
+    2,
+    3,
+    4
+  ],
+  "ranks": {
+    "0": {
+      "scoring_checks": [
+        {
+          "active_tokens": 223590,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 0,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        },
+        {
+          "active_tokens": 245039,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 0,
+          "rollout_id": 2,
+          "schema_version": 1,
+          "step": 2,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steps": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "1": {
+      "scoring_checks": [
+        {
+          "active_tokens": 223590,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 1,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        },
+        {
+          "active_tokens": 245039,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 1,
+          "rollout_id": 2,
+          "schema_version": 1,
+          "step": 2,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steps": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-09-async-resume-20260913-r2"
+}

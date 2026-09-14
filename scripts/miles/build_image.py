@@ -10,6 +10,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-image", required=True)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--target", choices=("runtime-base", "application"), default="application")
     options = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     lock = json.loads((root / "runtime/miles/runtime.lock.json").read_text())
@@ -18,6 +19,7 @@ def main():
     ).strip()
     if actual != lock["base_image"]["docker_id"]:
         raise ValueError("Base image differs from runtime.lock.json; qualify a new runtime before changing the pin")
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     subprocess.run(
         [
             "docker",
@@ -26,6 +28,10 @@ def main():
             "runtime/miles/Dockerfile",
             "--build-arg",
             f"BASE_IMAGE={options.base_image}",
+            "--build-arg",
+            f"SOURCE_REVISION={revision}",
+            "--target",
+            options.target,
             "--tag",
             options.tag,
             ".",

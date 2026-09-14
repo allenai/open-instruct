@@ -2,7 +2,8 @@
 
 The researcher launcher now compiles disaggregated runs into coordinated Beaker
 tasks on distinct physical nodes. Trainer GPU count, rollout GPU count and judge GPU count are independent.
-The first exercise is intentionally two updates, not a learning run.
+The initial two-node exercise and later four-update combined async exercise are
+recorded below; short execution gates do not establish mixture learning quality.
 
 ```bash
 python -m open_instruct.miles plan configs/miles/qualification/multinode-judges.toml
@@ -101,8 +102,10 @@ or throughput for a production mixture.
 Implementation status: the two-node, two-update EP2 mixed-task exercise passed
 with the native MILES router and both named judge bindings; its retained-sample
 audit also passed. See the [results](measurements/multinode-judges-20260912.md).
-This does not yet qualify EP8, 32K responses,
-large inference pools, or sustained multi-node performance.
+The later [EP2 + three engines + one judge exercise](measurements/colleague-20260913/README.md)
+also passed async/TIS, replay/packing, saves and actual prefix-cache hits. Neither
+establishes the full EP8 judged combination, 32K judged responses or sustained
+multi-node performance.
 
 ## Policy-engine health
 

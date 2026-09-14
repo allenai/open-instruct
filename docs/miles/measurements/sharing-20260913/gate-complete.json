@@ -1,0 +1,1 @@
+{"passed": true, "scope": "runtime tests; dense synthetic resume; FSDP diagnostics; EP2 packing; live MoE replay/resume"}

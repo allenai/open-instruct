@@ -1,5 +1,7 @@
 # Update-zero inference tracing
 
+> Historical diagnostic procedure for the September 10–11 comparisons. It may require the recorded external olmo-miles checkout and immutable artifacts. For new runs use the [operating guide](index.md); for current support use the [support matrix](feature-parity.md). Historical pending-job statements below are not live status.
+
 The completed 100-update comparison has only seven identical initial generations out of 128, despite identical prompt token IDs. These diagnostics use the original Core and Megatron runtimes to inspect the inference path before any optimizer update.
 
 Each separate three-B300 Holmes job:

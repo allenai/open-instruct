@@ -23,8 +23,14 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 
 `runtime/miles/runtime.lock.json` and its checksum-verified patches reconstruct
 the runtime. Working branches help development, but the lock/image determines a
-run. Source changes require a new overlay image; dependency/kernel changes may
-require a qualified new base. Reusing an image does not apply local source edits.
+run. Source changes require a new application image; dependency/kernel changes may
+require a qualified new binary base. The Dockerfile separates a `runtime-base`
+stage (locked dependency sources and verifier packages) from `application`
+(Open Instruct, tests, scripts, configs and MILES docs). Build the former with
+`build_image.py --target runtime-base` to reuse the prepared layer. Ordinary builds
+select `application` and reuse that layer through Docker caching. The immutable
+binary base in the lock is unchanged; the prepared layer is not interchangeable
+with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
 
 ```bash
 python scripts/miles/prepare_runtime.py runtime/miles/sources
@@ -42,7 +48,7 @@ command with different mounts or source provenance.
 CPU-only plan/structured validate exercise the public configuration contract.
 For a GPU lifecycle check use the [tiny example](../../configs/miles/examples/grpo-basic.toml)
 and a compatible tiny HF fixture in the pinned runtime. The existing
-[local MoE and restart procedure](core.md#local-moe-task-and-restart-check) covers
+[historical local MoE and restart procedure](measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check) covers
 model preparation and execution. A host-only parser test cannot qualify routing,
 attention, distributed gradients or publication.
 
@@ -64,3 +70,19 @@ Regenerate that snapshot with the documented capture command in the native appen
 when parser flags change. Update descriptions and rerun generation, reviewing the
 diff. Do not edit generated tables manually or copy a measurement's settings into
 current defaults without a deliberate recipe change.
+
+### Type checking with an external Core checkout
+
+The repository's type-check command does not require a hidden runtime source
+directory. The MILES adapter still needs the pinned Core APIs: an older installed
+Core can report missing members. To resolve its types against the exact Core
+branch during MILES development, pass that source path explicitly:
+
+```bash
+uv run ty check --extra-search-path /path/to/OLMo-core/src
+```
+
+Do not add an unconditionally required, ignored runtime directory to the global
+`tool.ty.environment.extra-paths`: a fresh clone has no such directory and the
+checker exits before examining any files. The runtime image and dependency lock
+continue to define the actual training implementation.

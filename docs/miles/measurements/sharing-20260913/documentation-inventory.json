@@ -1,0 +1,697 @@
+{
+  "review_date": "2026-09-13",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "GRPO entry point and deprecation policy",
+      "bytes": 7284
+    },
+    {
+      "path": "README.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Training Open Instruction-Following Language Models",
+      "bytes": 19522
+    },
+    {
+      "path": "configs/miles/README.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "MILES run configurations",
+      "bytes": 2405
+    },
+    {
+      "path": "configs/miles/examples/README.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Structured MILES run examples",
+      "bytes": 1429
+    },
+    {
+      "path": "docs/get_started/ai2_internal_setup.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Ai2 Internal Setup",
+      "bytes": 10696
+    },
+    {
+      "path": "docs/get_started/installation.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Installation",
+      "bytes": 2605
+    },
+    {
+      "path": "docs/index.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Welcome to Open Instruct",
+      "bytes": 12338
+    },
+    {
+      "path": "docs/miles/architecture.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Architecture and development",
+      "bytes": 4783
+    },
+    {
+      "path": "docs/miles/checkpoint-drift.md",
+      "category": "historical comparison procedure; external dependencies explicit",
+      "title": "Native checkpoint drift: bounded implementation and remaining gate",
+      "bytes": 7235
+    },
+    {
+      "path": "docs/miles/compiler-cache.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Compiler-cache lifecycle",
+      "bytes": 6661
+    },
+    {
+      "path": "docs/miles/configuration-intro.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Configuration reference",
+      "bytes": 5239
+    },
+    {
+      "path": "docs/miles/configuration.md",
+      "category": "generated reference; validated against sources and pinned option snapshot",
+      "title": "Configuration reference",
+      "bytes": 24123
+    },
+    {
+      "path": "docs/miles/core.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "MILES with an OLMo-core trainer",
+      "bytes": 10131
+    },
+    {
+      "path": "docs/miles/data-and-evaluation.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Data, rewards and evaluation",
+      "bytes": 3027
+    },
+    {
+      "path": "docs/miles/engine-drain.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Independent engine drain (experimental)",
+      "bytes": 11207
+    },
+    {
+      "path": "docs/miles/feature-parity.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Support and remaining parity gaps",
+      "bytes": 5962
+    },
+    {
+      "path": "docs/miles/fixed-policy-contract.md",
+      "category": "historical comparison procedure; external dependencies explicit",
+      "title": "Fixed-input Core/Megatron policy contract",
+      "bytes": 4322
+    },
+    {
+      "path": "docs/miles/hero-support.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Hero support in the MILES / OLMo-core integration",
+      "bytes": 8787
+    },
+    {
+      "path": "docs/miles/index.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "MILES + OLMo-core GRPO",
+      "bytes": 4251
+    },
+    {
+      "path": "docs/miles/launching.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Launching MILES runs",
+      "bytes": 6462
+    },
+    {
+      "path": "docs/miles/learning-watcher.md",
+      "category": "historical comparison procedure; external dependencies explicit",
+      "title": "Local learning-run watcher",
+      "bytes": 3945
+    },
+    {
+      "path": "docs/miles/long-sequences.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Choosing sequence lengths and memory controls",
+      "bytes": 9049
+    },
+    {
+      "path": "docs/miles/managed-judges.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Multi-node runs and named GPU judges",
+      "bytes": 7776
+    },
+    {
+      "path": "docs/miles/measurements/autotune-pinned-controls-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Fixed FLA tuner choices eliminate the measured prefill divergence",
+      "bytes": 2545
+    },
+    {
+      "path": "docs/miles/measurements/cache-publication-20260912/README.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Compiler-cache publication: local proxy, 2026-09-12",
+      "bytes": 5063
+    },
+    {
+      "path": "docs/miles/measurements/checkpoint-perf-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Native checkpoint performance qualification",
+      "bytes": 15949
+    },
+    {
+      "path": "docs/miles/measurements/colleague-20260912/README.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Colleague exercise results, 2026-09-12",
+      "bytes": 10017
+    },
+    {
+      "path": "docs/miles/measurements/colleague-20260913/README.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Readiness continuation, September 13 UTC",
+      "bytes": 18723
+    },
+    {
+      "path": "docs/miles/measurements/control-exercise-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Core scoring, scheduling and configuration exercise",
+      "bytes": 12201
+    },
+    {
+      "path": "docs/miles/measurements/core-cache-trial.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Actual Core cold/restored compiler-cache qualification",
+      "bytes": 4658
+    },
+    {
+      "path": "docs/miles/measurements/core-checkpoint-planning-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Core500 update-100 save: planning latency observation",
+      "bytes": 1854
+    },
+    {
+      "path": "docs/miles/measurements/core-native-routes-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Core native scorer versus serving, full SFT checkpoint at update zero",
+      "bytes": 2806
+    },
+    {
+      "path": "docs/miles/measurements/core-replay-full-sft-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Full-SFT Core rollout router replay qualification",
+      "bytes": 4651
+    },
+    {
+      "path": "docs/miles/measurements/core-row-specialization-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Opt-in runtime-row SwiGLU integration",
+      "bytes": 6164
+    },
+    {
+      "path": "docs/miles/measurements/core-score-profile-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Frozen Core100 scorer profile",
+      "bytes": 6638
+    },
+    {
+      "path": "docs/miles/measurements/core-score-variants-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Successive-batch Core scorer qualification",
+      "bytes": 5296
+    },
+    {
+      "path": "docs/miles/measurements/engine-drain-20260913/README.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Engine-drain qualification \u2014 isolated branch",
+      "bytes": 19279
+    },
+    {
+      "path": "docs/miles/measurements/feature-parity-audit-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "MILES/Core feature parity audit \u2014 September 11, 2026",
+      "bytes": 27756
+    },
+    {
+      "path": "docs/miles/measurements/gsm8k-configuration-differences-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Frozen100 GSM8K configuration and timing audit",
+      "bytes": 24029
+    },
+    {
+      "path": "docs/miles/measurements/gsm8k-generation-behavior-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Paired GSM8K generations and routing investigation",
+      "bytes": 9843
+    },
+    {
+      "path": "docs/miles/measurements/gsm8k-results-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "GSM8K: completed 100-update comparison",
+      "bytes": 15298
+    },
+    {
+      "path": "docs/miles/measurements/gsm8k-router-investigation-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Router, response length, and serving reproducibility investigation",
+      "bytes": 6854
+    },
+    {
+      "path": "docs/miles/measurements/implementation-history/compiler-cache-before-sharing-20260913.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Core compiler-cache lifecycle",
+      "bytes": 19941
+    },
+    {
+      "path": "docs/miles/measurements/implementation-history/core-before-sharing-20260913.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "MILES with an OLMo-core trainer",
+      "bytes": 36286
+    },
+    {
+      "path": "docs/miles/measurements/implementation-history/feature-parity-before-sharing-20260913.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "MILES/Core defaults and feature parity",
+      "bytes": 18713
+    },
+    {
+      "path": "docs/miles/measurements/implementation-history/olmo3-pre-rl-before-sharing-20260913.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Published Olmo 3 through MILES and Core",
+      "bytes": 20576
+    },
+    {
+      "path": "docs/miles/measurements/index.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "MILES measurements",
+      "bytes": 4088
+    },
+    {
+      "path": "docs/miles/measurements/knob-inventory.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "olmo-miles field inventory",
+      "bytes": 14063
+    },
+    {
+      "path": "docs/miles/measurements/learning-comparisons-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Learning comparisons and performance analysis",
+      "bytes": 7011
+    },
+    {
+      "path": "docs/miles/measurements/length-guidance-20260913/README.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Length guidance exercise \u2014 September 13, 2026",
+      "bytes": 9173
+    },
+    {
+      "path": "docs/miles/measurements/light-sft1000-gsm8k.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Light SFT1000 GSM8K comparison",
+      "bytes": 10311
+    },
+    {
+      "path": "docs/miles/measurements/mixture-qualification.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Mixed-source qualification",
+      "bytes": 3769
+    },
+    {
+      "path": "docs/miles/measurements/multinode-judges-20260912.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Tiny multi-node mixed-task and named-judge exercise",
+      "bytes": 14101
+    },
+    {
+      "path": "docs/miles/measurements/project-state.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "MILES/Core project working branches",
+      "bytes": 4881
+    },
+    {
+      "path": "docs/miles/measurements/publication-profile-20260912.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Publication transport profile (phase 0)",
+      "bytes": 7031
+    },
+    {
+      "path": "docs/miles/measurements/radix-cache-ab-20260912.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "KDA radix cache A/B on a math/IF/code mixture",
+      "bytes": 4151
+    },
+    {
+      "path": "docs/miles/measurements/researcher-workflow-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Researcher workflow: 8 \u00d7 8, async TIS, September 11",
+      "bytes": 5486
+    },
+    {
+      "path": "docs/miles/measurements/response-lengths-100-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Original GSM8K 100 response-length audit",
+      "bytes": 5330
+    },
+    {
+      "path": "docs/miles/measurements/response-lengths-conditional-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Response length conditioned on correctness and cap status",
+      "bytes": 2654
+    },
+    {
+      "path": "docs/miles/measurements/router-gradient-decomposition-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Native auxiliary and policy router gradients: tiny EP1 qualification",
+      "bytes": 2656
+    },
+    {
+      "path": "docs/miles/measurements/router-precision-20260911.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Router precision in the completed and current GSM8K runs",
+      "bytes": 4041
+    },
+    {
+      "path": "docs/miles/measurements/scoring-pass-merge-20260912.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Scoring-pass merge review",
+      "bytes": 5231
+    },
+    {
+      "path": "docs/miles/measurements/sequence-packing-20260912/README.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Sequence packing qualification, 2026-09-12",
+      "bytes": 6872
+    },
+    {
+      "path": "docs/miles/measurements/two-node-async-gsm8k-20260912.md",
+      "category": "historical evidence; preserved with explicit scope",
+      "title": "Two-node async GSM8K: first EP8 run at 64 \u00d7 8",
+      "bytes": 9218
+    },
+    {
+      "path": "docs/miles/models-and-checkpoints.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Models and checkpoints",
+      "bytes": 3584
+    },
+    {
+      "path": "docs/miles/native-options.md",
+      "category": "generated reference; validated against sources and pinned option snapshot",
+      "title": "Native MILES and SGLang options",
+      "bytes": 1557
+    },
+    {
+      "path": "docs/miles/native-serving-options.md",
+      "category": "generated reference; validated against sources and pinned option snapshot",
+      "title": "SGLang native option reference",
+      "bytes": 156844
+    },
+    {
+      "path": "docs/miles/native-training-options.md",
+      "category": "generated reference; validated against sources and pinned option snapshot",
+      "title": "MILES native option reference",
+      "bytes": 301409
+    },
+    {
+      "path": "docs/miles/olmo3-pre-rl.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Dense Olmo 3 through MILES/Core",
+      "bytes": 5135
+    },
+    {
+      "path": "docs/miles/operations.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Operations and troubleshooting",
+      "bytes": 3849
+    },
+    {
+      "path": "docs/miles/plans/active-work.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Active MILES / Core work",
+      "bytes": 10586
+    },
+    {
+      "path": "docs/miles/plans/colleague-exercises-20260912.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Internal colleague exercise campaign, 2026-09-12",
+      "bytes": 12368
+    },
+    {
+      "path": "docs/miles/plans/colleague-sanity-20260912.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Colleague-readiness exercise plan",
+      "bytes": 20737
+    },
+    {
+      "path": "docs/miles/plans/core-optimization-targets-20260911.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Core RL path: optimization targets",
+      "bytes": 13708
+    },
+    {
+      "path": "docs/miles/plans/dolci-production-proposal.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Proposed Core Dolci Think mixed-domain run",
+      "bytes": 13942
+    },
+    {
+      "path": "docs/miles/plans/engine-drain-handoff-20260912.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Handoff: independent engine drain and rolling weight publication",
+      "bytes": 14855
+    },
+    {
+      "path": "docs/miles/plans/gsm8k-investigation-handoff-20260911.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "GSM8K Core/Megatron discrepancy: investigation handoff",
+      "bytes": 16154
+    },
+    {
+      "path": "docs/miles/plans/gsm8k-parity-design.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Matched GSM8K learning comparison",
+      "bytes": 11369
+    },
+    {
+      "path": "docs/miles/plans/index.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "MILES plans",
+      "bytes": 1453
+    },
+    {
+      "path": "docs/miles/plans/publication-transport-plan-20260912.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Publication transport: plan",
+      "bytes": 12835
+    },
+    {
+      "path": "docs/miles/plans/qualification-plan.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Next MILES/Core qualification gates",
+      "bytes": 15431
+    },
+    {
+      "path": "docs/miles/plans/radix-cache-backport-plan-20260912.md",
+      "category": "historical proposal; not operating defaults",
+      "title": "Backporting the olmo-miles KDA radix cache policy",
+      "bytes": 7401
+    },
+    {
+      "path": "docs/miles/run-controls.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "MILES run controls in open-instruct",
+      "bytes": 19061
+    },
+    {
+      "path": "docs/miles/sequence-packing.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Sequence packing in the Core trainer",
+      "bytes": 4887
+    },
+    {
+      "path": "docs/miles/sharing-candidate.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Internal sharing candidate",
+      "bytes": 4673
+    },
+    {
+      "path": "docs/miles/topology.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "Topology and capacity",
+      "bytes": 5907
+    },
+    {
+      "path": "docs/miles/update-zero-diagnostics.md",
+      "category": "historical comparison procedure; external dependencies explicit",
+      "title": "Update-zero inference tracing",
+      "bytes": 6675
+    },
+    {
+      "path": "docs/miles/workflow.md",
+      "category": "current guide or entry point; reviewed for supported behavior",
+      "title": "MILES researcher workflow",
+      "bytes": 13041
+    },
+    {
+      "path": "docs/miles-active-work.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 337
+    },
+    {
+      "path": "docs/miles-checkpoint-drift.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 496
+    },
+    {
+      "path": "docs/miles-compiler-cache.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 591
+    },
+    {
+      "path": "docs/miles-core-cache-trial.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 333
+    },
+    {
+      "path": "docs/miles-core-optimization-targets-20260911.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 1159
+    },
+    {
+      "path": "docs/miles-core.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 500
+    },
+    {
+      "path": "docs/miles-dolci-production-proposal.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 425
+    },
+    {
+      "path": "docs/miles-feature-parity.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 459
+    },
+    {
+      "path": "docs/miles-fixed-policy-contract.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 261
+    },
+    {
+      "path": "docs/miles-gsm8k-investigation-handoff-20260911.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 702
+    },
+    {
+      "path": "docs/miles-gsm8k-parity-design.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 415
+    },
+    {
+      "path": "docs/miles-hero-support.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 503
+    },
+    {
+      "path": "docs/miles-knob-inventory.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 246
+    },
+    {
+      "path": "docs/miles-learning-comparisons-20260911.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 479
+    },
+    {
+      "path": "docs/miles-learning-watcher.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 237
+    },
+    {
+      "path": "docs/miles-light-sft1000-gsm8k.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 260
+    },
+    {
+      "path": "docs/miles-managed-judges.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 389
+    },
+    {
+      "path": "docs/miles-mixture-qualification.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 260
+    },
+    {
+      "path": "docs/miles-olmo3-pre-rl.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 616
+    },
+    {
+      "path": "docs/miles-project-state.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 362
+    },
+    {
+      "path": "docs/miles-publication-transport-plan-20260912.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 681
+    },
+    {
+      "path": "docs/miles-qualification-plan.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 474
+    },
+    {
+      "path": "docs/miles-radix-cache-backport-plan-20260912.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 395
+    },
+    {
+      "path": "docs/miles-run-controls.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 483
+    },
+    {
+      "path": "docs/miles-sequence-packing.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 271
+    },
+    {
+      "path": "docs/miles-update-zero-diagnostics.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 303
+    },
+    {
+      "path": "docs/miles-workflow.md",
+      "category": "redirect; current guide linked",
+      "title": "This document has moved",
+      "bytes": 440
+    }
+  ],
+  "count": 115,
+  "scope": "All MILES Markdown, root compatibility redirects, README/AGENTS and installation entry points; immutable JSON/tensor results remain evidence rather than rewritten current guidance."
+}

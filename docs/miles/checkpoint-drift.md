@@ -1,5 +1,7 @@
 # Native checkpoint drift: bounded implementation and remaining gate
 
+> Historical diagnostic procedure for the September 10–11 comparisons. It may require the recorded external olmo-miles checkout and immutable artifacts. For new runs use the [operating guide](index.md); for current support use the [support matrix](feature-parity.md). Historical pending-job statements below are not live status.
+
 The implementation uses CPU tensor reads and reductions; no training forward, GPU allocation or new GPU job is required. The purpose is to compare each saved checkpoint against the shared initial HF values by canonical parameter, layer and functional group, keeping model-visible storage and FP32 master changes separate.
 
 `scripts/miles/checkpoint_drift.py` provides chunked float64 norm/dot accumulators and strict canonical shape/inventory validation. It reports absolute L2, relative L2 against the initial reference, RMS change per parameter, maximum absolute change, changed-value fraction, and change-direction cosine. Cross-backend discrepancy is divided by each backend's change norm separately. Group totals sum squared norms and parameter counts; they do not average per-tensor relative errors. Undefined zero denominators and directions are null. No acceptance threshold is imposed.

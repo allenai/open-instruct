@@ -1,0 +1,52 @@
+{
+  "source": "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913",
+  "model": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+  "splits": {
+    "train": [
+      {
+        "id": "5a2bbd45fb6e243f77b01d9c093f17ec25a85221c9f252c0438f2d23b24bf50c",
+        "prompt_tokens": 130
+      },
+      {
+        "id": "583a7b534d296ea90c6a21a7c88b586c36e18375f75fe8c6b3f141d48f0cf90e",
+        "prompt_tokens": 123
+      },
+      {
+        "id": "42a5d1bf81c2083b2c86e0dffa338e1763603a071550dab55abf652912db2332",
+        "prompt_tokens": 68
+      },
+      {
+        "id": "27270d0f78a6bf2e5a8ff1413e7eaaf04c9c5226724f30716eaacdfff160cab9",
+        "prompt_tokens": 90
+      },
+      {
+        "id": "6aadba3baf62aa8cc06ac2300302d802df605930a32597751a2c1ee1a4a3f179",
+        "prompt_tokens": 100
+      },
+      {
+        "id": "79080dff3b7de12ddb946b403335b6a647a33eea6028fb1b8ed38fbfa703fac6",
+        "prompt_tokens": 125
+      },
+      {
+        "id": "16c66296a8cf300cb5edb603126f808a73af6cf643fcee5f4527f72fedeb571d",
+        "prompt_tokens": 112
+      },
+      {
+        "id": "9a9d672e463e85aecf9cf587afe2aaed9ff12c08fd32014b2af3635ed5c18970",
+        "prompt_tokens": 140
+      }
+    ],
+    "eval": [
+      {
+        "id": "1766d8d965391f4867616e284fa4cd1c435e33ad9caf2de854e42bb2da99d31a",
+        "prompt_tokens": 187
+      },
+      {
+        "id": "b995aba91a52ed35b67430ffee934b3635e45bc77ea53ec3920f7e44ca560c5f",
+        "prompt_tokens": 119
+      }
+    ]
+  },
+  "train_sha256": "f4f1287ef2078cfc18371991ca0b0b1534ecb18d766e9d100552a59c35482510",
+  "eval_sha256": "43dacf2f2bbe711da3f37709e2468d1567077083be6ffea5d1eca45caf627c00"
+}

@@ -1,12 +1,22 @@
-# GRPO documentation routing
+# GRPO entry point and deprecation policy
 
-For new GRPO runs on supported models, start at [docs/miles/index.md](docs/miles/index.md).
-It links the support matrix, example TOMLs, complete laptop/Beaker-session launch
-instructions and configuration reference. MILES uses SGLang and its own Core
-adapter; `grpo.py` and `grpo_fast.py` use the separate vLLM paths. Check support
-before selecting a backend. Dated measurements/plans are evidence, not defaults.
-Use the MILES committed-image wrapper described there for MILES launches; the
-existing debug scripts below apply to their named implementation.
+For new GRPO work, use `python -m open_instruct.miles` and start at
+[docs/miles/index.md](docs/miles/index.md). Read model/workload support, example
+TOMLs and the launch guide before preparing a run. Use the MILES committed-image
+wrapper described there; its dependencies and configuration differ from legacy GRPO.
+
+`open_instruct/grpo.py` and `open_instruct/grpo_fast.py` are **deprecated**.
+Their presence, tests and launch scripts support existing runs and historical
+reproduction; they are not alternatives to recommend for new GRPO work. Do not
+create new recipes or features on those paths unless the user's task explicitly
+targets legacy behavior. If MILES lacks a required capability, report the specific
+support gap instead of silently switching backends. Existing user instructions to
+maintain or reproduce a legacy run still apply.
+
+MILES has its own Core adapter and uses SGLang. The deprecated Core/vLLM path in
+`grpo.py` is separate, even though both use OLMo-core. Dated measurements/plans
+are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/legacy_grpo.md)
+contains the old CLI and reproduction instructions.
 
 # Bash commands
 - `uv run pytest`: Run the tests.
@@ -24,7 +34,7 @@ existing debug scripts below apply to their named implementation.
 - Prefer running single tests, not the whole suite, when developing.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - To launch experiment scripts, use the `build_image_and_launch.sh` script, like this: `./scripts/train/build_image_and_launch.sh $SOME_SCRIPT`.
-- For GRPO, we have three test scripts:
+- For the deprecated vLLM GRPO implementation only, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
   - `scripts/train/debug/large_test_script.sh`: two 8x GPU nodes, no tools (~32 minutes).
@@ -36,8 +46,8 @@ existing debug scripts below apply to their named implementation.
   - `scripts/train/debug/dpo/single_gpu.sh`: single GPU on Beaker.
   - `scripts/train/debug/dpo/multi_node.sh`: two 8x GPU nodes on Beaker.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
-- Launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
-- Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
+- For legacy vLLM GRPO maintenance, launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
+- For legacy vLLM GRPO maintenance, launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
 - Launch OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh`.
 - Launch multi-node OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_multinode.sh`.
 - Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.

@@ -1,0 +1,119 @@
+{
+  "limits": "Two retained training responses per deterministic domain, selected at reward extremes. Fresh verifier/service execution; no new judge calls or optimizer-equivalence claim.",
+  "passed": true,
+  "results": [
+    {
+      "diagnostics": {
+        "code": {
+          "http_status": 200,
+          "program_chars": 17229,
+          "status": "ok",
+          "stdio": false,
+          "tests": -1
+        }
+      },
+      "domain": "code",
+      "id": "dolci-think-full:41529:rlvr_acecoder_filtered_filtered-request-186-22",
+      "matched": true,
+      "recorded": 0.0,
+      "rescored": 0.0,
+      "response_sha256": "a51ee6f95fd902da4160a7a712e413c54480ea9f5414ce885e2eda7611e6906d",
+      "rollout": 0
+    },
+    {
+      "diagnostics": {
+        "code": {
+          "http_status": 200,
+          "program_chars": 196,
+          "status": "ok",
+          "stdio": false,
+          "tests": -1
+        }
+      },
+      "domain": "code",
+      "id": "dolci-think-full:46678:rlvr_acecoder_filtered_filtered-request-508-100",
+      "matched": true,
+      "recorded": 1.0,
+      "rescored": 1.0,
+      "response_sha256": "4238fa5e40df899a899180726397f30de312d8646a47e2b30a4f29fb59185c67",
+      "rollout": 3
+    },
+    {
+      "diagnostics": {
+        "code_stdio": {
+          "http_status": 200,
+          "program_chars": 15627,
+          "status": "ok",
+          "stdio": true,
+          "tests": -1
+        }
+      },
+      "domain": "code_stdio",
+      "id": "dolci-think-full:31841:klear-code-rlvr_filtered-request-39-84",
+      "matched": true,
+      "recorded": 0.0,
+      "rescored": 0.0,
+      "response_sha256": "75ae16cd77a3f4949be43c451a5fcb215455d8f60356e941ea762b772562f8dc",
+      "rollout": 0
+    },
+    {
+      "diagnostics": {
+        "code_stdio": {
+          "http_status": 200,
+          "program_chars": 13810,
+          "status": "ok",
+          "stdio": true,
+          "tests": -1
+        }
+      },
+      "domain": "code_stdio",
+      "id": "dolci-think-full:34997:klear-code-rlvr_filtered-request-113-1",
+      "matched": true,
+      "recorded": 0.0,
+      "rescored": 0.0,
+      "response_sha256": "cdfc62e6b765489faa0b0aa021cfb22fdb4097611912a5dd40eb451b790ab12a",
+      "rollout": 3
+    },
+    {
+      "diagnostics": {},
+      "domain": "ifeval",
+      "id": "dolci-think-full:78369:IF_multi_constraints_upto5_filtered-request-126-91",
+      "matched": true,
+      "recorded": 0.0,
+      "rescored": 0.0,
+      "response_sha256": "c81aa940497c3a979036d667c89df7793360ffaaa3e6c875db369962dbdb69ce",
+      "rollout": 0
+    },
+    {
+      "diagnostics": {},
+      "domain": "ifeval",
+      "id": "dolci-think-full:67911:IF_multi_constraints_upto5_filtered-request-388-65",
+      "matched": true,
+      "recorded": 1.0,
+      "rescored": 1.0,
+      "response_sha256": "7b1849ec49f37b96becbaf0beb9019c77549dd5c34dca2d2455209ac3eb83d1c",
+      "rollout": 3
+    },
+    {
+      "diagnostics": {},
+      "domain": "math",
+      "id": "dolci-think-full:14503:omega-combined-no-boxed_filtered-request-2-4",
+      "matched": true,
+      "recorded": 0.0,
+      "rescored": 0.0,
+      "response_sha256": "b0a0d8ef3453a7dc7e4f4c19b61fb4c975a06dff3846fad88be03526d95e5a4a",
+      "rollout": 0
+    },
+    {
+      "diagnostics": {},
+      "domain": "math",
+      "id": "dolci-think-full:409:AceReason-Math_filtered-request-29-70",
+      "matched": true,
+      "recorded": 0.0,
+      "rescored": 0.0,
+      "response_sha256": "99bf155dd4907276f92bba1441926efcb0622c364a6adde8c21c8110b6c332b1",
+      "rollout": 3
+    }
+  ],
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-03-warm-20260912"
+}

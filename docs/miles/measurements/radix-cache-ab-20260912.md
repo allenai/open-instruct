@@ -1,5 +1,7 @@
 # KDA radix cache A/B on a math/IF/code mixture
 
+> Point-in-time measurement. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../feature-parity.md) and current examples before launching.
+
 Three serving configurations, same prepared prompts (1,280 training prompts, 320 each
 of math, instruction following, function code and stdio code, interleaved; 48 held-out),
 same seed, same two-node layout (8 Core trainers at EP8 plus 8 TP1 engines), 64 × 8

@@ -1,0 +1,55 @@
+{
+  "limits": "Eight size-bounded saved parameter probes, update one versus four. Establishes sampled parameter movement; not a full-weight equivalence or restart-determinism proof.",
+  "passed": true,
+  "probes": [
+    {
+      "changed": 19,
+      "elements": 4096,
+      "key": "model.blocks.0.attention.k_norm.weight",
+      "max_abs": 2.86102294921875e-06
+    },
+    {
+      "changed": 2,
+      "elements": 4096,
+      "key": "model.blocks.12.attention_norm.weight",
+      "max_abs": 2.86102294921875e-06
+    },
+    {
+      "changed": 26,
+      "elements": 4096,
+      "key": "model.blocks.17.attention.k_norm.weight",
+      "max_abs": 2.86102294921875e-06
+    },
+    {
+      "changed": 0,
+      "elements": 4096,
+      "key": "model.blocks.20.attention_norm.weight",
+      "max_abs": 0.0
+    },
+    {
+      "changed": 18,
+      "elements": 4096,
+      "key": "model.blocks.25.attention.q_norm.weight",
+      "max_abs": 2.86102294921875e-06
+    },
+    {
+      "changed": 0,
+      "elements": 4096,
+      "key": "model.blocks.29.feed_forward_norm.weight",
+      "max_abs": 0.0
+    },
+    {
+      "changed": 16,
+      "elements": 4096,
+      "key": "model.blocks.5.attention.q_norm.weight",
+      "max_abs": 2.86102294921875e-06
+    },
+    {
+      "changed": 0,
+      "elements": 4096,
+      "key": "model.lm_head.norm.weight",
+      "max_abs": 0.0
+    }
+  ],
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913"
+}

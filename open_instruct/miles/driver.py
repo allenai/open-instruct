@@ -146,7 +146,11 @@ async def train(args, *, export_hf=None):
             ):
                 break
         await evaluation.drain()
-        if export_hf is not None:
+        # A deliberate debug stop leaves a resumable workflow, not a final export.
+        # Otherwise the first process creates the final directory and the resumed
+        # process cannot export its newer weights there (the exporter is exclusive).
+        reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
+        if export_hf is not None and reached_end:
             if args.fully_async:
                 await manager.core_publication_boundary.remote(True)
             with stage(args, "final_hf_export"):
