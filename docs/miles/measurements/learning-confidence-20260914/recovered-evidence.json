@@ -1,0 +1,865 @@
+{
+  "scope": "Historical log recovery and independent light-SFT full-test rescoring. Current mixed-task runs are incomplete.",
+  "runs": {
+    "core500": {
+      "experiment": "01M279ZFM6RBC223RJJ6QHN9MP",
+      "jobs": [
+        {
+          "id": "01M279ZFQZGCXK4TSQ7DBB5JN3",
+          "status": {
+            "created": "2026-09-11T04:00:28.8065Z",
+            "scheduled": "2026-09-11T04:03:52.918518Z",
+            "started": "2026-09-11T04:05:14.149705Z",
+            "exited": "2026-09-11T14:33:02.905763Z",
+            "finalized": "2026-09-11T14:33:04.745299Z",
+            "exitCode": 0,
+            "idleSince": "2026-09-11T14:33:02.850351Z",
+            "ready": "2026-09-11T04:05:13.302583Z"
+          },
+          "allocated_gpus": 3,
+          "scheduled_to_exit_gpu_hours": 31.458322704166665
+        }
+      ],
+      "log_sha256": "356e5e9b1cef8333ce61b51fee70887810d8ccb668f8f304dd0fc5804cab620b",
+      "curve": [
+        {
+          "eval_index": 0,
+          "score": 0.7734375,
+          "correct": 99,
+          "version": 0.0,
+          "tokens": 1788.4765625,
+          "capped": 0.15625,
+          "completed_updates": 0.0
+        },
+        {
+          "eval_index": 19,
+          "score": 0.734375,
+          "correct": 94,
+          "version": 20.0,
+          "tokens": 1798.78125,
+          "capped": 0.171875,
+          "completed_updates": 20.0
+        },
+        {
+          "eval_index": 39,
+          "score": 0.8046875,
+          "correct": 103,
+          "version": 40.0,
+          "tokens": 1724.15625,
+          "capped": 0.1328125,
+          "completed_updates": 40.0
+        },
+        {
+          "eval_index": 59,
+          "score": 0.8046875,
+          "correct": 103,
+          "version": 60.0,
+          "tokens": 1142.9375,
+          "capped": 0.125,
+          "completed_updates": 60.0
+        },
+        {
+          "eval_index": 79,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 80.0,
+          "tokens": 1117.765625,
+          "capped": 0.1328125,
+          "completed_updates": 80.0
+        },
+        {
+          "eval_index": 99,
+          "score": 0.8359375,
+          "correct": 107,
+          "version": 100.0,
+          "tokens": 1217.390625,
+          "capped": 0.140625,
+          "completed_updates": 100.0
+        },
+        {
+          "eval_index": 119,
+          "score": 0.765625,
+          "correct": 98,
+          "version": 120.0,
+          "tokens": 1387.3046875,
+          "capped": 0.1953125,
+          "completed_updates": 120.0
+        },
+        {
+          "eval_index": 139,
+          "score": 0.78125,
+          "correct": 100,
+          "version": 140.0,
+          "tokens": 1312.0546875,
+          "capped": 0.171875,
+          "completed_updates": 140.0
+        },
+        {
+          "eval_index": 159,
+          "score": 0.78125,
+          "correct": 100,
+          "version": 160.0,
+          "tokens": 1045.609375,
+          "capped": 0.15625,
+          "completed_updates": 160.0
+        },
+        {
+          "eval_index": 179,
+          "score": 0.7890625,
+          "correct": 101,
+          "version": 180.0,
+          "tokens": 818.5546875,
+          "capped": 0.09375,
+          "completed_updates": 180.0
+        },
+        {
+          "eval_index": 199,
+          "score": 0.78125,
+          "correct": 100,
+          "version": 200.0,
+          "tokens": 871.03125,
+          "capped": 0.125,
+          "completed_updates": 200.0
+        },
+        {
+          "eval_index": 219,
+          "score": 0.8203125,
+          "correct": 105,
+          "version": 220.0,
+          "tokens": 795.796875,
+          "capped": 0.1015625,
+          "completed_updates": 220.0
+        },
+        {
+          "eval_index": 239,
+          "score": 0.8203125,
+          "correct": 105,
+          "version": 240.0,
+          "tokens": 687.125,
+          "capped": 0.0859375,
+          "completed_updates": 240.0
+        },
+        {
+          "eval_index": 259,
+          "score": 0.8046875,
+          "correct": 103,
+          "version": 260.0,
+          "tokens": 579.203125,
+          "capped": 0.0625,
+          "completed_updates": 260.0
+        },
+        {
+          "eval_index": 279,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 280.0,
+          "tokens": 453.265625,
+          "capped": 0.0234375,
+          "completed_updates": 280.0
+        },
+        {
+          "eval_index": 299,
+          "score": 0.765625,
+          "correct": 98,
+          "version": 300.0,
+          "tokens": 577.375,
+          "capped": 0.0625,
+          "completed_updates": 300.0
+        },
+        {
+          "eval_index": 319,
+          "score": 0.796875,
+          "correct": 102,
+          "version": 320.0,
+          "tokens": 576.4140625,
+          "capped": 0.0625,
+          "completed_updates": 320.0
+        },
+        {
+          "eval_index": 339,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 340.0,
+          "tokens": 717.4375,
+          "capped": 0.0859375,
+          "completed_updates": 340.0
+        },
+        {
+          "eval_index": 359,
+          "score": 0.8046875,
+          "correct": 103,
+          "version": 360.0,
+          "tokens": 850.109375,
+          "capped": 0.1015625,
+          "completed_updates": 360.0
+        },
+        {
+          "eval_index": 379,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 380.0,
+          "tokens": 936.75,
+          "capped": 0.1171875,
+          "completed_updates": 380.0
+        },
+        {
+          "eval_index": 399,
+          "score": 0.796875,
+          "correct": 102,
+          "version": 400.0,
+          "tokens": 765.0390625,
+          "capped": 0.0859375,
+          "completed_updates": 400.0
+        },
+        {
+          "eval_index": 419,
+          "score": 0.796875,
+          "correct": 102,
+          "version": 420.0,
+          "tokens": 927.8125,
+          "capped": 0.1328125,
+          "completed_updates": 420.0
+        },
+        {
+          "eval_index": 439,
+          "score": 0.7734375,
+          "correct": 99,
+          "version": 440.0,
+          "tokens": 993.7265625,
+          "capped": 0.1328125,
+          "completed_updates": 440.0
+        },
+        {
+          "eval_index": 459,
+          "score": 0.75,
+          "correct": 96,
+          "version": 460.0,
+          "tokens": 1189.578125,
+          "capped": 0.1953125,
+          "completed_updates": 460.0
+        },
+        {
+          "eval_index": 479,
+          "score": 0.7265625,
+          "correct": 93,
+          "version": 480.0,
+          "tokens": 1238.890625,
+          "capped": 0.21875,
+          "completed_updates": 480.0
+        },
+        {
+          "eval_index": 499,
+          "score": 0.7890625,
+          "correct": 101,
+          "version": 500.0,
+          "tokens": 1994.640625,
+          "capped": 0.40625,
+          "completed_updates": 500.0
+        }
+      ]
+    },
+    "megatron500": {
+      "experiment": "01M278B5E9HME181B04HT6391P",
+      "jobs": [
+        {
+          "id": "01M278B5HR0SHV7NMCE8FTDSKQ",
+          "status": {
+            "created": "2026-09-11T03:31:54.441557Z",
+            "scheduled": "2026-09-11T03:45:01.776843Z",
+            "started": "2026-09-11T03:50:15.853Z",
+            "exited": "2026-09-11T14:27:57.371702Z",
+            "finalized": "2026-09-11T14:28:02.676919Z",
+            "exitCode": 0,
+            "idleSince": "2026-09-11T14:27:57.267537Z",
+            "ready": "2026-09-11T03:50:15.03333Z"
+          },
+          "allocated_gpus": 3,
+          "scheduled_to_exit_gpu_hours": 32.14632904916666
+        }
+      ],
+      "log_sha256": "8ec92a3bfcf1a50bd51c8147d5bf39def80236c62ca1dd469f2c9df9b5071b75",
+      "curve": [
+        {
+          "eval_index": 0,
+          "score": 0.765625,
+          "correct": 98,
+          "version": 1.0,
+          "tokens": 1872.375,
+          "capped": 0.1796875,
+          "completed_updates": 0.0
+        },
+        {
+          "eval_index": 19,
+          "score": 0.78125,
+          "correct": 100,
+          "version": 21.0,
+          "tokens": 1766.4609375,
+          "capped": 0.15625,
+          "completed_updates": 20.0
+        },
+        {
+          "eval_index": 39,
+          "score": 0.734375,
+          "correct": 94,
+          "version": 41.0,
+          "tokens": 1831.8984375,
+          "capped": 0.1640625,
+          "completed_updates": 40.0
+        },
+        {
+          "eval_index": 59,
+          "score": 0.7734375,
+          "correct": 99,
+          "version": 61.0,
+          "tokens": 1682.21875,
+          "capped": 0.125,
+          "completed_updates": 60.0
+        },
+        {
+          "eval_index": 79,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 81.0,
+          "tokens": 1438.859375,
+          "capped": 0.078125,
+          "completed_updates": 80.0
+        },
+        {
+          "eval_index": 99,
+          "score": 0.828125,
+          "correct": 106,
+          "version": 101.0,
+          "tokens": 1531.4140625,
+          "capped": 0.1015625,
+          "completed_updates": 100.0
+        },
+        {
+          "eval_index": 119,
+          "score": 0.8359375,
+          "correct": 107,
+          "version": 121.0,
+          "tokens": 1427.265625,
+          "capped": 0.078125,
+          "completed_updates": 120.0
+        },
+        {
+          "eval_index": 139,
+          "score": 0.75,
+          "correct": 96,
+          "version": 141.0,
+          "tokens": 1396.2578125,
+          "capped": 0.1015625,
+          "completed_updates": 140.0
+        },
+        {
+          "eval_index": 159,
+          "score": 0.7734375,
+          "correct": 99,
+          "version": 161.0,
+          "tokens": 1563.0390625,
+          "capped": 0.1328125,
+          "completed_updates": 160.0
+        },
+        {
+          "eval_index": 179,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 181.0,
+          "tokens": 1171.6484375,
+          "capped": 0.078125,
+          "completed_updates": 180.0
+        },
+        {
+          "eval_index": 199,
+          "score": 0.8203125,
+          "correct": 105,
+          "version": 201.0,
+          "tokens": 873.4296875,
+          "capped": 0.046875,
+          "completed_updates": 200.0
+        },
+        {
+          "eval_index": 219,
+          "score": 0.8203125,
+          "correct": 105,
+          "version": 221.0,
+          "tokens": 766.859375,
+          "capped": 0.0859375,
+          "completed_updates": 220.0
+        },
+        {
+          "eval_index": 239,
+          "score": 0.8046875,
+          "correct": 103,
+          "version": 241.0,
+          "tokens": 666.7109375,
+          "capped": 0.046875,
+          "completed_updates": 240.0
+        },
+        {
+          "eval_index": 259,
+          "score": 0.8515625,
+          "correct": 109,
+          "version": 261.0,
+          "tokens": 704.3828125,
+          "capped": 0.046875,
+          "completed_updates": 260.0
+        },
+        {
+          "eval_index": 279,
+          "score": 0.8515625,
+          "correct": 109,
+          "version": 281.0,
+          "tokens": 901.5078125,
+          "capped": 0.0546875,
+          "completed_updates": 280.0
+        },
+        {
+          "eval_index": 299,
+          "score": 0.8359375,
+          "correct": 107,
+          "version": 301.0,
+          "tokens": 1120.265625,
+          "capped": 0.0703125,
+          "completed_updates": 300.0
+        },
+        {
+          "eval_index": 319,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 321.0,
+          "tokens": 1113.0234375,
+          "capped": 0.1015625,
+          "completed_updates": 320.0
+        },
+        {
+          "eval_index": 339,
+          "score": 0.8359375,
+          "correct": 107,
+          "version": 341.0,
+          "tokens": 713.1015625,
+          "capped": 0.046875,
+          "completed_updates": 340.0
+        },
+        {
+          "eval_index": 359,
+          "score": 0.8359375,
+          "correct": 107,
+          "version": 361.0,
+          "tokens": 714.2578125,
+          "capped": 0.0625,
+          "completed_updates": 360.0
+        },
+        {
+          "eval_index": 379,
+          "score": 0.8203125,
+          "correct": 105,
+          "version": 381.0,
+          "tokens": 750.2890625,
+          "capped": 0.0703125,
+          "completed_updates": 380.0
+        },
+        {
+          "eval_index": 399,
+          "score": 0.8203125,
+          "correct": 105,
+          "version": 401.0,
+          "tokens": 941.3125,
+          "capped": 0.1328125,
+          "completed_updates": 400.0
+        },
+        {
+          "eval_index": 419,
+          "score": 0.84375,
+          "correct": 108,
+          "version": 421.0,
+          "tokens": 1147.9296875,
+          "capped": 0.1875,
+          "completed_updates": 420.0
+        },
+        {
+          "eval_index": 439,
+          "score": 0.8671875,
+          "correct": 111,
+          "version": 441.0,
+          "tokens": 2015.546875,
+          "capped": 0.40625,
+          "completed_updates": 440.0
+        },
+        {
+          "eval_index": 459,
+          "score": 0.828125,
+          "correct": 106,
+          "version": 461.0,
+          "tokens": 1464.9921875,
+          "capped": 0.2578125,
+          "completed_updates": 460.0
+        },
+        {
+          "eval_index": 479,
+          "score": 0.8359375,
+          "correct": 107,
+          "version": 481.0,
+          "tokens": 818.96875,
+          "capped": 0.078125,
+          "completed_updates": 480.0
+        },
+        {
+          "eval_index": 499,
+          "score": 0.8125,
+          "correct": 104,
+          "version": 501.0,
+          "tokens": 869.0078125,
+          "capped": 0.09375,
+          "completed_updates": 500.0
+        }
+      ]
+    },
+    "light_core200": {
+      "experiment": "01M27EWCG7P03CNY40E5WSXX1D",
+      "jobs": [
+        {
+          "id": "01M27EWCKM5KCBKHCN4X567HS6",
+          "status": {
+            "created": "2026-09-11T05:26:10.183412Z",
+            "scheduled": "2026-09-11T05:33:57.021551Z",
+            "started": "2026-09-11T05:35:07.383968Z",
+            "exited": "2026-09-11T08:35:37.182973Z",
+            "finalized": "2026-09-11T08:35:41.51928Z",
+            "exitCode": 0,
+            "idleSince": "2026-09-11T08:35:37.119546Z",
+            "ready": "2026-09-11T05:35:06.50671Z"
+          }
+        }
+      ],
+      "log_sha256": "3a2e4cc7bca0d63a28e2e91bb85d87f0b223ddc2ec71c11cd6d7a1bd2df50f40",
+      "native_curve": [
+        {
+          "completed_updates": 0,
+          "correct": 32,
+          "count": 128,
+          "mean_response_tokens": 133.9609375,
+          "capped_fraction": 0.0546875
+        },
+        {
+          "completed_updates": 10,
+          "correct": 50,
+          "count": 128,
+          "mean_response_tokens": 162.2578125,
+          "capped_fraction": 0.015625
+        },
+        {
+          "completed_updates": 20,
+          "correct": 47,
+          "count": 128,
+          "mean_response_tokens": 173.890625,
+          "capped_fraction": 0.03125
+        },
+        {
+          "completed_updates": 30,
+          "correct": 49,
+          "count": 128,
+          "mean_response_tokens": 216.171875,
+          "capped_fraction": 0.078125
+        },
+        {
+          "completed_updates": 40,
+          "correct": 66,
+          "count": 128,
+          "mean_response_tokens": 208.5546875,
+          "capped_fraction": 0.03125
+        },
+        {
+          "completed_updates": 50,
+          "correct": 53,
+          "count": 128,
+          "mean_response_tokens": 216.5546875,
+          "capped_fraction": 0.0546875
+        },
+        {
+          "completed_updates": 60,
+          "correct": 57,
+          "count": 128,
+          "mean_response_tokens": 212.1953125,
+          "capped_fraction": 0.046875
+        },
+        {
+          "completed_updates": 70,
+          "correct": 58,
+          "count": 128,
+          "mean_response_tokens": 222.8203125,
+          "capped_fraction": 0.0625
+        },
+        {
+          "completed_updates": 80,
+          "correct": 63,
+          "count": 128,
+          "mean_response_tokens": 215.59375,
+          "capped_fraction": 0.09375
+        },
+        {
+          "completed_updates": 90,
+          "correct": 66,
+          "count": 128,
+          "mean_response_tokens": 209.6171875,
+          "capped_fraction": 0.0859375
+        },
+        {
+          "completed_updates": 100,
+          "correct": 68,
+          "count": 128,
+          "mean_response_tokens": 208.7890625,
+          "capped_fraction": 0.09375
+        },
+        {
+          "completed_updates": 110,
+          "correct": 62,
+          "count": 128,
+          "mean_response_tokens": 198.9375,
+          "capped_fraction": 0.0546875
+        },
+        {
+          "completed_updates": 120,
+          "correct": 68,
+          "count": 128,
+          "mean_response_tokens": 192.703125,
+          "capped_fraction": 0.0703125
+        },
+        {
+          "completed_updates": 130,
+          "correct": 70,
+          "count": 128,
+          "mean_response_tokens": 203.53125,
+          "capped_fraction": 0.0390625
+        },
+        {
+          "completed_updates": 140,
+          "correct": 67,
+          "count": 128,
+          "mean_response_tokens": 210.671875,
+          "capped_fraction": 0.078125
+        },
+        {
+          "completed_updates": 150,
+          "correct": 86,
+          "count": 128,
+          "mean_response_tokens": 195.4609375,
+          "capped_fraction": 0.0546875
+        },
+        {
+          "completed_updates": 160,
+          "correct": 72,
+          "count": 128,
+          "mean_response_tokens": 215.15625,
+          "capped_fraction": 0.0859375
+        },
+        {
+          "completed_updates": 170,
+          "correct": 74,
+          "count": 128,
+          "mean_response_tokens": 191.421875,
+          "capped_fraction": 0.0546875
+        },
+        {
+          "completed_updates": 180,
+          "correct": 68,
+          "count": 128,
+          "mean_response_tokens": 198.4765625,
+          "capped_fraction": 0.0703125
+        },
+        {
+          "completed_updates": 190,
+          "correct": 72,
+          "count": 128,
+          "mean_response_tokens": 198.6640625,
+          "capped_fraction": 0.0546875
+        },
+        {
+          "completed_updates": 200,
+          "correct": 79,
+          "count": 128,
+          "mean_response_tokens": 176.671875,
+          "capped_fraction": 0.015625
+        }
+      ],
+      "offline_endpoints": [
+        {
+          "accuracy": 0.17361637604245642,
+          "capped": 2,
+          "correct": 229.0,
+          "count": 1319,
+          "elapsed_seconds": 53.608979967888445,
+          "format": "Historical raw completion prompt; greedy, max512, stops Question: and double-newline",
+          "step": 0,
+          "transport": "MILES /generate with proven raw-prompt token IDs; historical client used /completions",
+          "sha256": "ded2f5b8b480d8d012fc81f9ba1f4720ead19c62490756300527eedda3ad5ca0",
+          "rescored_count": 1319,
+          "score_mismatches": 0
+        },
+        {
+          "accuracy": 0.20318423047763456,
+          "capped": 14,
+          "correct": 268.0,
+          "count": 1319,
+          "elapsed_seconds": 61.9971306421794,
+          "format": "Historical raw completion prompt; greedy, max512, stops Question: and double-newline",
+          "step": 200,
+          "transport": "MILES /generate with proven raw-prompt token IDs; historical client used /completions",
+          "sha256": "573bf456300f8b01028549b1e574f31307fd70521a059eb0a784522d19049db8",
+          "rescored_count": 1319,
+          "score_mismatches": 0
+        }
+      ],
+      "offline_paired_transitions": {
+        "wrong_to_correct": 80,
+        "correct_to_wrong": 41,
+        "both_correct": 188,
+        "both_wrong": 1010
+      }
+    }
+  },
+  "light_megatron_reference": {
+    "experiment": "01M12Y23YZS5ZJWBK45CKQJ7DP",
+    "native_eval": {
+      "count": 128,
+      "interval": 10,
+      "temperature": 1.0,
+      "correct_by_step": {
+        "0": 26,
+        "10": 48,
+        "20": 52,
+        "30": 54,
+        "40": 57,
+        "50": 54,
+        "60": 61,
+        "70": 55,
+        "80": 63,
+        "90": 61,
+        "100": 73,
+        "110": 78,
+        "120": 70,
+        "130": 72,
+        "140": 64,
+        "150": 70,
+        "160": 75,
+        "170": 70,
+        "180": 70,
+        "190": 83,
+        "200": 77
+      }
+    },
+    "full_test": {
+      "before_experiment": "01M13A2NB29VNFFPG5GC82Z1FG",
+      "after_experiment": "01M13B0CFKKHRRGNKQFQ3GT8SG",
+      "after_result": "01M13B0CFW65GVAGVWVTDWH4DM",
+      "requests_path": "after/attempt_000/requests/_weka_oe-training-default_robertb_olmo-miles_rl-sft1000_runs-ep2_200-update_01M12Y23YZS5ZJWBK45CKQJ7DP_exports_hf-final-iter199/gsm8k_82d8c3-requests.jsonl",
+      "requests_sha256": "71c4d9b3389ae6a1c5364511d152bc3c41042e90ff41c97518ae1b9eb032ef28",
+      "before_correct": 230,
+      "after_correct": 274,
+      "count": 1319,
+      "temperature": 0.0,
+      "response_cap": 512,
+      "stop": [
+        "Question:",
+        "\n\n"
+      ],
+      "prompt": "Question: {query}\nAnswer:",
+      "chat_template": false
+    },
+    "performance": {
+      "job_elapsed_seconds": 12048.48114,
+      "allocated_gpus": 2,
+      "gpu_hours": 6.6936006333,
+      "steady_window_rollouts": [
+        40,
+        49
+      ],
+      "train_seconds_mean": 19.40194,
+      "scoring_seconds_mean": 3.16243,
+      "rollout_seconds_mean": 5.96573,
+      "publication_seconds_mean": 15.04447,
+      "batch_wall_seconds_mean": 68.1653,
+      "batch_wall_seconds_p50": 45.6106,
+      "checkpoint_seconds_one_event": 199.4761,
+      "eval_seconds_one_event": 24.0983
+    }
+  },
+  "mixed_task_starts": {
+    "moe_sft": {
+      "experiment": "01M2F7N19DQ3YJMRJAXJ1K4H59",
+      "completed_updates": 18,
+      "status": "failed: external code HTTP read timeout after retries",
+      "response_cap": 4096,
+      "evaluations": [
+        {
+          "eval_index": 0,
+          "domains": {
+            "math": {
+              "mean_reward": 0.0078125,
+              "count": 128,
+              "mean_response_tokens": 3958.6484375,
+              "capped_fraction": 0.9296875
+            },
+            "ifeval": {
+              "mean_reward": 0.20208333333333334,
+              "count": 128,
+              "mean_response_tokens": 3285.65625,
+              "capped_fraction": 0.7265625
+            },
+            "code": {
+              "mean_reward": 0.109375,
+              "count": 128,
+              "mean_response_tokens": 3364.140625,
+              "capped_fraction": 0.71875
+            },
+            "general": {
+              "mean_reward": 0.67421875,
+              "count": 128,
+              "mean_response_tokens": 2239.53125,
+              "capped_fraction": 0.34375
+            }
+          }
+        }
+      ],
+      "log_sha256": "6383bc6e24c4bf6f3699e55b43455d283519eb465581db6b5b1de75ff20ad285"
+    },
+    "dense_think_sft": {
+      "experiment": "01M2FBGGE8K8XJ7WJKCTE4KHMB",
+      "completed_updates": 11,
+      "status": "failed: external code HTTP read timeout after retries",
+      "response_cap": 4096,
+      "evaluations": [
+        {
+          "eval_index": 0,
+          "domains": {
+            "math": {
+              "mean_reward": 0.0078125,
+              "count": 128,
+              "mean_response_tokens": 3893.953125,
+              "capped_fraction": 0.9140625
+            },
+            "ifeval": {
+              "mean_reward": 0.28033854166666666,
+              "count": 128,
+              "mean_response_tokens": 2683.90625,
+              "capped_fraction": 0.4296875
+            },
+            "code": {
+              "mean_reward": 0.109375,
+              "count": 128,
+              "mean_response_tokens": 3439.59375,
+              "capped_fraction": 0.765625
+            },
+            "general": {
+              "mean_reward": 0.77578125,
+              "count": 128,
+              "mean_response_tokens": 1910.6875,
+              "capped_fraction": 0.25
+            }
+          }
+        }
+      ],
+      "log_sha256": "2e785d846a5f84c7d9deddf3d121a41a69b190f33fbe5ec42137c4d90a956cb4"
+    }
+  }
+}
