@@ -411,3 +411,16 @@ def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run():
     assert result["fraction_of_accounted_response_tokens"] == 0.25
     record["event"] = "shutdown_incomplete"
     assert throughput_basket.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10) is None
+
+
+def test_c256_supplies_both_engines_and_scales_required_caches():
+    spec = throughput_basket.specification("packed-2t2i-c256-p1024-b128", "/weka/oe-training-default/test/run")
+    config = spec.compile()
+    assert config.core.sequence_packing and config.core.packing_max_tokens == 6144
+    assert config.miles["async_max_concurrent_samples"] == 1024
+    assert config.miles["sglang_server_concurrency"] == 256
+    assert config.miles["sglang_max_running_requests"] == 256
+    assert config.miles["sglang_cuda_graph_max_bs_decode"] == 256
+    assert config.miles["sglang_max_mamba_cache_size"] == 2048
+    assert config.miles["sglang_max_total_tokens"] == 1572864
+    assert spec.plan()["allocation"]["policy_gpus"] == 4

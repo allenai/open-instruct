@@ -20,7 +20,14 @@ pack; this is a throughput comparison, not an exact gradient-parity claim.
 | Recurrent-state slots per engine | 1024 | 1024 | 1024 |
 | Updates | 24 | 24 | 24 |
 
-Start c32 and c64, then c128 after inspecting memory and correctness. If packed
+C32 and c64 launched first. The user then requested c256 immediately alongside
+c128, continuing to double until inference throughput stops improving or memory
+becomes the limit. C256 uses 1,024 producer samples, 2,048 recurrent-state slots,
+and 1,572,864 full-attention token slots; HTTP/running/graph limits are all 256.
+The pool and producer increases are necessary supporting changes, not isolated
+single-variable comparisons. Keep the completed queue at 128 samples and record
+backpressure; use sustained inference-only measurement if the trainer hides the
+serving ceiling. If packed
 trainer demand outstrips inference, use the measured serving curve to adjust the
 GPU ratio. If serving is throttled by a full completed buffer, higher concurrency
 is not evidence of greater useful throughput. Do not enlarge the lag budget just

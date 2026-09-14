@@ -99,6 +99,15 @@ for concurrency in (32, 64, 128):
     }
 
 
+CASES["packed-2t2i-c256-p1024-b128"] = {
+    **CASES["packed-2t2i-c128-p512-b128"],
+    "concurrency": 256,
+    "producer_samples": 1024,
+    "token_pool": 1572864,
+    "state_pool": 2048,
+}
+
+
 def specification(case, output):
     settings = CASES[case]
     output = Path(output)
