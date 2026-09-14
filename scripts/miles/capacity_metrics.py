@@ -19,6 +19,8 @@ def measurements(root, *, warmup=6):
     report = throughput_basket.analyze(root, warmup=0)
     plan = json.loads((root / "plan.json").read_text())
     allocation = plan["allocation"]
+    if plan["runtime"]["miles"].get("colocate", False):
+        raise ValueError("Capacity role attribution currently requires disaggregated trainer and inference GPUs")
     roles = throughput_occupancy.node_roles(root)
     trainer_gpus = sum(node["trainer_gpus"] for node in allocation["nodes"])
     inference_gpus = sum(node["rollout_gpus"] for node in allocation["nodes"])

@@ -81,7 +81,9 @@ Coverage panels distinguish missing observations from zero activity.
 
 ## Reproduce or publish a report
 
-The offline reporter requires completed artifacts, including driver timings,
+The offline reporter currently targets disaggregated qualification runs with one
+optimizer step per collection. Shared colocated GPUs need phase-based role
+attribution and are rejected rather than mislabeled. It requires completed artifacts, including driver timings,
 per-rank contracts, rollout flow, plan and optional pipeline/engine/GPU samples.
 The basket starts GPU sampling; arbitrary workflow runs need those samples
 collected too if hardware panels are desired. Missing samples leave gaps.
