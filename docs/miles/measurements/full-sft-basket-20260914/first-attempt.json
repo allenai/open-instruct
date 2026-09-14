@@ -1,0 +1,315 @@
+{
+  "experiment": "01M2F0FJC8JCSFKV5CHDX5S10R",
+  "status": "failed",
+  "completed_updates": 1,
+  "failure": "httpx.ReadError while awaiting response headers from the rollout client connection to the fleet router; surfaced at second collection",
+  "checkpoint_export_resume": "not reached",
+  "ranks": [
+    {
+      "rank": 0,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 0,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 1,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 1,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 2,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 2,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 3,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 3,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 4,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 4,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 5,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 5,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 6,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 6,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    },
+    {
+      "rank": 7,
+      "scoring_checks": [
+        {
+          "active_tokens": 852263,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 7,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "optimizer_steps": [
+        1
+      ]
+    }
+  ],
+  "driver_stages": [
+    {
+      "stage": "startup_cache_prepare",
+      "rollout_id": null,
+      "started_unix": 1789358691.2288837,
+      "seconds": 0.1875552150013391,
+      "passed": true
+    },
+    {
+      "stage": "placement",
+      "rollout_id": null,
+      "started_unix": 1789358691.4165132,
+      "seconds": 0.9323893199980375,
+      "passed": true
+    },
+    {
+      "stage": "serving_startup",
+      "rollout_id": null,
+      "started_unix": 1789358693.654428,
+      "seconds": 423.8145371959981,
+      "passed": true
+    },
+    {
+      "stage": "trainer_startup",
+      "rollout_id": null,
+      "started_unix": 1789359117.4699473,
+      "seconds": 193.9836009339997,
+      "passed": true
+    },
+    {
+      "stage": "initial_publication",
+      "rollout_id": null,
+      "started_unix": 1789359311.4547894,
+      "seconds": 24.962162547002663,
+      "passed": true
+    },
+    {
+      "stage": "evaluation",
+      "rollout_id": 0,
+      "started_unix": 1789359336.4180396,
+      "seconds": 172.03002245899916,
+      "passed": true,
+      "details": {
+        "phase": "initial",
+        "scope": "blocking_shared_engine_evaluation",
+        "configured_serving": {
+          "rollout_num_gpus": 7,
+          "rollout_num_gpus_per_engine": 1,
+          "sglang_server_concurrency": 32,
+          "sglang_max_running_requests": 32,
+          "sglang_max_total_tokens": 786432,
+          "sglang_max_mamba_cache_size": 1024,
+          "sglang_cuda_graph_max_bs_decode": 32,
+          "sglang_mem_fraction_static": 0.6,
+          "sglang_context_length": 6144,
+          "sglang_disable_radix_cache": false
+        }
+      }
+    },
+    {
+      "stage": "generation_wait",
+      "rollout_id": 0,
+      "started_unix": 1789359508.4494927,
+      "seconds": 81.88865516100122,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 0,
+      "started_unix": 1789359590.3394163,
+      "seconds": 1186.7428664549989,
+      "passed": true
+    },
+    {
+      "stage": "publication",
+      "rollout_id": 0,
+      "started_unix": 1789360777.083615,
+      "seconds": 3.051684715999727,
+      "passed": true
+    },
+    {
+      "stage": "generation_wait",
+      "rollout_id": 1,
+      "started_unix": 1789360780.1371112,
+      "seconds": 0.019873697998264106,
+      "passed": false
+    },
+    {
+      "stage": "final_generation_drain",
+      "rollout_id": null,
+      "started_unix": 1789360780.1580377,
+      "seconds": 0.006513184998766519,
+      "passed": true
+    },
+    {
+      "stage": "close_weight_transport",
+      "rollout_id": null,
+      "started_unix": 1789360780.1655335,
+      "seconds": 0.3799350070003129,
+      "passed": true
+    },
+    {
+      "stage": "rollout_dispose",
+      "rollout_id": null,
+      "started_unix": 1789360780.5464807,
+      "seconds": 0.9654271050021634,
+      "passed": true
+    },
+    {
+      "stage": "trainer_dispose",
+      "rollout_id": null,
+      "started_unix": 1789360781.5130112,
+      "seconds": 4.134826165998675,
+      "passed": true
+    }
+  ],
+  "initial_eval": {
+    "math": {
+      "reward": 0.0078125,
+      "capped_fraction": 0.953125,
+      "mean_response_tokens": 3983.671875
+    },
+    "ifeval": {
+      "reward": 0.23763020833333334,
+      "capped_fraction": 0.6953125,
+      "mean_response_tokens": 3318.90625
+    },
+    "code": {
+      "reward": 0.09375,
+      "capped_fraction": 0.7265625,
+      "mean_response_tokens": 3405.3671875
+    },
+    "general": {
+      "reward": 0.659375,
+      "capped_fraction": 0.3671875,
+      "mean_response_tokens": 2325.4609375
+    }
+  }
+}

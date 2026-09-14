@@ -71,6 +71,34 @@ Pending: EP8 warm timings, per-domain rewards/lengths/caps, actual judge and cod
 latency, dropped/terminal samples, native saves, final export/reload, and resume.
 
 
+## First attempt outcome
+
+The 200-update attempt **failed after one optimizer update**. The producer
+encountered `httpx.ReadError` at 04:19:49 UTC on its connection to the fleet router,
+then stopped and joined its outstanding generation tasks. The trainer completed
+its cold first update; the error propagated when requesting collection two at
+04:39:47. Both nodes exited (driver 1, peer 143 by failure propagation).
+
+All eight ranks completed the first optimizer step without skipping. The initial
+scoring-skip comparison was bit-exact on 852,263 active response tokens. This is
+one-step evidence, not EP8 steady-state qualification. No native checkpoint,
+final export or resume was reached. Initial scoring took 426.9 seconds and
+forward/backward/optimizer 753.1 seconds including cold compilation; neither is
+a steady-state performance result. Large-profile defaults remain unchanged.
+
+The exception is on **client → router**, distinct from the router → engine
+transport errors in the earlier high-concurrency probes. The underlying cause
+is not established. Do not claim an OOM, corrupted model or failed score check.
+The separate 2+4 GSM8K follow-up remains a controlled throughput experiment.
+
+Initial held-out results were math 0.78%, IF 23.76%, code 9.38%, general 65.94%
+(the IF/general rubrics can award fractional credit). Capped responses were
+95.3%, 69.5%, 72.7%, and 36.7%, respectively. The short 4096-token response budget
+is a material limitation for this harder mixture; these are not GSM8K scores
+and cannot establish a useful full-recipe learning baseline.
+
+[Retained first-attempt measurements](full-sft-basket-20260914/first-attempt.json).
+
 ## Integration status
 
 The winning EP2 settings and their supporting Open-Instruct changes are merged
@@ -91,7 +119,7 @@ New immutable runtime image: `01M2F1RKZFZVJYAS0XQGEC3SEJ`, application source
 `2c477efd5`, Docker digest
 `sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f`.
 The CPU image tests used the preceding `917fb0a44` build; only documentation
-removal differs in the final build. The active 200-update run keeps its frozen
+removal differs in the final build. The first 200-update attempt used its frozen
 older-image/committed-overlay provenance, avoiding changes mid-experiment.
 
 Live tracking: [W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/moxmo8wg).
