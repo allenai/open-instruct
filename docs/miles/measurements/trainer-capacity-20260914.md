@@ -7,6 +7,8 @@ file hashes, token counts, packing at 6144, and historical replay/behavior
 records were used across all successful arms. Each used two B300 GPUs and
 an isolated initially cold per-rank compiler cache. Source `2fa37b831`.
 
+![Trainer phase timing and compilation](trainer-capacity-20260914/comparison.png)
+
 ## Timing
 
 Primary window: updates 6–15, including remaining compilation. Total wall time
