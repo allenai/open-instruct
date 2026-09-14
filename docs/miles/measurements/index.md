@@ -6,7 +6,6 @@ current operating defaults; start with the [MILES guide](../index.md).
 | Record | Topic |
 |---|---|
 | [Faster trainer and 200-update task baseline](full-sft-basket-20260914.md) | EP2 qualification, fixed multi-domain data and EP8 baseline |
-| [Published RL performance anchors](rl-performance-literature-20260914.md) | Scope-labeled AReaL, DeepSeek and NeMo measurements |
 | [Throughput and queue qualification](throughput-20260913.md) | September 13 steady-state configuration comparisons, occupancy figures and limitations |
 | [Throughput campaign log](throughput-campaign-20260913.md) | Chronological controls, runtime repairs and allocation decisions |
 | [Sharing consolidation and documentation audit](sharing-20260913/README.md) | Branch decisions, complete document inventory and candidate validation |
