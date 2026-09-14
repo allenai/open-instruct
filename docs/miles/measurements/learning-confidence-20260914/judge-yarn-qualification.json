@@ -1,0 +1,132 @@
+{
+  "command": [
+    "/usr/bin/python",
+    "-m",
+    "sglang.launch_server",
+    "--model-path",
+    "/weka/oe-adapt-default/robertb/olmo-miles/judge-cache/hub/models--Qwen--Qwen3-32B/snapshots/9216db5781bf21249d130ec9da846c4624c16137",
+    "--served-model-name",
+    "Qwen/Qwen3-32B",
+    "--dtype",
+    "bfloat16",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "18080",
+    "--tp-size",
+    "1",
+    "--context-length",
+    "131072",
+    "--disable-cuda-graph",
+    "--chat-template",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge/chat-template.jinja",
+    "--max-running-requests",
+    "4",
+    "--chunked-prefill-size",
+    "8192",
+    "--mem-fraction-static",
+    "0.85",
+    "--json-model-override-args",
+    "{\"max_position_embeddings\": 131072, \"rope_scaling\": {\"rope_type\": \"yarn\", \"factor\": 4.0, \"original_max_position_embeddings\": 32768}, \"rope_parameters\": {\"rope_type\": \"yarn\", \"factor\": 4.0, \"original_max_position_embeddings\": 32768, \"rope_theta\": 1000000}}"
+  ],
+  "cases": [
+    {
+      "kind": "general-quality",
+      "background_tokens": 0,
+      "prompt_tokens": 199,
+      "score": 1.0,
+      "elapsed_seconds": 2.48234714102,
+      "reply": "{\"REASONING\": \"The AI assistant provided a direct and accurate answer to the user's question. The question was straightforward and factual, and the response correctly identified Paris as the capital of France. The answer is concise, relevant, and meets the user's needs without unnecessary elaboration or deviation.\", \"SCORE\": 10}"
+    },
+    {
+      "kind": "general-quality",
+      "background_tokens": 0,
+      "prompt_tokens": 204,
+      "score": 0.1,
+      "elapsed_seconds": 2.8054323038086295,
+      "reply": "{\"REASONING\": \"The AI assistant provided an incorrect and misleading answer. The capital of France is Paris, not Saturn, which is a planet, nor a type of sandwich. The response is factually wrong, irrelevant, and does not satisfy the user's query. There is no indication of helpfulness, accuracy, or appropriate level of detail.\", \"SCORE\": 1}"
+    },
+    {
+      "kind": "general-quality_ref",
+      "background_tokens": 0,
+      "prompt_tokens": 264,
+      "score": 1.0,
+      "elapsed_seconds": 3.31190289510414,
+      "reply": "{\"REASONING\": \"The AI assistant provided the correct answer, 'Paris,' which matches the reference answer. The response is concise, accurate, and directly addresses the user's question without unnecessary elaboration or deviation. Since the user explicitly asked for the capital of France, the answer is both relevant and helpful. There are no errors in the response, and it adheres to the instruction of being factual and straightforward.\", \"SCORE\": 10}"
+    },
+    {
+      "kind": "general-quality_ref",
+      "background_tokens": 0,
+      "prompt_tokens": 269,
+      "score": 0.1,
+      "elapsed_seconds": 3.3499931530095637,
+      "reply": "{\"REASONING\": \"The AI answer is incorrect and misleading. The capital of France is Paris, as stated in the reference answer. The AI response claims it is 'Saturn, a type of sandwich,' which is factually wrong and potentially humorous but not helpful or accurate. A good answer should provide correct information and be relevant to the question. Since the answer fails in accuracy and relevance, it is of very poor quality.\", \"SCORE\": 1}"
+    },
+    {
+      "kind": "general-quality",
+      "background_tokens": 50000,
+      "prompt_tokens": 50200,
+      "score": 1.0,
+      "elapsed_seconds": 8.420876507181674,
+      "reply": "{\"REASONING\": \"The AI assistant provided a correct and concise answer to the user's question. The question was straightforward and required a factual response. The assistant correctly identified Paris as the capital of France, which is accurate. The response is helpful, relevant, and meets the user's explicit request without unnecessary elaboration. There is no evidence of the assistant being influenced by the irrelevant background notes, as the answer is focused solely on the question asked. The response is appropriate in tone and level of detail.\", \"SCORE\": \"10\"}"
+    },
+    {
+      "kind": "general-quality",
+      "background_tokens": 50000,
+      "prompt_tokens": 50205,
+      "score": 0.2,
+      "elapsed_seconds": 3.5757956500165164,
+      "reply": "{\"REASONING\": \"The AI assistant's response is incorrect and misleading. The capital of France is Paris, not 'Saturn, a type of sandwich.' The answer fails to provide accurate information and appears to be a fabricated or humorous response. It does not satisfy the user's query and shows a lack of factual knowledge on the topic. The response is not helpful, relevant, or accurate.\", \"SCORE\": 2}"
+    },
+    {
+      "kind": "general-quality_ref",
+      "background_tokens": 50000,
+      "prompt_tokens": 50265,
+      "score": 1.0,
+      "elapsed_seconds": 7.328256731852889,
+      "reply": "{\"REASONING\": \"The AI assistant correctly identified the capital of France as Paris, which matches the reference answer. The response is accurate, concise, and directly addresses the user's question without unnecessary information. It is also free from any influence of the irrelevant background notes, as instructed. The answer is helpful and satisfies the user's query completely.\", \"SCORE\": \"10\"}"
+    },
+    {
+      "kind": "general-quality_ref",
+      "background_tokens": 50000,
+      "prompt_tokens": 50270,
+      "score": 0.1,
+      "elapsed_seconds": 4.0584665718488395,
+      "reply": "{\"REASONING\": \"The AI assistant's answer is incorrect and misleading. The capital of France is Paris, as stated in the reference answer. The AI assistant incorrectly claimed that the capital is 'Saturn, a type of sandwich,' which is factually wrong and appears to be a fabricated or humorous response. The answer fails to provide accurate information and does not satisfy the user's request for the correct capital of France. It is not helpful, relevant, or accurate.\", \"SCORE\": 1}"
+    },
+    {
+      "kind": "general-quality",
+      "background_tokens": 100000,
+      "prompt_tokens": 100200,
+      "score": 1.0,
+      "elapsed_seconds": 11.094092737417668,
+      "reply": "{\"REASONING\": \"The AI assistant correctly identified Paris as the capital of France. The response is accurate, concise, and directly addresses the user's question. The background notes were explicitly stated to be irrelevant, and the assistant appropriately ignored them. The answer is helpful and meets all the criteria for a high-quality response.\", \"SCORE\": \"10\"}"
+    },
+    {
+      "kind": "general-quality",
+      "background_tokens": 100000,
+      "prompt_tokens": 100205,
+      "score": 0.1,
+      "elapsed_seconds": 4.075383321847767,
+      "reply": "{\"REASONING\": \"The AI assistant's answer is incorrect and misleading. The capital of France is Paris, not 'Saturn, a type of sandwich'. The response does not provide accurate information and appears to be a fabricated or humorous answer. The helpfulness, relevance, accuracy, and appropriateness of the response are all very low, as it fails to correctly answer the straightforward question.\", \"SCORE\": 1}"
+    },
+    {
+      "kind": "general-quality_ref",
+      "background_tokens": 100000,
+      "prompt_tokens": 100265,
+      "score": 1.0,
+      "elapsed_seconds": 11.67545288382098,
+      "reply": "{\"REASONING\": \"The AI assistant provided the correct answer, 'Paris', which matches the reference answer. The response is concise, accurate, and directly addresses the question without unnecessary information. Since the user explicitly stated to ignore the background notes, the assistant correctly focused on providing the factual answer to the question about the capital of France. The answer is helpful and meets all the requirements of the task.\", \"SCORE\": \"10\"}"
+    },
+    {
+      "kind": "general-quality_ref",
+      "background_tokens": 100000,
+      "prompt_tokens": 100270,
+      "score": 0.1,
+      "elapsed_seconds": 4.810938948299736,
+      "reply": "{\"REASONING\": \"The AI assistant's answer is incorrect and misleading. The capital of France is Paris, a well-known and widely accepted fact. The provided answer states that the capital is 'Saturn, a type of sandwich,' which is completely false and appears to be a fabricated or humorous response. The answer does not demonstrate any understanding of the question and fails to provide accurate information. It is not helpful, relevant, or accurate, and it does not satisfy the user's request for factual information.\", \"SCORE\": 1}"
+    }
+  ],
+  "passed": true,
+  "overflow_rejected": true
+}

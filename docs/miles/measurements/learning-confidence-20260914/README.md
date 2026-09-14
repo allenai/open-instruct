@@ -376,3 +376,19 @@ The next hardware smoke draws 128 prompts x four samples from the full frozen
 training pool to exercise filtering/packing on four ranks. This larger smoke is
 not the matched 64-response learning benchmark. Full-run defaults remain separate;
 its batch/filtering difference must be resolved before arming a 200-update run.
+
+The final judge GPU gate [01M2GVCA5QT9G32743Z5CSX4MH](https://beaker.org/ex/01M2GVCA5QT9G32743Z5CSX4MH)
+passed with exit 0: 12 complete, parseable grades across both rubrics and short,
+50K and 100K backgrounds; all six correct/incorrect pairs ranked correctly.
+Actual largest request: 100,270 input tokens plus 2,048 reserved output. Per-request
+elapsed times at 100K were 4.08–11.68s; these are sequential canaries with prefix
+reuse, not a concurrent throughput benchmark. Over-budget requests still failed
+before inference. Details are in `judge-yarn-qualification.json`. This checks the
+long-context mechanism and simple grading discrimination, not broad judge quality.
+
+Both broad-run replacement profiles now use this same qualified judge, four
+concurrent calls and 600-second request timeout. Policy response budgets, frozen
+data, trainer settings and objectives remain unchanged. The prior dense broad
+run is being stopped before its first optimizer step to avoid mixing judge
+configurations across the two arms. Initial evaluation is repeated in the fresh
+run; no optimizer checkpoint is being resumed.
