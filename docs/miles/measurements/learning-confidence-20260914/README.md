@@ -300,3 +300,9 @@ continuation in `/tmp/original-baseline-sequence.py`, pinned to detached checkou
 HF exports. State and receipts are in `/tmp/original-baseline-sequence/`; a failed
 gate stops the sequence without automatic retries. The 200-update original run
 is not yet launched.
+
+The corrected MoE run exercised the timeout fallback live at 19:53:15 and
+19:53:33 UTC: both 45-second symbolic-math timeouts were logged as zero rewards
+and evaluation continued. This confirms the fix reached the running image; it is
+not a final timeout-rate estimate. The retained per-sample diagnostics, rather
+than duplicated driver warning lines, must supply the final grading coverage.
