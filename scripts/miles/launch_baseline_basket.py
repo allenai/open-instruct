@@ -17,11 +17,11 @@ from open_instruct.miles.run_spec import RunSpec
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def document(image, run, stage, source, digest, *, hostnames=None):
+def document(
+    image, run, stage, source, digest, *, hostnames=None, prepare_module="scripts.miles.prepare_baseline_basket"
+):
     spec = (
-        launch_judge_preparation.specification(
-            image, run, "prepare", prepare_module="scripts.miles.prepare_baseline_basket"
-        )
+        launch_judge_preparation.specification(image, run, "prepare", prepare_module=prepare_module)
         if stage == "prepare"
         else launch.specification(image, run, hostnames=hostnames)
     )
@@ -36,7 +36,7 @@ def document(image, run, stage, source, digest, *, hostnames=None):
         node_overlay = overlay
         if stage == "prepare":
             task["resources"].update(cpuCount=24, memory="96 GiB")
-            task["timeout"] = "1h"
+            task["timeout"] = "2h"
         else:
             target = Path(run.output["root"]) / f"checkpoints/gpu_usage_node{index}.jsonl"
             node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))} &\n"
@@ -58,8 +58,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("config", type=Path)
-    parser.add_argument("--stage", choices=("prepare", "train"), required=True)
+    parser.add_argument("--stage", choices=("prepare", "train", "workflow"), required=True)
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument(
+        "--prepare-module",
+        choices=("scripts.miles.prepare_baseline_basket", "scripts.miles.prepare_olmo3_basket"),
+        default="scripts.miles.prepare_baseline_basket",
+    )
     args = parser.parse_args()
     run = RunSpec.load(args.config)
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT):
@@ -119,6 +124,7 @@ def main():
             source,
             digest,
             hostnames=[f"host-{i}" for i in range(8)] if args.render_only else None,
+            prepare_module=args.prepare_module,
         )
         if args.render_only:
             print(json.dumps(spec, indent=2))

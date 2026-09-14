@@ -78,19 +78,140 @@ index bc6a36ef9..17d12435b 100644
          )
          if args.eval_function_path == original_path:
 diff --git a/miles/router/router.py b/miles/router/router.py
+index 7f3240af0..9186e7260 100644
 --- a/miles/router/router.py
 +++ b/miles/router/router.py
-@@ -182,7 +182,14 @@ class MilesRouter:
+@@ -2,6 +2,7 @@ import argparse
+ import asyncio
+ import json
+ import logging
++import time
+ from contextlib import suppress
+ 
+ import httpx
+@@ -9,6 +10,8 @@ import setproctitle
+ import uvicorn
+ from fastapi import FastAPI, HTTPException, Request
+ from fastapi.responses import JSONResponse
++from sglang.srt.environ import envs
++from starlette.requests import ClientDisconnect
+ from starlette.responses import Response
+ 
+ from miles.utils.logging_utils import configure_logger_raw
+@@ -29,7 +32,16 @@ def run_router(args):
+     miles_router = MilesRouter(args, verbose=False)
+ 
+     # Start the server
+-    uvicorn.run(miles_router.app, host=args.sglang_router_ip, port=args.sglang_router_port, log_level="info")
++    # Keep both HTTP hops on the same idle-connection policy. Large routed-token
++    # responses can delay the client's next event-loop turn beyond the default
++    # five seconds; generation deadlines are configured separately.
++    uvicorn.run(
++        miles_router.app,
++        host=args.sglang_router_ip,
++        port=args.sglang_router_port,
++        log_level="info",
++        timeout_keep_alive=envs.SGLANG_TIMEOUT_KEEP_ALIVE.get(),
++    )
+ 
+ 
+ class MilesRouter:
+@@ -60,8 +72,7 @@ class MilesRouter:
+         timeout = getattr(args, "miles_router_timeout", None)
+ 
+         self.client = httpx.AsyncClient(
+-            limits=httpx.Limits(max_connections=max_connections),
+-            timeout=httpx.Timeout(timeout),
++            limits=httpx.Limits(max_connections=max_connections), timeout=httpx.Timeout(timeout)
+         )
+ 
+         # Generation may occupy every data connection for minutes. Health must
+@@ -153,17 +164,25 @@ class MilesRouter:
+         return self.build_proxy_response(result)
+ 
+     async def do_proxy(
+-        self,
+-        request: Request,
+-        path: str,
+-        body: bytes | None = None,
+-        headers: dict | None = None,
++        self, request: Request, path: str, body: bytes | None = None, headers: dict | None = None
+     ) -> dict:
+         """Core proxy logic. Returns dict with request_body, response_body, status_code, headers."""
+         worker_url = self._use_url()
+         url = f"{worker_url}/{path}"
++        request_headers = headers if headers is not None else request.headers
++        request_id = request_headers.get("x-miles-request-id", "-")[:64]
++        started = time.monotonic()
++        phase = "reading_request_body"
+ 
+         try:
++            if request_id != "-":
++                logger.info(
++                    "[miles-router] Request received: request=%r worker=%s path=%s phase=%s",
++                    request_id,
++                    worker_url,
++                    path,
++                    phase,
++                )
+             if body is None:
+                 body = await request.body()
+             if headers is None:
+@@ -173,16 +192,58 @@ class MilesRouter:
+                     k: v for k, v in headers.items() if k.lower() not in ("content-length", "transfer-encoding")
+                 }
+ 
++            phase = "upstream_request"
++            if request_id != "-":
++                logger.info(
++                    "[miles-router] Forward started: request=%r worker=%s path=%s request_bytes=%d",
++                    request_id,
++                    worker_url,
++                    path,
++                    len(body or b""),
++                )
+             response = await self.client.request(request.method, url, content=body, headers=headers)
++            phase = "reading_upstream_body"
+             content = await response.aread()
++            if request_id != "-":
++                logger.info(
++                    "[miles-router] Upstream complete: request=%r worker=%s path=%s status=%d response_bytes=%d elapsed_seconds=%.3f",
++                    request_id,
++                    worker_url,
++                    path,
++                    response.status_code,
++                    len(content),
++                    time.monotonic() - started,
++                )
+             return {
+                 "request_body": body,
+                 "response_body": content,
+                 "status_code": response.status_code,
                  "headers": dict(response.headers),
              }
++        except (ClientDisconnect, asyncio.CancelledError) as error:
++            logger.warning(
++                "[miles-router] Request interrupted: request=%r worker=%s path=%s phase=%s error=%s elapsed_seconds=%.3f",
++                request_id,
++                worker_url,
++                path,
++                phase,
++                type(error).__name__,
++                time.monotonic() - started,
++                exc_info=isinstance(error, ClientDisconnect),
++            )
++            raise
          except httpx.RequestError as error:
 -            logger.warning("[miles-router] Proxy transport failed: %s", type(error).__name__)
 +            logger.warning(
-+                "[miles-router] Proxy transport failed: %s worker=%s path=%s active=%s",
++                "[miles-router] Proxy transport failed: %s worker=%s path=%s active=%s request=%r phase=%s elapsed_seconds=%.3f",
 +                type(error).__name__,
 +                worker_url,
 +                path,
 +                self.worker_request_counts.get(worker_url),
++                request_id,
++                phase,
++                time.monotonic() - started,
 +                exc_info=True,
 +            )
              raise HTTPException(503, "Rollout worker unavailable", headers={"Retry-After": "1"}) from error

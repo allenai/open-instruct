@@ -1,0 +1,4176 @@
+{
+  "2t2i": {
+    "full": {
+      "current_policy_token_fraction": 0.1729109980060228,
+      "provenance_active_tokens": 4599852,
+      "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
+      "completed_updates": 24,
+      "validated_trainer_ranks": 2,
+      "training_components_rank0": {
+        "standalone_scoring": {
+          "count": 0,
+          "total_seconds": 0,
+          "median_seconds": null
+        },
+        "forward_backward_optimizer": {
+          "count": 18,
+          "total_seconds": 304.8210947723128,
+          "median_seconds": 16.360480887524318
+        }
+      },
+      "warmup_updates": 6,
+      "measured_updates": 18,
+      "warm_cycle_seconds": 903.8735499521717,
+      "useful_response_tokens": 4599852,
+      "useful_response_tokens_per_second": 5089.043705553061,
+      "trainer_wait_fraction": 0.5808278808313577,
+      "batch_collection_breakdown": {
+        "scope": "Completed-buffer get time includes expiry filtering; the remainder includes collection and handoff, not solely transfer.",
+        "completed_queue_get_seconds": 468.5651578773977,
+        "completed_queue_get_cycle_fraction": 0.5183968021878632,
+        "other_collection_seconds": 56.429800680838525,
+        "other_collection_cycle_fraction": 0.06243107864349443
+      },
+      "discarded_response_tokens": 36515,
+      "discarded_token_fraction": 0.00787577859992533,
+      "mixed_responses": 1124,
+      "per_update": [
+        {
+          "rollout_id": 6,
+          "response_tokens": 281150,
+          "mixed_responses": 56,
+          "completed_queue_get_seconds": 10.136183132883161,
+          "other_collection_seconds": 3.4362431971821934,
+          "generation_wait_seconds": 13.572426330065355,
+          "training_seconds": 22.34734431002289,
+          "publication_seconds": 2.9453982409322634
+        },
+        {
+          "rollout_id": 7,
+          "response_tokens": 252285,
+          "mixed_responses": 83,
+          "completed_queue_get_seconds": 27.358115811366588,
+          "other_collection_seconds": 2.8973784387344494,
+          "generation_wait_seconds": 30.255494250101037,
+          "training_seconds": 16.55325649806764,
+          "publication_seconds": 2.98252786998637
+        },
+        {
+          "rollout_id": 8,
+          "response_tokens": 281576,
+          "mixed_responses": 73,
+          "completed_queue_get_seconds": 32.10128164116759,
+          "other_collection_seconds": 3.4072976207826287,
+          "generation_wait_seconds": 35.50857926195022,
+          "training_seconds": 19.878242462989874,
+          "publication_seconds": 4.4396553370170295
+        },
+        {
+          "rollout_id": 9,
+          "response_tokens": 237339,
+          "mixed_responses": 48,
+          "completed_queue_get_seconds": 19.99747729592491,
+          "other_collection_seconds": 3.051924905157648,
+          "generation_wait_seconds": 23.049402201082557,
+          "training_seconds": 15.893946788040921,
+          "publication_seconds": 3.6948344990378246
+        },
+        {
+          "rollout_id": 10,
+          "response_tokens": 211932,
+          "mixed_responses": 57,
+          "completed_queue_get_seconds": 24.804354128893465,
+          "other_collection_seconds": 3.055478657130152,
+          "generation_wait_seconds": 27.859832786023617,
+          "training_seconds": 17.024130423902534,
+          "publication_seconds": 2.9455748009495437
+        },
+        {
+          "rollout_id": 11,
+          "response_tokens": 260981,
+          "mixed_responses": 64,
+          "completed_queue_get_seconds": 30.221570935449563,
+          "other_collection_seconds": 3.5357524305582047,
+          "generation_wait_seconds": 33.75732336600777,
+          "training_seconds": 17.40442792302929,
+          "publication_seconds": 2.9985413199756294
+        },
+        {
+          "rollout_id": 12,
+          "response_tokens": 253102,
+          "mixed_responses": 57,
+          "completed_queue_get_seconds": 30.373949611908756,
+          "other_collection_seconds": 3.4239371500443667,
+          "generation_wait_seconds": 33.79788676195312,
+          "training_seconds": 17.26252155797556,
+          "publication_seconds": 3.0143712379503995
+        },
+        {
+          "rollout_id": 13,
+          "response_tokens": 261043,
+          "mixed_responses": 68,
+          "completed_queue_get_seconds": 22.140831804135814,
+          "other_collection_seconds": 4.0608187288744375,
+          "generation_wait_seconds": 26.201650533010252,
+          "training_seconds": 18.392855303012766,
+          "publication_seconds": 2.977395883994177
+        },
+        {
+          "rollout_id": 14,
+          "response_tokens": 228173,
+          "mixed_responses": 61,
+          "completed_queue_get_seconds": 20.654661725391634,
+          "other_collection_seconds": 2.8947927296394482,
+          "generation_wait_seconds": 23.549454455031082,
+          "training_seconds": 15.09360270597972,
+          "publication_seconds": 2.923015241045505
+        },
+        {
+          "rollout_id": 15,
+          "response_tokens": 262682,
+          "mixed_responses": 73,
+          "completed_queue_get_seconds": 33.386439264635555,
+          "other_collection_seconds": 3.040518941357732,
+          "generation_wait_seconds": 36.42695820599329,
+          "training_seconds": 19.128221509046853,
+          "publication_seconds": 2.887967273942195
+        },
+        {
+          "rollout_id": 16,
+          "response_tokens": 313309,
+          "mixed_responses": 71,
+          "completed_queue_get_seconds": 36.988247693981975,
+          "other_collection_seconds": 3.7202274119481444,
+          "generation_wait_seconds": 40.70847510593012,
+          "training_seconds": 22.759508415008895,
+          "publication_seconds": 2.9477627460146323
+        },
+        {
+          "rollout_id": 17,
+          "response_tokens": 262522,
+          "mixed_responses": 39,
+          "completed_queue_get_seconds": 19.577396727749147,
+          "other_collection_seconds": 3.0168189422693104,
+          "generation_wait_seconds": 22.594215670018457,
+          "training_seconds": 17.634076133952476,
+          "publication_seconds": 2.884486519964412
+        },
+        {
+          "rollout_id": 18,
+          "response_tokens": 239820,
+          "mixed_responses": 65,
+          "completed_queue_get_seconds": 22.34534643101506,
+          "other_collection_seconds": 3.4194145200308412,
+          "generation_wait_seconds": 25.7647609510459,
+          "training_seconds": 15.642031862051226,
+          "publication_seconds": 3.1199448980623856
+        },
+        {
+          "rollout_id": 19,
+          "response_tokens": 256615,
+          "mixed_responses": 71,
+          "completed_queue_get_seconds": 30.692512900568545,
+          "other_collection_seconds": 2.9454628044040874,
+          "generation_wait_seconds": 33.63797570497263,
+          "training_seconds": 17.31350669101812,
+          "publication_seconds": 2.8996625879080966
+        },
+        {
+          "rollout_id": 20,
+          "response_tokens": 279213,
+          "mixed_responses": 63,
+          "completed_queue_get_seconds": 32.33587576739956,
+          "other_collection_seconds": 2.554148412658833,
+          "generation_wait_seconds": 34.89002418005839,
+          "training_seconds": 18.662421862012707,
+          "publication_seconds": 2.9046776910545304
+        },
+        {
+          "rollout_id": 21,
+          "response_tokens": 248032,
+          "mixed_responses": 60,
+          "completed_queue_get_seconds": 27.173450416419655,
+          "other_collection_seconds": 3.0444619925692677,
+          "generation_wait_seconds": 30.217912408988923,
+          "training_seconds": 19.417655456927605,
+          "publication_seconds": 2.977430828032084
+        },
+        {
+          "rollout_id": 22,
+          "response_tokens": 242649,
+          "mixed_responses": 54,
+          "completed_queue_get_seconds": 18.98668561212253,
+          "other_collection_seconds": 2.0447219838388264,
+          "generation_wait_seconds": 21.031407595961355,
+          "training_seconds": 16.019483907031827,
+          "publication_seconds": 2.842041871044785
+        },
+        {
+          "rollout_id": 23,
+          "response_tokens": 227429,
+          "mixed_responses": 61,
+          "completed_queue_get_seconds": 29.290776976384223,
+          "other_collection_seconds": 2.8804018136579543,
+          "generation_wait_seconds": 32.17117879004218,
+          "training_seconds": 17.202423735987395,
+          "publication_seconds": 2.8636450009653345
+        }
+      ],
+      "median_seconds": {
+        "generation_wait": 30.23670332954498,
+        "training": 17.358967307023704,
+        "publication": 2.946668773482088
+      },
+      "all_driver_stage_seconds": {
+        "close_weight_transport": 0.5848217729944736,
+        "final_generation_drain": 182.91142562101595,
+        "generation_wait": 706.6962344592903,
+        "initial_publication": 36.757948876940645,
+        "placement": 9.552230520988815,
+        "publication": 72.45789813995361,
+        "rollout_dispose": 1.0395040439907461,
+        "serving_startup": 343.54102077591233,
+        "startup_cache_prepare": 0.20026379195041955,
+        "trainer_dispose": 1.9762857409659773,
+        "trainer_startup": 132.72231058904435,
+        "training": 1193.9531777282245
+      },
+      "workflow": {
+        "finished_unix": 1789357772.3638527,
+        "result": {
+          "completed_rollout_ids": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "export_hf": null,
+          "start_rollout_id": 0
+        },
+        "spec_sha256": "570250292ed3400cd977af8e6d9e6bedcf417dd2f1e462839e90c81c86fa23a9",
+        "started_unix": 1789355042.5864804,
+        "status": "complete",
+        "training_started_unix": 1789355047.9384756
+      },
+      "terminal_inventory": [
+        {
+          "event": "shutdown_start",
+          "completed_queue": {
+            "groups": 143,
+            "samples": 572,
+            "response_tokens": 1193865
+          },
+          "producer_ready": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "shutdown_unqueued": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "completed_put_wait_seconds": 744.197823276394,
+          "completed_put_current_wait_seconds": 0.0,
+          "time_unix": 1789357753.1640382,
+          "producer_owned_groups": 0,
+          "producer_active_group_tasks": 0,
+          "producer_admission_open": false,
+          "producer_unfinished_samples": null,
+          "completed_queue_groups": 143,
+          "completed_queue_capacity_groups": 160,
+          "http_capacity_requests": 64,
+          "http_active_requests": 0,
+          "http_waiting_requests": 0
+        },
+        {
+          "event": "shutdown_complete",
+          "completed_queue": {
+            "groups": 143,
+            "samples": 572,
+            "response_tokens": 1193865
+          },
+          "producer_ready": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "shutdown_unqueued": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "completed_put_wait_seconds": 744.197823276394,
+          "completed_put_current_wait_seconds": 0.0,
+          "time_unix": 1789357753.1675923,
+          "producer_owned_groups": 0,
+          "producer_active_group_tasks": 0,
+          "producer_admission_open": false,
+          "producer_unfinished_samples": null,
+          "completed_queue_groups": 143,
+          "completed_queue_capacity_groups": 160,
+          "http_capacity_requests": 64,
+          "http_active_requests": 0,
+          "http_waiting_requests": 0
+        }
+      ],
+      "terminal_unused_work": {
+        "groups": 143,
+        "samples": 572,
+        "response_tokens": 1193865,
+        "delivered_response_tokens_all_updates": 6117690,
+        "stale_dropped_response_tokens_all_updates": 854414,
+        "fraction_of_accounted_response_tokens": 0.14620004068102635,
+        "scope": "Final buffered, producer-ready and shutdown-unqueued completions; distinct from stale drops. Denominator excludes unobserved aborted or dynamically filtered work."
+      },
+      "end_to_end_passed": true
+    },
+    "windows": [
+      {
+        "updates": [
+          6,
+          23
+        ],
+        "tokens": 4599852,
+        "seconds": 903.8735499521717,
+        "useful_tokens_per_second": 5089.043705553061,
+        "seconds_per_update": 50.2151972195651,
+        "phase_mean_seconds": {
+          "generation_wait": 29.16638658656868,
+          "training": 17.97942541922546,
+          "publication": 3.069385213770955
+        },
+        "trainer_wait_fraction": 0.5808278808313577,
+        "discarded_tokens": 36515,
+        "discarded_token_fraction": 0.00787577859992533,
+        "optimizer_median_seconds": 16.360480887524318,
+        "occupancy": {
+          "scope": "Sampled occupancy during warm normal cycles; not hardware GPU utilization or exact per-request waits.",
+          "start_unix": 1789356665.6664388,
+          "end_unix": 1789357569.6556964,
+          "max_sample_hold_seconds": 10,
+          "pipeline": {
+            "producer_owned_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 127.98450553070805,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_active_group_tasks": {
+              "coverage_fraction": 1.0,
+              "mean": 127.98229342387704,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_admission_open": {
+              "coverage_fraction": 1.0,
+              "mean": 0.9294101908235867,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.07058980917641337
+            },
+            "producer_unfinished_samples": {
+              "coverage_fraction": 0,
+              "mean": null,
+              "p95": null,
+              "maximum": null,
+              "empty_fraction": null
+            },
+            "completed_queue_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 3.802113414028075,
+              "p95": 15.0,
+              "maximum": 27.0,
+              "empty_fraction": 0.5564169908731273
+            },
+            "completed_queue_capacity_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 32.0,
+              "p95": 32.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.0
+            },
+            "http_active_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 64.0,
+              "p95": 64.0,
+              "maximum": 64.0,
+              "empty_fraction": 0.0
+            },
+            "http_waiting_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 422.29892125870674,
+              "p95": 431.0,
+              "maximum": 437.0,
+              "empty_fraction": 0.0
+            },
+            "http_capacity_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 64.0,
+              "p95": 64.0,
+              "maximum": 64.0,
+              "empty_fraction": 0.0
+            },
+            "completed_queue_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 15.2084536561123,
+              "p95": 60.0,
+              "maximum": 108.0,
+              "empty_fraction": 0.5564169908731273
+            },
+            "completed_queue_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 29379.71789301315,
+              "p95": 109359.0,
+              "maximum": 237732.0,
+              "empty_fraction": 0.5564169908731273
+            },
+            "producer_ready_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0022121068310150755,
+              "p95": 0.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.997787893168985
+            },
+            "producer_ready_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 0.008848427324060302,
+              "p95": 0.0,
+              "maximum": 4.0,
+              "empty_fraction": 0.997787893168985
+            },
+            "producer_ready_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 6.9238943810771865,
+              "p95": 0.0,
+              "maximum": 3130.0,
+              "empty_fraction": 0.997787893168985
+            },
+            "completed_queue_full": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_put_blocked": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_put_current_wait_seconds": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            }
+          },
+          "engines": {
+            "http://172.17.0.4:15000": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.14712793825544007,
+                  "p95": 0.8827586206896552,
+                  "maximum": 0.9922480620155039,
+                  "empty_fraction": 0.7596977383955915
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05332621642395731,
+                  "p95": 0.07109705607096355,
+                  "maximum": 0.075897216796875,
+                  "empty_fraction": 0.05002266850919191
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2521.9691054787027,
+                  "p95": 3238.1018784087187,
+                  "maximum": 3260.214590327021,
+                  "empty_fraction": 0.0833966572736182
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10796398322553027,
+                  "p95": 0.1220703125,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.05002266850919191
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 1.8619019290818626,
+                  "p95": 31.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.9277330805425649
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 29.573551418376777,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.05558160562969015
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10762410808174953,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.05002266850919191
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15003": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.12385659467597618,
+                  "p95": 0.7804878048780488,
+                  "maximum": 0.9481481481481482,
+                  "empty_fraction": 0.7763474050573094
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05633207001605294,
+                  "p95": 0.07694117228190105,
+                  "maximum": 0.0859820048014323,
+                  "empty_fraction": 0.05002647296590943
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2608.3610315523642,
+                  "p95": 3242.4854924608667,
+                  "maximum": 3262.316933363626,
+                  "empty_fraction": 0.0778304675531009
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10888782819669357,
+                  "p95": 0.1220703125,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.05002647296590943
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 1.7676323884916856,
+                  "p95": 31.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.9110249180840534
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 29.579619505478234,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.05558563558453546
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.1085100383111851,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.05002647296590943
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            }
+          },
+          "node_roles": {
+            "0": {
+              "judges": {},
+              "ray_gpus": 4,
+              "rollout_gpus": 2,
+              "trainer_gpus": 2
+            }
+          },
+          "hardware": {
+            "gpu_usage_node0": [
+              {
+                "uuid": "GPU-0b667c16-d930-6cab-7688-d12f6522efc4",
+                "index": 0.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 17.118325730974288,
+                    "p95": 67.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.6127534431777932
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 4.3979646263112455,
+                    "p95": 21.0,
+                    "maximum": 27.0,
+                    "empty_fraction": 0.6296292863078753
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 213816.6853550501,
+                    "p95": 213817.0,
+                    "maximum": 213817.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-18ba8348-6960-9af3-adc0-47c6ddd9061d",
+                "index": 1.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 23.699554209639018,
+                    "p95": 99.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.6127551290070714
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 4.179865750910734,
+                    "p95": 21.0,
+                    "maximum": 25.0,
+                    "empty_fraction": 0.652020659355687
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 210447.18898752864,
+                    "p95": 210449.0,
+                    "maximum": 210451.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-43c81fe2-9ea9-e799-6090-09966216b3d3",
+                "index": 2.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 84.26695154225817,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0056243917103935386
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 35.67204362767717,
+                    "p95": 43.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0112525939435361
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 87474.34905384925,
+                    "p95": 90353.0,
+                    "maximum": 90355.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-63f81411-d9eb-34b9-74de-86107424cd7b",
+                "index": 3.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 82.17397786872598,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0056243917103935386
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 34.80602269440745,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0112525939435361
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 87472.87546488902,
+                    "p95": 90353.0,
+                    "maximum": 90355.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "caches": []
+      },
+      {
+        "updates": [
+          12,
+          23
+        ],
+        "tokens": 3074589,
+        "seconds": 610.7626112829894,
+        "useful_tokens_per_second": 5034.0163972077635,
+        "seconds_per_update": 50.89688427358245,
+        "phase_mean_seconds": {
+          "generation_wait": 30.082658363583807,
+          "training": 17.87735909500043,
+          "publication": 2.9368668149982113
+        },
+        "trainer_wait_fraction": 0.5910510789203246,
+        "discarded_tokens": 0,
+        "discarded_token_fraction": 0.0,
+        "optimizer_median_seconds": 16.459368484967854,
+        "occupancy": {
+          "scope": "Sampled occupancy during warm normal cycles; not hardware GPU utilization or exact per-request waits.",
+          "start_unix": 1789356958.8169186,
+          "end_unix": 1789357569.6556964,
+          "max_sample_hold_seconds": 10,
+          "pipeline": {
+            "producer_owned_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 127.98034485424233,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_active_group_tasks": {
+              "coverage_fraction": 1.0,
+              "mean": 127.97707112493013,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_admission_open": {
+              "coverage_fraction": 1.0,
+              "mean": 0.9276886587198964,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.0723113412801036
+            },
+            "producer_unfinished_samples": {
+              "coverage_fraction": 0,
+              "mean": null,
+              "p95": null,
+              "maximum": null,
+              "empty_fraction": null
+            },
+            "completed_queue_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 3.835526187111866,
+              "p95": 15.0,
+              "maximum": 20.0,
+              "empty_fraction": 0.5657861990212891
+            },
+            "completed_queue_capacity_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 32.0,
+              "p95": 32.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.0
+            },
+            "http_active_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 64.0,
+              "p95": 64.0,
+              "maximum": 64.0,
+              "empty_fraction": 0.0
+            },
+            "http_waiting_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 422.16981738642426,
+              "p95": 432.0,
+              "maximum": 437.0,
+              "empty_fraction": 0.0
+            },
+            "http_capacity_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 64.0,
+              "p95": 64.0,
+              "maximum": 64.0,
+              "empty_fraction": 0.0
+            },
+            "completed_queue_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 15.342104748447465,
+              "p95": 60.0,
+              "maximum": 80.0,
+              "empty_fraction": 0.5657861990212891
+            },
+            "completed_queue_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 30614.319579182295,
+              "p95": 114941.0,
+              "maximum": 169042.0,
+              "empty_fraction": 0.5657861990212891
+            },
+            "producer_ready_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 0.003273729312192338,
+              "p95": 0.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.9967262706878076
+            },
+            "producer_ready_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 0.013094917248769352,
+              "p95": 0.0,
+              "maximum": 4.0,
+              "empty_fraction": 0.9967262706878076
+            },
+            "producer_ready_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 10.246772747162018,
+              "p95": 0.0,
+              "maximum": 3130.0,
+              "empty_fraction": 0.9967262706878076
+            },
+            "completed_queue_full": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_put_blocked": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_put_current_wait_seconds": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            }
+          },
+          "engines": {
+            "http://172.17.0.4:15000": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.13461895138916863,
+                  "p95": 0.7950310559006211,
+                  "maximum": 0.9343065693430657,
+                  "empty_fraction": 0.7688624918753283
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05287866921506017,
+                  "p95": 0.07109705607096355,
+                  "maximum": 0.075897216796875,
+                  "empty_fraction": 0.04873383593476019
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2570.635332501112,
+                  "p95": 3233.639340164751,
+                  "maximum": 3260.214590327021,
+                  "empty_fraction": 0.08166662183201338
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10786691925014823,
+                  "p95": 0.12109375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.04873383593476019
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 1.7238790434305693,
+                  "p95": 20.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.9430463493893276
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 29.72947977653193,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.04873383593476019
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10752989204969907,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.04873383593476019
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15003": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.13626409102422948,
+                  "p95": 0.7852760736196319,
+                  "maximum": 0.9481481481481482,
+                  "empty_fraction": 0.7515205050991154
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05719297132223165,
+                  "p95": 0.07762781778971355,
+                  "maximum": 0.0840314229329427,
+                  "empty_fraction": 0.04873704196928186
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2643.3316233646415,
+                  "p95": 3227.0024137563723,
+                  "maximum": 3246.864372345885,
+                  "empty_fraction": 0.07342592577785981
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10972592652564361,
+                  "p95": 0.1220703125,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.04873704196928186
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 1.5925239652710053,
+                  "p95": 1.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.9100809961297109
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 29.72198071268601,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.04873704196928186
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10950536704171664,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.04873704196928186
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t2i-c32-p512-b128-b317b70e4f91/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            }
+          },
+          "node_roles": {
+            "0": {
+              "judges": {},
+              "ray_gpus": 4,
+              "rollout_gpus": 2,
+              "trainer_gpus": 2
+            }
+          },
+          "hardware": {
+            "gpu_usage_node0": [
+              {
+                "uuid": "GPU-0b667c16-d930-6cab-7688-d12f6522efc4",
+                "index": 0.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 15.509472418101137,
+                    "p95": 63.0,
+                    "maximum": 78.0,
+                    "empty_fraction": 0.6321914540742372
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 4.076949678945131,
+                    "p95": 21.0,
+                    "maximum": 27.0,
+                    "empty_fraction": 0.6488424350264035
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 213817.0,
+                    "p95": 213817.0,
+                    "maximum": 213817.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-18ba8348-6960-9af3-adc0-47c6ddd9061d",
+                "index": 1.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 21.040799527336993,
+                    "p95": 89.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.6321914540742372
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 3.912385542455005,
+                    "p95": 21.0,
+                    "maximum": 24.0,
+                    "empty_fraction": 0.6573084875171143
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 210447.51151517418,
+                    "p95": 210449.0,
+                    "maximum": 210451.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-43c81fe2-9ea9-e799-6090-09966216b3d3",
+                "index": 2.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 85.14605173439269,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 35.97621699814609,
+                    "p95": 43.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 87430.68670155799,
+                    "p95": 87305.0,
+                    "maximum": 90355.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-63f81411-d9eb-34b9-74de-86107424cd7b",
+                "index": 3.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 1.0,
+                    "mean": 82.19331581895227,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 1.0,
+                    "mean": 34.71518596864558,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 1.0,
+                    "mean": 87429.588760868,
+                    "p95": 87305.0,
+                    "maximum": 90355.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 1.0,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "caches": []
+      }
+    ]
+  },
+  "2t4i": {
+    "full": {
+      "current_policy_token_fraction": 0.05052073441478037,
+      "provenance_active_tokens": 9514351,
+      "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
+      "completed_updates": 48,
+      "validated_trainer_ranks": 2,
+      "training_components_rank0": {
+        "standalone_scoring": {
+          "count": 0,
+          "total_seconds": 0,
+          "median_seconds": null
+        },
+        "forward_backward_optimizer": {
+          "count": 42,
+          "total_seconds": 671.0932449320098,
+          "median_seconds": 14.75606946949847
+        }
+      },
+      "warmup_updates": 6,
+      "measured_updates": 42,
+      "warm_cycle_seconds": 1382.8529108457733,
+      "useful_response_tokens": 9514351,
+      "useful_response_tokens_per_second": 6880.233555845706,
+      "trainer_wait_fraction": 0.38579999686835675,
+      "batch_collection_breakdown": {
+        "scope": "Completed-buffer get time includes expiry filtering; the remainder includes collection and handoff, not solely transfer.",
+        "completed_queue_get_seconds": 392.6233962525148,
+        "completed_queue_get_cycle_fraction": 0.28392274635512793,
+        "other_collection_seconds": 140.88125242118258,
+        "other_collection_cycle_fraction": 0.10187725051322886
+      },
+      "discarded_response_tokens": 3685562,
+      "discarded_token_fraction": 0.27921108267910555,
+      "mixed_responses": 3083,
+      "per_update": [
+        {
+          "rollout_id": 6,
+          "response_tokens": 201966,
+          "mixed_responses": 45,
+          "completed_queue_get_seconds": 4.749333072104491,
+          "other_collection_seconds": 2.031857764814049,
+          "generation_wait_seconds": 6.78119083691854,
+          "training_seconds": 58.715537084965035,
+          "publication_seconds": 3.0428009249735624
+        },
+        {
+          "rollout_id": 7,
+          "response_tokens": 190203,
+          "mixed_responses": 41,
+          "completed_queue_get_seconds": 0.024541179882362485,
+          "other_collection_seconds": 1.9659192631952465,
+          "generation_wait_seconds": 1.990460443077609,
+          "training_seconds": 13.442933968035504,
+          "publication_seconds": 3.0438855219399557
+        },
+        {
+          "rollout_id": 8,
+          "response_tokens": 183689,
+          "mixed_responses": 7,
+          "completed_queue_get_seconds": 0.02705214824527502,
+          "other_collection_seconds": 2.245268132770434,
+          "generation_wait_seconds": 2.272320281015709,
+          "training_seconds": 11.880042735021561,
+          "publication_seconds": 4.548243566066958
+        },
+        {
+          "rollout_id": 9,
+          "response_tokens": 216429,
+          "mixed_responses": 95,
+          "completed_queue_get_seconds": 37.31953865638934,
+          "other_collection_seconds": 3.620095187565312,
+          "generation_wait_seconds": 40.93963384395465,
+          "training_seconds": 14.821833453024738,
+          "publication_seconds": 3.1791030160384253
+        },
+        {
+          "rollout_id": 10,
+          "response_tokens": 282249,
+          "mixed_responses": 33,
+          "completed_queue_get_seconds": 7.090863211895339,
+          "other_collection_seconds": 4.2870648491662,
+          "generation_wait_seconds": 11.377928061061539,
+          "training_seconds": 23.92432205111254,
+          "publication_seconds": 3.1688821729039773
+        },
+        {
+          "rollout_id": 11,
+          "response_tokens": 279670,
+          "mixed_responses": 73,
+          "completed_queue_get_seconds": 0.0012600888730958104,
+          "other_collection_seconds": 3.4731817331630737,
+          "generation_wait_seconds": 3.4744418220361695,
+          "training_seconds": 19.812871510977857,
+          "publication_seconds": 3.128266648040153
+        },
+        {
+          "rollout_id": 12,
+          "response_tokens": 261278,
+          "mixed_responses": 86,
+          "completed_queue_get_seconds": 13.929444064036943,
+          "other_collection_seconds": 4.04006207396742,
+          "generation_wait_seconds": 17.969506138004363,
+          "training_seconds": 19.88511653104797,
+          "publication_seconds": 3.139896932989359
+        },
+        {
+          "rollout_id": 13,
+          "response_tokens": 269176,
+          "mixed_responses": 70,
+          "completed_queue_get_seconds": 5.503624393953942,
+          "other_collection_seconds": 3.428219879977405,
+          "generation_wait_seconds": 8.931844273931347,
+          "training_seconds": 18.572803676943295,
+          "publication_seconds": 3.2243998099584132
+        },
+        {
+          "rollout_id": 14,
+          "response_tokens": 197061,
+          "mixed_responses": 69,
+          "completed_queue_get_seconds": 0.003156855935230851,
+          "other_collection_seconds": 3.4166362141259015,
+          "generation_wait_seconds": 3.4197930700611323,
+          "training_seconds": 15.617950164014474,
+          "publication_seconds": 3.176830005017109
+        },
+        {
+          "rollout_id": 15,
+          "response_tokens": 276093,
+          "mixed_responses": 87,
+          "completed_queue_get_seconds": 22.322055197670124,
+          "other_collection_seconds": 4.26804205426015,
+          "generation_wait_seconds": 26.590097251930274,
+          "training_seconds": 20.17337931401562,
+          "publication_seconds": 3.1835944829508662
+        },
+        {
+          "rollout_id": 16,
+          "response_tokens": 258762,
+          "mixed_responses": 59,
+          "completed_queue_get_seconds": 5.366004800773226,
+          "other_collection_seconds": 4.004280432127416,
+          "generation_wait_seconds": 9.370285232900642,
+          "training_seconds": 18.403838683036156,
+          "publication_seconds": 3.185279113939032
+        },
+        {
+          "rollout_id": 17,
+          "response_tokens": 248281,
+          "mixed_responses": 73,
+          "completed_queue_get_seconds": 2.8317116847028956,
+          "other_collection_seconds": 3.8925350243225694,
+          "generation_wait_seconds": 6.724246709025465,
+          "training_seconds": 17.195533271995373,
+          "publication_seconds": 2.98298112093471
+        },
+        {
+          "rollout_id": 18,
+          "response_tokens": 219362,
+          "mixed_responses": 80,
+          "completed_queue_get_seconds": 16.29538335010875,
+          "other_collection_seconds": 2.8259298959746957,
+          "generation_wait_seconds": 19.121313246083446,
+          "training_seconds": 14.036253675003536,
+          "publication_seconds": 3.1285129020689055
+        },
+        {
+          "rollout_id": 19,
+          "response_tokens": 238161,
+          "mixed_responses": 82,
+          "completed_queue_get_seconds": 12.483928705449216,
+          "other_collection_seconds": 3.027622574591078,
+          "generation_wait_seconds": 15.511551280040294,
+          "training_seconds": 17.349425868014805,
+          "publication_seconds": 3.9447052240138873
+        },
+        {
+          "rollout_id": 20,
+          "response_tokens": 279063,
+          "mixed_responses": 90,
+          "completed_queue_get_seconds": 5.887246878934093,
+          "other_collection_seconds": 2.9296210360480472,
+          "generation_wait_seconds": 8.81686791498214,
+          "training_seconds": 19.352676181006245,
+          "publication_seconds": 3.0413089439971372
+        },
+        {
+          "rollout_id": 21,
+          "response_tokens": 235066,
+          "mixed_responses": 76,
+          "completed_queue_get_seconds": 5.552445683162659,
+          "other_collection_seconds": 3.71975376480259,
+          "generation_wait_seconds": 9.27219944796525,
+          "training_seconds": 14.416029466083273,
+          "publication_seconds": 2.9692978620296344
+        },
+        {
+          "rollout_id": 22,
+          "response_tokens": 242083,
+          "mixed_responses": 84,
+          "completed_queue_get_seconds": 9.83354546490591,
+          "other_collection_seconds": 3.6793380531016737,
+          "generation_wait_seconds": 13.512883518007584,
+          "training_seconds": 15.153262351057492,
+          "publication_seconds": 3.049204914015718
+        },
+        {
+          "rollout_id": 23,
+          "response_tokens": 233859,
+          "mixed_responses": 77,
+          "completed_queue_get_seconds": 11.781143009895459,
+          "other_collection_seconds": 3.7943199111614376,
+          "generation_wait_seconds": 15.575462921056896,
+          "training_seconds": 19.204247338930145,
+          "publication_seconds": 3.4387956319842488
+        },
+        {
+          "rollout_id": 24,
+          "response_tokens": 236796,
+          "mixed_responses": 71,
+          "completed_queue_get_seconds": 4.766469667898491,
+          "other_collection_seconds": 3.587903444073163,
+          "generation_wait_seconds": 8.354373111971654,
+          "training_seconds": 15.771568911033683,
+          "publication_seconds": 3.1821830850094557
+        },
+        {
+          "rollout_id": 25,
+          "response_tokens": 254484,
+          "mixed_responses": 93,
+          "completed_queue_get_seconds": 12.596885623177513,
+          "other_collection_seconds": 3.825342700816691,
+          "generation_wait_seconds": 16.422228323994204,
+          "training_seconds": 17.88553230499383,
+          "publication_seconds": 4.508825385011733
+        },
+        {
+          "rollout_id": 26,
+          "response_tokens": 243896,
+          "mixed_responses": 72,
+          "completed_queue_get_seconds": 7.235400171135552,
+          "other_collection_seconds": 3.785595432855189,
+          "generation_wait_seconds": 11.020995603990741,
+          "training_seconds": 17.44334767793771,
+          "publication_seconds": 3.231106459046714
+        },
+        {
+          "rollout_id": 27,
+          "response_tokens": 229929,
+          "mixed_responses": 80,
+          "completed_queue_get_seconds": 6.4795935422880575,
+          "other_collection_seconds": 4.27740937366616,
+          "generation_wait_seconds": 10.757002915954217,
+          "training_seconds": 15.260547139914706,
+          "publication_seconds": 3.281159176956862
+        },
+        {
+          "rollout_id": 28,
+          "response_tokens": 185685,
+          "mixed_responses": 78,
+          "completed_queue_get_seconds": 9.710762436618097,
+          "other_collection_seconds": 2.805419895448722,
+          "generation_wait_seconds": 12.516182332066819,
+          "training_seconds": 13.310418968903832,
+          "publication_seconds": 3.03487538092304
+        },
+        {
+          "rollout_id": 29,
+          "response_tokens": 224939,
+          "mixed_responses": 98,
+          "completed_queue_get_seconds": 9.811670311260968,
+          "other_collection_seconds": 3.3527176487259567,
+          "generation_wait_seconds": 13.164387959986925,
+          "training_seconds": 14.79740822094027,
+          "publication_seconds": 3.2760799219831824
+        },
+        {
+          "rollout_id": 30,
+          "response_tokens": 252744,
+          "mixed_responses": 76,
+          "completed_queue_get_seconds": 13.157768509117886,
+          "other_collection_seconds": 3.9327128088334575,
+          "generation_wait_seconds": 17.090481317951344,
+          "training_seconds": 17.16649461002089,
+          "publication_seconds": 3.290778536000289
+        },
+        {
+          "rollout_id": 31,
+          "response_tokens": 216677,
+          "mixed_responses": 60,
+          "completed_queue_get_seconds": 7.666336080059409,
+          "other_collection_seconds": 3.2982408879324794,
+          "generation_wait_seconds": 10.964576967991889,
+          "training_seconds": 13.846951098996215,
+          "publication_seconds": 4.556537453085184
+        },
+        {
+          "rollout_id": 32,
+          "response_tokens": 232036,
+          "mixed_responses": 89,
+          "completed_queue_get_seconds": 7.401023708051071,
+          "other_collection_seconds": 3.231130374944769,
+          "generation_wait_seconds": 10.63215408299584,
+          "training_seconds": 15.204841784085147,
+          "publication_seconds": 2.9961919450433925
+        },
+        {
+          "rollout_id": 33,
+          "response_tokens": 210699,
+          "mixed_responses": 78,
+          "completed_queue_get_seconds": 11.563031007070094,
+          "other_collection_seconds": 3.1514320308342576,
+          "generation_wait_seconds": 14.714463037904352,
+          "training_seconds": 15.57670377008617,
+          "publication_seconds": 3.1567344639915973
+        },
+        {
+          "rollout_id": 34,
+          "response_tokens": 202768,
+          "mixed_responses": 66,
+          "completed_queue_get_seconds": 9.72680264140945,
+          "other_collection_seconds": 3.3621819915715605,
+          "generation_wait_seconds": 13.08898463298101,
+          "training_seconds": 15.50046624604147,
+          "publication_seconds": 3.1405120799317956
+        },
+        {
+          "rollout_id": 35,
+          "response_tokens": 231018,
+          "mixed_responses": 81,
+          "completed_queue_get_seconds": 13.128177503240295,
+          "other_collection_seconds": 3.248497731750831,
+          "generation_wait_seconds": 16.376675234991126,
+          "training_seconds": 16.311199921066873,
+          "publication_seconds": 3.209607762983069
+        },
+        {
+          "rollout_id": 36,
+          "response_tokens": 251146,
+          "mixed_responses": 79,
+          "completed_queue_get_seconds": 10.069959180080332,
+          "other_collection_seconds": 3.631242831936106,
+          "generation_wait_seconds": 13.701202012016438,
+          "training_seconds": 17.689934298046865,
+          "publication_seconds": 3.9137609320459887
+        },
+        {
+          "rollout_id": 37,
+          "response_tokens": 259109,
+          "mixed_responses": 70,
+          "completed_queue_get_seconds": 3.594629544997588,
+          "other_collection_seconds": 4.145794017007574,
+          "generation_wait_seconds": 7.740423562005162,
+          "training_seconds": 17.715839901007712,
+          "publication_seconds": 4.56283823098056
+        },
+        {
+          "rollout_id": 38,
+          "response_tokens": 204997,
+          "mixed_responses": 75,
+          "completed_queue_get_seconds": 3.3636057769181207,
+          "other_collection_seconds": 3.280908929067664,
+          "generation_wait_seconds": 6.6445147059857845,
+          "training_seconds": 13.76862919901032,
+          "publication_seconds": 3.161042927997187
+        },
+        {
+          "rollout_id": 39,
+          "response_tokens": 167804,
+          "mixed_responses": 86,
+          "completed_queue_get_seconds": 16.258762616780587,
+          "other_collection_seconds": 2.8590842641424388,
+          "generation_wait_seconds": 19.117846880923025,
+          "training_seconds": 11.494790973025374,
+          "publication_seconds": 3.0898638650542125
+        },
+        {
+          "rollout_id": 40,
+          "response_tokens": 179773,
+          "mixed_responses": 63,
+          "completed_queue_get_seconds": 9.351756542455405,
+          "other_collection_seconds": 2.6991365326102823,
+          "generation_wait_seconds": 12.050893075065687,
+          "training_seconds": 11.493335191044025,
+          "publication_seconds": 3.13004772097338
+        },
+        {
+          "rollout_id": 41,
+          "response_tokens": 213141,
+          "mixed_responses": 82,
+          "completed_queue_get_seconds": 11.81191326410044,
+          "other_collection_seconds": 2.631275791907683,
+          "generation_wait_seconds": 14.443189056008123,
+          "training_seconds": 14.881106306915171,
+          "publication_seconds": 3.204633818939328
+        },
+        {
+          "rollout_id": 42,
+          "response_tokens": 213186,
+          "mixed_responses": 87,
+          "completed_queue_get_seconds": 16.813442587852478,
+          "other_collection_seconds": 2.52396112610586,
+          "generation_wait_seconds": 19.337403713958338,
+          "training_seconds": 14.16718077706173,
+          "publication_seconds": 3.1450647249585018
+        },
+        {
+          "rollout_id": 43,
+          "response_tokens": 255337,
+          "mixed_responses": 69,
+          "completed_queue_get_seconds": 11.268460665014572,
+          "other_collection_seconds": 3.836141870939173,
+          "generation_wait_seconds": 15.104602535953745,
+          "training_seconds": 17.591665326966904,
+          "publication_seconds": 4.5010742750018835
+        },
+        {
+          "rollout_id": 44,
+          "response_tokens": 240120,
+          "mixed_responses": 71,
+          "completed_queue_get_seconds": 3.175856967107393,
+          "other_collection_seconds": 3.7332272089552134,
+          "generation_wait_seconds": 6.909084176062606,
+          "training_seconds": 17.395843688049354,
+          "publication_seconds": 3.137141201994382
+        },
+        {
+          "rollout_id": 45,
+          "response_tokens": 179629,
+          "mixed_responses": 70,
+          "completed_queue_get_seconds": 5.369599687051959,
+          "other_collection_seconds": 3.0336177048739046,
+          "generation_wait_seconds": 8.403217391925864,
+          "training_seconds": 10.996515172999352,
+          "publication_seconds": 2.9842851359862834
+        },
+        {
+          "rollout_id": 46,
+          "response_tokens": 149789,
+          "mixed_responses": 78,
+          "completed_queue_get_seconds": 12.111202061758377,
+          "other_collection_seconds": 2.542564903269522,
+          "generation_wait_seconds": 14.653766965027899,
+          "training_seconds": 10.197317107929848,
+          "publication_seconds": 3.1222355969948694
+        },
+        {
+          "rollout_id": 47,
+          "response_tokens": 166198,
+          "mixed_responses": 84,
+          "completed_queue_get_seconds": 15.188007710152306,
+          "other_collection_seconds": 3.4559650737792253,
+          "generation_wait_seconds": 18.64397278393153,
+          "training_seconds": 11.404674894060008,
+          "publication_seconds": 3.1253224828979
+        }
+      ],
+      "median_seconds": {
+        "generation_wait": 12.283537703566253,
+        "training": 15.597326967050321,
+        "publication": 3.164962550450582
+      },
+      "all_driver_stage_seconds": {
+        "close_weight_transport": 0.5251100999303162,
+        "final_generation_drain": 85.08884455403313,
+        "generation_wait": 662.0052759536775,
+        "initial_publication": 26.12606761395,
+        "placement": 9.938984913984314,
+        "publication": 161.3440420916304,
+        "rollout_dispose": 1.8561566340504214,
+        "serving_startup": 401.13095856201835,
+        "startup_cache_prepare": 0.20793820603284985,
+        "trainer_dispose": 2.3840923610841855,
+        "trainer_startup": 136.9794831390027,
+        "training": 1503.5461487546563
+      },
+      "workflow": {
+        "finished_unix": 1789362957.4598057,
+        "result": {
+          "completed_rollout_ids": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47
+          ],
+          "export_hf": null,
+          "start_rollout_id": 0
+        },
+        "spec_sha256": "6c4ed69034ac98fb98ec9c49c944212c3aaf0d45d70bcc02e7b07068df6d31e2",
+        "started_unix": 1789359920.4279592,
+        "status": "complete",
+        "training_started_unix": 1789359924.946714
+      },
+      "terminal_inventory": [
+        {
+          "event": "shutdown_start",
+          "completed_queue": {
+            "groups": 150,
+            "samples": 600,
+            "response_tokens": 1154720
+          },
+          "producer_ready": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "shutdown_unqueued": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "completed_put_wait_seconds": 827.4242188322823,
+          "completed_put_current_wait_seconds": 0.0,
+          "time_unix": 1789362934.6077268,
+          "producer_owned_groups": 0,
+          "producer_active_group_tasks": 0,
+          "producer_admission_open": false,
+          "producer_unfinished_samples": null,
+          "completed_queue_groups": 150,
+          "completed_queue_capacity_groups": 160,
+          "http_capacity_requests": 128,
+          "http_active_requests": 0,
+          "http_waiting_requests": 0
+        },
+        {
+          "event": "shutdown_complete",
+          "completed_queue": {
+            "groups": 150,
+            "samples": 600,
+            "response_tokens": 1154720
+          },
+          "producer_ready": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "shutdown_unqueued": {
+            "groups": 0,
+            "samples": 0,
+            "response_tokens": 0
+          },
+          "completed_put_wait_seconds": 827.4242188322823,
+          "completed_put_current_wait_seconds": 0.0,
+          "time_unix": 1789362934.6119144,
+          "producer_owned_groups": 0,
+          "producer_active_group_tasks": 0,
+          "producer_admission_open": false,
+          "producer_unfinished_samples": null,
+          "completed_queue_groups": 150,
+          "completed_queue_capacity_groups": 160,
+          "http_capacity_requests": 128,
+          "http_active_requests": 0,
+          "http_waiting_requests": 0
+        }
+      ],
+      "terminal_unused_work": {
+        "groups": 150,
+        "samples": 600,
+        "response_tokens": 1154720,
+        "delivered_response_tokens_all_updates": 11016172,
+        "stale_dropped_response_tokens_all_updates": 4519958,
+        "fraction_of_accounted_response_tokens": 0.06918281573436943,
+        "scope": "Final buffered, producer-ready and shutdown-unqueued completions; distinct from stale drops. Denominator excludes unobserved aborted or dynamically filtered work."
+      },
+      "end_to_end_passed": true
+    },
+    "windows": [
+      {
+        "updates": [
+          6,
+          23
+        ],
+        "tokens": 4312451,
+        "seconds": 632.1860724102007,
+        "useful_tokens_per_second": 6821.490045737389,
+        "seconds_per_update": 35.12144846723337,
+        "phase_mean_seconds": {
+          "generation_wait": 12.314001460669614,
+          "training": 19.553225406904758,
+          "publication": 3.2542215996590027
+        },
+        "trainer_wait_fraction": 0.35061200485959415,
+        "discarded_tokens": 1890185,
+        "discarded_token_fraction": 0.3047389851669516,
+        "optimizer_median_seconds": 16.889883299998473,
+        "occupancy": {
+          "scope": "Sampled occupancy during warm normal cycles; not hardware GPU utilization or exact per-request waits.",
+          "start_unix": 1789361465.8580797,
+          "end_unix": 1789362098.1549838,
+          "max_sample_hold_seconds": 10,
+          "pipeline": {
+            "producer_owned_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 126.71714363548116,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_active_group_tasks": {
+              "coverage_fraction": 1.0,
+              "mean": 124.32004506186752,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_admission_open": {
+              "coverage_fraction": 1.0,
+              "mean": 0.9103540542887999,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.08964594571120006
+            },
+            "producer_unfinished_samples": {
+              "coverage_fraction": 0,
+              "mean": null,
+              "p95": null,
+              "maximum": null,
+              "empty_fraction": null
+            },
+            "completed_queue_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 13.252395837725304,
+              "p95": 32.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.30828857210294686
+            },
+            "completed_queue_capacity_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 32.0,
+              "p95": 32.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.0
+            },
+            "http_active_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 128.0,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "http_waiting_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 321.3641589509058,
+              "p95": 348.0,
+              "maximum": 358.0,
+              "empty_fraction": 0.0
+            },
+            "http_capacity_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 128.0,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "completed_queue_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 53.00958335090122,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.30828857210294686
+            },
+            "completed_queue_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 106875.85227838371,
+              "p95": 261649.0,
+              "maximum": 301425.0,
+              "empty_fraction": 0.30828857210294686
+            },
+            "producer_ready_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 2.3970985736136523,
+              "p95": 22.0,
+              "maximum": 54.0,
+              "empty_fraction": 0.8950270054083848
+            },
+            "producer_ready_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 9.58839429445461,
+              "p95": 88.0,
+              "maximum": 216.0,
+              "empty_fraction": 0.8950270054083848
+            },
+            "producer_ready_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 18191.476240770164,
+              "p95": 189595.0,
+              "maximum": 382152.0,
+              "empty_fraction": 0.8950270054083848
+            },
+            "completed_queue_full": {
+              "coverage_fraction": 1.0,
+              "mean": 0.10813873485095052,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.8918612651490495
+            },
+            "completed_put_blocked": {
+              "coverage_fraction": 1.0,
+              "mean": 0.10180919585256246,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.8981908041474376
+            },
+            "completed_put_current_wait_seconds": {
+              "coverage_fraction": 1.0,
+              "mean": 1.3642898845965539,
+              "p95": 11.656098807929084,
+              "maximum": 35.68387619999703,
+              "empty_fraction": 0.8981908041474376
+            }
+          },
+          "engines": {
+            "http://172.17.0.4:15000": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.12006759401102038,
+                  "p95": 0.8648648648648649,
+                  "maximum": 0.9552238805970149,
+                  "empty_fraction": 0.7949332492468906
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05640470381330511,
+                  "p95": 0.07758712768554688,
+                  "maximum": 0.08428192138671875,
+                  "empty_fraction": 0.08470590289291402
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2502.9811278153616,
+                  "p95": 3226.488087384238,
+                  "maximum": 3235.8815413867214,
+                  "empty_fraction": 0.11878210831587134
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10784436754865907,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.08470590289291402
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.0363740804600408,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.871199210005691
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 28.124371686386425,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.09310615038279167
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10758205351696097,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.08470590289291402
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15003": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.07594334890674752,
+                  "p95": 0.44755244755244755,
+                  "maximum": 0.9922480620155039,
+                  "empty_fraction": 0.8437112872629617
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.054692382827893946,
+                  "p95": 0.07407506306966145,
+                  "maximum": 0.07778549194335938,
+                  "empty_fraction": 0.08469694942639508
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2350.5745990628493,
+                  "p95": 3223.299004195859,
+                  "maximum": 3249.30041698938,
+                  "empty_fraction": 0.13502387493411247
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10818268041254703,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.08469694942639508
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2.8991279886949326,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8812316037418234
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 28.190761328412446,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.09309600198953455
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10785075629665851,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.08469694942639508
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15006": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.1419227470920888,
+                  "p95": 0.7901234567901234,
+                  "maximum": 0.9343065693430657,
+                  "empty_fraction": 0.727319053162194
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.055536751135290885,
+                  "p95": 0.07219950358072917,
+                  "maximum": 0.0850677490234375,
+                  "empty_fraction": 0.08469853499500793
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2399.1435886448858,
+                  "p95": 3225.688617303168,
+                  "maximum": 3270.1810532014256,
+                  "empty_fraction": 0.1430224343584907
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10682747189299108,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.08469853499500793
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.1934471274220257,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8652551236797552
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.87812823232349,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.09309772594190029
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10700014533763075,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.08469853499500793
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15009": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10232666178918678,
+                  "p95": 0.5333333333333333,
+                  "maximum": 0.9552238805970149,
+                  "empty_fraction": 0.814164257639939
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05620861448970888,
+                  "p95": 0.07931137084960938,
+                  "maximum": 0.09090805053710938,
+                  "empty_fraction": 0.08469638193988799
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2426.406819458151,
+                  "p95": 3224.2936582060706,
+                  "maximum": 3256.8538720045094,
+                  "empty_fraction": 0.13478098090532184
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10637013399919129,
+                  "p95": 0.123046875,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.08469638193988799
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.225991635481159,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8410558825290472
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.67974533199494,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.09309545825827659
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10635845088240671,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.08469638193988799
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            }
+          },
+          "node_roles": {
+            "0": {
+              "judges": {},
+              "ray_gpus": 6,
+              "rollout_gpus": 4,
+              "trainer_gpus": 2
+            }
+          },
+          "hardware": {
+            "gpu_usage_node0": [
+              {
+                "uuid": "GPU-0b667c16-d930-6cab-7688-d12f6522efc4",
+                "index": 0.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 28.298269283979117,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.40821551859019556
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 6.401267756412915,
+                    "p95": 22.0,
+                    "maximum": 45.0,
+                    "empty_fraction": 0.5042662288467121
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 224436.82496349487,
+                    "p95": 224437.0,
+                    "maximum": 224439.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-18ba8348-6960-9af3-adc0-47c6ddd9061d",
+                "index": 1.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 43.775595689051386,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.40821551859019556
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 8.11372460575607,
+                    "p95": 24.0,
+                    "maximum": 92.0,
+                    "empty_fraction": 0.480253551282583
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 220084.02559737308,
+                    "p95": 220085.0,
+                    "maximum": 220085.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-43c81fe2-9ea9-e799-6090-09966216b3d3",
+                "index": 2.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 77.35604505702621,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 31.95416832050059,
+                    "p95": 43.0,
+                    "maximum": 43.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 87500.72258073867,
+                    "p95": 89350.0,
+                    "maximum": 90354.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-606dfcf9-0d0f-68da-1682-f42866ec7dac",
+                "index": 5.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 81.24609882241514,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 34.0192585910157,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.048025355128258305
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 87521.50683337588,
+                    "p95": 89350.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-63f81411-d9eb-34b9-74de-86107424cd7b",
+                "index": 3.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 80.477693140363,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 33.49097968460486,
+                    "p95": 43.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 87508.14505851691,
+                    "p95": 89350.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-a1953eea-a15b-4b7a-b728-25badf88218e",
+                "index": 4.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 77.45209576728273,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 32.098244385885366,
+                    "p95": 43.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.024012677564129153
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 87508.78011426689,
+                    "p95": 89350.0,
+                    "maximum": 90354.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.658625217956956,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "caches": [
+          {
+            "worker": "/tmp/core-triton-_cmv264l",
+            "cubins_start": 189,
+            "cubins_end": 189,
+            "cubins_added": 0,
+            "last_write_unix": 1789361403.2685215,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-_wro6vhx",
+            "cubins_start": 706,
+            "cubins_end": 712,
+            "cubins_added": 6,
+            "last_write_unix": 1789361660.873133,
+            "wrote_in_window": true
+          },
+          {
+            "worker": "/tmp/core-triton-cc4kli37",
+            "cubins_start": 189,
+            "cubins_end": 190,
+            "cubins_added": 1,
+            "last_write_unix": 1789361738.2060375,
+            "wrote_in_window": true
+          },
+          {
+            "worker": "/tmp/core-triton-iiv1oc7k",
+            "cubins_start": 189,
+            "cubins_end": 189,
+            "cubins_added": 0,
+            "last_write_unix": 1789361403.3055215,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-lmkapqc9",
+            "cubins_start": 189,
+            "cubins_end": 189,
+            "cubins_added": 0,
+            "last_write_unix": 1789361403.2665215,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-z07t8dmz",
+            "cubins_start": 634,
+            "cubins_end": 706,
+            "cubins_added": 72,
+            "last_write_unix": 1789362087.6456864,
+            "wrote_in_window": true
+          }
+        ]
+      },
+      {
+        "updates": [
+          24,
+          35
+        ],
+        "tokens": 2721671,
+        "seconds": 384.04257782676723,
+        "useful_tokens_per_second": 7086.899102181537,
+        "seconds_per_update": 32.0035481522306,
+        "phase_mean_seconds": {
+          "generation_wait": 12.92520879356501,
+          "training": 15.672956721168399,
+          "publication": 3.4053826374971927
+        },
+        "trainer_wait_fraction": 0.4038679940137869,
+        "discarded_tokens": 825605,
+        "discarded_token_fraction": 0.2327433782992922,
+        "optimizer_median_seconds": 14.65813556901412,
+        "occupancy": {
+          "scope": "Sampled occupancy during warm normal cycles; not hardware GPU utilization or exact per-request waits.",
+          "start_unix": 1789362098.157575,
+          "end_unix": 1789362482.2807071,
+          "max_sample_hold_seconds": 10,
+          "pipeline": {
+            "producer_owned_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 127.96353301252024,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_active_group_tasks": {
+              "coverage_fraction": 1.0,
+              "mean": 127.96353301252024,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_admission_open": {
+              "coverage_fraction": 1.0,
+              "mean": 0.8865796479052062,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.11342035209479384
+            },
+            "producer_unfinished_samples": {
+              "coverage_fraction": 0,
+              "mean": null,
+              "p95": null,
+              "maximum": null,
+              "empty_fraction": null
+            },
+            "completed_queue_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 10.153693921962894,
+              "p95": 27.0,
+              "maximum": 30.0,
+              "empty_fraction": 0.37356012772631847
+            },
+            "completed_queue_capacity_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 32.0,
+              "p95": 32.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.0
+            },
+            "http_active_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 128.0,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "http_waiting_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 329.4989512138378,
+              "p95": 342.0,
+              "maximum": 347.0,
+              "empty_fraction": 0.0
+            },
+            "http_capacity_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 128.0,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "completed_queue_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 40.614775687851576,
+              "p95": 108.0,
+              "maximum": 120.0,
+              "empty_fraction": 0.37356012772631847
+            },
+            "completed_queue_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 74144.48639492219,
+              "p95": 206615.0,
+              "maximum": 260003.0,
+              "empty_fraction": 0.37356012772631847
+            },
+            "producer_ready_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "producer_ready_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "producer_ready_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_queue_full": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_put_blocked": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            },
+            "completed_put_current_wait_seconds": {
+              "coverage_fraction": 1.0,
+              "mean": 0.0,
+              "p95": 0.0,
+              "maximum": 0.0,
+              "empty_fraction": 1.0
+            }
+          },
+          "engines": {
+            "http://172.17.0.4:15000": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.14865800519868294,
+                  "p95": 0.8311688311688312,
+                  "maximum": 0.9552238805970149,
+                  "empty_fraction": 0.7255475447006208
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05135881637866611,
+                  "p95": 0.07201766967773438,
+                  "maximum": 0.07938257853190105,
+                  "empty_fraction": 0.10153269955961756
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2301.8155098351776,
+                  "p95": 3219.083921093488,
+                  "maximum": 3228.3509340151904,
+                  "empty_fraction": 0.16718160075046495
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10697485182433893,
+                  "p95": 0.1240234375,
+                  "maximum": 0.1240234375,
+                  "empty_fraction": 0.10153269955961756
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.301548617587892,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8459650687602526
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.864725890168994,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.10153269955961756
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10642511873302972,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.10153269955961756
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15003": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.11022268047735746,
+                  "p95": 0.49230769230769234,
+                  "maximum": 0.9078014184397163,
+                  "empty_fraction": 0.77646807454342
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.051886638695383604,
+                  "p95": 0.06969324747721355,
+                  "maximum": 0.07772191365559895,
+                  "empty_fraction": 0.10152521040227692
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2362.5101614888617,
+                  "p95": 3222.682090262382,
+                  "maximum": 3232.9479020947965,
+                  "empty_fraction": 0.15404301376973997
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10523579592851913,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.10152521040227692
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.5639632573474755,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8590861655234489
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.34063083854871,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.10152521040227692
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10500967484798658,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.10152521040227692
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15006": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.16016091650074413,
+                  "p95": 0.6881720430107527,
+                  "maximum": 0.9696969696969697,
+                  "empty_fraction": 0.6818141113810992
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05120156193898631,
+                  "p95": 0.06849924723307292,
+                  "maximum": 0.07009379069010417,
+                  "empty_fraction": 0.10152556046731423
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2311.4463865708317,
+                  "p95": 3223.989211564198,
+                  "maximum": 3242.0097680358613,
+                  "empty_fraction": 0.154043190043624
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10539141401147217,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.10152556046731423
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.603330273595254,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8459539784019431
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.32278108188208,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.10152556046731423
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10503183554758883,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.10152556046731423
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15009": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.16215068513773812,
+                  "p95": 0.7901234567901234,
+                  "maximum": 0.9770992366412213,
+                  "empty_fraction": 0.6789249191121663
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05417582847449519,
+                  "p95": 0.07668050130208333,
+                  "maximum": 0.08821741739908855,
+                  "empty_fraction": 0.1015252948151228
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2319.675178126231,
+                  "p95": 3213.3772255309163,
+                  "maximum": 3230.327559339255,
+                  "empty_fraction": 0.15404322666390272
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10558118569831099,
+                  "p95": 0.125,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.1015252948151228
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 3.537603467416539,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8459539119888952
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.392087494237504,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.1015252948151228
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10502672237600015,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.1015252948151228
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            }
+          },
+          "node_roles": {
+            "0": {
+              "judges": {},
+              "ray_gpus": 6,
+              "rollout_gpus": 4,
+              "trainer_gpus": 2
+            }
+          },
+          "hardware": {
+            "gpu_usage_node0": [
+              {
+                "uuid": "GPU-0b667c16-d930-6cab-7688-d12f6522efc4",
+                "index": 0.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 21.52,
+                    "p95": 74.0,
+                    "maximum": 77.0,
+                    "empty_fraction": 0.44
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 6.0,
+                    "p95": 26.0,
+                    "maximum": 27.0,
+                    "empty_fraction": 0.44
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 224439.0,
+                    "p95": 224439.0,
+                    "maximum": 224439.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-18ba8348-6960-9af3-adc0-47c6ddd9061d",
+                "index": 1.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 41.48,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.36
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 5.72,
+                    "p95": 24.0,
+                    "maximum": 27.0,
+                    "empty_fraction": 0.44
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 220086.52,
+                    "p95": 220087.0,
+                    "maximum": 220087.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-43c81fe2-9ea9-e799-6090-09966216b3d3",
+                "index": 2.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 67.16,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.04
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 27.6,
+                    "p95": 43.0,
+                    "maximum": 43.0,
+                    "empty_fraction": 0.04
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 87606.0,
+                    "p95": 90356.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-606dfcf9-0d0f-68da-1682-f42866ec7dac",
+                "index": 5.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 74.0,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.04
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 30.88,
+                    "p95": 43.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.04
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 87606.16,
+                    "p95": 90356.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-63f81411-d9eb-34b9-74de-86107424cd7b",
+                "index": 3.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 80.72,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.04
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 33.64,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.04
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 87606.88,
+                    "p95": 90356.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-a1953eea-a15b-4b7a-b728-25badf88218e",
+                "index": 4.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 71.52,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.04
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 29.8,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.04
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 87606.16,
+                    "p95": 90356.0,
+                    "maximum": 90366.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6508329726184156,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "caches": [
+          {
+            "worker": "/tmp/core-triton-_cmv264l",
+            "cubins_start": 189,
+            "cubins_end": 190,
+            "cubins_added": 1,
+            "last_write_unix": 1789362382.814454,
+            "wrote_in_window": true
+          },
+          {
+            "worker": "/tmp/core-triton-_wro6vhx",
+            "cubins_start": 712,
+            "cubins_end": 712,
+            "cubins_added": 0,
+            "last_write_unix": 1789361660.873133,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-cc4kli37",
+            "cubins_start": 190,
+            "cubins_end": 190,
+            "cubins_added": 0,
+            "last_write_unix": 1789361738.2060375,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-iiv1oc7k",
+            "cubins_start": 189,
+            "cubins_end": 190,
+            "cubins_added": 1,
+            "last_write_unix": 1789362227.0805714,
+            "wrote_in_window": true
+          },
+          {
+            "worker": "/tmp/core-triton-lmkapqc9",
+            "cubins_start": 189,
+            "cubins_end": 190,
+            "cubins_added": 1,
+            "last_write_unix": 1789362416.5124297,
+            "wrote_in_window": true
+          },
+          {
+            "worker": "/tmp/core-triton-z07t8dmz",
+            "cubins_start": 706,
+            "cubins_end": 706,
+            "cubins_added": 0,
+            "last_write_unix": 1789362087.6456864,
+            "wrote_in_window": false
+          }
+        ]
+      },
+      {
+        "updates": [
+          36,
+          47
+        ],
+        "tokens": 2480229,
+        "seconds": 366.62426060880534,
+        "useful_tokens_per_second": 6765.043305866899,
+        "seconds_per_update": 30.552021717400446,
+        "phase_mean_seconds": {
+          "generation_wait": 13.062509738238683,
+          "training": 14.066402736343056,
+          "publication": 3.423109242818706
+        },
+        "trainer_wait_fraction": 0.427549766069953,
+        "discarded_tokens": 969772,
+        "discarded_token_fraction": 0.28109325185702844,
+        "optimizer_median_seconds": 13.092735393031035,
+        "occupancy": {
+          "scope": "Sampled occupancy during warm normal cycles; not hardware GPU utilization or exact per-request waits.",
+          "start_unix": 1789362482.28295,
+          "end_unix": 1789362848.979384,
+          "max_sample_hold_seconds": 10,
+          "pipeline": {
+            "producer_owned_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 127.9836241077844,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_active_group_tasks": {
+              "coverage_fraction": 1.0,
+              "mean": 127.96179669931331,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "producer_admission_open": {
+              "coverage_fraction": 1.0,
+              "mean": 0.8863744134468814,
+              "p95": 1.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.1136255865531186
+            },
+            "producer_unfinished_samples": {
+              "coverage_fraction": 0,
+              "mean": null,
+              "p95": null,
+              "maximum": null,
+              "empty_fraction": null
+            },
+            "completed_queue_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 10.150956896128434,
+              "p95": 30.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.38360741116958796
+            },
+            "completed_queue_capacity_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 32.0,
+              "p95": 32.0,
+              "maximum": 32.0,
+              "empty_fraction": 0.0
+            },
+            "http_active_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 128.0,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "http_waiting_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 330.7884221225673,
+              "p95": 344.0,
+              "maximum": 346.0,
+              "empty_fraction": 0.0
+            },
+            "http_capacity_requests": {
+              "coverage_fraction": 1.0,
+              "mean": 128.0,
+              "p95": 128.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.0
+            },
+            "completed_queue_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 40.60382758451374,
+              "p95": 120.0,
+              "maximum": 128.0,
+              "empty_fraction": 0.38360741116958796
+            },
+            "completed_queue_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 76752.23696852816,
+              "p95": 237113.0,
+              "maximum": 275698.0,
+              "empty_fraction": 0.38360741116958796
+            },
+            "producer_ready_groups": {
+              "coverage_fraction": 1.0,
+              "mean": 0.021827408471082138,
+              "p95": 0.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.9781725915289179
+            },
+            "producer_ready_samples": {
+              "coverage_fraction": 1.0,
+              "mean": 0.08730963388432855,
+              "p95": 0.0,
+              "maximum": 4.0,
+              "empty_fraction": 0.9781725915289179
+            },
+            "producer_ready_response_tokens": {
+              "coverage_fraction": 1.0,
+              "mean": 108.53279276850887,
+              "p95": 0.0,
+              "maximum": 6591.0,
+              "empty_fraction": 0.9781725915289179
+            },
+            "completed_queue_full": {
+              "coverage_fraction": 1.0,
+              "mean": 0.021826635407413527,
+              "p95": 0.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.9781733645925865
+            },
+            "completed_put_blocked": {
+              "coverage_fraction": 1.0,
+              "mean": 0.010916054960262577,
+              "p95": 0.0,
+              "maximum": 1.0,
+              "empty_fraction": 0.9890839450397374
+            },
+            "completed_put_current_wait_seconds": {
+              "coverage_fraction": 1.0,
+              "mean": 0.029980674631821268,
+              "p95": 0.0,
+              "maximum": 3.748145118006505,
+              "empty_fraction": 0.9890839450397374
+            }
+          },
+          "engines": {
+            "http://172.17.0.4:15000": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.11566817800821669,
+                  "p95": 0.48854961832061067,
+                  "maximum": 0.8,
+                  "empty_fraction": 0.7495213572069611
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.04886304183067486,
+                  "p95": 0.07386144002278645,
+                  "maximum": 0.08032862345377605,
+                  "empty_fraction": 0.11190606799194443
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2333.7077165562246,
+                  "p95": 3215.5067090187267,
+                  "maximum": 3229.2069659949766,
+                  "empty_fraction": 0.15316558909350073
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10229249105944085,
+                  "p95": 0.123046875,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.11190606799194443
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 4.282793730774836,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8330600684384358
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 26.999631769424013,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.1257028377587338
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10237103997648117,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.11190606799194443
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15003": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.15871488416850923,
+                  "p95": 0.7804878048780488,
+                  "maximum": 0.9481481481481482,
+                  "empty_fraction": 0.6912212099126501
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.04803651415243679,
+                  "p95": 0.0658734639485677,
+                  "maximum": 0.06997299194335938,
+                  "empty_fraction": 0.11189595444664141
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2336.9224715921127,
+                  "p95": 3219.7826031329914,
+                  "maximum": 3230.667922128652,
+                  "empty_fraction": 0.1531657009244099
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10238352105631782,
+                  "p95": 0.123046875,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.11189595444664141
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 4.22534430656358,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8468602835074792
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 26.86194939401691,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.12569117028393711
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10237162122413337,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.11189595444664141
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15006": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.1558645573780401,
+                  "p95": 0.5079365079365079,
+                  "maximum": 0.9696969696969697,
+                  "empty_fraction": 0.6617959795643837
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0466487266548052,
+                  "p95": 0.06627527872721355,
+                  "maximum": 0.07052103678385417,
+                  "empty_fraction": 0.11189725935730828
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2285.189855599814,
+                  "p95": 3214.8156222318585,
+                  "maximum": 3230.871184599627,
+                  "empty_fraction": 0.16690976972507385
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.1023703540429884,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.11189725935730828
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 4.268708844274887,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8468319018630197
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 26.972334635114468,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.12569243488346232
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10187750760658239,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.11189725935730828
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            },
+            "http://172.17.0.4:15009": {
+              "series": [
+                {
+                  "name": "cache_hit_rate",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.08820112677208833,
+                  "p95": 0.47761194029850745,
+                  "maximum": 0.927536231884058,
+                  "empty_fraction": 0.8209957369537281
+                },
+                {
+                  "name": "full_token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.05174710415040488,
+                  "p95": 0.07303873697916667,
+                  "maximum": 0.0764757792154948,
+                  "empty_fraction": 0.11189546356096454
+                },
+                {
+                  "name": "fwd_occupancy",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 0,
+                  "mean": null,
+                  "p95": null,
+                  "maximum": null,
+                  "empty_fraction": null
+                },
+                {
+                  "name": "gen_throughput",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 2342.2409248659574,
+                  "p95": 3215.6227088493633,
+                  "maximum": 3226.2938517235475,
+                  "empty_fraction": 0.13940948221560853
+                },
+                {
+                  "name": "mamba_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10329777237414227,
+                  "p95": 0.1240234375,
+                  "maximum": 0.125,
+                  "empty_fraction": 0.11189546356096454
+                },
+                {
+                  "name": "num_queue_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 4.199945866687986,
+                  "p95": 31.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.8468476641695951
+                },
+                {
+                  "name": "num_running_reqs",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 27.10915539497793,
+                  "p95": 32.0,
+                  "maximum": 32.0,
+                  "empty_fraction": 0.12569072621119898
+                },
+                {
+                  "name": "token_usage",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.10298723783063848,
+                  "p95": 0.12,
+                  "maximum": 0.12,
+                  "empty_fraction": 0.11189546356096454
+                },
+                {
+                  "name": "utilization",
+                  "labels": "{engine_type=\"unified\",model_name=\"/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run/prepared/hf\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}",
+                  "coverage_fraction": 1.0,
+                  "mean": 0.0,
+                  "p95": 0.0,
+                  "maximum": 0.0,
+                  "empty_fraction": 1.0
+                }
+              ],
+              "failed_observations": 0
+            }
+          },
+          "node_roles": {
+            "0": {
+              "judges": {},
+              "ray_gpus": 6,
+              "rollout_gpus": 4,
+              "trainer_gpus": 2
+            }
+          },
+          "hardware": {
+            "gpu_usage_node0": [
+              {
+                "uuid": "GPU-0b667c16-d930-6cab-7688-d12f6522efc4",
+                "index": 0.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 18.625,
+                    "p95": 60.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.5416666666666666
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 8.25,
+                    "p95": 23.0,
+                    "maximum": 94.0,
+                    "empty_fraction": 0.5416666666666666
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 224442.33333333334,
+                    "p95": 224479.0,
+                    "maximum": 224479.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-18ba8348-6960-9af3-adc0-47c6ddd9061d",
+                "index": 1.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 34.625,
+                    "p95": 99.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.5416666666666666
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 8.333333333333334,
+                    "p95": 25.0,
+                    "maximum": 93.0,
+                    "empty_fraction": 0.5416666666666666
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 220087.0,
+                    "p95": 220087.0,
+                    "maximum": 220087.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-43c81fe2-9ea9-e799-6090-09966216b3d3",
+                "index": 2.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 87.83333333333333,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 37.333333333333336,
+                    "p95": 43.0,
+                    "maximum": 43.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 87557.33333333333,
+                    "p95": 90356.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-606dfcf9-0d0f-68da-1682-f42866ec7dac",
+                "index": 5.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 81.875,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 34.708333333333336,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 87556.66666666667,
+                    "p95": 90356.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-63f81411-d9eb-34b9-74de-86107424cd7b",
+                "index": 3.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 79.45833333333333,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 33.583333333333336,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 87554.25,
+                    "p95": 90356.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              },
+              {
+                "uuid": "GPU-a1953eea-a15b-4b7a-b728-25badf88218e",
+                "index": 4.0,
+                "metrics": {
+                  "utilization.gpu": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 73.0,
+                    "p95": 100.0,
+                    "maximum": 100.0,
+                    "empty_fraction": 0.0
+                  },
+                  "utilization.memory": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 30.708333333333332,
+                    "p95": 44.0,
+                    "maximum": 44.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.used": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 87515.83333333333,
+                    "p95": 89352.0,
+                    "maximum": 90356.0,
+                    "empty_fraction": 0.0
+                  },
+                  "memory.total": {
+                    "coverage_fraction": 0.6544923204414315,
+                    "mean": 275040.0,
+                    "p95": 275040.0,
+                    "maximum": 275040.0,
+                    "empty_fraction": 0.0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "caches": [
+          {
+            "worker": "/tmp/core-triton-_cmv264l",
+            "cubins_start": 190,
+            "cubins_end": 190,
+            "cubins_added": 0,
+            "last_write_unix": 1789362382.814454,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-_wro6vhx",
+            "cubins_start": 712,
+            "cubins_end": 712,
+            "cubins_added": 0,
+            "last_write_unix": 1789361660.873133,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-cc4kli37",
+            "cubins_start": 190,
+            "cubins_end": 190,
+            "cubins_added": 0,
+            "last_write_unix": 1789361738.2060375,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-iiv1oc7k",
+            "cubins_start": 190,
+            "cubins_end": 190,
+            "cubins_added": 0,
+            "last_write_unix": 1789362227.0805714,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-lmkapqc9",
+            "cubins_start": 190,
+            "cubins_end": 190,
+            "cubins_added": 0,
+            "last_write_unix": 1789362416.5124297,
+            "wrote_in_window": false
+          },
+          {
+            "worker": "/tmp/core-triton-z07t8dmz",
+            "cubins_start": 706,
+            "cubins_end": 706,
+            "cubins_added": 0,
+            "last_write_unix": 1789362087.6456864,
+            "wrote_in_window": false
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,6 +4,7 @@ import asyncio
 import time
 import uuid
 
+import httpx
 from miles.rollout.base_types import GenerateFnOutput, RolloutFnEvalOutput
 from miles.rollout.generate_hub.single_turn import generate as single_turn_generate
 from miles.rollout.generate_utils.generate_endpoint_utils import (
@@ -15,7 +16,7 @@ from miles.rollout.inference_rollout.inference_rollout_eval import run_eval_data
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import pipeline_observer, policy_refresh
+from open_instruct.miles import pipeline_observer, policy_refresh, sibling_timing
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
 
 logger = logger_utils.setup_logger(__name__)
@@ -60,9 +61,30 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
     async def _generate_group(self, prompt_group):
         if any(s.generate_function_path or s.response_length or s.multimodal_inputs for s in prompt_group):
             raise ValueError("Policy refresh supports fresh, single-turn text requests without custom generators")
-        return await super()._generate_group(prompt_group)
+        observed = getattr(self.args.olmo_core, "pipeline_observation_interval", 0) > 0
+        records = sibling_timing.start_group(prompt_group) if observed else None
+        outcome = "completed"
+        try:
+            return await super()._generate_group(prompt_group)
+        except BaseException as error:
+            outcome = type(error).__name__
+            raise
+        finally:
+            if records is not None:
+                sibling_timing.write_group(self.args, records, outcome)
 
     async def _generate_response(self, input):
+        sibling_timing.admitted(input.sample)
+        outcome = "completed"
+        try:
+            return await self._generate_response_impl(input)
+        except BaseException as error:
+            outcome = type(error).__name__
+            raise
+        finally:
+            sibling_timing.finished(input.sample, outcome)
+
+    async def _generate_response_impl(self, input):
         sample = input.sample
         payload, halt = compute_request_payload(
             input.args,
@@ -72,12 +94,40 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         if payload is None:
             raise ValueError(f"Policy refresh prompt has no response-token budget ({halt}); increase context length")
         payload["rid"] = uuid.uuid4().hex
+        timing = sibling_timing.sample_record(sample)
+        if timing is not None:
+            timing["request_id"] = payload["rid"]
         # With the qualified MILES router the complete response metadata survives.
         # Ambiguous failures must not transparently resample under newer weights.
         url = f"http://{input.args.sglang_router_ip}:{input.args.sglang_router_port}/generate"
         timeout = self.args.olmo_core.refresh_request_timeout
+        started = time.monotonic()
+        logger.info(
+            "Policy refresh request submitted: request=%s group=%s sample=%s url=%s prompt_tokens=%d",
+            payload["rid"],
+            sample.group_index,
+            sample.index,
+            url,
+            len(payload.get("input_ids", [])),
+        )
         try:
-            output = await asyncio.wait_for(post(url, payload, max_retries=1), timeout)
+            output = await asyncio.wait_for(
+                post(url, payload, max_retries=1, headers={"x-miles-request-id": payload["rid"]}), timeout
+            )
+        except httpx.HTTPError as error:
+            logger.exception(
+                "Policy refresh HTTP failure: request=%s group=%s sample=%s url=%s elapsed_seconds=%.3f "
+                "error=%s status=%s attempts=1 delivery=unknown; correlate request with miles_router logs. "
+                "No automatic resampling; propagating failure to the producer.",
+                payload["rid"],
+                sample.group_index,
+                sample.index,
+                url,
+                time.monotonic() - started,
+                type(error).__name__,
+                getattr(getattr(error, "response", None), "status_code", None),
+            )
+            raise
         except TimeoutError as error:
             raise TimeoutError(
                 f"Policy refresh request {payload['rid']} exceeded core.refresh_request_timeout={timeout:g}s. "
@@ -85,6 +135,7 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
                 "admission pressure; increase the request timeout for deliberately long responses. "
                 "core.engine_drain_timeout only controls save/eval/shutdown draining."
             ) from error
+        sibling_timing.response_received(sample, payload["rid"], output.get("meta_info", {}))
         if output.get("meta_info", {}).get("finish_reason", {}).get("type") not in ("stop", "length"):
             raise RuntimeError("Policy refresh request did not finish; refusing a partial training sample")
         await update_sample_from_response(input.args, sample, payload, output)

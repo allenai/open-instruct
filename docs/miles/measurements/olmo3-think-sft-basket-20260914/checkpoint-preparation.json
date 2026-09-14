@@ -1,0 +1,202 @@
+{
+  "identity": {
+    "files": [
+      {
+        "mtime_ns": 1789369094995980806,
+        "path": ".cache/huggingface/.gitignore",
+        "size": 1
+      },
+      {
+        "mtime_ns": 1789369094888340065,
+        "path": ".cache/huggingface/CACHEDIR.TAG",
+        "size": 191
+      },
+      {
+        "mtime_ns": 1789369095272004482,
+        "path": ".cache/huggingface/download/README.md.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095274015628,
+        "path": ".cache/huggingface/download/README.md.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369095207998989,
+        "path": ".cache/huggingface/download/config.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095213353931,
+        "path": ".cache/huggingface/download/config.json.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369095215999675,
+        "path": ".cache/huggingface/download/generation_config.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095221172859,
+        "path": ".cache/huggingface/download/generation_config.json.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369112829511656,
+        "path": ".cache/huggingface/download/model-00001-of-00003.safetensors.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369112833511999,
+        "path": ".cache/huggingface/download/model-00001-of-00003.safetensors.metadata",
+        "size": 125
+      },
+      {
+        "mtime_ns": 1789369113505569692,
+        "path": ".cache/huggingface/download/model-00002-of-00003.safetensors.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369113511322443,
+        "path": ".cache/huggingface/download/model-00002-of-00003.safetensors.metadata",
+        "size": 125
+      },
+      {
+        "mtime_ns": 1789369112589491052,
+        "path": ".cache/huggingface/download/model-00003-of-00003.safetensors.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369112597583368,
+        "path": ".cache/huggingface/download/model-00003-of-00003.safetensors.metadata",
+        "size": 125
+      },
+      {
+        "mtime_ns": 1789369095179996585,
+        "path": ".cache/huggingface/download/model.safetensors.index.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095182474764,
+        "path": ".cache/huggingface/download/model.safetensors.index.json.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369095175996241,
+        "path": ".cache/huggingface/download/special_tokens_map.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095179054959,
+        "path": ".cache/huggingface/download/special_tokens_map.json.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369095408016158,
+        "path": ".cache/huggingface/download/tokenizer.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095414104997,
+        "path": ".cache/huggingface/download/tokenizer.json.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369095368012724,
+        "path": ".cache/huggingface/download/tokenizer_config.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095373154216,
+        "path": ".cache/huggingface/download/tokenizer_config.json.metadata",
+        "size": 101
+      },
+      {
+        "mtime_ns": 1789369095420017188,
+        "path": ".cache/huggingface/download/vocab.json.lock",
+        "size": 0
+      },
+      {
+        "mtime_ns": 1789369095423606542,
+        "path": ".cache/huggingface/download/vocab.json.metadata",
+        "size": 100
+      },
+      {
+        "mtime_ns": 1789369094881193268,
+        "path": ".cache/huggingface/trees/6ff857587e040d6d523a3d5f3a56e918f5401d66.json",
+        "sha256": "a803bfadab72a1dc80cfc6aafdb95fd96c3d2c7789197a122ba7350759d451e1",
+        "size": 2242
+      },
+      {
+        "mtime_ns": 1789369095264003795,
+        "path": "README.md",
+        "size": 11868
+      },
+      {
+        "mtime_ns": 1789369095203998645,
+        "path": "config.json",
+        "sha256": "64edc4f827648e6a18a7c0ce33030689f102657f5a05f27315b7f087a2d69077",
+        "size": 1629
+      },
+      {
+        "mtime_ns": 1789369095211999331,
+        "path": "generation_config.json",
+        "sha256": "57d5d2ffcdb854bdff4bdd6bbaa27bf3557ad284b9f6c8212aab38b787bcf4e7",
+        "size": 225
+      },
+      {
+        "mtime_ns": 1789369110621322099,
+        "path": "model-00001-of-00003.safetensors",
+        "size": 4969984976
+      },
+      {
+        "mtime_ns": 1789369110601320383,
+        "path": "model-00002-of-00003.safetensors",
+        "size": 4981161496
+      },
+      {
+        "mtime_ns": 1789369109469223200,
+        "path": "model-00003-of-00003.safetensors",
+        "size": 4644917240
+      },
+      {
+        "mtime_ns": 1789369095171995898,
+        "path": "model.safetensors.index.json",
+        "sha256": "47a8266860f2a5f95c021fb4d7d3a469a95ee8b445742becbb6b19632cfc6e95",
+        "size": 29630
+      },
+      {
+        "mtime_ns": 1789369095171995898,
+        "path": "special_tokens_map.json",
+        "sha256": "8abae158f82012899936754210d899b34090847e083f6ba6d12e357bf0e85d19",
+        "size": 580
+      },
+      {
+        "mtime_ns": 1789369095396015127,
+        "path": "tokenizer.json",
+        "sha256": "ae12cb7a47a48bba7131225fb776a7c1c138747986affea7902b5d9966a49891",
+        "size": 4822289
+      },
+      {
+        "mtime_ns": 1789369095368012724,
+        "path": "tokenizer_config.json",
+        "sha256": "768461353d27a100fe02df01fc2a046fa159217856046eb94d59578838dea5c0",
+        "size": 5886
+      },
+      {
+        "mtime_ns": 1789369095412016502,
+        "path": "vocab.json",
+        "sha256": "ab4870ea01f3e9de5c4aaab9a6fa89657246d5da122f0375b66dbfd5a1ea0481",
+        "size": 2305049
+      }
+    ],
+    "path": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66"
+  },
+  "model": "allenai/Olmo-3-7B-Think-SFT",
+  "revision": "6ff857587e040d6d523a3d5f3a56e918f5401d66",
+  "shards": [
+    "model-00001-of-00003.safetensors",
+    "model-00002-of-00003.safetensors",
+    "model-00003-of-00003.safetensors"
+  ]
+}

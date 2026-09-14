@@ -1,8 +1,10 @@
 """The refresh contract preserves behavior provenance and owns live requests."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
+import httpx
 import numpy as np
 import pytest
 import torch
@@ -10,6 +12,7 @@ from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_funct
 from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample
+from sglang.srt.observability import req_time_stats
 
 from open_instruct.miles import policy_refresh, refreshing_rollout
 from open_instruct.miles.async_buffer import RefreshPolicyDataBuffer
@@ -313,3 +316,126 @@ def test_request_deadline_is_independent_of_drain_and_cancels_timeout(monkeypatc
         assert finalized == [True]
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure_type", ["read", "status"])
+def test_transport_failure_logs_request_identity_without_resampling(monkeypatch, caplog, failure_type):
+    async def scenario():
+        p = producer()
+        p.args.olmo_core.refresh_request_timeout = 1
+        p.args.sglang_router_ip, p.args.sglang_router_port = "localhost", 1234
+        value = sample()
+        value.index = 17
+        calls = []
+        failure = httpx.ReadError("connection reset")
+        if failure_type == "status":
+            response = httpx.Response(503, request=httpx.Request("POST", "http://localhost:1234/generate"))
+            failure = httpx.HTTPStatusError("unavailable", request=response.request, response=response)
+
+        async def post(url, payload, **kwargs):
+            calls.append((url, dict(payload), kwargs))
+            raise failure
+
+        monkeypatch.setattr(refreshing_rollout, "post", post)
+        monkeypatch.setattr(refreshing_rollout, "compute_prompt_ids_from_sample", lambda *args: [9])
+        monkeypatch.setattr(
+            refreshing_rollout,
+            "compute_request_payload",
+            lambda *args, **kwargs: ({"input_ids": [9], "private": "secret prompt"}, None),
+        )
+        request = SimpleNamespace(args=p.args, state=None, sample=value, sampling_params={})
+        original_scores = list(value.rollout_log_probs)
+        with pytest.raises(httpx.HTTPError) as caught:
+            await p._generate_response(request)
+        assert caught.value is failure
+        assert len(calls) == 1
+        _, payload, kwargs = calls[0]
+        assert kwargs == {"max_retries": 1, "headers": {"x-miles-request-id": payload["rid"]}}
+        assert value.rollout_log_probs == original_scores
+        assert f"request={payload['rid']} group=0 sample=17" in caplog.text
+        assert "delivery=unknown" in caplog.text
+        assert f"error={type(failure).__name__}" in caplog.text
+        assert "secret prompt" not in caplog.text
+        if failure_type == "status":
+            assert "status=503" in caplog.text
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_group_timing_records_before_buffering_and_preserves_error(monkeypatch, tmp_path, fails):
+    async def scenario():
+        p = producer()
+        p.args.save = str(tmp_path)
+        p.args.olmo_core.pipeline_observation_interval = 2
+        values = [Sample(group_index=5, index=i, metadata={}) for i in range(2)]
+        failure = httpx.ReadError("test connection reset")
+
+        async def generate(input):
+            if fails and input.sample.index == 1:
+                raise failure
+            refreshing_rollout.sibling_timing.response_received(
+                input.sample,
+                f"request-{input.sample.index}",
+                {
+                    "request_received_ts": 100 + input.sample.index,
+                    "forward_entry_time": 101 + input.sample.index,
+                    "request_finished_ts": 110 + input.sample.index,
+                },
+            )
+            input.sample.response_length = 10
+            return SimpleNamespace(samples=input.sample)
+
+        async def group(self, values):
+            for value in values:
+                await self._generate_response(SimpleNamespace(sample=value))
+            return SimpleNamespace(group=values)
+
+        monkeypatch.setattr(p, "_generate_response_impl", generate)
+        monkeypatch.setattr(refreshing_rollout.ManagedFullyAsyncRolloutFn, "_generate_group", group)
+        if fails:
+            with pytest.raises(httpx.ReadError) as caught:
+                await p._generate_group(values)
+            assert caught.value is failure
+        else:
+            assert (await p._generate_group(values)).group is values
+        rows = next(tmp_path.glob("sibling_timing_*.jsonl")).read_text().splitlines()
+        assert len(rows) == 1
+        row = json.loads(rows[0])
+        assert row["summary"]["admission_samples"] == 2
+        assert row["summary"]["call_finished_samples"] == 2
+        assert row["outcome"] == ("ReadError" if fails else "completed")
+        if fails:
+            assert row["samples"][1]["outcome"] == "ReadError"
+            assert "engine_first_forward_skew_seconds" not in row["summary"]
+        else:
+            assert row["summary"]["engine_first_forward_skew_seconds"] == 1
+            assert row["summary"]["engine_finished_skew_seconds"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_pinned_engine_metadata_retains_first_forward_across_retraction():
+    scheduler = req_time_stats.SchedulerReqTimeStats()
+    scheduler.set_scheduler_recv_time(ts=90)
+    scheduler.set_wait_queue_entry_time(ts=95)
+    scheduler.set_forward_entry_time(ts=100)
+    scheduler.set_prefill_finished_time(ts=102)
+    first = scheduler.convert_to_output_meta_info()
+    scheduler.set_wait_queue_entry_time(ts=110)
+    scheduler.set_forward_entry_time(ts=120)
+    scheduler.set_prefill_finished_time(ts=122)
+    later = scheduler.convert_to_output_meta_info()
+    assert first["forward_entry_time"] == later["forward_entry_time"]
+    assert first["prefill_finished_time"] == later["prefill_finished_time"]
+    assert first["prefill_finished_time"] - first["forward_entry_time"] == 2
+    api = req_time_stats.APIServerReqTimeStats()
+    api.set_created_time(ts=90)
+    api.set_finished_time(ts=130)
+    metadata = {**later, **api.convert_to_output_meta_info()}
+    value = sample()
+    refreshing_rollout.sibling_timing.start_group([value])
+    refreshing_rollout.sibling_timing.response_received(value, "rid", metadata)
+    summary = refreshing_rollout.sibling_timing.summarize([refreshing_rollout.sibling_timing.sample_record(value)])
+    assert summary["engine_initial_wait_mean_seconds"] == 10
+    assert summary["engine_execution_mean_seconds"] == 30
