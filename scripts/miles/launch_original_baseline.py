@@ -74,6 +74,7 @@ def specification(image, source_dataset, stage, name):
         task["envVars"].append({"name": "WANDB_API_KEY", "secret": "robertb_WANDB_API_KEY"})
     return {
         "version": "v2",
+        "budget": "ai2/oe-other",
         "description": "Original Open Instruct Olmo 3 SFT GSM8K control: " + stage,
         "tasks": [task],
     }
@@ -140,8 +141,6 @@ def main():
                     str(path),
                     "--workspace",
                     "ai2/open-instruct-dev",
-                    "--budget",
-                    "ai2/oe-other",
                     "--format",
                     "json",
                 ],

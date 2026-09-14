@@ -51,6 +51,7 @@ def test_reward_contract_changes_are_not_silently_adopted(change):
 
 
 def test_cpu_weka_preparation_uses_saturn_and_training_is_the_original_backend():
+    assert launch_original_baseline.specification("image", "source", "prepare", "test")["budget"] == "ai2/oe-other"
     cpu = launch_original_baseline.specification("image", "source", "prepare", "test")["tasks"][0]
     assert cpu["resources"]["gpuCount"] == 0
     assert cpu["constraints"] == {"cluster": ["ai2/saturn"]}
