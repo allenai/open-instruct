@@ -78,3 +78,18 @@ avoid changing pool allocation between measurements. Startup allocation failure
 is retained as failure evidence, not silently retried with different settings.
 The engine uses a 0.9 memory fraction for this capacity experiment; the RL arms
 retain 0.6. No run defaults are changed on the basis of an unmeasured ceiling.
+
+### Independent engine capacity, completed
+
+The TP1 B300 fixed-policy sweep (Beaker `01M2ER5D8WRAS7BQ1DG7Q7N438`)
+completed through 512 concurrent sequences. Warm output throughput continued
+increasing across 32, 64, 128, 256, and 512. This isolates engine batch capacity;
+it does not establish live refresh/routing reliability at those limits.
+
+The next screen compares 512 and 1024 using a 2,621,440-token KV pool and
+6,144 recurrent-state slots at memory fraction 0.9. That KV pool covers the
+actual fixed workload (512 input + 2048 output tokens per sequence), not 1024
+simultaneous full 6144-token contexts. Its pool configuration differs from the
+first screen, so the repeated 512 arm provides a within-screen control.
+Memory allocation, graph capture failure, and throughput decline are all useful
+outcomes; this is not a proposed production default.

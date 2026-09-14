@@ -17,7 +17,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--concurrencies", nargs="+", type=int, default=[32, 64, 128, 256, 512])
+    parser.add_argument("--max-total-tokens", type=int)
+    parser.add_argument("--max-mamba-cache-size", type=int)
     args = parser.parse_args()
+    worker_args = ["--concurrencies", *map(str, args.concurrencies)]
+    for key in ("max_total_tokens", "max_mamba_cache_size"):
+        value = getattr(args, key)
+        if value is not None:
+            worker_args.extend(["--" + key.replace("_", "-"), str(value)])
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT):
         raise RuntimeError("Commit changes before launch")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -66,7 +74,7 @@ export TOKENIZERS_PARALLELISM=false
 export TRITON_CACHE_DIR={shlex.quote(str(output / "tmp-7d/triton"))}
 python -m scripts.miles.sample_gpu_usage {shlex.quote(str(output / "gpu_usage.jsonl"))} &
 trap 'cp {shlex.quote(str(output))}/*.json* /output/ 2>/dev/null || true' EXIT
-python -m scripts.miles.inference_capacity --model {shlex.quote(str(CAMPAIGN / "hf"))} --output {shlex.quote(str(output))}
+python -m scripts.miles.inference_capacity --model {shlex.quote(str(CAMPAIGN / "hf"))} --output {shlex.quote(str(output))} {shlex.join(worker_args)}
 """
         spec = dict(
             version="v2",
