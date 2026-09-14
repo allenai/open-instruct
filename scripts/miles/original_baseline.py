@@ -14,9 +14,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+from safetensors import safe_open
+
 from open_instruct import dataset_transformation
 
-ORIGINAL_TRAINER_SHA256 = "b405883512b75c1bcd4ba373df4ca3d530fb66af764bf334cc1eeb8da5cc7b34"
+ORIGINAL_TRAINER_SHA256 = "6367478b4c957cfe595745dd1549ad1884585fc7bc4b21a589cbe8ed46cee3b1"
 PASSTHROUGH_TEMPLATE = "{{ messages[0]['content'] }}"
 
 
@@ -55,6 +57,64 @@ def read_jsonl(path):
         return [json.loads(line) for line in stream]
 
 
+def legacy_model(model, output):
+    config = json.loads((model / "config.json").read_text())
+    if config.get("model_type") != "olmo3" or config.get("architectures") != ["Olmo3ForCausalLM"]:
+        raise ValueError("Historical alias requires a public Olmo3ForCausalLM checkpoint")
+    shapes = {}
+    for shard in model.glob("*.safetensors"):
+        with safe_open(shard, framework="pt", device="cpu") as handle:
+            for name in handle.keys():  # noqa: SIM118 -- safe_open is not an iterable mapping
+                if name.endswith(("self_attn.q_norm.weight", "self_attn.k_norm.weight")):
+                    if name in shapes:
+                        raise ValueError(f"Duplicate checkpoint tensor: {name}")
+                    shapes[name] = handle.get_slice(name).get_shape()
+    head_dim = config["hidden_size"] // config["num_attention_heads"]
+    expected = {
+        f"model.layers.{layer}.self_attn.{kind}_norm.weight": [heads * head_dim]
+        for layer in range(config["num_hidden_layers"])
+        for kind, heads in (("q", config["num_attention_heads"]), ("k", config["num_key_value_heads"]))
+    }
+    if shapes != expected:
+        raise ValueError("Checkpoint Q/K norms do not match the historical global-normalization implementation")
+    output.mkdir()
+    links = {}
+    for path in model.iterdir():
+        if path.is_file() and path.name != "config.json":
+            (output / path.name).symlink_to(path.resolve())
+            links[path.name] = {"target": str(path.resolve()), "size": path.stat().st_size}
+    config.update(model_type="olmo2-retrofit", architectures=["Olmo2RetrofitForCausalLM"])
+    (output / "config.json").write_bytes(encoded(config))
+    return {"source_config_sha256": sha((model / "config.json").read_bytes()), "norm_shapes": shapes, "links": links}
+
+
+def restore_public_exports(output, source):
+    restored = []
+    for path in (output / "model").rglob("config.json"):
+        config = json.loads(path.read_text())
+        if config.get("model_type") != "olmo2-retrofit":
+            continue
+        if not list(path.parent.glob("*.safetensors")) and not list(path.parent.glob("pytorch_model*.bin")):
+            continue
+        config.update(model_type="olmo3", architectures=["Olmo3ForCausalLM"])
+        path.write_bytes(encoded(config))
+        for name in (
+            "tokenizer_config.json",
+            "chat_template.jinja",
+            "special_tokens_map.json",
+            "tokenizer.json",
+            "vocab.json",
+            "merges.txt",
+            "added_tokens.json",
+        ):
+            if (source / name).is_file():
+                shutil.copyfile(source / name, path.parent / name)
+        restored.append(str(path.parent))
+    if not restored:
+        raise ValueError("Original trainer exited without a public HF model export")
+    return restored
+
+
 def prepare(model, source, output):
     if output.exists():
         raise ValueError("Prepared comparison directory already exists; verify or use a fresh path")
@@ -65,6 +125,7 @@ def prepare(model, source, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".original-gsm8k-", dir=output.parent))
     try:
+        alias = legacy_model(model, staging / "legacy-model")
         token_root = staging / "tokenizer"
         token_root.mkdir()
         tokenizer = dataset_transformation.TokenizerConfig(tokenizer_name_or_path=str(model)).tokenizer
@@ -77,6 +138,7 @@ def prepare(model, source, output):
         receipt = {
             "model": str(model),
             "source": str(source),
+            "model_alias": alias,
             "splits": {},
             "original_chat_template_sha256": sha(original_template.encode()),
             "adapter_chat_template": PASSTHROUGH_TEMPLATE,
@@ -101,7 +163,9 @@ def prepare(model, source, output):
         if identities[0] & identities[1]:
             raise ValueError("Training and heldout identities overlap")
         receipt["files"] = {
-            str(p.relative_to(staging)): sha(p.read_bytes()) for p in staging.rglob("*") if p.is_file()
+            str(p.relative_to(staging)): sha(p.read_bytes())
+            for p in staging.rglob("*")
+            if p.is_file() and not p.is_symlink()
         }
         (staging / "preparation.json").write_bytes(encoded(receipt))
         staging.rename(output)
@@ -136,6 +200,10 @@ def train(model, prepared, output, *, smoke):
     for name, digest in receipt["files"].items():
         if sha((prepared / name).read_bytes()) != digest:
             raise ValueError(f"Prepared artifact changed: {name}")
+    for name, link in receipt["model_alias"]["links"].items():
+        path = prepared / "legacy-model" / name
+        if not path.is_symlink() or str(path.resolve()) != link["target"] or path.stat().st_size != link["size"]:
+            raise ValueError(f"Original model alias changed: {name}")
     if output.exists():
         raise ValueError("Use a fresh original-framework run directory")
     output.mkdir(parents=True)
@@ -149,7 +217,7 @@ def train(model, prepared, output, *, smoke):
     prefix = "smoke-" if smoke else ""
     options = {
         "exp_name": output.name,
-        "model_name_or_path": str(model),
+        "model_name_or_path": str(prepared / "legacy-model"),
         "tokenizer_name_or_path": str(prepared / "tokenizer"),
         "attn_implementation": "flash_attention_2",
         "torch_dtype": "bfloat16",
@@ -209,6 +277,7 @@ def train(model, prepared, output, *, smoke):
         command.extend(str(v) for v in (value if isinstance(value, list) else [value]))
     record = {
         "command": command,
+        "model_alias": receipt["model_alias"],
         "original_source_sha256": sha(original),
         "patched_source_sha256": sha(trainer.read_bytes()),
         "source_adjustments": changes,
@@ -225,6 +294,11 @@ def train(model, prepared, output, *, smoke):
     subprocess.run(
         command, check=True, env={**os.environ, "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914"}
     )
+
+    exports = restore_public_exports(output, model)
+    completion = {"completed_updates": steps, "public_exports": exports, "invocation_sha256": sha(encoded(record))}
+    (output / "completion.json").write_bytes(encoded(completion))
+    print("ORIGINAL_BASELINE_COMPLETED", json.dumps(completion), flush=True)
 
 
 def main():

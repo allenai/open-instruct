@@ -248,3 +248,12 @@ used `Olmo2RetrofitForCausalLM`, with global norms and mixed sliding/full attent
 Compatibility qualification now targets that implementation in its published-run
 image `01KA3FGCMVYGVEX2NG7Q2JWZ8E`; no checkpoint tensors will be reshaped to fit
 the prototype. The original 200-update comparison is still not launched.
+
+The metadata alias passed a CPU equivalence check against public Transformers
+4.57.0: all 3968 logits are identical and maximum Q-normalization gradient error
+is 1.46e-11. The two-layer probe includes full/sliding attention, grouped-query
+attention, nonuniform global norm weights and YaRN. [Proof](original-retrofit-parity.json).
+Full-checkpoint preparation checks every Q/K norm shape, changes only config
+`model_type`/`architectures`, and links unchanged source weights. Export restores
+public Olmo 3 config and the original chat template. Nine tests passed in the
+historical Think image. A fresh CPU preparation and GPU trial are still required.

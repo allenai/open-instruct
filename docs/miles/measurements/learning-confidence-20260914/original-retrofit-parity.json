@@ -1,0 +1,11 @@
+{
+  "model_class": "Olmo2RetrofitForCausalLM",
+  "logits_max_abs": 0.0,
+  "q_grad_max_abs": 1.4551915228366852e-11,
+  "reference": "Public Transformers 4.57.0 Olmo3ForCausalLM",
+  "candidate_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "device": "CPU",
+  "dtype": "float32",
+  "logit_values": 3968,
+  "description": "Two layers, full and sliding attention, nonuniform global Q/K norm weights, grouped-query attention, YaRN scaling; identical state tensors and inputs. This is not full-model GPU qualification."
+}

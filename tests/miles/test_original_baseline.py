@@ -4,10 +4,13 @@ Run in its original image, with /stage before this checkout on PYTHONPATH.
 """
 
 import ast
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
+from safetensors.torch import save_file
 from scripts.miles import launch_original_baseline, original_baseline
 
 
@@ -95,3 +98,53 @@ def test_original_image_adjustments_preserve_loop_and_schedule_initial_eval():
     for change in reversed(list(changes.values())):
         patched = patched.replace(change["after"], change["before"])
     assert patched == source
+
+
+def test_model_alias_changes_only_metadata_and_links_unchanged_tensors(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    config = {
+        "model_type": "olmo3",
+        "architectures": ["Olmo3ForCausalLM"],
+        "hidden_size": 16,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 2,
+        "num_hidden_layers": 1,
+        "sliding_window": 5,
+        "rope_scaling": {"rope_type": "yarn", "factor": 2},
+    }
+    (source / "config.json").write_text(json.dumps(config))
+    tensors = {
+        "model.layers.0.self_attn.q_norm.weight": torch.ones(16),
+        "model.layers.0.self_attn.k_norm.weight": torch.ones(8),
+    }
+    save_file(tensors, source / "model.safetensors")
+    alias = tmp_path / "alias"
+    receipt = original_baseline.legacy_model(source, alias)
+    assert (alias / "model.safetensors").resolve() == source / "model.safetensors"
+    changed = json.loads((alias / "config.json").read_text())
+    assert {key for key in changed if changed[key] != config[key]} == {"model_type", "architectures"}
+    assert receipt["norm_shapes"] == {key: list(value.shape) for key, value in tensors.items()}
+    assert json.loads((source / "config.json").read_text()) == config
+    tensors["model.layers.0.self_attn.q_norm.weight"] = torch.ones(4)
+    save_file(tensors, source / "model.safetensors")
+    with pytest.raises(ValueError, match="global-normalization"):
+        original_baseline.legacy_model(source, tmp_path / "bad-alias")
+
+
+def test_public_export_restores_model_class_and_original_chat_template(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "chat_template.jinja").write_text("public chat template")
+    output = tmp_path / "run"
+    exported = output / "model" / "final"
+    exported.mkdir(parents=True)
+    (exported / "config.json").write_text(
+        json.dumps({"model_type": "olmo2-retrofit", "architectures": ["Olmo2RetrofitForCausalLM"]})
+    )
+    save_file({"weight": torch.ones(4)}, exported / "model.safetensors")
+    before = original_baseline.sha((exported / "model.safetensors").read_bytes())
+    assert original_baseline.restore_public_exports(output, source) == [str(exported)]
+    assert json.loads((exported / "config.json").read_text())["model_type"] == "olmo3"
+    assert (exported / "chat_template.jinja").read_text() == "public chat template"
+    assert original_baseline.sha((exported / "model.safetensors").read_bytes()) == before

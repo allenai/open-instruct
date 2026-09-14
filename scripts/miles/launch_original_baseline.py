@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66"
 SOURCE = "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r2-20260914/prepared/data"
-PREPARED = "/weka/oe-training-default/robertb/open-instruct/data/olmo3-sft-gsm8k-original-20260914"
+PREPARED = "/weka/oe-training-default/robertb/open-instruct/data/olmo3-sft-gsm8k-original-retrofit-20260914"
 
 
 def specification(image, source_dataset, stage, name):
@@ -87,6 +87,8 @@ def main():
     parser.add_argument("--name", required=True)
     parser.add_argument("--render-only", action="store_true")
     args = parser.parse_args()
+    if args.image != "01KA3FGCMVYGVEX2NG7Q2JWZ8E":
+        raise ValueError("Use the qualified historical Think image 01KA3FGCMVYGVEX2NG7Q2JWZ8E")
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT):
         raise ValueError("Commit changes before launching")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
