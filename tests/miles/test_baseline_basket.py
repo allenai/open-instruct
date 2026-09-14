@@ -117,3 +117,16 @@ def test_preparation_writes_separate_partitions_and_canary_receipt(tmp_path, mon
         prepare_baseline_basket.verify(spec)
     with pytest.raises(ValueError, match="already exists"):
         prepare_baseline_basket.prepare(spec)
+
+
+def test_local_reward_learning_workflow_has_no_basket_verifier_dependency():
+    run = RunSpec.load(ROOT / "configs/miles/qualification/olmo3-sft-gsm8k-core-200-32k.toml")
+    compiled = run.compile()
+    assert compiled.miles["num_rollout"] == 200
+    assert compiled.miles["global_batch_size"] == 64
+    assert compiled.miles["rollout_max_response_len"] == 32768
+    assert run.plan()["allocation"]["allocated_gpus"] == 6
+    assert not run.judges
+    document = launch_baseline_basket.document("image", run, "workflow", "source", "a" * 64)
+    assert len(document["tasks"]) == 1
+    assert "prepare_baseline_basket" not in document["tasks"][0]["arguments"][0]

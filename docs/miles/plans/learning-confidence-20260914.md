@@ -49,3 +49,16 @@ Original Open Instruct reference image 01K7B0Z1KKP8AFKV2YKENMQ53B was downloaded
 and inspected: torch 2.7.0, transformers 4.54.0.dev0, custom vLLM. Compatibility
 with the published Olmo 3 checkpoint still needs qualification; the original-vs-Core
 learning pair has not launched. Tool approval capacity failures interrupted work.
+
+## Immediate Core learning control
+
+`configs/miles/qualification/olmo3-sft-gsm8k-core-200-32k.toml` runs 200 updates,
+16 prompts × four responses, on two FSDP trainer GPUs plus four TP1 engines.
+It uses local GSM8K rewards with no external verifier or judge. The existing
+preparation selects 6000 training and 512 disjoint held-out rows from the pinned
+RLVR GSM8K train source; this is RL-held-out data, not the official test split
+and not a claim that SFT never saw those questions. Reuse the exact prepared
+artifacts for the original arm. This control uses synchronous publication,
+packing/recomputation and explicit old-policy scoring to simplify attribution.
+The original image inspection found Olmo 3 implementations in both Transformers
+and vLLM despite their older version labels; GPU compatibility remains untested.
