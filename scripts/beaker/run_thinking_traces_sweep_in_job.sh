@@ -100,6 +100,16 @@ unset VLLM_PORT
 # vLLM 0.28 defaults both of these to on, so they must be turned off explicitly.
 # The CUTLASS fallback kernels ship precompiled in the wheel. This mirrors the
 # tmax recipe, which keeps DeepGEMM opt-in for the same reason.
+# DeepSeek-V4 checkpoints are expert_dtype=fp4 and store their FP8 *linear*
+# scales as ue8m0 (e8m0fnu). vLLM only reads that layout when DeepGEMM is
+# active -- fp8_utils.py sets `use_ue8m0 = is_deep_gemm_e8m0_used()`. With
+# DeepGEMM off the linear layers fall through to the CUTLASS w8a8 kernel,
+# whose first assertion is that the scales are float32, so engine init dies
+# with "dispatch_scaled_mm, .../c3x/scaled_mm_helper.hpp:17". DeepGEMM
+# JIT-compiles with nvcc, which ensure_nvcc installs below.
+case "$MODELS" in
+    *DeepSeek-V4*) : "${VLLM_USE_DEEP_GEMM:=1}"; : "${VLLM_MOE_USE_DEEP_GEMM:=1}" ;;
+esac
 export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
 export VLLM_MOE_USE_DEEP_GEMM="${VLLM_MOE_USE_DEEP_GEMM:-0}"
 # FlashInfer JIT-builds its sampling kernels for sm_103 the same way, and hits
