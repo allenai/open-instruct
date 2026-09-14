@@ -11,9 +11,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles import topology, workflow
+from open_instruct.miles import opd_config, opd_launch, specs, topology, workflow
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,6 +46,8 @@ def cluster_hostnames(spec):
 
 
 def specification(image, spec, *, hostnames=None):
+    if isinstance(spec, opd_config.OPDRunSpec):
+        return opd_launch.specification(image, spec)
     config = spec.compile()
     layout = topology.plan(spec)
     allocated = layout["gpus_per_replica"]
@@ -187,7 +188,7 @@ def collect_results(root, destination):
 
 
 def run(path, overrides):
-    spec = RunSpec.load(path, overrides)
+    spec = specs.load(path, overrides)
     # Validate launch feasibility before spending time building an image.
     specification("pending-build", spec)
     with tempfile.TemporaryDirectory(prefix="miles-submitted-run-") as directory:
@@ -227,7 +228,7 @@ def submit(image, spec):
         revision=revision,
         spec_sha256=workflow.fingerprint(spec.to_dict()),
         spec=spec.to_dict(),
-        allocation=topology.plan(spec),
+        allocation=spec.allocation() if isinstance(spec, opd_config.OPDRunSpec) else topology.plan(spec),
         placements=[
             {
                 "task": task["name"],

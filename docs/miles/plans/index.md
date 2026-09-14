@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Qwen3.5 OPD prototype](qwen35-opd-prototype-20260914.md) | Megatron learners, SGLang teacher, runtime patches and bounded 2B/4B exercises |
 | [Colleague exercise campaign](colleague-exercises-20260912.md) | Bounded readiness and inference-pool qualification |
 | [Engine drain and rolling publication handoff](engine-drain-handoff-20260912.md) | Independent engine updates; single-policy responses |
 | [Active MILES / Core work](active-work.md) | active-work |

@@ -6,10 +6,9 @@ import json
 import sys
 from pathlib import Path
 
-from open_instruct.miles import validation
+from open_instruct.miles import opd_config, specs, validation
 from open_instruct.miles.config import RunConfig
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
 
 
 def main() -> None:
@@ -38,7 +37,7 @@ def execute(parser, options):
     payload = validation.read_document(options.config)
     structured = "schema_version" in payload or "model" in payload
     config = (
-        RunSpec.from_dict(payload, config_path=options.config, overrides=options.overrides)
+        specs.from_dict(payload, config_path=options.config, overrides=options.overrides)
         if structured
         else RunConfig.from_dict(payload, options.overrides)
     )
@@ -53,6 +52,13 @@ def execute(parser, options):
             launch.run(options.config, options.overrides)
         else:
             print(json.dumps(launch.status(config), indent=2))
+        return
+    if isinstance(config, opd_config.OPDRunSpec):
+        if options.command == "validate":
+            print("OPD schema and allocation validated; runtime/model checks run in the candidate image")
+        else:
+            runtime = importlib.import_module("open_instruct.miles.opd_runtime")
+            runtime.execute(config)
         return
     workflow = importlib.import_module("open_instruct.miles.workflow")
     if options.command == "validate":

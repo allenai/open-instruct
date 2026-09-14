@@ -1,0 +1,2 @@
+# Miles' HF-to-Megatron converter uses mbridge, separately from megatron.bridge.
+mbridge @ git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c
