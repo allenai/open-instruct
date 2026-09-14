@@ -180,6 +180,7 @@ def train(model, prepared, output, *, smoke):
         "checkpoint_state_freq": steps if smoke else 100,
         "checkpoint_state_dir": str(output / "checkpoints"),
         "output_dir": str(output / "model"),
+        "push_to_hub": False,
         "try_auto_save_to_beaker": False,
         "try_launch_beaker_eval_jobs_on_weka": False,
         "save_traces": True,
