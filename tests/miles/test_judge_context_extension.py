@@ -48,7 +48,9 @@ def test_long_context_requires_explicit_scaling_and_preserves_checkpoint(tmp_pat
     value["context_extension"] = "qwen3-yarn-128k"
     command = judge_server.command(value, 1234)
     scaling = json.loads(command[command.index("--json-model-override-args") + 1])
-    assert scaling == {"rope_scaling": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}}
+    assert scaling["max_position_embeddings"] == 131072
+    assert scaling["rope_scaling"] == {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}
+    assert scaling["rope_parameters"] == {**scaling["rope_scaling"], "rope_theta": 1000000.0}
     assert (tmp_path / "config.json").read_bytes() == original
     value["max_context_length"] = 131073
     with pytest.raises(ValueError, match="at most 131072"):

@@ -25,7 +25,16 @@ def command(service, port):
         overrides = [
             "--json-model-override-args",
             json.dumps(
-                {"rope_scaling": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}}
+                {
+                    "max_position_embeddings": 131072,
+                    "rope_scaling": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768},
+                    "rope_parameters": {
+                        "rope_type": "yarn",
+                        "factor": 4.0,
+                        "original_max_position_embeddings": 32768,
+                        "rope_theta": model_config.get("rope_theta", 1000000.0),
+                    },
+                }
             ),
         ]
     elif extension != "none":

@@ -181,6 +181,14 @@ def patch_trainer(text):
             "before": "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)",
             "after": "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer, betas=(0.9, 0.95), eps=1e-8)",
         },
+        "update_accounting": {
+            "before": "        if (\n            args.checkpoint_state_freq > 0\n",
+            "after": (
+                "        with open(os.path.join(os.path.dirname(args.output_dir), 'optimizer-updates.jsonl'), 'a') as update_log:\n"
+                "            update_log.write(json.dumps({'driver_step': training_step}) + '\\n')\n"
+                "        if (\n            args.checkpoint_state_freq > 0\n"
+            ),
+        },
         "initial_evaluation": {
             "before": "            training_step % args.local_eval_every == 0\n",
             "after": "            (training_step % args.local_eval_every == 0 or (training_step == 1 and args.eval_on_step_0))\n",
@@ -281,12 +289,14 @@ def train(model, prepared, output, *, smoke):
         "original_source_sha256": sha(original),
         "patched_source_sha256": sha(trainer.read_bytes()),
         "source_adjustments": changes,
-        "eval_policy_updates": sorted({0, *range((1 if smoke else 50) - 1, steps, 1 if smoke else 50)}),
+        "eval_driver_step_offsets": sorted({0, *range((1 if smoke else 50) - 1, steps, 1 if smoke else 50)}),
         "remaining_differences": [
             "vLLM versus SGLang",
             "DeepSpeed/HF versus OLMo-core",
             "Original token-mean packed loss versus Core response reduction",
             "Original historical GSM8K verifier versus current verifier",
+            "Original zero-advantage filtering can skip driver steps; completed optimizer calls are counted separately",
+            "Four H100 trainers/four inference GPUs versus the two-B300/four-inference Core control",
         ],
     }
     (output / "invocation.json").write_bytes(encoded(record))
@@ -296,7 +306,15 @@ def train(model, prepared, output, *, smoke):
     )
 
     exports = restore_public_exports(output, model)
-    completion = {"completed_updates": steps, "public_exports": exports, "invocation_sha256": sha(encoded(record))}
+    update_path = output / "optimizer-updates.jsonl"
+    updates = read_jsonl(update_path) if update_path.exists() else []
+    completion = {
+        "driver_steps": steps,
+        "completed_updates": len(updates),
+        "optimizer_driver_steps": updates,
+        "public_exports": exports,
+        "invocation_sha256": sha(encoded(record)),
+    }
     (output / "completion.json").write_bytes(encoded(completion))
     print("ORIGINAL_BASELINE_COMPLETED", json.dumps(completion), flush=True)
 

@@ -333,3 +333,36 @@ The first CPU budget audit (01M2GT8HMKAC4462240XBX73KT) exited successfully but
 returned invalid two-token counts because Transformers returned a dictionary.
 Those aggregate counts are rejected; the corrected audit explicitly requests
 lists of token IDs and verifies that rendering preserves its input.
+
+The corrected CPU audit, [01M2GTQY3AEX7JHS0HBJBR6SHT](https://beaker.org/ex/01M2GTQY3AEX7JHS0HBJBR6SHT),
+passed and covered all 20,489 judged training rows and 128 judged held-out rows.
+Largest static grading prompt: 7,477 training tokens / 1,455 held-out tokens,
+including rubric and framing, excluding candidate answer. No static prompt alone
+exceeds the old budget. Thus the failed held-out request's size is dominated by
+candidate re-tokenization, not an unusually large reference. See `judge-budget.json`.
+The pinned Qwen config advertises 40,960 positions and has no rope scaling.
+
+The first isolated GPU probe, 01M2GTQTR1RZ4WFFHKSX5ZJKBX, failed before model load:
+its reused CPU launcher set LD_LIBRARY_PATH to CUDA compatibility libraries,
+causing CUDA error 803 on a GPU node. The GPU variant now leaves driver library
+selection to the image/runtime, with a regression test. Its retry is
+[01M2GTY8B5ZKMVVXE2Z6DNXRNG](https://beaker.org/ex/01M2GTY8B5ZKMVVXE2Z6DNXRNG).
+The four-trainer/four-engine H100 retry is
+[01M2GTQPTPSEQCY3W3W2PZXDM9](https://beaker.org/ex/01M2GTQPTPSEQCY3W3W2PZXDM9).
+Neither was qualified at submission; inspect final markers and exit status.
+
+The second judge probe reached CUDA but failed the serving context guard. In the
+pinned SGLang build, YaRN with `original_max_position_embeddings` does not multiply
+the configured maximum; Transformers 5 also reads `rope_parameters`. The candidate
+now explicitly sets the serving maximum to 131072 and both legacy/new RoPE fields.
+A CPU check using the actual Qwen config and pinned SGLang helpers confirmed
+`get_context_length == 131072` and effective factor-4 YaRN at theta 1,000,000.
+No unsafe longer-context environment override is used.
+
+The four-H100 original smoke cleared initialization and first weight sync (2.951s).
+Its first collection then exposed another comparison difference: the historical
+trainer filters zero-variance groups (15/16 here) and skips the driver iteration
+if the remaining packed samples cannot fill all ranks. Its old completion marker
+incorrectly called driver iterations optimizer updates. Future launches now record
+successful training calls separately; the already-running smoke's marker must not
+be trusted as an optimizer count. No automatic full run is armed from that marker.
