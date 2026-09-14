@@ -1,4 +1,4 @@
-# Measured full-SFT B300 throughput starting point: EP2 + four TP1 engines.
+# Measured full-SFT B300 throughput starting point: EP2 + two TP1 engines at concurrency 32.
 # Batch 128 is an optimization choice; see docs/miles/throughput-profiles.md.
 # Mixed-policy refresh remains experimental outside the exercised workload.
 schema_version = 1
@@ -20,7 +20,7 @@ priority = "urgent"
 min_runtime = "1h"
 timeout = "8h"
 auto_resume = false
-gpus_per_replica = 6
+gpus_per_replica = 4
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -53,22 +53,22 @@ trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 4
+gpus = 2
 rollout_tensor_parallel_size = 1
 rollout_batch_size = 32
 samples_per_prompt = 4
 global_batch_size = 128
 max_response_length = 4096
 max_context_length = 6144
-sglang_server_concurrency = 8
-sglang_max_running_requests = 8
-sglang_max_total_tokens = 131072
-sglang_max_mamba_cache_size = 128
+sglang_server_concurrency = 32
+sglang_max_running_requests = 32
+sglang_max_total_tokens = 262144
+sglang_max_mamba_cache_size = 256
 sglang_mem_fraction_static = 0.6
 radix_cache = true
 mamba_radix_cache_strategy = "extra_buffer"
 sglang_cuda_graph_backend_decode = "full"
-sglang_cuda_graph_max_bs_decode = 8
+sglang_cuda_graph_max_bs_decode = 32
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"

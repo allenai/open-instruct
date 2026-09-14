@@ -129,7 +129,8 @@ def report_blocks(entity, project, group, warmup):
         ]
         blocks.append(
             wr.PanelGrid(
-                runsets=[wr.Runset(entity=entity, project=project, filters=f'group == "{group}"')], panels=plots
+                runsets=[wr.Runset(entity=entity, project=project, filters=f"group == {json.dumps(group)}")],
+                panels=plots,
             )
         )
     return blocks
@@ -151,7 +152,11 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     prepared = []
     for item in args.run:
+        if "=" not in item:
+            parser.error("--run must have the form NAME=/downloaded/run")
         name, root = item.split("=", 1)
+        if not root:
+            parser.error("--run requires a downloaded run directory after =")
         if not name or Path(name).name != name:
             parser.error("run name must be a nonempty filename component")
         result = capacity_metrics.measurements(root, warmup=args.warmup)
@@ -162,6 +167,18 @@ def main():
     if not args.publish:
         print(json.dumps({"prepared": [str(p) for _, _, p, _ in prepared], "sections": list(SECTIONS)}))
         return
+    report = (
+        wr.Report.from_url(args.report_url)
+        if args.report_url
+        else wr.Report(
+            entity=args.entity,
+            project=args.project,
+            title="MILES / OLMo-core capacity: trainer, inference and queues",
+            description="Measured throughput, capacity, memory, waste and freshness for the September 13 topology trials.",
+        )
+    )
+    if report.entity != args.entity or report.project != args.project:
+        parser.error("--report-url must belong to the selected --entity and --project")
     receipt = {"runs": []}
     for name, root, path, result in prepared:
         identity = hashlib.sha256((args.group + name + str(Path(root).resolve())).encode()).hexdigest()[:16]
@@ -192,16 +209,7 @@ def main():
                 run.log(row)
             run.save(str(path), base_path=str(args.output), policy="now")
             receipt["runs"].append({"name": name, "url": run.url, "id": identity})
-    report = (
-        wr.Report.from_url(args.report_url)
-        if args.report_url
-        else wr.Report(
-            entity=args.entity,
-            project=args.project,
-            title="MILES / OLMo-core capacity: trainer, inference and queues",
-            description="Measured throughput, capacity, memory, waste and freshness for the September 13 topology trials.",
-        )
-    )
+        (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     report.blocks = blocks
     report.save()
     receipt["report_url"] = report.url

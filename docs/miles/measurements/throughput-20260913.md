@@ -1,5 +1,9 @@
 # Throughput qualification — September 13, 2026
 
+**Follow-up:** the [concurrency-32 trial](throughput-c32-20260913.md) subsequently
+matched the small configuration with two inference GPUs. The tables below
+retain the original basket measurements; the current small example uses 2T/2I.
+
 The recommended full-model starting points are **2 trainer + 4 inference GPUs at
 batch 128**, and **8 trainer + 8 inference GPUs at batch 256**. Both supplied the
 trainer with effectively zero completed-buffer waiting. Full decode CUDA graphs

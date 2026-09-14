@@ -38,3 +38,5 @@ current operating defaults; start with the [MILES guide](../index.md).
 | [Scoring-pass merge review](scoring-pass-merge-20260912.md) | scoring-pass-merge-20260912 |
 | [Sequence packing qualification, 2026-09-12](sequence-packing-20260912/README.md) | README |
 | [Two-node async GSM8K: first EP8 run at 64 × 8](two-node-async-gsm8k-20260912.md) | two-node-async-gsm8k-20260912 |
+
+* [Two-engine concurrency-32 follow-up](throughput-c32-20260913.md): same useful throughput with fewer serving GPUs.

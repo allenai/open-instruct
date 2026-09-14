@@ -6,6 +6,11 @@ postprocessed from completed-run artifacts and have job type `capacity-analysis`
 they never rewrite the original training history. Runtime Core trainer metrics
 also include the explicit phase rates listed below on subsequent launches.
 
+The [prepared measurements](results/capacity-dashboard-20260913.json) include
+the 2T/4I and 2T/6I baselines, EP8, and the 2T/2I concurrency-32 follow-up.
+The report has 28 panels; W&B publication is pending explicit approval following
+an automatic approval-review rejection. No original training runs were modified.
+
 ## What the rates mean
 
 | Metric | Numerator and denominator |
