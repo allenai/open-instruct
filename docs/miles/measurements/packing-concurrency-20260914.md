@@ -60,3 +60,21 @@ GPU memory and activity; queue occupancy, blocked insertion, stale drops, age,
 length, and terminal unused work. Keep historical behavior probabilities and lag
 filters unchanged. Re-profile recommendations after packing; do not extrapolate
 unpacked trainer utilization to the packed trainer.
+
+## Independent serving ceiling
+
+`scripts/miles/inference_capacity.py` sweeps actual batch sizes 32, 64, 128, 256,
+512 through one TP1 engine configured for 512. It uses the same frozen HF policy,
+BF16, KDA radix strategy, decode graphs, and routed-expert/logprob returns. Each
+batch has distinct 512-token synthetic prompts and 2,048 forced output tokens.
+This removes variable response termination, trainer backpressure and policy
+updates. It includes prefill and result delivery but bypasses the HTTP fleet
+router; its absolute rates are not interchangeable with RL wall-clock rates.
+
+Each size gets a short warmup plus three full repeats; the short warmup and first
+full repeat are marked warmup. Compare the last two repeats and retained GPU
+samples, including memory/activity. All sizes share maximum engine pools to
+avoid changing pool allocation between measurements. Startup allocation failure
+is retained as failure evidence, not silently retried with different settings.
+The engine uses a 0.9 memory fraction for this capacity experiment; the RL arms
+retain 0.6. No run defaults are changed on the basis of an unmeasured ceiling.
