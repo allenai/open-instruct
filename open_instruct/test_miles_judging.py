@@ -262,7 +262,7 @@ def test_cpu_judge_stages_always_use_saturn(document, stage):
     module = importlib.import_module("scripts.miles.launch_judge_preparation")
     task = module.specification("image", RunSpec.from_dict(document), stage)["tasks"][0]
     assert task["constraints"]["cluster"] == ["ai2/saturn"]
-    assert "gpuCount" not in task["resources"] and "replicas" not in task
+    assert task["resources"]["gpuCount"] == 0 and "replicas" not in task
     assert "hostname" not in task["constraints"]
     assert "preflight_attention" not in task["arguments"][0]
     subprocess.run(["bash", "-n"], input=task["arguments"][0], text=True, check=True)
