@@ -66,6 +66,7 @@ def test_cpu_weka_preparation_uses_saturn_and_training_is_the_original_backend()
     gpu = launch_original_baseline.specification("image", "source", "smoke", "test")["tasks"][0]
     assert gpu["resources"]["gpuCount"] == 8
     assert gpu["constraints"] == {"cluster": ["ai2/jupiter"]}
+    assert {e["name"]: e.get("value") for e in gpu["envVars"]}["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
     assert "original_baseline.py smoke" in gpu["arguments"][0]
     assert "open_instruct.miles train" not in gpu["arguments"][0]
 

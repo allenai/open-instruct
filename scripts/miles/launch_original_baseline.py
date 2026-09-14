@@ -47,6 +47,7 @@ def specification(image, source_dataset, stage, name):
         "HF_HOME": "/tmp/hf-cache",
         "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914",
         "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     }
     task = {
         "name": name,
