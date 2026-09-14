@@ -13,7 +13,7 @@ reliability is investigated.
 | Fully SFT MoE, four domains | [01M2GVVKXSS2E1X1FHYNQ8P555](https://beaker.org/ex/01M2GVVKXSS2E1X1FHYNQ8P555) | Running; 5 optimizer updates observed; qualified 128K judge; target 200 |
 | Dense Think-SFT, same four domains | [01M2GVVT4CMSPS4TQSYTYSE9TG](https://beaker.org/ex/01M2GVVT4CMSPS4TQSYTYSE9TG) | Initial evaluation complete; collecting training responses; same judge; target 200 |
 | Dense GSM8K protected control | [01M2GQK5F7T1YTVPPVD9E3S43Q](https://beaker.org/ex/01M2GQK5F7T1YTVPPVD9E3S43Q) | Running; 21 optimizer updates observed; target 200, eval every 50, save every 25, 48-hour ceiling |
-| Original framework hardware qualifier | [01M2H38X7KPNQKRZD89VYF988C](https://beaker.org/ex/01M2H38X7KPNQKRZD89VYF988C) | Scheduled after allocation-limit wait; expandable allocator retry; 4 H100 trainers + 4 inference; 3 driver iterations of 512 responses |
+| Original framework hardware qualifier | [01M2H38X7KPNQKRZD89VYF988C](https://beaker.org/ex/01M2H38X7KPNQKRZD89VYF988C) | Running since 23:24 UTC after allocation-limit wait; expandable allocator retry; 4 H100 trainers + 4 inference; 3 driver iterations of 512 responses |
 
 [Repair launch receipts](repair-launches.json) supersede `active-launches.json`
 for the broad benchmarks. The former MoE broad run failed the 40,960-token judge
@@ -68,7 +68,14 @@ with 4.70 GiB free and 7.47 GiB reserved but unused. The retry enables
 budget and loss. This is a candidate fragmentation fix, not yet a verified fix.
 Its source is `363b3fdd9`; the focused original-image tests passed (9 tests), and
 Ruff passed. Jupiter initially deferred it because the budget used 168/168 slots;
-it became scheduled at 23:22 UTC. No other user's jobs were touched.
+it became scheduled at 23:22 UTC and started at 23:24 UTC. Initialization and
+first weight publication passed. Backward remains unqualified. No other user's
+jobs were touched.
+
+The subsequent completion gate rejects an export-only run with zero optimizer
+updates and invalid/duplicate update ledgers; its original-image suite passed
+15 tests and Ruff passed. This does not modify the already running qualifier.
+The full original launcher now allows 48 hours; it is not yet launched.
 
 The MoE's fourth optimizer call took about 650 seconds. Do not project that as
 settled throughput yet: compilation may still taper. Its 24-hour job ceiling is a

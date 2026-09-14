@@ -149,3 +149,18 @@ def test_public_export_restores_model_class_and_original_chat_template(tmp_path)
     assert json.loads((exported / "config.json").read_text())["model_type"] == "olmo3"
     assert (exported / "chat_template.jinja").read_text() == "public chat template"
     assert original_baseline.sha((exported / "model.safetensors").read_bytes()) == before
+
+
+def test_completion_does_not_confuse_driver_iterations_with_optimizer_updates():
+    updates = [{"driver_step": 2}, {"driver_step": 5}]
+    result = original_baseline.completion_record(5, updates, ["model"], {})
+    assert result["driver_steps"] == 5
+    assert result["completed_updates"] == 2
+    with pytest.raises(RuntimeError, match="no optimizer updates"):
+        original_baseline.completion_record(5, [], ["model"], {})
+
+
+@pytest.mark.parametrize("steps", [[2, 2], [3, 2], [0], [6], [True]])
+def test_invalid_optimizer_ledger_cannot_pass_the_completion_gate(steps):
+    with pytest.raises(ValueError, match="Optimizer update ledger"):
+        original_baseline.completion_record(5, [{"driver_step": step} for step in steps], ["model"], {})

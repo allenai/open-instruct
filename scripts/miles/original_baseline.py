@@ -208,6 +208,24 @@ def patch_trainer(text):
     return text, changes
 
 
+def completion_record(steps, updates, exports, invocation):
+    """Do not label an export-only or entirely filtered run a training success."""
+    driver_steps = [row["driver_step"] for row in updates]
+    if not driver_steps:
+        raise RuntimeError("Original baseline exported weights but completed no optimizer updates")
+    if any(type(step) is not int or not 1 <= step <= steps for step in driver_steps):
+        raise ValueError("Optimizer update ledger contains an invalid driver step")
+    if driver_steps != sorted(set(driver_steps)):
+        raise ValueError("Optimizer update ledger must contain increasing, unique driver steps")
+    return {
+        "driver_steps": steps,
+        "completed_updates": len(updates),
+        "optimizer_driver_steps": updates,
+        "public_exports": exports,
+        "invocation_sha256": sha(encoded(invocation)),
+    }
+
+
 def train(model, prepared, output, *, smoke):
     receipt = json.loads((prepared / "preparation.json").read_text())
     if receipt["model"] != str(model):
@@ -318,13 +336,7 @@ def train(model, prepared, output, *, smoke):
     exports = restore_public_exports(output, model)
     update_path = output / "optimizer-updates.jsonl"
     updates = read_jsonl(update_path) if update_path.exists() else []
-    completion = {
-        "driver_steps": steps,
-        "completed_updates": len(updates),
-        "optimizer_driver_steps": updates,
-        "public_exports": exports,
-        "invocation_sha256": sha(encoded(record)),
-    }
+    completion = completion_record(steps, updates, exports, record)
     (output / "completion.json").write_bytes(encoded(completion))
     print("ORIGINAL_BASELINE_COMPLETED", json.dumps(completion), flush=True)
 
