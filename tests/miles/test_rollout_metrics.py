@@ -1,8 +1,9 @@
 """Code-service outcomes recorded on samples aggregate into per-collection metrics."""
 
+import json
 from types import SimpleNamespace
 
-from open_instruct.miles import rollout_metrics
+from open_instruct.miles import rollout_metrics, sibling_timing
 
 
 def _sample(diagnostics):
@@ -27,3 +28,19 @@ def test_code_service_metrics_count_rejections_by_status():
 
 def test_no_code_samples_means_no_metrics():
     assert rollout_metrics.code_service_metrics([_sample({"math": {"latency": 0.1}})]) == {}
+
+
+def test_timing_metrics_and_consumption_identity_reach_tracking_and_flow(tmp_path):
+    samples = [
+        SimpleNamespace(group_index=0, index=i, metadata={}, response_length=4, weight_versions=["0"])
+        for i in range(2)
+    ]
+    records = sibling_timing.start_group(samples)
+    for i, record in enumerate(records):
+        record["engine_first_forward_unix"] = 10 + i * 3
+    metrics = {}
+    assert rollout_metrics.log_rollout_data(2, SimpleNamespace(save=str(tmp_path)), samples, metrics, 1.0) is False
+    assert metrics["rollout/siblings/consumed/engine_first_forward_skew_seconds/mean"] == 3
+    flow = json.loads((tmp_path / "rollout_flow.jsonl").read_text())
+    assert flow["sibling_group_attempts"] == [records[0]["group_attempt"]]
+    assert flow["queue_metrics"] == metrics

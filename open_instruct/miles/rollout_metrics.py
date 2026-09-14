@@ -14,6 +14,7 @@ from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles import sibling_timing
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -50,6 +51,11 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     metrics = code_service_metrics(samples)
     if metrics:
         logger.info("code_verifier %d: %s", rollout_id, metrics)
+    timing_metrics = sibling_timing.consumed_metrics(samples)
+    if timing_metrics:
+        logger.info("sibling_timing %d: %s", rollout_id, timing_metrics)
+        metrics.update(timing_metrics)
+    if metrics:
         if isinstance(rollout_extra_metrics, dict):
             rollout_extra_metrics.update(metrics)
         else:
@@ -68,6 +74,13 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
             "collection_wait_seconds": rollout_time,
             "mixed_responses": sum(len(set(sample.weight_versions or [])) > 1 for sample in samples),
             "queue_metrics": rollout_extra_metrics or {},
+            "sibling_group_attempts": sorted(
+                {
+                    record["group_attempt"]
+                    for sample in samples
+                    if (record := sibling_timing.sample_record(sample)) is not None
+                }
+            ),
         }
         with (root / "rollout_flow.jsonl").open("a") as stream:
             stream.write(json.dumps(record) + "\n")
