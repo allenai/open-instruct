@@ -20,8 +20,8 @@ example adopts it; the larger defaults await their own exercise.
 
 [Submitted run](https://beaker.org/ex/01M2F0FJC8JCSFKV5CHDX5S10R), source
 `34fb3a99a55d2548636602d3fa0d7155a53a302a`, image
-`01M2CJG5RQQ93GEYNYAS7ASCQJ`, committed overlay. This is an active qualification
-run, not yet a completed learning baseline.
+`01M2CJG5RQQ93GEYNYAS7ASCQJ`, committed overlay. This attempt failed after one update; see the outcome below. It is not a
+completed learning baseline.
 
 - Eight EP8 trainers on node one; seven TP1 policy engines and one fixed Qwen3-32B
   judge on node two. Both full nodes are B300 on Holmes, urgent,
