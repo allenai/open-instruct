@@ -1,7 +1,9 @@
 # Qwen3.5 OPD through Open Instruct: prototype and bounded run plan
 
 Status: proposed implementation and experiment plan, September 14, 2026.
-No OPD training run has been launched or qualified by this investigation.
+Implementation and a two-update 4B pilot are now underway; see the
+[OPD prototype guide](../opd.md). The larger qualification plan below remains
+a proposal, including 2B support and resume to 20 updates.
 Source inspected: `robertb/miles-olmo-core`, Open Instruct `26c9f7926`.
 
 Implement two text-only, full-parameter on-policy distillation experiments:

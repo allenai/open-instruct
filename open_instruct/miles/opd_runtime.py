@@ -92,6 +92,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "seq-length": inf["max_context_length"],
         "sglang-mem-fraction-static": 0.6,
         "sglang-max-running-requests": 8,
+        "sglang-max-total-tokens": inf["max_context_length"] * 8,
         "sglang-attention-backend": "triton",
         "sglang-sampling-backend": "pytorch",
         "sglang-router-request-timeout-secs": doc["teacher"]["request_timeout"],
@@ -133,10 +134,10 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         args += [f"--{key}", str(value)]
     args += [
         "--use-opd",
-        "--rollout-global-dataset",
         "--rollout-shuffle",
         "--sequence-parallel",
         "--disable-grpo-std-normalization",
+        "--sglang-disable-flashinfer-autotune",
         "--sglang-disable-cuda-graph",
         "--sglang-disable-radix-cache",
         "--accumulate-allreduce-grads-in-fp32",
@@ -229,9 +230,22 @@ def execute(spec):
             "triton",
             "--sampling-backend",
             "pytorch",
+            "--max-total-tokens",
+            str(spec.document["inference"]["max_context_length"] * spec.document["teacher"]["concurrency"]),
+            "--disable-flashinfer-autotune",
             "--disable-cuda-graph",
             "--disable-radix-cache",
         ]
+        arguments = native_arguments(spec, prepared, checkpoint, url + "/generate", architecture)
+        with (root / "native-preflight.log").open("w") as stream:
+            subprocess.run(
+                [sys.executable, "-c", "from miles.utils.arguments import parse_args; parse_args()", *arguments],
+                env=environment,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                check=True,
+                timeout=180,
+            )
         teacher = learner = None
         try:
             with (root / "teacher.log").open("w") as teacher_log, (root / "training.log").open("a") as train_log:

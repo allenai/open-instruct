@@ -1,7 +1,10 @@
 """Audit the tiny sampled-token update and complete its HF model export."""
 
 import argparse
+import ast
 import json
+import math
+import re
 from pathlib import Path
 
 import torch
@@ -42,6 +45,22 @@ def audit_training(root, num_rollouts, coefficient):
     return records
 
 
+def audit_optimizer(root, num_rollouts):
+    steps = {}
+    for match in re.finditer(r"step \d+: (\{[^\n]+\})", (root / "training.log").read_text()):
+        values = ast.literal_eval(match[1])
+        if "train/grad_norm" in values:
+            steps[int(values["train/step"])] = values
+    if sorted(steps) != list(range(num_rollouts)):
+        raise ValueError("Missing optimizer step metrics")
+    for values in steps.values():
+        if not all(math.isfinite(v) for v in values.values() if isinstance(v, (int, float))):
+            raise ValueError("Nonfinite optimizer metric")
+        if values["train/grad_norm"] <= 0:
+            raise ValueError("OPD update has zero gradient norm")
+    return list(steps.values())
+
+
 def complete_export(root, base, rollout_id):
     """Preserve frozen vision/MTP weights omitted by the native language-only exporter."""
     export = root / f"hf-{rollout_id}"
@@ -51,7 +70,11 @@ def complete_export(root, base, rollout_id):
     index = json.loads(index_path.read_text())
     original = json.loads((base / "model.safetensors.index.json").read_text())
     original_map, weight_map = original["weight_map"], index["weight_map"]
-    changed, fp32_a_logs = 0, 0
+    changed, fp32_a_logs, changed_since_previous = 0, 0, 0
+    previous = root / f"hf-{rollout_id - 1}"
+    previous_map = (
+        json.loads((previous / "model.safetensors.index.json").read_text())["weight_map"] if rollout_id else {}
+    )
     for shard in sorted(set(weight_map.values())):
         tensors = safetensors_torch.load_file(export / shard)
         for name, tensor in tensors.items():
@@ -61,12 +84,17 @@ def complete_export(root, base, rollout_id):
                 if tensor.dtype != torch.float32:
                     raise ValueError(f"Export lost A_log precision: {name}")
                 fp32_a_logs += 1
+            if name in previous_map:
+                with safe_open(previous / previous_map[name], framework="pt", device="cpu") as source:
+                    changed_since_previous += int(not torch.equal(source.get_tensor(name), tensor))
             if name in original_map:
                 with safe_open(base / original_map[name], framework="pt", device="cpu") as source:
                     old = source.get_tensor(name)
                 changed += int(not torch.equal(old, tensor))
     if changed == 0 or fp32_a_logs == 0:
         raise ValueError("Export lacks changed weights or FP32 A_log tensors")
+    if rollout_id and not changed_since_previous:
+        raise ValueError("Weights did not change between learner updates")
     missing = sorted(set(original_map) - set(weight_map))
     # Missing language weights would be an export failure, not frozen extras.
     if any(name.startswith("model.language_model.") for name in missing):
@@ -85,6 +113,7 @@ def complete_export(root, base, rollout_id):
     result = {
         "path": str(export),
         "changed_tensors": changed,
+        "changed_since_previous_update": changed_since_previous,
         "fp32_a_log_tensors": fp32_a_logs,
         "frozen_base_tensors": missing,
         "training_scope": "language only",
@@ -102,6 +131,7 @@ def main():
     prepared = json.loads((args.root / "prepared.json").read_text())
     count = spec["training"]["num_rollouts"]
     result = {
+        "optimizer": audit_optimizer(args.root, count),
         "updates": audit_training(args.root, count, spec["distillation"]["kl_coef"]),
         "export": complete_export(args.root, Path(prepared["model"]), count - 1),
     }

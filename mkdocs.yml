@@ -93,6 +93,7 @@ nav:
   - MILES + OLMo-core:
     - Start here: miles/index.md
     - MILES GRPO: miles/grpo.md
+    - Experimental Qwen OPD: miles/opd.md
     - Support and gaps: miles/feature-parity.md
     - Workflow: miles/workflow.md
     - Launching: miles/launching.md

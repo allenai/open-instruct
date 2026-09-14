@@ -1,0 +1,60 @@
+"""Reject incorrect OPD signals and preserve frozen weights in native exports."""
+
+import json
+from pathlib import Path
+
+import pytest
+import torch
+from safetensors import torch as safetensors_torch
+
+from open_instruct.miles import opd_audit
+
+
+def test_advantages_must_match_teacher_signal(tmp_path):
+    folder = tmp_path / "debug/train_data"
+    folder.mkdir(parents=True)
+    data = {
+        "log_probs": [torch.tensor([-2.0, -3.0])],
+        "teacher_log_probs": [torch.tensor([-1.0, -4.0])],
+        "advantages": [torch.tensor([1.0, -1.0])],
+    }
+    path = folder / "0_0.pt"
+    torch.save({"rollout_data": data}, path)
+    assert opd_audit.audit_training(tmp_path, 1, 1.0)[0]["max_advantage_error"] == 0
+    data["advantages"][0].zero_()
+    torch.save({"rollout_data": data}, path)
+    with pytest.raises(ValueError, match="teacher signal"):
+        opd_audit.audit_training(tmp_path, 1, 1.0)
+
+
+def test_export_preserves_frozen_weights_and_fp32_a_log(tmp_path):
+    base, export = tmp_path / "base", tmp_path / "hf-0"
+    base.mkdir()
+    export.mkdir()
+    name = "model.language_model.layers.0.linear_attn.A_log"
+    tensors = {name: torch.tensor([0.1]), "model.visual.weight": torch.tensor([42.0])}
+    safetensors_torch.save_file(tensors, base / "model.safetensors")
+    (base / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {key: "model.safetensors" for key in tensors}})
+    )
+    safetensors_torch.save_file({name: torch.tensor([0.2])}, export / "model.safetensors")
+    (export / "model.safetensors.index.json").write_text(
+        json.dumps({"metadata": {"total_size": 4}, "weight_map": {name: "model.safetensors"}})
+    )
+    (export / ".complete").touch()
+    result = opd_audit.complete_export(tmp_path, base, 0)
+    assert result["changed_tensors"] == result["fp32_a_log_tensors"] == 1
+    assert result["frozen_base_tensors"] == ["model.visual.weight"]
+    frozen = safetensors_torch.load_file(Path(result["path"]) / "frozen-base.safetensors")
+    torch.testing.assert_close(frozen["model.visual.weight"], tensors["model.visual.weight"])
+
+
+def test_optimizer_audit_requires_every_nonzero_update(tmp_path):
+    path = tmp_path / "training.log"
+    path.write_text("step 0: {'train/step': 0, 'train/grad_norm': 0.5, 'train/loss': 1.0}\n")
+    assert len(opd_audit.audit_optimizer(tmp_path, 1)) == 1
+    with pytest.raises(ValueError, match="Missing optimizer"):
+        opd_audit.audit_optimizer(tmp_path, 2)
+    path.write_text("step 0: {'train/step': 0, 'train/grad_norm': 0.0}\n")
+    with pytest.raises(ValueError, match="zero gradient"):
+        opd_audit.audit_optimizer(tmp_path, 1)

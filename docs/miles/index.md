@@ -11,6 +11,9 @@ Their [legacy reference](../algorithms/legacy_grpo.md) does not define MILES beh
 If a required capability is missing here, identify the gap rather than silently
 switching to a deprecated backend.
 
+For the separate experimental Qwen3.5/Megatron distillation route, see the
+[OPD prototype guide](opd.md).
+
 ## Start here
 
 1. Start with the [MILES GRPO guide](grpo.md) for setup, the runtime image and a first run.
