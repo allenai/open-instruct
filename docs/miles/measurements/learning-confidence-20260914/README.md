@@ -6,6 +6,42 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
+## Restarted broad baselines — September 14, 18:35 UTC
+
+Code-verifier failures now default to logged/tagged zero rewards rather than
+terminating the run, matching original Open Instruct's continuation behavior.
+Strict service-failure handling remains opt-in. The implementation passed 28
+focused tests including real HTTP retry exhaustion and recovery; four additional
+rollout-metric tests passed in the actual MILES runtime image. See the
+[historical service audit and policy](historical-code-service.md).
+
+| Run | Beaker | Allocation | Workload |
+| --- | --- | --- | --- |
+| Fully SFT MoE | [01M2GK6NNB1BV8C50AXBVW319D](https://beaker.org/ex/01M2GK6NNB1BV8C50AXBVW319D) | EP8 + 7 inference + 1 judge | Frozen math/IF/code/general basket, 200 updates |
+| Dense Olmo 3 Think-SFT | [01M2GK7CYF7BKJZR97QSA5ZJF4](https://beaker.org/ex/01M2GK7CYF7BKJZR97QSA5ZJF4) | FSDP8 + 7 inference + 1 judge | Same frozen basket identities, 200 updates |
+| Dense GSM8K control, retry | [01M2GK81TBNVB6DEEAXC2Q3XTY](https://beaker.org/ex/01M2GK81TBNVB6DEEAXC2Q3XTY) | FSDP2 + 4 inference | 6000 training / 512 held-out RLVR rows, 200 updates |
+
+All were allocated on urgent Holmes with four-hour minimum runtime. At 18:38 UTC,
+the dense jobs had started and verified their committed source archives; one MoE
+replica was still entering startup. No new learning endpoint is available yet.
+
+Both basket restarts preserve all four domains and their original frozen inputs.
+The response budget increases from 4096 to 32768, with context/packing 34816,
+activation recomputation, and eight running sequences per inference engine.
+Dense KV-cache capacity rises from 131072 to 294912 tokens. These are explicit
+memory adjustments for the larger budget, not the previously qualified 4K
+throughput configuration. Batch size remains 256, learning rate 1e-6, same seed
+17. Evaluate and checkpoint every 50 updates. The MoE keeps qualified decode
+graphs/radix/replay; the dense path keeps graphs/radix/replay disabled. See the
+[complete immutable launch receipts](restart-launches.json).
+
+The first GSM8K attempt exited before training because `NCCL_SOCKET_IFNAME=ib`
+selected an interface absent in its single-node bridge network. The fresh retry
+removes this restriction and lets NCCL choose an available interface. It has no
+code-service or judge dependency. The multi-node basket runs use host networking.
+All three submissions use source `dc8c2661d6a3c97566662c157f2039a05e5093d0` and
+base image `01M2CJG5RQQ93GEYNYAS7ASCQJ` with the recorded source overlay.
+
 ## What the completed runs tell us
 
 | Starting model and evaluation | MILES/Core | olmo-miles/Megatron | Evidence |
