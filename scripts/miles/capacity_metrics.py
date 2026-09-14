@@ -157,6 +157,7 @@ def measurements(root, *, warmup=6):
             for source, label, divisor in (
                 ("utilization.gpu", "kernel_activity_percent", 1),
                 ("memory.used", "memory_used_gib", 1024),
+                ("memory.total", "memory_total_gib", 1024),
             ):
                 observations = [d[source] for d in devices]
                 coverage = min(m["coverage_fraction"] for m in observations)
