@@ -21,9 +21,10 @@ rollout-metric tests passed in the actual MILES runtime image. See the
 | Dense Olmo 3 Think-SFT | [01M2GK7CYF7BKJZR97QSA5ZJF4](https://beaker.org/ex/01M2GK7CYF7BKJZR97QSA5ZJF4) | FSDP8 + 7 inference + 1 judge | Same frozen basket identities, 200 updates |
 | Dense GSM8K control, retry | [01M2GK81TBNVB6DEEAXC2Q3XTY](https://beaker.org/ex/01M2GK81TBNVB6DEEAXC2Q3XTY) | FSDP2 + 4 inference | 6000 training / 512 held-out RLVR rows, 200 updates |
 
-All were allocated on urgent Holmes with four-hour minimum runtime. At 18:38 UTC,
-the dense jobs had started and verified their committed source archives; one MoE
-replica was still entering startup. No new learning endpoint is available yet.
+All were allocated on urgent Holmes with four-hour minimum runtime. By 19:06 UTC,
+both basket runs had reached their initial math evaluation and the GSM8K control
+was halfway through its initial held-out evaluation. No new learning endpoint is
+available yet.
 
 Both basket restarts preserve all four domains and their original frozen inputs.
 The response budget increases from 4096 to 32768, with context/packing 34816,
@@ -150,8 +151,10 @@ once sustained runs complete.
 - Heavy Megatron500: [Beaker](https://beaker.org/ex/01M278B5E9HME181B04HT6391P).
 - MoE basket, incomplete: [Beaker](https://beaker.org/ex/01M2F7N19DQ3YJMRJAXJ1K4H59).
 - Dense basket, incomplete: [Beaker](https://beaker.org/ex/01M2FBGGE8K8XJ7WJKCTE4KHMB).
-- New dense GSM8K control: [Beaker](https://beaker.org/ex/01M2GDHWYJX9VH4J94RS2QQWK3),
-  source `44a893788`, immutable base `01M2CJG5RQQ93GEYNYAS7ASCQJ` with committed overlay.
+- Failed first dense GSM8K launch: [Beaker](https://beaker.org/ex/01M2GDHWYJX9VH4J94RS2QQWK3),
+  source `44a893788`; exited before training because of the NCCL interface restriction.
+- Active dense GSM8K retry: [Beaker](https://beaker.org/ex/01M2GK81TBNVB6DEEAXC2Q3XTY),
+  source `dc8c2661d`, immutable base `01M2CJG5RQQ93GEYNYAS7ASCQJ` with committed overlay.
 
 [Machine-readable evidence](recovered-evidence.json) contains curves, original
 log/answer SHA256 digests, job status, evaluation boundaries and paired counts.
@@ -187,3 +190,15 @@ packed token-mean versus response reduction, and the historical GSM8K verifier.
 They remain visible in the invocation receipt; this is a rough implementation
 comparison rather than a claim of exact algorithmic parity. Original-framework
 GPU execution is still unqualified until that separate smoke succeeds.
+
+The [CPU preparation retry](https://beaker.org/ex/01M2GMYARVE95SRYZDTH8P6Z12)
+passed on September 14 at 19:06 UTC: all 6000 training and 512 evaluation prompt
+token sequences match Core exactly. [Input-parity proof](original-input-parity.json)
+retains the artifact digests. The first attempt failed because `str.splitlines()`
+split Unicode separators embedded in valid JSON strings; file-line iteration fixes
+that reader bug. All six comparator tests passed in the original image.
+
+The [three-update GPU trial](https://beaker.org/ex/01M2GN0YT6XVX0MAX7PC635YZQ)
+has acquired six Holmes GPUs and is pulling the original image. Its launch revision
+is `2806460af`; [receipts](original-launches.json) distinguish preparation from
+GPU execution. The full original 200-update run remains gated on the trial.

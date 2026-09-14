@@ -1,0 +1,46 @@
+[
+  {
+    "experiment": "01M2GMYARVE95SRYZDTH8P6Z12",
+    "source_dataset": "01M2GMY8XTZ1T3TCSBBN0FFPPV",
+    "name": "olmo3-sft-gsm8k-original-prepare-r2-20260914",
+    "commit": "2806460afe8167fd4e4cc43bd22accbf947c131b",
+    "base_image": "01K7B0Z1KKP8AFKV2YKENMQ53B",
+    "stage": "prepare",
+    "archive_sha256": "7c890710f9a1e4bd3796f9108addf51789ffcec90079761fc35c58b4b617e87a",
+    "trainer": "original-open-instruct",
+    "observed_jobs": [
+      {
+        "id": "01M2GMYAX0KWX8GGSP2N32Y4VM",
+        "status": {
+          "created": "2026-09-14T19:05:15.290734Z",
+          "scheduled": "2026-09-14T19:05:33.600881Z",
+          "started": "2026-09-14T19:05:46.228541Z",
+          "exited": "2026-09-14T19:06:09.292061Z",
+          "finalized": "2026-09-14T19:06:10.367453Z",
+          "exitCode": 0,
+          "idleSince": "2026-09-14T19:06:09.237439Z",
+          "ready": "2026-09-14T19:05:44.905034Z"
+        }
+      }
+    ]
+  },
+  {
+    "experiment": "01M2GN0YT6XVX0MAX7PC635YZQ",
+    "source_dataset": "01M2GN0WR88DS542G7H0B2MM85",
+    "name": "olmo3-sft-gsm8k-original-smoke-20260914",
+    "commit": "2806460afe8167fd4e4cc43bd22accbf947c131b",
+    "base_image": "01K7B0Z1KKP8AFKV2YKENMQ53B",
+    "stage": "smoke",
+    "archive_sha256": "7c890710f9a1e4bd3796f9108addf51789ffcec90079761fc35c58b4b617e87a",
+    "trainer": "original-open-instruct",
+    "observed_jobs": [
+      {
+        "id": "01M2GN0YXXZB2RR5220YMYGZ4Z",
+        "status": {
+          "created": "2026-09-14T19:06:41.350536Z",
+          "scheduled": "2026-09-14T19:06:53.036393Z"
+        }
+      }
+    ]
+  }
+]
