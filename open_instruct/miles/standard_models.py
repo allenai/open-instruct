@@ -125,6 +125,8 @@ def model_config_from_hf(hf: Any, options: Any) -> transformer.TransformerConfig
 
 def validate_training_options(args):
     """Reject MoE-only operations before model storage or checkpoint allocation."""
+    if args.olmo_core.compile_optimizer or args.olmo_core.use_reduce_scatter:
+        raise InputError("Optimizer compilation and reduce-scatter controls currently require the Core MoE trainer")
     if getattr(args, "use_rollout_routing_replay", False):
         raise ValueError("Router replay requires an OLMoDDP MoE model; standard dense trainers do not support replay")
     if args.olmo_core.checkpoint_save_options() != CoreConfig().checkpoint_save_options():

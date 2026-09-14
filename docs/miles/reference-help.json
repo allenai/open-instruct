@@ -36,7 +36,10 @@
     "snapshot_capacity": "Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store.",
     "stream_moe_export": "Stream MoE tensors during HF-layout publication to reduce export memory.",
     "weight_sync_mode": "flattened batches tensor transfers; per_tensor is the rollback/reference transport.",
-    "pipeline_observation_interval": "Seconds between read-only async producer/completed-buffer observations; zero disables. Engine metrics are sampled no more frequently than every five seconds when observation is enabled. Missing samples remain explicit."
+    "pipeline_observation_interval": "Seconds between read-only async producer/completed-buffer observations; zero disables. Engine metrics are sampled no more frequently than every five seconds when observation is enabled. Missing samples remain explicit.",
+    "compile_model": "Compile native Core model forwards. Experimental for variable-shaped RL; monitor graph recompilation. Default false.",
+    "compile_optimizer": "Compile the native MoE distributed optimizer update. Experimental; independent of model compilation. Default false.",
+    "use_reduce_scatter": "Use the native MoE reduce-scatter gradient path. Experimental; qualify EP topology before promoting. Default false."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",

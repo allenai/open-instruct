@@ -41,6 +41,9 @@ class CoreConfig:
     expert_parallel_size: int = 1
     attention_backend: str = "torch"
     activation_checkpointing: bool = True
+    compile_model: bool = False
+    compile_optimizer: bool = False
+    use_reduce_scatter: bool = False
     max_sequence_length: int = 8192
     sequence_packing: bool = False
     packing_max_tokens: int | None = None
@@ -99,6 +102,9 @@ class CoreConfig:
             "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",
+            "compile_model",
+            "compile_optimizer",
+            "use_reduce_scatter",
             "checkpoint_profile",
             "checkpoint_compact_storage",
             "checkpoint_dedup_save_to_lowest_rank",

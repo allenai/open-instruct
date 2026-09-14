@@ -68,8 +68,10 @@ def build_train_module(args, *, common, optim, hf_config, hf_state):
         hf_state=hf_state,
         startup_args=args,
         **common,
-        optim=OLMoDDPOptimizerConfig(**optim, max_grad_norm=args.clip_grad),
-        dp_config=train_config.TransformerDataParallelConfig(name=DataParallelType.ddp),
+        optim=OLMoDDPOptimizerConfig(**optim, max_grad_norm=args.clip_grad, compile=args.olmo_core.compile_optimizer),
+        dp_config=train_config.TransformerDataParallelConfig(
+            name=DataParallelType.ddp, use_reduce_scatter=args.olmo_core.use_reduce_scatter
+        ),
         ep_config=train_config.TransformerExpertParallelConfig(degree=args.olmo_core.expert_parallel_size)
         if args.olmo_core.expert_parallel_size > 1
         else None,

@@ -83,3 +83,40 @@ separate numerical, weight-publication and learning qualification.
 5. Recheck numerical contracts and resume for any optimizer/reduction change,
    then rerun end-to-end RL to select inference capacity. Keep queue drops,
    blocked producer time, terminal unused work and trainer waits in that report.
+
+## Matched trainer screening campaign
+
+Six EP2 arms replay the same sixteen retained batches from
+`steady-2t2i-c32-b128-graphs-986935b17569/run/rollouts`, starting with the same
+full-SFT HF weights. Input hashes are recorded per batch. Baseline retains
+standalone scoring and exhaustive replay diagnostics. Lean allows the guarded
+scoring skip and disables exhaustive replay instrumentation, while retaining
+router replay and runtime contracts. Four further arms change one option from
+lean: recomputation off, optimizer compilation, model compilation, or native
+reduce-scatter. These are experimental switches, not new production defaults.
+
+All arms retain packing at 6144 tokens and `row_specialization="dynamic"`.
+The historic runaway specialization was the no-gradient routed SwiGLU buffer
+capacity; the qualified dynamic forward from Core commit `307d20590` remains in
+place. Backward and wave kernels are unchanged. The compiler observer records
+kernel identity, constexpr arguments, cache artifact writes, and Dynamo graph
+counts on every batch. In-memory JIT misses include disk-cache hits and must not
+be equated with fresh compilation.
+
+Each arm uses an isolated initially cold per-rank cache that persists within the
+job. Report startup and cold batches separately from the final warm window;
+do not assume six updates suffice without inspecting compiler activity. The
+worker measures scoring, forward/loss/backward, optimizer, remaining trainer
+bookkeeping, token counts, and CUDA allocator peaks. Synchronization at phase
+boundaries aids attribution but may add overhead; use the same instrumentation
+for all arms. CUDA allocator peaks are training-phase peaks because the actor
+resets peak statistics before training. GPU sampling independently covers the
+full job.
+
+This is a trainer throughput screen: no live inference, Ray data transfer,
+weight delivery, or learning-curve comparison. Historical behavior probabilities
+and routes remain intact. The publication clock advances logically after each
+update. Fixed batches become off-policy with respect to each arm's independently
+updated parameters; they provide controlled workloads, not a new on-policy RL
+experiment. Numerical checks and a live run, including resume qualification for
+optimizer changes, are required before promoting a winning option.

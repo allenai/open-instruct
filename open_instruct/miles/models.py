@@ -74,7 +74,7 @@ def build_train_module(args, source=None):
         model=model,
         rank_microbatch_size=forward_capacity,
         max_sequence_length=forward_capacity,
-        compile_model=False,
+        compile_model=args.olmo_core.compile_model,
         device=torch.device("cuda", torch.cuda.current_device()),
         max_grad_norm=args.clip_grad,
     )

@@ -237,6 +237,9 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.expert_parallel_size | &lt;class &#x27;int&#x27;&gt; | 1 | Expert-parallel group size; must divide trainer world size. |
 | core.attention_backend | &lt;class &#x27;str&#x27;&gt; | &quot;torch&quot; | Core attention implementation: torch, flash_2, flash_3 or flash_4; hardware/model qualification is separate. |
 | core.activation_checkpointing | &lt;class &#x27;bool&#x27;&gt; | true | Recompute blocks during backward to reduce activation memory. |
+| core.compile_model | &lt;class &#x27;bool&#x27;&gt; | false | Compile native Core model forwards. Experimental for variable-shaped RL; monitor graph recompilation. Default false. |
+| core.compile_optimizer | &lt;class &#x27;bool&#x27;&gt; | false | Compile the native MoE distributed optimizer update. Experimental; independent of model compilation. Default false. |
+| core.use_reduce_scatter | &lt;class &#x27;bool&#x27;&gt; | false | Use the native MoE reduce-scatter gradient path. Experimental; qualify EP topology before promoting. Default false. |
 | core.max_sequence_length | &lt;class &#x27;int&#x27;&gt; | 8192 | Trainer context limit in tokens; structured max_context_length sets trainer and serving limits together. |
 | core.sequence_packing | &lt;class &#x27;bool&#x27;&gt; | false | Pack complete samples within each optimizer partition using document-isolated attention/KDA and replay alignment. |
 | core.packing_max_tokens | int &#124; None | null | Maximum tokens per pack; null uses context limit. Must cover max_sequence_length; samples are never split. |
