@@ -8,8 +8,8 @@ from open_instruct.environments.swerl_sandbox import LAST_STEP_WARNING, SWERLSan
 from open_instruct.environments.swerl_vanillux_sandbox import (
     INSTANCE_TEMPLATE,
     SUBMIT_MARKER,
-    SWERLVanilluxSandboxEnv,
     TOOL_CALL_FORMAT_ERROR_MESSAGE,
+    SWERLVanilluxSandboxEnv,
     format_error_message,
     render_instance,
     truncate_observation,
