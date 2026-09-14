@@ -6,30 +6,36 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
-## Active identities — September 14, 19:52 UTC
+## Active identities — September 14, 21:07 UTC
 
 | Run | Experiment | Status / target |
 | --- | --- | --- |
-| Fully SFT MoE, four domains | [01M2GP10EKTRDDC4MD924FGDRM](https://beaker.org/ex/01M2GP10EKTRDDC4MD924FGDRM) | Running; 200 updates, eval/save every 50 |
-| Dense Think-SFT, same four domains | [01M2GP1D9Q4ZNGVJF3ATN1V9VN](https://beaker.org/ex/01M2GP1D9Q4ZNGVJF3ATN1V9VN) | Running; 200 updates, eval/save every 50 |
-| Dense GSM8K protected control | [01M2GQK5F7T1YTVPPVD9E3S43Q](https://beaker.org/ex/01M2GQK5F7T1YTVPPVD9E3S43Q) | Starting; 200 updates, eval every 50, save every 25, 48-hour ceiling |
-| Original framework qualifier | [01M2GQ7M7QZHDZS4AKM488BJ9S](https://beaker.org/ex/01M2GQ7M7QZHDZS4AKM488BJ9S) | Running; all four vLLM engines loaded the unchanged checkpoint; trainer initialization pending |
+| Fully SFT MoE, four domains | [01M2GVVKXSS2E1X1FHYNQ8P555](https://beaker.org/ex/01M2GVVKXSS2E1X1FHYNQ8P555) | Scheduled; qualified 128K judge; 200 updates |
+| Dense Think-SFT, same four domains | [01M2GVVT4CMSPS4TQSYTYSE9TG](https://beaker.org/ex/01M2GVVT4CMSPS4TQSYTYSE9TG) | Scheduled; same 128K judge; 200 updates |
+| Dense GSM8K protected control | [01M2GQK5F7T1YTVPPVD9E3S43Q](https://beaker.org/ex/01M2GQK5F7T1YTVPPVD9E3S43Q) | Running; 200 updates, eval every 50, save every 25, 48-hour ceiling |
+| Original framework hardware qualifier | [01M2GVP4SZTA36EV579ST4NDCB](https://beaker.org/ex/01M2GVP4SZTA36EV579ST4NDCB) | Scheduled; 4 H100 trainers + 4 inference; 3 driver iterations of 512 responses |
 
-[Current MILES launch receipts](active-launches.json) are the authoritative run
-identities; older sections retain superseded attempts as history. The GSM8K r2
-control completed its initial 441/512 evaluation, then was stopped while its first
-64-sample training batch was still generating. Its 12-hour limit and first save at
-100 updates risked losing all progress on this longer workload. The r3 control
-keeps the same model/data recipe/seed/objective, saves every 25, allows 48 hours,
-and skips repeating the expensive initial evaluation. Report policy-zero results
-from r2 explicitly rather than pretending r3 ran its own initial evaluation;
-prepared artifact hashes must be checked before combining their curves.
+[Repair launch receipts](repair-launches.json) supersede `active-launches.json`
+for the broad benchmarks. The former MoE broad run failed the 40,960-token judge
+context guard. The former dense broad run was stopped at zero optimizer updates
+to adopt the same qualified judge. Both new profiles keep 32K policy responses;
+only the judge capacity/concurrency/timeout changes. Initial evaluation repeats.
 
-The historical full-checkpoint preparation checked all 64 norm shapes and all
-6512 frozen prompt token hashes: [proof](original-retrofit-preparation.json).
-The bounded original-framework continuation is live; a failed trial stops it.
-Live local status: `/tmp/learning-confidence-final-watch/status.json` and
-`/tmp/original-baseline-sequence/state.json`. No new 200-update endpoint exists yet.
+The GSM8K r2 control completed its initial 441/512 evaluation before a fresh r3
+restart with saves every 25 updates and a 48-hour limit. R3 skips repeating initial
+evaluation; verify prepared hashes before combining its curve with the r2 score.
+
+Historical full-checkpoint preparation checked all 64 norm shapes and 6512 frozen
+prompt token hashes: [proof](original-retrofit-preparation.json). The old automatic
+original-framework continuation stopped on its failed B300 trial. **No automatic
+200-update original run is armed.** H100 qualification uncovered zero-advantage
+filtering that can skip driver iterations; the new overlay counts completed
+training calls separately and fixes export-only generation metadata. Its larger
+smoke batch is a hardware/mechanics exercise, not a matched learning benchmark.
+No new 200-update endpoint exists yet.
+
+Read-only local monitor: `/tmp/learning-confidence-repairs-watch/status.json`.
+See the dated repair section below for all failures, fixes and qualification.
 
 ## Current runs — September 14, 19:24 UTC
 
