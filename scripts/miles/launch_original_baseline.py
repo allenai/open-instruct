@@ -65,7 +65,7 @@ def specification(image, source_dataset, stage, name):
             "memory": "64 GiB" if stage == "prepare" else "704 GiB",
             "sharedMemory": "200 GiB" if stage != "prepare" else "4 GiB",
         },
-        "constraints": {"cluster": ["ai2/saturn" if stage == "prepare" else "ai2/holmes"]},
+        "constraints": {"cluster": ["ai2/saturn" if stage == "prepare" else "ai2/jupiter"]},
         "context": {"priority": "urgent", "minRuntime": "30m" if stage != "train" else "4h", "autoResume": False},
         "timeout": "1h" if stage == "prepare" else ("3h" if stage == "smoke" else "24h"),
         "envVars": [{"name": k, "value": v} for k, v in env.items()],

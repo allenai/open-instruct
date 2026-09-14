@@ -65,7 +65,7 @@ def test_cpu_weka_preparation_uses_saturn_and_training_is_the_original_backend()
     assert not any(e["name"] == "WANDB_API_KEY" for e in cpu["envVars"])
     gpu = launch_original_baseline.specification("image", "source", "smoke", "test")["tasks"][0]
     assert gpu["resources"]["gpuCount"] == 6
-    assert gpu["constraints"] == {"cluster": ["ai2/holmes"]}
+    assert gpu["constraints"] == {"cluster": ["ai2/jupiter"]}
     assert "original_baseline.py smoke" in gpu["arguments"][0]
     assert "open_instruct.miles train" not in gpu["arguments"][0]
 
