@@ -42,9 +42,7 @@ def document(
                 task["constraints"] = {"cluster": ["ai2/holmes"]}
                 task["context"].update(minRuntime="30m")
                 task["timeout"] = "1h"
-                task["arguments"][0] = task["arguments"][0].replace(
-                    "export CUDA_VISIBLE_DEVICES=", "export CUDA_VISIBLE_DEVICES=0"
-                )
+                task["envVars"] = [entry for entry in task["envVars"] if entry["name"] != "LD_LIBRARY_PATH"]
         else:
             target = Path(run.output["root"]) / f"checkpoints/gpu_usage_node{index}.jsonl"
             node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))} &\n"
