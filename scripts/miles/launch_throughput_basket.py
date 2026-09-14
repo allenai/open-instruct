@@ -110,7 +110,12 @@ git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/p
                 node_overlay = overlay
                 if case not in ("dev", "tiny"):
                     target = root / f"checkpoints/gpu_usage_node{index}.jsonl"
-                    node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))} &\n"
+                    observe = (
+                        " --triton-cache-parent /tmp --interval 15"
+                        if basket.CASES[case].get("observe_compiler_cache")
+                        else ""
+                    )
+                    node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))}{observe} &\n"
                 task["arguments"][0] = task["arguments"][0].replace(
                     "cd /opt/core-rl\n", "cd /opt/core-rl\n" + node_overlay, 1
                 )

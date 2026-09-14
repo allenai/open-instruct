@@ -116,6 +116,17 @@ CASES["packed-fast-2t2i-c32-p512-b128"] = {
 }
 
 
+# Matched follow-up after qualifying the faster trainer; only engine count and
+# run duration change. Keep producer admission at 512 (128 engine slots total).
+CASES["packed-fast-2t4i-c32-p512-b128"] = {
+    **CASES["packed-fast-2t2i-c32-p512-b128"],
+    "inference": 4,
+    "capacity": 6,
+    "updates": 48,
+    "observe_compiler_cache": True,
+}
+
+
 def specification(case, output):
     settings = CASES[case]
     output = Path(output)

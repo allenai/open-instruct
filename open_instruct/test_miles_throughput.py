@@ -435,3 +435,29 @@ def test_fast_live_probe_keeps_inference_and_objective_fixed():
     base["trainer"]["activation_recompute"] = False
     base["core"].update(scoring_pass_required=False, replay_diagnostics=False)
     assert fast == base
+
+
+def test_fast_four_engine_probe_changes_only_capacity_and_duration():
+    root = "/weka/oe-training-default/test/run"
+    base = throughput_basket.specification("packed-fast-2t2i-c32-p512-b128", root).to_dict()
+    more = throughput_basket.specification("packed-fast-2t4i-c32-p512-b128", root).to_dict()
+    base.pop("name")
+    more.pop("name")
+    base["inference"]["gpus"] = 4
+    base["launch"]["gpus_per_replica"] = 6
+    base["training"]["num_rollouts"] = 48
+    base["miles"]["lr_decay_iters"] = 48
+    assert more == base
+
+
+def test_triton_artifact_sampler_tracks_growth_without_unrelated_caches(tmp_path):
+    worker = tmp_path / "core-triton-test" / "triton" / "kernel"
+    worker.mkdir(parents=True)
+    (worker / "a.cubin").write_bytes(b"compiled")
+    (worker / "a.json").write_text("{}")
+    (tmp_path / "unrelated.cubin").write_bytes(b"ignore")
+    first = sample_gpu_usage.triton_artifacts(tmp_path)
+    assert len(first) == 1 and first[0]["cubins"] == 1
+    assert first[0]["newest_write_unix"] > 0
+    (worker / "b.cubin").write_bytes(b"another")
+    assert sample_gpu_usage.triton_artifacts(tmp_path)[0]["cubins"] == 2

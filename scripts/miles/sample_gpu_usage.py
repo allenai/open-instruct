@@ -31,11 +31,27 @@ def sample():
     return devices
 
 
+def triton_artifacts(parent):
+    """Observe node-local worker caches without changing compiler dispatch.
+
+    Counts include restored artifacts; changes after startup indicate writes,
+    not compiler CPU duration. This does not observe non-Triton compilers.
+    """
+    workers = []
+    for root in sorted(parent.glob("core-triton-*")):
+        if root.is_symlink() or not root.is_dir():
+            continue
+        mtimes = [path.stat().st_mtime for path in (root / "triton").rglob("*.cubin") if path.is_file()]
+        workers.append(dict(root=str(root), cubins=len(mtimes), newest_write_unix=max(mtimes, default=None)))
+    return workers
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--seconds", type=float, default=10800)
     parser.add_argument("--interval", type=float, default=5)
+    parser.add_argument("--triton-cache-parent", type=Path, help="Also count worker cubins under this local directory")
     args = parser.parse_args()
     if not all(math.isfinite(v) for v in (args.seconds, args.interval)) or args.seconds <= 0 or args.interval < 1:
         parser.error("duration must be positive and interval at least one second")
@@ -46,6 +62,8 @@ def main():
             record = dict(time_unix=time.time(), host=os.uname().nodename)
             try:
                 record["devices"] = sample()
+                if args.triton_cache_parent is not None:
+                    record["triton_artifacts"] = triton_artifacts(args.triton_cache_parent)
             except (subprocess.SubprocessError, OSError, ValueError) as error:
                 record["error"] = str(error)
             stream.write(json.dumps(record) + "\n")
