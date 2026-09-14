@@ -114,6 +114,8 @@ def main(
     using Ray actors for both training and inference. The same code path is used for
     single GPU mode and multi-node training.
     """
+    grpo_utils.check_olmo_core_compatible_config(args)
+
     tokenizer = grpo_fast.make_tokenizer(tc, model_config)
 
     grpo_fast.setup_runtime_variables(args, streaming_config, tools_config)
