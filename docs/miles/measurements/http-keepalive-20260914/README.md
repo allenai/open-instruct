@@ -59,6 +59,7 @@ Seven host baseline/loader tests also passed; the candidate config validated.
 Config: `configs/miles/qualification/full-sft-basket-fast-200-keepalive60.toml`.
 Same checkpoint, frozen training and held-out sets, 200 updates, EP8 + seven TP1
 policy engines + one judge on two B300 nodes, Holmes/urgent, four-hour minimum.
-Recipe unchanged except new identity/output and the keep-alive setting. Launch
-receipt is recorded separately after submission. This short-context basket is
+Recipe unchanged except new identity/output and the keep-alive setting. The [launch receipt](launch.json) records source revision `455d5cd0c` and
+[Beaker experiment](https://beaker.org/ex/01M2F7N19DQ3YJMRJAXJ1K4H59).
+Both replicas were scheduled on Holmes at 05:54 UTC. Training results are pending. This short-context basket is
 not the full 32K Dolci Think recipe.
