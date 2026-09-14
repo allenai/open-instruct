@@ -89,3 +89,9 @@ refresh/transport, and then rebalance producer admission and queue capacity.
 The [trainer screening plan](../plans/trainer-throughput-20260914.md) retains
 the dynamic-row safeguard and measures scoring, backward, optimizer, and
 compilation separately.
+
+The next c128 repeat changes only failure diagnostics: the router logs the
+underlying exception chain, selected endpoint, request path, and active count.
+It still returns 503 and releases ownership on a transport error. It does not
+retry generation or log prompts/headers. This distinguishes a failed connection
+from engine compute failure without changing policy bookkeeping.

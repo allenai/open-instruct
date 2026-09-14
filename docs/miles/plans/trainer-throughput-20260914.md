@@ -1,8 +1,8 @@
 # Trainer throughput proposals, 2026-09-14 UTC
 
 Optimize trainer and serving capacity separately on fixed workloads, then size
-inference to the measured trainer demand. This document proposes trainer work;
-only the already-running packing/concurrency campaign is being exercised now.
+inference to the measured trainer demand. The six-arm trainer screen below is now launched; the broader kernel and
+communication suggestions remain follow-up proposals.
 
 ## What the current code actually selects
 
@@ -11,9 +11,9 @@ microbatch/gradient lifecycle, native distributed fused AdamW, and replayed expe
 assignments. It already accumulates microbatch gradients before final reduction;
 there is no need to add gradient accumulation or replace Adam with a fused optimizer.
 
-- `open_instruct/miles/models.py`: `compile_model=False` is hard-coded.
-- `moe_models.py`: native `OLMoDDPOptimizerConfig` is built without `compile`, whose
-  Core default is false; DDP config leaves `use_reduce_scatter=False`.
+- `open_instruct/miles/models.py`: `compile_model` now follows an explicit experimental Core option (default false).
+- `moe_models.py`: native optimizer compilation and `use_reduce_scatter` are now explicitly
+  plumbed experimental Core options, both defaulting to false.
 - `moe_models.py`: `recompute_each_block` follows `activation_recompute`, currently true.
 - The HF-to-Core factory defaults expert communication to `sync_1d`, capacity 1.25.
 - Current qualification arms use 6,144-token packs, FlashAttention 4, dynamic-row

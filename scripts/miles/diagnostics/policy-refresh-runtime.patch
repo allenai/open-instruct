@@ -77,3 +77,22 @@ index bc6a36ef9..17d12435b 100644
              else "open_instruct.miles.async_rollout.ManagedFullyAsyncRolloutFn"
          )
          if args.eval_function_path == original_path:
+diff --git a/miles/router/router.py b/miles/router/router.py
+--- a/miles/router/router.py
++++ b/miles/router/router.py
+@@ -182,7 +182,14 @@ class MilesRouter:
+                 "headers": dict(response.headers),
+             }
+         except httpx.RequestError as error:
+-            logger.warning("[miles-router] Proxy transport failed: %s", type(error).__name__)
++            logger.warning(
++                "[miles-router] Proxy transport failed: %s worker=%s path=%s active=%s",
++                type(error).__name__,
++                worker_url,
++                path,
++                self.worker_request_counts.get(worker_url),
++                exc_info=True,
++            )
+             raise HTTPException(503, "Rollout worker unavailable", headers={"Retry-After": "1"}) from error
+         finally:
+             self._finish_url(worker_url)
