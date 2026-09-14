@@ -1,0 +1,10 @@
+{
+  "case": "packed-fast-2t4i-c32-p512-b128",
+  "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/packed-fast-2t4i-c32-p512-b128-3db23e80ee2e/run",
+  "experiment": "01M2F2F86TZKY4A7VPTH6448K5",
+  "source": "01M2F2F5H44ZV1WEBTT654D2Q3",
+  "commit": "563379c9ff67ae4908a167524e60f5c071f6ba7e",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "archive_sha256": "6e5c7768c491b4f71c4475cadbc585393e9f1828f54f02420303e0afa0764f63",
+  "excluded_hostnames": []
+}
