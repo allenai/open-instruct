@@ -1,4 +1,4 @@
-# MILES + OLMo-core GRPO
+# MILES GRPO documentation
 
 Use **`python -m open_instruct.miles`** for new GRPO work in this project.
 Open Instruct owns the researcher configuration and data/reward integration; MILES
@@ -13,17 +13,18 @@ switching to a deprecated backend.
 
 ## Start here
 
-1. Check [model support](models-and-checkpoints.md) and [topology limits](topology.md).
-2. Copy a [structured example](../../configs/miles/examples/README.md).
-3. Read the [workflow](workflow.md), then follow the [launch guide](launching.md)
+1. Start with the [MILES GRPO guide](grpo.md) for setup, the runtime image and a first run.
+2. Check [model support](models-and-checkpoints.md) and [topology limits](topology.md).
+3. Copy a [structured example](../../configs/miles/examples/README.md).
+4. Read the [workflow](workflow.md), then follow the [launch guide](launching.md)
    for your host. Planning does not require GPUs or mounted checkpoints.
-4. Use [operations](operations.md) to check completion and inspect retained evidence.
+5. Use [operations](operations.md) to check completion and inspect retained evidence.
 
 ## Documentation map
 
 | Document | Use it when |
 |---|---|
-| [Sharing candidate](sharing-candidate.md) | Finding consolidated work, image qualification and tester setup |
+| [MILES GRPO](grpo.md) | Setting up MILES GRPO, selecting its runtime image and launching a first run |
 | [Support matrix](feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
 | [Workflow](workflow.md) | Editing one TOML from preparation through training and export |
 | [Launching](launching.md) | Submitting from a laptop or Beaker session, or executing in an allocation |

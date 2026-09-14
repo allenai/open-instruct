@@ -3,7 +3,7 @@
 For new GRPO work, use `python -m open_instruct.miles` and start with
 [MILES + OLMo-core](miles/index.md), its [support matrix](miles/feature-parity.md),
 [launch guide](miles/launching.md), and [configuration reference](miles/configuration.md).
-For the colleague pilot, see the [sharing candidate](miles/sharing-candidate.md).
+For the colleague pilot, see the [MILES GRPO](miles/grpo.md).
 The older `grpo.py` and `grpo_fast.py` entry points are **deprecated**; their
 [legacy instructions](algorithms/legacy_grpo.md) are for existing runs and reproduction.
 

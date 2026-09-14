@@ -8,7 +8,7 @@ for building and updating that image.
 ## Prepare a submitting host
 
 Use the project's `robertb/miles-olmo-core` branch. For the internal pilot, first
-follow the [candidate source handoff](sharing-candidate.md#tester-workflow): the
+follow the [source setup](grpo.md#run-miles-grpo): the
 supplied bundle includes local commits that may not yet be on GitHub. The clone
 command below applies once the intended revision is available there.
 
@@ -53,7 +53,7 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
-The current [sharing candidate](sharing-candidate.md) uses image
+The current [MILES GRPO](grpo.md) uses image
 `01M2E5QR5C60WF7H0TDEF4CD3S`. Its starter retains offline W&B metrics and needs
 no extra HF/W&B secrets with the supplied inputs. Beaker resource permissions
 are still required.

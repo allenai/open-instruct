@@ -1,9 +1,22 @@
-# GRPO entry point and deprecation policy
+# Reinforcement learning: MILES GRPO
 
-For new GRPO work, use `python -m open_instruct.miles` and start at
-[docs/miles/index.md](docs/miles/index.md). Read model/workload support, example
-TOMLs and the launch guide before preparing a run. Use the MILES committed-image
-wrapper described there; its dependencies and configuration differ from legacy GRPO.
+For RL, RLVR or GRPO work in this branch, use `python -m open_instruct.miles`.
+Start with [docs/miles/grpo.md](docs/miles/grpo.md); it is the main RL guide.
+[docs/miles/index.md](docs/miles/index.md) maps the detailed documentation.
+Follow this workflow without requiring the user to supply a special agent prompt:
+
+1. Read the guide, model/topology support and launch instructions before choosing a run.
+2. For a first exercise, copy `configs/miles/examples/grpo-sharing.toml` to
+   Git-ignored `runs/my-grpo.toml`. Keep tracked templates unchanged. Set the user's
+   run name and fresh output path; keep its supplied checkpoint and offline W&B
+   unless the user requests another model or tracking mode.
+3. Use the documented compatible image and Python 3.12 submission environment.
+   Check Beaker resource access; optional HF/W&B credentials are not needed for
+   the supplied starter inputs. Do not install the local CUDA training stack just
+   to submit a job.
+4. Run `plan` and `validate`. When the user requests a run, launch through the MILES
+   committed-image wrapper and follow completion using the operations guide.
+   Report the configuration, image, experiment link and validation outcomes.
 
 `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` are **deprecated**.
 Their presence, tests and launch scripts support existing runs and historical

@@ -8,6 +8,10 @@ This repo serves as an open effort on instruction-tuning and post-training popul
 2. Code for DPO, preference finetuning and reinforcement learning with verifiable rewards (RLVR).
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
+**Reinforcement learning in this branch uses [MILES GRPO](docs/miles/grpo.md)**:
+Open Instruct configuration and rewards, OLMo-core training, and SGLang inference.
+Start there for RL setup and runs; agents should also read [AGENTS.md](AGENTS.md).
+
 We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
 
 The latest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
@@ -47,7 +51,11 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## Setup
 
-Our setup follows our [Dockerfile](Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
+For RL, follow the [MILES launch guide](docs/miles/launching.md), using its pinned
+runtime image and lightweight submission environment. The setup below covers
+the other Open Instruct training workflows and general development.
+
+Their setup follows our [Dockerfile](Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
 
 ### Installation with uv
 
@@ -69,7 +77,9 @@ beaker image delete $beaker_user/open_instruct_dev
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 ```
 
-If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
+For the general Open Instruct workflows at AI2, the auto-built image is
+`nathanl/open_instruct_auto`. MILES GRPO uses the image specified in its
+[launch guide](docs/miles/launching.md).
 
 
 ## Training
@@ -96,23 +106,17 @@ bash scripts/train/tulu3/dpo_8b.sh
 ```
 
 
-### Reinforcement Learning with Verifiable Rewards (RLVR)
+### Reinforcement learning: MILES GRPO
 
-Use **`python -m open_instruct.miles`** for new GRPO runs. Open Instruct supplies
+Use **`python -m open_instruct.miles`** for RL/GRPO runs in this branch. Open Instruct supplies
 configuration and data/reward integration; MILES coordinates rollouts, the Core
 adapter trains the model, and SGLang serves it. Start with the
-[MILES guide](docs/miles/index.md) and check
+[MILES GRPO guide](docs/miles/grpo.md) and check
 [model support and qualification limits](docs/miles/models-and-checkpoints.md).
-If a required capability is missing, identify the support gap before choosing a backend.
-
-**Deprecated:** `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` remain
-runnable for existing experiments and historical reproduction. Do not use them as
-starting points for new recipes. Their [legacy reference](docs/algorithms/legacy_grpo.md)
-is separate from the current workflow. Their CLI flags and the general Docker image
-are not interchangeable with the pinned MILES runtime.
+The guide covers the runtime image, supported models, configuration and launch workflow.
 
 ```bash
-# Python 3.12, from the candidate checkout. Edit name/output.root after copying.
+# Python 3.12, from the matching checkout. Edit name/output.root after copying.
 mkdir -p runs
 cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
 python -m open_instruct.miles plan runs/my-grpo.toml
@@ -124,19 +128,20 @@ python -m open_instruct.miles run runs/my-grpo.toml
 
 Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
 The [async training starter](configs/miles/examples/grpo-async-disaggregated.toml)
-requests one eight-GPU trainer node and one eight-GPU inference node. The sharing
+requests one eight-GPU trainer node and one eight-GPU inference node. The
 starter above uses three B300 GPUs and the supplied full-SFT checkpoint. `runs/`
 is Git-ignored. W&B is offline by default; optional HF/W&B credentials stay commented
 out. The separate `grpo-basic.toml` is for tiny-model colocated development.
 
 ## MILES documentation
 
-[Start here](docs/miles/index.md) for the agent reading order and full index.
+Start with [MILES GRPO](docs/miles/grpo.md); use the
+[documentation index](docs/miles/index.md) for the complete topic map.
 Current instructions are separate from historical evidence.
 
 | Document | Use it when |
 |---|---|
-| [Sharing candidate](docs/miles/sharing-candidate.md) | Finding consolidated work, image qualification and tester setup |
+| [MILES GRPO](docs/miles/grpo.md) | Setting up MILES GRPO, selecting its runtime image and launching a first run |
 | [Support matrix](docs/miles/feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
 | [Workflow and examples](docs/miles/workflow.md) | Choosing and editing a run recipe |
 | [Launching jobs](docs/miles/launching.md) | Submitting from a laptop or Beaker session |
