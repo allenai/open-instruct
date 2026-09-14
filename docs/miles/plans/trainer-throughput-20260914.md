@@ -120,3 +120,12 @@ update. Fixed batches become off-policy with respect to each arm's independently
 updated parameters; they provide controlled workloads, not a new on-policy RL
 experiment. Numerical checks and a live run, including resume qualification for
 optimizer changes, are required before promoting a winning option.
+
+The initial screen attempts stopped before update zero: the diagnostic harness
+had bypassed MILES' NumPy-to-tensor replay conversion. The production check
+rejected the arrays. The corrected worker mocks only object-store retrieval and
+uses the real MILES ingress, including behavior-logprob dtype conversion and
+route tensor conversion. A CPU runtime regression check covers that boundary.
+The measured total now includes the normal ingress device copies, while retained
+file loading and DP partitioning remain outside the timer. Failed attempts are
+not throughput evidence.

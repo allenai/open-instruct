@@ -114,8 +114,8 @@ def main():
             stack.enter_context(
                 mock.patch.object(
                     actor.miles_data,
-                    "get_rollout_data",
-                    side_effect=lambda *a: (current_shard[0], contextlib.nullcontext()),
+                    "process_rollout_data",
+                    side_effect=lambda *a, **kw: (current_shard[0], contextlib.nullcontext()),
                 )
             )
             stack.enter_context(mock.patch.object(jit.JITFunction, "_do_compile", lambda *a: observation.compile(*a)))
@@ -132,8 +132,6 @@ def main():
                 )
                 shards = train_data_conversion.split_train_data_by_dp_raw(args, train, dp_size=world)
                 shard = train_data_conversion.process_rollout_data_shard(args, shards[rank])
-                for key, dtype in (("tokens", torch.long), ("loss_masks", torch.int)):
-                    shard[key] = [torch.as_tensor(value, device="cuda", dtype=dtype) for value in shard[key]]
                 current_shard[0] = shard
                 observation.misses.clear()
                 observation.writes.clear()
