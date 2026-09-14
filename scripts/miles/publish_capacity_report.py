@@ -24,7 +24,11 @@ SECTIONS = {
             "trainer/score_train_seconds",
         ],
         "Trainer kernel activity — not SM/FLOP utilization": ["trainer/kernel_activity_percent_mean"],
-        "Trainer memory GiB": ["trainer/memory_used_gib_mean", "trainer/memory_used_gib_peak_any_gpu"],
+        "Trainer memory GiB": [
+            "trainer/memory_used_gib_mean",
+            "trainer/memory_used_gib_peak_any_gpu",
+            "trainer/memory_total_gib_mean",
+        ],
         "Useful response tokens/sec/trainer GPU over full cycle": [
             "trainer/useful_response_tokens_per_gpu_cycle_second"
         ],
@@ -38,7 +42,11 @@ SECTIONS = {
         ],
         "Engine waiting requests": ["inference/num_queue_reqs_mean_per_engine"],
         "Inference kernel activity — not SM/FLOP utilization": ["inference/kernel_activity_percent_mean"],
-        "Inference memory GiB": ["inference/memory_used_gib_mean", "inference/memory_used_gib_peak_any_gpu"],
+        "Inference memory GiB": [
+            "inference/memory_used_gib_mean",
+            "inference/memory_used_gib_peak_any_gpu",
+            "inference/memory_total_gib_mean",
+        ],
         "Pool occupancy peak fraction": [
             "inference/full_token_usage_peak_any_engine",
             "inference/mamba_usage_peak_any_engine",
