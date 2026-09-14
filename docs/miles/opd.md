@@ -6,7 +6,8 @@ Megatron trainer. It is a separate route from the OLMo-core GRPO adapter.
 
 The initial exercise is two updates of **Qwen3.5-4B from Qwen3.5-9B** using
 student-generated responses and sampled-token teacher log probabilities. The
-first GPU run is in progress; this page does not yet establish qualification.
+[tiny run passed](measurements/qwen35-opd-20260914/README.md): teacher scoring,
+two optimizer updates, checkpoint/export auditing and fresh-process export reload.
 The broader [prototype plan](plans/qwen35-opd-prototype-20260914.md) includes
 additional checks before research-scale use.
 
@@ -25,7 +26,11 @@ python -m open_instruct.miles validate configs/miles/opd/qwen35-4b-tiny.toml
 The image adds `ISEEKYAN/mbridge` at
 `89eb10887887bc74853f89a4de258c0702932a1c`, matching the pinned Miles converter.
 This package is distinct from NVIDIA Megatron Bridge. Existing Megatron patches
-are retained. Commit changes before building and launching; `run` invokes the
+are retained. The candidate pins a complete cuDNN wheel and sets `CUDNN_HOME` /
+`CUDNN_PATH` consistently for PyTorch and Transformer Engine. Qwen uses packed
+sequences with explicit FlashAttention; the native CP1 padding metadata is
+corrected so FlashAttention 4 can handle its head dimension on B300.
+Commit changes before building and launching; `run` invokes the
 repository's required `build_image_and_launch.sh --miles` wrapper.
 
 ```bash
@@ -49,6 +54,25 @@ four-GPU allocation: two Megatron trainer GPUs (TP2), one learner SGLang GPU, an
 one teacher SGLang GPU. Ray sees only the first three GPUs. The teacher loads the
 pinned 9B checkpoint and scores complete learner token sequences on a local
 endpoint; startup, timeout and failure checks are owned by the launcher.
+
+## Repeat the exercised image
+
+The tested source is `298254e50a1ece28d6291863f67f13942537c3e1`; the immutable
+image below contains that source and the complete candidate runtime. From a clean,
+committed checkout, use fresh run and asset paths in your workspace:
+
+```bash
+MILES_EXISTING_IMAGE=01M2H301PJ0WFB19NCGY5QBP51 \
+python -m open_instruct.miles run configs/miles/opd/qwen35-4b-tiny.toml \
+  --set 'name="qwen35-4b-opd-repeat"' \
+  --set 'output.root="/weka/oe-training-default/YOUR_USERNAME/opd/runs/tiny-01"' \
+  --set 'output.assets="/weka/oe-training-default/YOUR_USERNAME/opd/assets"'
+```
+
+This still uses `build_image_and_launch.sh --miles`, reusing the explicit image.
+Preparation runs automatically if assets are absent; the separate Saturn step
+above avoids staging downloads on the GPU allocation. For runtime code changes,
+leave `MILES_EXISTING_IMAGE` unset and build with `MILES_BASE_IMAGE`.
 
 ## Semantics and evidence
 
@@ -76,7 +100,8 @@ not an improvement in task accuracy.
   its own architecture profile and exercise.
 - Automatic restart and resume are rejected until native checkpoint restoration
   and the data cursor have been exercised together.
-- Only the fixed topology, top-k zero, pure OPD and offline tracking are exposed.
+- Only GSM8K with held-out evaluation, saving every update, the fixed topology,
+  top-k zero, pure OPD and offline tracking are exposed.
   The general Core configuration reference does not describe this prototype's
   closed schema; `plan` shows its resolved defaults.
 - Before a colleague scales up, review independent teacher/student probability

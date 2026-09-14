@@ -1,8 +1,9 @@
 # Qwen3.5 OPD through Open Instruct: prototype and bounded run plan
 
 Status: proposed implementation and experiment plan, September 14, 2026.
-Implementation and a two-update 4B pilot are now underway; see the
-[OPD prototype guide](../opd.md). The larger qualification plan below remains
+Implementation and a two-update 4B pilot are complete; see the
+[OPD prototype guide](../opd.md) and
+[successful exercise report](../measurements/qwen35-opd-20260914/README.md). The larger qualification plan below remains
 a proposal, including 2B support and resume to 20 updates.
 Source inspected: `robertb/miles-olmo-core`, Open Instruct `26c9f7926`.
 
@@ -98,9 +99,9 @@ monkeypatch hooks.
 
 ## 3. Public interface and implementation boundaries
 
-Keep `python -m open_instruct.miles {plan,validate,train,run,status}`. Extend the
-structured configuration with these proposed fields; they are not accepted by
-the current parser:
+Keep `python -m open_instruct.miles {plan,validate,train,run,status}`. The original
+planning contract below is broader than the implemented pilot. Use the
+[prototype guide](../opd.md) and `plan` output for the actual accepted fields:
 
 | Proposed field | First supported meaning |
 |---|---|

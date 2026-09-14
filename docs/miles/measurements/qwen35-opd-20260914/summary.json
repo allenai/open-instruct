@@ -1,0 +1,104 @@
+{
+  "experiment": "01M2H33R16RBRTBCZHCH5BYCW9",
+  "job": "01M2H33R7KPHYE45RA7KQA0RZS",
+  "result_dataset": "01M2H33R1CDW9VDBK93TQ15SQ2",
+  "image": "01M2H301PJ0WFB19NCGY5QBP51",
+  "source_revision": "298254e50a1ece28d6291863f67f13942537c3e1",
+  "status": {
+    "created": "2026-09-14T23:12:52.774117Z",
+    "scheduled": "2026-09-14T23:13:01.661626Z",
+    "started": "2026-09-14T23:14:21.081648Z",
+    "exited": "2026-09-14T23:31:05.468296Z",
+    "finalized": "2026-09-14T23:31:15.967573Z",
+    "exitCode": 0,
+    "idleSince": "2026-09-14T23:31:05.40324Z",
+    "ready": "2026-09-14T23:14:20.375257Z"
+  },
+  "gpu_type": "NVIDIA B300 SXM6 AC",
+  "gpus": 4,
+  "run_root": "/weka/oe-training-default/robertb/open-instruct/opd/runs/tiny-20260914-f",
+  "native_checkpoint_marker": "1",
+  "teacher_scored_responses": 16,
+  "teacher_scored_response_tokens": 3947,
+  "updates": [
+    {
+      "max_abs_opd_signal": 6.249186992645264,
+      "max_advantage_error": 0.0,
+      "rollout_id": 0,
+      "samples": 8
+    },
+    {
+      "max_abs_opd_signal": 8.094499588012695,
+      "max_advantage_error": 0.0,
+      "rollout_id": 1,
+      "samples": 8
+    }
+  ],
+  "optimizer": [
+    {
+      "train/entropy_loss": 0.0,
+      "train/ess_ratio": 1.0,
+      "train/grad_norm": 11.24356460571289,
+      "train/loss": 0.07195938378572464,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/opd_reverse_kl": 0.07195938378572464,
+      "train/pg_clipfrac": 0.0,
+      "train/pg_loss": 0.07195938378572464,
+      "train/ppo_kl": 0.0,
+      "train/step": 0,
+      "train/train_rollout_kl": 0.00020370437414385378,
+      "train/train_rollout_logprob_abs_diff": 0.00518410699442029
+    },
+    {
+      "train/entropy_loss": 0.0,
+      "train/ess_ratio": 1.0,
+      "train/grad_norm": 12.70932674407959,
+      "train/loss": 0.0804770365357399,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/opd_reverse_kl": 0.0804770365357399,
+      "train/pg_clipfrac": 0.0,
+      "train/pg_loss": 0.0804770365357399,
+      "train/ppo_kl": 0.0,
+      "train/step": 1,
+      "train/train_rollout_kl": 0.000230114339501597,
+      "train/train_rollout_logprob_abs_diff": 0.006096188444644213
+    }
+  ],
+  "export": {
+    "changed_since_previous_update": 334,
+    "changed_tensors": 359,
+    "fp32_a_log_tensors": 24,
+    "path": "/weka/oe-training-default/robertb/open-instruct/opd/runs/tiny-20260914-f/hf-1",
+    "training_scope": "language only",
+    "frozen_base_tensor_count": 312
+  },
+  "evaluation": {
+    "0": {
+      "eval/heldout": 0.5,
+      "eval/heldout/num_training_samples": 8,
+      "eval/heldout/truncated_ratio": 0.625,
+      "eval/heldout/weight_version/mean": 1.0
+    },
+    "1": {
+      "eval/heldout": 0.375,
+      "eval/heldout/num_training_samples": 8,
+      "eval/heldout/truncated_ratio": 0.625,
+      "eval/heldout/weight_version/mean": 3.0
+    }
+  },
+  "reload": {
+    "model_path": "/weka/oe-training-default/robertb/open-instruct/opd/runs/tiny-20260914-f/hf-1",
+    "completion_tokens": 32,
+    "finite_output_logprobs": true,
+    "text": "To find out how many baby sea turtles are still on the sand, we can follow these steps:\n\n1.  **Identify the total number of turtles"
+  },
+  "checks": {
+    "focused_cpu_tests": 200,
+    "runtime_gpu_preflight_tests": 8,
+    "ruff": "passed",
+    "opd_type_checks": "passed"
+  },
+  "interpretation": "Two-update mechanics check only; no quality or scaling claim."
+}
