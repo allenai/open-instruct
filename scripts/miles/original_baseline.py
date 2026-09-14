@@ -1,0 +1,223 @@
+"""Frozen-data adapter for a historical Open Instruct GSM8K comparison.
+
+Run inside the original Olmo 3 image. The original trainer and verifiers remain
+in that image; only Adam beta2 is aligned to the Core comparison explicitly.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from open_instruct import dataset_transformation
+
+ORIGINAL_TRAINER_SHA256 = "b405883512b75c1bcd4ba373df4ca3d530fb66af764bf334cc1eeb8da5cc7b34"
+PASSTHROUGH_TEMPLATE = "{{ messages[0]['content'] }}"
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def encoded(value):
+    return (json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n").encode()
+
+
+def convert_row(row, tokenizer):
+    specs = row["metadata"]["verifiers"]
+    if len(specs) != 1 or specs[0]["name"] != "gsm8k" or specs[0].get("weight", 1) != 1:
+        raise ValueError("Original GSM8K control requires exactly one unit-weight GSM8K verifier")
+    result = {
+        "messages": [{"role": "user", "content": row["input"]}],
+        "ground_truth": str(specs[0]["target"]),
+        "dataset": "gsm8k",
+        "prepared_sample_id": row["metadata"]["prepared_sample_id"],
+    }
+    transformed = dataset_transformation.rlvr_tokenize_v2(dict(result), tokenizer)
+    ids = transformed[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    if sha(encoded(ids)) != row["metadata"]["run_prompt_token_ids_sha256"]:
+        raise ValueError(f"Original tokenizer changed frozen prompt tokens: {result['prepared_sample_id']}")
+    if not dataset_transformation.rlvr_filter_v1(
+        transformed, tokenizer, max_prompt_token_length=2048, max_token_length=34816
+    ):
+        raise ValueError("Original filter would remove a frozen row")
+    return result
+
+
+def prepare(model, source, output):
+    if output.exists():
+        raise ValueError("Prepared comparison directory already exists; verify or use a fresh path")
+    manifest = json.loads((source / "manifest.json").read_text())
+    for filename, expected in manifest["outputs"].items():
+        if sha((source / filename).read_bytes()) != expected:
+            raise ValueError(f"Core prepared artifact changed: {filename}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".original-gsm8k-", dir=output.parent))
+    try:
+        token_root = staging / "tokenizer"
+        token_root.mkdir()
+        tokenizer = dataset_transformation.TokenizerConfig(tokenizer_name_or_path=str(model)).tokenizer
+        original_template = tokenizer.chat_template
+        tokenizer.chat_template = PASSTHROUGH_TEMPLATE
+        tokenizer.save_pretrained(token_root)
+        shutil.copyfile(model / "config.json", token_root / "config.json")
+        # Check the exact loader that training uses, including its pad-token rules.
+        tokenizer = dataset_transformation.TokenizerConfig(tokenizer_name_or_path=str(token_root)).tokenizer
+        receipt = {
+            "model": str(model),
+            "source": str(source),
+            "splits": {},
+            "original_chat_template_sha256": sha(original_template.encode()),
+            "adapter_chat_template": PASSTHROUGH_TEMPLATE,
+            "source_manifest_sha256": sha((source / "manifest.json").read_bytes()),
+        }
+        identities = []
+        for split, expected_count in (("train", 6000), ("eval", 512)):
+            rows = [json.loads(line) for line in (source / f"{split}.jsonl").read_text().splitlines()]
+            if len(rows) != expected_count:
+                raise ValueError(f"Expected {expected_count} frozen {split} rows")
+            converted = [convert_row(row, tokenizer) for row in rows]
+            ids = {row["prepared_sample_id"] for row in converted}
+            if len(ids) != len(converted):
+                raise ValueError("Duplicate source identities")
+            identities.append(ids)
+            raw = b"".join(encoded(row) for row in converted)
+            (staging / f"{split}.jsonl").write_bytes(raw)
+            (staging / f"smoke-{split}.jsonl").write_bytes(
+                b"".join(encoded(row) for row in converted[: 64 if split == "train" else 8])
+            )
+            receipt["splits"][split] = {"rows": len(converted), "sha256": sha(raw), "all_prompt_tokens_equal": True}
+        if identities[0] & identities[1]:
+            raise ValueError("Training and heldout identities overlap")
+        receipt["files"] = {
+            str(p.relative_to(staging)): sha(p.read_bytes()) for p in staging.rglob("*") if p.is_file()
+        }
+        (staging / "preparation.json").write_bytes(encoded(receipt))
+        staging.rename(output)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    print("ORIGINAL_BASELINE_PREPARATION_PASSED", json.dumps(receipt), flush=True)
+
+
+def train(model, prepared, output, *, smoke):
+    receipt = json.loads((prepared / "preparation.json").read_text())
+    if receipt["model"] != str(model):
+        raise ValueError("Prepared model identity differs")
+    for name, digest in receipt["files"].items():
+        if sha((prepared / name).read_bytes()) != digest:
+            raise ValueError(f"Prepared artifact changed: {name}")
+    if output.exists():
+        raise ValueError("Use a fresh original-framework run directory")
+    output.mkdir(parents=True)
+    trainer = Path("/stage/open_instruct/grpo_fast.py")
+    original = trainer.read_bytes()
+    if sha(original) != ORIGINAL_TRAINER_SHA256:
+        raise ValueError("Original trainer source differs from the audited image")
+    old = "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)"
+    new = "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer, betas=(0.9, 0.95), eps=1e-8)"
+    text = original.decode()
+    if text.count(old) != 1:
+        raise ValueError("Cannot unambiguously align Adam beta2")
+    trainer.write_text(text.replace(old, new))
+    steps = 3 if smoke else 200
+    prefix = "smoke-" if smoke else ""
+    options = {
+        "exp_name": output.name,
+        "model_name_or_path": str(model),
+        "tokenizer_name_or_path": str(prepared / "tokenizer"),
+        "attn_implementation": "flash_attention_2",
+        "torch_dtype": "bfloat16",
+        "dataset_mixer_list": [str(prepared / f"{prefix}train.jsonl"), "1.0"],
+        "dataset_mixer_eval_list": [str(prepared / f"{prefix}eval.jsonl"), "1.0"],
+        "dataset_mixer_list_splits": "train",
+        "dataset_mixer_eval_list_splits": "train",
+        "max_token_length": 34816,
+        "max_prompt_token_length": 2048,
+        "response_length": 32768,
+        "pack_length": 34816,
+        "num_learners_per_node": 2,
+        "vllm_num_engines": 4,
+        "vllm_tensor_parallel_size": 1,
+        "vllm_enforce_eager": True,
+        "vllm_gpu_memory_utilization": 0.7,
+        "vllm_enable_prefix_caching": False,
+        "deepspeed_stage": 3,
+        "gradient_checkpointing": True,
+        "per_device_train_batch_size": 1,
+        "num_unique_prompts_rollout": 16,
+        "num_samples_per_prompt_rollout": 4,
+        "total_episodes": steps * 64,
+        "num_mini_batches": 1,
+        "num_epochs": 1,
+        "learning_rate": 1e-6,
+        "lr_scheduler_type": "constant",
+        "warm_up_steps": 0,
+        "weight_decay": 0.0,
+        "beta": 0.0,
+        "clip_lower": 0.2,
+        "clip_higher": 0.28,
+        "advantage_normalization_type": "centered",
+        "verification_reward": 1.0,
+        "temperature": 1.0,
+        "seed": 17,
+        "async_steps": 0,
+        "inflight_updates": False,
+        "eval_on_step_0": True,
+        "local_eval_every": 1 if smoke else 50,
+        "save_freq": steps,
+        "checkpoint_state_freq": steps if smoke else 100,
+        "checkpoint_state_dir": str(output / "checkpoints"),
+        "output_dir": str(output / "model"),
+        "try_auto_save_to_beaker": False,
+        "try_launch_beaker_eval_jobs_on_weka": False,
+        "save_traces": True,
+        "with_tracking": True,
+        "wandb_entity": "ai2-llm",
+        "wandb_project_name": "olmo-rl-comparison",
+        "backend_timeout": 120,
+    }
+    command = [sys.executable, str(trainer)]
+    for key, value in options.items():
+        command.append("--" + key)
+        command.extend(str(v) for v in (value if isinstance(value, list) else [value]))
+    record = {
+        "command": command,
+        "original_source_sha256": sha(original),
+        "patched_source_sha256": sha(trainer.read_bytes()),
+        "adam_alignment": {"before": old, "after": new},
+        "remaining_differences": [
+            "vLLM versus SGLang",
+            "DeepSpeed/HF versus OLMo-core",
+            "Original token-mean packed loss versus Core response reduction",
+            "Original historical GSM8K verifier versus current verifier",
+        ],
+    }
+    (output / "invocation.json").write_bytes(encoded(record))
+    print("ORIGINAL_BASELINE_COMMAND", json.dumps(record), flush=True)
+    subprocess.run(
+        command, check=True, env={**os.environ, "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914"}
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("stage", choices=("prepare", "smoke", "train"))
+    parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--prepared", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if args.stage == "prepare":
+        prepare(args.model, args.source, args.prepared)
+    else:
+        train(args.model, args.prepared, args.output, smoke=args.stage == "smoke")
+
+
+if __name__ == "__main__":
+    main()

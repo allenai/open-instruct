@@ -159,3 +159,31 @@ log/answer SHA256 digests, job status, evaluation boundaries and paired counts.
 [heavy-SFT protocol](../learning-comparisons-20260911.md) retain model/data/runtime
 identities and known differences. Generation samples and original-framework
 results remain pending additions; this report marks those gaps explicitly.
+
+
+## Original Open Instruct comparator qualification
+
+`scripts/miles/launch_original_baseline.sh` uses the committed-image wrapper to
+run the actual original image `01K7B0Z1KKP8AFKV2YKENMQ53B` (October 2025), not
+MILES. Its CPU preparation runs on Saturn and adapts the current Core GSM8K
+control's 6000 training and 512 held-out rows. It checks every prompt token hash
+through the original `rlvr_tokenize_v2` transform, preserves source identities and
+labels, and rejects changed filtering or train/eval overlap. A tokenizer-only
+passthrough template prevents adding a second template to already-rendered
+prompts; it does not change model weights.
+
+A three-update, six-GPU qualifier uses 64 training prompts and eight held-out
+questions before the full 200-update, full-heldout comparator is authorized to
+start. Both use two DeepSpeed learners and four vLLM engines, response 32768,
+pack/context 34816, 16 prompts x four samples, LR 1e-6, centered advantages,
+clipping 0.2/0.28, KL zero, training temperature 1, greedy evaluation and seed17.
+The only trainer source edit aligns Adam beta2 from its hardcoded 0.999 to 0.95;
+the exact original source hash and one replacement are checked and recorded.
+All proposed CLI options were checked against the image's dataclasses before
+submission; this is not a claim of runtime qualification.
+
+Remaining differences include vLLM/SGLang numerics, DeepSpeed/HF/Core execution,
+packed token-mean versus response reduction, and the historical GSM8K verifier.
+They remain visible in the invocation receipt; this is a rough implementation
+comparison rather than a claim of exact algorithmic parity. Original-framework
+GPU execution is still unqualified until that separate smoke succeeds.
