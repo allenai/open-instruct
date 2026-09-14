@@ -1,7 +1,6 @@
 """Teacher score validation and task evaluation around upstream sampled-token OPD."""
 
 import asyncio
-import copy
 import json
 import math
 import os
@@ -23,6 +22,9 @@ async def reward(args, sample, **kwargs):
         for attempt in range(3):
             try:
                 result = await on_policy_distillation.reward_func(args, sample, **kwargs)
+                entries = result["meta_info"]["input_token_logprobs"][1:][-sample.response_length :]
+                if [entry[1] for entry in entries] != sample.tokens[-sample.response_length :]:
+                    raise ValueError("Teacher scored different token positions or IDs")
                 scores = on_policy_distillation._teacher_sampled_log_probs(result, sample.response_length)
                 if len(scores) != sample.response_length or not all(math.isfinite(x) for x in scores.tolist()):
                     raise ValueError("Teacher scores are missing, misaligned or nonfinite")
@@ -63,7 +65,15 @@ async def eval_reward(args, sample, **kwargs):
 def evaluate(args, rollout_id, data_source, evaluation=False):
     if not evaluation:
         raise ValueError("OPD task evaluation is evaluation-only")
-    eval_args = copy.copy(args)
-    eval_args.custom_rm_path = "open_instruct.miles.opd_hooks.eval_reward"
-    eval_args.custom_reward_post_process_path = None
-    return sglang_rollout.generate_rollout(eval_args, rollout_id, data_source, evaluation=True)
+    # Legacy GenerateState retains the first args object across calls. Mutate and
+    # restore that same object so an initial evaluation cannot pin the task RM
+    # as the training reward. The prototype uses the synchronous driver only.
+    reward_path = args.custom_rm_path
+    postprocess_path = args.custom_reward_post_process_path
+    args.custom_rm_path = "open_instruct.miles.opd_hooks.eval_reward"
+    args.custom_reward_post_process_path = None
+    try:
+        return sglang_rollout.generate_rollout(args, rollout_id, data_source, evaluation=True)
+    finally:
+        args.custom_rm_path = reward_path
+        args.custom_reward_post_process_path = postprocess_path

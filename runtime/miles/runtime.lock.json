@@ -18,7 +18,7 @@
       "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
       "development_commit": "b18b71b1825a7d4795a0399081807b9c40c4f557",
       "patch": "patches/miles.patch",
-      "patch_sha256": "9aa21f8e62823faadbe737cfbeeaeae7fc5ff9905123b2b276f9abce74e19af6"
+      "patch_sha256": "d706a1eb574397053537e5a87556f3ec3168d157095b2c61d5abfcbc4a53d53c"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",

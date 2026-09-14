@@ -1046,6 +1046,26 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
          assert (
              args.use_dynamic_batch_size is False
          ), "Dynamic batch size is not supported for bshd format. Please specify --micro-batch-size instead."
+diff --git a/miles/utils/data.py b/miles/utils/data.py
+index 13459dcf996cd2637bf4cd755384124f728a2ce6..6b0d2e8cd39a6b8704ea804e0af66700c4d5f4bf 100644
+--- a/miles/utils/data.py
++++ b/miles/utils/data.py
+@@ -229,12 +229,11 @@ class Dataset:
+             else:
+                 output_prompt = prompt
+ 
+-            if processor:
++            # Pre-rendered text remains valid when a multimodal checkpoint supplies
++            # a processor. Media extraction is only meaningful for conversations.
++            if processor and isinstance(prompt, list):
+                 from miles.utils.processing_utils import process_vision_info
+ 
+-                assert isinstance(
+-                    prompt, list
+-                ), f"prompt must be a list when processor is not None, got {type(prompt)} instead"
+                 multimodal_inputs = process_vision_info(prompt, processor)
+             else:
+                 multimodal_inputs = None
 diff --git a/miles/utils/test_wandb_utils.py b/miles/utils/test_wandb_utils.py
 index c5e5c5ad7c4b70ecb17eab4879edc77ae16f0aa3..872bd5dc579b0bb4c3b04e0df56b41e1dbc14cf2 100644
 --- a/miles/utils/test_wandb_utils.py

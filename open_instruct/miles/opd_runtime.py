@@ -176,6 +176,24 @@ def execute(spec):
                 "CONVERT_KEEP_PP1": "1",
             }
         )
+        with (root / "runtime-tests.log").open("w") as stream:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "no:cacheprovider",
+                    "-q",
+                    "/opt/core-rl/tests/miles/test_opd_hooks.py",
+                    "/opt/core-rl/tests/miles/test_opd_audit.py",
+                ],
+                env=environment,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                check=True,
+                timeout=180,
+            )
         visible = environment.get("CUDA_VISIBLE_DEVICES", "0,1,2,3").split(",")
         if len(visible) != 4:
             raise InputError(f"Expected four visible GPU devices; got {visible}")
@@ -239,7 +257,14 @@ def execute(spec):
         arguments = native_arguments(spec, prepared, checkpoint, url + "/generate", architecture)
         with (root / "native-preflight.log").open("w") as stream:
             subprocess.run(
-                [sys.executable, "-c", "from miles.utils.arguments import parse_args; parse_args()", *arguments],
+                [
+                    sys.executable,
+                    "-c",
+                    "from miles.utils.arguments import parse_args; "
+                    "from miles.rollout.data_source import RolloutDataSourceWithBuffer; "
+                    "RolloutDataSourceWithBuffer(parse_args())",
+                    *arguments,
+                ],
                 env=environment,
                 stdout=stream,
                 stderr=subprocess.STDOUT,
