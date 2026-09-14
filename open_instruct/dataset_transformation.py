@@ -263,11 +263,7 @@ CHAT_TEMPLATES = {
         "{% elif message['role'] == 'assistant' %}"
         "{{ '<|assistant|>\n' }}"
         "{% generation %}"
-        "{% if not loop.last %}"
         "{{ message['content'] + eos_token }}"
-        "{% else %}"
-        "{{ message['content'] + eos_token }}"
-        "{% endif %}"
         "{% endgeneration %}"
         "{% if not loop.last %}{{ '\n' }}{% endif %}"
         "{% endif %}"
@@ -286,11 +282,7 @@ CHAT_TEMPLATES = {
         "{% set content = message['content'] %}"
         "{{ '<|assistant|>\n' }}"
         "{% generation %}"
-        "{% if not loop.last %}"
         "{{ content + eos_token }}"
-        "{% else %}"
-        "{{ content + eos_token }}"
-        "{% endif %}"
         "{% endgeneration %}"
         "{% if not loop.last %}{{ '\n' }}{% endif %}"
         "{% endif %}"
@@ -321,11 +313,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{{ '<|assistant|>\n' }}"
         "{% generation %}"
-        "{% if not loop.last %}"
         "{{ content + eos_token }}"
-        "{% else %}"
-        "{{ content + eos_token }}"
-        "{% endif %}"
         "{% endgeneration %}"
         "{% if not loop.last %}{{ '\n' }}{% endif %}"
         "{% endif %}"
@@ -992,7 +980,7 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
-DATASET_CACHE_VERSION = "v7"
+DATASET_CACHE_VERSION = "v8"
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
@@ -1361,6 +1349,115 @@ def _verify_assistant_spans_cover_content(
                 )
 
 
+def _tokenize_rendered_chat(
+    rendered: str, tokenizer: PreTrainedTokenizer, max_seq_length: int | None
+) -> tuple[torch.Tensor, torch.Tensor, np.ndarray, bool]:
+    tokenized = tokenizer(
+        rendered,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=max_seq_length is not None,
+        max_length=max_seq_length,
+    )
+    input_ids = tokenized[INPUT_IDS_KEY]
+    offsets = tokenized["offset_mapping"][0].numpy()
+    truncated = _was_truncated(offsets, rendered, input_ids.shape[-1], max_seq_length)
+    return input_ids, tokenized[ATTENTION_MASK_KEY], offsets, truncated
+
+
+def _labels_from_char_spans(
+    input_ids: torch.Tensor, offsets: np.ndarray, spans: list[tuple[int, int]]
+) -> torch.Tensor:
+    """Train overlapping tokens, including boundary merges, but never zero-width offsets or spans."""
+    mask = np.zeros(len(offsets), dtype=bool)
+    for start, end in spans:
+        if start < end:
+            mask |= (offsets[:, 1] > start) & (offsets[:, 0] < end)
+    mask &= offsets[:, 0] < offsets[:, 1]
+    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+    labels[0, mask] = input_ids[0, mask]
+    return labels
+
+
+def _last_assistant_generation_ranges(
+    messages: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizer,
+    tools: list | None,
+    rendered: str,
+    ranges: list[tuple[int, int]],
+    message_idx: int,
+) -> list[tuple[int, int]]:
+    """Locate the final assistant message without interpreting its inference prompt as a label boundary.
+
+    External templates may emit several blocks for one turn and none for another: equal
+    block/message counts do not prove ownership. Instead bound the turn by stable renders
+    before and through that message, then select complete blocks inside it. Olmo 3.5's
+    stable answer/tool-call terminators allow this even with trailing tool or user turns.
+    """
+    try:
+        before = (
+            tokenizer.apply_chat_template(
+                messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=False
+            )
+            if message_idx
+            else ""
+        )
+        through = tokenizer.apply_chat_template(
+            messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
+        )
+    except Exception as exc:
+        raise AssistantSpanDerivationError("Cannot render prefixes to establish generation-block ownership.") from exc
+    if not (isinstance(before, str) and isinstance(through, str)):
+        raise AssistantSpanDerivationError("Expected text while establishing generation-block ownership.")
+    if not (through.startswith(before) and rendered.startswith(through)):
+        raise AssistantSpanDerivationError(
+            "Cannot establish generation-block ownership for the final assistant: conversation prefixes change "
+            "when later turns are rendered. Use a template with stable turn endings."
+        )
+    start, end = len(before), len(through)
+    selected = []
+    for block_start, block_end in ranges:
+        if block_start < end and start < block_end:
+            if block_start < start or block_end > end:
+                raise AssistantSpanDerivationError("A generation block crosses the final assistant message boundary.")
+            selected.append((block_start, block_end))
+    return selected
+
+
+def _verify_generation_terminators(
+    rendered: str, ranges: list[tuple[int, int]], tokenizer: PreTrainedTokenizer
+) -> None:
+    """Reject EOS or ChatML handoff tokens placed just outside the selected generation blocks.
+
+    Check the full render, before truncation: a cut-off response is handled separately by
+    over_length_strategy. Blocks may split reasoning, answers and terminators, and templates
+    without a closing token are allowed. An arbitrary special token is not necessarily a
+    terminator, so only EOS and the ChatML end-of-turn marker are checked here.
+    """
+    terminators = {token for token in (tokenizer.eos_token, "<|im_end|>") if token}
+    for start, end in ranges:
+        if start == end:
+            continue
+        terminator_start = end
+        while terminator_start < len(rendered) and rendered[terminator_start].isspace():
+            terminator_start += 1
+        for terminator in terminators:
+            if rendered.startswith(terminator, terminator_start):
+                terminator_end = terminator_start + len(terminator)
+                # A terminator may itself occupy a separate generation block.
+                covered_until = terminator_start
+                for block_start, block_end in sorted(ranges):
+                    if block_start <= covered_until < block_end:
+                        covered_until = block_end
+                if covered_until < terminator_end:
+                    raise AssistantSpanDerivationError(
+                        f"Assistant terminator {terminator!r} is outside the generation blocks. "
+                        "Include the closing token inside {% generation %} so the model learns to stop or hand off."
+                    )
+
+
 def _tokenize_tulu_sft_with_assistant_labels(
     messages: list[dict[str, Any]],
     tokenizer: PreTrainedTokenizer,
@@ -1382,73 +1479,50 @@ def _tokenize_tulu_sft_with_assistant_labels(
     # truncation, stops after the first range whose start was truncated away.
     template = tokenizer.get_chat_template(tools=tools)
     has_generation_blocks = isinstance(template, str) and re.search(r"\{\%[-+]?\s*generation\s*[-+]?\%\}", template)
-    is_registered_template = template in CHAT_TEMPLATES.values()
-    if has_generation_blocks and (not last_turn_only or is_registered_template):
-        template_kwargs = cast(dict[str, Any], tokenizer.special_tokens_map)
+    if has_generation_blocks:
         rendered_chats, generation_indices = chat_template_utils.render_jinja_template(
             conversations=[messages],
             tools=tools,
             chat_template=template,
             return_assistant_tokens_mask=True,
             add_generation_prompt=False,
-            **template_kwargs,
+            **cast(dict[str, Any], tokenizer.special_tokens_map),
         )
-        tokenized = tokenizer(
-            rendered_chats[0],
-            add_special_tokens=False,
-            return_offsets_mapping=True,
-            return_tensors="pt",
-            padding=False,
-            truncation=max_seq_length is not None,
-            max_length=max_seq_length,
+        rendered = rendered_chats[0]
+    else:
+        rendered = tokenizer.apply_chat_template(
+            conversation=messages, tools=tools, tokenize=False, add_generation_prompt=False
         )
-        input_ids = tokenized[INPUT_IDS_KEY]
-        attention_mask = tokenized[ATTENTION_MASK_KEY]
-        offsets = tokenized["offset_mapping"][0].tolist()
-        truncated = _was_truncated(offsets, rendered_chats[0], input_ids.shape[-1], max_seq_length)
-        labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
-        assistant_turn_count = sum(message.get("role") == "assistant" for message in messages)
-        ranges = generation_indices[0]
-        if assistant_turn_count == 0:
+    assert isinstance(rendered, str)
+    input_ids, attention_mask, offsets, truncated = _tokenize_rendered_chat(rendered, tokenizer, max_seq_length)
+    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+    if has_generation_blocks:
+        assistant_indices = _trainable_assistant_indices(messages, last_turn_only=False)
+        if not assistant_indices:
             return input_ids, attention_mask, labels, truncated
+        ranges = cast(list[tuple[int, int]], generation_indices[0])
         if not any(start < end for start, end in ranges):
             raise AssistantSpanDerivationError(
                 "Chat template contains {% generation %} blocks but rendered no non-empty assistant spans, "
                 "so labels would train on nothing."
             )
         if last_turn_only:
-            if len(ranges) != assistant_turn_count:
-                raise AssistantSpanDerivationError(
-                    "Registered SFT templates must render exactly one {% generation %} span per assistant turn, "
-                    f"but found {len(ranges)} spans for {assistant_turn_count} assistant turns."
+            # Tokenizer loaders prepend this exact BOS expression. It changes neither
+            # block ownership nor the one-block-per-assistant contract of our templates.
+            if template.removeprefix("{{ bos_token }}") in CHAT_TEMPLATES.values():
+                if len(ranges) != len(assistant_indices):
+                    raise AssistantSpanDerivationError(
+                        "Registered SFT templates must render exactly one {% generation %} span per assistant turn, "
+                        f"but found {len(ranges)} spans for {len(assistant_indices)} assistant turns."
+                    )
+                ranges = ranges[-1:]
+            else:
+                ranges = _last_assistant_generation_ranges(
+                    messages, tokenizer, tools, rendered, ranges, assistant_indices[-1]
                 )
-            ranges = ranges[-1:]
-        for start_char, end_char in ranges:
-            for token_index, (token_start, token_end) in enumerate(offsets):
-                if token_end > start_char and token_start < end_char:
-                    labels[0, token_index] = input_ids[0, token_index]
+        _verify_generation_terminators(rendered, ranges, tokenizer)
+        labels = _labels_from_char_spans(input_ids, offsets, ranges)
         return input_ids, attention_mask, labels, truncated
-    # An arbitrary external template may emit multiple generation blocks per turn,
-    # but Transformers does not expose which message owns each block. For
-    # last_turn_only, use the verified prefix path below rather than guessing.
-    rendered = tokenizer.apply_chat_template(
-        conversation=messages, tools=tools, tokenize=False, add_generation_prompt=False
-    )
-    assert isinstance(rendered, str)
-    tokenized = tokenizer(
-        rendered,
-        add_special_tokens=False,
-        return_offsets_mapping=True,
-        return_tensors="pt",
-        padding=False,
-        truncation=max_seq_length is not None,
-        max_length=max_seq_length,
-    )
-    input_ids = tokenized[INPUT_IDS_KEY]
-    attention_mask = tokenized[ATTENTION_MASK_KEY]
-    offsets = tokenized["offset_mapping"][0].tolist()
-    truncated = _was_truncated(offsets, rendered, input_ids.shape[-1], max_seq_length)
-    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
 
     trainable_indices = _trainable_assistant_indices(messages, last_turn_only)
 
@@ -1510,14 +1584,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
         _verify_assistant_spans_cover_content(messages, tokenizer, input_ids, rendered, token_spans)
         return input_ids, attention_mask, labels, truncated
 
-    for token_idx, (token_start, token_end) in enumerate(offsets):
-        if token_start == token_end:
-            continue
-        # Train a token if it overlaps a trainable span. Overlap (rather than full
-        # containment) keeps a boundary token that straddles the header/content edge —
-        # e.g. a leading-space-merged " ok" token in "Assistant: ok" — trainable.
-        if any(token_start < span_end and span_start < token_end for span_start, span_end in trainable_char_spans):
-            labels[0, token_idx] = input_ids[0, token_idx]
+    labels = _labels_from_char_spans(input_ids, offsets, trainable_char_spans)
 
     return input_ids, attention_mask, labels, truncated
 
@@ -1538,7 +1605,9 @@ def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) 
     return fn_args
 
 
-def _was_truncated(offsets: Sequence[Sequence[int]], rendered: str, n_tokens: int, max_seq_length: int | None) -> bool:
+def _was_truncated(
+    offsets: Sequence[Sequence[int]] | np.ndarray, rendered: str, n_tokens: int, max_seq_length: int | None
+) -> bool:
     """Whether `max_seq_length` truncation dropped part of `rendered`.
 
     Sitting at the cap is not sufficient (a render can be exactly that long) and the final token
@@ -1547,9 +1616,9 @@ def _was_truncated(offsets: Sequence[Sequence[int]], rendered: str, n_tokens: in
     """
     if max_seq_length is None or n_tokens < max_seq_length:
         return False
-    if not offsets:
+    if len(offsets) == 0:
         return False
-    return max(end for _, end in offsets) < len(rendered)
+    return bool(np.asarray(offsets)[:, 1].max() < len(rendered))
 
 
 def _apply_over_length_strategy(
@@ -1616,21 +1685,8 @@ def _tokenize_row_or_mask_out(
         )
         rendered = tokenizer.apply_chat_template(conversation=messages, tools=tools, tokenize=False)
         assert isinstance(rendered, str)
-        tokenized = tokenizer(
-            rendered,
-            add_special_tokens=False,
-            return_offsets_mapping=True,
-            return_tensors="pt",
-            padding=False,
-            truncation=max_seq_length is not None,
-            max_length=max_seq_length,
-        )
-        input_ids = tokenized[INPUT_IDS_KEY]
-        attention_mask = tokenized[ATTENTION_MASK_KEY]
+        input_ids, attention_mask, _, truncated = _tokenize_rendered_chat(rendered, tokenizer, max_seq_length)
         labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
-        truncated = _was_truncated(
-            tokenized["offset_mapping"][0].tolist(), rendered, input_ids.shape[-1], max_seq_length
-        )
     input_ids, labels = _apply_over_length_strategy(input_ids, labels, tokenizer, truncated, over_length_strategy)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
