@@ -4,6 +4,7 @@ import asyncio
 import time
 import uuid
 
+import httpx
 from miles.rollout.base_types import GenerateFnOutput, RolloutFnEvalOutput
 from miles.rollout.generate_hub.single_turn import generate as single_turn_generate
 from miles.rollout.generate_utils.generate_endpoint_utils import (
@@ -76,8 +77,33 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         # Ambiguous failures must not transparently resample under newer weights.
         url = f"http://{input.args.sglang_router_ip}:{input.args.sglang_router_port}/generate"
         timeout = self.args.olmo_core.refresh_request_timeout
+        started = time.monotonic()
+        logger.info(
+            "Policy refresh request submitted: request=%s group=%s sample=%s url=%s prompt_tokens=%d",
+            payload["rid"],
+            sample.group_index,
+            sample.index,
+            url,
+            len(payload.get("input_ids", [])),
+        )
         try:
-            output = await asyncio.wait_for(post(url, payload, max_retries=1), timeout)
+            output = await asyncio.wait_for(
+                post(url, payload, max_retries=1, headers={"x-miles-request-id": payload["rid"]}), timeout
+            )
+        except httpx.HTTPError as error:
+            logger.exception(
+                "Policy refresh HTTP failure: request=%s group=%s sample=%s url=%s elapsed_seconds=%.3f "
+                "error=%s status=%s attempts=1 delivery=unknown; correlate request with miles_router logs. "
+                "No automatic resampling; propagating failure to the producer.",
+                payload["rid"],
+                sample.group_index,
+                sample.index,
+                url,
+                time.monotonic() - started,
+                type(error).__name__,
+                getattr(getattr(error, "response", None), "status_code", None),
+            )
+            raise
         except TimeoutError as error:
             raise TimeoutError(
                 f"Policy refresh request {payload['rid']} exceeded core.refresh_request_timeout={timeout:g}s. "

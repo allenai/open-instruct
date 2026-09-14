@@ -63,7 +63,7 @@ def test_baseline_allocation_and_cpu_placement():
     assert len(spec["tasks"]) == 1
     task = spec["tasks"][0]
     assert task["constraints"] == {"cluster": ["ai2/saturn"]}
-    assert "gpuCount" not in task["resources"]
+    assert task["resources"]["gpuCount"] == 0
     assert "scripts.miles.prepare_baseline_basket" in task["arguments"][0]
     assert "open_instruct.miles.cluster /output" not in task["arguments"][0]
 

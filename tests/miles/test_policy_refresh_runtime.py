@@ -3,6 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 
+import httpx
 import numpy as np
 import pytest
 import torch
@@ -311,5 +312,49 @@ def test_request_deadline_is_independent_of_drain_and_cancels_timeout(monkeypatc
             result = await p._generate_response(request)
             assert result.samples is request.sample
         assert finalized == [True]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure_type", ["read", "status"])
+def test_transport_failure_logs_request_identity_without_resampling(monkeypatch, caplog, failure_type):
+    async def scenario():
+        p = producer()
+        p.args.olmo_core.refresh_request_timeout = 1
+        p.args.sglang_router_ip, p.args.sglang_router_port = "localhost", 1234
+        value = sample()
+        value.index = 17
+        calls = []
+        failure = httpx.ReadError("connection reset")
+        if failure_type == "status":
+            response = httpx.Response(503, request=httpx.Request("POST", "http://localhost:1234/generate"))
+            failure = httpx.HTTPStatusError("unavailable", request=response.request, response=response)
+
+        async def post(url, payload, **kwargs):
+            calls.append((url, dict(payload), kwargs))
+            raise failure
+
+        monkeypatch.setattr(refreshing_rollout, "post", post)
+        monkeypatch.setattr(refreshing_rollout, "compute_prompt_ids_from_sample", lambda *args: [9])
+        monkeypatch.setattr(
+            refreshing_rollout,
+            "compute_request_payload",
+            lambda *args, **kwargs: ({"input_ids": [9], "private": "secret prompt"}, None),
+        )
+        request = SimpleNamespace(args=p.args, state=None, sample=value, sampling_params={})
+        original_scores = list(value.rollout_log_probs)
+        with pytest.raises(httpx.HTTPError) as caught:
+            await p._generate_response(request)
+        assert caught.value is failure
+        assert len(calls) == 1
+        _, payload, kwargs = calls[0]
+        assert kwargs == {"max_retries": 1, "headers": {"x-miles-request-id": payload["rid"]}}
+        assert value.rollout_log_probs == original_scores
+        assert f"request={payload['rid']} group=0 sample=17" in caplog.text
+        assert "delivery=unknown" in caplog.text
+        assert f"error={type(failure).__name__}" in caplog.text
+        assert "secret prompt" not in caplog.text
+        if failure_type == "status":
+            assert "status=503" in caplog.text
 
     asyncio.run(scenario())
