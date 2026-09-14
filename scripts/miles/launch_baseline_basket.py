@@ -62,7 +62,11 @@ def main():
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument(
         "--prepare-module",
-        choices=("scripts.miles.prepare_baseline_basket", "scripts.miles.prepare_olmo3_basket"),
+        choices=(
+            "scripts.miles.prepare_baseline_basket",
+            "scripts.miles.prepare_olmo3_basket",
+            "scripts.miles.audit_judge_budget",
+        ),
         default="scripts.miles.prepare_baseline_basket",
     )
     args = parser.parse_args()
