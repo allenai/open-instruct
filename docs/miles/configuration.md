@@ -216,7 +216,7 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.replay_diagnostics | &lt;class &#x27;bool&#x27;&gt; | false | Retain expert-ID replay diagnostics; does not enable replay itself. |
 | core.stream_moe_export | &lt;class &#x27;bool&#x27;&gt; | true | Stream MoE tensors during HF-layout publication to reduce export memory. |
 | core.weight_sync_mode | &lt;class &#x27;str&#x27;&gt; | &quot;flattened&quot; | flattened batches tensor transfers; per_tensor is the rollback/reference transport. |
-| core.publication_mode | &lt;class &#x27;str&#x27;&gt; | &quot;barrier&quot; | barrier (default) synchronously publishes the fleet; engine_drain is experimental independent TP1 publication for disaggregated async MoE. |
+| core.publication_mode | &lt;class &#x27;str&#x27;&gt; | &quot;barrier&quot; | barrier (low-level default) synchronously publishes the fleet; engine_drain finishes admitted TP1 requests before independent publication; refresh (current full-model starters) preserves sampled tokens/behavior logprobs across publication and continues decoding with policy-span metadata. Refresh requires managed disaggregated TP1 async GRPO, one optimizer step per collection, MILES router, TIS, and use_rollout_logprobs=false; consult docs/miles/grpo.md for scope. |
 | core.engine_drain_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine. |
 | core.engine_update_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run. |
 | core.refresh_request_timeout | &lt;class &#x27;float&#x27;&gt; | 1800.0 | Positive seconds allowed for an entire refresh generation request, including admission, decode and publication pauses; separate from the lifecycle drain timeout. |
@@ -309,7 +309,7 @@ Generated from the actual structured TOMLs. These are recipe choices, not univer
 | grpo-basic.toml | 1 × 1 | 1 | True | 8 × 8 | 64 | False | False | False | 2 |
 | grpo-disaggregated.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 100 |
 | grpo-multitask.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 4 |
-| grpo-sharing.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | True | True | True | 2 |
+| grpo-sharing.toml | 1 × 2 | 2 | False | 32 × 4 | 128 | True | True | True | 2 |
 | large.toml | 1 × 8 | 8 | False | 64 × 4 | 256 | True | True | False | 100 |
 | small.toml | 1 × 2 | 2 | False | 32 × 4 | 128 | True | True | True | 100 |
 | tiny.toml | 1 × 1 | 1 | False | 4 × 2 | 8 | False | False | False | 4 |

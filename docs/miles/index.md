@@ -61,5 +61,5 @@ Maintain the generated reference with `python -m scripts.miles.generate_docs`
 and check it with `python -m scripts.miles.generate_docs --check`. See
 [development](architecture.md#documentation-checks) for validation.
 
-Experimental: [independent engine drain and rolling publication](engine-drain.md)
-(isolated qualification; barrier publication remains the default).
+See [publication modes](grpo.md#publication-modes) for current mixed-policy
+refresh, barrier controls and independent [engine drain](engine-drain.md).

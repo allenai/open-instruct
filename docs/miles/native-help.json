@@ -1,5 +1,5 @@
 {
-  "image": "sha256:c33312f4607ff3a0b0d74768ff2ae1185cf8c0d5a7942a2f5b824516e1138313",
+  "image": "sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f",
   "options": [
     {
       "default": null,
@@ -11926,11 +11926,5 @@
       "help": null
     }
   ],
-  "schema_provenance_verification": {
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "miles_development_commit": "edca455105ef0fa7e703002f5fb5c9aa426f761b",
-    "note": "Runtime source overlay verified against prior parser actions; original help capture image retained.",
-    "parser_actions_unchanged": true
-  },
-  "schema_sha256": "be6c3c8e3b63738f74956a86e5da3b6a63b00af349aa5e6ce1e4d792f4e005f3"
+  "schema_sha256": "a43b6400d09cf1ea6851b6890bfe342457b698be7dcc836f0b7e03f508e141a4"
 }

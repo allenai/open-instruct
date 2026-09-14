@@ -166,10 +166,12 @@ on-policy training. Compare time to the first useful current-version batch,
 consumed-version distribution, useful trained tokens and rejected completed work,
 rather than optimizing generation occupancy in isolation.
 
-## Future mixed-policy work
+## Mixed-policy refresh is a separate mode
 
-The reusable pieces are immutable snapshot ownership, per-engine communicators,
-request identities, version clocks and lifecycle barriers. Continuing a partial
-response after a weight change would additionally require explicit KV/KDA-state
-semantics, per-token behavior versions/log-probabilities, token-age masks and replay
-handling across policy changes. None of that is implemented or claimed here.
+The current runtime also implements `core.publication_mode="refresh"`, with
+preserved sampled tokens/behavior probabilities, rebuilt serving state and exact
+policy-span metadata. It is selected by the full-model starting profiles.
+This document covers `engine_drain`, which finishes requests on their admitted
+weights and does not mix policies inside a response. See the current
+[publication-mode guide](grpo.md#publication-modes) and
+[qualification](measurements/full-sft-basket-20260914.md).

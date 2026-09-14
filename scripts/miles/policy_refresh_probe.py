@@ -468,7 +468,9 @@ def main():
             cache_before = set(cache_root.rglob("*.cubin"))
             report = run_case(root, publisher, p, label, batch, length, cut, i, refresh, temperature)
             cache_after = set(cache_root.rglob("*.cubin"))
-            report["triton_new_binaries_including_reference_scoring"] = dict(Counter(path.name for path in cache_after - cache_before))
+            report["triton_new_binaries_including_reference_scoring"] = dict(
+                Counter(path.name for path in cache_after - cache_before)
+            )
             report["triton_cache_root"] = str(cache_root)
             reports.append(report)
         (root / "summary.json").write_text(

@@ -8,7 +8,7 @@ Follow this workflow without requiring the user to supply a special agent prompt
 1. Read the guide, model/topology support and launch instructions before choosing a run.
 2. For a first exercise, copy `configs/miles/examples/grpo-sharing.toml` to
    Git-ignored `runs/my-grpo.toml`. Keep tracked templates unchanged. Set the user's
-   run name and fresh output path; keep its supplied checkpoint and offline W&B
+   run name and fresh output path; keep its supplied checkpoint, mixed-policy refresh and offline W&B
    unless the user requests another model or tracking mode.
 3. Use the documented compatible image and Python 3.12 submission environment.
    Check Beaker resource access; optional HF/W&B credentials are not needed for

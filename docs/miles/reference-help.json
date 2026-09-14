@@ -23,7 +23,7 @@
     "max_train_rollout_logprob_abs_diff": "Fail when mean absolute active-token trainer/serving log-probability gap exceeds this value; null disables. Despite the name, this is a mean, not a maximum.",
     "model_config": "Optional Core model factory configuration path for supported construction.",
     "packing_max_tokens": "Maximum tokens per pack; null uses context limit. Must cover max_sequence_length; samples are never split.",
-    "publication_mode": "barrier (default) synchronously publishes the fleet; engine_drain is experimental independent TP1 publication for disaggregated async MoE.",
+    "publication_mode": "barrier (low-level default) synchronously publishes the fleet; engine_drain finishes admitted TP1 requests before independent publication; refresh (current full-model starters) preserves sampled tokens/behavior logprobs across publication and continues decoding with policy-span metadata. Refresh requires managed disaggregated TP1 async GRPO, one optimizer step per collection, MILES router, TIS, and use_rollout_logprobs=false; consult docs/miles/grpo.md for scope.",
     "replay_diagnostics": "Retain expert-ID replay diagnostics; does not enable replay itself.",
     "reward_config": "Trusted verifier registry path; structured workflow preparation supplies it.",
     "router_aux_loss_weight": "Coefficient for native Core load-balancing auxiliary loss; with packing, use packed-forward local-batch semantics.",

@@ -28,8 +28,10 @@ do not assume a local TOML upgrades code inside an existing image.
 
 The new image passed source reconstruction/build checks; its runtime code passed
 113 packaged CPU tests. GPU evidence is the matching EP2 runtime exercised through
-the committed qualification overlay. The separate EP8 mixed-task run is ongoing;
-this image is an internal candidate, not a claim of every topology being qualified.
+the committed qualification overlay. The EP8 mixed-task attempt stopped after one update on an HTTP transport error;
+its [record](measurements/full-sft-basket-20260914.md) distinguishes successful
+first-step checks from the uncompleted baseline. This image is the current
+MILES GRPO runtime; qualification remains specific to the recorded workload.
 
 ```bash
 MILES_EXISTING_IMAGE=01M2F1RKZFZVJYAS0XQGEC3SEJ \

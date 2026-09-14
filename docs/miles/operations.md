@@ -41,6 +41,10 @@ do not prove that a batch with identical rewards supplied a policy gradient.
 The policy-agreement guard named max_train_rollout_logprob_abs_diff measures the
 **mean absolute active-token gap**, despite its legacy name. Replay diagnostics
 check supplied expert IDs; native route agreement is a different experiment.
+With mixed-policy refresh, retained token spans identify historical behavior
+versions, while routes describe the final forward that rebuilt the route table.
+Inspect `refresh_scores` for mixed-response counts and historical-prefix versus
+latest-forward gaps/TIS clipping; those gaps include actual policy age.
 See [implementation contracts](core.md) for exact semantics and evidence limits.
 
 ## Failure triage

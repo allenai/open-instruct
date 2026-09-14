@@ -122,14 +122,14 @@ cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
 python -m open_instruct.miles plan runs/my-grpo.toml
 python -m open_instruct.miles validate runs/my-grpo.toml
 # After authenticating Beaker and checking resource access:
-export MILES_EXISTING_IMAGE=01M2E5QR5C60WF7H0TDEF4CD3S
+export MILES_EXISTING_IMAGE=01M2F1RKZFZVJYAS0XQGEC3SEJ
 python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
 The [async training starter](configs/miles/examples/grpo-async-disaggregated.toml)
 requests one eight-GPU trainer node and one eight-GPU inference node. The
-starter above uses three B300 GPUs and the supplied full-SFT checkpoint. `runs/`
+starter above uses four B300 GPUs, mixed-policy refresh and the supplied full-SFT checkpoint. `runs/`
 is Git-ignored. W&B is offline by default; optional HF/W&B credentials stay commented
 out. The separate `grpo-basic.toml` is for tiny-model colocated development.
 

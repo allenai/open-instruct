@@ -78,7 +78,7 @@ Keys include runtime/source identity, relevant model architecture and compile
 settings, actual device/toolchain and compile-affecting environment hashes.
 Output paths, checkpoint weight paths and tracking labels are excluded. Different
 source, image, architecture or compile settings can intentionally miss; a new
-sharing image must not assume every older cache is reusable.
+runtime image must not assume every older cache is reusable.
 
 Generations contain checksummed manifests and `cache.tar.gz`. Restore validates
 identity, archive and individual files in staging before atomic installation;

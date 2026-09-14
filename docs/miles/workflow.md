@@ -13,7 +13,7 @@ Start from one of the [examples](../../configs/miles/examples):
 
 | File | Purpose |
 | --- | --- |
-| `grpo-sharing.toml` | First colleague run: supplied full-SFT checkpoint, two updates on three B300 GPUs, async/TIS, packing/replay, offline W&B. |
+| `grpo-sharing.toml` | First colleague run: supplied full-SFT checkpoint, two updates on four B300 GPUs, mixed-policy refresh/TIS, 32 × 4, packing/replay, offline W&B. |
 | `grpo-basic.toml` | Two-update tiny-model colocated dev/test run using compact generated multiplication prompts; one shared GPU, Core resident throughout. |
 | `grpo-disaggregated.toml` | Full-SFT B300 starter: two Core trainer GPUs and one dedicated TP1 SGLang engine, 100 updates. |
 | `grpo-async-disaggregated.toml` | Production-shaped two-node EP8 trainer + eight TP1 engines, packing, bounded async, one-update staleness, buffer factor two and TIS. |
@@ -155,7 +155,11 @@ way to keep prompts, splits, rendering and reward configuration fixed between
 runs. Compare the recorded question IDs when checking parity; matching counts
 alone does not establish identical datasets.
 
-## The restored baseline recipe
+## Historical 8 × 8 baseline recipe
+
+The current [first-run guide](grpo.md) uses the mixed-policy small recipe at
+32 × 4 and batch 128. The settings below describe the older `grpo-*` barrier
+examples; both recipe families run on the current image.
 
 The training starters collect **8 prompts × 8 responses = 64 samples** and set
 `global_batch_size=64`, giving one optimizer update per collection. The older

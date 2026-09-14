@@ -25,15 +25,23 @@ Multi-node jobs use explicit tasks with disjoint hostname pools; judge GPUs
 belong to their own fixed-weight service. Plan reports unused slots. Consult
 [managed judges](managed-judges.md) for current placement restrictions.
 
+## Publication and recipe selection
+
+The [current first-run and small profiles](grpo.md) use EP2 + two engines,
+mixed-policy refresh, 32 prompts × 4 responses and batch 128 with lag two.
+`large.toml` uses EP8 + eight engines and batch 256. The `grpo-async-disaggregated`
+recipe below is the older 8 × 8, lag-one barrier control. Choosing the newer image
+does not silently change those settings; inspect the selected TOML and plan.
+
 ## Collections, optimization and async
 
-The baseline collects **8 prompts × 8 responses = 64 samples**, with global batch
+The older barrier baseline collects **8 prompts × 8 responses = 64 samples**, with global batch
 64 for one optimizer update per collection. Smaller global batches introduce
 multiple optimizer updates and change policy lag requirements. Core microbatch
 size remains one; optional [packing](sequence-packing.md) groups original samples
 into document-isolated forwards within an optimizer partition.
 
-Async requires resident disaggregated engines. The starter uses staleness one,
+Async requires resident disaggregated engines. That barrier starter uses staleness one,
 buffer factor two, retry of unused groups, group submission, and TIS with
 trainer-scored old log probabilities. Staleness counts optimizer steps, not elapsed
 seconds or merely collections. Multiple optimizer steps per collection consume

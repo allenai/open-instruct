@@ -40,7 +40,7 @@ replace checkpoint/output paths, usernames and image placeholders.
 mkdir -p runs
 cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
 # Edit name/output.root to use your username and a fresh run path.
-# Keep the supplied read-only checkpoint for this three-B300-GPU first run.
+# Keep the supplied read-only checkpoint for this four-B300-GPU first run.
 python -m open_instruct.miles plan runs/my-grpo.toml
 python -m open_instruct.miles validate runs/my-grpo.toml
 ```
@@ -54,7 +54,7 @@ exist on the submitting host.
 ## Laptop: choose or build an image
 
 The current [MILES GRPO](grpo.md) uses image
-`01M2E5QR5C60WF7H0TDEF4CD3S`. Its starter retains offline W&B metrics and needs
+`01M2F1RKZFZVJYAS0XQGEC3SEJ`. Its four-GPU starter uses mixed-policy refresh, retains offline W&B metrics and needs
 no extra HF/W&B secrets with the supplied inputs. Beaker resource permissions
 are still required.
 

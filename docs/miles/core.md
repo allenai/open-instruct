@@ -75,7 +75,10 @@ serving tensors; no HF directory or Megatron conversion is written per update.
 MoE export supports fused expert tensors; final HF exports retain standard
 per-expert slices. Dense export gathers parameters through its FSDP backend.
 The normal disaggregated transport broadcasts flattened NCCL buckets; colocation
-uses IPC. [Engine drain](engine-drain.md) is a separate opt-in publication mode.
+uses IPC. Current full-model starters use mixed-policy `refresh`; low-level
+`barrier` and independent [engine drain](engine-drain.md) remain distinct modes.
+[Publication contracts](grpo.md#publication-modes) explain historical behavior
+probabilities, final-forward replay routes and oldest-token lag checks.
 
 Native checkpoints include model/optimizer/scheduler and rank RNG state. Schema-2
 manifests record world size, EP degree and the committed rollout cursor. Restore
