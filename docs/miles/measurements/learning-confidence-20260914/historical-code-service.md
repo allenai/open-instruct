@@ -1,7 +1,8 @@
 # Historical Olmo 3 code-service audit — 2026-09-14
 
-The Beaker runs linked by `scripts/train/olmo3/README.md` actually used the
-shared AWS code-execution endpoint. This is confirmed by both submitted
+The three Think/code runs initially inspected from `scripts/train/olmo3/README.md` used the
+shared AWS code-execution endpoint. The released 7B Instruct run used local execution,
+as confirmed by the follow-up below. This is confirmed by both submitted
 `--code_api_url` arguments and runtime warning lines naming that endpoint;
 it is no longer an inference from the checked-in recipe.
 
@@ -57,3 +58,48 @@ arguments and HTTP errors above establish AWS usage for these runs.
 Evidence: [structured counts, timestamps, source lines and log hashes](historical-code-service-evidence.json).
 Re-fetch logs with `beaker job logs <driver-job-id>`; no new training jobs or
 service configuration changes were made by this audit.
+
+## Follow-up: local execution in the released 7B Instruct run
+
+A colleague recalled eventual local-service use. Expanding the audit confirms
+that this is true for at least one released Olmo 3 arm:
+
+- [7B Instruct RL, November 17–19](https://beaker.org/ex/01KA8BY8MMAQWENWY4087MAPFE),
+  driver `01KA8BY8R5QS2CZG1MVH7DR8A7`, records
+  `code_api_url=http://10.95.1.109:8070/test_program`. HTTP request warnings
+  name this same local endpoint. This proves actual local use, not merely
+  local-server startup. It also has HTTP 504 warnings; local placement alone
+  does not establish correct timeout handling.
+- [Later 7B Think continuation, November 20–21](https://beaker.org/ex/01KAHGKA74GFJZ15G40271VDCK),
+  latest driver `01KAHRW77BSP6HQ8ZJ303ZC9FS`, continues W&B `buq6ny46`.
+  It starts a local service at `10.93.1.18:8070`, but its effective
+  `code_api_url` and verifier errors still name AWS. Both startup and actual
+  request destinations must be checked.
+
+The released 32B Think and 32B Instruct Beaker specifications also explicitly
+pass the AWS URL (`01KA4ZXT7MCVK493Y2B3K0BC82` and
+`01KAJQH1X2PRZP5VYZ1F0Z96KK`); their runtime logs were not downloaded in this
+follow-up. Do not equate that specification evidence with the runtime checks
+performed for the 7B arms.
+
+Corrected conclusion: Olmo 3 used both local and AWS code execution across
+runs. The original three-run audit was not sufficient to generalize across
+all released models or later continuations.
+
+## Baseline policy update
+
+Following user direction, MILES now defaults to the original Open Instruct
+behavior: exhausted code-service failures and invalid replies receive zero
+reward and do not terminate training. `OI_MILES_CODE_FAILURE_POLICY=raise`
+(or verifier `failure_policy="raise"`) restores strict service failure handling.
+Existing per-sample HTTP rejection handling is unchanged. Configuration errors
+and task cancellation still propagate. Known-answer preparation checks explicitly
+use strict mode.
+
+Every fallback is logged and tagged `status="service_error"`, with HTTP status,
+exception type, request/response stage and elapsed time. Rollout tracking records
+`rollout/code_verifier/service_errors` and `service_error_fraction`, separate from
+`rejected` and successful grading. The fraction's denominator is code verifier
+calls represented in the consumed collection, not all generated samples or
+all HTTP retry attempts. These metrics make the comparison's reward-service
+limitations visible; this change does not repair the external execution service.

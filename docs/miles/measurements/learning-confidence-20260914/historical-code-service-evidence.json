@@ -154,5 +154,54 @@
     },
     "runtime_code_pass_rate_reward_threshold": 0.0,
     "count_unit": "Retained driver-log warning lines, not deduplicated sample IDs or a failure rate. Training/evaluation calls are not separated."
+  },
+  "think7-latest": {
+    "experiment_id": "01KAHGKA74GFJZ15G40271VDCK",
+    "driver_job_id": "01KAHRW77BSP6HQ8ZJ303ZC9FS",
+    "endpoint_location": "AWS",
+    "warning_counts": {
+      "http_500": 178,
+      "read_timeout": 128,
+      "http_413": 72,
+      "http_503": 5
+    },
+    "examples": {
+      "http_500": {
+        "line": 1754,
+        "text": "2025-11-20T23:52:13.622Z 2025-11-20 23:52:13 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 500 Server Error: Internal Server Error for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "read_timeout": {
+        "line": 1762,
+        "text": "2025-11-20T23:52:13.634Z 2025-11-20 23:52:13 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: HTTPSConnectionPool(host='p9f1719l7f.execute-api.us-west-2.amazonaws.com', port=443): Read timed out. (read timeout=30)"
+      },
+      "http_413": {
+        "line": 3579,
+        "text": "2025-11-21T00:39:46.188Z 2025-11-21 00:39:46 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 413 Client Error: Request Entity Too Large for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "http_503": {
+        "line": 10996,
+        "text": "2025-11-21T03:30:49.046Z 2025-11-21 03:30:49 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 503 Server Error: Service Unavailable for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      }
+    },
+    "log_lines": 57592,
+    "log_sha256": "5a83a2190b73bf5b4b1dd4e98a766bbf4abfe915155d194a8c248cbc3d3e8efe",
+    "count_unit": "Warning lines, not distinct sample counts or failure rates"
+  },
+  "instruct7": {
+    "experiment_id": "01KA8BY8MMAQWENWY4087MAPFE",
+    "driver_job_id": "01KA8BY8R5QS2CZG1MVH7DR8A7",
+    "endpoint_location": "local",
+    "warning_counts": {
+      "http_504": 71
+    },
+    "examples": {
+      "http_504": {
+        "line": 1397,
+        "text": "2025-11-17T07:46:32.373Z 2025-11-17 07:46:32 - WARNING - ground_truth_utils.py:905 - Error verifying code sample: 504 Server Error: Gateway Time-out for url: http://10.95.1.109:8070/test_program"
+      }
+    },
+    "log_lines": 162010,
+    "log_sha256": "5ff4a706c4ec69b3d6c50b7e4202c2a5b4491c447388d1161a61774bf03347f1",
+    "count_unit": "Warning lines, not distinct sample counts or failure rates"
   }
 }

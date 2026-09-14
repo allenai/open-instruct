@@ -44,3 +44,18 @@ def test_timing_metrics_and_consumption_identity_reach_tracking_and_flow(tmp_pat
     flow = json.loads((tmp_path / "rollout_flow.jsonl").read_text())
     assert flow["sibling_group_attempts"] == [records[0]["group_attempt"]]
     assert flow["queue_metrics"] == metrics
+
+
+def test_service_failure_zeros_are_reported_separately():
+    samples = [
+        _sample({"code": {"status": "ok", "http_status": 200, "program_chars": 2}}),
+        _sample({"code": {"status": "rejected", "http_status": 413, "program_chars": 2}}),
+        _sample({"code": {"status": "service_error", "http_status": 503, "program_chars": 2}}),
+        _sample({"code": {"status": "service_error", "http_status": None, "program_chars": 2}}),
+    ]
+    metrics = rollout_metrics.code_service_metrics(samples)
+    assert metrics["rollout/code_verifier/service_errors"] == 2
+    assert metrics["rollout/code_verifier/service_error_fraction"] == 0.5
+    assert metrics["rollout/code_verifier/rejected"] == 1
+    assert metrics["rollout/code_verifier/service_error_503"] == 1
+    assert metrics["rollout/code_verifier/service_error_transport_or_response"] == 1

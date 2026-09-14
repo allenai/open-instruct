@@ -23,6 +23,7 @@ def code_service_metrics(samples) -> dict[str, float]:
     """Aggregate code-service outcomes recorded by ``code_rewards.execute``."""
     counts = collections.Counter()
     by_status = collections.Counter()
+    service_errors = collections.Counter()
     for sample in samples:
         diagnostics = getattr(sample, "metadata", None)
         diagnostics = diagnostics.get("verifier_diagnostics") if isinstance(diagnostics, dict) else None
@@ -35,15 +36,22 @@ def code_service_metrics(samples) -> dict[str, float]:
             if record.get("status") == "rejected":
                 counts["rejected"] += 1
                 by_status[record.get("http_status")] += 1
+            if record.get("status") == "service_error":
+                counts["service_errors"] += 1
+                service_errors[record.get("http_status") or "transport_or_response"] += 1
     if not counts["samples"]:
         return {}
     metrics = {
         "rollout/code_verifier/samples": counts["samples"],
         "rollout/code_verifier/rejected": counts["rejected"],
         "rollout/code_verifier/rejected_fraction": counts["rejected"] / counts["samples"],
+        "rollout/code_verifier/service_errors": counts["service_errors"],
+        "rollout/code_verifier/service_error_fraction": counts["service_errors"] / counts["samples"],
     }
     for status, n in sorted(by_status.items(), key=lambda kv: str(kv[0])):
         metrics[f"rollout/code_verifier/rejected_{status}"] = n
+    for status, n in sorted(service_errors.items(), key=lambda kv: str(kv[0])):
+        metrics[f"rollout/code_verifier/service_error_{status}"] = n
     return metrics
 
 
