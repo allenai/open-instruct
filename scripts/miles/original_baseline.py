@@ -1,7 +1,7 @@
 """Frozen-data adapter for a historical Open Instruct GSM8K comparison.
 
 Run inside the original Olmo 3 image. The original trainer and verifiers remain
-in that image; only Adam beta2 is aligned to the Core comparison explicitly.
+in that image; Adam beta2 is aligned and the initial evaluation is explicitly scheduled.
 """
 
 import argparse
@@ -111,6 +111,24 @@ def prepare(model, source, output):
     print("ORIGINAL_BASELINE_PREPARATION_PASSED", json.dumps(receipt), flush=True)
 
 
+def patch_trainer(text):
+    changes = {
+        "adam_alignment": {
+            "before": "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)",
+            "after": "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer, betas=(0.9, 0.95), eps=1e-8)",
+        },
+        "initial_evaluation": {
+            "before": "            training_step % args.local_eval_every == 0\n",
+            "after": "            (training_step % args.local_eval_every == 0 or (training_step == 1 and args.eval_on_step_0))\n",
+        },
+    }
+    for name, change in changes.items():
+        if text.count(change["before"]) != 1:
+            raise ValueError(f"Cannot unambiguously apply original benchmark adjustment: {name}")
+        text = text.replace(change["before"], change["after"])
+    return text, changes
+
+
 def train(model, prepared, output, *, smoke):
     receipt = json.loads((prepared / "preparation.json").read_text())
     if receipt["model"] != str(model):
@@ -125,12 +143,8 @@ def train(model, prepared, output, *, smoke):
     original = trainer.read_bytes()
     if sha(original) != ORIGINAL_TRAINER_SHA256:
         raise ValueError("Original trainer source differs from the audited image")
-    old = "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)"
-    new = "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer, betas=(0.9, 0.95), eps=1e-8)"
-    text = original.decode()
-    if text.count(old) != 1:
-        raise ValueError("Cannot unambiguously align Adam beta2")
-    trainer.write_text(text.replace(old, new))
+    patched, changes = patch_trainer(original.decode())
+    trainer.write_text(patched)
     steps = 3 if smoke else 200
     prefix = "smoke-" if smoke else ""
     options = {
@@ -197,7 +211,8 @@ def train(model, prepared, output, *, smoke):
         "command": command,
         "original_source_sha256": sha(original),
         "patched_source_sha256": sha(trainer.read_bytes()),
-        "adam_alignment": {"before": old, "after": new},
+        "source_adjustments": changes,
+        "eval_policy_updates": sorted({0, *range((1 if smoke else 50) - 1, steps, 1 if smoke else 50)}),
         "remaining_differences": [
             "vLLM versus SGLang",
             "DeepSpeed/HF versus OLMo-core",

@@ -3,6 +3,10 @@
 Run in its original image, with /stage before this checkout on PYTHONPATH.
 """
 
+import ast
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from scripts.miles import launch_original_baseline, original_baseline
 
@@ -68,3 +72,26 @@ def test_jsonl_preserves_unicode_line_separators_inside_prompts(tmp_path):
     path = tmp_path / "train.jsonl"
     path.write_bytes(b"".join(original_baseline.encoded(sample) for sample in samples))
     assert original_baseline.read_jsonl(path) == samples
+
+
+def test_original_image_adjustments_preserve_loop_and_schedule_initial_eval():
+    source = Path("/stage/open_instruct/grpo_fast.py").read_text()
+    assert original_baseline.sha(source.encode()) == original_baseline.ORIGINAL_TRAINER_SHA256
+    patched, changes = original_baseline.patch_trainer(source)
+    tree = ast.parse(patched)
+    loop = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_training")
+    condition = next(
+        n.test for n in ast.walk(loop) if isinstance(n, ast.If) and "local_eval_every" in ast.unparse(n.test)
+    )
+    expression = compile(ast.Expression(condition), "eval_schedule", "eval")
+    for interval, expected in [(50, [1, 50, 100, 150, 200]), (1, [1, 2, 3])]:
+        args = SimpleNamespace(local_eval_every=interval, eval_on_step_0=True)
+        scheduled = [
+            step
+            for step in range(1, expected[-1] + 1)
+            if eval(expression, {"args": args, "training_step": step, "eval_batch": object()})
+        ]
+        assert scheduled == expected
+    for change in reversed(list(changes.values())):
+        patched = patched.replace(change["after"], change["before"])
+    assert patched == source

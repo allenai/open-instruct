@@ -180,8 +180,13 @@ questions before the full 200-update, full-heldout comparator is authorized to
 start. Both use two DeepSpeed learners and four vLLM engines, response 32768,
 pack/context 34816, 16 prompts x four samples, LR 1e-6, centered advantages,
 clipping 0.2/0.28, KL zero, training temperature 1, greedy evaluation and seed17.
-The only trainer source edit aligns Adam beta2 from its hardcoded 0.999 to 0.95;
-the exact original source hash and one replacement are checked and recorded.
+The trainer adjustments align Adam beta2 from its hardcoded 0.999 to 0.95 and
+make `eval_on_step_0` actually schedule an initial evaluation with interval 50.
+The exact original source hash and each unique replacement are checked and
+recorded; seven tests pass in the original image. The periodic original evaluations
+sample the policy before updates 50/100/150/200, hence completed-update labels
+49/99/149/199. They must not be plotted as post-update 50/100/150/200. The exported
+final model is post-update 200 and can be evaluated separately.
 All proposed CLI options were checked against the image's dataclasses before
 submission; this is not a claim of runtime qualification.
 
@@ -202,3 +207,11 @@ The [three-update GPU trial](https://beaker.org/ex/01M2GN0YT6XVX0MAX7PC635YZQ)
 has acquired six Holmes GPUs and is pulling the original image. Its launch revision
 is `2806460af`; [receipts](original-launches.json) distinguish preparation from
 GPU execution. The full original 200-update run remains gated on the trial.
+
+The first GPU trial stopped before model loading: the historical CLI defaults to
+`push_to_hub=True` and required an HF credential. Publishing is now explicitly
+disabled. The [retry](https://beaker.org/ex/01M2GNC6R97113K90EM8ND6GXF) has started
+Ray and model actors (19:15 UTC); source `5b9c43245`. It uses evaluation interval
+one, so it already exercises initial-policy evaluation without the interval-50
+scheduling adjustment needed by the full run. Neither failed startup performed
+an optimizer update.
