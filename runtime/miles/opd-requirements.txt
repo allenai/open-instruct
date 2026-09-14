@@ -1,5 +1,5 @@
 # Miles' HF-to-Megatron converter uses mbridge, separately from megatron.bridge.
 mbridge @ git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c
-# Keep one complete CUDA-13 cuDNN wheel for native Megatron fused attention.
+# Keep PyTorch and Transformer Engine on one complete CUDA-13 cuDNN wheel.
 # The base's PyTorch-pinned 9.20 wheel lacks the tensor_ir sublibrary.
 nvidia-cudnn-cu13==9.23.2.1

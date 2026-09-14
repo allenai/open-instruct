@@ -251,6 +251,22 @@ index 4d6d7689098877bfbdb092863963e0ee01e7605d..444fcbae71dd0d6950274e4b6ffe51ad
      from megatron.bridge import AutoBridge
      from megatron.bridge.peft.multi_lora_layers import expose_adapter_slot
      from safetensors.torch import save_file as save_safetensors
+diff --git a/miles/backends/megatron_utils/parallel.py b/miles/backends/megatron_utils/parallel.py
+index fc9fc3dedc8de17262e08f32517512e3a37c90cc..dac97ed15875f83d2a3cd44bf2b9475a8036843e 100644
+--- a/miles/backends/megatron_utils/parallel.py
++++ b/miles/backends/megatron_utils/parallel.py
+@@ -98,6 +98,11 @@ def get_packed_seq_params(batch: dict[str, torch.Tensor], args: Namespace) -> Pa
+             max_seqlen_kv=batch["max_seqlen"],
+             qkv_format="thd",
+         )
++        if args.use_opd and args.context_parallel_size == 1:
++            # CP1 get_batch appends padding as a separate dummy sequence;
++            # cu_seqlens already covers every token with no gaps. This also
++            # permits FlashAttention 4 for Qwen head_dim=256 on Blackwell.
++            packed_seq_params.pad_between_seqs = False
+         batch["packed_seq_params"] = packed_seq_params
+         return packed_seq_params
+     else:
 diff --git a/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py b/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py
 index cc15ecee73e565ae30b39d536270d4515ac28992..f8f5219a2e4cd4665b0af72c8e80ebcb5d8cd83e 100644
 --- a/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py

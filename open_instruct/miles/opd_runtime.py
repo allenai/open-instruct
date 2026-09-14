@@ -118,7 +118,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "clip-grad": 1.0,
         "attention-dropout": 0.0,
         "attention-backend": "flash",
-        "qkv-format": "bshd",
+        "qkv-format": "thd",
         "hidden-dropout": 0.0,
         "recompute-granularity": "full",
         "recompute-method": "uniform",
