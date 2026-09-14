@@ -1,0 +1,272 @@
+{
+  "model": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
+  "source": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r2-20260914/prepared/data",
+  "model_alias": {
+    "source_config_sha256": "64edc4f827648e6a18a7c0ce33030689f102657f5a05f27315b7f087a2d69077",
+    "norm_shapes": {
+      "model.layers.0.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.0.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.1.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.1.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.2.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.2.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.3.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.3.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.4.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.4.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.5.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.5.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.6.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.6.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.7.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.7.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.8.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.8.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.9.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.9.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.23.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.23.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.24.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.24.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.25.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.25.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.26.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.26.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.27.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.27.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.28.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.28.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.29.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.29.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.30.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.30.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.31.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.31.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.10.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.10.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.11.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.11.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.12.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.12.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.13.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.13.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.14.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.14.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.15.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.15.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.16.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.16.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.17.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.17.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.18.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.18.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.19.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.19.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.20.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.20.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.21.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.21.self_attn.q_norm.weight": [
+        4096
+      ],
+      "model.layers.22.self_attn.k_norm.weight": [
+        4096
+      ],
+      "model.layers.22.self_attn.q_norm.weight": [
+        4096
+      ]
+    },
+    "links": {
+      "README.md": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/README.md",
+        "size": 11868
+      },
+      "generation_config.json": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/generation_config.json",
+        "size": 225
+      },
+      "vocab.json": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/vocab.json",
+        "size": 2305049
+      },
+      "model-00001-of-00003.safetensors": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/model-00001-of-00003.safetensors",
+        "size": 4969984976
+      },
+      "tokenizer_config.json": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/tokenizer_config.json",
+        "size": 5886
+      },
+      "model-00003-of-00003.safetensors": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/model-00003-of-00003.safetensors",
+        "size": 4644917240
+      },
+      "tokenizer.json": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/tokenizer.json",
+        "size": 4822289
+      },
+      "special_tokens_map.json": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/special_tokens_map.json",
+        "size": 580
+      },
+      "model-00002-of-00003.safetensors": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/model-00002-of-00003.safetensors",
+        "size": 4981161496
+      },
+      "model.safetensors.index.json": {
+        "target": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66/model.safetensors.index.json",
+        "size": 29630
+      }
+    }
+  },
+  "splits": {
+    "train": {
+      "rows": 6000,
+      "sha256": "9cee7598660e4555e18c711337ed2978b06b841ba3b29d904ceb8264fa727411",
+      "all_prompt_tokens_equal": true
+    },
+    "eval": {
+      "rows": 512,
+      "sha256": "baa1267f3ad0169fdf283ecb08e3472113a296f8b8056836b2724c4d4bcafec9",
+      "all_prompt_tokens_equal": true
+    }
+  },
+  "original_chat_template_sha256": "fb2b8736121ab4001112a9ccfb33c0081230536c861c706bf24b1b390964c1cd",
+  "adapter_chat_template": "{{ messages[0]['content'] }}",
+  "source_manifest_sha256": "fe00e4ac1057ff727697ae466bf0dea1c0e1eee5bf9b6e916dbce1fd7b947ed3",
+  "files": {
+    "eval.jsonl": "baa1267f3ad0169fdf283ecb08e3472113a296f8b8056836b2724c4d4bcafec9",
+    "train.jsonl": "9cee7598660e4555e18c711337ed2978b06b841ba3b29d904ceb8264fa727411",
+    "smoke-train.jsonl": "be44c63f2d4c6177568b10a75ab3212a256aa2cc54da43c439c852726b2778de",
+    "smoke-eval.jsonl": "1caa18d4683f3e91394cc679eb0b7a7cd565a8165841c9c90324abca809e1eb2",
+    "legacy-model/config.json": "8ab105afd76824c0d4a8402251edd1184c6a2f2b16982700c098ac11a749db18",
+    "tokenizer/merges.txt": "b6fe424e334903f7fb84d3a106d9730455f4744b9fe3c21ee136d97a00e72502",
+    "tokenizer/special_tokens_map.json": "78afb564e81264029b25f9caf24bda2521d5bdaeff5cd3fdbc01d3da2e8ce2f2",
+    "tokenizer/tokenizer_config.json": "e7ea56bef75ad5257b13dc09bfe3033e8cd742eb42233e9b57726d53be9f7ead",
+    "tokenizer/chat_template.jinja": "e2ce372d1e093249ecf0ac01bf8ce1be16316356ee0be7176898b31d3b9db73c",
+    "tokenizer/tokenizer.json": "73fd5254624f39a88e3faac6a8e11300fc3c735ed37880d4f4f08db898eaecca",
+    "tokenizer/config.json": "64edc4f827648e6a18a7c0ce33030689f102657f5a05f27315b7f087a2d69077",
+    "tokenizer/vocab.json": "9e14712c91b37c7aab74b1306baa46ac342d620637a4b44523cdc3aec7d24195"
+  }
+}
