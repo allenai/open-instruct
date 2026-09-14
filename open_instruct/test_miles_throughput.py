@@ -424,3 +424,14 @@ def test_c256_supplies_both_engines_and_scales_required_caches():
     assert config.miles["sglang_max_mamba_cache_size"] == 2048
     assert config.miles["sglang_max_total_tokens"] == 1572864
     assert spec.plan()["allocation"]["policy_gpus"] == 4
+
+
+def test_fast_live_probe_keeps_inference_and_objective_fixed():
+    root = "/weka/oe-training-default/test/run"
+    base = throughput_basket.specification("packed-2t2i-c32-p512-b128", root).to_dict()
+    fast = throughput_basket.specification("packed-fast-2t2i-c32-p512-b128", root).to_dict()
+    base.pop("name")
+    fast.pop("name")
+    base["trainer"]["activation_recompute"] = False
+    base["core"].update(scoring_pass_required=False, replay_diagnostics=False)
+    assert fast == base

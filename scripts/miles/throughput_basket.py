@@ -108,6 +108,14 @@ CASES["packed-2t2i-c256-p1024-b128"] = {
 }
 
 
+CASES["packed-fast-2t2i-c32-p512-b128"] = {
+    **CASES["packed-2t2i-c32-p512-b128"],
+    "activation_recompute": False,
+    "scoring_pass_required": False,
+    "replay_diagnostics": False,
+}
+
+
 def specification(case, output):
     settings = CASES[case]
     output = Path(output)
@@ -177,6 +185,11 @@ def specification(case, output):
         run["inference"]["sglang_cuda_graph_backend_decode"] = "full"
         run["inference"]["sglang_cuda_graph_max_bs_decode"] = settings["concurrency"]
         run["core"]["replay_diagnostics"] = True
+    if "activation_recompute" in settings:
+        run["trainer"]["activation_recompute"] = settings["activation_recompute"]
+    for option in ("scoring_pass_required", "replay_diagnostics"):
+        if option in settings:
+            run["core"][option] = settings[option]
     # The benchmark observes drift without a run-ending threshold established on a different batch distribution.
     run["core"].pop("max_train_rollout_logprob_abs_diff", None)
     return RunSpec.from_dict(run, config_path=output / "trial.json")

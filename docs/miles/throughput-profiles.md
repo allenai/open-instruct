@@ -3,9 +3,11 @@
 Use the trainer size and **desired optimization batch** to choose a starting
 profile, then provision inference to keep completed-group waiting near zero.
 The September 13 exercise found that full decode CUDA graphs mattered more than
-adding serving GPUs. For the measured EP2/batch-128 configuration, the concurrency-32 follow-up kept the trainer supplied with just
-two inference GPUs and no completed-queue drops. See the
-[follow-up measurements](measurements/throughput-c32-20260913.md).
+adding serving GPUs. The initial unpacked concurrency-32 follow-up used two
+inference GPUs without warm completed-queue drops. The small example now uses
+the subsequently qualified 6144-token packing configuration; its 24-update run
+measured about 4,930 useful response tokens/s, 25% awaited collection time, and
+1% warm stale-token drops. See the [packed measurements and queue diagrams](measurements/packed-capacity-results-20260914.md).
 
 These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
 GSM8K-style responses capped at 4096 tokens, and Holmes B300 GPUs. They are a
@@ -40,14 +42,19 @@ is an RL configuration change and should be evaluated as such.
   keep prefill graphs disabled for this qualified refresh path. The small example
   uses 32 HTTP/running slots per engine and capture through batch 32.
 * Keep radix caching with the `extra_buffer` KDA strategy and static memory
-  fraction 0.6. Small uses 262144 token slots and 256 recurrent-state slots per
+  fraction 0.6. Small uses 786432 token slots and 1024 recurrent-state slots per
   engine; large retains its qualified 131072/128 pools at concurrency 16. These are requested
   limits; inspect the engine's resolved capacities and memory after capture.
 * Use dynamic-row Core kernels and persistent Triton caching. Cache namespaces
   include source/configuration identity; new configurations can still start cold.
 * Publish every optimizer step using flattened 1-GiB buckets and per-expert
   export. Warm publication was about three to four seconds in these trials.
-* Keep the completed FIFO to one collection. The automatic producer default is
+* The small example enables 6144-token trainer packing. Recomputation and
+  standalone scoring remain on pending a live qualification of the faster
+  trainer-screen combination; see [the matched screen](measurements/trainer-capacity-20260914.md).
+* Keep the completed FIFO to one collection. Small explicitly uses the measured
+  512-sample producer budget; it can retain substantial work at shutdown.
+  The automatic producer default, when not overridden, is
   one collection or two waves of requested serving admission, whichever is larger.
   It is a starting heuristic, not an instruction to produce as far ahead as possible.
 * Enable pipeline observations and serving metrics to see where work waits.
