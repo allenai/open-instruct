@@ -5,6 +5,7 @@ import asyncio
 import collections
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from scripts.miles.prepare_judge_exercise import CODE_URL, MANIFEST, code_canaries
@@ -102,7 +103,7 @@ def prepare(spec):
     selected = select(eligible)
     # Preserve original source weighting/duplicates in training. Only holdout removal
     # and the explicit prompt budget filter alter source proportions.
-    for split, rows in selected.items():
+    for rows in selected.values():
         for row in rows:
             row["metadata"].setdefault("prepared_sample_id", "basket:" + digest(row["input"]))
     train_ids = {row["metadata"]["prepared_sample_id"] for row in selected["train"]}
@@ -142,7 +143,33 @@ def prepare(spec):
     print(json.dumps({key: value for key, value in report.items() if key != "held_out_ids"}, indent=2), flush=True)
 
 
+def verify(spec, *, wait_seconds=0):
+    output = Path(spec.data["prompt_data"]).parent
+    manifest = output / "preparation.json"
+    deadline = time.monotonic() + wait_seconds
+    while not manifest.is_file() and time.monotonic() < deadline:
+        time.sleep(5)
+    report = json.loads(manifest.read_text())
+    if not report["passed"] or report["model"] != spec.model:
+        raise ValueError("Preparation checkpoint identity differs from the submitted baseline")
+    for name, expected in report["outputs"].items():
+        if hashlib.sha256((output / name).read_bytes()).hexdigest() != expected:
+            raise ValueError(f"Frozen baseline artifact changed: {name}")
+    for source, expected in report["sources"].items():
+        if hashlib.sha256(Path(source).read_bytes()).hexdigest() != expected:
+            raise ValueError(f"Baseline source changed: {source}")
+    workflow.write_json(Path("/output/preparation.json"), report)
+    print("Frozen baseline preparation and source hashes verified", flush=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path)
-    prepare(RunSpec.load(parser.parse_args().config))
+    parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--wait-seconds", type=int, default=0)
+    args = parser.parse_args()
+    spec = RunSpec.load(args.config)
+    if args.verify:
+        verify(spec, wait_seconds=args.wait_seconds)
+    else:
+        prepare(spec)

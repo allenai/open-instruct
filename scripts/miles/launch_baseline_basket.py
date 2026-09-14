@@ -45,6 +45,12 @@ def document(image, run, stage, source, digest, *, hostnames=None):
             task["resources"].update(cpuCount=48, memory="704 GiB", sharedMemory="200 GiB")
         task["datasets"].append(dict(mountPath="/qualification-source", source=dict(beaker=source)))
         task["arguments"][0] = task["arguments"][0].replace("cd /opt/core-rl\n", "cd /opt/core-rl\n" + node_overlay, 1)
+        if stage == "train":
+            task["arguments"][0] = task["arguments"][0].replace(
+                "python -m open_instruct.miles.cluster /output/submitted-run.json",
+                "python -m scripts.miles.prepare_baseline_basket /output/submitted-run.json --verify --wait-seconds 1800\n"
+                "python -m open_instruct.miles.cluster /output/submitted-run.json",
+            )
     return spec
 
 

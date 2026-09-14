@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from scripts.miles import launch_baseline_basket, prepare_baseline_basket
 
 from open_instruct.miles.run_spec import RunSpec
@@ -67,3 +66,49 @@ def test_baseline_allocation_and_cpu_placement():
     assert "gpuCount" not in task["resources"]
     assert "scripts.miles.prepare_baseline_basket" in task["arguments"][0]
     assert "open_instruct.miles.cluster /output" not in task["arguments"][0]
+
+
+def test_preparation_writes_separate_partitions_and_canary_receipt(tmp_path, monkeypatch):
+    spec = RunSpec.load(ROOT / "configs/miles/qualification/full-sft-basket-fast-200.toml")
+    spec.data["prompt_data"] = str(tmp_path / "frozen/train.jsonl")
+    names = ["math", "ifeval", "code", "general-quality"]
+    partitions = {
+        "train": [row(name, i) for name in names for i in range(1, 140)],
+        "eval": [row(name, 0) for name in names],
+    }
+    for rows in partitions.values():
+        for item in rows:
+            item["metadata"]["verifiers"][0]["target"] = "answer"
+    tokenizer = type("Tokenizer", (), {"chat_template": "template", "encode": lambda self, text, **kw: [1, 2]})()
+    monkeypatch.setattr(prepare_baseline_basket.run_data, "_tokenizer", lambda path: tokenizer)
+    monkeypatch.setattr(
+        prepare_baseline_basket.run_data,
+        "_adopt",
+        lambda *args: (partitions, {"template_sha256": prepare_baseline_basket.digest("template")}, None),
+    )
+    monkeypatch.setattr(prepare_baseline_basket.judge_server, "command", lambda *args: None)
+
+    async def canaries():
+        return [1, 0, 1, 0]
+
+    monkeypatch.setattr(prepare_baseline_basket, "code_canaries", canaries)
+    write = prepare_baseline_basket.workflow.write_json
+    monkeypatch.setattr(
+        prepare_baseline_basket.workflow,
+        "write_json",
+        lambda path, value: write(
+            tmp_path / "receipt.json" if str(path) == "/output/preparation.json" else path, value
+        ),
+    )
+    prepare_baseline_basket.prepare(spec)
+    paths = list((tmp_path / "frozen").glob("*.jsonl"))
+    assert {path.name for path in paths} == {
+        "train.jsonl",
+        "eval-math.jsonl",
+        "eval-ifeval.jsonl",
+        "eval-code.jsonl",
+        "eval-general.jsonl",
+    }
+    assert all(len(path.read_text().splitlines()) == 128 for path in paths if path.name.startswith("eval-"))
+    with pytest.raises(ValueError, match="already exists"):
+        prepare_baseline_basket.prepare(spec)
