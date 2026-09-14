@@ -95,3 +95,17 @@ underlying exception chain, selected endpoint, request path, and active count.
 It still returns 503 and releases ownership on a transport error. It does not
 retry generation or log prompts/headers. This distinguishes a failed connection
 from engine compute failure without changing policy bookkeeping.
+
+## Measured queue views for completed runs
+
+These diagrams cover the two completed packed RL runs. The ongoing trainer-only
+and transport-diagnostic experiments are not included. Queue means are
+sample-time-weighted; CPU driver occupation is not GPU hardware utilization.
+Final drain inventory is reported separately above.
+
+![c32 pipeline](packed-capacity-20260914/packed-2t2i-c32-map.png)
+
+![c64 pipeline](packed-capacity-20260914/packed-2t2i-c64-map.png)
+
+Warm timelines: [c32](packed-capacity-20260914/packed-2t2i-c32-steady-pipeline.png),
+[c64](packed-capacity-20260914/packed-2t2i-c64-steady-pipeline.png).
