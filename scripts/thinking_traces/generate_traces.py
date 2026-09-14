@@ -203,6 +203,32 @@ def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
     return prompts
 
 
+def _extract_reasoning(message) -> str | None:
+    """Pull ``reasoning_content`` off a chat message however the SDK exposes it.
+
+    When a ``--reasoning-parser`` is active the server moves the whole trace out
+    of ``content`` and into ``reasoning_content``. That field is not part of the
+    OpenAI schema, so depending on SDK version it arrives as a real attribute, in
+    ``model_extra``, or only in the dumped dict. Reading it with a plain getattr
+    silently returned None on DeepSeek-V4-Flash, and because the parser had
+    already stripped the trace from ``content`` there was nothing left to fall
+    back to: an 8,000-trace run recorded 94% of its generated tokens nowhere.
+    """
+    value = getattr(message, "reasoning_content", None)
+    if value is not None:
+        return value
+    extra = getattr(message, "model_extra", None)
+    if isinstance(extra, dict) and extra.get("reasoning_content") is not None:
+        return extra["reasoning_content"]
+    dump = getattr(message, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump().get("reasoning_content")
+        except Exception:  # noqa: BLE001 - diagnostics only, never fail a request
+            return None
+    return None
+
+
 def split_trace(text: str, finish_reason: str) -> tuple[str, str, str]:
     """Split a completion into (thinking_text, answer_text, kind).
 
@@ -278,7 +304,7 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
 
     choice = response.choices[0]
     text = choice.message.content or ""
-    reasoning = getattr(choice.message, "reasoning_content", None)
+    reasoning = _extract_reasoning(choice.message)
 
     if reasoning is not None:
         # A --reasoning-parser is active, so the server already separated the
@@ -298,6 +324,10 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
     thinking_tokens = len(tokenizer(thinking_text, add_special_tokens=False)["input_ids"])
     answer_tokens = len(tokenizer(answer_text, add_special_tokens=False)["input_ids"])
     usage = response.usage
+    # Tokens the server says it generated but that landed in neither field. A
+    # large gap means the trace was dropped in transit rather than not produced.
+    _completion = getattr(usage, "completion_tokens", 0) or 0
+    unaccounted = max(0, _completion - thinking_tokens - answer_tokens)
 
     return {
         "prompt_index": prompt["prompt_index"],
@@ -317,6 +347,7 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
         "answer_tokens": answer_tokens,
         "thinking_chars": len(thinking_text),
         "completion_tokens": getattr(usage, "completion_tokens", None),
+        "unaccounted_tokens": unaccounted,
         "latency_s": round(time.monotonic() - started, 3),
         # Full text, not an excerpt: these traces are the expensive artifact of
         # the run and get published as a dataset. Storing them whole also means
@@ -370,6 +401,7 @@ def main() -> None:
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     write_lock = threading.Lock()
     shapes: collections.Counter = collections.Counter()
+    unaccounted_total = 0
     done = 0
     started_at = time.monotonic()
 
@@ -388,8 +420,25 @@ def main() -> None:
                 # of traces. Surfacing it here turns a 14-hour discovery into a
                 # 5-minute one -- and because full text is stored, a mis-parse is
                 # recoverable offline rather than needing the run repeated.
+                if record.get("unaccounted_tokens"):
+                    unaccounted_total += record["unaccounted_tokens"]
                 if done == args.parse_health_after:
                     logger.info("parse health after %d traces: %s", done, dict(shapes))
+                    mean_lost = unaccounted_total / max(1, done)
+                    if shapes.get(KIND_CLOSED, 0) == 0 and mean_lost > 100:
+                        # The server generated tokens that reached neither field, so
+                        # the trace is being lost in transit and storing full text
+                        # does NOT make this recoverable offline. Stop now instead of
+                        # spending hours producing records with empty traces.
+                        handle.flush()
+                        raise SystemExit(
+                            f"aborting after {done} traces: no closed traces and a mean of "
+                            f"{mean_lost:.0f} generated tokens per trace landed in neither "
+                            "thinking_text nor answer_text. The reasoning is being dropped "
+                            "before it reaches this client -- check --reasoning-parser and "
+                            "that reasoning_content is readable. This is NOT recoverable "
+                            "offline because the text never arrives."
+                        )
                     if shapes.get(KIND_CLOSED, 0) == 0:
                         logger.error(
                             "NO closed <think>...</think> traces yet -- the parser and this "
