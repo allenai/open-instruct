@@ -45,8 +45,10 @@ def specification(image, spec, stage, prepare_module="scripts.miles.prepare_judg
         source = f"""from pathlib import Path
 import json
 root = Path({spec.output["root"]!r})
-for path in sorted((root / 'cluster').glob('*/*')):
-    if path.suffix not in ('.json', '.log') or not path.is_file():
+paths = list((root / 'cluster').glob('*/*')) + list((root / 'checkpoints').glob('*.jsonl'))
+paths += [root / 'workflow-state.json', root / 'plan.json']
+for path in sorted(paths):
+    if path.suffix not in ('.json', '.jsonl', '.log') or not path.is_file():
         continue
     raw = path.read_bytes()
     target = Path('/output/inspection') / path.relative_to(root)
