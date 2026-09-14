@@ -110,13 +110,14 @@ def report_blocks(entity, project, group, warmup):
         plots = [
             wr.LinePlot(
                 title=label,
+                layout=wr.Layout(x=(index % 2) * 12, y=(index // 2) * 8, w=12, h=8),
                 x="update",
                 y=keys,
                 range_x=(None, None) if title.startswith("Warmup") else (warmup + 1, None),
                 smoothing_factor=0,
                 max_runs_to_show=20,
             )
-            for label, keys in panels.items()
+            for index, (label, keys) in enumerate(panels.items())
         ]
         blocks.append(
             wr.PanelGrid(
