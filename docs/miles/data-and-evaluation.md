@@ -73,3 +73,14 @@ grading. W&B records `rollout/code_verifier/service_errors` and
 the existing rejection counters. The fraction covers code verifier calls in
 the consumed collection; it is not the fraction of HTTP attempts or all
 samples generated. Retain these metrics when comparing learning curves.
+
+### Symbolic math timeouts
+
+Symbolic math runs in a bounded subprocess pool. An individual request exceeding
+45 seconds kills and replaces that worker and defaults to reward zero. The sample
+retains `verifier_diagnostics` with `kind=math`, `status=timeout` and elapsed time;
+`rollout/math_verifier/timeouts` and `timeout_fraction` count these separately from
+ordinary incorrect answers. Set `OI_MILES_MATH_TIMEOUT_POLICY=raise` for strict
+qualification. Configuration errors, unexpected worker failures and cancellation
+still propagate. A timeout-zero is an ungraded sample, not evidence of a wrong
+mathematical answer; include the timeout rate when interpreting benchmark scores.
