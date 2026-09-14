@@ -257,3 +257,21 @@ Full-checkpoint preparation checks every Q/K norm shape, changes only config
 `model_type`/`architectures`, and links unchanged source weights. Export restores
 public Olmo 3 config and the original chat template. Nine tests passed in the
 historical Think image. A fresh CPU preparation and GPU trial are still required.
+
+At 19:45 UTC the dense GSM8K control completed its initial evaluation: **441/512
+(86.13%)**, median response 1525 tokens, mean 4805.83, and 49 capped responses
+(9.57%). All samples report policy version zero. The long response tail made this
+evaluation take 3718 seconds. [Recorded metrics](dense-gsm8k-initial.json). This is
+a starting score, not an RL gain; training-cycle measurements and an endpoint are
+still pending.
+
+The historical retrofit's full-checkpoint CPU preparation passed on Saturn:
+[Beaker](https://beaker.org/ex/01M2GPZSQFFGFNM545229AYB19). All 64 normalization
+shapes and all 6512 prompt token hashes pass. Its three-update GPU trial is
+[Beaker](https://beaker.org/ex/01M2GQ7M7QZHDZS4AKM488BJ9S). A bounded local
+continuation in `/tmp/original-baseline-sequence.py`, pinned to detached checkout
+`.worktrees/miles-original-executor` at `bbfdb130f`, launches the original
+200-update run only after zero exit, three completed updates and restored public
+HF exports. State and receipts are in `/tmp/original-baseline-sequence/`; a failed
+gate stops the sequence without automatic retries. The 200-update original run
+is not yet launched.
