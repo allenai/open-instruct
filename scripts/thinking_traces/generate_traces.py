@@ -203,7 +203,7 @@ def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
     return prompts
 
 
-def _extract_reasoning(message) -> str | None:
+def _extract_reasoning(message, raw_payload: dict | None = None) -> str | None:
     """Pull ``reasoning_content`` off a chat message however the SDK exposes it.
 
     When a ``--reasoning-parser`` is active the server moves the whole trace out
@@ -214,6 +214,13 @@ def _extract_reasoning(message) -> str | None:
     already stripped the trace from ``content`` there was nothing left to fall
     back to: an 8,000-trace run recorded 94% of its generated tokens nowhere.
     """
+    if isinstance(raw_payload, dict):
+        try:
+            value = raw_payload["choices"][0]["message"].get("reasoning_content")
+            if value is not None:
+                return value
+        except (KeyError, IndexError, TypeError):
+            pass
     value = getattr(message, "reasoning_content", None)
     if value is not None:
         return value
@@ -268,18 +275,46 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
             extra_body = {}
             if args.chat_template_kwargs:
                 extra_body["chat_template_kwargs"] = json.loads(args.chat_template_kwargs)
-            response = client.chat.completions.create(
-                model=args.model,
-                messages=[{"role": "user", "content": prompt["prompt"]}],
-                temperature=args.temperature,
-                top_p=args.top_p,
-                max_tokens=args.max_tokens,
-                extra_body=extra_body or None,
-                # Distinct per (prompt, sample) so the run is reproducible while
-                # the samples within a prompt stay independent draws.
-                seed=args.seed * 1_000_003 + prompt["prompt_index"] * 97 + sample_index,
-                n=1,
-            )
+            raw_payload = None
+            response = None
+            try:
+                # Read the raw HTTP body as well as the parsed object. A
+                # --reasoning-parser puts the trace in `reasoning_content`, which
+                # is not part of the OpenAI schema, so SDK model validation can
+                # drop it before we ever see it. The raw JSON always has it.
+                _raw = client.chat.completions.with_raw_response.create(
+                    model=args.model,
+                    messages=[{"role": "user", "content": prompt["prompt"]}],
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    max_tokens=args.max_tokens,
+                    extra_body=extra_body or None,
+                    # Distinct per (prompt, sample) so the run is reproducible
+                    # while samples within a prompt stay independent draws.
+                    seed=args.seed * 1_000_003
+                    + prompt["prompt_index"] * 97
+                    + sample_index,
+                    n=1,
+                )
+                response = _raw.parse()
+                try:
+                    raw_payload = json.loads(_raw.text)
+                except Exception:  # noqa: BLE001 - diagnostics only
+                    raw_payload = None
+            except AttributeError:
+                # Older SDKs without with_raw_response.
+                response = client.chat.completions.create(
+                    model=args.model,
+                    messages=[{"role": "user", "content": prompt["prompt"]}],
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    max_tokens=args.max_tokens,
+                    extra_body=extra_body or None,
+                    seed=args.seed * 1_000_003
+                    + prompt["prompt_index"] * 97
+                    + sample_index,
+                    n=1,
+                )
             break
         except Exception as exc:  # noqa: BLE001 - retry anything the server throws
             last_error = exc
@@ -304,7 +339,7 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
 
     choice = response.choices[0]
     text = choice.message.content or ""
-    reasoning = _extract_reasoning(choice.message)
+    reasoning = _extract_reasoning(choice.message, raw_payload)
 
     if reasoning is not None:
         # A --reasoning-parser is active, so the server already separated the

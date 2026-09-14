@@ -402,6 +402,15 @@ model_extra_args() {
         # probabilistic draft sampling with adaptive verification, which could
         # perturb the output length distribution this study measures.
         *DeepSeek-V4*)   echo "--tokenizer-mode deepseek_v4 --block-size 256 --attention_config.indexer_kv_dtype=mxfp4 --kv-cache-dtype fp8" ;;
+        # Kimi-K3 ships no jinja template (TikTokenTokenizer), so
+        # --tokenizer-mode kimi_k3 is required for vLLM to render chat.
+        # Unlike DeepSeek-V4 the reasoning parser is NOT optional here: K3
+        # wraps its think channel in special tokens (<|open|>think<|sep|>)
+        # rather than a literal </think>, so split_trace cannot recover the
+        # trace from content and reasoning_content is the only path. The
+        # client now reads that field off the raw HTTP body so SDK schema
+        # validation cannot drop it.
+        *Kimi-K3*)       echo "--tokenizer-mode kimi_k3 --reasoning-parser kimi_k3 --kv-cache-dtype fp8" ;;
         *)               echo "" ;;
     esac
 }
