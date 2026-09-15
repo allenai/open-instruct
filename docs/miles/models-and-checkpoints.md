@@ -54,3 +54,23 @@ change the recipe in-place and call it a resume.
 Budget checkpoint disk space, synchronous save time and startup load time. See
 [checkpoint measurements](measurements/checkpoint-perf-20260911.md) for the measured
 EP2 workload, and [operations](operations.md) for artifact/completion checks.
+
+## Using a template that does not ship with the checkpoint
+
+Point `model.hf_template` at a tokenizer directory, for example a local snapshot of
+`allenai/dolma2-tokenizer-olmo35`, and preparation stages that directory's tokenizer,
+chat template and stop-token `generation_config.json` over the checkpoint's own. The
+vocabulary must match the checkpoint's; the Olmo 3.5 tokenizer is vocabulary-identical
+to the base dolma2 tokenizer, so only the template changes. Both the trainer's scoring
+and the serving engines read the staged directory, so prompts, stop tokens and
+log-probabilities all follow the override. Runs prepared under different templates are
+different conditions: compare them only through a fresh evaluation, which
+`scripts/miles/gsm8k_test_eval.py --tokenizer DIR` renders and serves with the same
+override.
+
+```toml
+[model]
+source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+format = "hf"
+hf_template = "/weka/oe-training-default/robertb/open-instruct/tokenizers/dolma2-tokenizer-olmo35"
+```

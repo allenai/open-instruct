@@ -217,8 +217,8 @@ class RunSpec:
             raise InputError("model.format must be hf or olmo_core; Megatron checkpoints are not Core inputs")
         if model["format"] == "olmo_core" and not model.get("hf_template"):
             raise InputError("model.hf_template is required for an olmo_core input")
-        if model["format"] == "hf" and "hf_template" in model:
-            raise InputError("model.hf_template applies only to olmo_core inputs")
+        # For an HF input, hf_template is optional: a tokenizer directory or a
+        # chat_template.jinja that replaces the template shipped with the checkpoint.
         for key in ("hf_template",):
             if key in model:
                 model[key] = _path(model[key], base, f"model.{key}")
