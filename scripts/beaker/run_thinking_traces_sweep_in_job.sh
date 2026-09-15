@@ -67,6 +67,14 @@ dump_vllm_failure() {
 # shards the MoE experts so the weights still fit. TP_SIZE * DP_SIZE must
 # equal GPU_COUNT.
 : "${DP_SIZE:=}"
+# Weight-loading controls. LOAD_FORMAT=instanttensor uses vLLM's distributed
+# loader (pipelined prefetch + direct I/O, bypassing the page cache); vLLM's
+# own figures are DeepSeek-R1 on 8xH200 160s -> 15.3s. STARTUP_PROBE=1 loads
+# the model, reports time-to-ready, and exits without generating, so a loader
+# can be A/B-tested in minutes on a small checkpoint instead of hours on a
+# large one.
+: "${LOAD_FORMAT:=}"
+: "${STARTUP_PROBE:=0}"
 : "${ENABLE_EP:=}"
 : "${MAX_MODEL_LEN:=131072}"
 : "${MAX_TOKENS:=128000}"
@@ -146,6 +154,13 @@ if [ -d /weka/oe-adapt-default ]; then
     rm -rf /root/.cache/flashinfer 2>/dev/null || true
     ln -sfn "$_fi_cache" /root/.cache/flashinfer
     log "flashinfer JIT cache -> $_fi_cache"
+    # vLLM rebuilds its torch.compile artifacts every job because this cache
+    # is container-local. Persisting it on weka removes that from every
+    # subsequent boot of the same (model, shape, vLLM version).
+    _vllm_cache="/weka/oe-adapt-default/${BEAKER_USER_ID:-shared}/vllm_cache"
+    mkdir -p "$_vllm_cache"
+    export VLLM_CACHE_ROOT="$_vllm_cache"
+    log "vLLM compile cache -> $_vllm_cache"
 fi
 
 # Read throughput from the weka HF cache varies by roughly 8x across nodes on
@@ -480,6 +495,7 @@ run_one_model() {
     # Same attention/MoE backends selected either way, so nothing is degraded.
     # Neither wheel is on PyPI at this version; they come from flashinfer.ai.
     uvx --python 3.12 \
+        ${LOAD_FORMAT:+$([ "$LOAD_FORMAT" = instanttensor ] && printf -- "--with instanttensor")} \
         ${FLASHINFER_WHEELS:+--with flashinfer-cubin==${FLASHINFER_VERSION} \
           --with flashinfer-jit-cache==${FLASHINFER_VERSION} \
           --index-strategy unsafe-best-match \
@@ -497,7 +513,8 @@ run_one_model() {
         ${DP_SIZE:+--data-parallel-size "$DP_SIZE"} \
         ${ENABLE_EP:+--enable-expert-parallel} \
         --trust-remote-code \
-        --safetensors-load-strategy "${SAFETENSORS_LOAD_STRATEGY:-prefetch}" \
+        ${LOAD_FORMAT:+--load-format "$LOAD_FORMAT"} \
+        ${LOAD_FORMAT:---safetensors-load-strategy "${SAFETENSORS_LOAD_STRATEGY:-prefetch}"} \
         >"$vllm_log" 2>&1 &
     local vllm_pid=$!
 
@@ -521,6 +538,17 @@ run_one_model() {
         sleep 10
     done
     log "vllm ready for ${served} after ${SECONDS}s"
+
+    # STARTUP_PROBE exists so a loader change can be measured on a small
+    # checkpoint in minutes rather than validated on a 1.5 TB one in hours.
+    # It reports the phase breakdown and exits without generating anything.
+    if [ "${STARTUP_PROBE:-0}" = "1" ]; then
+        log "STARTUP PROBE RESULT ${served}: time_to_ready=${SECONDS}s load_format=${LOAD_FORMAT:-prefetch} tp=${TP_SIZE}${DCP_SIZE:+ dcp=${DCP_SIZE}} omp=${OMP_NUM_THREADS:-unset}"
+        grep -aoE "Model loading took [0-9.]+ (GiB|GB) and [0-9.]+ seconds|torch.compile takes [0-9.]+ s|Capturing CUDA graphs[^|]*100%|init engine \\(profile, create kv cache, warmup model\\) took [0-9.]+ seconds" "$vllm_log" 2>/dev/null | tail -5 || true
+        kill "$vllm_pid" 2>/dev/null || true
+        cp "$vllm_log" "$RESULTS_DIR/" 2>/dev/null || true
+        return 0
+    fi
 
     # Stream partial traces out, and surface the telemetry vLLM already emits.
     # Trace counts alone cannot distinguish "KV-bound" from "concurrency-starved"

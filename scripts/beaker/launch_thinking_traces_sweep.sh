@@ -37,6 +37,8 @@ GPU_COUNT=4
 TP_SIZE=""
 DCP_SIZE=""
 DP_SIZE=""
+LOAD_FORMAT=""
+STARTUP_PROBE=0
 ENABLE_EP=""
 MAX_MODEL_LEN=131072
 MAX_TOKENS=128000
@@ -114,6 +116,8 @@ while [ $# -gt 0 ]; do
         --tp)                TP_SIZE="$2"; shift 2 ;;
         --dcp)               DCP_SIZE="$2"; shift 2 ;;
         --dp)                DP_SIZE="$2"; shift 2 ;;
+        --load-format)       LOAD_FORMAT="$2"; shift 2 ;;
+        --startup-probe)     STARTUP_PROBE=1; shift ;;
         --ep)                ENABLE_EP=1; shift ;;
         --num-prompts)       NUM_PROMPTS="$2"; shift 2 ;;
         --num-samples)       NUM_SAMPLES="$2"; shift 2 ;;
@@ -154,7 +158,7 @@ cat <<EOF
 
 === Thinking-trace sweep ===
   Models      : ${MODELS}
-  Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}}${DP_SIZE:+ DP=${DP_SIZE}}${ENABLE_EP:+ EP=on}), vLLM ${VLLM_PKG_VERSION}
+  Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}}${DP_SIZE:+ DP=${DP_SIZE}}${ENABLE_EP:+ EP=on}), vLLM ${VLLM_PKG_VERSION}${LOAD_FORMAT:+, load-format ${LOAD_FORMAT}}${STARTUP_PROBE:+$([ "$STARTUP_PROBE" = 1 ] && printf ", STARTUP PROBE")}
   Context     : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   Sampling    : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples (seed ${SEED}), concurrency ${CONCURRENCY}
   Hub         : ${HF_REPO_ID:-<none>}  secret=${HF_TOKEN_SECRET_NAME:-<none>}
@@ -188,6 +192,8 @@ cmd=(
 # every rank and caps concurrency at a fraction of the intended value.
 [ -n "$DCP_SIZE" ] && cmd+=(--env "DCP_SIZE=${DCP_SIZE}")
 [ -n "$DP_SIZE" ] && cmd+=(--env "DP_SIZE=${DP_SIZE}")
+[ -n "$LOAD_FORMAT" ] && cmd+=(--env "LOAD_FORMAT=${LOAD_FORMAT}")
+[ "$STARTUP_PROBE" = "1" ] && cmd+=(--env "STARTUP_PROBE=1")
 [ -n "$ENABLE_EP" ] && cmd+=(--env "ENABLE_EP=1")
 [ "$WEKA_MOUNT" != "none" ] && cmd+=(--weka "$WEKA_MOUNT")
 [ -n "$HF_TOKEN_SECRET_NAME" ] && cmd+=(--env-secret "HF_TOKEN=${HF_TOKEN_SECRET_NAME}")
