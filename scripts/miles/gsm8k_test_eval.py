@@ -110,8 +110,9 @@ def check_rendering(tokenizer, reference: Path) -> int:
 
 
 class Engines:
-    def __init__(self, model: str, gpus: int, seed: int, log_dir: Path):
+    def __init__(self, model: str, gpus: int, seed: int, log_dir: Path, tokenizer_path: str | None = None):
         self.model, self.gpus, self.seed, self.log_dir = model, gpus, seed, log_dir
+        self.tokenizer_path = tokenizer_path
         self.processes: list[subprocess.Popen] = []
         self.urls: list[str] = []
 
@@ -131,6 +132,7 @@ class Engines:
                 str(index),
                 "--random-seed",
                 str(self.seed + index),
+                *(["--tokenizer-path", self.tokenizer_path] if self.tokenizer_path else []),
                 *SERVER_FLAGS,
             ]
             log = (self.log_dir / f"engine-{index}.log").open("w")
@@ -204,11 +206,13 @@ def score(verifier, text, label):
 
 
 def evaluate_checkpoint(name, model, items, options, output: Path):
-    tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(options.tokenizer or model, trust_remote_code=True)
     rendered_checks = check_rendering(tokenizer, Path(options.reference_eval)) if options.reference_eval else 0
     prompts = [render(tokenizer, item["question"]) for item in items]
     verifier = GSM8KVerifier()
-    engines = Engines(model, options.gpus, options.seed, output / f"{name}-engine-logs")
+    engines = Engines(
+        model, options.gpus, options.seed, output / f"{name}-engine-logs", tokenizer_path=options.tokenizer
+    )
     engines.log_dir.mkdir(parents=True, exist_ok=True)
     timings = {}
     started = time.perf_counter()
@@ -253,6 +257,7 @@ def evaluate_checkpoint(name, model, items, options, output: Path):
     n = len(records)
     summary = {
         "model": model,
+        "tokenizer": options.tokenizer or model,
         "questions": n,
         "rendering_checked_against_prepared_rows": rendered_checks,
         "timings": timings,
@@ -315,6 +320,11 @@ def main():
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--limit", type=int, default=None, help="Only the first N questions (smoke runs)")
     parser.add_argument("--reference-eval", default=None, help="Prepared eval.jsonl to check prompt rendering")
+    parser.add_argument(
+        "--tokenizer",
+        default=None,
+        help="Tokenizer/chat-template directory to render prompts and serve with, instead of the checkpoint's own",
+    )
     options = parser.parse_args()
 
     output = Path(options.output)
@@ -325,6 +335,7 @@ def main():
         "dataset": {"source": DATASET, "questions": len(items), "fingerprint_sha256": fingerprint},
         "settings": {
             "gpus": options.gpus,
+            "tokenizer": options.tokenizer,
             "sampled_n": options.sampled_n,
             "max_new_tokens": options.max_new_tokens,
             "server_flags": SERVER_FLAGS,

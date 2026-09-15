@@ -14,7 +14,10 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
+
+logger = logger_utils.setup_logger(__name__)
 
 
 def write_json(path, document):
@@ -107,8 +110,21 @@ def prepare_model(spec):
                 if (staging / "chat_templates").exists():
                     shutil.rmtree(staging / "chat_templates")
                 tokenizer.save_pretrained(staging)
+                # Stop-token ids belong with the template (Olmo 3.5 ends answers
+                # with eos but tool calls with <|im_end|>); carry them along.
+                if (template_path / "generation_config.json").is_file():
+                    shutil.copyfile(template_path / "generation_config.json", staging / "generation_config.json")
+                rendered = tokenizer.chat_template or ""
             else:
                 shutil.copyfile(template_path, staging / "chat_template.jinja")
+                rendered = template_path.read_text()
+            for placeholder in ("[CUTOFF_DATE]",):
+                if placeholder in rendered:
+                    logger.warning(
+                        "Chat template %s contains the literal placeholder %s; every prompt will render it verbatim",
+                        template_path,
+                        placeholder,
+                    )
         if model_identity(source) != identity["source"]:
             raise InputError("Source model changed during preparation")
         write_json(staging / marker.name, {"identity": identity, "prepared_files": model_identity(staging)["files"]})
