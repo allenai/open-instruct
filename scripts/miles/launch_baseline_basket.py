@@ -37,6 +37,12 @@ def document(
         if stage == "prepare":
             task["resources"].update(cpuCount=24, memory="96 GiB")
             task["timeout"] = "2h"
+            if prepare_module == "scripts.miles.audit_live_trainer":
+                task["resources"].update(gpuCount=0, cpuCount=2, memory="16 GiB")
+                task["constraints"] = {"cluster": ["ai2/saturn"]}
+                task["hostNetworking"] = True
+                task["timeout"] = "10m"
+                task["context"].update(minRuntime="5m")
             if prepare_module == "scripts.miles.qualify_judge_context":
                 task["resources"].update(gpuCount=1, cpuCount=16, memory="128 GiB")
                 task["constraints"] = {"cluster": ["ai2/holmes"]}
@@ -72,6 +78,7 @@ def main():
             "scripts.miles.prepare_baseline_basket",
             "scripts.miles.prepare_olmo3_basket",
             "scripts.miles.audit_judge_budget",
+            "scripts.miles.audit_live_trainer",
             "scripts.miles.qualify_judge_context",
         ),
         default="scripts.miles.prepare_baseline_basket",
