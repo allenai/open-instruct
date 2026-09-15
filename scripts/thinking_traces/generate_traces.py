@@ -203,6 +203,9 @@ def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
     return prompts
 
 
+_LOGGED_MESSAGE_KEYS = False
+
+
 def _extract_reasoning(message, raw_payload: dict | None = None) -> str | None:
     """Pull ``reasoning_content`` off a chat message however the SDK exposes it.
 
@@ -216,11 +219,27 @@ def _extract_reasoning(message, raw_payload: dict | None = None) -> str | None:
     """
     if isinstance(raw_payload, dict):
         try:
-            value = raw_payload["choices"][0]["message"].get("reasoning_content")
-            if value is not None:
-                return value
+            msg = raw_payload["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
-            pass
+            msg = None
+        if isinstance(msg, dict):
+            # The field name is not stable across vLLM versions and frontends:
+            # 0.28's engine protocol calls it "reasoning" while older builds and
+            # the docs say "reasoning_content", and 0.28 serves chat through a
+            # Rust frontend whose naming is not visible in the Python source.
+            # Reading whichever key is actually present beats guessing, and the
+            # cost of guessing wrong is an entire run of empty traces.
+            for key in ("reasoning_content", "reasoning"):
+                value = msg.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            for key, value in msg.items():
+                if "reasoning" in key.lower() and isinstance(value, str) and value:
+                    return value
+            global _LOGGED_MESSAGE_KEYS
+            if not _LOGGED_MESSAGE_KEYS:
+                _LOGGED_MESSAGE_KEYS = True
+                logger.info("response message keys: %s", sorted(msg.keys()))
     value = getattr(message, "reasoning_content", None)
     if value is not None:
         return value
@@ -466,6 +485,12 @@ def main() -> None:
                         # does NOT make this recoverable offline. Stop now instead of
                         # spending hours producing records with empty traces.
                         handle.flush()
+                        # Every future was submitted up front, and the executor's
+                        # __exit__ waits for all of them, so raising on its own
+                        # lets the run continue to completion. Cancel first.
+                        for fut in futures:
+                            fut.cancel()
+                        pool.shutdown(wait=False, cancel_futures=True)
                         raise SystemExit(
                             f"aborting after {done} traces: no closed traces and a mean of "
                             f"{mean_lost:.0f} generated tokens per trace landed in neither "
