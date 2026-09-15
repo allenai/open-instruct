@@ -51,3 +51,36 @@ Rollout dumps are trusted tensor artifacts on WEKA; do not load arbitrary extern
 pickle files. The small Beaker reports are an index into the larger retained
 artifacts, not a replacement for per-sample auditing. See [operations](operations.md)
 and [comparison evidence](measurements/gsm8k-results-20260911.md).
+
+
+## Code-service failure policy
+
+Code rewards default to Open Instruct's zero-reward continuation behavior.
+After existing HTTP retries are exhausted, a transport/gateway failure or
+invalid service reply receives zero reward, logs a warning, and leaves the
+rollout running. This is a fallback reward, not proof that the generated code
+failed its tests. Existing HTTP rejection handling is unchanged.
+
+Set `OI_MILES_CODE_FAILURE_POLICY = "raise"` in `[launch.env]` for strict
+service-failure handling, or set `failure_policy` to `"zero"` or `"raise"` in
+the code verifier's trusted JSON config. An explicit verifier setting takes
+precedence over the environment. Configuration errors and cancellation still
+propagate; known-answer preparation canaries use strict mode.
+
+Per-sample diagnostics distinguish `service_error`, `rejected`, and successful
+grading. W&B records `rollout/code_verifier/service_errors` and
+`rollout/code_verifier/service_error_fraction`, with status breakdowns alongside
+the existing rejection counters. The fraction covers code verifier calls in
+the consumed collection; it is not the fraction of HTTP attempts or all
+samples generated. Retain these metrics when comparing learning curves.
+
+### Symbolic math timeouts
+
+Symbolic math runs in a bounded subprocess pool. An individual request exceeding
+45 seconds kills and replaces that worker and defaults to reward zero. The sample
+retains `verifier_diagnostics` with `kind=math`, `status=timeout` and elapsed time;
+`rollout/math_verifier/timeouts` and `timeout_fraction` count these separately from
+ordinary incorrect answers. Set `OI_MILES_MATH_TIMEOUT_POLICY=raise` for strict
+qualification. Configuration errors, unexpected worker failures and cancellation
+still propagate. A timeout-zero is an ungraded sample, not evidence of a wrong
+mathematical answer; include the timeout rate when interpreting benchmark scores.

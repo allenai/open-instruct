@@ -19,6 +19,7 @@ import asyncio
 import math
 import os
 import re
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -41,6 +42,7 @@ class CodeVerifierConfig:
     max_execution_time: float
     pass_rate_reward_threshold: float
     apply_perf_penalty: bool
+    failure_policy: str = "zero"
 
 
 def extract_python_code(model_output: str) -> str:
@@ -94,8 +96,14 @@ def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfi
         raise ValueError("OI_MILES_CODE_MAX_EXECUTION_TIME must be positive")
     if not 0 <= threshold <= 1:
         raise ValueError("OI_MILES_CODE_PASS_RATE_REWARD_THRESHOLD must be between zero and one")
+    failure_policy = getattr(args, "code_failure_policy", None)
+    if failure_policy is None:
+        failure_policy = os.environ.get("OI_MILES_CODE_FAILURE_POLICY", "zero")
+    if failure_policy not in {"zero", "raise"}:
+        raise ValueError("OI_MILES_CODE_FAILURE_POLICY must be 'zero' or 'raise'")
     return CodeVerifierConfig(
         api_url=str(url),
+        failure_policy=failure_policy,
         max_execution_time=max_execution_time,
         pass_rate_reward_threshold=threshold,
         apply_perf_penalty=_bool_setting(args, "code_apply_perf_penalty", "OI_MILES_CODE_APPLY_PERF_PENALTY", False),
@@ -168,6 +176,7 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
         "program_chars": len(program),
         "tests": len(target) if isinstance(target, list) else -1,
         "stdio": stdio,
+        "failure_policy": config.failure_policy,
     }
 
     def request() -> Any:
@@ -181,12 +190,11 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
         except requests.HTTPError as error:
             status = getattr(error.response, "status_code", None)
             if status is not None and (400 <= status < 500 and status != 429 or status == 500):
-                # A client error is a property of this sample (an oversized test
-                # payload, for instance), and the code service answers 500 when
-                # executing a program raises inside its harness; neither is a
-                # service outage. Score the sample zero, as the standard
-                # open-instruct verifier does, and keep training. Gateway errors
-                # (502-504) and 429 are retried and then fail the run.
+                # Preserve the existing rejection category for client errors
+                # and HTTP 500 (which this harness can emit for program errors).
+                # HTTP status alone does not establish the underlying cause.
+                # Gateway and transport failures use the
+                # configured failure policy after the HTTP retries finish.
                 logger.warning(
                     "code verifier rejected a sample with HTTP %s (program %d chars, %d tests); scoring it zero",
                     status,
@@ -195,14 +203,33 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
                 )
                 diagnostics["status"] = "rejected"
                 return {"results": []}
-            raise RuntimeError(f"code verifier request failed for {config.api_url}: {error}") from error
-        except Exception as error:
-            raise RuntimeError(f"code verifier request failed for {config.api_url}: {error}") from error
+            raise
 
-    result = await asyncio.to_thread(request)
-    score = _score_response(result, config=config)
-    if not math.isfinite(score):
-        raise RuntimeError(f"code verifier returned non-finite score {score!r}")
+    started = time.monotonic()
+    stage = "request"
+    try:
+        result = await asyncio.to_thread(request)
+        stage = "response"
+        score = _score_response(result, config=config)
+        if not math.isfinite(score):
+            raise RuntimeError(f"code verifier returned non-finite score {score!r}")
+    except Exception as error:
+        # Match original Open Instruct's continue-with-zero behavior, while
+        # distinguishing missing/invalid grading from an actual failed test.
+        # Config validation stays outside this try; cancellation is not caught.
+        diagnostics.update(
+            status="service_error", error_stage=stage, error_type=type(error).__name__, error=str(error)[:1000]
+        )
+        if config.failure_policy == "raise":
+            raise RuntimeError(f"code verifier request failed for {config.api_url}: {error}") from error
+        logger.warning(
+            "code verifier service failure after %.2fs; assigning zero reward and continuing: %s",
+            time.monotonic() - started,
+            diagnostics,
+        )
+        score = 0.0
+    finally:
+        diagnostics["elapsed_seconds"] = time.monotonic() - started
     return score, diagnostics
 
 
@@ -212,6 +239,7 @@ class ServiceConfig:
     stdio: bool = False
     max_execution_time: float = 1.0
     pass_rate_reward_threshold: float = 0.99
+    failure_policy: str | None = None
 
 
 class CodeVerifier:
@@ -223,6 +251,7 @@ class CodeVerifier:
     async def async_call(self, tokens, prediction, label, **kwargs):
         args = SimpleNamespace(
             code_api_url=self.config.api_url,
+            code_failure_policy=self.config.failure_policy,
             code_max_execution_time=self.config.max_execution_time,
             code_pass_rate_reward_threshold=self.config.pass_rate_reward_threshold,
         )

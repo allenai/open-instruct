@@ -130,3 +130,15 @@ def test_local_reward_learning_workflow_has_no_basket_verifier_dependency():
     document = launch_baseline_basket.document("image", run, "workflow", "source", "a" * 64)
     assert len(document["tasks"]) == 1
     assert "prepare_baseline_basket" not in document["tasks"][0]["arguments"][0]
+
+
+def test_judge_gpu_probe_does_not_inherit_cpu_cuda_compat_override():
+    spec = RunSpec.load("configs/miles/qualification/full-sft-basket-200-32k-yarn.toml")
+    document = launch_baseline_basket.document(
+        "image", spec, "prepare", "source", "0" * 64, prepare_module="scripts.miles.qualify_judge_context"
+    )
+    task = document["tasks"][0]
+    assert task["resources"]["gpuCount"] == 1
+    assert task["constraints"] == {"cluster": ["ai2/holmes"]}
+    assert not any(entry["name"] == "LD_LIBRARY_PATH" for entry in task["envVars"])
+    assert "scripts.miles.qualify_judge_context" in task["arguments"][0]

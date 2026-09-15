@@ -93,7 +93,7 @@ async def probe(output):
         for response in ("The capital of France is Paris.", "The capital of France is Saturn, a type of sandwich."):
             sample = SimpleNamespace(response=response, metadata={"judge_query": "What is the capital of France?"})
             score = await general_judge.general_judge_score(
-                SimpleNamespace(seed=1), sample, name=name, target="Paris."
+                SimpleNamespace(seed=1, llm_judge_failure_policy="raise"), sample, name=name, target="Paris."
             )
             scores.append(score)
             reports.append(

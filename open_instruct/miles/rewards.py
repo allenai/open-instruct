@@ -18,11 +18,15 @@ import math
 import os
 import signal
 import sys
+import time
 import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
+from open_instruct import logger_utils
 from open_instruct.miles import general_judge, judge_registry
+
+logger = logger_utils.setup_logger(__name__)
 
 _MATH_FACTORIES = {
     "open_instruct.ground_truth_utils.MathVerifier",
@@ -40,6 +44,10 @@ def _kill_remaining_children():
 
 
 atexit.register(_kill_remaining_children)
+
+
+class MathVerifierTimeout(TimeoutError):
+    """A symbolic grading request exceeded its bounded subprocess budget."""
 
 
 class _MathProcessPool:
@@ -143,7 +151,7 @@ class _MathProcessPool:
                             future.set_result(result)
                     else:
                         if not future.done():
-                            future.set_exception(TimeoutError(f"Math verifier exceeded {self.timeout} seconds"))
+                            future.set_exception(MathVerifierTimeout(f"Math verifier exceeded {self.timeout} seconds"))
                         exchange.cancel()
                         await asyncio.gather(exchange, return_exceptions=True)
                         await self._stop(process)
@@ -211,7 +219,34 @@ class _IsolatedVerifier:
         self.spec = spec
 
     async def async_call(self, *args, **kwargs):
-        return await isolated_verifier_call(self.spec, *args, **kwargs)
+        policy = os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
+        if policy not in ("zero", "raise"):
+            raise ValueError("OI_MILES_MATH_TIMEOUT_POLICY must be zero or raise")
+        start = time.monotonic()
+        try:
+            result = await isolated_verifier_call(self.spec, *args, **kwargs)
+        except MathVerifierTimeout as error:
+            if policy == "raise":
+                raise
+            logger.warning("Math verifier timeout; assigning zero reward: %s", error)
+            return SimpleNamespace(
+                score=0.0,
+                cost=0.0,
+                diagnostics={
+                    "kind": "math",
+                    "status": "timeout",
+                    "error": str(error),
+                    "failure_policy": policy,
+                    "elapsed_seconds": time.monotonic() - start,
+                },
+            )
+        result.diagnostics = {
+            **(getattr(result, "diagnostics", None) or {}),
+            "kind": "math",
+            "status": "ok",
+            "elapsed_seconds": time.monotonic() - start,
+        }
+        return result
 
 
 @functools.lru_cache(maxsize=32)

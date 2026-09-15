@@ -1,0 +1,10 @@
+{
+  "experiment": "01M2H7NFWZB8ERKFJ6XYAQABQ3",
+  "source_dataset": "01M2H7NDY50AJ1HQ04J3RXWEVY",
+  "name": "olmo3-sft-original-h100-export-fixed-smoke-20260915",
+  "commit": "26ece1f03462367baab4c70e1c1b69fa89404488",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "smoke",
+  "archive_sha256": "2710172733cf1f645ba813a55f97eb42a5906895b29d5df0fe6409b6a725ddf2",
+  "trainer": "original-open-instruct"
+}

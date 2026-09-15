@@ -1,0 +1,11 @@
+{
+  "experiment": "01M2HG94A2BA5FSFWDAZFNFJSS",
+  "source_dataset": "01M2HG91Y0DZFVHPKD2W641RNQ",
+  "name": "olmo3-sft-original-h100-gsm8k-retained-200-20260915",
+  "commit": "327ba1f512f7d5f2ae5849ce1f35ac23a87fef12",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "train",
+  "archive_sha256": "2e2ea8fca4cad45de6f1e4f4af7da0be66d5541becbece95d2cb077bf23c3b52",
+  "trainer": "original-open-instruct",
+  "keep_zero_advantage_groups": true
+}

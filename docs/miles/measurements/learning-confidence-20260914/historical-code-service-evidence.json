@@ -1,0 +1,207 @@
+{
+  "think7": {
+    "log_sha256": "5ffbda93b3b174bd9a59177c061113ba3cab5ae8364987dc89839ba0e41919f6",
+    "log_lines": 77849,
+    "warning_lines": 549,
+    "warning_counts": {
+      "http_500": 253,
+      "read_timeout": 206,
+      "http_413": 88,
+      "http_503": 2
+    },
+    "examples": {
+      "http_500": {
+        "line": 3772,
+        "text": "2025-11-19T10:46:52.002Z 2025-11-19 10:46:52 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 500 Server Error: Internal Server Error for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "read_timeout": {
+        "line": 3780,
+        "text": "2025-11-19T10:46:54.474Z 2025-11-19 10:46:54 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: HTTPSConnectionPool(host='p9f1719l7f.execute-api.us-west-2.amazonaws.com', port=443): Read timed out. (read timeout=30)"
+      },
+      "http_413": {
+        "line": 9610,
+        "text": "2025-11-19T11:54:50.979Z 2025-11-19 11:54:50 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 413 Client Error: Request Entity Too Large for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "http_503": {
+        "line": 76868,
+        "text": "2025-11-20T20:31:50.514Z 2025-11-20 20:31:50 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 503 Server Error: Service Unavailable for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      }
+    },
+    "first_timestamp": "2025-11-19T10:01:57.829Z",
+    "last_timestamp": "2025-11-20T20:50:52.988Z",
+    "experiment_id": "01KADRVRYEPW4YPKNN0RRNS137",
+    "driver_job_id": "01KADRVS2QN40WPQW4SM9Q31BJ",
+    "recorded_source_revision": "c4878185",
+    "last_observed_training_step": 1456,
+    "code_api_url": "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program",
+    "runtime_code_max_execution_time": 1.0,
+    "job_status": {
+      "created": "2025-11-19T09:59:18.734223Z",
+      "scheduled": "2025-11-19T09:59:34.055535Z",
+      "started": "2025-11-19T10:01:57.810045Z",
+      "exited": "2025-11-20T20:50:55.97533Z",
+      "finalized": "2025-11-20T20:50:57.69613Z",
+      "exitCode": 134,
+      "canceled": "2025-11-20T20:50:50.346358Z",
+      "canceledFor": "Job 01KADRVS2QN40WPQW4SM9Q31BJ has been manually canceled by hamishivi",
+      "canceledCode": 4,
+      "idleSince": "2025-11-19T10:01:59.879996Z",
+      "ready": "2025-11-19T10:01:57.270571Z"
+    },
+    "runtime_code_pass_rate_reward_threshold": 0.99,
+    "count_unit": "Retained driver-log warning lines, not deduplicated sample IDs or a failure rate. Training/evaluation calls are not separated."
+  },
+  "think7-no-pipeline": {
+    "log_sha256": "50d713b10d8e91408314a9b8bfe5c4c727f41cbc46c77ca262050c7274a007bc",
+    "log_lines": 142793,
+    "warning_lines": 5985,
+    "warning_counts": {
+      "read_timeout": 2892,
+      "http_500": 2353,
+      "http_413": 736,
+      "http_503": 4
+    },
+    "examples": {
+      "read_timeout": {
+        "line": 1831,
+        "text": "2025-10-02T17:58:19.586Z 2025-10-02 17:58:19 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: HTTPSConnectionPool(host='p9f1719l7f.execute-api.us-west-2.amazonaws.com', port=443): Read timed out. (read timeout=30)"
+      },
+      "http_500": {
+        "line": 2042,
+        "text": "2025-10-02T18:07:17.679Z 2025-10-02 18:07:17 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 500 Server Error: Internal Server Error for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "http_413": {
+        "line": 2372,
+        "text": "2025-10-02T19:01:53.989Z 2025-10-02 19:01:53 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 413 Client Error: Request Entity Too Large for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "http_503": {
+        "line": 17458,
+        "text": "2025-10-04T10:38:22.802Z 2025-10-04 10:38:22 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 503 Server Error: Service Unavailable for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      }
+    },
+    "first_timestamp": "2025-10-02T17:37:02.078Z",
+    "last_timestamp": "2025-10-18T23:52:21.025Z",
+    "experiment_id": "01K6JZVN4EN3VHTJ820BV23HGC",
+    "driver_job_id": "01K6JZVND7B151PFJVVFVJDNPQ",
+    "recorded_source_revision": "e698112d",
+    "last_observed_training_step": 1577,
+    "code_api_url": "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program",
+    "runtime_code_max_execution_time": 1.0,
+    "job_status": {
+      "created": "2025-10-02T17:34:59.726641Z",
+      "scheduled": "2025-10-02T17:35:07.481778Z",
+      "started": "2025-10-02T17:37:02.06389Z",
+      "exited": "2025-10-18T23:52:27.119987Z",
+      "finalized": "2025-10-18T23:52:27.870231Z",
+      "exitCode": 134,
+      "canceled": "2025-10-18T23:52:16.415616Z",
+      "canceledFor": "Job 01K6JZVND7B151PFJVVFVJDNPQ has been manually canceled by hamishivi",
+      "canceledCode": 4,
+      "idleSince": "2025-10-02T17:37:04.137252Z",
+      "ready": "2025-10-02T17:37:01.503834Z"
+    },
+    "runtime_code_pass_rate_reward_threshold": 0.99,
+    "count_unit": "Retained driver-log warning lines, not deduplicated sample IDs or a failure rate. Training/evaluation calls are not separated."
+  },
+  "code7": {
+    "log_sha256": "78edc639ef4130b2378284f5033fdad980ecdcf134169c4e325ab4314dd7e519",
+    "log_lines": 105167,
+    "warning_lines": 12233,
+    "warning_counts": {
+      "http_500": 6896,
+      "read_timeout": 4713,
+      "http_413": 623,
+      "http_503": 1
+    },
+    "examples": {
+      "http_500": {
+        "line": 1798,
+        "text": "2025-10-14T16:34:51.318Z 2025-10-14 16:34:51 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 500 Server Error: Internal Server Error for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "read_timeout": {
+        "line": 1873,
+        "text": "2025-10-14T16:36:46.563Z 2025-10-14 16:36:46 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: HTTPSConnectionPool(host='p9f1719l7f.execute-api.us-west-2.amazonaws.com', port=443): Read timed out. (read timeout=30)"
+      },
+      "http_413": {
+        "line": 4072,
+        "text": "2025-10-14T17:17:50.029Z 2025-10-14 17:17:50 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 413 Client Error: Request Entity Too Large for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "http_503": {
+        "line": 17729,
+        "text": "2025-10-14T21:26:39.491Z 2025-10-14 21:26:39 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 503 Server Error: Service Unavailable for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      }
+    },
+    "first_timestamp": "2025-10-14T16:27:20.796Z",
+    "last_timestamp": "2025-10-15T20:24:09.004Z",
+    "experiment_id": "01K7FSWM4717FAR9KF6GE958CA",
+    "driver_job_id": "01K7HRK5MKKTPDY5B41YKAESB4",
+    "recorded_source_revision": null,
+    "last_observed_training_step": 2042,
+    "code_api_url": "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program",
+    "runtime_code_max_execution_time": 1.0,
+    "job_status": {
+      "created": "2025-10-14T16:24:28.499052Z",
+      "scheduled": "2025-10-14T16:24:38.750742Z",
+      "started": "2025-10-14T16:27:20.638001Z",
+      "exited": "2025-10-15T20:24:14.762392Z",
+      "finalized": "2025-10-15T20:24:15.513945Z",
+      "exitCode": 134,
+      "canceled": "2025-10-15T20:24:06.098409Z",
+      "canceledFor": "Job 01K7HRK5MKKTPDY5B41YKAESB4 has been manually canceled by saurabhs",
+      "canceledCode": 4,
+      "idleSince": "2025-10-14T16:27:22.697591Z",
+      "ready": "2025-10-14T16:27:20.096768Z"
+    },
+    "runtime_code_pass_rate_reward_threshold": 0.0,
+    "count_unit": "Retained driver-log warning lines, not deduplicated sample IDs or a failure rate. Training/evaluation calls are not separated."
+  },
+  "think7-latest": {
+    "experiment_id": "01KAHGKA74GFJZ15G40271VDCK",
+    "driver_job_id": "01KAHRW77BSP6HQ8ZJ303ZC9FS",
+    "endpoint_location": "AWS",
+    "warning_counts": {
+      "http_500": 178,
+      "read_timeout": 128,
+      "http_413": 72,
+      "http_503": 5
+    },
+    "examples": {
+      "http_500": {
+        "line": 1754,
+        "text": "2025-11-20T23:52:13.622Z 2025-11-20 23:52:13 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 500 Server Error: Internal Server Error for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "read_timeout": {
+        "line": 1762,
+        "text": "2025-11-20T23:52:13.634Z 2025-11-20 23:52:13 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: HTTPSConnectionPool(host='p9f1719l7f.execute-api.us-west-2.amazonaws.com', port=443): Read timed out. (read timeout=30)"
+      },
+      "http_413": {
+        "line": 3579,
+        "text": "2025-11-21T00:39:46.188Z 2025-11-21 00:39:46 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 413 Client Error: Request Entity Too Large for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      },
+      "http_503": {
+        "line": 10996,
+        "text": "2025-11-21T03:30:49.046Z 2025-11-21 03:30:49 - WARNING - ground_truth_utils.py:913 - Error verifying code sample: 503 Server Error: Service Unavailable for url: https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio"
+      }
+    },
+    "log_lines": 57592,
+    "log_sha256": "5a83a2190b73bf5b4b1dd4e98a766bbf4abfe915155d194a8c248cbc3d3e8efe",
+    "count_unit": "Warning lines, not distinct sample counts or failure rates"
+  },
+  "instruct7": {
+    "experiment_id": "01KA8BY8MMAQWENWY4087MAPFE",
+    "driver_job_id": "01KA8BY8R5QS2CZG1MVH7DR8A7",
+    "endpoint_location": "local",
+    "warning_counts": {
+      "http_504": 71
+    },
+    "examples": {
+      "http_504": {
+        "line": 1397,
+        "text": "2025-11-17T07:46:32.373Z 2025-11-17 07:46:32 - WARNING - ground_truth_utils.py:905 - Error verifying code sample: 504 Server Error: Gateway Time-out for url: http://10.95.1.109:8070/test_program"
+      }
+    },
+    "log_lines": 162010,
+    "log_sha256": "5ff4a706c4ec69b3d6c50b7e4202c2a5b4491c447388d1161a61774bf03347f1",
+    "count_unit": "Warning lines, not distinct sample counts or failure rates"
+  }
+}

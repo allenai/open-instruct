@@ -18,7 +18,7 @@ CODE_URL = "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_pro
 
 
 async def code_canaries():
-    args = SimpleNamespace(code_api_url=CODE_URL, code_pass_rate_reward_threshold=0.99)
+    args = SimpleNamespace(code_api_url=CODE_URL, code_pass_rate_reward_threshold=0.99, code_failure_policy="raise")
     results = []
     for program, tests, stdio, expected in (
         ("def add(a,b): return a+b", ["assert add(1,2)==3"], False, 1),

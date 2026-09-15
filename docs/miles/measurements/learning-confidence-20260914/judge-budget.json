@@ -1,0 +1,206 @@
+{
+  "model_config": {
+    "architectures": [
+      "Qwen3ForCausalLM"
+    ],
+    "attention_bias": false,
+    "attention_dropout": 0.0,
+    "bos_token_id": 151643,
+    "eos_token_id": 151645,
+    "head_dim": 128,
+    "hidden_act": "silu",
+    "hidden_size": 5120,
+    "initializer_range": 0.02,
+    "intermediate_size": 25600,
+    "max_position_embeddings": 40960,
+    "max_window_layers": 64,
+    "model_type": "qwen3",
+    "num_attention_heads": 64,
+    "num_hidden_layers": 64,
+    "num_key_value_heads": 8,
+    "rms_norm_eps": 1e-06,
+    "rope_scaling": null,
+    "rope_theta": 1000000,
+    "sliding_window": null,
+    "tie_word_embeddings": false,
+    "torch_dtype": "bfloat16",
+    "transformers_version": "4.51.0",
+    "use_cache": true,
+    "use_sliding_window": false,
+    "vocab_size": 151936
+  },
+  "files": {
+    "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl": {
+      "sha256": "fde6da774f735ea8d3720598f85ecbd613d5fcf0533f85dd5d8997fedbe93805",
+      "judged_rows": 20489,
+      "largest_static_prompts": [
+        {
+          "sample_id": "dolci-think-full:101345:new-wildchat-english-general_filtered-request-186-65",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 7477,
+          "reference_tokens": 7118,
+          "query_tokens": 115
+        },
+        {
+          "sample_id": "dolci-think-full:97472:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-114-77",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3943,
+          "reference_tokens": 1838,
+          "query_tokens": 1862
+        },
+        {
+          "sample_id": "dolci-think-full:99886:new-wildchat-english-general_filtered-request-53-43",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3708,
+          "reference_tokens": 2143,
+          "query_tokens": 1322
+        },
+        {
+          "sample_id": "dolci-think-full:95917:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-78-77",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3687,
+          "reference_tokens": 1746,
+          "query_tokens": 1698
+        },
+        {
+          "sample_id": "dolci-think-full:83747:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-206-71",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3401,
+          "reference_tokens": 3115,
+          "query_tokens": 43
+        },
+        {
+          "sample_id": "dolci-think-full:86256:new-wildchat-english-general_filtered-request-88-24",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3328,
+          "reference_tokens": 1551,
+          "query_tokens": 1534
+        },
+        {
+          "sample_id": "dolci-think-full:91579:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-150-39",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3230,
+          "reference_tokens": 2843,
+          "query_tokens": 144
+        },
+        {
+          "sample_id": "dolci-think-full:85675:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-393-56",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3032,
+          "reference_tokens": 2751,
+          "query_tokens": 37
+        },
+        {
+          "sample_id": "dolci-think-full:97588:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-222-2",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3018,
+          "reference_tokens": 31,
+          "query_tokens": 2744
+        },
+        {
+          "sample_id": "dolci-think-full:83105:new-wildchat-english-general_filtered-request-185-54",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 3003,
+          "reference_tokens": 578,
+          "query_tokens": 2181
+        }
+      ],
+      "static_prompt_alone_over_budget": 0
+    },
+    "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl": {
+      "sha256": "a858ef1a095b8e9d0d41b684e65b40a3b052c28d351128f0b876e671d847403c",
+      "judged_rows": 0,
+      "largest_static_prompts": [],
+      "static_prompt_alone_over_budget": 0
+    },
+    "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl": {
+      "sha256": "b3251e88df7701bf4daf93ebf44ad34407310a019e16a838765c87dbd4f5d626",
+      "judged_rows": 0,
+      "largest_static_prompts": [],
+      "static_prompt_alone_over_budget": 0
+    },
+    "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl": {
+      "sha256": "b4cd346c2dd853e68778225baa27dd56aff70a8dd6b061b379a0b4007f039e88",
+      "judged_rows": 0,
+      "largest_static_prompts": [],
+      "static_prompt_alone_over_budget": 0
+    },
+    "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl": {
+      "sha256": "974fd34e043a37f482a9183473f035de5543741de8315b7833cb4fa0fbc1a0d0",
+      "judged_rows": 128,
+      "largest_static_prompts": [
+        {
+          "sample_id": "dolci-think-full:85512:new-wildchat-english-general_filtered-request-64-29",
+          "verifier": "general-quality",
+          "static_prompt_tokens": 1455,
+          "reference_tokens": 1076,
+          "query_tokens": 1274
+        },
+        {
+          "sample_id": "dolci-think-full:96437:new-wildchat-english-general_filtered-request-56-96",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 1441,
+          "reference_tokens": 444,
+          "query_tokens": 753
+        },
+        {
+          "sample_id": "dolci-think-full:81777:new-wildchat-english-general_filtered-request-16-93",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 1387,
+          "reference_tokens": 457,
+          "query_tokens": 686
+        },
+        {
+          "sample_id": "dolci-think-full:90451:new-wildchat-english-general_filtered-request-26-33",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 1352,
+          "reference_tokens": 406,
+          "query_tokens": 702
+        },
+        {
+          "sample_id": "dolci-think-full:101186:new-wildchat-english-general_filtered-request-183-47",
+          "verifier": "general-quality",
+          "static_prompt_tokens": 1343,
+          "reference_tokens": 761,
+          "query_tokens": 1163
+        },
+        {
+          "sample_id": "dolci-think-full:88773:new-wildchat-english-general_filtered-request-31-3",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 1154,
+          "reference_tokens": 463,
+          "query_tokens": 447
+        },
+        {
+          "sample_id": "dolci-think-full:96840:new-wildchat-english-general_filtered-request-166-11",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 1025,
+          "reference_tokens": 455,
+          "query_tokens": 327
+        },
+        {
+          "sample_id": "dolci-think-full:89287:tulu_3_rewritten_400k_string_f1_only_v2_nocode_all_filtered_qwen2_5_openthoughts2_filtered-request-184-100",
+          "verifier": "general-quality_ref",
+          "static_prompt_tokens": 1003,
+          "reference_tokens": 663,
+          "query_tokens": 97
+        },
+        {
+          "sample_id": "dolci-think-full:101449:new-wildchat-english-general_filtered-request-116-44",
+          "verifier": "general-quality",
+          "static_prompt_tokens": 956,
+          "reference_tokens": 593,
+          "query_tokens": 775
+        },
+        {
+          "sample_id": "dolci-think-full:92160:new-wildchat-english-general_filtered-request-125-15",
+          "verifier": "general-quality",
+          "static_prompt_tokens": 943,
+          "reference_tokens": 1380,
+          "query_tokens": 763
+        }
+      ],
+      "static_prompt_alone_over_budget": 0
+    }
+  }
+}

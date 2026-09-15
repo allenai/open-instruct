@@ -1,0 +1,10 @@
+{
+  "experiment": "01M2HDDJKQE4TSPYKFJFEN662Q",
+  "source_dataset": "01M2HDDGQR02YH99C9WDPH1993",
+  "name": "olmo3-sft-original-h100-gsm8k-200-20260915",
+  "commit": "578f5b496a83c047a34e4a67dd742fc883c214dd",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "train",
+  "archive_sha256": "9d51d162584116b5aa34f9b54b22c30d1b4275c8af4559c26c70118d20a76737",
+  "trainer": "original-open-instruct"
+}

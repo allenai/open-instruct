@@ -68,6 +68,18 @@ settings; their lifecycle and context enforcement remain externally owned.
 Independent vLLM allocations, credentialed external judges and custom rubric files
 from the broader olmo-miles surface have not been ported yet; unsupported keys fail.
 
+For long policy responses, budget the complete grading request in **judge**
+tokens: question, candidate answer, optional reference, rubric, chat framing and
+the judge's output. A 32K policy response can exceed 40K judge tokens because the
+tokenizers differ. Managed Qwen/Qwen3-32B can explicitly request
+`context_extension="qwen3-yarn-128k"` with `max_context_length=131072`. This uses
+Qwen's documented factor-4 YaRN configuration (original context 32768), passed as
+a serving override without rewriting prepared weights. The native default stays
+unchanged; unsupported models, double scaling and limits above 131072 fail.
+This changes judge computation, so compare runs using the same judge setting and
+qualify long grading requests before using it for a benchmark. See the
+[qualification record](measurements/learning-confidence-20260914/README.md).
+
 The judge client was ported from olmo-miles `afbdd6f`. It uses the same rubric
 text/digests and answer extraction, keeps `metadata.judge_query` and reference
 labels, tokenizes the full grading request plus its output reservation, and
