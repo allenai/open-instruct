@@ -57,6 +57,7 @@ def execute(parser, options):
     workflow = importlib.import_module("open_instruct.miles.workflow")
     if options.command == "validate":
         if structured:
+            config.plan()  # Validate physical allocation as well as trainer options.
             compiled = config.compile()
             compiled.arguments()
             planned = compiled.plan()

@@ -196,6 +196,20 @@ def patch_trainer(text, *, keep_zero_advantage_groups=False):
                 "                model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)\n"
             ),
         },
+        "retain_partial_evaluation": {
+            "before": "        # Accumulate evaluation results from all vLLM engines\n",
+            "after": (
+                "        # The evaluator is the only consumer. Wait for a whole round before\n"
+                "        # removing results; a short poll must not discard a partial round.\n"
+                "        eval_deadline = time.monotonic() + timeout\n"
+                "        while evaluation_inference_results_Q.qsize() < num_eval_prompts:\n"
+                "            remaining = eval_deadline - time.monotonic()\n"
+                "            if remaining <= 0:\n"
+                "                raise Empty\n"
+                "            time.sleep(min(0.01, remaining))\n"
+                "        # Accumulate evaluation results from all vLLM engines\n"
+            ),
+        },
         "initial_evaluation": {
             "before": "            training_step % args.local_eval_every == 0\n",
             "after": "            (training_step % args.local_eval_every == 0 or (training_step == 1 and args.eval_on_step_0))\n",

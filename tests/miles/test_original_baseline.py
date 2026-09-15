@@ -3,9 +3,13 @@
 Run in its original image, with /stage before this checkout on PYTHONPATH.
 """
 
+import __future__
+
 import ast
 import json
 import os
+import queue
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -245,3 +249,47 @@ def test_comparison_retention_switch_is_explicit_in_submitted_command():
     assert "--keep-zero-advantage-groups" in spec["tasks"][0]["arguments"][0]
     spec = launch_original_baseline.specification("image", "source", "train", "test")
     assert "--keep-zero-advantage-groups" not in spec["tasks"][0]["arguments"][0]
+
+
+def test_partial_evaluation_timeout_does_not_remove_results_or_prompts():
+    source = Path("/stage/open_instruct/grpo_fast.py").read_text()
+    patched, _ = original_baseline.patch_trainer(source)
+    tree = ast.parse(patched)
+    function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "maybe_evaluate")
+    result_queue = queue.Queue()
+    result_queue.put(SimpleNamespace(dataset_index=7))
+    pending = {7: "first prompt", 8: "second prompt"}
+
+    def consume(*args, **kwargs):
+        pytest.fail("An incomplete evaluation round was consumed")
+
+    namespace = {
+        "time": time,
+        "Empty": queue.Empty,
+        "logger": SimpleNamespace(warning=lambda message: None),
+        "accumulate_inference_batches": consume,
+    }
+    exec(
+        compile(
+            ast.Module(body=[function], type_ignores=[]),
+            "historical_eval",
+            "exec",
+            __future__.annotations.compiler_flag,
+        ),
+        namespace,
+    )
+    namespace["maybe_evaluate"](
+        SimpleNamespace(num_training_steps=200, local_eval_every=50),
+        5,
+        result_queue,
+        None,
+        None,
+        0,
+        pending,
+        None,
+        None,
+        2,
+        None,
+    )
+    assert result_queue.qsize() == 1
+    assert pending == {7: "first prompt", 8: "second prompt"}
