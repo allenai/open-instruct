@@ -101,6 +101,34 @@ of both arms before comparing. Open follow-ups: evaluate the r3 update-150
 checkpoint, and evaluate the original's final export with the same frozen
 prompts and 32K cap used for its update-100 export.
 
+### MoE broad basket: first post-training evaluation at update 50 — September 15, 23:49 UTC
+
+The c16 continuation committed checkpoint 50 at 23:22 UTC and evaluated all
+four domains (128 held-out prompts each, greedy, one response) in 27 minutes.
+Update-zero values are the retained initial evaluation of the same model and
+prompts ([broad-initial-32k.json](broad-initial-32k.json)).
+
+| Domain | Update 0 reward | Update 50 reward | Capped at 32K, update 0 → 50 | Mean response tokens, update 0 → 50 |
+| --- | ---: | ---: | ---: | ---: |
+| Math | 0.039 (5/128) | 0.047 (6/128) | 82% → 80% | 28,960 → 28,754 |
+| Instruction following | 0.255 | 0.241 | 66% → 68% | 22,495 → 23,198 |
+| Code | 0.078 (10/128) | 0.109 (14/128) | 70% → 72% | 23,303 → 24,011 |
+| General judged | 0.623 | 0.658 | 34% → 34% | 12,278 → 11,962 |
+
+Fifty updates at learning rate 1e-6 moved nothing beyond noise on 128-prompt
+sets, and the length distribution is the dominant fact: 70–80 percent of math,
+code and instruction-following responses still hit the 32K cap, so most prompt
+groups carry zero or near-zero reward and little advantage signal. This is the
+same behavior the 4K-cap attempts showed, now with eight times the budget.
+Compare update 100 before drawing conclusions; the informative signal to watch
+is whether the capped fraction and mean length start falling.
+
+Trainer warmup after the 21:26 UTC restart lasted five updates: scoring plus
+train time fell 1842 → 1079 → 735 → 648 → 451 s before the evaluation. The
+warm figure from the previous allocation was 44 s. The background compiler-cache
+publication ran after checkpoint 50; the next restart will show whether the
+restored cache removes this warmup.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
