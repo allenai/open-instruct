@@ -980,7 +980,7 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
-DATASET_CACHE_VERSION = "v8"
+DATASET_CACHE_VERSION = "v9"
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
@@ -1371,12 +1371,14 @@ def _labels_from_char_spans(
     input_ids: torch.Tensor, offsets: np.ndarray, spans: list[tuple[int, int]]
 ) -> torch.Tensor:
     """Train overlapping tokens, including boundary merges, but never zero-width offsets or spans."""
+    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+    if len(offsets) == 0:
+        return labels
     mask = np.zeros(len(offsets), dtype=bool)
     for start, end in spans:
         if start < end:
             mask |= (offsets[:, 1] > start) & (offsets[:, 0] < end)
     mask &= offsets[:, 0] < offsets[:, 1]
-    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
     labels[0, mask] = input_ids[0, mask]
     return labels
 
@@ -1434,7 +1436,7 @@ def _verify_generation_terminators(
     Check the full render, before truncation: a cut-off response is handled separately by
     over_length_strategy. Blocks may split reasoning, answers and terminators, and templates
     without a closing token are allowed. An arbitrary special token is not necessarily a
-    terminator, so only EOS and the ChatML end-of-turn marker are checked here.
+    terminator, so other special tokens produce a warning instead of rejecting the row.
     """
     terminators = {token for token in (tokenizer.eos_token, "<|im_end|>") if token}
     for start, end in ranges:
@@ -1443,7 +1445,7 @@ def _verify_generation_terminators(
         terminator_start = end
         while terminator_start < len(rendered) and rendered[terminator_start].isspace():
             terminator_start += 1
-        for terminator in terminators:
+        for terminator in terminators | set(tokenizer.all_special_tokens):
             if rendered.startswith(terminator, terminator_start):
                 terminator_end = terminator_start + len(terminator)
                 # A terminator may itself occupy a separate generation block.
@@ -1452,9 +1454,15 @@ def _verify_generation_terminators(
                     if block_start <= covered_until < block_end:
                         covered_until = block_end
                 if covered_until < terminator_end:
-                    raise AssistantSpanDerivationError(
-                        f"Assistant terminator {terminator!r} is outside the generation blocks. "
-                        "Include the closing token inside {% generation %} so the model learns to stop or hand off."
+                    if terminator in terminators:
+                        raise AssistantSpanDerivationError(
+                            f"Assistant terminator {terminator!r} is outside the generation blocks. "
+                            "Include the closing token inside {% generation %} so the model learns to stop or hand off."
+                        )
+                    logger.warning(
+                        f"Special token {terminator!r} immediately follows a generation block but is not covered "
+                        "by one. If it terminates the assistant turn, include it inside {% generation %}; "
+                        "if it starts the next turn, leaving it masked is correct."
                     )
 
 
@@ -1477,6 +1485,8 @@ def _tokenize_tulu_sft_with_assistant_labels(
     # Render generation ranges directly instead of using Transformers' flattened
     # assistant mask. The flattened mask loses block boundaries and, with left
     # truncation, stops after the first range whose start was truncated away.
+    # render_jinja_template is a Transformers-internal API; the rendering-contract
+    # tests guard its generation-range behavior when upgrading Transformers.
     template = tokenizer.get_chat_template(tools=tools)
     has_generation_blocks = isinstance(template, str) and re.search(r"\{\%[-+]?\s*generation\s*[-+]?\%\}", template)
     if has_generation_blocks:
@@ -1611,14 +1621,18 @@ def _was_truncated(
     """Whether `max_seq_length` truncation dropped part of `rendered`.
 
     Sitting at the cap is not sufficient (a render can be exactly that long) and the final token
-    not being EOS is neither necessary nor sufficient, so check whether any token reaches the end
-    of the rendered string.
+    not being EOS is neither necessary nor sufficient, so check both ends of the render.
+    Ignore zero-width offsets, which do not represent retained text.
     """
     if max_seq_length is None or n_tokens < max_seq_length:
         return False
     if len(offsets) == 0:
         return False
-    return bool(np.asarray(offsets)[:, 1].max() < len(rendered))
+    offsets = np.asarray(offsets)
+    nonempty = offsets[offsets[:, 0] < offsets[:, 1]]
+    if len(nonempty) == 0:
+        return False
+    return bool(nonempty[:, 0].min() > 0 or nonempty[:, 1].max() < len(rendered))
 
 
 def _apply_over_length_strategy(
@@ -1633,6 +1647,7 @@ def _apply_over_length_strategy(
     Right-sided truncation drops the trailing EOS, so a cut inside an assistant turn leaves
     trainable text with no terminator. `keep` leaves the row as is, `terminate` replaces its
     final token with a trainable EOS, `drop` masks it out so `sft_tulu_filter_v1` removes it.
+    Left-sided truncation also triggers `drop`, but `terminate` preserves the intact tail.
     """
     if over_length_strategy not in OVER_LENGTH_STRATEGIES:
         raise ValueError(f"over_length_strategy must be one of {OVER_LENGTH_STRATEGIES}, got {over_length_strategy!r}")
@@ -1640,6 +1655,8 @@ def _apply_over_length_strategy(
         return input_ids, labels
     if over_length_strategy == "drop":
         return input_ids, torch.full_like(labels, MASKED_TOKEN_VALUE)
+    if tokenizer.truncation_side == "left":
+        return input_ids, labels
     eos_token_id = tokenizer.eos_token_id
     if eos_token_id is None:
         raise ValueError(

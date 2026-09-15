@@ -1220,6 +1220,45 @@ class TestGenerationBlockContracts(unittest.TestCase):
         )
         return self.tokenizer.decode(ids[labels != -100].tolist())
 
+    def test_empty_render_does_not_abort_dataset_map(self):
+        self.tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["assistant_message_only"]
+        dataset = open_instruct.dataset_transformation.Dataset.from_list(
+            [
+                {"messages": [{"role": "user", "content": "No assistant response"}]},
+                {"messages": [{"role": "assistant", "content": "ANSWER"}]},
+            ]
+        )
+        mapped = dataset.map(
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1,
+            fn_kwargs={"tokenizer": self.tokenizer, "max_seq_length": 4096},
+        )
+        self.assertEqual(mapped[0][open_instruct.dataset_transformation.LABELS_KEY], [])
+        filtered = mapped.filter(
+            open_instruct.dataset_transformation.sft_tulu_filter_v1, fn_kwargs={"tokenizer": self.tokenizer}
+        )
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["messages"][0]["content"], "ANSWER")
+
+    def test_empty_offsets_with_nonempty_spans_are_safe(self):
+        labels = open_instruct.dataset_transformation._labels_from_char_spans(
+            torch.empty((1, 0), dtype=torch.long), torch.tensor([]).numpy(), [(0, 3)]
+        )
+        self.assertEqual(labels.shape, (1, 0))
+
+    def test_unknown_special_token_outside_block_warns_without_rejecting(self):
+        self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|custom_end|>"]})
+        with mock.patch.object(open_instruct.dataset_transformation.logger, "warning") as warning:
+            open_instruct.dataset_transformation._verify_generation_terminators(
+                "ANSWER<|custom_end|>", [(0, 6)], self.tokenizer
+            )
+        warning.assert_called_once()
+        self.assertIn("<|custom_end|>", warning.call_args.args[0])
+        with mock.patch.object(open_instruct.dataset_transformation.logger, "warning") as warning:
+            open_instruct.dataset_transformation._verify_generation_terminators(
+                "ANSWER<|custom_end|>", [(0, 6), (6, 20)], self.tokenizer
+            )
+        warning.assert_not_called()
+
     @parameterized.expand(SFT_CHAT_TEMPLATE_NAMES)
     def test_bos_preserves_last_assistant_labels(self, template_name):
         template = open_instruct.dataset_transformation.CHAT_TEMPLATES[template_name]
@@ -1434,6 +1473,38 @@ class TestOverLengthStrategy(unittest.TestCase):
         rendered = "abcdefg and a great deal more text"
         self.assertTrue(
             open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    @parameterized.expand([("keep",), ("drop",), ("terminate",)])
+    def test_left_truncation_strategy_preserves_tool_handoff_unless_dropped(self, strategy):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.truncation_side = "left"
+        tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_end|>"]})
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}<|im_end|>{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "filler " * 200}, {"role": "assistant", "content": "TOOLCALL"}]
+        _, _, _, truncated = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+            messages, tokenizer, None, 32
+        )
+        self.assertTrue(truncated)
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": messages}, tokenizer, max_seq_length=32, over_length_strategy=strategy
+        )
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        if strategy == "drop":
+            self.assertTrue(all(label == -100 for label in labels))
+            self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer))
+        else:
+            self.assertEqual(labels[-1], tokenizer.convert_tokens_to_ids("<|im_end|>"))
+
+    def test_left_truncation_ignores_zero_width_offsets(self):
+        self.assertTrue(
+            open_instruct.dataset_transformation._was_truncated(
+                [(0, 0), (4, 7)], "abcdefg", n_tokens=2, max_seq_length=2
+            )
         )
 
     def test_terminate_leaves_a_cut_in_a_masked_span_alone(self):
