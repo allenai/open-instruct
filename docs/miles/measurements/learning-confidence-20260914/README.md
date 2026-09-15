@@ -64,6 +64,22 @@ protection is unchanged at a four-hour minimum runtime on urgent priority; the
 workspace remains several hundred percent over its allocation target inside
 `ai2/oe-scaling`, which is why every job is preempted at exactly four hours.
 
+### First measurements after relaunch — September 15, 22:20 UTC
+
+| Arm | Updates observed | Cadence | Engine decode at ≥12 running | Notes |
+| --- | --- | --- | --- | --- |
+| Dense GSM8K r4 | 151 → 185 in 46 min | **1.4 min/update** (r3: 7.0) | 1,214 tokens/s per engine | KV usage ≤ 0.10; first warm-cache publication succeeded |
+| Dense broad g16 | 6 → 8 | **14 min/update** (predecessor: 47) | 699 tokens/s per engine | KV usage mean 0.35, max 0.87; five code-service failures now cost 126 s each instead of 517–530 s |
+| MoE broad c16 | restored checkpoint 45 at 21:48 UTC | first update pending (cold compile; previous restart took 37 min from restore) | 1,775 tokens/s per engine at 16 running | KV usage mean 0.22, max 0.38; one benign health-check abort during the first publication |
+
+The dense GSM8K control gained the most because its updates were dominated by
+single-stream straggler decode. Dense g16 remains generation-bound at about
+2.6 million response tokens per update; at 16 running requests its per-engine
+rate falls as contexts lengthen, and the 32K-response KV pool now approaches
+occupancy during the longest tails. Both dense runs restored the predecessor
+checkpoints and prompt ledgers, and both published a warm Triton cache after
+their first committed checkpoint through the new background publication.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
