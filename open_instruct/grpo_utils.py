@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from queue import Empty
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -149,6 +149,14 @@ class GRPOExperimentConfig(
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
     """Whether to use DAPO or CISPO loss function."""
+    use_liger_grpo_loss: bool = False
+    """Whether to use the tiled lm-head GRPO loss path, which avoids materializing the full
+    vocabulary logits by recomputing the lm-head projection and loss tile-by-tile (DeepSpeed
+    ``TiledFusedLogitsLoss`` pattern). High value for large-vocab / long-context memory.
+    Supports ``loss_fn=dapo`` and ``loss_fn=cispo``."""
+    liger_grpo_loss_chunk_size: int = 8
+    """Number of tiles (shards) to split the flattened tokens into when computing the tiled
+    lm-head GRPO loss. Larger values reduce peak memory at the cost of more lm-head recomputes."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -248,6 +256,13 @@ class GRPOExperimentConfig(
                 "Cannot use both `use_vllm_logprobs` and `use_rho_correction`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making the ρ correction pointless."
             )
+        if self.use_liger_grpo_loss:
+            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.cispo):
+                raise ValueError("`use_liger_grpo_loss` currently only supports `loss_fn=dapo` or `loss_fn=cispo`.")
+            if self.record_entropy:
+                raise ValueError("`use_liger_grpo_loss` does not support `record_entropy=True`.")
+            if self.liger_grpo_loss_chunk_size < 1:
+                raise ValueError(f"`liger_grpo_loss_chunk_size` must be >= 1 (got {self.liger_grpo_loss_chunk_size}).")
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
@@ -536,6 +551,319 @@ def compute_grpo_loss(
         kl = torch.zeros_like(pg_loss)
 
     return pg_loss, clipfrac, kl
+
+
+class TiledGRPOLMHeadLoss(torch.autograd.Function):
+    """Tiled DAPO/CISPO lm-head loss that avoids materializing full-vocabulary logits.
+
+    This follows DeepSpeed's ``TiledFusedLogitsLoss`` pattern: the lm-head
+    projection and scalar loss are recomputed per tile in ``forward`` and
+    ``torch.autograd.backward`` is called per tile to accumulate lm-head grads.
+    The custom ``backward`` then returns the precomputed hidden-state gradient
+    so the outer DeepSpeed backward only traverses the backbone.
+
+    The scalar loss it returns matches ``masked_mean(pg + beta * kl, mask, None,
+    loss_denominator) * loss_scale`` from the non-tiled path, so a run can switch
+    the flag on/off without changing the objective.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        lm_head: torch.nn.Module,
+        hidden_states: torch.Tensor,
+        selected_token_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        advantages: torch.Tensor,
+        old_logprobs: torch.Tensor,
+        ref_logprobs: torch.Tensor,
+        has_ref_logprobs: bool,
+        temperature: float,
+        beta: float,
+        kl_estimator: int,
+        clip_lower: float,
+        clip_higher: float,
+        loss_fn: str,
+        shards: int,
+        loss_scale: torch.Tensor,
+        loss_denom: torch.Tensor,
+        rho_weights: torch.Tensor,
+        has_rho_weights: bool,
+        compute_params: list[torch.nn.Parameter],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if hidden_states.dim() != 3:
+            raise ValueError(f"hidden_states must be [B, T, H], got {tuple(hidden_states.shape)}")
+        if selected_token_ids.shape != hidden_states.shape[:2]:
+            raise ValueError("selected_token_ids must match hidden_states batch/sequence dimensions")
+        if response_mask.shape != hidden_states.shape[:2]:
+            raise ValueError("response_mask must match hidden_states batch/sequence dimensions")
+        if shards < 1:
+            raise ValueError(f"shards must be >= 1, got {shards}")
+        loss_type = GRPOLossType(loss_fn)
+        if loss_type not in (GRPOLossType.dapo, GRPOLossType.cispo):
+            raise ValueError(f"`tiled_grpo_lm_head_loss` does not support loss_fn={loss_type}.")
+
+        x_requires_grad = hidden_states.requires_grad
+        batch_size, seq_len, hidden_size = hidden_states.shape
+        x = hidden_states.detach().reshape(-1, hidden_size)
+        x.requires_grad_(x_requires_grad)
+
+        labels = selected_token_ids.reshape(-1)
+        mask_2d = response_mask.to(dtype=torch.bool)
+        mask = mask_2d.reshape(-1)
+        advantages = advantages.reshape(-1)
+        old_logprobs = old_logprobs.reshape(-1)
+        if has_ref_logprobs:
+            ref_logprobs = ref_logprobs.reshape(-1)
+        if has_rho_weights:
+            rho_weights = rho_weights.reshape(-1)
+
+        num_tokens = x.shape[0]
+        shards = min(shards, num_tokens)
+        loss_denom = loss_denom.to(dtype=torch.float32).clamp_min(1.0)
+        incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / loss_denom).reshape(())
+
+        x_grad = torch.zeros_like(x) if x_requires_grad else None
+        x_shards = list(torch.chunk(x, chunks=shards, dim=0))
+        label_shards = list(torch.chunk(labels, chunks=shards, dim=0))
+        mask_shards = list(torch.chunk(mask, chunks=shards, dim=0))
+        advantage_shards = list(torch.chunk(advantages, chunks=shards, dim=0))
+        old_logprob_shards = list(torch.chunk(old_logprobs, chunks=shards, dim=0))
+        ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
+        rho_weight_shards = list(torch.chunk(rho_weights, chunks=shards, dim=0)) if has_rho_weights else []
+
+        total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
+        total_pg_sum = torch.zeros_like(total_loss_sum)
+        total_kl_sum = torch.zeros(4, dtype=torch.float32, device=hidden_states.device)
+        total_clip_sum = torch.zeros_like(total_loss_sum)
+        total_ratio_sum = torch.zeros_like(total_loss_sum)
+        metric_denom = mask_2d.to(dtype=torch.float32).sum().clamp_min(1.0)
+        compute_params = [p for p in compute_params if p.requires_grad]
+
+        for shard_idx, x_shard in enumerate(x_shards):
+            if compute_params:
+                # ZeRO-3 reduces a param's grad once ds_grad_is_ready flips True; only let the
+                # last shard trigger the reduction so all tiles accumulate into the same buffer.
+                grad_is_ready = shard_idx + 1 == len(x_shards)
+                for param in compute_params:
+                    # ds_grad_is_ready is injected by DeepSpeed ZeRO-3 at runtime.
+                    param.ds_grad_is_ready = grad_is_ready  # type: ignore[unresolved-attribute]
+
+            shard_step = x_shard.shape[0]
+            shard_offset = shard_idx * x_shards[0].shape[0]
+            x_shard.requires_grad_(x_requires_grad)
+            if x_grad is not None:
+                x_shard.grad = x_grad.narrow(0, shard_offset, shard_step).view_as(x_shard)
+
+            with torch.enable_grad():
+                logits = lm_head(x_shard)
+                if temperature != 1.0:
+                    logits = logits / temperature
+                shard_labels = label_shards[shard_idx]
+                new_logprobs = torch.gather(logits, dim=-1, index=shard_labels.unsqueeze(-1)).squeeze(-1)
+                new_logprobs = new_logprobs - torch.logsumexp(logits, dim=-1)
+
+                ratio = torch.exp(new_logprobs - old_logprob_shards[shard_idx])
+                if loss_type == GRPOLossType.dapo:
+                    pg_losses = -advantage_shards[shard_idx] * ratio
+                    pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
+                    pg_loss = torch.max(pg_losses, pg_losses2)
+                    shard_clip = (pg_losses2 > pg_losses).detach().float()
+                else:  # cispo
+                    clipped_ratio = torch.clamp(ratio.detach(), max=1.0 + clip_higher)
+                    pg_loss = -advantage_shards[shard_idx] * clipped_ratio * new_logprobs
+                    shard_clip = (ratio > 1.0 + clip_higher).detach().float()
+
+                if has_rho_weights:
+                    # Truncated-importance-sampling correction ρ = π^train_old / π^infer_old.
+                    # Scales the policy loss per token and zeros clipfrac for dropped tokens
+                    # (matching the non-tiled compute_grpo_loss path). KL is left unscaled.
+                    rho_shard = rho_weight_shards[shard_idx].to(dtype=pg_loss.dtype)
+                    pg_loss = pg_loss * rho_shard
+                    shard_clip = shard_clip * (rho_shard != 0).float()
+
+                if has_ref_logprobs:
+                    ref_diff = (new_logprobs - ref_logprob_shards[shard_idx]).clamp(-40.0, 40.0)
+                    kl_all = model_utils.estimate_kl(ref_diff, ratio)
+                    kl = kl_all[kl_estimator]
+                else:
+                    kl = torch.zeros_like(pg_loss)
+
+                shard_mask = mask_shards[shard_idx].to(dtype=pg_loss.dtype)
+                per_token_loss = pg_loss + beta * kl
+                loss_sum = (per_token_loss * shard_mask).sum()
+
+            total_loss_sum = total_loss_sum + loss_sum.detach().float()
+            total_pg_sum = total_pg_sum + (pg_loss.detach().float() * shard_mask.float()).sum()
+            if has_ref_logprobs:
+                total_kl_sum = total_kl_sum + (kl_all.detach().float() * shard_mask.float()).sum(dim=-1)
+            total_clip_sum = total_clip_sum + (shard_clip * shard_mask.float()).sum()
+            total_ratio_sum = total_ratio_sum + (ratio.detach().float() * shard_mask.float()).sum()
+            torch.autograd.backward(loss_sum, incoming_grad.to(dtype=loss_sum.dtype))
+
+        if compute_params:
+            for param in compute_params:
+                param.ds_grad_is_ready = True  # type: ignore[unresolved-attribute]
+
+        if x_grad is None:
+            x_grad = torch.zeros_like(x)
+        ctx.save_for_backward(x_grad.reshape(batch_size, seq_len, hidden_size).detach())
+
+        loss = total_loss_sum / loss_denom * loss_scale.detach().to(dtype=total_loss_sum.dtype)
+        pg_avg = total_pg_sum / metric_denom
+        kl_avg = total_kl_sum / metric_denom
+        clipfrac = total_clip_sum / metric_denom
+        ratio_avg = total_ratio_sum / metric_denom
+        return loss, pg_avg, kl_avg, clipfrac, ratio_avg
+
+    @staticmethod
+    def backward(ctx, *grads) -> tuple:
+        (x_grad,) = ctx.saved_tensors
+        grad = grads[0]
+        if isinstance(grad, torch.Tensor):
+            x_grad = x_grad * grad.to(dtype=x_grad.dtype)
+        return (None, x_grad, *([None] * 18))
+
+
+def tiled_grpo_lm_head_loss(
+    lm_head: torch.nn.Module,
+    hidden_states: torch.Tensor,
+    selected_token_ids: torch.Tensor,
+    response_mask: torch.Tensor,
+    advantages: torch.Tensor,
+    old_logprobs: torch.Tensor,
+    ref_logprobs: torch.Tensor | None,
+    temperature: float,
+    beta: float,
+    clip_lower: float,
+    clip_higher: float,
+    shards: int,
+    loss_scale: torch.Tensor,
+    loss_denom: torch.Tensor,
+    loss_fn: str | GRPOLossType = GRPOLossType.dapo,
+    rho_weights: torch.Tensor | None = None,
+    kl_estimator: int = 2,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Memory-efficient tiled GRPO lm-head loss. Returns ``(loss, pg_avg, kl_avg, clipfrac, ratio_avg)``.
+
+    ``rho_weights`` is the optional per-token truncated-importance-sampling correction
+    (ρ = π^train_old / π^infer_old); when ``None`` the correction is disabled.
+    """
+    has_ref_logprobs = ref_logprobs is not None
+    if ref_logprobs is None:
+        ref_logprobs = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
+    has_rho_weights = rho_weights is not None
+    if rho_weights is None:
+        rho_weights = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
+    compute_params = list(lm_head.parameters())
+    return TiledGRPOLMHeadLoss.apply(
+        lm_head,
+        hidden_states,
+        selected_token_ids,
+        response_mask,
+        advantages,
+        old_logprobs,
+        ref_logprobs,
+        has_ref_logprobs,
+        temperature,
+        beta,
+        kl_estimator,
+        clip_lower,
+        clip_higher,
+        loss_fn,
+        shards,
+        loss_scale,
+        loss_denom,
+        rho_weights,
+        has_rho_weights,
+        compute_params,
+    )
+
+
+def _unwrap_causal_lm(model: torch.nn.Module) -> torch.nn.Module:
+    """Unwrap a (possibly DeepSpeed- or PEFT-wrapped) model down to the HF causal-LM module.
+
+    Strips DeepSpeed/DDP ``.module`` wrappers and PEFT ``PeftModel`` wrappers (via
+    ``get_base_model``). Without the PEFT unwrap, the backbone lookup would treat the
+    full causal LM (lm_head included) as the backbone and materialize logits.
+    """
+    inner = model
+    seen: set[int] = set()
+    while id(inner) not in seen:
+        seen.add(id(inner))
+        get_base_model = getattr(inner, "get_base_model", None)
+        if hasattr(inner, "module"):
+            inner = inner.module
+        elif callable(get_base_model):
+            inner = get_base_model()
+        else:
+            break
+    return cast(torch.nn.Module, inner)
+
+
+def get_causal_lm_backbone_and_lm_head(model: torch.nn.Module) -> tuple[torch.nn.Module, torch.nn.Module]:
+    causal_lm = _unwrap_causal_lm(model)
+    base_model_prefix = getattr(causal_lm, "base_model_prefix", None)
+    if isinstance(base_model_prefix, str) and hasattr(causal_lm, base_model_prefix):
+        backbone = getattr(causal_lm, base_model_prefix)
+    elif hasattr(causal_lm, "model"):
+        backbone = causal_lm.model
+    elif hasattr(causal_lm, "base_model"):
+        backbone = causal_lm.base_model
+    else:
+        raise AttributeError(f"Could not find causal LM backbone for {type(causal_lm).__name__}.")
+    lm_head = getattr(causal_lm, "lm_head", None)
+    if lm_head is None:
+        raise AttributeError(f"Could not find lm_head for {type(causal_lm).__name__}.")
+    return cast(torch.nn.Module, backbone), cast(torch.nn.Module, lm_head)
+
+
+def forward_for_liger_hidden_states(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    position_ids: torch.Tensor,
+) -> torch.Tensor:
+    """Run only the causal-LM backbone (no lm-head) and return the shifted hidden states.
+
+    ``attention_mask=None`` lets HF build the correct 3D intra-document mask from
+    ``position_ids`` for packed sequences, matching ``forward_for_logprobs``.
+    """
+    backbone, _ = get_causal_lm_backbone_and_lm_head(model)
+    output = backbone(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids)
+    hidden_states = output.last_hidden_state if hasattr(output, "last_hidden_state") else output[0]
+    return hidden_states[:, :-1]
+
+
+def tiled_token_logprobs(
+    lm_head: torch.nn.Module,
+    hidden_states: torch.Tensor,
+    selected_token_ids: torch.Tensor,
+    temperature: float,
+    shards: int,
+) -> torch.Tensor:
+    """Per-token logprobs from hidden states, computed tile-by-tile to avoid full-vocab logits.
+
+    Mirrors the lm-head logprob computation in :class:`TiledGRPOLMHeadLoss` but without
+    autograd, so the tiled-loss path can compute old/behavior logprobs without the
+    ``[B, T, vocab]`` materialization that a full ``forward_for_logprobs`` would incur.
+    Callers should wrap this in ``torch.no_grad()``.
+    """
+    batch_size, seq_len, hidden_size = hidden_states.shape
+    x = hidden_states.reshape(-1, hidden_size)
+    labels = selected_token_ids.reshape(-1)
+    num_tokens = x.shape[0]
+    shards = max(1, min(shards, num_tokens))
+    logprobs = torch.empty(num_tokens, dtype=torch.float32, device=x.device)
+    for x_shard, label_shard, logprob_shard in zip(
+        torch.chunk(x, shards), torch.chunk(labels, shards), torch.chunk(logprobs, shards)
+    ):
+        logits = lm_head(x_shard)
+        if temperature != 1.0:
+            logits = logits / temperature
+        selected = torch.gather(logits, dim=-1, index=label_shard.unsqueeze(-1)).squeeze(-1)
+        logprob_shard.copy_(selected - torch.logsumexp(logits, dim=-1))
+    return logprobs.reshape(batch_size, seq_len)
 
 
 def forward_for_logprobs(
