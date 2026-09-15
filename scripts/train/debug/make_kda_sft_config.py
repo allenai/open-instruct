@@ -11,6 +11,15 @@ in a Linear forward -- OOM in disguise).
 olmo-core's block has three checkpointing flags for precisely this; enabling them
 trades compute for activation memory without touching the model's math.
 
+The Olmo 3.5 hero checkpoints (production-hero-small-lc, 2026-09) add one more
+change: their KDA layers were pretrained with ``use_cute_kernel: true``, and the
+cute kernel has no packed/variable-length path. Jacob's own SFT on these
+checkpoints (OLMo-core ``src/examples/olmo_ddp/olmoe3_hero_sft.py``) turns it
+off and lets KDA fall back to the flash-linear-attention kernels, which is what
+the proxy SFT always ran. Do the same here. Their full-attention layers use the
+``flash_4`` backend, which supports intra-document masking (OLMo-core 3847ce127
+passes the varlen boundaries by keyword), so it is left alone.
+
     uv run python scripts/train/debug/make_kda_sft_config.py \
         <checkpoint>/config.json scripts/train/debug/kda_mt_sft.json
 """
@@ -39,6 +48,25 @@ def retarget_attention_backend(section: dict, label: str) -> list[str]:
     return []
 
 
+def disable_cute_kda_kernel(section: dict, label: str) -> list[str]:
+    """Turn off the cute KDA kernel: it has no packed path, so SFT uses the fla kernels."""
+    mixer = section.get("sequence_mixer") or {}
+    if mixer.get("use_cute_kernel"):
+        mixer["use_cute_kernel"] = False
+        return [f"{label}: use_cute_kernel true -> false (fla kernels for packed SFT)"]
+    return []
+
+
+def assert_emo_off(section: dict, label: str) -> None:
+    """The SFT path has no EMO handling; refuse a router that still carries it."""
+    router = section.get("routed_experts_router") or {}
+    if router.get("emo") is not None:
+        raise SystemExit(
+            f"{label}: routed_experts_router.emo is set; this generator only handles the "
+            "non-EMO lineage. Jacob's SFT nulls the field -- decide that explicitly."
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=pathlib.Path)
@@ -62,9 +90,12 @@ def main() -> int:
     if not args.keep_ep and block.pop("ep", None) is not None:
         print("dropped block.ep (no expert-parallel meshes in open-instruct)")
 
-    changes = retarget_attention_backend(block, "block")
+    changes = retarget_attention_backend(block, "block") + disable_cute_kda_kernel(block, "block")
+    assert_emo_off(block, "block")
     for name, override in (payload["model"].get("block_overrides") or {}).items():
-        changes += retarget_attention_backend(override, f"block_overrides.{name}")
+        label = f"block_overrides.{name}"
+        changes += retarget_attention_backend(override, label) + disable_cute_kda_kernel(override, label)
+        assert_emo_off(override, label)
         if not args.keep_ep:
             override.pop("ep", None)
     for change in changes:
