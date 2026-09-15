@@ -5,6 +5,8 @@ Run in its original image, with /stage before this checkout on PYTHONPATH.
 
 import ast
 import json
+import os
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +14,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 from scripts.miles import launch_original_baseline, original_baseline
+from transformers import GenerationConfig
 
 
 class Tokenizer:
@@ -164,3 +167,56 @@ def test_completion_does_not_confuse_driver_iterations_with_optimizer_updates():
 def test_invalid_optimizer_ledger_cannot_pass_the_completion_gate(steps):
     with pytest.raises(ValueError, match="Optimizer update ledger"):
         original_baseline.completion_record(5, [{"driver_step": step} for step in steps], ["model"], {})
+
+
+def test_export_normalizes_the_unwrapped_models_generation_metadata(tmp_path):
+    source, _ = original_baseline.patch_trainer(Path("/stage/open_instruct/grpo_fast.py").read_text())
+    method = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef) and n.name == "save_model")
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(2))
+            self.config = SimpleNamespace(tie_word_embeddings=False)
+            self.generation_config = GenerationConfig(do_sample=False, temperature=0.6, top_p=0.95)
+
+        def save_pretrained(self, output_dir, state_dict):
+            self.generation_config.save_pretrained(output_dir)
+            torch.save(state_dict, Path(output_dir) / "weights.pt")
+
+    model = Model()
+    actor = SimpleNamespace(
+        model=SimpleNamespace(module=model),
+        rank=0,
+        stage=3,
+        tokenizer=SimpleNamespace(save_pretrained=lambda output: None),
+    )
+    namespace = {
+        "PreTrainedTokenizer": object,
+        "os": os,
+        "torch": torch,
+        "get_olmo3_generation_config": lambda tokenizer: GenerationConfig(),
+        "_z3_params_to_fetch": lambda params: [],
+        "deepspeed": SimpleNamespace(zero=SimpleNamespace(GatheredParameters=lambda *args, **kwargs: nullcontext())),
+        "PeftModel": type("UnusedPeftModel", (), {}),
+    }
+    exec(compile(ast.Module(body=[method], type_ignores=[]), "historical_save_model", "exec"), namespace)
+    namespace["save_model"](actor, str(tmp_path), "olmo", object())
+    assert GenerationConfig.from_pretrained(tmp_path).do_sample
+    assert torch.equal(torch.load(tmp_path / "weights.pt", weights_only=True)["weight"], model.weight)
+
+
+def test_optimizer_ledger_path_survives_historical_output_directory_rewriting(tmp_path, monkeypatch):
+    source, changes = original_baseline.patch_trainer(Path("/stage/open_instruct/grpo_fast.py").read_text())
+    ledger = tmp_path / "optimizer-updates.jsonl"
+    monkeypatch.setenv("OI_ORIGINAL_BASELINE_UPDATE_LEDGER", str(ledger))
+    block = ast.parse("def record():\n" + changes["update_accounting"]["after"].split("        if (")[0])
+    namespace = {
+        "os": os,
+        "json": json,
+        "training_step": 2,
+        "args": SimpleNamespace(output_dir=str(tmp_path / "model" / "rewritten-name")),
+    }
+    exec(compile(block, "update_ledger", "exec"), namespace)
+    namespace["record"]()
+    assert original_baseline.read_jsonl(ledger) == [{"driver_step": 2}]

@@ -6,6 +6,32 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
+## Progress — September 15, 00:28 UTC
+
+All three MILES runs remain active: MoE basket 14 completed optimizer updates,
+dense basket 2, dense GSM8K 29. No post-training held-out checkpoint has reached
+its first scheduled evaluation at update 50 yet. MoE optimizer wall time fell
+from 838 seconds initially to 75 seconds at updates 13–14; do not use its cold
+step timing as the steady-state estimate. Dense basket's second optimizer call
+took 51 seconds, but the interval between updates was 32 minutes, dominated by
+work outside the optimizer. Long generation remains the completion bottleneck.
+
+The original expandable-allocator qualifier completed three training calls
+(21.97, 8.22 and 8.99 seconds) without OOM, then failed saving the first HF export.
+The previous metadata fix targeted the DeepSpeed wrapper before unwrapping; the
+inner HF model still had `do_sample=false`, temperature 0.6 and top_p 0.95. The
+fix now sets sampling metadata on the actual model immediately before export.
+An executable regression test runs the historical save method on a wrapped toy
+model and validates the saved Transformers GenerationConfig and unchanged weights.
+The optimizer ledger also now uses an explicit absolute path: the historical
+trainer rewrites `args.output_dir`, which displaced the previous ledger. All 17
+original-image tests and Ruff pass. Training/objective/sampling arguments are
+unchanged. The 200-iteration original run remains gated on a complete qualifier.
+
+A live MoE code-verifier request exhausted retries after 521.64 seconds with HTTP
+503 and received a tagged zero reward; the run continued. Include such service
+failures separately from model correctness in the final report.
+
 ## Active identities — September 14, 23:24 UTC
 
 | Run | Experiment | Status / target |

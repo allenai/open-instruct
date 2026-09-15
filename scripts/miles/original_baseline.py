@@ -184,16 +184,16 @@ def patch_trainer(text):
         "update_accounting": {
             "before": "        if (\n            args.checkpoint_state_freq > 0\n",
             "after": (
-                "        with open(os.path.join(os.path.dirname(args.output_dir), 'optimizer-updates.jsonl'), 'a') as update_log:\n"
+                "        with open(os.environ['OI_ORIGINAL_BASELINE_UPDATE_LEDGER'], 'a') as update_log:\n"
                 "            update_log.write(json.dumps({'driver_step': training_step}) + '\\n')\n"
                 "        if (\n            args.checkpoint_state_freq > 0\n"
             ),
         },
         "export_generation_metadata": {
-            "before": "            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)\n",
+            "before": "                model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)\n",
             "after": (
-                "            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)\n"
-                "            model_to_save.generation_config.do_sample = True\n"
+                "                model_to_save.generation_config.do_sample = True\n"
+                "                model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)\n"
             ),
         },
         "initial_evaluation": {
@@ -330,7 +330,13 @@ def train(model, prepared, output, *, smoke):
     (output / "invocation.json").write_bytes(encoded(record))
     print("ORIGINAL_BASELINE_COMMAND", json.dumps(record), flush=True)
     subprocess.run(
-        command, check=True, env={**os.environ, "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914"}
+        command,
+        check=True,
+        env={
+            **os.environ,
+            "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914",
+            "OI_ORIGINAL_BASELINE_UPDATE_LEDGER": str(output / "optimizer-updates.jsonl"),
+        },
     )
 
     exports = restore_public_exports(output, model)
