@@ -447,7 +447,10 @@ run_one_model() {
         rm -f "$store" "$done_marker" "$traces"
     fi
 
-    if [ -f "$done_marker" ]; then
+    # STARTUP_PROBE measures loading, so a completed trace file is irrelevant to
+    # it. Without this exemption the probe silently skips the model and exits 0
+    # having loaded nothing, which looks like a successful run.
+    if [ -f "$done_marker" ] && [ "${STARTUP_PROBE:-0}" != "1" ]; then
         log "SKIP ${model}: already complete ($(wc -l < "$store" 2>/dev/null || echo 0) traces in $store)"
         cp "$store" "$traces" 2>/dev/null || true
         return 0
