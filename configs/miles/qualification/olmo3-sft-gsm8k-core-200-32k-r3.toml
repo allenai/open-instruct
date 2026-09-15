@@ -24,7 +24,7 @@ cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "4h"
 timeout = "48h"
-auto_resume = false
+auto_resume = true
 gpus_per_replica = 6
 
 [[launch.weka_mounts]]

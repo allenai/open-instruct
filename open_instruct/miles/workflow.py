@@ -32,6 +32,24 @@ def fingerprint(document):
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 
+def recovery_configuration_matches(root, previous, document):
+    """Allow changing recovery policy without changing the training recipe.
+
+    Authenticate the recorded full specification before allowing this one
+    operational change, including for older runs that hashed auto_resume.
+    """
+    if previous["spec_sha256"] == fingerprint(document):
+        return True
+    path = Path(root) / "run-spec.json"
+    if not path.is_file():
+        return False
+    recorded = json.loads(path.read_text())
+    if fingerprint(recorded) != previous["spec_sha256"]:
+        return False
+    recorded.setdefault("launch", {})["auto_resume"] = document["launch"]["auto_resume"]
+    return recorded == document
+
+
 def model_identity(source):
     """Record checkpoint metadata and shard identity without hashing tens of GB."""
     source = Path(source)
@@ -217,7 +235,7 @@ def run_directory(spec):
         path = root / "workflow.json"
         if path.exists():
             previous = json.loads(path.read_text())
-            if previous["spec_sha256"] != identity:
+            if not recovery_configuration_matches(root, previous, document):
                 raise InputError("Run configuration changed; choose a new output.root")
             if previous["status"] == "complete":
                 raise InputError(f"Run already completed: {root}. Choose a new output.root for another run.")
