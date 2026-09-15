@@ -48,7 +48,6 @@ uv run python mason.py \
     --exp_name 0605_general_tool_use_without_good_outputs \
     --learning_rate 5e-7 \
     --total_episodes $((20 * 8 * 4)) \
-    --deepspeed_stage 2 \
     --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \

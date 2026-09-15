@@ -46,6 +46,7 @@ from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
 from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct.olmo_core_callbacks import PerfCallback
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -121,6 +122,10 @@ class SFTConfig:
     """Timeout for distributed collectives, in hours."""
     save_async: bool = True
     """Whether olmo-core saves checkpoints asynchronously."""
+    hf_export_dir: str | None = None
+    """Where to write the final HF export. Defaults to <output_dir>/hf_model. Set this
+    when output_dir is unique per launch (e.g. mason's $CHECKPOINT_OUTPUT_DIR) but a
+    stable export path is wanted."""
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
@@ -213,6 +218,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = olmo_core_utils.setup_model(args.model, tc, init_device="meta")
+    if use_hf_ckpt and is_main_process:
+        olmo_core_utils.verify_can_save_as_hf(model_config, args.model.model_name_or_path)
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
     cp_degree = args.training.cp_degree or 1
@@ -343,6 +350,26 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
+    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
+    if use_hf_ckpt:
+        # NOTE: PerfCallback currently no-ops on this path (TransformerTrainModule never
+        # records train/token_count); SpeedMonitorCallback above is the working metric source.
+        # Tracked separately.
+        try:
+            model_dims = utils.ModelDims.from_hf_config(args.model.model_name_or_path)
+        except ValueError as e:
+            # ModelDims resolves the GPU name against GPU_SPECS, which does not cover
+            # every device (e.g. desktop 4090, L4, V100); MFU is undefined there anyway.
+            logger.warning(f"Skipping PerfCallback: {e}")
+        else:
+            trainer_callbacks["perf"] = PerfCallback(
+                model_dims=model_dims,
+                gradient_accumulation_steps=args.training.gradient_accumulation_steps,
+                dp_world_size=dp_world_size,
+                tensor_parallel_degree=1,
+            )
+    else:
+        logger.warning("Skipping PerfCallback: ModelDims requires an HF checkpoint config.")
 
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
@@ -378,6 +405,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     logger.info("Starting training...")
     trainer.fit()
     logger.info("Training complete.")
+
+    if use_hf_ckpt:
+        hf_model_path = args.sft.hf_export_dir or os.path.join(args.checkpoint.output_dir, "hf_model")
+        olmo_core_utils.export_to_hf(
+            train_module.model, tc.tokenizer, hf_model_path, args.model.model_name_or_path, is_main_process
+        )
+    else:
+        logger.warning("Skipping final HF export: model was not loaded from an HF checkpoint.")
 
     teardown_training_environment()
 
