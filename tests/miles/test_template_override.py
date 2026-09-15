@@ -45,3 +45,30 @@ def test_staging_copies_a_jinja_override_over_the_checkpoint_template(tmp_path, 
     marker = json.loads((staged / "workflow-model.json").read_text())
     assert marker["identity"]["template"]["path"] == str(override)
     assert any("[CUTOFF_DATE]" in w for w in warnings)
+
+
+@pytest.mark.parametrize(
+    "template, message",
+    [
+        ("/weka/does/not/exist", "not found"),
+        ("EMPTY_DIR", "no tokenizer assets"),
+        ("notes.txt", "tokenizer directory or a .jinja"),
+    ],
+)
+def test_bad_template_overrides_fail_as_input_errors(tmp_path, template, message):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    (source / "model.safetensors").write_bytes(b"weights")
+    if template == "EMPTY_DIR":
+        template = str(tmp_path / "empty")
+        Path(template).mkdir()
+    elif template == "notes.txt":
+        template = str(tmp_path / "notes.txt")
+        Path(template).write_text("not a template")
+    spec = RunSpec.load(
+        EXAMPLE,
+        overrides=[f'model.source="{source}"', f'model.hf_template="{template}"', f'output.root="{tmp_path / "run"}"'],
+    )
+    with pytest.raises(InputError, match=message):
+        workflow.prepare_model(spec)

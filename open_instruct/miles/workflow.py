@@ -61,6 +61,20 @@ def prepare_model(spec):
     template = spec.model.get("hf_template")
     identity = dict(source=model_identity(source), format=spec.model["format"], conversion=spec.conversion)
     if template:
+        template_path = Path(template)
+        if not template_path.exists():
+            raise InputError(
+                f"model.hf_template not found: {template}. Check the path and the job's WEKA mounts; "
+                "omit hf_template to use the checkpoint's own tokenizer and chat template."
+            )
+        if template_path.is_dir():
+            if not any((template_path / name).is_file() for name in ("tokenizer.json", "tokenizer_config.json")):
+                raise InputError(
+                    f"model.hf_template directory has no tokenizer assets (tokenizer.json or tokenizer_config.json): "
+                    f"{template}"
+                )
+        elif template_path.suffix != ".jinja":
+            raise InputError(f"model.hf_template must be a tokenizer directory or a .jinja chat template: {template}")
         identity["template"] = (
             model_identity(template)
             if Path(template).is_dir()
