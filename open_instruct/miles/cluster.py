@@ -383,7 +383,8 @@ def reload_export(supervisor, spec, env, devices, root):
         concurrency=1,
     )
     port = free_port()
-    command = core_opd_teacher.command(service, port)
+    # Core exports retain the registered learner's custom HF configuration code.
+    command = core_opd_teacher.command(service, port) + ["--trust-remote-code"]
     reload_env = dict(env, CUDA_VISIBLE_DEVICES=devices[-1])
     supervisor.start("export-reload", command, reload_env)
     url = f"http://127.0.0.1:{port}"

@@ -236,3 +236,29 @@ def test_teacher_returns_scalar_reward_before_native_rollout_logging(monkeypatch
     assert sample.teacher_log_probs.tolist() == [-1.0, -2.0]
     assert sample.train_metadata["opd_alignment_mask"] == [1, 1]
     assert core_opd_hooks.post_process(SimpleNamespace(save=None), [sample, sample]) == ([0.0, 0.0], [0.0, 0.0])
+
+
+def test_reload_export_loads_custom_core_checkpoint(monkeypatch, tmp_path):
+    spec = specs.load(ROOT / "configs/miles/opd/olmo-moe-tiny.toml")
+    spec.output["root"] = str(tmp_path)
+    spec.output["hf_dir"] = str(tmp_path / "export-hf")
+    data = tmp_path / "prepared/data"
+    data.mkdir(parents=True)
+    (data / "eval.jsonl").write_text(json.dumps({"input": "test prompt"}) + "\n")
+    started = []
+    supervisor = SimpleNamespace(
+        start=lambda *args: started.append(args), wait=lambda predicate: {"model_path": spec.output["hf_dir"]}
+    )
+    monkeypatch.setattr(
+        cluster.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: io.BytesIO(json.dumps({"meta_info": {"completion_tokens": 1}}).encode()),
+    )
+    cluster.reload_export(supervisor, spec, {}, ["0", "1", "2"], tmp_path)
+    _, command, env = started[0]
+    assert "--trust-remote-code" in command
+    assert command[command.index("--model-path") + 1] == spec.output["hf_dir"]
+    assert env["CUDA_VISIBLE_DEVICES"] == "2"
+    assert (
+        json.loads((tmp_path / "export-reload.json").read_text())["generation"]["meta_info"]["completion_tokens"] == 1
+    )
