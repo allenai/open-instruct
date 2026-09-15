@@ -1,0 +1,454 @@
+{
+  "workflow": {
+    "finished_unix": 1789448617.5542786,
+    "result": {
+      "completed_rollout_ids": [
+        0,
+        1
+      ],
+      "export_hf": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-moe-tiny-20260914-d/export-hf",
+      "start_rollout_id": 0
+    },
+    "spec_sha256": "cb6fe1311afa5e2d5b4ddd16c134b28b6048307b9bd27deb17f3c0e28fc7a1c3",
+    "started_unix": 1789447363.4259684,
+    "status": "complete",
+    "training_started_unix": 1789447373.2241104
+  },
+  "contracts": {
+    "training_contract_rank0": {
+      "updates": [
+        {
+          "auxiliary_denominator": 4475.0,
+          "elapsed_seconds": 159.1408557971008,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.19106202661991117,
+            "router_z": 9.158010818064213e-05
+          },
+          "local_behavior_versions": [
+            0
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": 0.2583593726158142,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 3.2492011907684457,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 1.6877434530039819,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.26635226498793774,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 8192,
+            "model_tokens": 8950,
+            "samples": 8,
+            "token_denominator": 8192,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 0,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 0,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 8.360837189393386e-05
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 2.9315442510922446e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.294639949192961e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "standalone",
+          "step": 1
+        },
+        {
+          "auxiliary_denominator": 4187.0,
+          "elapsed_seconds": 46.99311191495508,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.18473029136657718,
+            "router_z": 8.374444004148245e-05
+          },
+          "local_behavior_versions": [
+            1
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": 0.25731000304222107,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 4.129767945990108,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 2.2287620762060802,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.42717462935725703,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 7572,
+            "model_tokens": 8374,
+            "samples": 8,
+            "token_denominator": 7572,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 1,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 1,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 0.00011478276085506522
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 4.27809980367369e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.3417933023074912e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "standalone",
+          "step": 2
+        }
+      ],
+      "alignment": [
+        {
+          "active_tokens": 8192.0,
+          "coverage": 0.80615234375,
+          "event": "opd_alignment",
+          "matched_tokens": 6604.0,
+          "rank": 0,
+          "rollout_id": 0,
+          "sampled_log_ratio_mean": 0.3396496995155339,
+          "schema_version": 1
+        },
+        {
+          "active_tokens": 7572.0,
+          "coverage": 0.8771790808240888,
+          "event": "opd_alignment",
+          "matched_tokens": 6642.0,
+          "rank": 0,
+          "rollout_id": 1,
+          "sampled_log_ratio_mean": 0.32237608696243486,
+          "schema_version": 1
+        }
+      ],
+      "advantages": [
+        {
+          "event": "opd_advantages",
+          "max_abs_error": 0.0,
+          "rank": 0,
+          "rollout_id": 0,
+          "schema_version": 1
+        },
+        {
+          "event": "opd_advantages",
+          "max_abs_error": 0.0,
+          "rank": 0,
+          "rollout_id": 1,
+          "schema_version": 1
+        }
+      ]
+    },
+    "training_contract_rank1": {
+      "updates": [
+        {
+          "auxiliary_denominator": 4475.0,
+          "elapsed_seconds": 159.1407135440968,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.1917108941078186,
+            "router_z": 9.631248231977224e-05
+          },
+          "local_behavior_versions": [
+            0
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": 0.2892594337463379,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 3.2492011907684457,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 1.6865600568915888,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.26635226498793774,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 8192,
+            "model_tokens": 8950,
+            "samples": 8,
+            "token_denominator": 8192,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 0,
+          "rank": 1,
+          "reduction": "response",
+          "rollout_id": 0,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 8.360837189393386e-05
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 2.896573737462701e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.294639949192961e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "standalone",
+          "step": 1
+        },
+        {
+          "auxiliary_denominator": 4187.0,
+          "elapsed_seconds": 46.99301178799942,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.20284144520759578,
+            "router_z": 0.00010442232452332976
+          },
+          "local_behavior_versions": [
+            1
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": 0.31524425745010376,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 4.129767945990108,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 2.2317779142749115,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.42717462935725703,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 7572,
+            "model_tokens": 8374,
+            "samples": 8,
+            "token_denominator": 7572,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 1,
+          "rank": 1,
+          "reduction": "response",
+          "rollout_id": 1,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 0.00011478276085506522
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 4.3856636923678656e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.3417933023074912e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "standalone",
+          "step": 2
+        }
+      ],
+      "alignment": [
+        {
+          "active_tokens": 8192.0,
+          "coverage": 0.80615234375,
+          "event": "opd_alignment",
+          "matched_tokens": 6604.0,
+          "rank": 1,
+          "rollout_id": 0,
+          "sampled_log_ratio_mean": 0.3396496995155339,
+          "schema_version": 1
+        },
+        {
+          "active_tokens": 7572.0,
+          "coverage": 0.8771790808240888,
+          "event": "opd_alignment",
+          "matched_tokens": 6642.0,
+          "rank": 1,
+          "rollout_id": 1,
+          "sampled_log_ratio_mean": 0.32237608696243486,
+          "schema_version": 1
+        }
+      ],
+      "advantages": [
+        {
+          "event": "opd_advantages",
+          "max_abs_error": 0.0,
+          "rank": 1,
+          "rollout_id": 0,
+          "schema_version": 1
+        },
+        {
+          "event": "opd_advantages",
+          "max_abs_error": 0.0,
+          "rank": 1,
+          "rollout_id": 1,
+          "schema_version": 1
+        }
+      ]
+    }
+  },
+  "teacher_scores": {
+    "samples": 16,
+    "response_tokens": 15764,
+    "matched_tokens": 13246,
+    "student_tokenizer_sha256": [
+      "d44f0ea02cc104c6669d4c13885679d612fd6220b2e7c4dcc1b04407d8ad9105"
+    ],
+    "teacher_tokenizer_sha256": [
+      "ffb7a28b27dabcc333662fd3e0b0005d9e79a1c22e31453ab5a3017fbd5f25c0"
+    ]
+  },
+  "teacher": {
+    "gpus": 1,
+    "tensor_parallel_size": 1,
+    "concurrency": 4,
+    "request_timeout": 180,
+    "startup_timeout": 1800,
+    "max_context_length": 8192,
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    },
+    "attention_backend": "triton",
+    "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+    "source": "Qwen/Qwen3.5-9B",
+    "alignment": "exact_text_spans",
+    "endpoint": "http://10.93.2.6:60223",
+    "snapshot": "/tmp/hf-cache/hub/models--Qwen--Qwen3.5-9B/snapshots/c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+    "config_sha256": "d0883072e01861ed0b2d47be3c16c36a8e81c224c7ffaa310c6558fb3f932b05",
+    "model_type": "qwen3_5"
+  },
+  "teacher_probe": {
+    "passed": true,
+    "scored_tokens": 20
+  },
+  "cluster_complete": {
+    "status": "complete",
+    "time": 1789448837.6504455
+  },
+  "cluster_cleanup": {
+    "complete": true
+  },
+  "cluster_failure": null,
+  "export_reload": {
+    "model_path": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-moe-tiny-20260914-d/export-hf",
+    "completion_tokens": 32,
+    "finite_output_logprobs": true
+  },
+  "checkpoint_rollouts": [
+    {
+      "directory": "rollout_0000000",
+      "clock": {
+        "completed_steps": 1,
+        "next_rollout_id": 1,
+        "published_step": 0
+      }
+    },
+    {
+      "directory": "rollout_0000001",
+      "clock": {
+        "completed_steps": 2,
+        "next_rollout_id": 2,
+        "published_step": 1
+      }
+    }
+  ],
+  "evaluations": [
+    {
+      "rollout_id": 0,
+      "reward": 0.25,
+      "mean_response_length": 978.5,
+      "truncated_ratio": 0.875
+    },
+    {
+      "rollout_id": 1,
+      "reward": 0.625,
+      "mean_response_length": 982.75,
+      "truncated_ratio": 0.75
+    }
+  ]
+}

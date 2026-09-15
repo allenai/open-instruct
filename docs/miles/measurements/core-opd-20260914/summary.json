@@ -1,0 +1,248 @@
+{
+  "status": "passed",
+  "scope": "Two-update mechanics qualification; no quality or throughput claim",
+  "branch": "robertb/miles-qwen35-opd",
+  "final_image": "01M2HNJ96AQMCE69SK5ZA0EJQT",
+  "runtime_sources": {
+    "01M2HNJ96AQMCE69SK5ZA0EJQT": "54c09c020e2b0946eab10889df324353a308eca4",
+    "01M2HKRHZV515XFY44E84JHVEB": "06b43758687e1b7a519d18c257191a16471304fe"
+  },
+  "image_difference": "Final image adds --trust-remote-code only to Core export reload, plus tests/docs; training code and binary dependencies are identical.",
+  "runtime_lock": {
+    "schema_version": 1,
+    "status": "MILES/Core internal sharing candidate; see docs/miles/feature-parity.md for qualified scope",
+    "base_image": {
+      "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+      "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    },
+    "sources": {
+      "olmo-core": {
+        "repository": "https://github.com/allenai/OLMo-core.git",
+        "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5",
+        "development_commit": "3d35ab326b72d92e06137cc310631d9187d8a2c5",
+        "patch": "patches/olmo-core.patch",
+        "patch_sha256": "1e10df5671031af23b6695c61db85c64af7b88617953950a6c06fefbd0b69204"
+      },
+      "miles": {
+        "repository": "https://github.com/radixark/miles.git",
+        "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
+        "development_commit": "b18b71b1825a7d4795a0399081807b9c40c4f557",
+        "patch": "patches/miles.patch",
+        "patch_sha256": "6ce7db0735875d9576f2bda0d349903f11660d8946c9baa3e5442647bfaab5d8"
+      },
+      "olmo-sglang": {
+        "repository": "https://github.com/allenai/olmo-sglang.git",
+        "revision": "81a312ee8326e279a4641e03542ef971a5ffb863",
+        "development_commit": "02ccb5dcf641cbabc9b78a5bc65dacf8690707a7",
+        "embedded_path": "/src/olmo-sglang",
+        "patch": "patches/olmo-sglang.patch",
+        "patch_sha256": "608c073cdc248ec1230863ad99df3dcfe84199fb90d89f9ace6b219941e0c175",
+        "patch_paths": [
+          "src",
+          "tools",
+          "docs"
+        ],
+        "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit."
+      }
+    }
+  },
+  "runs": {
+    "moe": {
+      "experiment": "01M2HNJJ63684V0FSJ1W3P5HNB",
+      "job": "01M2HNJJ9ZJR3EE790QEB4R605",
+      "image": "01M2HNJ96AQMCE69SK5ZA0EJQT",
+      "result": {
+        "beaker": "01M2HNJJ6DRCEG84KVB9KZ3EKF"
+      },
+      "status": {
+        "created": "2026-09-15T04:35:32.675788Z",
+        "scheduled": "2026-09-15T04:35:47.212108Z",
+        "started": "2026-09-15T04:36:59.495192Z",
+        "exited": "2026-09-15T05:07:41.530537Z",
+        "finalized": "2026-09-15T05:07:45.754326Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-15T05:07:41.463848Z",
+        "ready": "2026-09-15T04:36:58.880921Z"
+      }
+    },
+    "dense": {
+      "experiment": "01M2HM19A6K4QT01XSV3XB2V2E",
+      "job": "01M2HM19EF02TD1VYSF0HRPMBX",
+      "image": "01M2HKRHZV515XFY44E84JHVEB",
+      "result": {
+        "beaker": "01M2HM19AFKT8MXEQ66SXJXDG1"
+      },
+      "status": {
+        "created": "2026-09-15T04:08:37.958435Z",
+        "scheduled": "2026-09-15T04:17:52.700026Z",
+        "started": "2026-09-15T04:19:16.173075Z",
+        "exited": "2026-09-15T04:33:49.704112Z",
+        "finalized": "2026-09-15T04:33:55.618913Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-15T04:33:49.6434Z",
+        "ready": "2026-09-15T04:19:15.520708Z"
+      }
+    },
+    "qwen": {
+      "experiment": "01M2HMYEVHYAAVVJ7FR0VDAW2R",
+      "job": "01M2HMYEYZRXFE3E749P8QJTF9",
+      "image": "01M2HKRHZV515XFY44E84JHVEB",
+      "result": {
+        "beaker": "01M2HMYEVRX8TNHW1RJWNQC3RJ"
+      },
+      "status": {
+        "created": "2026-09-15T04:24:33.905802Z",
+        "scheduled": "2026-09-15T04:24:44.954162Z",
+        "started": "2026-09-15T04:30:30.857549Z",
+        "exited": "2026-09-15T04:49:42.459728Z",
+        "finalized": "2026-09-15T04:49:52.500755Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-15T04:49:42.403543Z",
+        "ready": "2026-09-15T04:30:29.953898Z"
+      }
+    },
+    "grpo": {
+      "experiment": "01M2HN5C71YSD6YBP2AM0GQAXF",
+      "job": "01M2HN5CBSV43PT0X9MC7RZ9X2",
+      "image": "01M2HKRHZV515XFY44E84JHVEB",
+      "result": {
+        "beaker": "01M2HN5C7BMT0V8NHK76B8DHC2"
+      },
+      "status": {
+        "created": "2026-09-15T04:28:20.577703Z",
+        "scheduled": "2026-09-15T04:33:44.653561Z",
+        "started": "2026-09-15T04:34:57.027418Z",
+        "exited": "2026-09-15T04:52:06.489138Z",
+        "finalized": "2026-09-15T04:52:09.361112Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-15T04:52:06.430424Z",
+        "ready": "2026-09-15T04:34:56.264018Z"
+      }
+    }
+  },
+  "audits": {
+    "moe": "moe-audit.json",
+    "dense": "dense-audit.json",
+    "qwen": "qwen-regression-audit.json",
+    "grpo": "grpo-regression-audit.json"
+  },
+  "launch_receipts": "launches.json",
+  "checks": {
+    "focused_cpu_tests_passed": 161,
+    "final_moe_gpu_preflight_tests_passed": 30,
+    "attention_forward_backward": "passed",
+    "ruff_lint": "passed",
+    "ruff_format": "passed",
+    "opd_type_checks": "passed",
+    "python_compilation": "passed",
+    "documentation_build": "passed",
+    "generated_reference": "passed",
+    "repository_type_check": "6 existing Core adapter diagnostics against local unpatched OLMo-core; see README"
+  },
+  "prior_runs": {
+    "moe_a": {
+      "experiment": "01M2HK1H4R9THMQAX50FQYBR2P",
+      "job": "01M2HK1H8A05RXE8S6QKJR0WWG",
+      "status": {
+        "created": "2026-09-15T03:51:17.40011Z",
+        "scheduled": "2026-09-15T03:51:29.918218Z",
+        "started": "2026-09-15T03:52:51.274898Z",
+        "exited": "2026-09-15T03:57:56.985846Z",
+        "finalized": "2026-09-15T03:57:59.632151Z",
+        "exitCode": 1,
+        "idleSince": "2026-09-15T03:57:56.929359Z",
+        "ready": "2026-09-15T03:52:50.530106Z"
+      },
+      "image": "01M2HK17N8Z6N1FHYTXK0N283Y",
+      "result": {
+        "beaker": "01M2HK1H508AAK6BQKS4S9PAZT"
+      }
+    },
+    "moe_b": {
+      "experiment": "01M2HKMCZTB9ASVKXEQ9AS1TCM",
+      "job": "01M2HKMD3G0XJFHP5ZQGCTRTM7",
+      "status": {
+        "created": "2026-09-15T04:01:35.738583Z",
+        "scheduled": "2026-09-15T04:01:49.554822Z",
+        "finalized": "2026-09-15T04:03:07.299175Z",
+        "message": "Job canceled while starting",
+        "canceled": "2026-09-15T04:03:05.007212Z",
+        "canceledFor": "Job 01M2HKMD3G0XJFHP5ZQGCTRTM7 has been manually canceled by robertb",
+        "canceledCode": 4
+      },
+      "image": "01M2HKM3MN3B63YYC6ZNY0PN3C",
+      "result": {
+        "beaker": "01M2HKMD03TJKK1XEMZ44MJ7J7"
+      }
+    },
+    "moe_c": {
+      "experiment": "01M2HKRVGZPZ9M3NDRY3CXP60Y",
+      "job": "01M2HKRVVNV14H3N8P80N0A90Z",
+      "status": {
+        "created": "2026-09-15T04:04:01.695542Z",
+        "scheduled": "2026-09-15T04:04:20.655189Z",
+        "started": "2026-09-15T04:05:43.400831Z",
+        "exited": "2026-09-15T04:33:27.570987Z",
+        "finalized": "2026-09-15T04:33:39.431474Z",
+        "exitCode": 1,
+        "idleSince": "2026-09-15T04:33:27.458377Z",
+        "ready": "2026-09-15T04:05:42.665011Z"
+      },
+      "image": "01M2HKRHZV515XFY44E84JHVEB",
+      "result": {
+        "beaker": "01M2HKRVH8SGGAFVQJ4T6FZZ7S"
+      }
+    },
+    "qwen_a": {
+      "experiment": "01M2HK48E3V33RQTMXSA2ARZQ6",
+      "job": "01M2HK48JP4H53WQFPY1GG9MT8",
+      "status": {
+        "created": "2026-09-15T03:52:46.787111Z",
+        "scheduled": "2026-09-15T03:53:06.17346Z",
+        "started": "2026-09-15T03:59:16.614715Z",
+        "exited": "2026-09-15T04:17:37.84753Z",
+        "finalized": "2026-09-15T04:17:47.387776Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-15T04:17:37.787786Z",
+        "ready": "2026-09-15T03:59:15.8086Z"
+      },
+      "image": "01M2HK17N8Z6N1FHYTXK0N283Y",
+      "result": {
+        "beaker": "01M2HK48E9AKWJ3PJAVV6JGGZG"
+      }
+    },
+    "grpo_a": {
+      "experiment": "01M2HK6J19QZK2SYJF3KWQSFD1",
+      "job": "01M2HK6J4RTH4EGJDEYDV9TYPC",
+      "status": {
+        "created": "2026-09-15T03:54:02.153728Z",
+        "scheduled": "2026-09-15T03:54:20.803798Z",
+        "started": "2026-09-15T03:59:16.875145Z",
+        "exited": "2026-09-15T04:22:09.343806Z",
+        "finalized": "2026-09-15T04:22:12.232398Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-15T04:22:09.282736Z",
+        "ready": "2026-09-15T03:59:16.013206Z"
+      },
+      "image": "01M2HK17N8Z6N1FHYTXK0N283Y",
+      "result": {
+        "beaker": "01M2HK6J1F86TZMZF2ZAB8FJGJ"
+      }
+    },
+    "grpo_canceled": {
+      "experiment": "01M2HMYMHP7JFP9Y740HFE1SWX",
+      "job": "01M2HMYMN714K47JV701ARCM31",
+      "status": {
+        "created": "2026-09-15T04:24:39.734703Z",
+        "finalized": "2026-09-15T04:28:19.670443Z",
+        "canceled": "2026-09-15T04:28:19.670443Z",
+        "canceledFor": "Job 01M2HMYMN714K47JV701ARCM31 has been manually canceled by robertb",
+        "canceledCode": 4
+      },
+      "image": "01M2HKRHZV515XFY44E84JHVEB",
+      "result": {
+        "beaker": "01M2HMYMHXX4YHD40EPJA9WFMN"
+      }
+    }
+  }
+}

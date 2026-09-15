@@ -1,0 +1,659 @@
+{
+  "moe": {
+    "allocation": {
+      "allocated_gpus": 4,
+      "gpus_per_replica": 4,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "judges": {},
+          "ray_gpus": 3,
+          "rollout_gpus": 1,
+          "teacher_gpus": 1,
+          "trainer_gpus": 2
+        }
+      ],
+      "policy_gpus": 3,
+      "replicas": 1,
+      "teacher_gpus": 1,
+      "unused_gpus": 0
+    },
+    "experiment_id": "01M2HNJJ63684V0FSJ1W3P5HNB",
+    "image": "01M2HNJ96AQMCE69SK5ZA0EJQT",
+    "placements": [
+      {
+        "gpus": 4,
+        "hostnames": [],
+        "task": "core-opd-moe-tiny-20260914-d"
+      }
+    ],
+    "requested_image": "robertb/open-instruct-miles-core-54c09c020e2b",
+    "revision": "54c09c020e2b0946eab10889df324353a308eca4",
+    "spec": {
+      "async": {},
+      "compiler_cache": {},
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-moe-tiny-20260914-d/prepared/hf"
+      },
+      "core": {
+        "diagnostic_interval": 1,
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "replay_diagnostics": true,
+        "router_aux_loss_weight": 0.01,
+        "router_z_loss_weight": 1e-05,
+        "stream_moe_export": true,
+        "weight_sync_mode": "flattened"
+      },
+      "data": {
+        "seed": 17,
+        "shuffle": true,
+        "tasks": [
+          {
+            "eval_count": 8,
+            "task": "gsm8k",
+            "train_count": 16
+          }
+        ]
+      },
+      "distillation": {
+        "alignment": "exact_text_spans",
+        "kl_coef": 1.0
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 8,
+        "gpus": 1,
+        "max_context_length": 6144,
+        "max_response_length": 1024,
+        "placement_mode": "disaggregated",
+        "radix_cache": false,
+        "rollout_batch_size": 4,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 2,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 8,
+        "sglang_max_mamba_cache_size": 128,
+        "sglang_max_running_requests": 8,
+        "sglang_max_total_tokens": 65536,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 8,
+        "update_weight_buffer_size": 1073741824
+      },
+      "judges": {},
+      "judging": {
+        "bindings": {}
+      },
+      "launch": {
+        "auto_resume": false,
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 4,
+        "min_runtime": "1h",
+        "priority": "urgent",
+        "secrets": {},
+        "shared_memory": "200 GiB",
+        "timeout": "3h",
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          }
+        ],
+        "workspace": "ai2/open-instruct-dev"
+      },
+      "miles": {
+        "disable_grpo_std_normalization": true,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "use_miles_router": true,
+        "use_rollout_routing_replay": true
+      },
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+      },
+      "name": "core-opd-moe-tiny-20260914-d",
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "output": {
+        "export_hf": true,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-moe-tiny-20260914-d/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-moe-tiny-20260914-d"
+      },
+      "rubrics": {},
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "schema_version": 1,
+      "teacher": {
+        "attention_backend": "triton",
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "concurrency": 4,
+        "gpus": 1,
+        "max_context_length": 8192,
+        "request_timeout": 180,
+        "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+        "source": "Qwen/Qwen3.5-9B",
+        "startup_timeout": 1800,
+        "tensor_parallel_size": 1
+      },
+      "tracking": {
+        "wandb_group": "core-opd-qualification",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison"
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "backend": "olmo_core",
+        "expert_parallel_size": 2,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 6144,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "training": {
+        "algorithm": "opd",
+        "eval_interval": 2,
+        "num_rollouts": 2,
+        "save_checkpoints": true,
+        "save_interval": 1,
+        "skip_eval_before_train": false
+      }
+    },
+    "spec_sha256": "cb6fe1311afa5e2d5b4ddd16c134b28b6048307b9bd27deb17f3c0e28fc7a1c3"
+  },
+  "dense": {
+    "allocation": {
+      "allocated_gpus": 4,
+      "gpus_per_replica": 4,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "judges": {},
+          "ray_gpus": 3,
+          "rollout_gpus": 1,
+          "teacher_gpus": 1,
+          "trainer_gpus": 2
+        }
+      ],
+      "policy_gpus": 3,
+      "replicas": 1,
+      "teacher_gpus": 1,
+      "unused_gpus": 0
+    },
+    "experiment_id": "01M2HM19A6K4QT01XSV3XB2V2E",
+    "image": "01M2HKRHZV515XFY44E84JHVEB",
+    "placements": [
+      {
+        "gpus": 4,
+        "hostnames": [],
+        "task": "core-opd-dense-tiny-20260914"
+      }
+    ],
+    "requested_image": "01M2HKRHZV515XFY44E84JHVEB",
+    "revision": "06b43758687e1b7a519d18c257191a16471304fe",
+    "spec": {
+      "async": {},
+      "compiler_cache": {},
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-dense-tiny-20260914/prepared/hf"
+      },
+      "core": {
+        "diagnostic_interval": 1,
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "weight_sync_mode": "flattened"
+      },
+      "data": {
+        "seed": 17,
+        "shuffle": true,
+        "tasks": [
+          {
+            "eval_count": 8,
+            "task": "gsm8k",
+            "train_count": 16
+          }
+        ]
+      },
+      "distillation": {
+        "alignment": "exact_text_spans",
+        "kl_coef": 1.0
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 8,
+        "gpus": 1,
+        "max_context_length": 6144,
+        "max_response_length": 1024,
+        "placement_mode": "disaggregated",
+        "radix_cache": false,
+        "rollout_batch_size": 4,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 2,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 8,
+        "sglang_max_mamba_cache_size": 128,
+        "sglang_max_running_requests": 8,
+        "sglang_max_total_tokens": 65536,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 8,
+        "update_weight_buffer_size": 1073741824
+      },
+      "judges": {},
+      "judging": {
+        "bindings": {}
+      },
+      "launch": {
+        "auto_resume": false,
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 4,
+        "min_runtime": "1h",
+        "priority": "urgent",
+        "secrets": {},
+        "shared_memory": "200 GiB",
+        "timeout": "3h",
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          }
+        ],
+        "workspace": "ai2/open-instruct-dev"
+      },
+      "miles": {
+        "disable_grpo_std_normalization": true,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "use_miles_router": true
+      },
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66"
+      },
+      "name": "core-opd-dense-tiny-20260914",
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "output": {
+        "export_hf": true,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-dense-tiny-20260914/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/core-opd-dense-tiny-20260914"
+      },
+      "rubrics": {},
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "schema_version": 1,
+      "teacher": {
+        "attention_backend": "triton",
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "concurrency": 4,
+        "gpus": 1,
+        "max_context_length": 8192,
+        "request_timeout": 180,
+        "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+        "source": "Qwen/Qwen3.5-9B",
+        "startup_timeout": 1800,
+        "tensor_parallel_size": 1
+      },
+      "tracking": {
+        "wandb_group": "core-opd-qualification",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison"
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "backend": "olmo_core",
+        "expert_parallel_size": 1,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 6144,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "training": {
+        "algorithm": "opd",
+        "eval_interval": 2,
+        "num_rollouts": 2,
+        "save_checkpoints": true,
+        "save_interval": 1,
+        "skip_eval_before_train": false
+      }
+    },
+    "spec_sha256": "41b562c596ceced36b64ef08f500d036c434ca3fae761be70c328b7fb200184d"
+  },
+  "qwen": {
+    "allocation": {
+      "gpus_per_replica": 4,
+      "ray_gpus": 3,
+      "replicas": 1,
+      "roles": {
+        "student": [
+          2
+        ],
+        "teacher": [
+          3
+        ],
+        "trainer": [
+          0,
+          1
+        ]
+      }
+    },
+    "experiment_id": "01M2HMYEVHYAAVVJ7FR0VDAW2R",
+    "image": "01M2HKRHZV515XFY44E84JHVEB",
+    "placements": [
+      {
+        "gpus": 4,
+        "hostnames": [],
+        "task": "core-opd-qwen-final-20260914"
+      }
+    ],
+    "requested_image": "01M2HKRHZV515XFY44E84JHVEB",
+    "revision": "624b99cc50f074606d8ec0a70bbdd215c7621dee",
+    "spec": {
+      "data": {
+        "seed": 17,
+        "shuffle": true,
+        "tasks": [
+          {
+            "eval_count": 8,
+            "task": "gsm8k",
+            "train_count": 16
+          }
+        ]
+      },
+      "distillation": {
+        "kl_coef": 1.0,
+        "log_prob_top_k": 0,
+        "task_reward_weight": 0.0
+      },
+      "inference": {
+        "gpus": 1,
+        "max_context_length": 2048,
+        "max_response_length": 256,
+        "rollout_batch_size": 4,
+        "samples_per_prompt": 2,
+        "temperature": 1.0
+      },
+      "launch": {
+        "auto_resume": false,
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "min_runtime": "1h",
+        "priority": "urgent",
+        "secrets": {},
+        "shared_memory": "64 GiB",
+        "timeout": "3h",
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          }
+        ],
+        "workspace": "ai2/open-instruct-dev"
+      },
+      "model": {
+        "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+        "source": "Qwen/Qwen3.5-4B"
+      },
+      "name": "core-opd-qwen-final-20260914",
+      "optimizer": {
+        "learning_rate": 1e-06
+      },
+      "output": {
+        "assets": "/weka/oe-training-default/robertb/open-instruct/opd/assets-qwen35-v1",
+        "root": "/weka/oe-training-default/robertb/open-instruct/opd/runs/core-final-20260914"
+      },
+      "schema_version": 1,
+      "teacher": {
+        "concurrency": 4,
+        "gpus": 1,
+        "request_timeout": 180,
+        "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+        "source": "Qwen/Qwen3.5-9B",
+        "startup_timeout": 900
+      },
+      "tracking": {
+        "wandb_mode": "offline"
+      },
+      "trainer": {
+        "backend": "megatron",
+        "gpus": 2,
+        "tensor_parallel_size": 2
+      },
+      "training": {
+        "algorithm": "opd",
+        "num_rollouts": 2,
+        "phase": "train",
+        "resume": false,
+        "save_interval": 1
+      }
+    },
+    "spec_sha256": "daf9b0fbd622fc6d1c83a766bd0b832139e7f9018d952d8af7b14e8b3127ebd9"
+  },
+  "grpo": {
+    "allocation": {
+      "allocated_gpus": 3,
+      "gpus_per_replica": 3,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "judges": {},
+          "ray_gpus": 3,
+          "rollout_gpus": 1,
+          "trainer_gpus": 2
+        }
+      ],
+      "policy_gpus": 3,
+      "replicas": 1,
+      "teacher_gpus": 0,
+      "unused_gpus": 0
+    },
+    "experiment_id": "01M2HN5C71YSD6YBP2AM0GQAXF",
+    "image": "01M2HKRHZV515XFY44E84JHVEB",
+    "placements": [
+      {
+        "gpus": 3,
+        "hostnames": [],
+        "task": "core-grpo-image-final-short-20260914"
+      }
+    ],
+    "requested_image": "01M2HKRHZV515XFY44E84JHVEB",
+    "revision": "624b99cc50f074606d8ec0a70bbdd215c7621dee",
+    "spec": {
+      "async": {},
+      "compiler_cache": {},
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/core-grpo-image-final-short-20260914/prepared/hf"
+      },
+      "core": {
+        "diagnostic_interval": 1,
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "replay_diagnostics": true,
+        "router_aux_loss_weight": 0.01,
+        "router_z_loss_weight": 1e-05,
+        "stream_moe_export": true,
+        "weight_sync_mode": "flattened"
+      },
+      "data": {
+        "seed": 17,
+        "shuffle": true,
+        "tasks": [
+          {
+            "eval_count": 8,
+            "task": "gsm8k",
+            "train_count": 16
+          }
+        ]
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 8,
+        "gpus": 1,
+        "max_context_length": 2048,
+        "max_response_length": 128,
+        "placement_mode": "disaggregated",
+        "radix_cache": false,
+        "rollout_batch_size": 4,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 2,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 8,
+        "sglang_max_mamba_cache_size": 128,
+        "sglang_max_running_requests": 8,
+        "sglang_max_total_tokens": 16384,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 8,
+        "update_weight_buffer_size": 1073741824
+      },
+      "judges": {},
+      "judging": {
+        "bindings": {}
+      },
+      "launch": {
+        "auto_resume": false,
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 3,
+        "min_runtime": "1h",
+        "priority": "urgent",
+        "secrets": {},
+        "shared_memory": "200 GiB",
+        "timeout": "3h",
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          }
+        ],
+        "workspace": "ai2/open-instruct-dev"
+      },
+      "miles": {
+        "disable_grpo_std_normalization": true,
+        "rollout_max_prompt_len": 1920,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "use_miles_router": true,
+        "use_rollout_routing_replay": true
+      },
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+      },
+      "name": "core-grpo-image-final-short-20260914",
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "output": {
+        "export_hf": false,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/core-grpo-image-final-short-20260914/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/core-grpo-image-final-short-20260914"
+      },
+      "rubrics": {},
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "schema_version": 1,
+      "tracking": {
+        "wandb_group": "core-opd-qualification",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison"
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "backend": "olmo_core",
+        "expert_parallel_size": 2,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 2048,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "training": {
+        "algorithm": "grpo",
+        "eval_interval": 2,
+        "num_rollouts": 2,
+        "save_checkpoints": false,
+        "skip_eval_before_train": false
+      }
+    },
+    "spec_sha256": "c93c86510b0e29e01de4ccee2ca0a3f978cd793b605769775381fcf800083cbe"
+  }
+}

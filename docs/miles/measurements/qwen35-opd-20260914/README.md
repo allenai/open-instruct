@@ -110,3 +110,8 @@ publication correctness, native resume plus data-cursor restoration, longer
 contexts, throughput and held-out task quality. The B300 attention route is the
 only hardware route exercised here. The new candidate image has not separately
 requalified the OLMo-core GPU path after its cuDNN dependency change.
+
+
+The subsequent [Core OPD integration exercise](../core-opd-20260914/README.md)
+qualifies a newer shared image, including dense/MoE Core OPD and compatibility
+checks for native Qwen OPD and Core GRPO. Use that report for the current image.

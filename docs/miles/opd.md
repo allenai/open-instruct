@@ -16,7 +16,7 @@ additional checks before research-scale use.
 
 ## Qwen configuration and launch
 
-Start from [the tiny run file](../../configs/miles/opd/qwen35-4b-tiny.toml).
+Start from [the tiny run file](https://github.com/allenai/open-instruct/blob/robertb/miles-qwen35-opd/configs/miles/opd/qwen35-4b-tiny.toml).
 Change `name`, `output.root`, and `output.assets` for your own workspace.
 The run directory must be fresh. Assets may be shared across runs; immutable
 model revisions and tokenizer identities are recorded when preparing them.
@@ -60,12 +60,14 @@ endpoint; startup, timeout and failure checks are owned by the launcher.
 
 ## Repeat the exercised image
 
-The tested source is `298254e50a1ece28d6291863f67f13942537c3e1`; the immutable
-image below contains that source and the complete candidate runtime. From a clean,
-committed checkout, use fresh run and asset paths in your workspace:
+The current shared image contains runtime source
+`54c09c020e2b0946eab10889df324353a308eca4` and supports the Core and native Qwen
+paths. The [integration qualification](measurements/core-opd-20260914/README.md)
+records exact images and tests, including the Qwen regression on its immediate
+predecessor. From a clean, committed checkout, use fresh run and asset paths:
 
 ```bash
-MILES_EXISTING_IMAGE=01M2H301PJ0WFB19NCGY5QBP51 \
+MILES_EXISTING_IMAGE=01M2HNJ96AQMCE69SK5ZA0EJQT \
 python -m open_instruct.miles run configs/miles/opd/qwen35-4b-tiny.toml \
   --set 'name="qwen35-4b-opd-repeat"' \
   --set 'output.root="/weka/oe-training-default/YOUR_USERNAME/opd/runs/tiny-01"' \
@@ -97,7 +99,7 @@ Small JSON/log artifacts are copied to Beaker results; tensor checkpoints and
 training dumps remain on WEKA. A successful two-update run establishes mechanics,
 not an improvement in task accuracy.
 
-## Current limits
+## Qwen prototype limits
 
 - Only the 4B learner and 9B teacher are accepted. The requested 2B learner needs
   its own architecture profile and exercise.
@@ -170,8 +172,23 @@ alongside gradient and weight-change diagnostics. Teacher identity is retained i
 An enabled final HF export is reloaded through SGLang and recorded in
 `export-reload.json` before the supervisor reports success.
 
-Build the committed integration using the existing `MILES_BASE_IMAGE` procedure;
-reusing the earlier Qwen image does not include Core OPD. The image retains
-Megatron/mbridge for the original Qwen OPD example and the existing Core GRPO
-path. Qualification results for this extension must identify the new immutable
-image and source revision; the original Qwen result above does not qualify it.
+The [Core qualification report](measurements/core-opd-20260914/README.md) records
+successful two-update MoE and dense runs, including teacher-signal audits,
+checkpoints and fresh export reloads. It also records the passing native Qwen OPD
+and Core GRPO compatibility checks. The image retains Megatron/mbridge for Qwen;
+Core learners use the registered OLMo-core trainer.
+
+To reproduce the MoE exercise on the final image:
+
+```bash
+MILES_EXISTING_IMAGE=01M2HNJ96AQMCE69SK5ZA0EJQT \
+python -m open_instruct.miles run configs/miles/opd/olmo-moe-tiny.toml \
+  --set 'name="core-opd-moe-repeat"' \
+  --set 'output.root="/weka/oe-training-default/YOUR_USERNAME/opd/runs/moe-tiny-01"'
+```
+
+Use `olmo3-tiny.toml` for the dense learner. These files deliberately keep the
+image outside the run schema: `MILES_EXISTING_IMAGE` selects an immutable runtime;
+unset it and use `MILES_BASE_IMAGE` to build committed runtime changes. Always use
+a fresh output root. The two-update exercises establish mechanics; response
+truncation and partial alignment need attention before a learning comparison.

@@ -1,0 +1,62 @@
+{
+  "export": {
+    "changed_since_previous_update": 328,
+    "changed_tensors": 356,
+    "fp32_a_log_tensors": 24,
+    "path": "/weka/oe-training-default/robertb/open-instruct/opd/runs/core-final-20260914/hf-1",
+    "training_scope": "language only",
+    "frozen_base_tensor_count": 312
+  },
+  "optimizer": [
+    {
+      "train/entropy_loss": 0.0,
+      "train/ess_ratio": 0.9999831914901733,
+      "train/grad_norm": 10.680476188659668,
+      "train/loss": 0.07887928932905197,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/opd_reverse_kl": 0.07890483736991882,
+      "train/pg_clipfrac": 0.0,
+      "train/pg_loss": 0.07887928932905197,
+      "train/ppo_kl": 0.00013869081158190966,
+      "train/step": 0,
+      "train/train_rollout_kl": 0.00021019956329837441,
+      "train/train_rollout_logprob_abs_diff": 0.005525854416191578
+    },
+    {
+      "train/entropy_loss": 0.0,
+      "train/ess_ratio": 1.0,
+      "train/grad_norm": 13.253793716430664,
+      "train/loss": 0.07162513583898544,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/opd_reverse_kl": 0.07162513583898544,
+      "train/pg_clipfrac": 0.0,
+      "train/pg_loss": 0.07162513583898544,
+      "train/ppo_kl": 0.0,
+      "train/step": 1,
+      "train/train_rollout_kl": 0.00021084128820803016,
+      "train/train_rollout_logprob_abs_diff": 0.005584848579019308
+    }
+  ],
+  "updates": [
+    {
+      "max_abs_opd_signal": 5.437904357910156,
+      "max_advantage_error": 0.0,
+      "rollout_id": 0,
+      "samples": 8
+    },
+    {
+      "max_abs_opd_signal": 8.126888275146484,
+      "max_advantage_error": 0.0,
+      "rollout_id": 1,
+      "samples": 8
+    }
+  ],
+  "export_reload": {
+    "model_path": "/weka/oe-training-default/robertb/open-instruct/opd/runs/core-final-20260914/hf-1",
+    "completion_tokens": 32,
+    "finite_output_logprobs": true
+  },
+  "result_status": "trained"
+}

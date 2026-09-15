@@ -1,0 +1,341 @@
+{
+  "workflow": {
+    "finished_unix": 1789447918.0377645,
+    "result": {
+      "completed_rollout_ids": [
+        0,
+        1
+      ],
+      "export_hf": null,
+      "start_rollout_id": 0
+    },
+    "spec_sha256": "c93c86510b0e29e01de4ccee2ca0a3f978cd793b605769775381fcf800083cbe",
+    "started_unix": 1789446936.1035404,
+    "status": "complete",
+    "training_started_unix": 1789446946.2678251
+  },
+  "contracts": {
+    "training_contract_rank0": {
+      "updates": [
+        {
+          "auxiliary_denominator": 890.0,
+          "elapsed_seconds": 162.91267530573532,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.20441180050373078,
+            "router_z": 0.00017384670138359074
+          },
+          "local_behavior_versions": [
+            0
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": -0.125,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 0.6115540128180955,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 0.3325455267074242,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.06121429768084751,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 1022,
+            "model_tokens": 1780,
+            "samples": 8,
+            "token_denominator": 1022,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 0,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 0,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 8.352567022842854e-05
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 2.7386137876266006e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.2806280214410373e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "checked",
+          "step": 1
+        },
+        {
+          "auxiliary_denominator": 913.0,
+          "elapsed_seconds": 1.1788619328290224,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.20486807823181152,
+            "router_z": 0.00017427506528794768
+          },
+          "local_behavior_versions": [
+            1
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": -0.125,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 0.715276375313138,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 0.3867715848337902,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.07865664422035266,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 1024,
+            "model_tokens": 1826,
+            "samples": 8,
+            "token_denominator": 1024,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 1,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 1,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 0.00011225567772846887
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 4.110178045304798e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.609723413886989e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "skipped",
+          "step": 2
+        }
+      ],
+      "alignment": [],
+      "advantages": []
+    },
+    "training_contract_rank1": {
+      "updates": [
+        {
+          "auxiliary_denominator": 890.0,
+          "elapsed_seconds": 162.9125258019194,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.20443561315536501,
+            "router_z": 0.0001830052527785301
+          },
+          "local_behavior_versions": [
+            0
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": 0.125,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 0.6115540128180955,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 0.32636963877358977,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.06121429768084751,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 1022,
+            "model_tokens": 1780,
+            "samples": 8,
+            "token_denominator": 1022,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 0,
+          "rank": 1,
+          "reduction": "response",
+          "rollout_id": 0,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 8.352567022842854e-05
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 2.7396620269306247e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.2806280214410373e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "checked",
+          "step": 1
+        },
+        {
+          "auxiliary_denominator": 913.0,
+          "elapsed_seconds": 1.1776528060436249,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.2043259060382843,
+            "router_z": 0.0001784850223362446
+          },
+          "local_behavior_versions": [
+            1
+          ],
+          "local_microbatches": 1,
+          "local_policy_objective": 0.125,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 618154752,
+              "local_l2": 0.715276375313138,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 8992972800,
+              "local_l2": 0.39134896221686116,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 12451840,
+              "local_l2": 0.07865664422035266,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06,
+            1e-06
+          ],
+          "lr_used": [
+            1e-06,
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 1024,
+            "model_tokens": 1826,
+            "samples": 8,
+            "token_denominator": 1024,
+            "world_size": 2
+          },
+          "optimizer_skipped": false,
+          "published_step": 1,
+          "rank": 1,
+          "reduction": "response",
+          "rollout_id": 1,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 99072,
+              "sampled_update_l2": 0.00011225567772846887
+            },
+            "expert": {
+              "sampled_elements": 19968,
+              "sampled_update_l2": 4.075494885765665e-05
+            },
+            "router": {
+              "sampled_elements": 4864,
+              "sampled_update_l2": 1.609723413886989e-05
+            }
+          },
+          "schema_version": 1,
+          "scoring_pass": "skipped",
+          "step": 2
+        }
+      ],
+      "alignment": [],
+      "advantages": []
+    }
+  },
+  "checkpoint_rollouts": [],
+  "evaluations": [],
+  "rollout_and_eval_rewards": [
+    {
+      "kind": "eval",
+      "rollout_id": 0,
+      "eval/heldout/episode_raw_reward": 0.0,
+      "eval/heldout/zero_std/all_zero_percentage": 1.0,
+      "eval/heldout/zero_std/all_one_percentage": 0.0,
+      "eval/heldout/truncated_ratio": 1.0,
+      "eval/heldout-truncated_ratio": 1.0
+    },
+    {
+      "kind": "perf",
+      "rollout_id": 0,
+      "rollout/episode_raw_reward": 0.125,
+      "rollout/zero_std/all_zero_percentage": 0.75,
+      "rollout/zero_std/all_one_percentage": 0.0,
+      "rollout/truncated_ratio": 0.875
+    },
+    {
+      "kind": "perf",
+      "rollout_id": 1,
+      "rollout/episode_raw_reward": 0.125,
+      "rollout/zero_std/all_zero_percentage": 0.75,
+      "rollout/zero_std/all_one_percentage": 0.0,
+      "rollout/truncated_ratio": 1.0
+    },
+    {
+      "kind": "eval",
+      "rollout_id": 1,
+      "eval/heldout/episode_raw_reward": 0.125,
+      "eval/heldout/zero_std/all_zero_percentage": 0.0,
+      "eval/heldout/zero_std/all_one_percentage": 0.0,
+      "eval/heldout/truncated_ratio": 1.0,
+      "eval/heldout-truncated_ratio": 1.0
+    }
+  ]
+}
