@@ -75,6 +75,7 @@ cp /patch/open_instruct/data_loader.py \
     /patch/open_instruct/ground_truth_utils.py \
     /patch/open_instruct/grpo_fast.py \
     /patch/open_instruct/grpo_utils.py \
+    /patch/open_instruct/actor_manager.py \
     /stage/open_instruct/ \
 \&\& source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
