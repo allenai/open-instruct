@@ -498,7 +498,7 @@ run_one_model() {
     # Same attention/MoE backends selected either way, so nothing is degraded.
     # Neither wheel is on PyPI at this version; they come from flashinfer.ai.
     uvx --python 3.12 \
-        ${LOAD_FORMAT:+$([ "$LOAD_FORMAT" = instanttensor ] && printf -- "--with instanttensor")} \
+        $([ "$LOAD_FORMAT" = instanttensor ] && printf -- '--with instanttensor') \
         ${FLASHINFER_WHEELS:+--with flashinfer-cubin==${FLASHINFER_VERSION} \
           --with flashinfer-jit-cache==${FLASHINFER_VERSION} \
           --index-strategy unsafe-best-match \
@@ -517,7 +517,7 @@ run_one_model() {
         ${ENABLE_EP:+--enable-expert-parallel} \
         --trust-remote-code \
         ${LOAD_FORMAT:+--load-format "$LOAD_FORMAT"} \
-        ${LOAD_FORMAT:---safetensors-load-strategy "${SAFETENSORS_LOAD_STRATEGY:-prefetch}"} \
+        $([ -z "$LOAD_FORMAT" ] && printf -- '--safetensors-load-strategy %s' "${SAFETENSORS_LOAD_STRATEGY:-prefetch}") \
         >"$vllm_log" 2>&1 &
     local vllm_pid=$!
 
