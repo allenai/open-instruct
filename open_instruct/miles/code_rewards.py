@@ -112,14 +112,21 @@ def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfi
 
 # The code service is an external API gateway that returns transient 5xx errors
 # under load. urllib3 retries only idempotent methods by default, so the scoring
-# POSTs must be allowed explicitly; the backoff grows 1, 2, 4, ... seconds and is
-# capped by urllib3, about four minutes in total before the verifier gives up.
+# POSTs must be allowed explicitly; the backoff grows 1, 2, 4 seconds. With the
+# 30-second request timeout, a dead gateway costs at most about two minutes per
+# sample before the configured failure policy applies. The earlier eight-retry
+# budget took 517-530 seconds per failed sample and stalled whole prompt groups.
 RETRY = requests.adapters.Retry(
-    total=8,
+    total=3,
     backoff_factor=1.0,
     status_forcelist=[502, 503, 504],
     allowed_methods=frozenset({"GET", "POST"}),
     raise_on_status=False,
+)
+# Worst-case seconds one sample can spend inside the HTTP layer at the default
+# 30-second timeout: (total + 1) attempts plus the exponential backoff sleeps.
+RETRY_WORST_CASE_SECONDS = (RETRY.total + 1) * 30.0 + sum(
+    min(RETRY.backoff_factor * 2**i, 120) for i in range(RETRY.total)
 )
 
 

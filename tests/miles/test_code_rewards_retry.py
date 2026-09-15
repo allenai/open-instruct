@@ -15,10 +15,13 @@ from open_instruct.miles import code_rewards
 def test_retry_policy_covers_the_scoring_posts():
     retry = code_rewards.RETRY
     assert "POST" in retry.allowed_methods
-    assert retry.total >= 5
+    assert 2 <= retry.total <= 4
     assert {502, 503, 504} <= set(retry.status_forcelist)
-    # Enough backoff to outlast a gateway hiccup, not so much that a dead service hangs a run forever.
-    assert 60 <= sum(min(retry.backoff_factor * 2**i, 120) for i in range(retry.total)) <= 600
+    # Enough backoff to outlast a gateway hiccup, not so much that a dead service
+    # stalls a prompt group: the live broad runs measured 517-530 s per failed
+    # sample under the earlier eight-retry budget. Bound the whole HTTP layer.
+    assert 3 <= sum(min(retry.backoff_factor * 2**i, 120) for i in range(retry.total)) <= 60
+    assert code_rewards.RETRY_WORST_CASE_SECONDS <= 180
 
 
 def test_session_mounts_the_retry_policy():

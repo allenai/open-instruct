@@ -125,6 +125,9 @@ async def train(args, *, export_hf=None):
                     await learner.finalize_checkpoint(rollout_id)
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
+                # Warm compiler caches now exist; publish them in the background
+                # so a later preemption does not discard this process's warmup.
+                startup_cache.publish_progress(args, rollout_id)
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)

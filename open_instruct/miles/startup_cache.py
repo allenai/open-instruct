@@ -29,6 +29,11 @@ ENV = "OI_CORE_STARTUP_CACHE"
 # One budget for all workers; no per-rank multiplication at shutdown.
 PUBLICATION_TIMEOUT_SECONDS = 240
 PUBLISHERS_PER_NODE = 2
+# Publish warm caches after the first committed checkpoint of each process and
+# then every N later checkpoints, so a preempted run still leaves a reusable
+# generation. Publication keeps the worker's mutable local cache in place.
+PROGRESS_PUBLICATION_INTERVAL = 10
+_PROGRESS: dict[str, dict[str, Any]] = {}
 DEFAULT_SHARED = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 
 
@@ -210,8 +215,12 @@ def setup_worker():
     logger.info("Core compiler cache worker %s: %s", policy["slot"], report["restore"])
 
 
-def publish_worker(report):
-    """Runs on the original node after successful training and worker disposal."""
+def publish_worker(report, *, retain_local=False):
+    """Runs on the original node; deletes the private copy only after final teardown.
+
+    With ``retain_local`` the worker is still live: its mutable cache stays in
+    place and a snapshot that changes underneath is recorded as rejected.
+    """
     local = Path(report["local"])
     if not local.name.startswith("core-triton-") or local.parent != Path("/tmp"):
         raise ValueError("Unexpected worker cache directory")
@@ -236,12 +245,19 @@ def publish_worker(report):
     except Exception as error:
         result["publish"] = {"status": "rejected", "reason": f"{type(error).__name__}: {error}"}
     else:
-        shutil.rmtree(local)
+        if not retain_local:
+            shutil.rmtree(local)
     return result
 
 
-async def _publish_all(workers):
+def publish_worker_retained(report):
+    """Live-worker variant for progress publication; the private cache stays in place."""
+    return publish_worker(report, retain_local=True)
+
+
+async def _publish_all(workers, *, retain_local=False):
     ray = importlib.import_module("ray")
+    publisher = publish_worker_retained if retain_local else publish_worker
     strategies = importlib.import_module("ray.util.scheduling_strategies")
     limits = {worker["node_id"]: asyncio.Semaphore(PUBLISHERS_PER_NODE) for worker in workers}
 
@@ -253,7 +269,7 @@ async def _publish_all(workers):
                     "Core compiler cache publication queued: slot=%s node=%s", worker["slot"], worker["node_id"]
                 )
                 task = (
-                    ray.remote(num_cpus=0, max_retries=0)(publish_worker)
+                    ray.remote(num_cpus=0, max_retries=0)(publisher)
                     .options(
                         scheduling_strategy=strategies.NodeAffinitySchedulingStrategy(worker["node_id"], soft=False)
                     )
@@ -296,6 +312,85 @@ async def _publish_all(workers):
     ]
 
 
+def _worker_reports(report_dir):
+    """Split worker startup records into publishable workers and cold/unavailable ones."""
+    workers, others = [], []
+    for path in sorted(Path(report_dir).glob("*.json")):
+        worker = json.loads(path.read_text())
+        (workers if "fingerprint" in worker else others).append(worker)
+    return workers, others
+
+
+def _save_report(args, name, report):
+    if not getattr(args, "save", None):
+        return
+    try:
+        target = Path(args.save) / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(cache.encoded(report))
+    except Exception as error:
+        logger.warning("Core compiler cache report could not be saved: %s: %s", type(error).__name__, error)
+
+
+def progress_due(checkpoints_seen, published, *, interval=PROGRESS_PUBLICATION_INTERVAL):
+    """First committed checkpoint of this process, then every ``interval`` checkpoints."""
+    if published == 0:
+        return True
+    return checkpoints_seen % interval == 0
+
+
+async def _publish_progress(args, policy, state, rollout_id):
+    started = time.monotonic()
+    report = {"rollout_id": rollout_id, "checkpoints_seen": state["checkpoints_seen"], "workers": []}
+    try:
+        workers, others = _worker_reports(policy["report_dir"])
+        report["workers"].extend(others)
+        report["workers"].extend(await _publish_all(workers, retain_local=True))
+    except Exception as error:
+        report["publication_error"] = f"{type(error).__name__}: {error}"
+        logger.warning("Core compiler cache progress publication unavailable: %s", report["publication_error"])
+    report["seconds"] = time.monotonic() - started
+    state["published"] += 1
+    state["history"].append(report)
+    _save_report(
+        args, "compiler-cache-progress.json", {"report_dir": policy["report_dir"], "publications": state["history"]}
+    )
+    logger.info("Core compiler cache progress publication: %s", json.dumps(report))
+
+
+def publish_progress(args, rollout_id):
+    """Schedule a bounded background publication after a committed checkpoint.
+
+    Training is not blocked: the publication runs as an asyncio task using the
+    same per-node Ray tasks as the final publication, with workers still live.
+    At most one progress publication is in flight; a checkpoint that arrives
+    while one is running is simply counted. Failures never fail the run.
+    """
+    policy = getattr(args, "olmo_core_startup_cache", None)
+    if not policy:
+        return None
+    state = _PROGRESS.setdefault(
+        policy["report_dir"], {"checkpoints_seen": 0, "published": 0, "task": None, "history": []}
+    )
+    state["checkpoints_seen"] += 1
+    task = state["task"]
+    if task is not None and not task.done():
+        return None
+    if not progress_due(state["checkpoints_seen"], state["published"]):
+        return None
+    state["task"] = asyncio.create_task(_publish_progress(args, policy, state, rollout_id))
+    return state["task"]
+
+
+async def _drain_progress(policy):
+    state = _PROGRESS.pop(policy["report_dir"], None)
+    task = state["task"] if state else None
+    if task is None or task.done():
+        return
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 async def finish(args, *, success):
     """Best-effort publication after teardown, with one bounded wait for all nodes."""
     policy = getattr(args, "olmo_core_startup_cache", None)
@@ -304,24 +399,14 @@ async def finish(args, *, success):
     started = time.monotonic()
     report = {"success": success, "workers": [], "report_dir": policy["report_dir"]}
     try:
+        await _drain_progress(policy)
         if success:
-            workers = []
-            for path in sorted(Path(policy["report_dir"]).glob("*.json")):
-                worker = json.loads(path.read_text())
-                if "fingerprint" not in worker:
-                    report["workers"].append(worker)
-                else:
-                    workers.append(worker)
+            workers, others = _worker_reports(policy["report_dir"])
+            report["workers"].extend(others)
             report["workers"].extend(await _publish_all(workers))
     except Exception as error:
         report["publication_error"] = f"{type(error).__name__}: {error}"
         logger.warning("Core compiler cache publication unavailable: %s", report["publication_error"])
     report["seconds"] = time.monotonic() - started
-    if getattr(args, "save", None):
-        try:
-            target = Path(args.save) / "compiler-cache.json"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(cache.encoded(report))
-        except Exception as error:
-            logger.warning("Core compiler cache report could not be saved: %s: %s", type(error).__name__, error)
+    _save_report(args, "compiler-cache.json", report)
     logger.info("Core compiler cache completion: %s", json.dumps(report))
