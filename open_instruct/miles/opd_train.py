@@ -16,9 +16,12 @@ def main():
         if key.startswith(("OI_OPD_", "MILES_", "WANDB_"))
         or key in ("PYTHONPATH", "CUDA_DEVICE_MAX_CONNECTIONS", "CUDNN_HOME", "CUDNN_PATH")
     }
+    module_file = miles.__file__
+    if module_file is None:
+        raise RuntimeError("Native OPD requires the Miles source checkout")
     ray.init(num_gpus=3, include_dashboard=False, runtime_env={"env_vars": env})
     try:
-        runpy.run_path(str(Path(miles.__file__).resolve().parents[1] / "train.py"), run_name="__main__")
+        runpy.run_path(str(Path(module_file).resolve().parents[1] / "train.py"), run_name="__main__")
     finally:
         ray.shutdown()
 
