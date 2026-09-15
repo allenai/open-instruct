@@ -4,6 +4,18 @@ Research code for our paper **Learning to Solve Hard Problems in RL for LLMs by 
 
 This is the code for reproducing the experiments in the paper. For cleaner code implementing NGU as an algorithm, check out the [PR in open-instruct](https://github.com/allenai/open-instruct/pull/1861).
 
+See also [the paper on Arxiv](https://arxiv.org/abs/2609.13443) and [the blog post](https://mnoukhov.github.io/posts/ngu/). To cite:
+
+```
+@misc{noukhovitch_ngu_2026,
+	title = {Learning to Solve Hard Problems in RL for LLMs by Never Giving Up},
+	url = {https://arxiv.org/abs/2609.13443},
+	author = {Noukhovitch, Michael and Ivison, Hamish and Lambert, Nathan and Courville, Aaron},
+	month = sep,
+	year = {2026},
+}
+```
+
 ## Info
 
 This is a fork of [`allenai/open-instruct`](https://github.com/allenai/open-instruct)
