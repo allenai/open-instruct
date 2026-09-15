@@ -2621,23 +2621,31 @@ class WeightSyncTrigger:
         self._lock = threading.Lock()
         self._completion_condition = threading.Condition(self._lock)
         self._step: int | None = None
+        self._post_update = False
         self._completed_step = -1
 
-    def notify(self, step: int | None = None) -> None:
+    def notify(self, step: int | None = None, post_update: bool = False) -> None:
+        """Request a sync labelled ``step``.
+
+        ``post_update=True`` marks a sync that publishes the weights produced by training
+        step ``step``; the initial sync instead publishes the weights that training step
+        ``step`` will consume. The distinction only matters for ``synchronous_rollouts``.
+        """
         with self._lock:
             if step is not None:
                 self._step = step
+                self._post_update = post_update
         self._event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
         return self._event.wait(timeout=timeout)
 
-    def get_step_and_clear(self) -> int | None:
-        """Atomically gets the step and clears the event."""
+    def get_step_and_clear(self) -> tuple[int | None, bool]:
+        """Atomically gets the step and its post-update flag, then clears the event."""
         with self._lock:
-            step = self._step
+            step, post_update = self._step, self._post_update
             self._event.clear()
-            return step
+            return step, post_update
 
     def mark_completed(self, step: int) -> None:
         """Record that all vLLM engines now serve ``step`` weights."""
@@ -2665,7 +2673,8 @@ def weight_sync_thread(
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
     if resume_training_step > 1:
-        weight_sync_trigger.notify(step=resume_training_step - 1)
+        # The restored checkpoint holds the weights produced by training step ``resume_training_step - 1``.
+        weight_sync_trigger.notify(step=resume_training_step - 1, post_update=True)
 
     while not stop_event.is_set():
         # Wait for weight sync trigger from main thread
@@ -2673,7 +2682,7 @@ def weight_sync_thread(
             continue
 
         # Clear the event for next iteration
-        target_model_step = weight_sync_trigger.get_step_and_clear()
+        target_model_step, post_update = weight_sync_trigger.get_step_and_clear()
 
         try:
             with Timer("[Weight Sync]") as timer:
@@ -2725,6 +2734,12 @@ def weight_sync_thread(
                     desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
                     enable=args.verbose,
                 )
+                # Data-preparation step ``s`` feeds trainer step ``s + 1``. A post-update sync of
+                # step ``t`` serves the weights trainer step ``t + 1`` consumes, so data step ``t``
+                # is on-policy; the initial sync labelled ``t`` serves the weights trainer step
+                # ``t`` consumes, so data step ``t - 1`` is on-policy.
+                on_policy_data_step = target_model_step if post_update else target_model_step - 1
+                ray.get(actor_manager.set_on_policy_data_step.remote(on_policy_data_step))
                 weight_sync_trigger.mark_completed(target_model_step)
 
         # Calculate distribution statistics
@@ -3486,7 +3501,7 @@ def run_training(
 
         if weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
-            weight_sync_trigger.notify(step=training_step)
+            weight_sync_trigger.notify(step=training_step, post_update=True)
         elif training_step == resume_training_step:
             # Non-ZeRO-3 runs initialise weight sync after the first training
             # step. ZeRO-3 is handled pre-loop via a dummy step, so
@@ -3756,6 +3771,10 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+    if streaming_config.synchronous_rollouts and args.deepspeed_stage != 3:
+        # Non-ZeRO-3 runs perform their first weight sync after training step one and label it
+        # as an initial sync, which would leave the on-policy gate waiting forever.
+        raise ValueError("`synchronous_rollouts` is only supported with `deepspeed_stage=3`.")
 
     if args.opd_teacher_model_name_or_path is not None and args.opd_pure and streaming_config.filter_zero_std_samples:
         logger.warning(

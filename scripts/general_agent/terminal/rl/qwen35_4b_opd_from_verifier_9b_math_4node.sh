@@ -35,6 +35,7 @@ if [[ -n "$PATCH_DATASET" ]]; then
         /patch/open_instruct/ground_truth_utils.py
         /patch/open_instruct/grpo_fast.py
         /patch/open_instruct/grpo_utils.py
+        /patch/open_instruct/actor_manager.py
         /stage/open_instruct/
         '&&'
     )

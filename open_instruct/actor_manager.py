@@ -42,6 +42,7 @@ class ActorManager:
         vllm_config: data_loader.VLLMConfig,
     ):
         self._should_stop = False
+        self._on_policy_data_step = 0
         self._last_updated = datetime.now()
         self._dashboard_port: int | None = None
         self._queues = queues or {}
@@ -138,6 +139,20 @@ class ActorManager:
     def should_stop(self) -> bool:
         """Check if actors should stop processing."""
         return self._should_stop
+
+    def set_on_policy_data_step(self, step: int):
+        """Record the data-preparation step whose rollouts are on-policy under the weights vLLM now serves.
+
+        Set by the weight sync thread after every completed sync. Data-preparation step ``s``
+        (zero-based) feeds trainer step ``s + 1``, so its rollouts are on-policy once the
+        weights produced by trainer step ``s`` have been published. Only consulted when
+        ``StreamingDataLoaderConfig.synchronous_rollouts`` is enabled.
+        """
+        self._on_policy_data_step = max(self._on_policy_data_step, step)
+
+    def on_policy_data_step(self) -> int:
+        """Largest data-preparation step whose rollouts would be on-policy under the served weights."""
+        return self._on_policy_data_step
 
     def report_token_stats(self, prompt_tokens: int, generation_tokens: int):
         """Report token statistics from main thread."""

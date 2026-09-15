@@ -564,6 +564,18 @@ class StreamingDataLoaderConfig:
 
     # Batching
     async_steps: int = 8
+    synchronous_rollouts: bool = False
+    """Generate every training batch strictly on-policy.
+
+    By default the generator keeps ``async_steps`` batches in flight, so the batch for step
+    N+1 is produced by the weights that preceded update N (or, with in-flight updates, by a
+    mix of weights). With this flag the data-preparation actor holds each batch's prompts
+    until the weight sync for the previous training step has completed on every vLLM
+    engine, so all rollouts consumed by a step were sampled from exactly the policy that
+    step trains. Generation and training no longer overlap, so steps take longer.
+    Requires ``async_steps=1``, ``inflight_updates=False``, no zero-std filtering or active
+    sampling (dropped prompts are not replenished in this mode), and DeepSpeed ZeRO-3.
+    """
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -725,7 +737,20 @@ class StreamingDataLoaderConfig:
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
             )
         if self.async_steps < 1:
-            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+            raise ValueError(
+                "`async_steps` must be greater than 0. For strictly on-policy rollouts set "
+                "`async_steps=1` together with `synchronous_rollouts=True`."
+            )
+        if self.synchronous_rollouts:
+            if self.async_steps != 1:
+                raise ValueError("`synchronous_rollouts` requires `async_steps=1`.")
+            if self.inflight_updates:
+                raise ValueError("`synchronous_rollouts` requires `inflight_updates=False`.")
+            if self.active_sampling or self.filter_zero_std_samples or self.no_resampling_pass_rate is not None:
+                raise ValueError(
+                    "`synchronous_rollouts` does not replenish dropped prompts, so it requires "
+                    "`active_sampling=False`, `filter_zero_std_samples=False` and no `no_resampling_pass_rate`."
+                )
         if not 0.0 <= self.mask_non_submitting_completions_percent < 1.0:
             raise ValueError("`mask_non_submitting_completions_percent` must be in [0.0, 1.0).")
         if self.mask_non_submitting_completions_percent > 0.0 and not self.mask_non_submitting_completions:
@@ -1608,6 +1633,23 @@ class DataPreparationActor:
         self._prep_future = self._executor.submit(self._data_preparation_loop)
         logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
+    def _wait_for_on_policy_weights(self, step: int) -> None:
+        """Block until every vLLM engine serves the weights that make data step ``step`` on-policy."""
+        wait_start_time = time.perf_counter()
+        last_log_time = wait_start_time
+        while (ready_step := ray.get(self.actor_manager.on_policy_data_step.remote())) < step:
+            if time.perf_counter() - last_log_time > 60:
+                logger.info(
+                    f"[DataPreparationActor] Step {step}: waiting for weight sync (on-policy through step "
+                    f"{ready_step}) for {time.perf_counter() - wait_start_time:.0f}s"
+                )
+                last_log_time = time.perf_counter()
+            time.sleep(0.1)
+        logger.info(
+            f"[DataPreparationActor] Step {step}: weights synced after {time.perf_counter() - wait_start_time:.1f}s; "
+            f"queueing {self.global_batch_size} on-policy prompts"
+        )
+
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
 
@@ -1637,6 +1679,23 @@ class DataPreparationActor:
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
+            if self.config.synchronous_rollouts and step > self.training_step:
+                # The initial batch was queued above against the starting weights. Every later
+                # batch waits until the sync that published the weights trained on the previous
+                # batch has finished, so its rollouts are sampled from exactly the policy that
+                # trainer step ``step + 1`` will update.
+                self._wait_for_on_policy_weights(step)
+                for _ in range(self.global_batch_size):
+                    add_prompt_to_generator(
+                        next(self.iter_dataloader),
+                        self.iter_dataloader._epoch,
+                        self.param_prompt_Q,
+                        self.generation_config,
+                        is_eval=False,
+                        base_env_config=self.base_env_config,
+                        ground_truth_overrides=self.ground_truth_overrides,
+                        image_prewarm_actors=self.image_prewarm_actors,
+                    )
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
@@ -1652,7 +1711,7 @@ class DataPreparationActor:
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
-                replenish_prompts=True,
+                replenish_prompts=not self.config.synchronous_rollouts,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,

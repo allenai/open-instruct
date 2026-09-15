@@ -499,6 +499,40 @@ class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):
         self.assertEqual(config.rollouts_save_path, "/tmp/rollouts")
 
 
+class TestSynchronousRolloutsConfig(unittest.TestCase):
+    def test_synchronous_rollouts_accepts_on_policy_settings(self):
+        config = open_instruct.data_loader.StreamingDataLoaderConfig(
+            synchronous_rollouts=True, async_steps=1, inflight_updates=False, filter_zero_std_samples=False
+        )
+        self.assertTrue(config.synchronous_rollouts)
+
+    def test_synchronous_rollouts_requires_single_async_step(self):
+        with self.assertRaises(ValueError) as context:
+            open_instruct.data_loader.StreamingDataLoaderConfig(
+                synchronous_rollouts=True, async_steps=2, inflight_updates=False, filter_zero_std_samples=False
+            )
+        self.assertIn("async_steps=1", str(context.exception))
+
+    def test_synchronous_rollouts_rejects_inflight_updates(self):
+        with self.assertRaises(ValueError) as context:
+            open_instruct.data_loader.StreamingDataLoaderConfig(
+                synchronous_rollouts=True, async_steps=1, inflight_updates=True, filter_zero_std_samples=False
+            )
+        self.assertIn("inflight_updates", str(context.exception))
+
+    def test_synchronous_rollouts_rejects_prompt_dropping_filters(self):
+        with self.assertRaises(ValueError) as context:
+            open_instruct.data_loader.StreamingDataLoaderConfig(
+                synchronous_rollouts=True, async_steps=1, inflight_updates=False, filter_zero_std_samples=True
+            )
+        self.assertIn("filter_zero_std_samples", str(context.exception))
+
+    def test_zero_async_steps_points_to_synchronous_rollouts(self):
+        with self.assertRaises(ValueError) as context:
+            open_instruct.data_loader.StreamingDataLoaderConfig(async_steps=0)
+        self.assertIn("synchronous_rollouts", str(context.exception))
+
+
 class TestMaskNonSubmittingCompletionsPercent(unittest.TestCase):
     def test_sample_non_submitting_unmask_idxes_hits_target_fraction(self):
         sampled = open_instruct.data_loader._sample_non_submitting_unmask_idxes(
