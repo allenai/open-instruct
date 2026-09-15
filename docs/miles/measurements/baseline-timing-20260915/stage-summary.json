@@ -1,0 +1,49 @@
+{
+  "Dense broad": {
+    "updates": 7,
+    "stage_mean_seconds": {
+      "generation_wait": 2410.451404815939,
+      "training": 163.2209235198596,
+      "publication": 1.8238302782577063,
+      "checkpoint": 5.568513349829508
+    },
+    "stage_total_seconds": {
+      "generation_wait": 16873.159833711572,
+      "training": 1142.5464646390174,
+      "publication": 12.766811947803944,
+      "checkpoint": 38.979593448806554
+    }
+  },
+  "MoE broad, warm": {
+    "updates": 5,
+    "stage_mean_seconds": {
+      "generation_wait": 380.1089910688344,
+      "training": 44.08295690298546,
+      "publication": 3.0255735529819505,
+      "checkpoint": 21.179652246390468
+    },
+    "stage_total_seconds": {
+      "generation_wait": 1900.5449553441722,
+      "training": 220.4147845149273,
+      "publication": 15.127867764909752,
+      "checkpoint": 105.89826123195235
+    }
+  },
+  "Core GSM8K": {
+    "updates": 79,
+    "stage_mean_seconds": {
+      "generation_wait": 402.4524069848718,
+      "training": 10.523777609879646,
+      "publication": 1.7479262197967855,
+      "checkpoint": 1.4090401296256274,
+      "evaluation": 44.28898031667134
+    },
+    "stage_total_seconds": {
+      "generation_wait": 31793.740151804872,
+      "training": 831.378431180492,
+      "publication": 138.08617136394605,
+      "checkpoint": 111.31417024042457,
+      "evaluation": 3498.829445017036
+    }
+  }
+}
