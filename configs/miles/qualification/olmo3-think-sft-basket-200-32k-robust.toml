@@ -1,15 +1,16 @@
+# Fresh protected restart; retains prior initial evaluation, not prior optimizer updates.
 # Four-domain learning baseline: same frozen prompts/holdouts, 32K response budget.
 # Code-service failures receive tagged zero rewards, matching original Open Instruct.
 # Recompute and eight active sequences per engine bound longer-context memory use.
 schema_version = 1
-name = "olmo3-think-sft-basket-200-32k-robust-20260914"
+name = "olmo3-think-sft-basket-200-32k-robust-20260915"
 
 [model]
 source = "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-robust-20260914"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-robust-20260915"
 export_hf = true
 
 [launch]
@@ -18,7 +19,7 @@ budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "4h"
-timeout = "24h"
+timeout = "48h"
 auto_resume = false
 gpus_per_replica = 8
 
@@ -33,6 +34,7 @@ mount_path = "/weka/oe-adapt-default"
 [launch.env]
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 OI_MILES_CODE_FAILURE_POLICY = "zero"
+OI_MILES_JUDGE_FAILURE_POLICY = "zero"
 SGLANG_TIMEOUT_KEEP_ALIVE = "60"
 NCCL_SOCKET_IFNAME = "ib"
 NCCL_IB_HCA = "^=mlx5_bond_0"
@@ -54,10 +56,10 @@ shuffle = true
 
 [training]
 num_rollouts = 200
-skip_eval_before_train = false
+skip_eval_before_train = true
 eval_interval = 50
 save_checkpoints = true
-save_interval = 50
+save_interval = 5
 
 [trainer]
 gpus = 8
@@ -164,8 +166,10 @@ model = "Qwen/Qwen3-32B"
 revision = "9216db5781bf21249d130ec9da846c4624c16137"
 gpus = 1
 tensor_parallel_size = 1
-max_context_length = 40960
-max_concurrent_calls = 16
+max_context_length = 131072
+context_extension = "qwen3-yarn-128k"
+max_concurrent_calls = 4
+timeout = 600
 chat_template = "qwen3-no-thinking"
 prepared_dir = "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
 

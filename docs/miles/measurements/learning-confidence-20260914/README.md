@@ -18,8 +18,9 @@ changes effective exposure. The larger qualifier batch was not the comparison.
 Dense GSM8K reached 44 updates; dense basket reached 5. Neither has reached its
 first post-training evaluation at 50. Dense basket takes about 30 minutes per
 collection despite 40–50 second optimizer calls. At that rate, 200 updates exceed
-its 24-hour allocation, and its first save at 50 is too late. This is unresolved;
-the active dense basket has not been stopped or silently reconfigured.
+its 24-hour allocation, and its first save at 50 is too late. The dense basket replacement uses the protected parser/fallback, five-update
+saves and a 48-hour limit. It starts fresh and reuses initial-evaluation evidence;
+its predecessor's partial optimizer updates are not carried over.
 
 MoE basket failed after 25 optimizer calls. Three judge attempts returned a
 Markdown `**SCORE:** 1` line that the JSON-style parser rejected. The result bundle
@@ -30,7 +31,10 @@ The parser now accepts a single explicit Markdown score line. Exhausted malforme
 or failed transport replies produce tagged zero rewards, with per-sample evidence
 and `rollout/general_judge/{samples,errors,error_fraction}`. Configuration/context
 errors remain fatal and startup judge canaries explicitly use strict mode.
-These changes are not retroactively present in the active dense basket.
+These changes are present in the new robust profiles only. The MoE protected
+restart is [01M2HDRSBP66D7QXJGH9RQ5N48](https://beaker.org/ex/01M2HDRSBP66D7QXJGH9RQ5N48).
+Twenty focused runtime tests passed, including parser rejection, measured fallback,
+strict canaries, context policy and service counters; Ruff passed.
 
 ## Progress — September 15, 00:28 UTC
 
