@@ -59,27 +59,24 @@ async def reward(args, sample, **kwargs):
             timeout_secs=service["request_timeout"],
         )
     scores, mask = opd_alignment.extract_scores(result, ids, mapping)
-    return {
-        "teacher_log_probs": scores,
-        "opd_alignment_mask": mask,
-        "student_tokenizer_sha256": service["student_tokenizer_sha256"],
-        "teacher_tokenizer_sha256": service["teacher_tokenizer_sha256"],
-    }
+    sample.teacher_log_probs = torch.tensor(scores, dtype=torch.float32)
+    sample.train_metadata = dict(
+        sample.train_metadata or {},
+        opd_alignment_mask=mask,
+        student_tokenizer_sha256=service["student_tokenizer_sha256"],
+        teacher_tokenizer_sha256=service["teacher_tokenizer_sha256"],
+    )
+    # Native rollout statistics run before post_process and require scalar task
+    # rewards, including when two siblings produce identical responses/scores.
+    return 0.0
 
 
 def post_process(args, samples, **kwargs):
     for sample in samples:
-        result = sample.get_reward_value(args)
-        if len(result["teacher_log_probs"]) != sample.response_length:
+        if sample.teacher_log_probs is None or len(sample.teacher_log_probs) != sample.response_length:
             raise ValueError("Teacher response does not match the learner response length")
-        sample.teacher_log_probs = torch.tensor(result["teacher_log_probs"], dtype=torch.float32)
-        sample.train_metadata = dict(
-            sample.train_metadata or {},
-            **{
-                key: result[key]
-                for key in ("opd_alignment_mask", "student_tokenizer_sha256", "teacher_tokenizer_sha256")
-            },
-        )
+        if len(sample.train_metadata["opd_alignment_mask"]) != sample.response_length:
+            raise ValueError("Teacher mask does not match the learner response length")
     if args.save and getattr(args.olmo_core, "diagnostic_interval", 0) > 0:
         path = Path(args.save).parent / "teacher-scores.jsonl"
         with path.open("a") as stream:
@@ -89,7 +86,8 @@ def post_process(args, samples, **kwargs):
                         {
                             "sample_index": sample.index,
                             "response_length": sample.response_length,
-                            **sample.get_reward_value(args),
+                            "teacher_log_probs": sample.teacher_log_probs.tolist(),
+                            **sample.train_metadata,
                         },
                         allow_nan=False,
                     )

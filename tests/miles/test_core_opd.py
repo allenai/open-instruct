@@ -1,5 +1,6 @@
 """Contracts for cross-tokenizer OPD through the existing Core learner."""
 
+import asyncio
 import io
 import json
 import urllib.error
@@ -212,3 +213,26 @@ def test_ready_teacher_must_match_checkpoint(monkeypatch):
     assert cluster.ready_model("http://teacher", "/model")["model_path"] == "/model"
     with pytest.raises(RuntimeError, match="checkpoint"):
         cluster.ready_model("http://teacher", "/wrong")
+
+
+def test_teacher_returns_scalar_reward_before_native_rollout_logging(monkeypatch):
+    service = dict(
+        alignment="shared_token_ids",
+        max_context_length=10,
+        endpoint="http://teacher",
+        request_timeout=5,
+        student_tokenizer_sha256="student",
+        teacher_tokenizer_sha256="teacher",
+    )
+    monkeypatch.setenv("OI_MILES_OPD_TEACHER", "test")
+    monkeypatch.setattr(core_opd_hooks, "resources", lambda *args: (service, None, None, asyncio.Semaphore(1)))
+
+    async def score(*args, **kwargs):
+        return {"meta_info": {"input_token_logprobs": [[None, 1], [-1.0, 2], [-2.0, 3]]}}
+
+    monkeypatch.setattr(core_opd_hooks.on_policy_distillation, "_post_json", score)
+    sample = SimpleNamespace(tokens=[1, 2, 3], response_length=2, train_metadata=None)
+    assert asyncio.run(core_opd_hooks.reward(SimpleNamespace(hf_checkpoint="learner"), sample)) == 0.0
+    assert sample.teacher_log_probs.tolist() == [-1.0, -2.0]
+    assert sample.train_metadata["opd_alignment_mask"] == [1, 1]
+    assert core_opd_hooks.post_process(SimpleNamespace(save=None), [sample, sample]) == ([0.0, 0.0], [0.0, 0.0])
