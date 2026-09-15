@@ -47,3 +47,28 @@ and successful next update. Inspect cursor pending groups, checkpoint stage
 timings, and serving activity during writes; no `checkpoint_drain` stage should
 occur. Retain GPU native same-batch resume equality checks as a separate numerical
 qualification; this live async run does not reproduce identical sampled batches.
+
+
+## Recovery follow-up
+
+The GPU qualification restored optimizer state and eight pending prompt groups
+in a fresh process, then completed optimizer update 5 at 07:22 UTC September 15.
+This qualifies continuation from the native checkpoint, not bit-exact async
+sampling or a forced Beaker preemption. Final cleanup is tracked separately.
+
+Campaign configs had explicitly disabled the launcher's default automatic resume.
+The three Core campaign configs now enable it. An authenticated comparison of the
+saved run specification permits changing only this recovery flag without relaxing
+checks on model, data, objective or topology. The single-node GSM8K checkpoint
+has a completed update-50 marker. Its first recovery submission selected an
+incompatible newer image and failed before training; the campaign launcher now
+rejects that image choice before allocating GPUs. The required overlay base is
+`01M2CJG5RQQ93GEYNYAS7ASCQJ`.
+
+Multi-node retries now rendezvous using fresh process identities for every rank
+and receive a new shared coordination subdirectory. Staggered retries cannot
+consume previous readiness, failure or completion markers. Old directories remain
+as diagnostic evidence; wall-clock expiration is not used for correctness.
+A missing restarted peer hits the existing startup deadline. Automatic preemption
+recovery still relies on Beaker restarting the peer tasks together; this does not
+introduce unlimited retries for application exceptions.

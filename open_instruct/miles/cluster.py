@@ -1,6 +1,6 @@
 """Own a replicated Ray cluster and fixed-weight judges for one committed run.
 
-All coordination lives under a unique submission UUID on shared WEKA. No Beaker
+Each replica attempt receives a fresh coordination directory on shared WEKA. No Beaker
 credential reaches training. Beaker propagates failure/preemption; heartbeats
 also bound peer failures and startup hangs from inside the allocation.
 """
@@ -22,7 +22,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from open_instruct.miles import judge_registry, judge_server, judging, topology
+from open_instruct.miles import judge_registry, judge_server, judging, rendezvous, topology
 from open_instruct.miles.run_spec import RunSpec
 
 
@@ -187,7 +187,9 @@ def run(path):
     if count != layout["replicas"] or rank not in range(count):
         raise RuntimeError("Beaker replica topology differs from the submitted run")
     attempt = os.environ["OI_MILES_LAUNCH_ID"]
-    root = Path(spec.output["root"]) / "cluster" / attempt
+    root = rendezvous.join(
+        Path(spec.output["root"]) / "cluster" / attempt, rank, count, spec.launch["coordination"]["startup_timeout"]
+    )
     root.mkdir(parents=True, exist_ok=True)
     address = socket.gethostbyname(os.environ.get("BEAKER_NODE_HOSTNAME", socket.gethostname()))
     supervisor = Supervisor(spec, root, rank, count)

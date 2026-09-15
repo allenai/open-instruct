@@ -84,6 +84,11 @@ def main():
         default="scripts.miles.prepare_baseline_basket",
     )
     args = parser.parse_args()
+    if args.image != "01M2CJG5RQQ93GEYNYAS7ASCQJ":
+        parser.error(
+            "This campaign overlay requires base image 01M2CJG5RQQ93GEYNYAS7ASCQJ; "
+            "newer packaged images already contain a different MILES patch state."
+        )
     run = RunSpec.load(args.config)
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT):
         raise RuntimeError("Commit changes before launch")
