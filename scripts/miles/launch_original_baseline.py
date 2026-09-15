@@ -20,7 +20,15 @@ PREPARED = "/weka/oe-training-default/robertb/open-instruct/data/olmo3-sft-gsm8k
 
 
 def specification(
-    image, source_dataset, stage, name, *, keep_zero_advantage_groups=False, checkpoint_root=None, checkpoint_tag=None
+    image,
+    source_dataset,
+    stage,
+    name,
+    *,
+    keep_zero_advantage_groups=False,
+    checkpoint_root=None,
+    checkpoint_tag=None,
+    evaluation_model=None,
 ):
     output = "/weka/oe-training-default/robertb/open-instruct/runs/" + name
     args = [
@@ -28,7 +36,7 @@ def specification(
         "/tmp/qualification/scripts/miles/original_baseline.py",
         stage,
         "--model",
-        MODEL,
+        evaluation_model or MODEL,
         "--source",
         SOURCE,
         "--prepared",
@@ -57,6 +65,9 @@ def specification(
         "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     }
+    if stage == "export":
+        # Our own optimizer checkpoints contain trusted Python client state.
+        env["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
     task = {
         "name": name,
         "image": {"beaker": image},
@@ -69,17 +80,19 @@ def specification(
         ],
         "result": {"path": "/output"},
         "resources": {
-            "gpuCount": 0 if stage in {"prepare", "export"} else 8,
+            "gpuCount": 0 if stage in {"prepare", "export"} else (1 if stage == "evaluate" else 8),
             "cpuCount": 16 if stage == "prepare" else 48,
-            "memory": "256 GiB" if stage == "export" else ("64 GiB" if stage == "prepare" else "704 GiB"),
+            "memory": "256 GiB"
+            if stage == "export"
+            else ("64 GiB" if stage in {"prepare", "evaluate"} else "704 GiB"),
             "sharedMemory": "200 GiB" if stage in {"train", "smoke"} else "4 GiB",
         },
         "constraints": {"cluster": ["ai2/saturn" if stage in {"prepare", "export"} else "ai2/jupiter"]},
         "context": {"priority": "urgent", "minRuntime": "30m" if stage != "train" else "4h", "autoResume": False},
-        "timeout": "1h" if stage in {"prepare", "export"} else ("3h" if stage == "smoke" else "48h"),
+        "timeout": "1h" if stage in {"prepare", "export"} else ("3h" if stage in {"smoke", "evaluate"} else "48h"),
         "envVars": [{"name": k, "value": v} for k, v in env.items()],
     }
-    if stage not in {"prepare", "export"}:
+    if stage in {"train", "smoke"}:
         task["envVars"].append({"name": "WANDB_API_KEY", "secret": "robertb_WANDB_API_KEY"})
     return {
         "version": "v2",
@@ -92,12 +105,13 @@ def specification(
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("--stage", choices=("prepare", "smoke", "train", "export"), required=True)
+    parser.add_argument("--stage", choices=("prepare", "smoke", "train", "export", "evaluate"), required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--keep-zero-advantage-groups", action="store_true")
     parser.add_argument("--checkpoint-root")
     parser.add_argument("--checkpoint-tag")
+    parser.add_argument("--evaluation-model", help="Public HF model for independent evaluation")
     args = parser.parse_args()
     if args.image != "01KA3FGCMVYGVEX2NG7Q2JWZ8E":
         raise ValueError("Use the qualified historical Think image 01KA3FGCMVYGVEX2NG7Q2JWZ8E")
@@ -149,6 +163,7 @@ def main():
             keep_zero_advantage_groups=args.keep_zero_advantage_groups,
             checkpoint_root=args.checkpoint_root,
             checkpoint_tag=args.checkpoint_tag,
+            evaluation_model=args.evaluation_model,
         )
         if args.render_only:
             print(json.dumps(spec, indent=2))

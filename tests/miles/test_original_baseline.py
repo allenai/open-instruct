@@ -6,6 +6,7 @@ Run in its original image, with /stage before this checkout on PYTHONPATH.
 import __future__
 
 import ast
+import importlib
 import json
 import os
 import queue
@@ -341,3 +342,115 @@ def test_checkpoint_export_launch_is_cpu_only_on_saturn():
 def test_historical_zero_converter_imports_on_cpu():
     converter = original_baseline.load_zero_converter()
     assert callable(converter.get_fp32_state_dict_from_zero_checkpoint)
+
+
+def test_real_zero3_export_reconstructs_partitioned_weights(tmp_path, monkeypatch):
+    original_baseline.load_zero_converter()
+    config = importlib.import_module("deepspeed.runtime.zero.config")
+    monkeypatch.setenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"olmo3"}')
+    expected = torch.tensor([1.003, -2.333, 3.111])
+    save_file({"weight": torch.zeros(3, dtype=torch.bfloat16)}, model / "model.safetensors")
+    root = tmp_path / "checkpoints"
+    tag = root / "global_step101"
+    tag.mkdir(parents=True)
+    for rank, values in enumerate((expected[:2], torch.tensor([expected[2], 0.0]))):
+        torch.save(
+            {
+                "optimizer_state_dict": {
+                    "zero_stage": config.ZeroStageEnum.weights,
+                    "partition_count": 2,
+                    "fp32_flat_groups": [values],
+                    "optimizer_state_dict": {},
+                }
+            },
+            tag / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt",
+        )
+        torch.save(
+            {
+                "training_step": 100,
+                "buffer_names": [],
+                "module": {},
+                "param_shapes": [{"weight": torch.Size([3])}],
+                "shared_params": {},
+                "ds_version": "test",
+            },
+            tag / f"zero_pp_rank_{rank}_mp_rank_00_model_states.pt",
+        )
+    original_baseline.export_checkpoint(model, root, tag.name, tmp_path / "export")
+    with original_baseline.safe_open(tmp_path / "export/hf/model-00000.safetensors", framework="pt") as f:
+        assert torch.equal(f.get_tensor("weight"), expected.bfloat16())
+
+
+def test_evaluation_launch_is_separate_from_training():
+    task = launch_original_baseline.specification(
+        "image", "source", "evaluate", "test", evaluation_model="/weka/export/hf"
+    )["tasks"][0]
+    assert task["resources"]["gpuCount"] == 1
+    assert task["constraints"] == {"cluster": ["ai2/jupiter"]}
+    assert "evaluate --model /weka/export/hf" in task["arguments"][0]
+    assert not any(e["name"] == "WANDB_API_KEY" for e in task["envVars"])
+
+
+def test_eval_rejects_modified_frozen_source_before_starting_engine(tmp_path):
+    source, prepared = tmp_path / "source", tmp_path / "prepared"
+    source.mkdir()
+    prepared.mkdir()
+    (source / "manifest.json").write_text("{}")
+    (prepared / "preparation.json").write_text(json.dumps({"source_manifest_sha256": "bad"}))
+    with pytest.raises(ValueError, match="source differs"):
+        original_baseline.evaluate_checkpoint(tmp_path / "model", source, prepared, tmp_path / "eval")
+    assert not (tmp_path / "eval").exists()
+
+
+def test_independent_eval_keeps_frozen_tokens_and_all_outputs(tmp_path, monkeypatch):
+    source, prepared = tmp_path / "source", tmp_path / "prepared"
+    source.mkdir()
+    prepared.mkdir()
+    rows = [row() for _ in range(512)]
+    for index, sample in enumerate(rows):
+        sample["metadata"]["prepared_sample_id"] = f"gsm8k:train:{index}"
+    raw = b"".join(original_baseline.encoded(r) for r in rows)
+    (source / "eval.jsonl").write_bytes(raw)
+    manifest = original_baseline.encoded({"outputs": {"eval.jsonl": original_baseline.sha(raw)}})
+    (source / "manifest.json").write_bytes(manifest)
+    (prepared / "preparation.json").write_text(json.dumps({"source_manifest_sha256": original_baseline.sha(manifest)}))
+    monkeypatch.setattr(
+        original_baseline.dataset_transformation,
+        "TokenizerConfig",
+        lambda **kw: SimpleNamespace(tokenizer=Tokenizer()),
+    )
+    monkeypatch.setattr(original_baseline, "legacy_model", lambda *a: {})
+    seen = []
+
+    class Engine:
+        def __init__(self, **options):
+            assert options["max_model_len"] == 34816
+
+        def generate(self, prompts, sampling, **options):
+            assert sampling.temperature == 0.0 and sampling.max_tokens == 32768
+            seen.extend(prompts)
+            return [
+                SimpleNamespace(
+                    prompt_token_ids=p["prompt_token_ids"],
+                    outputs=[SimpleNamespace(text="-12", token_ids=[5, 6], finish_reason="stop")],
+                )
+                for p in prompts
+            ]
+
+    modules = {
+        "vllm": SimpleNamespace(LLM=Engine, SamplingParams=SimpleNamespace),
+        "open_instruct.ground_truth_utils": SimpleNamespace(
+            GSM8KVerifier=lambda: lambda **kw: SimpleNamespace(score=1.0)
+        ),
+    }
+    monkeypatch.setattr(original_baseline.importlib, "import_module", modules.__getitem__)
+    output = tmp_path / "eval"
+    original_baseline.evaluate_checkpoint(tmp_path / "model", source, prepared, output)
+    assert len(seen) == 512 and all(p["prompt_token_ids"] == [10, 11] for p in seen)
+    saved = original_baseline.read_jsonl(output / "generations.jsonl")
+    assert [r["id"] for r in saved] == [r["metadata"]["prepared_sample_id"] for r in rows]
+    summary = json.loads((output / "evaluation.json").read_text())
+    assert summary["correct"] == 512 and summary["capped"] == 0

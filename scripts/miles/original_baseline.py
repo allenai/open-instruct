@@ -476,9 +476,102 @@ def export_checkpoint(model, checkpoint_root, tag, output):
     print("ORIGINAL_CHECKPOINT_EXPORT_PASSED", json.dumps(receipt), flush=True)
 
 
+def evaluate_checkpoint(model, source, prepared, output):
+    """Greedy evaluation on the exact frozen 512 prompts, retaining every output."""
+    if output.exists():
+        raise ValueError("Use a fresh evaluation output directory")
+    receipt = json.loads((prepared / "preparation.json").read_text())
+    if sha((source / "manifest.json").read_bytes()) != receipt["source_manifest_sha256"]:
+        raise ValueError("Evaluation source differs from the prepared comparison")
+    manifest = json.loads((source / "manifest.json").read_text())
+    if sha((source / "eval.jsonl").read_bytes()) != manifest["outputs"]["eval.jsonl"]:
+        raise ValueError("Frozen evaluation file changed")
+    rows = read_jsonl(source / "eval.jsonl")
+    if len(rows) != 512:
+        raise ValueError("Expected the frozen 512-question evaluation")
+    tokenizer = dataset_transformation.TokenizerConfig(tokenizer_name_or_path=str(prepared / "tokenizer")).tokenizer
+    prompts = []
+    for row in rows:
+        converted = convert_row(row, tokenizer)
+        transformed = dataset_transformation.rlvr_tokenize_v2(converted, tokenizer)
+        prompts.append({"prompt_token_ids": transformed[dataset_transformation.INPUT_IDS_PROMPT_KEY]})
+    output.mkdir(parents=True)
+    alias = legacy_model(model, output / "legacy-model")
+    vllm = importlib.import_module("vllm")
+    verifiers = importlib.import_module("open_instruct.ground_truth_utils")
+    llm = vllm.LLM(
+        model=str(output / "legacy-model"),
+        tokenizer=str(prepared / "tokenizer"),
+        tensor_parallel_size=1,
+        dtype="bfloat16",
+        enforce_eager=True,
+        enable_prefix_caching=False,
+        gpu_memory_utilization=0.7,
+        max_model_len=34816,
+        max_num_seqs=32,
+        seed=17,
+    )
+    sampling = vllm.SamplingParams(
+        temperature=0.0,
+        top_p=1.0,
+        max_tokens=32768,
+        n=1,
+        seed=17,
+        include_stop_str_in_output=True,
+        skip_special_tokens=False,
+        stop=[],
+    )
+    verifier = verifiers.GSM8KVerifier()
+    results = []
+    with (output / "generations.jsonl").open("w") as stream:
+        for start in range(0, len(rows), 32):
+            completions = llm.generate(prompts[start : start + 32], sampling, use_tqdm=True)
+            if len(completions) != len(rows[start : start + 32]):
+                raise ValueError("Missing evaluation responses")
+            for row, prompt, completion in zip(rows[start : start + 32], prompts[start : start + 32], completions):
+                if completion.prompt_token_ids != prompt["prompt_token_ids"] or len(completion.outputs) != 1:
+                    raise ValueError("Evaluation output has different prompt tokens or sample count")
+                response = completion.outputs[0]
+                label = str(row["metadata"]["verifiers"][0]["target"])
+                result = {
+                    "id": row["metadata"]["prepared_sample_id"],
+                    "label": label,
+                    "prompt_token_ids": prompt["prompt_token_ids"],
+                    "text": response.text,
+                    "token_ids": list(response.token_ids),
+                    "finish_reason": response.finish_reason,
+                    "score": verifier(
+                        tokenized_prediction=list(response.token_ids), prediction=response.text, label=label
+                    ).score,
+                }
+                stream.write(encoded(result).decode())
+                results.append(result)
+            stream.flush()
+            print("ORIGINAL_EVAL_PROGRESS", len(results), sum(r["score"] for r in results), flush=True)
+    summary = {
+        "model": str(model),
+        "model_alias": alias,
+        "source": str(source),
+        "eval_sha256": manifest["outputs"]["eval.jsonl"],
+        "questions": len(results),
+        "correct": sum(r["score"] for r in results),
+        "accuracy": sum(r["score"] for r in results) / len(results),
+        "capped": sum(r["finish_reason"] == "length" for r in results),
+        "mean_response_tokens": sum(len(r["token_ids"]) for r in results) / len(results),
+        "temperature": 0.0,
+        "max_new_tokens": 32768,
+        "seed": 17,
+        "verifier": "historical-open-instruct-GSM8KVerifier",
+        "engine": "historical-vllm",
+        "max_num_seqs": 32,
+    }
+    (output / "evaluation.json").write_bytes(encoded(summary))
+    print("ORIGINAL_CHECKPOINT_EVAL_PASSED", json.dumps(summary), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("prepare", "smoke", "train", "export"))
+    parser.add_argument("stage", choices=("prepare", "smoke", "train", "export", "evaluate"))
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--prepared", type=Path, required=True)
@@ -487,7 +580,9 @@ def main():
     parser.add_argument("--checkpoint-root", type=Path)
     parser.add_argument("--checkpoint-tag")
     args = parser.parse_args()
-    if args.stage == "export":
+    if args.stage == "evaluate":
+        evaluate_checkpoint(args.model, args.source, args.prepared, args.output)
+    elif args.stage == "export":
         if not args.checkpoint_root or not args.checkpoint_tag:
             parser.error("export requires --checkpoint-root and --checkpoint-tag")
         export_checkpoint(args.model, args.checkpoint_root, args.checkpoint_tag, args.output)
