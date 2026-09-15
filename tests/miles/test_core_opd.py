@@ -1,5 +1,8 @@
 """Contracts for cross-tokenizer OPD through the existing Core learner."""
 
+import io
+import json
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +11,7 @@ import torch
 from miles.backends.training_utils.loss_hub import opd
 
 from open_instruct.miles import (
+    cluster,
     config,
     core_opd_hooks,
     core_opd_teacher,
@@ -187,3 +191,24 @@ def test_teacher_launch_uses_supervisor_and_host_network():
     assert task["hostNetworking"]
     assert task["resources"]["gpuCount"] == 4
     assert "open_instruct.miles.cluster" in task["arguments"][0]
+
+
+def test_metadata_does_not_mean_teacher_is_ready(monkeypatch):
+    def unavailable(url, **kwargs):
+        assert url.endswith("/health")
+        raise urllib.error.HTTPError(url, 503, "warming up", {}, None)
+
+    monkeypatch.setattr(cluster.urllib.request, "urlopen", unavailable)
+    assert cluster.ready_model("http://teacher", "/model") is False
+
+
+def test_ready_teacher_must_match_checkpoint(monkeypatch):
+    def available(url, **kwargs):
+        response = io.BytesIO(json.dumps({"model_path": "/model"}).encode())
+        response.status = 200
+        return response
+
+    monkeypatch.setattr(cluster.urllib.request, "urlopen", available)
+    assert cluster.ready_model("http://teacher", "/model")["model_path"] == "/model"
+    with pytest.raises(RuntimeError, match="checkpoint"):
+        cluster.ready_model("http://teacher", "/wrong")

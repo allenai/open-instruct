@@ -116,7 +116,7 @@ class Supervisor:
                     {"failures": self.health_failures, "error": str(error)},
                 )
                 if self.health_failures[name] >= 3:
-                    raise RuntimeError(f"Judge {name}: three consecutive liveness failures") from error
+                    raise RuntimeError(f"Service {name}: three consecutive liveness failures") from error
 
     def relay_logs(self):
         for stream in self.logs:
@@ -241,18 +241,15 @@ def run(path):
                 teacher_env,
             )
 
-            def teacher_ready():
-                try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/get_model_info", timeout=3) as response:
-                        info = json.load(response)
-                    expected = read(teacher_path).get("snapshot")
-                    if info.get("model_path") != expected:
-                        raise RuntimeError("Teacher server model differs from prepared checkpoint")
-                    return True
-                except OSError:
-                    return False
-
-            supervisor.wait(teacher_ready, timeout=service["startup_timeout"])
+            supervisor.wait(
+                lambda: ready_model(f"http://127.0.0.1:{port}", read(teacher_path).get("snapshot")),
+                timeout=service["startup_timeout"],
+            )
+            supervisor.run_child(
+                "teacher-probe",
+                [sys.executable, "-m", "open_instruct.miles.core_opd_teacher", str(teacher_path), "--probe"],
+                teacher_env,
+            )
             supervisor.health["opd_teacher"] = f"http://127.0.0.1:{port}/health"
             env[core_opd.ENV] = json.dumps(read(teacher_path))
         registry = judging.registry(spec.judges)
@@ -361,6 +358,21 @@ def run(path):
         write(root / f"cleanup-{rank}.json", {"complete": True})
 
 
+def ready_model(url, snapshot):
+    """Metadata is available before warmup; health must pass before promotion."""
+    try:
+        with urllib.request.urlopen(url + "/health", timeout=3) as response:
+            if response.status != 200:
+                return False
+        with urllib.request.urlopen(url + "/get_model_info", timeout=3) as response:
+            info = json.load(response)
+        if info.get("model_path") != snapshot:
+            raise RuntimeError("Serving model differs from the prepared checkpoint")
+        return info
+    except OSError:
+        return False
+
+
 def reload_export(supervisor, spec, env, devices, root):
     """Reload the completed HF export after the Core driver disposes its actors."""
     service = dict(
@@ -376,17 +388,7 @@ def reload_export(supervisor, spec, env, devices, root):
     supervisor.start("export-reload", command, reload_env)
     url = f"http://127.0.0.1:{port}"
 
-    def ready():
-        try:
-            with urllib.request.urlopen(url + "/get_model_info", timeout=3) as response:
-                info = json.load(response)
-            if info.get("model_path") != service["snapshot"]:
-                raise RuntimeError("Export reload loaded an unexpected checkpoint")
-            return info
-        except OSError:
-            return False
-
-    info = supervisor.wait(ready)
+    info = supervisor.wait(lambda: ready_model(url, service["snapshot"]))
     prompt_path = Path(spec.output["root"]) / "prepared/data/eval.jsonl"
     if not prompt_path.exists():
         prompt_path = Path(spec.output["root"]) / "prepared/data/train.jsonl"

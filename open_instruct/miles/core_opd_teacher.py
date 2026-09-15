@@ -4,9 +4,13 @@ import hashlib
 import json
 import os
 import sys
+import urllib.request
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+from transformers import AutoTokenizer
+
+from open_instruct.miles import opd_alignment
 
 
 def command(service, port):
@@ -42,8 +46,39 @@ def command(service, port):
     ]
 
 
+def probe(path):
+    service = json.loads(path.read_text())
+    tokenizer = AutoTokenizer.from_pretrained(service["snapshot"], trust_remote_code=True)
+    context = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "What is 1 + 1?"}],
+        tokenize=False,
+        add_generation_prompt=True,
+        **service["chat_template_kwargs"],
+    )
+    ids = tokenizer.encode(context + "2", add_special_tokens=False)
+    payload = {
+        "input_ids": ids,
+        "sampling_params": {"temperature": 0, "max_new_tokens": 0},
+        "return_logprob": True,
+        "logprob_start_len": 0,
+    }
+    request = urllib.request.Request(
+        service["endpoint"] + "/generate",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=service["request_timeout"]) as response:
+        result = json.load(response)
+    scores, _ = opd_alignment.extract_scores(result, ids, list(range(1, len(ids))))
+    path.with_name("teacher-probe.json").write_text(json.dumps({"passed": True, "scored_tokens": len(scores)}))
+
+
 def main():
-    path, port = Path(sys.argv[1]), int(sys.argv[2])
+    path = Path(sys.argv[1])
+    if sys.argv[2] == "--probe":
+        probe(path)
+        return
+    port = int(sys.argv[2])
     service = json.loads(path.read_text())
     source = service["source"]
     snapshot = source if Path(source).is_absolute() else snapshot_download(source, revision=service["revision"])
