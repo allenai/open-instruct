@@ -366,20 +366,22 @@ def compute_reference_cache_hash(args: DPOExperimentConfig, tc: TokenizerConfig)
         args.mixer_list, args.mixer_list_splits, args.transform_fn, transform_fn_args, args.target_columns
     )
     dataset_config_hash = args.config_hash or compute_config_hash(dcs, tc)
-    config_str = json.dumps(
-        {
-            "concatenated_forward": args.concatenated_forward,
-            "dataset_config_hash": dataset_config_hash,
-            "loss_type": args.loss_type,
-            "max_train_samples": args.max_train_samples,
-            "model_name_or_path": args.model_name_or_path,
-            "model_revision": args.model_revision,
-            "packing": args.packing,
-            "use_lora": args.use_lora,
-            "use_qlora": args.use_qlora,
-        },
-        sort_keys=True,
-    )
+    config = {
+        "concatenated_forward": args.concatenated_forward,
+        "dataset_config_hash": dataset_config_hash,
+        "loss_type": args.loss_type,
+        "max_train_samples": args.max_train_samples,
+        "model_name_or_path": args.model_name_or_path,
+        "model_revision": args.model_revision,
+        "packing": args.packing,
+        "use_lora": args.use_lora,
+        "use_qlora": args.use_qlora,
+    }
+    if args.max_train_samples is not None:
+        # A subset is drawn after shuffling, so which rows it holds depends on the seed.
+        # Kept out of the full-dataset hash, which is seed-independent.
+        config["seed"] = args.seed
+    config_str = json.dumps(config, sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
 
