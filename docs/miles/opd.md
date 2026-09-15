@@ -1,8 +1,11 @@
-# Experimental Qwen3.5 OPD
+# On-policy distillation with Miles
 
-This prototype uses the public `python -m open_instruct.miles` entry point,
-Open Instruct data preparation and Beaker launch plumbing, and the native Miles
-Megatron trainer. It is a separate route from the OLMo-core GRPO adapter.
+Use `python -m open_instruct.miles` with Open Instruct data preparation and Beaker
+launching. The learner backend is explicit: OLMo-core for our registered Olmo MoE
+and dense Olmo 3 models, or native Miles/Megatron for the Qwen3.5 prototype.
+Core OPD reuses the existing Core training loop. See
+[Core learners and independent teachers](#olmo-core-learners-and-independent-teachers)
+for the cross-tokenizer Qwen-to-Olmo path.
 
 The initial exercise is two updates of **Qwen3.5-4B from Qwen3.5-9B** using
 student-generated responses and sampled-token teacher log probabilities. The
@@ -11,7 +14,7 @@ two optimizer updates, checkpoint/export auditing and fresh-process export reloa
 The broader [prototype plan](plans/qwen35-opd-prototype-20260914.md) includes
 additional checks before research-scale use.
 
-## Configuration and launch
+## Qwen configuration and launch
 
 Start from [the tiny run file](../../configs/miles/opd/qwen35-4b-tiny.toml).
 Change `name`, `output.root`, and `output.assets` for your own workspace.

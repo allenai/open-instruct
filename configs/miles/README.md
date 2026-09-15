@@ -14,6 +14,7 @@ they are not interchangeable throughput baselines.
 | Directory / file | Role |
 |---|---|
 | `examples/` | Researcher TOMLs with model, data, allocation and training settings; supports plan/validate/run/status |
+| `opd/` | Explicit Core MoE/dense and native Megatron OPD examples; see the [OPD guide](../../docs/miles/opd.md) for model and tokenizer boundaries |
 | `profiles/` | Low-level prepared-input Core/MILES files; plan/validate/train, no configuration-driven allocation/preparation |
 | `qualification/` | Frozen bounded exercises, often account-specific paths; read their measurement before reusing |
 | `proposals/` | Future recipes that can reference unprepared assets; not ready to submit |

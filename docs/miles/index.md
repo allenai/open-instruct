@@ -12,7 +12,7 @@ If a required capability is missing here, identify the gap rather than silently
 switching to a deprecated backend.
 
 For the separate experimental Qwen3.5/Megatron distillation route, see the
-[OPD prototype guide](opd.md).
+[OPD guide](opd.md), covering native Qwen/Megatron and Core learners with independent teachers.
 
 ## Start here
 
