@@ -9,7 +9,7 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
-from open_instruct.miles import run_data, workflow
+from open_instruct.miles import opd_config, run_data, workflow
 from open_instruct.miles.errors import InputError
 
 
@@ -22,21 +22,35 @@ def prepare(spec):
         paths = {}
         for role in ("model", "teacher"):
             item = spec.document[role]
-            target = assets / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}"
+            original = None
+            if opd_config.is_local(item["source"]):
+                original = Path(item["source"])
+                if not (original / "config.json").is_file():
+                    raise InputError(f"{role}.source {original} is not a Hugging Face checkpoint directory")
+                stamp = workflow.fingerprint(
+                    {"path": str(original), "config": (original / "config.json").read_text()}
+                )[:12]
+                identity = {"source": str(original), "revision": "", "thinking": False, "local_fingerprint": stamp}
+                target = assets / f"{original.name}-local-{stamp}"
+            else:
+                identity = {"source": item["source"], "revision": item["revision"], "thinking": False}
+                target = assets / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}"
             marker = target / "opd-source.json"
-            identity = {"source": item["source"], "revision": item["revision"], "thinking": False}
             if marker.exists():
                 if json.loads(marker.read_text()) != identity:
                     raise InputError("Prepared model identity differs")
             else:
-                original = Path(
-                    snapshot_download(
-                        item["source"],
-                        revision=item["revision"],
-                        local_dir=assets / "downloads" / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}",
-                        allow_patterns=["*.json", "*.jinja", "*.safetensors", "*.txt", "*.model"],
+                if original is None:
+                    original = Path(
+                        snapshot_download(
+                            item["source"],
+                            revision=item["revision"],
+                            local_dir=assets
+                            / "downloads"
+                            / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}",
+                            allow_patterns=["*.json", "*.jinja", "*.safetensors", "*.txt", "*.model"],
+                        )
                     )
-                )
                 target.mkdir(exist_ok=True)
                 for source in original.iterdir():
                     if not source.is_file():

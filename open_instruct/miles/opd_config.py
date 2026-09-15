@@ -1,4 +1,4 @@
-"""CPU-only configuration for the bounded Miles/Megatron OPD prototype."""
+"""CPU-only configuration for the Miles/Megatron sampled-token OPD route."""
 
 import copy
 import dataclasses
@@ -12,31 +12,70 @@ REVISIONS = {
     "Qwen/Qwen3.5-4B": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
     "Qwen/Qwen3.5-9B": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
 }
+# Megatron architecture profiles: Miles ships scripts/models/<profile>.py; profiles
+# under open_instruct/miles/model_profiles/ take precedence at runtime.
+PROFILES = ("qwen3.5-4B", "qwen3.5-9B")
+ARCHITECTURES = {"Qwen/Qwen3.5-4B": "qwen3.5-4B", "Qwen/Qwen3.5-9B": "qwen3.5-9B"}
+WANDB_MODES = ("offline", "online", "disabled")
 DEFAULTS = {
-    "model": {"source": "Qwen/Qwen3.5-4B", "revision": REVISIONS["Qwen/Qwen3.5-4B"]},
+    "model": {"source": "Qwen/Qwen3.5-4B", "revision": "", "architecture": ""},
     "teacher": {
         "source": "Qwen/Qwen3.5-9B",
-        "revision": REVISIONS["Qwen/Qwen3.5-9B"],
+        "revision": "",
         "gpus": 1,
         "concurrency": 4,
         "request_timeout": 180,
         "startup_timeout": 900,
     },
-    "training": {"algorithm": "opd", "phase": "train", "num_rollouts": 2, "save_interval": 1, "resume": False},
+    "training": {
+        "algorithm": "opd",
+        "phase": "train",
+        "num_rollouts": 2,
+        "save_interval": 1,
+        "eval_interval": 0,
+        "resume": False,
+    },
     "trainer": {"backend": "megatron", "gpus": 2, "tensor_parallel_size": 2},
     "inference": {
         "gpus": 1,
+        "tensor_parallel_size": 1,
         "rollout_batch_size": 4,
         "samples_per_prompt": 2,
         "max_response_length": 256,
         "max_context_length": 2048,
+        "max_running_requests": 8,
         "temperature": 1.0,
+        "eval_temperature": 0.0,
+        "eval_samples_per_prompt": 1,
     },
-    "distillation": {"kl_coef": 1.0, "log_prob_top_k": 0, "task_reward_weight": 0.0},
+    "distillation": {"kl_coef": 1.0, "log_prob_top_k": 0, "task_reward_weight": 0.0, "use_rollout_logprobs": False},
     "optimizer": {"learning_rate": 1e-6},
     "output": {"root": "", "assets": ""},
-    "tracking": {"wandb_mode": "offline"},
+    "tracking": {"wandb_mode": "offline", "wandb_project": "open-instruct-opd", "wandb_entity": ""},
 }
+
+
+def is_local(source):
+    return source.startswith(("/", ".", "~"))
+
+
+def _resolve_source(values, role, base):
+    """Accept a Hugging Face repository at an immutable revision or a local checkpoint directory."""
+    source = validation.text(values["source"], f"{role}.source")
+    revision = values["revision"]
+    if revision is not None and not isinstance(revision, str):
+        raise InputError(f"{role}.revision must be a string commit hash")
+    if is_local(source):
+        if revision:
+            raise InputError(f"Local {role}.source must not specify revision")
+        values["source"] = str((base / Path(source).expanduser()).resolve())
+        values["revision"] = ""
+        return
+    if not revision:
+        revision = REVISIONS.get(source, "")
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise InputError(f"Remote {role}.source requires an immutable 40-character {role}.revision")
+    values["revision"] = revision
 
 
 @dataclasses.dataclass
@@ -61,11 +100,14 @@ class OPDRunSpec:
             validation.fields(incoming, section, set(defaults))
             document[section] = defaults | incoming
         for role in ("model", "teacher"):
-            values = document[role]
-            expected = "Qwen/Qwen3.5-4B" if role == "model" else "Qwen/Qwen3.5-9B"
-            validation.choice(values["source"], f"{role}.source", (expected,))
-            if not re.fullmatch(r"[0-9a-f]{40}", values["revision"]):
-                raise InputError(f"{role}.revision must be an immutable HF commit")
+            _resolve_source(document[role], role, base.parent)
+        model = document["model"]
+        architecture = model["architecture"] or ARCHITECTURES.get(model["source"], "")
+        if not architecture:
+            raise InputError(
+                f"model.architecture must name a Megatron profile ({', '.join(PROFILES)}) for {model['source']}"
+            )
+        model["architecture"] = validation.choice(architecture, "model.architecture", PROFILES)
         for key in ("root", "assets"):
             document["output"][key] = run_spec._path(document["output"][key], base.parent, f"output.{key}")
         root, assets = (Path(document["output"][key]) for key in ("root", "assets"))
@@ -77,40 +119,48 @@ class OPDRunSpec:
             "training": ("num_rollouts", "save_interval"),
             "inference": (
                 "gpus",
+                "tensor_parallel_size",
                 "rollout_batch_size",
                 "samples_per_prompt",
                 "max_response_length",
                 "max_context_length",
+                "max_running_requests",
+                "eval_samples_per_prompt",
             ),
         }.items():
             for key in keys:
                 validation.integer(document[section][key], f"{section}.{key}")
+        validation.integer(document["training"]["eval_interval"], "training.eval_interval", minimum=0)
         for section, key, expected in (
             ("training", "algorithm", "opd"),
-            ("training", "save_interval", 1),
             ("trainer", "backend", "megatron"),
-            ("teacher", "gpus", 1),
-            ("trainer", "gpus", 2),
-            ("trainer", "tensor_parallel_size", 2),
-            ("inference", "gpus", 1),
             ("distillation", "log_prob_top_k", 0),
             ("distillation", "task_reward_weight", 0.0),
-            ("tracking", "wandb_mode", "offline"),
         ):
             if document[section][key] != expected:
-                raise InputError(f"Prototype requires {section}.{key}={expected!r}")
+                raise InputError(f"Miles OPD requires {section}.{key}={expected!r}")
+        for section, key in (("trainer", "gpus"), ("inference", "gpus")):
+            if document[section][key] % document[section]["tensor_parallel_size"]:
+                raise InputError(f"{section}.gpus must be a multiple of {section}.tensor_parallel_size")
         validation.choice(document["training"]["phase"], "training.phase", ("prepare", "train"))
         validation.boolean(document["training"]["resume"], "training.resume")
         if document["training"]["resume"]:
-            raise InputError("Resume is not yet qualified for the OPD prototype; use a fresh run")
+            raise InputError("Resume is not yet qualified for Miles OPD; use a fresh run")
+        validation.boolean(document["distillation"]["use_rollout_logprobs"], "distillation.use_rollout_logprobs")
         for section, key in (
             ("distillation", "kl_coef"),
             ("optimizer", "learning_rate"),
             ("inference", "temperature"),
         ):
             validation.number(document[section][key], f"{section}.{key}", exclusive_min=True)
+        validation.number(document["inference"]["eval_temperature"], "inference.eval_temperature")
         if document["inference"]["max_response_length"] >= document["inference"]["max_context_length"]:
             raise InputError("max_context_length must exceed max_response_length")
+        tracking = document["tracking"]
+        validation.choice(tracking["wandb_mode"], "tracking.wandb_mode", WANDB_MODES)
+        validation.text(tracking["wandb_project"], "tracking.wandb_project")
+        if not isinstance(tracking["wandb_entity"], str):
+            raise InputError("tracking.wandb_entity must be a string (empty for the default entity)")
         document["data"] = run_spec.RunSpec._data(document.get("data", {}), base.parent)
         tasks = document["data"].get("tasks", [])
         if len(tasks) != 1 or tasks[0]["task"] != "gsm8k" or not tasks[0].get("eval_count"):
@@ -119,12 +169,20 @@ class OPDRunSpec:
             {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent
         )
         if document["launch"]["auto_resume"]:
-            raise InputError("Automatic restart is not supported for the OPD prototype")
+            raise InputError("Automatic restart is not supported for Miles OPD")
         preparing = document["training"]["phase"] == "prepare"
         if preparing and document["launch"]["cluster"] != "ai2/saturn":
             raise InputError("CPU-only OPD preparation with WEKA must run on ai2/saturn")
-        if not preparing and document["launch"].get("gpus_per_replica", 4) != 4:
-            raise InputError("OPD training allocates four GPUs in one task")
+        total = sum(document[section]["gpus"] for section in ("trainer", "inference", "teacher"))
+        if not preparing and document["launch"].get("gpus_per_replica", total) != total:
+            raise InputError(
+                f"OPD training allocates trainer.gpus + inference.gpus + teacher.gpus = {total} GPUs in one task; "
+                f"launch.gpus_per_replica disagrees"
+            )
+        if total > 8:
+            raise InputError("Miles OPD runs in one node; trainer.gpus + inference.gpus + teacher.gpus must be <= 8")
+        if tracking["wandb_mode"] == "online" and "WANDB_API_KEY" not in document["launch"]["secrets"]:
+            raise InputError('tracking.wandb_mode="online" requires launch.secrets.WANDB_API_KEY')
         return cls(document, base)
 
     @property
@@ -143,15 +201,25 @@ class OPDRunSpec:
         return copy.deepcopy(self.document)
 
     def allocation(self):
-        preparing = self.document["training"]["phase"] == "prepare"
+        if self.document["training"]["phase"] == "prepare":
+            return {"replicas": 1, "gpus_per_replica": 0, "ray_gpus": 0, "roles": {}}
+        trainer, student, teacher = (self.document[section]["gpus"] for section in ("trainer", "inference", "teacher"))
         return {
             "replicas": 1,
-            "gpus_per_replica": 0 if preparing else 4,
-            "ray_gpus": 0 if preparing else 3,
-            "roles": {} if preparing else {"trainer": [0, 1], "student": [2], "teacher": [3]},
+            "gpus_per_replica": trainer + student + teacher,
+            "ray_gpus": trainer + student,
+            "roles": {
+                "trainer": list(range(trainer)),
+                "student": list(range(trainer, trainer + student)),
+                "teacher": list(range(trainer + student, trainer + student + teacher)),
+            },
         }
 
     def plan(self):
+        exercised = self.allocation()["roles"] == {"trainer": [0, 1], "student": [2], "teacher": [3]}
+        warnings = ["Experimental sampled-token OPD; runtime qualification required."]
+        if not exercised:
+            warnings.append("Only the 2 trainer / 1 student / 1 teacher GPU topology has been exercised.")
         return {
             "name": self.name,
             "backend": "megatron",
@@ -159,5 +227,5 @@ class OPDRunSpec:
             "allocation": self.allocation(),
             "runtime_validated": False,
             "spec": self.to_dict(),
-            "warnings": ["Experimental 4B <- 9B sampled-token OPD; runtime qualification required."],
+            "warnings": warnings,
         }

@@ -19,7 +19,9 @@ def main():
     module_file = miles.__file__
     if module_file is None:
         raise RuntimeError("Native OPD requires the Miles source checkout")
-    ray.init(num_gpus=3, include_dashboard=False, runtime_env={"env_vars": env})
+    ray.init(
+        num_gpus=int(os.environ.get("OI_OPD_RAY_GPUS", "3")), include_dashboard=False, runtime_env={"env_vars": env}
+    )
     try:
         runpy.run_path(str(Path(module_file).resolve().parents[1] / "train.py"), run_name="__main__")
     finally:

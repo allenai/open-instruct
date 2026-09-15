@@ -44,19 +44,25 @@ def stop(process):
         process.wait(timeout=30)
 
 
-def model_args(miles_root, environment):
+PROFILES = Path(__file__).resolve().parent / "model_profiles"
+
+
+def model_args(miles_root, environment, architecture):
+    """Render the Megatron architecture profile; repository profiles shadow the Miles copies."""
+    directory = PROFILES if (PROFILES / f"{architecture}.py").exists() else miles_root / "scripts/models"
+    code = (
+        "import sys; from pathlib import Path; "
+        "from miles.utils.external_utils.model_args_utils import load_model_args; "
+        "print(load_model_args(sys.argv[1], model_script_dir=Path(sys.argv[2])))"
+    )
     return shlex.split(
-        subprocess.check_output(
-            [sys.executable, str(miles_root / "miles/utils/external_utils/model_args_utils.py"), "qwen3.5-4B"],
-            env=environment,
-            text=True,
-        )
+        subprocess.check_output([sys.executable, "-c", code, architecture, str(directory)], env=environment, text=True)
     )
 
 
 def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
     doc, root = spec.document, Path(spec.output["root"])
-    inf, training = doc["inference"], doc["training"]
+    inf, training, trainer, tracking = doc["inference"], doc["training"], doc["trainer"], doc["tracking"]
     batch = inf["rollout_batch_size"] * inf["samples_per_prompt"]
     values = {
         "train-backend": "megatron",
@@ -67,11 +73,11 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "save-hf": str(root / "hf-{rollout_id}"),
         "num-rollout": training["num_rollouts"],
         "actor-num-nodes": 1,
-        "actor-num-gpus-per-node": 2,
-        "num-gpus-per-node": 3,
-        "rollout-num-gpus": 1,
-        "rollout-num-gpus-per-engine": 1,
-        "tensor-model-parallel-size": 2,
+        "actor-num-gpus-per-node": trainer["gpus"],
+        "num-gpus-per-node": trainer["gpus"] + inf["gpus"],
+        "rollout-num-gpus": inf["gpus"],
+        "rollout-num-gpus-per-engine": inf["tensor_parallel_size"],
+        "tensor-model-parallel-size": trainer["tensor_parallel_size"],
         "pipeline-model-parallel-size": 1,
         "context-parallel-size": 1,
         "expert-model-parallel-size": 1,
@@ -91,8 +97,8 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "sglang-context-length": inf["max_context_length"],
         "seq-length": inf["max_context_length"],
         "sglang-mem-fraction-static": 0.6,
-        "sglang-max-running-requests": 8,
-        "sglang-max-total-tokens": inf["max_context_length"] * 8,
+        "sglang-max-running-requests": inf["max_running_requests"],
+        "sglang-max-total-tokens": inf["max_context_length"] * inf["max_running_requests"],
         "sglang-attention-backend": "triton",
         "sglang-sampling-backend": "pytorch",
         "sglang-router-request-timeout-secs": doc["teacher"]["request_timeout"],
@@ -104,10 +110,10 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "custom-reward-post-process-path": "open_instruct.miles.opd_hooks.post_process",
         "rm-url": teacher_url,
         "eval-function-path": "open_instruct.miles.opd_hooks.evaluate",
-        "eval-interval": training["num_rollouts"],
-        "n-samples-per-eval-prompt": 1,
+        "eval-interval": training["eval_interval"] or training["num_rollouts"],
+        "n-samples-per-eval-prompt": inf["eval_samples_per_prompt"],
         "eval-max-response-len": inf["max_response_length"],
-        "eval-temperature": 0.0,
+        "eval-temperature": inf["eval_temperature"],
         "optimizer": "adam",
         "lr": doc["optimizer"]["learning_rate"],
         "lr-decay-style": "constant",
@@ -125,7 +131,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "recompute-num-layers": 1,
         "megatron-to-hf-mode": "raw",
         "dump-details": str(root / "debug"),
-        "wandb-project": "open-instruct-opd",
+        "wandb-project": tracking["wandb_project"],
         "wandb-group": spec.name,
         "wandb-dir": str(root / "wandb"),
     }
@@ -144,8 +150,16 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "--sglang-disable-radix-cache",
         "--accumulate-allreduce-grads-in-fp32",
         "--attention-softmax-in-fp32",
-        "--use-wandb",
     ]
+    if doc["distillation"]["use_rollout_logprobs"]:
+        # Score the student side of the reverse KL with the rollout engine's log-probs,
+        # matching Open Instruct's --use_vllm_logprobs behaviour instead of the trainer's
+        # pre-update forward pass.
+        args.append("--use-rollout-logprobs")
+    if tracking["wandb_mode"] != "disabled":
+        args += ["--use-wandb", "--wandb-mode", tracking["wandb_mode"]]
+        if tracking["wandb_entity"]:
+            args += ["--wandb-team", tracking["wandb_entity"]]
     args += ["--eval-prompt-data", *prepared["data"]["eval_prompt_data"]]
     return args
 
@@ -172,7 +186,7 @@ def execute(spec):
                 "PYTHONPATH": "/src/Megatron-LM:" + environment.get("PYTHONPATH", ""),
                 "MILES_USE_LEGACY_ROLLOUT_V1": "1",
                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-                "WANDB_MODE": "offline",
+                "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
                 "OI_OPD_OUTPUT": str(root),
                 "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
                 "CONVERT_KEEP_PP1": "1",
@@ -197,21 +211,27 @@ def execute(spec):
                 check=True,
                 timeout=180,
             )
-        visible = environment.get("CUDA_VISIBLE_DEVICES", "0,1,2,3").split(",")
-        if len(visible) != 4:
-            raise InputError(f"Expected four visible GPU devices; got {visible}")
-        architecture = model_args(miles_root, environment)
+        allocation = spec.allocation()
+        total, roles = allocation["gpus_per_replica"], allocation["roles"]
+        visible = environment.get("CUDA_VISIBLE_DEVICES", ",".join(map(str, range(total)))).split(",")
+        if len(visible) != total:
+            raise InputError(f"Expected {total} visible GPU devices; got {visible}")
+        devices = {role: ",".join(visible[index] for index in indices) for role, indices in roles.items()}
+        tensor_parallel = spec.document["trainer"]["tensor_parallel_size"]
+        architecture = model_args(miles_root, environment, spec.document["model"]["architecture"])
         checkpoint = Path(spec.output["assets"]) / (
-            Path(prepared["model"]).name + "-tp2-" + workflow.fingerprint(architecture)[:12]
+            Path(prepared["model"]).name + f"-tp{tensor_parallel}-" + workflow.fingerprint(architecture)[:12]
         )
-        conversion_env = environment | {"CUDA_VISIBLE_DEVICES": ",".join(visible[:2])}
+        conversion_env = environment | {
+            "CUDA_VISIBLE_DEVICES": ",".join(visible[index] for index in roles["trainer"][:tensor_parallel])
+        }
         if not (checkpoint / "latest_checkpointed_iteration.txt").exists():
             command = [
                 sys.executable,
                 "-m",
                 "torch.distributed.run",
                 "--standalone",
-                "--nproc-per-node=2",
+                f"--nproc-per-node={tensor_parallel}",
                 str(miles_root / "tools/convert_hf_to_torch_dist.py"),
                 *architecture,
                 "--hf-checkpoint",
@@ -219,7 +239,7 @@ def execute(spec):
                 "--save",
                 str(checkpoint),
                 "--tensor-model-parallel-size",
-                "2",
+                str(tensor_parallel),
             ]
             logger.info("Converting the learner to Megatron")
             with (root / "conversion.log").open("w") as stream:
@@ -228,7 +248,7 @@ def execute(spec):
                 )
         teacher_port = port()
         url = f"http://127.0.0.1:{teacher_port}"
-        teacher_env = environment | {"CUDA_VISIBLE_DEVICES": visible[3]}
+        teacher_env = environment | {"CUDA_VISIBLE_DEVICES": devices["teacher"]}
         command = [
             sys.executable,
             "-m",
@@ -240,7 +260,7 @@ def execute(spec):
             "--port",
             str(teacher_port),
             "--tp",
-            "1",
+            str(spec.document["teacher"]["gpus"]),
             "--mem-fraction-static",
             "0.6",
             "--context-length",
@@ -306,7 +326,10 @@ def execute(spec):
                 workflow.write_json(root / "teacher-preflight.json", {"identity": info, "score_probe": probe})
                 arguments = native_arguments(spec, prepared, checkpoint, url + "/generate", architecture)
                 workflow.write_json(root / "native-arguments.json", arguments)
-                learner_env = environment | {"CUDA_VISIBLE_DEVICES": ",".join(visible[:3])}
+                learner_env = environment | {
+                    "CUDA_VISIBLE_DEVICES": devices["trainer"] + "," + devices["student"],
+                    "OI_OPD_RAY_GPUS": str(allocation["ray_gpus"]),
+                }
                 learner = subprocess.Popen(
                     [sys.executable, "-m", "open_instruct.miles.opd_train", *arguments],
                     env=learner_env,

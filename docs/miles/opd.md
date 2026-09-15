@@ -99,16 +99,46 @@ Small JSON/log artifacts are copied to Beaker results; tensor checkpoints and
 training dumps remain on WEKA. A successful two-update run establishes mechanics,
 not an improvement in task accuracy.
 
+## Qwen configuration reference
+
+`plan` prints the resolved defaults. Beyond the tiny run file, the Megatron OPD
+schema accepts:
+
+- `model.source` / `teacher.source`: a Hugging Face repository with an immutable
+  40-character `revision` (the pinned Qwen3.5-4B and 9B revisions are filled in
+  when omitted) or a local checkpoint directory (`/weka/...`, `./relative`), which
+  must not set `revision`. `model.architecture` names the Megatron profile
+  (`qwen3.5-4B`, `qwen3.5-9B`); it is inferred for the pinned repositories and
+  required for local learners. Profiles under `open_instruct/miles/model_profiles/`
+  shadow the Miles copies.
+- `training.num_rollouts`, `training.save_interval` (HF export cadence) and
+  `training.eval_interval` (`0` evaluates before the first update and after the
+  last one, as the prototype did).
+- `inference.max_response_length`, `inference.max_context_length`,
+  `inference.max_running_requests` (learner SGLang concurrency; the KV budget is
+  `max_context_length` times this), `inference.eval_temperature` and
+  `inference.eval_samples_per_prompt`.
+- Topology: `trainer.gpus` (a multiple of `trainer.tensor_parallel_size`),
+  `inference.gpus` (a multiple of `inference.tensor_parallel_size`) and
+  `teacher.gpus` (the teacher's SGLang tensor parallelism). The task requests
+  their sum, at most one node; roles occupy consecutive devices in that order.
+  Only 2/1/1 has been exercised; `plan` warns on any other topology.
+- `distillation.use_rollout_logprobs`: score the student side of the reverse KL
+  with the rollout engine's log-probs instead of the trainer's pre-update forward
+  pass. Open Instruct's `--use_vllm_logprobs` OPD runs behave like `true`; the
+  exercised prototype used `false`.
+- `tracking.wandb_mode` (`offline`, `online`, `disabled`), `tracking.wandb_project`
+  and `tracking.wandb_entity`; `online` requires `launch.secrets.WANDB_API_KEY`.
+
 ## Qwen prototype limits
 
-- Only the 4B learner and 9B teacher are accepted. The requested 2B learner needs
-  its own architecture profile and exercise.
+- The 2B learner needs its own architecture profile and exercise.
 - Automatic restart and resume are rejected until native checkpoint restoration
   and the data cursor have been exercised together.
-- Only GSM8K with held-out evaluation, saving every update, the fixed topology,
-  top-k zero, pure OPD and offline tracking are exposed.
-  The general Core configuration reference does not describe this prototype's
-  closed schema; `plan` shows its resolved defaults.
+- Only GSM8K with held-out evaluation, top-k zero and pure OPD are exposed; only
+  the default 2/1/1 topology, saving every update and offline tracking have been
+  exercised on GPUs. The general Core configuration reference does not describe
+  this schema.
 - Before a colleague scales up, review independent teacher/student probability
   agreement, publication correctness, resume behavior, longer contexts and task
   quality. The original plan describes those broader qualification gates.

@@ -33,7 +33,7 @@ def specification(image, spec):
         "TOKENIZERS_PARALLELISM": "false",
         "OMP_NUM_THREADS": "2",
         "HF_HOME": "/tmp/hf-cache",
-        "WANDB_MODE": "offline",
+        "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
         "NCCL_CUMEM_ENABLE": "1",
         **spec.launch["env"],
     }
