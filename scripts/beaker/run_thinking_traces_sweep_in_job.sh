@@ -129,6 +129,12 @@ export VLLM_MOE_USE_DEEP_GEMM="${VLLM_MOE_USE_DEEP_GEMM:-0}"
 # sampler is prebuilt and free, so leave vLLM's default in place.
 export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-1}"
 
+# vLLM derives OMP_NUM_THREADS as cpu_count/local_world_size, and that term
+# carries no data-parallel component (vllm issue #52330), so DP runs
+# oversubscribe badly. STARTUP.md 4.8 measured 1822s vs 118s on a packed
+# INT4 checkpoint purely from this. Setting it explicitly makes loading
+# deterministic instead of a function of how vLLM counts ranks.
+[ -n "${OMP_NUM_THREADS:-}" ] && export OMP_NUM_THREADS
 REPO_ROOT="$(pwd)"
 mkdir -p "$RESULTS_DIR"
 
@@ -546,7 +552,7 @@ run_one_model() {
     # checkpoint in minutes rather than validated on a 1.5 TB one in hours.
     # It reports the phase breakdown and exits without generating anything.
     if [ "${STARTUP_PROBE:-0}" = "1" ]; then
-        log "STARTUP PROBE RESULT ${served}: time_to_ready=${SECONDS}s load_format=${LOAD_FORMAT:-prefetch} tp=${TP_SIZE}${DCP_SIZE:+ dcp=${DCP_SIZE}} omp=${OMP_NUM_THREADS:-unset}"
+        log "STARTUP PROBE RESULT ${served}: time_to_ready=${SECONDS}s load_format=${LOAD_FORMAT:-prefetch} tp=${TP_SIZE}${DCP_SIZE:+ dcp=${DCP_SIZE}} omp=${OMP_NUM_THREADS:-unset} cpus=$(nproc 2>/dev/null || echo ?)"
         grep -aoE "Model loading took [0-9.]+ (GiB|GB) and [0-9.]+ seconds|torch.compile takes [0-9.]+ s|Capturing CUDA graphs[^|]*100%|init engine \\(profile, create kv cache, warmup model\\) took [0-9.]+ seconds" "$vllm_log" 2>/dev/null | tail -5 || true
         kill "$vllm_pid" 2>/dev/null || true
         cp "$vllm_log" "$RESULTS_DIR/" 2>/dev/null || true

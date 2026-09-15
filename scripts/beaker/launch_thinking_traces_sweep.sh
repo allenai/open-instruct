@@ -38,6 +38,7 @@ TP_SIZE=""
 DCP_SIZE=""
 DP_SIZE=""
 LOAD_FORMAT=""
+EXTRA_ENVS=()
 STARTUP_PROBE=0
 ENABLE_EP=""
 MAX_MODEL_LEN=131072
@@ -117,6 +118,7 @@ while [ $# -gt 0 ]; do
         --dcp)               DCP_SIZE="$2"; shift 2 ;;
         --dp)                DP_SIZE="$2"; shift 2 ;;
         --load-format)       LOAD_FORMAT="$2"; shift 2 ;;
+        --env)               EXTRA_ENVS+=("$2"); shift 2 ;;
         --startup-probe)     STARTUP_PROBE=1; shift ;;
         --ep)                ENABLE_EP=1; shift ;;
         --num-prompts)       NUM_PROMPTS="$2"; shift 2 ;;
@@ -193,6 +195,7 @@ cmd=(
 [ -n "$DCP_SIZE" ] && cmd+=(--env "DCP_SIZE=${DCP_SIZE}")
 [ -n "$DP_SIZE" ] && cmd+=(--env "DP_SIZE=${DP_SIZE}")
 [ -n "$LOAD_FORMAT" ] && cmd+=(--env "LOAD_FORMAT=${LOAD_FORMAT}")
+for _e in ${EXTRA_ENVS+"${EXTRA_ENVS[@]}"}; do cmd+=(--env "$_e"); done
 [ "$STARTUP_PROBE" = "1" ] && cmd+=(--env "STARTUP_PROBE=1")
 [ -n "$ENABLE_EP" ] && cmd+=(--env "ENABLE_EP=1")
 [ "$WEKA_MOUNT" != "none" ] && cmd+=(--weka "$WEKA_MOUNT")
