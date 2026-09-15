@@ -346,7 +346,7 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
         raise
     except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as error:
         raise JudgeResponseError(
-            f"general judge transport or response failure: {type(error).__name__}: {error}"
+            f"general judge request failed (transport or response): {type(error).__name__}: {error}"
         ) from error
     except Exception as error:
         raise RuntimeError(f"general judge request failed for {config.api_url}: {error}") from error

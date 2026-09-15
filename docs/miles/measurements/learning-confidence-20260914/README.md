@@ -6,6 +6,23 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
+## Current active runs — September 15, 03:06 UTC
+
+| Arm | Experiment | State |
+| --- | --- | --- |
+| MoE broad, protected restart | [01M2HDRSBP66D7QXJGH9RQ5N48](https://beaker.org/ex/01M2HDRSBP66D7QXJGH9RQ5N48) | Running; fresh 200-update target, save every 5 |
+| Dense broad, protected replacement | [01M2HG0XFGPA5JFA8MPW01J4JF](https://beaker.org/ex/01M2HG0XFGPA5JFA8MPW01J4JF) | Started; fresh 200-update target, save every 5 |
+| Dense GSM8K/Core | [01M2GQK5F7T1YTVPPVD9E3S43Q](https://beaker.org/ex/01M2GQK5F7T1YTVPPVD9E3S43Q) | 50 optimizer updates; first held-out evaluation in progress |
+| Dense GSM8K/original, retained groups | [01M2HG94A2BA5FSFWDAZFNFJSS](https://beaker.org/ex/01M2HG94A2BA5FSFWDAZFNFJSS) | Started; explicit Core-aligned group-retention adjustment |
+
+The superseded dense broad and original filtering-only runs were stopped. Their
+logs remain in their original result datasets and WEKA directories. Monitoring
+now tracks these four current identities, not their predecessors. The restored
+judge error message retains its prior `request failed` wording; behavior matches
+the running robust jobs. The full related CPU/runtime test basket passed 47 tests,
+and the historical image passed 20 original-adapter tests. No new final learning
+endpoint exists yet.
+
 ## Protected continuations — September 15, 03:05 UTC
 
 Dense GSM8K reached 50 optimizer updates and began the 512-question held-out
