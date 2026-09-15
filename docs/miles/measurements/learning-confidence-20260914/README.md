@@ -6,7 +6,65 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
-## Current active runs — September 15, 03:06 UTC
+## Relaunch with measured serving and recovery fixes — September 15, 21:00 UTC
+
+This section is the current-runs ledger. The tracked qualification configs were
+removed from git by the starter consolidation (`3a41d194a`); the configs of the
+runs below live in Git-ignored `runs/relaunch-20260915/` and their resolved
+specifications are retained in [relaunch-20260915.json](relaunch-20260915.json).
+Predecessor configs are archived under `runs/miles-archive-20260915/`.
+
+| Arm | Experiment | Continues from | Changes | State at submission |
+| --- | --- | --- | --- | --- |
+| Dense broad basket, g16 | [01M2KEBH81YA9SH0HQ88XDD5YM](https://beaker.org/ex/01M2KEBH81YA9SH0HQ88XDD5YM) | single-node run checkpoint 5 (`01M2J19078AMKBCTARS065FZ9S`) | full decode CUDA graphs, admission 8 → 16, save every update | started 21:13 UTC |
+| MoE broad basket, c16 | [01M2KF9EW2ZX50X477D6CZWECG](https://beaker.org/ex/01M2KF9EW2ZX50X477D6CZWECG) | robust-20260915 checkpoint 45 (`01M2J039655AS5BM5KZ9YQNQ3F`) | admission 8 → 16; EP8 topology retained | submitted 21:20 UTC after the robust run was stopped past checkpoint 45 |
+| Dense GSM8K Core control, r4 | [01M2KEPRMD3NGSJEV9GM7VR0HF](https://beaker.org/ex/01M2KEPRMD3NGSJEV9GM7VR0HF) | r3 checkpoint 150 (`01M2HZKS5S3EJTP6QY3KBERG7D`) | full decode CUDA graphs, admission 8 → 16, save every 5 | started 21:14 UTC; r3 stopped at 21:13 after checkpoint 150 committed |
+| Original Open Instruct GSM8K comparator | [01M2K1SFCHC33S3R4JF9PWAF0F](https://beaker.org/ex/01M2K1SFCHC33S3R4JF9PWAF0F) | unchanged | none | completed 200 updates and saved its final model at 20:58 UTC |
+
+All three Core relaunches use base image `01M2CJG5RQQ93GEYNYAS7ASCQJ` with the
+committed overlay `a20f785ff`, which adds two runtime changes: warm Triton
+caches are published in the background after the first committed checkpoint of
+each process and every tenth thereafter, and the code-service HTTP retry budget
+is bounded to three retries (about two minutes per failed sample instead of the
+measured 517–530 s). Model, data, objective, optimizer, batch geometry, response
+budget and KV pools are unchanged. Each relaunch is a new run identity that loads
+the predecessor's committed native checkpoint through `miles.load`; automatic
+preemption recovery then prefers checkpoints in the new run's own output root.
+
+Why these changes, from the [timing diagnosis](../baseline-timing-20260915/README.md)
+and the live logs of September 15:
+
+- Both dense arms served with decode graphs disabled: 22–27 output tokens/s per
+  stream and 192–215 tokens/s per engine at eight running requests. The MoE
+  engines on the same image run 1,200 tokens/s per engine with graphs, and the
+  original comparator's vLLM engines complete the same 64-sample GSM8K update in
+  2.2 minutes versus 7.0 for the Core arm. No dense config had ever enabled graphs.
+- The dense broad run's second allocation completed updates 6–9 at 44–50 minutes
+  each and was preempted eight minutes before its next save, leaving no durable
+  progress from a 34 GPU-hour allocation. Saving every update costs about 39 s
+  without inference drain.
+- The MoE engines reported full-token KV usage of 0.10–0.14 at admission 8 with a
+  786,432-token pool, so admission 16 fits without changing the pool.
+- Every restart logged Triton cache `miss` for all workers; the MoE's first update
+  after the 19:24 UTC restart took 57 minutes against 8 warm.
+
+Not done: EP4 trainers with 11 engines. Two blockers were found. Core RL resume
+rejects any trainer topology change (`validate_topology` in
+`open_instruct/miles/checkpoint.py`), so the EP8 checkpoint at update 45 cannot
+continue at EP4. The topology planner also places trainers on exclusive nodes,
+so 4 trainers + 11 engines + 1 judge plans to three nodes with eight idle GPUs
+(`runs/relaunch-20260915/moe-broad-ep4-i11.toml` validates but is not launched).
+An EP4/11 arm therefore means a fresh MoE run and a placement change to the
+planner; both are recorded here as open decisions rather than made silently.
+
+The r3 control was stopped immediately after checkpoint 150 committed, before
+its scheduled update-150 held-out evaluation, so that evaluation must be run on
+the frozen checkpoint separately; r4 evaluates at update 200. Scheduling
+protection is unchanged at a four-hour minimum runtime on urgent priority; the
+workspace remains several hundred percent over its allocation target inside
+`ai2/oe-scaling`, which is why every job is preempted at exactly four hours.
+
+## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
 | --- | --- | --- |
