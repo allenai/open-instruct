@@ -133,10 +133,14 @@ schema accepts:
   `inference.gpus` (a multiple of `inference.tensor_parallel_size`) and
   `teacher.gpus` (the teacher's SGLang tensor parallelism). The task requests
   their sum, at most one node; roles occupy consecutive devices in that order.
-  Only 2/1/1 has been exercised; `plan` warns on any other topology. Keep
-  `teacher.gpus = 1` for Qwen3.5 hybrid GDN teachers: with SGLang tensor
-  parallelism 2 the first `/generate` probe returned NaN logits and the sampler
-  hit a CUDA device-side assert (Beaker 01M2K5Y9JT4CD9WN1HRD12GGA9).
+  Only 2/1/1 has been exercised; `plan` warns on any other topology.
+- Local teacher checkpoints saved by transformers 5 as a text-only
+  `Qwen3_5ForCausalLM` keep the repository's `model.language_model.*` tensor
+  names. SGLang's text-only loader skips every such tensor, serves random
+  weights and the sampler hits a CUDA device-side assert on NaN probabilities
+  (Beaker 01M2K5Y9JT4CD9WN1HRD12GGA9, 01M2K86VPW6HB549MPCNVEEDB2). `prepare`
+  detects this layout and stages a renamed copy of the shards (`model.*`,
+  vision and MTP tensors dropped) instead of symlinking them.
 - `distillation.use_rollout_logprobs`: score the student side of the reverse KL
   with the rollout engine's log-probs instead of the trainer's pre-update forward
   pass. Open Instruct's `--use_vllm_logprobs` OPD runs behave like `true`; the

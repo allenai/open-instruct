@@ -16,8 +16,8 @@ source = "Qwen/Qwen3.5-4B"
 
 [teacher]
 source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/qwen35_9b_verifier_dppo_math_fixed_dapo_100step_4node__42__1788828853"
-# SGLang serves the Qwen3.5 hybrid GDN teacher on one GPU: with tensor parallelism 2
-# the first /generate probe returned NaN logits and the sampler hit a CUDA assert.
+# One SGLang GPU scores the teacher; scoring is prefill-only, so the student
+# rollout engines get the other three inference GPUs.
 gpus = 1
 concurrency = 32
 request_timeout = 900
@@ -54,7 +54,7 @@ use_rollout_logprobs = true
 learning_rate = 5e-7
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-4b-opd-from-verifier-9b-math"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-4b-opd-from-verifier-9b-math-v3"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]
