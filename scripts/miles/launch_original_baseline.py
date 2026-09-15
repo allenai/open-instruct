@@ -19,7 +19,7 @@ SOURCE = "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-c
 PREPARED = "/weka/oe-training-default/robertb/open-instruct/data/olmo3-sft-gsm8k-original-retrofit-20260914"
 
 
-def specification(image, source_dataset, stage, name):
+def specification(image, source_dataset, stage, name, *, keep_zero_advantage_groups=False):
     output = "/weka/oe-training-default/robertb/open-instruct/runs/" + name
     args = [
         "python",
@@ -34,6 +34,8 @@ def specification(image, source_dataset, stage, name):
         "--output",
         output,
     ]
+    if keep_zero_advantage_groups:
+        args.append("--keep-zero-advantage-groups")
     command = (
         "set -euo pipefail\nmkdir -p /tmp/qualification /output\n"
         "cp /qualification-source/provenance.json /output/\n"
@@ -87,6 +89,7 @@ def main():
     parser.add_argument("--stage", choices=("prepare", "smoke", "train"), required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--keep-zero-advantage-groups", action="store_true")
     args = parser.parse_args()
     if args.image != "01KA3FGCMVYGVEX2NG7Q2JWZ8E":
         raise ValueError("Use the qualified historical Think image 01KA3FGCMVYGVEX2NG7Q2JWZ8E")
@@ -103,6 +106,7 @@ def main():
             "stage": args.stage,
             "archive_sha256": hashlib.sha256(raw).hexdigest(),
             "trainer": "original-open-instruct",
+            "keep_zero_advantage_groups": args.keep_zero_advantage_groups,
         }
         (directory / "provenance.json").write_text(json.dumps(provenance, indent=2))
         source_dataset = "SOURCE_DATASET"
@@ -129,7 +133,13 @@ def main():
             source_dataset = json.loads(
                 subprocess.check_output(["beaker", "dataset", "get", f"{user}/{name}", "--format", "json"], text=True)
             )[0]["id"]
-        spec = specification(args.image, source_dataset, args.stage, args.name)
+        spec = specification(
+            args.image,
+            source_dataset,
+            args.stage,
+            args.name,
+            keep_zero_advantage_groups=args.keep_zero_advantage_groups,
+        )
         if args.render_only:
             print(json.dumps(spec, indent=2))
             return

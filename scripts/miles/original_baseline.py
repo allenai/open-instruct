@@ -175,7 +175,7 @@ def prepare(model, source, output):
     print("ORIGINAL_BASELINE_PREPARATION_PASSED", json.dumps(receipt), flush=True)
 
 
-def patch_trainer(text):
+def patch_trainer(text, *, keep_zero_advantage_groups=False):
     changes = {
         "adam_alignment": {
             "before": "torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)",
@@ -201,6 +201,11 @@ def patch_trainer(text):
             "after": "            (training_step % args.local_eval_every == 0 or (training_step == 1 and args.eval_on_step_0))\n",
         },
     }
+    if keep_zero_advantage_groups:
+        changes["retain_zero_advantage_groups"] = {
+            "before": "            non_zero_gradient_index = np.where(expanded_mask)[0]\n",
+            "after": "            non_zero_gradient_index = np.arange(len(scores))  # Core comparison: retain zero-advantage groups\n",
+        }
     for name, change in changes.items():
         if text.count(change["before"]) != 1:
             raise ValueError(f"Cannot unambiguously apply original benchmark adjustment: {name}")
@@ -226,7 +231,7 @@ def completion_record(steps, updates, exports, invocation):
     }
 
 
-def train(model, prepared, output, *, smoke):
+def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False):
     receipt = json.loads((prepared / "preparation.json").read_text())
     if receipt["model"] != str(model):
         raise ValueError("Prepared model identity differs")
@@ -244,13 +249,13 @@ def train(model, prepared, output, *, smoke):
     original = trainer.read_bytes()
     if sha(original) != ORIGINAL_TRAINER_SHA256:
         raise ValueError("Original trainer source differs from the audited image")
-    patched, changes = patch_trainer(original.decode())
+    patched, changes = patch_trainer(original.decode(), keep_zero_advantage_groups=keep_zero_advantage_groups)
     trainer.write_text(patched)
     steps = 3 if smoke else 200
     prefix = "smoke-" if smoke else ""
     # Exercise the historical filtering/packing loop with enough distinct prompts
     # to fill four H100 ranks. Full comparisons retain their original batch size.
-    prompts_per_collection = 128 if smoke else 16
+    prompts_per_collection = 128 if smoke and not keep_zero_advantage_groups else 16
     options = {
         "exp_name": output.name,
         "model_name_or_path": str(prepared / "legacy-model"),
@@ -295,7 +300,7 @@ def train(model, prepared, output, *, smoke):
         "eval_on_step_0": True,
         "local_eval_every": 1 if smoke else 50,
         "save_freq": steps,
-        "checkpoint_state_freq": steps if smoke else 100,
+        "checkpoint_state_freq": steps if smoke else 25,
         "checkpoint_state_dir": str(output / "checkpoints"),
         "output_dir": str(output / "model"),
         "push_to_hub": False,
@@ -323,7 +328,11 @@ def train(model, prepared, output, *, smoke):
             "DeepSpeed/HF versus OLMo-core",
             "Original token-mean packed loss versus Core response reduction",
             "Original historical GSM8K verifier versus current verifier",
-            "Original zero-advantage filtering can skip driver steps; completed optimizer calls are counted separately",
+            (
+                "Zero-advantage groups retained to match Core; historical pruning disabled explicitly"
+                if keep_zero_advantage_groups
+                else "Original zero-advantage filtering can skip driver steps; completed optimizer calls are counted separately"
+            ),
             "Four H100 trainers/four inference GPUs versus the two-B300/four-inference Core control",
         ],
     }
@@ -354,11 +363,18 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--prepared", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--keep-zero-advantage-groups", action="store_true")
     args = parser.parse_args()
     if args.stage == "prepare":
         prepare(args.model, args.source, args.prepared)
     else:
-        train(args.model, args.prepared, args.output, smoke=args.stage == "smoke")
+        train(
+            args.model,
+            args.prepared,
+            args.output,
+            smoke=args.stage == "smoke",
+            keep_zero_advantage_groups=args.keep_zero_advantage_groups,
+        )
 
 
 if __name__ == "__main__":

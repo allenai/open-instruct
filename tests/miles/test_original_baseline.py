@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from safetensors.torch import save_file
@@ -220,3 +221,27 @@ def test_optimizer_ledger_path_survives_historical_output_directory_rewriting(tm
     exec(compile(block, "update_ledger", "exec"), namespace)
     namespace["record"]()
     assert original_baseline.read_jsonl(ledger) == [{"driver_step": 2}]
+
+
+@pytest.mark.parametrize("scores", [[1, 1, 0, 0], [1, 0, 0, 0]])
+def test_opt_in_comparison_retains_groups_without_changing_their_advantages(scores):
+    source = Path("/stage/open_instruct/grpo_fast.py").read_text()
+    _, default_changes = original_baseline.patch_trainer(source)
+    assert "retain_zero_advantage_groups" not in default_changes
+    _, changes = original_baseline.patch_trainer(source, keep_zero_advantage_groups=True)
+    scores = np.array(scores)
+    grouped = scores.reshape(-1, 2)
+    advantages = scores - np.repeat(grouped.mean(axis=-1), 2)
+    expanded_mask = np.repeat(grouped.std(axis=-1) != 0, 2)
+    namespace = {"np": np, "scores": scores, "expanded_mask": expanded_mask}
+    exec(changes["retain_zero_advantage_groups"]["after"].strip(), namespace)
+    index = namespace["non_zero_gradient_index"]
+    assert index.tolist() == list(range(len(scores)))
+    assert np.array_equal(advantages[index], advantages)
+
+
+def test_comparison_retention_switch_is_explicit_in_submitted_command():
+    spec = launch_original_baseline.specification("image", "source", "train", "test", keep_zero_advantage_groups=True)
+    assert "--keep-zero-advantage-groups" in spec["tasks"][0]["arguments"][0]
+    spec = launch_original_baseline.specification("image", "source", "train", "test")
+    assert "--keep-zero-advantage-groups" not in spec["tasks"][0]["arguments"][0]

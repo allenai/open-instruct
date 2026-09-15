@@ -6,6 +6,32 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
+## Protected continuations — September 15, 03:05 UTC
+
+Dense GSM8K reached 50 optimizer updates and began the 512-question held-out
+evaluation. MoE robust restart is running; dense robust replacement is submitted
+as [01M2HG0XFGPA5JFA8MPW01J4JF](https://beaker.org/ex/01M2HG0XFGPA5JFA8MPW01J4JF).
+The dense predecessor reached 7 updates without a checkpoint and is being
+replaced. Both robust profiles keep the same frozen inputs, topology, lengths and
+optimization, but use the repaired judge parser/fallback, five-update native saves,
+48h allocations and retained initial evaluation. If 200 updates exceed an
+allocation, continuation must load a committed native checkpoint; do not splice
+fresh-start step numbers onto the previous learning curve.
+
+Original full B64 run `01M2HDDJKQE4TSPYKFJFEN662Q` has not performed an optimizer
+call after its first six collections. Historical pruning left 0–12 responses,
+which packed into fewer than four trainer shards. The B512 qualifier concealed
+this small-batch problem. The corrected benchmark opts into
+`--keep-zero-advantage-groups`, retaining all 16×4 responses like Core and leaving
+their computed advantages unchanged. This is an explicitly modified historical
+baseline, not an unmodified published recipe. It changes which samples enter the
+loss denominator and permits optimizer momentum updates on all-zero-advantage
+collections, matching Core's retention behavior more closely. Token-mean versus
+response-mean loss and pack-remainder dropping remain documented differences.
+The default historical pruning path is preserved for reproduction. The corrected
+launcher records the opt-in and actual successful training calls, and saves native
+state every 25 iterations. Twenty original-image tests pass; Ruff passes.
+
 ## Progress — September 15, 02:12 UTC
 
 Original framework qualifier `01M2H7NFWZB8ERKFJ6XYAQABQ3` exited zero, completed
