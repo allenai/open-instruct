@@ -5,6 +5,7 @@ in that image; Adam beta2 is aligned and the initial evaluation is explicitly sc
 """
 
 import argparse
+import fcntl
 import hashlib
 import importlib
 import json
@@ -13,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 import torch
@@ -248,7 +250,69 @@ def completion_record(steps, updates, exports, invocation):
     }
 
 
-def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False):
+def prepare_resume(output, record):
+    """Check the unchanged recipe and native rank metadata before resuming."""
+    previous = json.loads((output / "invocation.json").read_text())
+    for key in ("command", "original_source_sha256", "model_alias"):
+        if previous[key] != record[key]:
+            raise ValueError(f"Resume changes the original run's {key}")
+    if (output / "completion.json").exists():
+        raise ValueError("Original run is already complete")
+    root = output / "checkpoints"
+    tag = (root / "latest").read_text().strip()
+    if not tag.startswith("global_step") or not tag[11:].isdigit():
+        raise ValueError("Invalid native checkpoint tag")
+    checkpoint = root / tag
+    newer = [p.name for p in root.glob("global_step*") if p.name[11:].isdigit() and int(p.name[11:]) > int(tag[11:])]
+    if newer:
+        raise ValueError(f"Inspect incomplete newer checkpoints before resuming: {newer}")
+    steps = []
+    for rank in range(4):
+        state = torch.load(
+            checkpoint / f"zero_pp_rank_{rank}_mp_rank_00_model_states.pt", map_location="cpu", weights_only=False
+        )
+        if "rng_states" not in state or type(state.get("training_step")) is not int:
+            raise ValueError("Checkpoint lacks optimizer update clock or RNG state")
+        steps.append(state["training_step"])
+        shard = checkpoint / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
+        if not shard.is_file() or shard.stat().st_size == 0:
+            raise ValueError(f"Missing optimizer shard for rank {rank}")
+    if len(set(steps)) != 1 or not 0 < steps[0] < 200:
+        raise ValueError(f"Invalid checkpoint update clocks: {steps}")
+    ledger = output / "optimizer-updates.jsonl"
+    updates = read_jsonl(ledger)
+    retained = [u for u in updates if u["driver_step"] <= steps[0]]
+    if not retained or retained[-1]["driver_step"] != steps[0]:
+        raise ValueError("Update ledger does not cover the saved checkpoint")
+    attempt = uuid.uuid4().hex
+    shutil.copyfile(ledger, output / f"optimizer-updates-before-resume-{attempt}.jsonl")
+    temporary = ledger.with_suffix(".tmp")
+    temporary.write_bytes(b"".join(encoded(u) for u in retained))
+    temporary.replace(ledger)
+    result = {
+        "checkpoint": str(checkpoint),
+        "completed_steps": steps[0],
+        "discarded_unsaved_updates": len(updates) - len(retained),
+        "invocation": record,
+    }
+    (output / f"resume-{attempt}.json").write_bytes(encoded(result))
+    print("ORIGINAL_BASELINE_RESUME", json.dumps(result), flush=True)
+    return result
+
+
+def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, resume=False):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with (output.parent / f".{output.name}.run.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("Another process owns this original-framework run") from error
+        return _train(
+            model, prepared, output, smoke=smoke, keep_zero_advantage_groups=keep_zero_advantage_groups, resume=resume
+        )
+
+
+def _train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, resume=False):
     receipt = json.loads((prepared / "preparation.json").read_text())
     if receipt["model"] != str(model):
         raise ValueError("Prepared model identity differs")
@@ -259,9 +323,11 @@ def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False):
         path = prepared / "legacy-model" / name
         if not path.is_symlink() or str(path.resolve()) != link["target"] or path.stat().st_size != link["size"]:
             raise ValueError(f"Original model alias changed: {name}")
-    if output.exists():
-        raise ValueError("Use a fresh original-framework run directory")
-    output.mkdir(parents=True)
+    if output.exists() and not resume:
+        raise ValueError("Use a fresh original-framework run directory, or explicitly resume its native checkpoint")
+    if resume and not (output / "invocation.json").is_file():
+        raise ValueError("Resume requires an existing original-framework invocation")
+    output.mkdir(parents=True, exist_ok=resume)
     trainer = Path("/stage/open_instruct/grpo_fast.py")
     original = trainer.read_bytes()
     if sha(original) != ORIGINAL_TRAINER_SHA256:
@@ -353,7 +419,10 @@ def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False):
             "Four H100 trainers/four inference GPUs versus the two-B300/four-inference Core control",
         ],
     }
-    (output / "invocation.json").write_bytes(encoded(record))
+    if resume:
+        prepare_resume(output, record)
+    else:
+        (output / "invocation.json").write_bytes(encoded(record))
     print("ORIGINAL_BASELINE_COMMAND", json.dumps(record), flush=True)
     subprocess.run(
         command,
@@ -571,7 +640,7 @@ def evaluate_checkpoint(model, source, prepared, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("prepare", "smoke", "train", "export", "evaluate"))
+    parser.add_argument("stage", choices=("prepare", "smoke", "train", "export", "evaluate", "resume"))
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--prepared", type=Path, required=True)
@@ -594,6 +663,7 @@ def main():
             args.prepared,
             args.output,
             smoke=args.stage == "smoke",
+            resume=args.stage == "resume",
             keep_zero_advantage_groups=args.keep_zero_advantage_groups,
         )
 

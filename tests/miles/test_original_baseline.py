@@ -454,3 +454,66 @@ def test_independent_eval_keeps_frozen_tokens_and_all_outputs(tmp_path, monkeypa
     assert [r["id"] for r in saved] == [r["metadata"]["prepared_sample_id"] for r in rows]
     summary = json.loads((output / "evaluation.json").read_text())
     assert summary["correct"] == 512 and summary["capped"] == 0
+
+
+def resume_fixture(tmp_path):
+    record = {
+        "command": ["python", "train.py", "--learning_rate", "1e-6"],
+        "original_source_sha256": "source",
+        "model_alias": {"source": "model"},
+    }
+    (tmp_path / "invocation.json").write_text(json.dumps(record))
+    checkpoint = tmp_path / "checkpoints/global_step126"
+    checkpoint.mkdir(parents=True)
+    (checkpoint.parent / "latest").write_text(checkpoint.name)
+    for rank in range(4):
+        torch.save(
+            {"training_step": 125, "rng_states": {}}, checkpoint / f"zero_pp_rank_{rank}_mp_rank_00_model_states.pt"
+        )
+        (checkpoint / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt").write_bytes(b"test")
+    (tmp_path / "optimizer-updates.jsonl").write_bytes(
+        b"".join(original_baseline.encoded({"driver_step": n}) for n in range(1, 146))
+    )
+    return record, checkpoint
+
+
+def test_resume_archives_unsaved_updates_and_preserves_checkpoint(tmp_path):
+    record, checkpoint = resume_fixture(tmp_path)
+    before = {p.name: p.read_bytes() for p in checkpoint.iterdir()}
+    result = original_baseline.prepare_resume(tmp_path, record)
+    assert result["completed_steps"] == 125 and result["discarded_unsaved_updates"] == 20
+    assert len(original_baseline.read_jsonl(tmp_path / "optimizer-updates.jsonl")) == 125
+    archive = next(tmp_path.glob("optimizer-updates-before-resume-*.jsonl"))
+    assert len(original_baseline.read_jsonl(archive)) == 145
+    assert {p.name: p.read_bytes() for p in checkpoint.iterdir()} == before
+
+
+@pytest.mark.parametrize("failure", ["recipe", "rank", "shard", "newer", "complete"])
+def test_resume_fails_before_changing_ledger_on_invalid_state(tmp_path, failure):
+    record, checkpoint = resume_fixture(tmp_path)
+    if failure == "recipe":
+        record["command"][-1] = "1e-5"
+    elif failure == "rank":
+        torch.save({"training_step": 124, "rng_states": {}}, checkpoint / "zero_pp_rank_3_mp_rank_00_model_states.pt")
+    elif failure == "shard":
+        (checkpoint / "bf16_zero_pp_rank_2_mp_rank_00_optim_states.pt").unlink()
+    elif failure == "newer":
+        (checkpoint.parent / "global_step151").mkdir()
+    else:
+        (tmp_path / "completion.json").write_text("{}")
+    ledger = (tmp_path / "optimizer-updates.jsonl").read_bytes()
+    with pytest.raises(ValueError):
+        original_baseline.prepare_resume(tmp_path, record)
+    assert (tmp_path / "optimizer-updates.jsonl").read_bytes() == ledger
+
+
+def test_explicit_resume_launch_reuses_run_and_enables_preemption_recovery():
+    task = launch_original_baseline.specification(
+        "image", "source", "resume", "existing-run", keep_zero_advantage_groups=True
+    )["tasks"][0]
+    assert task["context"]["autoResume"] is True
+    assert task["context"]["minRuntime"] == "4h"
+    assert task["resources"]["gpuCount"] == 8
+    assert "original_baseline.py resume" in task["arguments"][0]
+    assert "--keep-zero-advantage-groups" in task["arguments"][0]
+    assert {e["name"]: e.get("value") for e in task["envVars"]}["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] == "1"

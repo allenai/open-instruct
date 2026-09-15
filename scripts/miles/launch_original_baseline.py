@@ -65,7 +65,7 @@ def specification(
         "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     }
-    if stage == "export":
+    if stage in {"export", "resume"}:
         # Our own optimizer checkpoints contain trusted Python client state.
         env["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
     task = {
@@ -85,14 +85,18 @@ def specification(
             "memory": "256 GiB"
             if stage == "export"
             else ("64 GiB" if stage in {"prepare", "evaluate"} else "704 GiB"),
-            "sharedMemory": "200 GiB" if stage in {"train", "smoke"} else "4 GiB",
+            "sharedMemory": "200 GiB" if stage in {"train", "smoke", "resume"} else "4 GiB",
         },
         "constraints": {"cluster": ["ai2/saturn" if stage in {"prepare", "export"} else "ai2/jupiter"]},
-        "context": {"priority": "urgent", "minRuntime": "30m" if stage != "train" else "4h", "autoResume": False},
+        "context": {
+            "priority": "urgent",
+            "minRuntime": "4h" if stage in {"train", "resume"} else "30m",
+            "autoResume": stage == "resume",
+        },
         "timeout": "1h" if stage in {"prepare", "export"} else ("3h" if stage in {"smoke", "evaluate"} else "48h"),
         "envVars": [{"name": k, "value": v} for k, v in env.items()],
     }
-    if stage in {"train", "smoke"}:
+    if stage in {"train", "smoke", "resume"}:
         task["envVars"].append({"name": "WANDB_API_KEY", "secret": "robertb_WANDB_API_KEY"})
     return {
         "version": "v2",
@@ -105,7 +109,9 @@ def specification(
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("--stage", choices=("prepare", "smoke", "train", "export", "evaluate"), required=True)
+    parser.add_argument(
+        "--stage", choices=("prepare", "smoke", "train", "export", "evaluate", "resume"), required=True
+    )
     parser.add_argument("--name", required=True)
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--keep-zero-advantage-groups", action="store_true")
