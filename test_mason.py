@@ -117,6 +117,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "hostname": None,
                     "preemptible": False,
                     "mount_docker_socket": False,
+                    "extra_weka_buckets": [],
                 },
             ),
             (
@@ -142,6 +143,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "preemptible": True,
                     "hostname": None,
                     "mount_docker_socket": False,
+                    "extra_weka_buckets": [],
                 },
             ),
         ]
@@ -192,6 +194,33 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
+
+
+class TestGetDatasets(unittest.TestCase):
+    def _buckets(self, mounts):
+        return [(mount.mount_path, mount.source.weka) for mount in mounts]
+
+    def test_weka_cluster_mounts_the_two_defaults(self):
+        self.assertEqual(
+            self._buckets(mason.get_datasets([], ["ai2/jupiter"])),
+            [("/weka/oe-adapt-default", "oe-adapt-default"), ("/weka/oe-training-default", "oe-training-default")],
+        )
+
+    def test_extra_buckets_are_appended_and_deduplicated(self):
+        mounts = mason.get_datasets(
+            [], ["ai2/jupiter"], extra_weka_buckets=["olmo-3p5-checkpoints", "oe-adapt-default"]
+        )
+        self.assertEqual(
+            self._buckets(mounts),
+            [
+                ("/weka/oe-adapt-default", "oe-adapt-default"),
+                ("/weka/oe-training-default", "oe-training-default"),
+                ("/weka/olmo-3p5-checkpoints", "olmo-3p5-checkpoints"),
+            ],
+        )
+
+    def test_extra_buckets_are_ignored_off_weka(self):
+        self.assertEqual(mason.get_datasets([], ["ai2/phobos"], extra_weka_buckets=["olmo-3p5-checkpoints"]), [])
 
 
 if __name__ == "__main__":
