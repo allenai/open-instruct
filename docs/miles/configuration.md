@@ -14,7 +14,7 @@ and [miles] and support only plan/validate/train. Structured validate is CPU-saf
 low-level validate invokes the installed native parser. Neither certifies GPU fit.
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/grpo-async-disaggregated.toml \
+python -m open_instruct.miles plan configs/miles/examples/medium.toml \
   --set training.num_rollouts=20 \
   --set 'tracking.wandb_group="my-comparison"'
 ```
@@ -116,6 +116,7 @@ flags, choices and source help see the [native appendix](native-options.md).
 | data.tasks[].train_count | Positive integer number of training prompts. At least one task must select training data. |
 | judges.NAME.backend | Managed only: sglang (default and only supported value). |
 | judges.NAME.chat_template | Managed only: qwen3-no-thinking (default and only supported template). |
+| judges.NAME.context_extension | Optional explicit context extension recipe; qwen3-yarn-128k enables the validated Qwen3 YaRN settings for a 128K judge context. |
 | judges.NAME.endpoint | External only: required HTTP(S) endpoint without embedded credentials. |
 | judges.NAME.gpus | Managed only: positive GPU count, default 1; must equal tensor_parallel_size. |
 | judges.NAME.max_concurrent_calls | Positive client concurrency, default 16. |
@@ -146,7 +147,7 @@ flags, choices and source help see the [native appendix](native-options.md).
 | launch.weka_mounts[].weka | WEKA filesystem name; unique per mount. |
 | launch.workspace | Beaker workspace string; default ai2/open-instruct-dev. |
 | model.format | hf (default) or olmo_core. Megatron checkpoint inputs are rejected. |
-| model.hf_template | Tokenizer/chat-template override: a tokenizer directory (its tokenizer files, chat template and `generation_config.json` replace the checkpoint's in the prepared HF directory) or a single `chat_template.jinja`. Required for native olmo_core input; optional for hf input. The override's digest is recorded in `workflow-model.json`, and a template containing a literal `[CUTOFF_DATE]` placeholder is warned about at preparation. |
+| model.hf_template | Required only for native olmo_core input; compatible HF architecture/tokenizer template path. |
 | model.reference_hf | Rejected baseline conversion-validation field; use miles.ref_load for a frozen KL reference. |
 | model.source | Required checkpoint path, resolved relative to the run file; input remains read-only. |
 | name | Required run identifier: letters, digits, dots, underscores and hyphens; starts with a letter/digit. |
@@ -305,11 +306,6 @@ Generated from the actual structured TOMLs. These are recipe choices, not univer
 | Example | Trainer GPUs | Rollout GPUs | Colocated | Prompts × responses | Global batch | Async | TIS | Packing | Collections |
 |---|---|---|---|---|---|---|---|---|---|
 | dev.toml | 1 × 1 | 1 | True | 4 × 2 | 8 | False | False | False | 4 |
-| grpo-async-disaggregated.toml | 1 × 8 | 8 | False | 64 × 8 | 512 | True | True | True | 100 |
-| grpo-basic.toml | 1 × 1 | 1 | True | 8 × 8 | 64 | False | False | False | 2 |
-| grpo-disaggregated.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 100 |
-| grpo-multitask.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 4 |
-| grpo-sharing.toml | 1 × 2 | 2 | False | 32 × 4 | 128 | True | True | True | 2 |
-| large.toml | 1 × 8 | 8 | False | 64 × 4 | 256 | True | True | False | 100 |
-| small.toml | 1 × 2 | 2 | False | 32 × 4 | 128 | True | True | True | 100 |
-| tiny.toml | 1 × 1 | 1 | False | 4 × 2 | 8 | False | False | False | 4 |
+| large.toml | 2 × 8 | 32 | False | 64 × 4 | 256 | True | True | True | 200 |
+| medium.toml | 1 × 8 | 7 | False | 64 × 4 | 256 | True | True | True | 200 |
+| small.toml | 1 × 1 | 1 | False | 4 × 2 | 8 | False | False | False | 4 |

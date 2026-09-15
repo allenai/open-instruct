@@ -11,11 +11,19 @@ from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "configs/miles/qualification/olmo3-think-sft-basket-200.toml"
+CONFIG = ROOT / "configs/miles/examples/medium.toml"
 
 
 def test_dense_basket_configuration():
-    run = RunSpec.load(CONFIG)
+    run = RunSpec.load(
+        CONFIG,
+        overrides=[
+            "trainer.expert_parallel_size=1",
+            "miles.use_rollout_routing_replay=false",
+            "inference.radix_cache=false",
+            "inference.sglang_max_total_tokens=131072",
+        ],
+    )
     compiled = run.compile()
     assert compiled.core.expert_parallel_size == 1
     assert compiled.core.sequence_packing
@@ -35,7 +43,15 @@ def test_dense_basket_configuration():
 
 @pytest.mark.parametrize("failure", [None, "hash", "length", "overlap"])
 def test_frozen_retokenization(tmp_path, monkeypatch, failure):
-    run = RunSpec.load(CONFIG)
+    run = RunSpec.load(
+        CONFIG,
+        overrides=[
+            "trainer.expert_parallel_size=1",
+            "miles.use_rollout_routing_replay=false",
+            "inference.radix_cache=false",
+            "inference.sglang_max_total_tokens=131072",
+        ],
+    )
     source = tmp_path / "source"
     source.mkdir()
     output = tmp_path / "target"

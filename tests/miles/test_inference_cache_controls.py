@@ -8,7 +8,7 @@ from open_instruct.miles import validation
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
-EXAMPLE = Path(__file__).resolve().parents[2] / "configs/miles/examples/grpo-async-disaggregated.toml"
+EXAMPLE = Path(__file__).resolve().parents[2] / "configs/miles/examples/medium.toml"
 
 RADIX_ON = [
     "inference.radix_cache=true",
@@ -22,7 +22,19 @@ RADIX_ON = [
 
 
 def _miles(overrides):
-    return RunSpec.load(EXAMPLE, overrides=overrides).compile().miles
+    return (
+        RunSpec.load(
+            EXAMPLE,
+            overrides=[
+                "inference.radix_cache=false",
+                "inference.sglang_server_concurrency=64",
+                "inference.sglang_max_running_requests=64",
+            ]
+            + overrides,
+        )
+        .compile()
+        .miles
+    )
 
 
 def test_example_default_is_cache_off_with_a_slot_per_request():

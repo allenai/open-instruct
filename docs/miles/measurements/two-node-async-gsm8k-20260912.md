@@ -2,7 +2,7 @@
 
 > Historical evidence. For current operating instructions, start at the [MILES guide](../index.md).
 
-Run file: [`configs/miles/qualification/two-node-async-gsm8k-20260912.toml`](../../../configs/miles/qualification/two-node-async-gsm8k-20260912.toml).
+Run file: [`configs/miles/qualification/two-node-async-gsm8k-20260912.toml`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/two-node-async-gsm8k-20260912.toml).
 Model: the full-SFT KDA/latent-MoE checkpoint (`sft-65536` step 23607, HF artifact).
 Layout: one Holmes B300 node of eight Core trainer ranks at expert parallelism 8, one
 node of eight TP1 SGLang engines. Collections of 64 prompts × 8 responses = 512, one

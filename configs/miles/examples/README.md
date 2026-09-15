@@ -1,58 +1,58 @@
-# Structured MILES run examples
+# Four MILES starting points
 
-Start with the [MILES guide](../../../docs/miles/index.md) and
-[launch instructions](../../../docs/miles/launching.md). Copy a TOML into the
-Git-ignored `runs/` directory, replace YOUR_USERNAME and input/output paths, then
-run plan and validate. Keep these tracked templates unchanged for other users.
+| Config | Purpose | GPU allocation |
+|---|---|---|
+| [dev.toml](dev.toml) | Exercise colocation and basic plumbing with a tiny model | 1 shared GPU |
+| [small.toml](small.toml) | Exercise disaggregated GSM8K at small scale | 1 trainer + 1 inference |
+| [medium.toml](medium.toml) | Modest mixed math/IF/code/general training | 8 trainers + 7 inference + 1 judge; 16 B300 GPUs |
+| [large.toml](large.toml) | Provisional production layout; not qualified | 16 trainers + 32 inference + 1 judge; currently reserves 56 GPUs |
+
+Copy a starter before editing it:
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
-# Edit name/output.root; retain the supplied read-only checkpoint for the first run.
-python -m open_instruct.miles plan runs/my-grpo.toml
-python -m open_instruct.miles validate runs/my-grpo.toml
-export MILES_EXISTING_IMAGE=01M2F1RKZFZVJYAS0XQGEC3SEJ
-python -m open_instruct.miles run runs/my-grpo.toml
+cp configs/miles/examples/small.toml runs/my-run.toml
+# Replace model/output paths and YOUR_USERNAME; select an appropriate tiny model.
+python -m open_instruct.miles plan runs/my-run.toml
+python -m open_instruct.miles validate runs/my-run.toml
+# Set MILES_EXISTING_IMAGE to the compatible immutable runtime image.
+python -m open_instruct.miles run runs/my-run.toml
 ```
 
-The MILES GRPO starter uses four B300 GPUs, mixed-policy refresh and offline W&B. It needs Beaker login
-and resource access, but no extra HF/W&B secret mappings for the supplied inputs.
-Optional secret-name examples are commented at the end of each template.
-`runs/` is excluded from Git and Docker build contexts; the launcher still carries
-the selected TOML into the job. Relative input paths resolve from the copied TOML's
-directory; prefer absolute WEKA paths for remote inputs.
+`dev` and `small` use short GSM8K responses with a tiny checkpoint to test
+mechanics. They are not accuracy baselines. They exercise evaluation, save and
+resume as well as generation and training.
 
-Examples are editable starting points, not
-historical measurement records or universal memory-fit guarantees.
+`medium` targets our latent KDA MoE on B300 hardware. Supply an HF policy,
+prepared immutable mixed-task training/held-out JSONL files and verifier registry,
+and a prepared Qwen3-32B judge. The registry must include the code execution
+endpoint and the named general-quality verifiers. Those assets are prerequisites;
+this template does not provision a code service. See [managed judges](../../../docs/miles/managed-judges.md)
+and [datasets and verifiers](../../../docs/miles/data-and-evaluation.md).
 
-| Example | Purpose |
-|---|---|
-| [grpo-sharing.toml](grpo-sharing.toml) | First colleague run: tested full-SFT checkpoint, EP2 + two engines, two updates, mixed-policy refresh/TIS and packing/replay |
-| [grpo-basic.toml](grpo-basic.toml) | Tiny-model, one-GPU resident colocated execution check |
-| [grpo-disaggregated.toml](grpo-disaggregated.toml) | EP2 trainer plus one dedicated TP1 engine, synchronous training |
-| [grpo-async-disaggregated.toml](grpo-async-disaggregated.toml) | Production-shaped EP8 trainer node plus eight TP1 engines on another node; async/TIS and packing |
-| [grpo-multitask.toml](grpo-multitask.toml) | Short GSM8K/math mixed-task preparation and evaluation exercise |
+The medium trainer uses sequence packing, dynamic-row SwiGLU, periodic checks of
+scoring-pass skipping, router replay and flattened weight publication. At the
+32K response budget, activation recomputation remains enabled: the measured
+no-recompute win at 4K is not a memory qualification for 32K packs. SGLang uses
+radix caching and decode graphs, with client admission and active-request limits
+both set to 16 per engine. That concurrency is a starting estimate for long
+responses. Watch KV occupancy, retractions, tokens/s/GPU, trainer wait and stale
+sample drops before increasing it. These MoE cache budgets must not be copied
+unchanged to dense Olmo 3 or a different architecture.
 
-The first-run `grpo-sharing.toml` follows `small.toml`: 32 prompts × 4 responses
-and global batch 128. The older `grpo-basic`, `grpo-disaggregated`,
-`grpo-async-disaggregated` and `grpo-multitask` recipes keep 8 × 8 and batch 64
-with barrier publication. Image selection does not change these recipe settings.
-The full async example is 16 GPUs, not the older three-GPU comparison layout.
-Use [generated example summaries](../../../docs/miles/configuration.md#example-recipes)
-for exact current values. `profiles/` contains low-level prepared-input configs;
-`qualification/` contains bounded exercise inputs. Neither is interchangeable with
-a full workflow example. Preserve frozen experiment inputs when changing starters.
+The completed queue holds one 256-response collection; the producer permits
+1,024 outstanding responses, including those waiting for inference admission.
+Mixed-policy refresh and TIS retain a lag limit of two updates. Evaluation runs
+before training and every 50 updates; native checkpoints every five updates
+protect progress against preemption. Compiler-cache restore is enabled, but
+publication before preemption remains follow-up work.
 
-## Size-based throughput starters
+`large` keeps the same workload and numerical settings as a planning baseline.
+Trainer parallelism is two eight-GPU nodes, EP8 with DP2. Its topology,
+throughput, recovery and memory use require qualification before production.
+Thirty-two engines plus a one-GPU judge currently need a fifth serving/service
+node, leaving seven allocated GPUs unused. `plan` reports this explicitly.
 
-Use `dev.toml` and `tiny.toml` for one-GPU and disaggregated tiny-model mechanics.
-`small.toml` uses two full-model trainer GPUs; `large.toml` uses eight. Their
-inference fleets and batch sizes follow the [measured throughput guide](../../../docs/miles/throughput-profiles.md).
-These full-model examples use mixed-policy refresh and keep FIFO/lag-two semantics;
-that remains experimental outside the qualified full-SFT GSM8K/B300 workload.
-They are different recipes from the older packed async example above.
-
-The throughput basket disables eval/saves/export and enables detailed replay
-qualification. These researcher starters retain practical eval/save/export
-settings and disable the extra route audit. Read the measurement scope before
-using normal-cycle timings to estimate total job duration.
+W&B defaults to offline; configure an API-key secret and online mode when needed.
+Do not run any template unchanged: model, data, output and judge paths are
+placeholders. Put all experiment-specific variants in ignored `runs/`.

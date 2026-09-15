@@ -4,7 +4,7 @@ Use the trainer size and **desired optimization batch** to choose a starting
 profile, then provision inference to keep completed-group waiting near zero.
 The September 13 exercise found that full decode CUDA graphs mattered more than
 adding serving GPUs. The initial unpacked concurrency-32 follow-up used two
-inference GPUs without warm completed-queue drops. The small example now combines 6144-token packing with
+inference GPUs without warm completed-queue drops. The historical EP2 throughput experiment combined 6144-token packing with
 no recomputation and guarded scoring skip. Its 24-update live qualification
 measured 5,089 useful response tokens/s, 58% awaited collection and 0.79% warm
 stale-token drops. The faster trainer shifted the bottleneck toward batch supply.
@@ -40,29 +40,25 @@ MILES_EXISTING_IMAGE=01M2F1RKZFZVJYAS0XQGEC3SEJ \
 
 ## Choose a profile
 
-| Profile | Trainer / inference GPUs | Optimization batch | Use |
-|---|---:|---:|---|
-| [dev](../../configs/miles/examples/dev.toml) | 1 shared | 8 | Tiny-model GSM8K mechanics. Four updates and saves passed. |
-| [tiny](../../configs/miles/examples/tiny.toml) | 1 / 1 | 8 | Tiny-model disaggregated mechanics. Four updates and saves passed. |
-| [small](../../configs/miles/examples/small.toml) | 2 / 2 | 128 | Measured full-model throughput starting point. |
-| [large](../../configs/miles/examples/large.toml) | 8 / 8 | 256 | Measured two-node throughput starting point; no need to begin at 64 GPUs. |
+Use the four [maintained starters](../../configs/miles/examples/README.md).
 
-Dev/tiny use a random small MoE fixture in qualification. They do not establish
-that the full-SFT model and optimizer fit on one trainer GPU, or measure GSM8K
-learning. Core's trainer remains resident in colocated mode.
+| Profile | Trainer / inference / judge GPUs | Role |
+|---|---|---|
+| dev | 1 shared / — | Tiny-model colocation mechanics |
+| small | 1 / 1 / 0 | Disaggregated GSM8K mechanics |
+| medium | 8 / 7 / 1 | Mixed-workload 32K training starting point |
+| large | 16 / 32 / 1 | Production proposal; reserves 56 GPUs, not qualified |
 
-The full-model profiles use experimental mixed-policy refresh, FIFO whole groups,
-lag at most two updates, historical behavior log probabilities and TIS. Small now uses guarded scoring
-skip; large retains standalone scoring pending its faster EP8 qualification. Faster inference does not make already-generated tokens current-policy:
-in the EP2/batch-128 warm window every delivered group was age two. The goal here
-is useful throughput within that explicit age contract. A different lag or batch
-is an RL configuration change and should be evaluated as such.
+The measurements below describe historical 4K experiments. Their labels such as
+“small” and “large” are historical campaign names, not the current starter sizes.
+Do not transfer the 4K no-recomputation setting to 32K packs without measuring
+memory. The maintained medium uses recomputation and candidate admission 16.
 
 ## Settings behind the recommendation
 
 * Enable **full decode CUDA graphs** through the configured request admission;
-  keep prefill graphs disabled for this qualified refresh path. The small example
-  uses 32 HTTP/running slots per engine and capture through batch 32.
+  keep prefill graphs disabled for this qualified refresh path. The historical EP2 experiment
+  used 32 HTTP/running slots per engine and capture through batch 32.
 * Keep radix caching with the `extra_buffer` KDA strategy and static memory
   fraction 0.6. Small uses 786432 token slots and 1024 recurrent-state slots per
   engine; large retains its qualified 131072/128 pools at concurrency 16. These are requested

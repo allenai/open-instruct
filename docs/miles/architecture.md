@@ -46,7 +46,7 @@ command with different mounts or source provenance.
 ## Local development
 
 CPU-only plan/structured validate exercise the public configuration contract.
-For a GPU lifecycle check use the [tiny example](../../configs/miles/examples/grpo-basic.toml)
+For a GPU lifecycle check use the [tiny example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/dev.toml)
 and a compatible tiny HF fixture in the pinned runtime. The existing
 [historical local MoE and restart procedure](measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check) covers
 model preparation and execution. A host-only parser test cannot qualify routing,

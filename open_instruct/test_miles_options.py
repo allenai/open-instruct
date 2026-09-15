@@ -7,6 +7,7 @@ import pytest
 
 from open_instruct.miles import __main__, options
 from open_instruct.miles.config import CoreConfig, RunConfig
+from open_instruct.miles.run_spec import RunSpec
 
 
 def config(**kwargs):
@@ -121,10 +122,11 @@ def test_option_strings_are_preserved():
 
 def test_all_starting_profiles_compile():
     root = Path(__file__).parents[1]
-    paths = sorted((root / "configs/miles/profiles").glob("*.toml"))
-    assert len(paths) >= 3
+    paths = sorted((root / "configs/miles/examples").glob("*.toml"))
+    assert {p.stem for p in paths} == {"dev", "small", "medium", "large"}
+    assert set((root / "configs/miles").rglob("*.toml")) == set(paths)
     for path in paths:
-        assert RunConfig.load(path).plan()["argv"]
+        assert RunSpec.load(path).compile().plan()["argv"]
 
 
 def test_public_plan_cli(tmp_path, monkeypatch, capsys):

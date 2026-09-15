@@ -112,10 +112,11 @@ def test_small_comparisons_hold_model_data_and_objective_fixed():
         assert config.core.publication_mode == "refresh"
 
 
-@pytest.mark.parametrize("profile", ["dev", "tiny", "small", "large"])
-def test_self_contained_example_plans(profile):
+@pytest.mark.parametrize("profile,gpus", [("dev", 1), ("small", 2), ("medium", 16), ("large", 56)])
+def test_self_contained_example_plans(profile, gpus):
     spec = RunSpec.load(throughput_basket.ROOT / f"configs/miles/examples/{profile}.toml")
-    assert spec.data["tasks"][0]["task"] == "gsm8k"
+    assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k"
+    assert spec.plan()["allocation"]["allocated_gpus"] == gpus
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
 
 

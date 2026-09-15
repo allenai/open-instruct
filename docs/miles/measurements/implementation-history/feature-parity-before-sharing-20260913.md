@@ -40,11 +40,11 @@ uses implicit inheritance or environment-variable expansion.
 
 | Profile | Default shape | Qualification and remaining scope |
 | --- | --- | --- |
-| [tiny-resident](../../../../configs/miles/profiles/tiny-resident.toml) | One shared GPU; 1 prompt × 4 responses; two updates, native saves, eager decode | Tiny hybrid-MoE updates and separate-process continuation passed. Zero task rewards establish plumbing, not learning. |
-| [train-disaggregated](../../../../configs/miles/profiles/train-disaggregated.toml) | Two B300 Core EP ranks + one TP1 engine; 8 prompts × 8 responses; admission 64; 100 updates; initial/every-20 heldout eval; final native save; offline W&B | Full-model capacity and synchronous scheduling passed a 12-update trial. That trial used 16 × 4; the new 8 × 8 recipe and complete 100-update eval/save lifecycle are not established by it. |
-| [train-disaggregated-async](../../../../configs/miles/profiles/train-disaggregated-async.toml) | Same hardware/batch; lag ≤1 optimizer step; buffer factor two; retry; trainer-scored old logprobs plus TIS | Full-model bounded async passed 24-update and admission-64 12-update exercises. Those runs used the earlier behavior-logprob recipe; the new TIS/8 × 8 exercise passed four updates with an independent sample audit. Combined replay/restart/failure endurance remains separate. |
-| [sft-b300-ep2-sync](../../../../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two updates, initial/final eval, diagnostics; same admission 64 | Short correctness recipe; no optimizer checkpoint requested. |
-| [sft-b300-ep2-async-candidate](../../../../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Four updates; 512-token responses; eager decode; admission 64 | Short lifecycle variant. Its name does not mean all Core async support remains unqualified. |
+| [tiny-resident](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/profiles/tiny-resident.toml) | One shared GPU; 1 prompt × 4 responses; two updates, native saves, eager decode | Tiny hybrid-MoE updates and separate-process continuation passed. Zero task rewards establish plumbing, not learning. |
+| [train-disaggregated](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/profiles/train-disaggregated.toml) | Two B300 Core EP ranks + one TP1 engine; 8 prompts × 8 responses; admission 64; 100 updates; initial/every-20 heldout eval; final native save; offline W&B | Full-model capacity and synchronous scheduling passed a 12-update trial. That trial used 16 × 4; the new 8 × 8 recipe and complete 100-update eval/save lifecycle are not established by it. |
+| [train-disaggregated-async](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/profiles/train-disaggregated-async.toml) | Same hardware/batch; lag ≤1 optimizer step; buffer factor two; retry; trainer-scored old logprobs plus TIS | Full-model bounded async passed 24-update and admission-64 12-update exercises. Those runs used the earlier behavior-logprob recipe; the new TIS/8 × 8 exercise passed four updates with an independent sample audit. Combined replay/restart/failure endurance remains separate. |
+| [sft-b300-ep2-sync](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/profiles/sft-b300-ep2-sync.toml) | Two updates, initial/final eval, diagnostics; same admission 64 | Short correctness recipe; no optimizer checkpoint requested. |
+| [sft-b300-ep2-async-candidate](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Four updates; 512-token responses; eager decode; admission 64 | Short lifecycle variant. Its name does not mean all Core async support remains unqualified. |
 
 Full-SFT profiles refer to the existing 18.5B-total KDA/latent model, not hero.
 They reserve 2048 prompt + 4096 response tokens, except the short async variant.
@@ -94,8 +94,8 @@ forward/backward preflight for the target hardware.
 ## Additional datasource trials
 
 The [datasource harness](../../../../scripts/miles/datasource_trials.py) consumes pinned
-[math](../../../../configs/miles/tasks/math.toml) and
-[legacy IF](../../../../configs/miles/tasks/ifeval.toml) task specifications. These task
+[math](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/tasks/math.toml) and
+[legacy IF](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/tasks/ifeval.toml) task specifications. These task
 TOMLs are preparation inputs, not standalone training configs. It selects 24
 unique in-budget prompts from at most 256 source rows: eight for two updates and
 sixteen held out for before/after evaluation. Hashes and actual row indices are

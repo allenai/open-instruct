@@ -192,9 +192,10 @@ def select(spec, manifest, partitions, quotas, collections_count, eval_per_domai
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path)
+    parser.add_argument("--dense-config", type=Path, required=True, help="Prepared dense-model run config in runs/")
     args = parser.parse_args()
     moe = RunSpec.load(args.config)
-    dense = RunSpec.load(Path("configs/miles/qualification/colleague-20260912/01-dense.toml"))
+    dense = RunSpec.load(args.dense_config)
     report = {"passed": False, "started": time.time()}
     try:
         report["inventories"] = [inventory(spec.model["source"]) for spec in (dense, moe)]

@@ -21,7 +21,7 @@ reward delivery and cross-node training/publication, not learning or throughput.
 
 ## Reproducibility
 
-- [Run configuration](../../../configs/miles/qualification/multinode-judges.toml)
+- [Run configuration](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/multinode-judges.toml)
 - [Frozen launch receipt](multinode-judges-20260912/launch.json): source
   `7c8dd09792a4446d462ee4b72b810cfc84c690eb`, image `01M29VAV2PH85A9WRTF1ZR1GK4`.
 - [GPU exercise](https://beaker.org/ex/01M29VB7YZXNZWK28W9H6CZSJ4).

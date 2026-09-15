@@ -38,7 +38,7 @@ from open_instruct.miles import rewards
 from open_instruct.miles.driver import train
 from open_instruct.miles.rewards import registered_reward
 
-TASK_ROOT = Path(__file__).resolve().parents[2] / "configs/miles/tasks"
+TASK_ROOT = Path(__file__).resolve().parents[2] / "scripts/miles/assets/tasks"
 VERIFIERS = {"math": MathVerifier, "ifeval_old": IFEvalVerifierOld, "ifeval": IFEvalVerifier}
 
 

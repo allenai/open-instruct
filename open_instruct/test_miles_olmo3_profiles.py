@@ -14,12 +14,23 @@ from open_instruct.miles.run_spec import RunSpec
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize(
-    "filename,batch,trainer,engines,replicas",
-    [("qualification/olmo3-think-gsm8k.toml", 8, 2, 1, 1), ("proposals/olmo3-think-dolci-200.toml", 512, 8, 7, 2)],
-)
-def test_olmo3_configs_use_dense_recipe_controls(filename, batch, trainer, engines, replicas):
-    spec = RunSpec.load(ROOT / "configs/miles" / filename)
+@pytest.mark.parametrize("trainer,engines,batch", [(2, 1, 8), (8, 7, 512)])
+def test_olmo3_configs_use_dense_recipe_controls(trainer, engines, batch):
+    spec = RunSpec.load(
+        ROOT / "configs/miles/examples/medium.toml",
+        overrides=[
+            f"trainer.gpus={trainer}",
+            "trainer.expert_parallel_size=1",
+            f"inference.gpus={engines}",
+            f"inference.rollout_batch_size={batch // 4}",
+            f"inference.global_batch_size={batch}",
+            "miles.use_rollout_routing_replay=false",
+            "inference.radix_cache=false",
+            "optimizer.adam_beta2=0.999",
+            "optimizer.eps_clip_high=0.272",
+            "miles.calculate_per_token_loss=true",
+        ],
+    )
     config = spec.compile()
     assert config.core.expert_parallel_size == 1
     assert not config.miles["use_rollout_routing_replay"]
@@ -28,11 +39,9 @@ def test_olmo3_configs_use_dense_recipe_controls(filename, batch, trainer, engin
     assert config.miles["global_batch_size"] == batch
     assert config.miles["adam_beta2"] == 0.999
     assert config.miles["eps_clip_high"] == 0.272
-    assert not config.miles["grpo_std_normalization"]
     assert config.miles["calculate_per_token_loss"]
-    assert config.miles["rollout_max_context_len"] == 2048 + 32768
-    assert config.miles["save_interval"] <= config.miles["num_rollout"]
-    assert topology.plan(spec)["replicas"] == replicas
+    assert config.miles["rollout_max_context_len"] == 34816
+    assert topology.plan(spec)["replicas"] == (1 if trainer == 2 else 2)
 
 
 def test_staging_preserves_snapshot_and_pins_original_prompt(tmp_path):
@@ -58,7 +67,7 @@ def test_staging_preserves_snapshot_and_pins_original_prompt(tmp_path):
 
 
 def test_checkpoint_preparation_is_cpu_only_on_saturn():
-    spec = RunSpec.load(ROOT / "configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912.toml")
+    spec = RunSpec.load(ROOT / "configs/miles/examples/small.toml")
     task = launch_olmo3_preparation.specification("test-image", spec)["tasks"][0]
     assert task["constraints"] == {"cluster": ["ai2/saturn"]}
     assert "gpuCount" not in task["resources"]

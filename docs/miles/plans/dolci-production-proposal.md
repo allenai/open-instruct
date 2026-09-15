@@ -8,7 +8,7 @@ the immediate goal is a tiny real-data exercise of multi-node training and named
 judge placement. Multi-node launching, named judge sections and the strict reward
 bridge described as missing below have since been implemented. See the
 [current managed-judge guide](../managed-judges.md) and its
-[two-update configuration](../../../configs/miles/qualification/multinode-judges.toml).
+[two-update configuration](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/multinode-judges.toml).
 The 200-update configuration remains an unlaunched scaling proposal; its full
 data preparation, EP8 and long-context settings still need qualification.
 
@@ -16,7 +16,7 @@ The remainder records the original production proposal and its then-current gaps
 KDA checkpoint, not SFT1000 or hero. This is an adaptation of the RL recipe;
 it does not reproduce the released dense model's SFT/DPO history.
 
-The [candidate run file](../../../configs/miles/proposals/dolci-think-200.toml) uses the
+The [candidate run file](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/proposals/dolci-think-200.toml) uses the
 existing Core run schema and successfully compiles through `plan`. It names
 future prepared-data artifacts. Its 15 policy GPUs deliberately exclude the
 additional managed judge GPU. The current launcher rejects the two-node
@@ -25,7 +25,7 @@ supported Open Instruct/MILES configuration section.
 
 ## What we already have
 
-- [grpo-multitask.toml](../../../configs/miles/examples/grpo-multitask.toml) is a small
+- [grpo-multitask.toml](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/grpo-multitask.toml) is a small
   GSM8K/math example. Separate full-SFT GSM8K/math/IF mixed updates passed the
   [retained mixture audit](../measurements/mixture-20260910.json). That EP2/one-engine run used an 8,192-token response cap; the mixture
   guide now links this later evidence.

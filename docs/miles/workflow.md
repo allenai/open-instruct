@@ -5,19 +5,19 @@ logging and allocation together. The section names follow `olmo-miles` examples;
 the resolved training backend here is OLMo-core. Existing `[core]` / `[miles]`
 TOMLs and the `RunConfig` Python interface remain available for low-level work.
 
-For measured 1-, 2- and 8-GPU trainer starting points, see the
-[throughput profiles](throughput-profiles.md). The examples below are additional
-recipes with different packing, batch and publication choices.
-
-Start from one of the [examples](../../configs/miles/examples):
+The maintained [examples](../../configs/miles/examples/README.md) have four roles:
 
 | File | Purpose |
-| --- | --- |
-| `grpo-sharing.toml` | First colleague run: supplied full-SFT checkpoint, two updates on four B300 GPUs, mixed-policy refresh/TIS, 32 × 4, packing/replay, offline W&B. |
-| `grpo-basic.toml` | Two-update tiny-model colocated dev/test run using compact generated multiplication prompts; one shared GPU, Core resident throughout. |
-| `grpo-disaggregated.toml` | Full-SFT B300 starter: two Core trainer GPUs and one dedicated TP1 SGLang engine, 100 updates. |
-| `grpo-async-disaggregated.toml` | Production-shaped two-node EP8 trainer + eight TP1 engines, packing, bounded async, one-update staleness, buffer factor two and TIS. |
-| `grpo-multitask.toml` | Four-update GSM8K + math example with heldout entries for each task. |
+|---|---|
+| `dev.toml` | One-GPU tiny-model colocation and plumbing check. |
+| `small.toml` | Two-GPU disaggregated GSM8K mechanics check. |
+| `medium.toml` | Mixed-workload MoE training: 8 trainers, 7 inference engines and 1 judge. |
+| `large.toml` | Unqualified production proposal: 16 trainers, 32 inference engines and 1 judge. |
+
+Copy the chosen example into ignored `runs/` before customizing it. Historical
+qualification configurations live in Git history and local run archives, not in
+the maintained menu. See [throughput evidence](throughput-profiles.md) for the
+measurements behind the settings and their limits.
 
 Replace `YOUR_USERNAME` and the checkpoint path before launching. A model source
 must include the compatible architecture, tokenizer and chat template. Keep the
@@ -35,8 +35,8 @@ weights, so retain the original checkpoint for the life of the run.
 ## One configuration, inspection through launch
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/grpo-async-disaggregated.toml
-python -m open_instruct.miles validate configs/miles/examples/grpo-async-disaggregated.toml
+python -m open_instruct.miles plan configs/miles/examples/medium.toml
+python -m open_instruct.miles validate configs/miles/examples/medium.toml
 ```
 
 `plan` resolves the structured sections into the existing Core configuration and
@@ -50,8 +50,8 @@ Use `train` inside an allocation. `run` launches the config-driven Beaker
 workflow and `status` inspects the submitted run:
 
 ```bash
-python -m open_instruct.miles run configs/miles/examples/grpo-async-disaggregated.toml
-python -m open_instruct.miles status configs/miles/examples/grpo-async-disaggregated.toml
+python -m open_instruct.miles run configs/miles/examples/medium.toml
+python -m open_instruct.miles status configs/miles/examples/medium.toml
 ```
 
 See the complete [laptop and Beaker-session launch guide](launching.md).
@@ -93,7 +93,7 @@ jobs that need WEKA belong on `ai2/saturn`.
 All commands accept repeatable TOML overrides, for example:
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/grpo-disaggregated.toml \
+python -m open_instruct.miles plan configs/miles/examples/small.toml \
   --set training.num_rollouts=20 \
   --set 'tracking.wandb_group="gsm8k-parity-check"'
 ```
@@ -214,7 +214,7 @@ runtime's actual memory allocation and long-tail response lengths determine
 throughput; these settings are not a guarantee of a particular evaluation time.
 
 For the exact bounded workflow exercise, see
-[`workflow-async-gsm8k.toml`](../../configs/miles/qualification/workflow-async-gsm8k.toml):
+[`workflow-async-gsm8k.toml`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/workflow-async-gsm8k.toml):
 four updates, the previously prepared full-SFT checkpoint, fresh named-task
 GSM8K preparation, heldout evaluation, async TIS and 8 × 8 sampling. It disables
 checkpoint saving and final export to isolate the configuration-to-training

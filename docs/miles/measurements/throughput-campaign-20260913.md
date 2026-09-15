@@ -13,7 +13,7 @@ can require different settings. Existing examples remain available.
 | Profile | Placement | Purpose | Model assumption |
 |---|---|---|---|
 | [dev](../../../configs/miles/examples/dev.toml) | 1 shared GPU | GSM8K mechanics, saving and basic data plumbing | Small MoE; Core optimizer and serving pools fit together. The qualification fixture is random and is not an accuracy model. |
-| [tiny](../../../configs/miles/examples/tiny.toml) | 1 trainer + 1 inference GPU | Disaggregated mechanics and very small jobs | Same small model fixture for the initial exercise. A full SFT model is not assumed to fit one trainer GPU. |
+| [tiny](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/tiny.toml) | 1 trainer + 1 inference GPU | Disaggregated mechanics and very small jobs | Same small model fixture for the initial exercise. A full SFT model is not assumed to fit one trainer GPU. |
 | [small](../../../configs/miles/examples/small.toml) | 2 trainers + 4 inference GPUs | First useful throughput comparison | Full SFT checkpoint, EP2, TP1 engines. Ratio is compared with 4+2. |
 | [large](../../../configs/miles/examples/large.toml) | 8 trainers + 56 inference GPUs | 64-GPU scale target | Full SFT checkpoint, EP8 trainer node and seven inference nodes; qualification follows smaller checks. |
 

@@ -131,12 +131,147 @@ def specification(case, output):
     settings = CASES[case]
     output = Path(output)
     mechanics = settings["profile"] in ("dev", "tiny")
-    profile_path = (
-        f"examples/{settings['profile']}.toml"
-        if mechanics
-        else f"qualification/throughput-{settings['profile']}-base.toml"
-    )
-    run = RunSpec.load(ROOT / "configs/miles" / profile_path).to_dict()
+    profile = settings["profile"]
+    if mechanics:
+        filename = "dev" if profile == "dev" else "small"
+        run = RunSpec.load(ROOT / f"configs/miles/examples/{filename}.toml").to_dict()
+    else:
+        run = RunSpec.load(ROOT / "configs/miles/examples/medium.toml").to_dict()
+        # Historical 4K benchmark geometry is independent of the maintained starters.
+        run["judges"] = {}
+        run["rubrics"] = {}
+        run["judging"] = {}
+        run["launch"]["gpus_per_replica"] = 8 if profile == "large" else 6
+        if profile == "small":
+            run["trainer"] = {
+                "gpus": 2,
+                "trainer_num_nodes": 1,
+                "expert_parallel_size": 2,
+                "micro_batch_size": 1,
+                "sequence_packing": False,
+                "activation_recompute": True,
+                "trainer_flash_attention_version": 4,
+            }
+            run["inference"] = {
+                "placement_mode": "disaggregated",
+                "gpus": 4,
+                "rollout_tensor_parallel_size": 1,
+                "rollout_batch_size": 8,
+                "samples_per_prompt": 4,
+                "global_batch_size": 32,
+                "max_response_length": 4096,
+                "max_context_length": 6144,
+                "sglang_server_concurrency": 16,
+                "sglang_max_running_requests": 16,
+                "sglang_max_total_tokens": 131072,
+                "sglang_max_mamba_cache_size": 128,
+                "sglang_mem_fraction_static": 0.6,
+                "radix_cache": True,
+                "mamba_radix_cache_strategy": "extra_buffer",
+                "sglang_cuda_graph_backend_decode": "disabled",
+                "sglang_cuda_graph_max_bs_decode": 16,
+                "sglang_cuda_graph_backend_prefill": "disabled",
+                "sglang_sampling_backend": "pytorch",
+                "sglang_attention_backend": "triton",
+                "check_weight_update_equal": True,
+                "update_weight_buffer_size": 1073741824,
+            }
+            run["core"] = {
+                "max_train_rollout_logprob_abs_diff": 0.05,
+                "publication_mode": "refresh",
+                "refresh_request_timeout": 1800.0,
+                "engine_drain_timeout": 900.0,
+                "scoring_pass_required": True,
+                "router_aux_loss_weight": 0.01,
+                "router_z_loss_weight": 1e-05,
+                "stream_moe_export": True,
+                "weight_sync_mode": "flattened",
+                "expert_publication": "per_expert",
+                "scoring_check_interval": 50,
+            }
+            run["async"] = {
+                "fully_async": True,
+                "max_weight_staleness": 2,
+                "async_data_buffer_capacity_factor": 1.0,
+                "async_unused_samples_handler": "retry",
+                "rollout_submission_granularity": "group",
+                "off_policy_correction": "tis",
+            }
+            run["miles"] = {
+                "use_rollout_routing_replay": True,
+                "use_miles_router": True,
+                "sglang_chunked_prefill_size": 8192,
+                "rollout_temperature": 1.0,
+                "rollout_seed": 17,
+                "rollout_max_prompt_len": 2048,
+                "seed": 17,
+                "disable_grpo_std_normalization": True,
+            }
+        if profile == "large":
+            run["trainer"] = {
+                "gpus": 8,
+                "trainer_num_nodes": 1,
+                "expert_parallel_size": 8,
+                "micro_batch_size": 1,
+                "sequence_packing": False,
+                "activation_recompute": True,
+                "trainer_flash_attention_version": 4,
+            }
+            run["inference"] = {
+                "placement_mode": "disaggregated",
+                "gpus": 56,
+                "rollout_tensor_parallel_size": 1,
+                "rollout_batch_size": 64,
+                "samples_per_prompt": 4,
+                "global_batch_size": 256,
+                "max_response_length": 4096,
+                "max_context_length": 6144,
+                "sglang_server_concurrency": 16,
+                "sglang_max_running_requests": 16,
+                "sglang_max_total_tokens": 131072,
+                "sglang_max_mamba_cache_size": 128,
+                "sglang_mem_fraction_static": 0.6,
+                "radix_cache": True,
+                "mamba_radix_cache_strategy": "extra_buffer",
+                "sglang_cuda_graph_backend_decode": "disabled",
+                "sglang_cuda_graph_max_bs_decode": 16,
+                "sglang_cuda_graph_backend_prefill": "disabled",
+                "sglang_sampling_backend": "pytorch",
+                "sglang_attention_backend": "triton",
+                "check_weight_update_equal": True,
+                "update_weight_buffer_size": 1073741824,
+            }
+            run["core"] = {
+                "max_train_rollout_logprob_abs_diff": 0.05,
+                "publication_mode": "refresh",
+                "refresh_request_timeout": 1800.0,
+                "engine_drain_timeout": 900.0,
+                "scoring_pass_required": True,
+                "router_aux_loss_weight": 0.01,
+                "router_z_loss_weight": 1e-05,
+                "stream_moe_export": True,
+                "weight_sync_mode": "flattened",
+                "expert_publication": "per_expert",
+                "scoring_check_interval": 50,
+            }
+            run["async"] = {
+                "fully_async": True,
+                "max_weight_staleness": 2,
+                "async_data_buffer_capacity_factor": 1.0,
+                "async_unused_samples_handler": "retry",
+                "rollout_submission_granularity": "group",
+                "off_policy_correction": "tis",
+            }
+            run["miles"] = {
+                "use_rollout_routing_replay": True,
+                "use_miles_router": True,
+                "sglang_chunked_prefill_size": 8192,
+                "rollout_temperature": 1.0,
+                "rollout_seed": 17,
+                "rollout_max_prompt_len": 2048,
+                "seed": 17,
+                "disable_grpo_std_normalization": True,
+            }
     source = output.parent / "fixture" if mechanics else CAMPAIGN
     run["name"] = "throughput-" + case
     run["model"]["source"] = str(source / "hf")

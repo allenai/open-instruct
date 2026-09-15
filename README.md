@@ -116,9 +116,9 @@ adapter trains the model, and SGLang serves it. Start with the
 The guide covers the runtime image, supported models, configuration and launch workflow.
 
 ```bash
-# Python 3.12, from the matching checkout. Edit name/output.root after copying.
+# Python 3.12. After copying, set model/output paths for your small checkpoint.
 mkdir -p runs
-cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
+cp configs/miles/examples/small.toml runs/my-grpo.toml
 python -m open_instruct.miles plan runs/my-grpo.toml
 python -m open_instruct.miles validate runs/my-grpo.toml
 # After authenticating Beaker and checking resource access:
@@ -127,11 +127,12 @@ python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
-The [async training starter](configs/miles/examples/grpo-async-disaggregated.toml)
-requests one eight-GPU trainer node and one eight-GPU inference node. The
-starter above uses four B300 GPUs, mixed-policy refresh and the supplied full-SFT checkpoint. `runs/`
-is Git-ignored. W&B is offline by default; optional HF/W&B credentials stay commented
-out. The separate `grpo-basic.toml` is for tiny-model colocated development.
+The [four maintained examples](configs/miles/examples/README.md) are `dev`
+(one-GPU colocation), `small` (two-GPU disaggregated GSM8K), `medium`
+(16-GPU mixed-workload training), and `large` (an unqualified production proposal).
+The starter above is a mechanics check with a tiny model. Model/data paths are
+placeholders, W&B defaults to offline, and personal configurations belong in
+Git-ignored `runs/`.
 
 ## MILES documentation
 

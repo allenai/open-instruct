@@ -16,8 +16,8 @@ Model:
 |---|---|---|
 | [Single-GPU serving sweep](https://beaker.org/ex/01M2E0SRNC49XZZY31VWPFE2SM) | Exact synthetic inputs of context minus 256 tokens at 16K/32K/64K; greedy output capped at 128; cold/warm and increasing concurrency | Passed |
 | [Saturn math preparation](https://beaker.org/ex/01M2E0VGC7HJQMZRHEAMJHQQST) | Retain the existing eight train/two held-out natural math rows; token budget and disjointness checks | Passed |
-| [16K RL config](../../../../configs/miles/qualification/colleague-20260912/length-math-16k-20260913.toml) | Two updates, EP2 + one engine, packing/replay, recomputation, 2 × 4 responses; response cap 14,336 | [Running](https://beaker.org/ex/01M2E15KM2J249V5BQ719PNX95) |
-| [32K RL config](../../../../configs/miles/qualification/colleague-20260912/length-math-32k-20260913.toml) | Same recipe with response cap 30,720 | [Running](https://beaker.org/ex/01M2E15MNA9HZV0V54JSD5JC32) |
+| [16K RL config](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/colleague-20260912/length-math-16k-20260913.toml) | Two updates, EP2 + one engine, packing/replay, recomputation, 2 × 4 responses; response cap 14,336 | [Running](https://beaker.org/ex/01M2E15KM2J249V5BQ719PNX95) |
+| [32K RL config](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/colleague-20260912/length-math-32k-20260913.toml) | Same recipe with response cap 30,720 | [Running](https://beaker.org/ex/01M2E15MNA9HZV0V54JSD5JC32) |
 
 The inference probe uses a fresh server for each context, an explicit 131,072 KV
 token ceiling, 16 recurrent state slots, radix off, chunked prefill 2,048 and decode

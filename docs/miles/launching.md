@@ -38,9 +38,9 @@ replace checkpoint/output paths, usernames and image placeholders.
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
+cp configs/miles/examples/small.toml runs/my-grpo.toml
 # Edit name/output.root to use your username and a fresh run path.
-# Keep the supplied read-only checkpoint for this four-B300-GPU first run.
+# Select a tiny checkpoint that fits on one trainer GPU; this starter uses two GPUs.
 python -m open_instruct.miles plan runs/my-grpo.toml
 python -m open_instruct.miles validate runs/my-grpo.toml
 ```
@@ -54,9 +54,9 @@ exist on the submitting host.
 ## Laptop: choose or build an image
 
 The current [MILES GRPO](grpo.md) uses image
-`01M2F1RKZFZVJYAS0XQGEC3SEJ`. Its four-GPU starter uses mixed-policy refresh, retains offline W&B metrics and needs
-no extra HF/W&B secrets with the supplied inputs. Beaker resource permissions
-are still required.
+`01M2F1RKZFZVJYAS0XQGEC3SEJ`. Choose a starter from the four maintained examples and verify image compatibility
+with its backend and serving features. Supply the model/data paths and any secrets
+needed by your run. Beaker resource permissions are required.
 
 For an **already built compatible image**, obtain its immutable ID and source
 provenance from its maintainer or qualification record. Inspect its metadata:

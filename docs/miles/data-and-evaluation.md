@@ -17,7 +17,7 @@ Choose exactly one mode under `[data]`:
 
 Current named tasks are `gsm8k`, `math`, legacy `ifeval`, and generated
 `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/run_data.py`.
-The [multitask example](../../configs/miles/examples/grpo-multitask.toml) mixes
+The [multitask example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/medium.toml) mixes
 GSM8K and math; it is not the complete published Olmo 3 mixture.
 Use manifest adoption and the [mixed-task qualification](measurements/mixture-qualification.md)
 for broader data. Unsupported task/verifier contracts fail rather than silently
@@ -25,7 +25,7 @@ substituting a different judge or reward.
 
 The trusted verifier registry names factories and configurations; individual
 samples select registered names, targets and weights. See
-[prepared fixtures](../../configs/miles/verifiers.json). Code verification may
+[prepared fixtures](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/verifiers.json). Code verification may
 need an externally provisioned service. GPU judges have an explicit preparation,
 service and rubric contract in [managed judges](managed-judges.md); launch does not
 automatically supply every Olmo 3 external service.

@@ -56,7 +56,7 @@ The full checkpoint is now staged on WEKA: three shards, 14,596,063,712 bytes,
 with pinned revision and the original RL template. The Saturn preparation job
 [passed](https://beaker.org/ex/01M2A1Z8HQTKHM500H9SNE20Q1), including all 160
 reward canaries. The concrete
-[qualification config](../../../../configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912.toml)
+[qualification config](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912.toml)
 was submitted to [Beaker](https://beaker.org/ex/01M2A28EYHS4BYYK5TPDJTQNPT):
 Holmes, urgent, minimum runtime one hour, two Core GPUs and one SGLang GPU,
 two updates, initial/final held-out evaluation, native saves and final HF export.
@@ -109,7 +109,7 @@ a 4096 sliding window, and YaRN factor 8 from an original 8192-token context.
 The checkpoint's HF chat template differs from the original open-instruct RL
 script's `olmo_thinker` template. In particular, the latter defaults to
 `You are a helpful AI assistant.` The copied original template is
-[`configs/miles/templates/olmo-thinker.jinja`](../../../../configs/miles/templates/olmo-thinker.jinja),
+[`configs/miles/templates/olmo-thinker.jinja`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/templates/olmo-thinker.jinja),
 SHA256 `eba6e269f669706e5c788e370160dad953137f3fa7014fa69d03c7b3ad9f0e72`.
 Use it in both comparison arms; recording only the checkpoint name is insufficient.
 
@@ -196,11 +196,11 @@ PYTHONPATH="$PYTHONPATH:$PWD/tests/miles" python tests/miles/smoke.py /artifacts
 
 Two configs are included:
 
-- [`qualification/olmo3-think-gsm8k.toml`](../../../../configs/miles/qualification/olmo3-think-gsm8k.toml):
+- [`qualification/olmo3-think-gsm8k.toml`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/olmo3-think-gsm8k.toml):
   candidate full-model debug run, two Core ranks plus one SGLang GPU, two updates,
   native saves every update, initial/final held-out evaluation and final HF export.
   Its memory fit, FSDP execution and long-context performance are not yet qualified.
-- [`proposals/olmo3-think-dolci-200.toml`](../../../../configs/miles/proposals/olmo3-think-dolci-200.toml):
+- [`proposals/olmo3-think-dolci-200.toml`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/proposals/olmo3-think-dolci-200.toml):
   future 200-update comparison, 8 Core ranks, 7 serving GPUs and one managed judge
   GPU. It deliberately references future prepared datasets/judge assets, and is
   not ready to submit. Multi-replica auto-resume is disabled.

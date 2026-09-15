@@ -10,7 +10,7 @@ from open_instruct.miles import workflow
 from open_instruct.miles.errors import InputError
 
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "configs/miles/templates/olmo-thinker.jinja"
+TEMPLATE = ROOT / "scripts/miles/assets/templates/olmo-thinker.jinja"
 
 
 def stage(source, output):

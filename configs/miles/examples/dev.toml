@@ -1,4 +1,5 @@
-# Tiny-model colocated development check: one shared GPU; Core stays resident.
+# DEV: exercise colocation and basic plumbing with a tiny model on one GPU.
+# Core stays resident. This is not a model-quality or performance benchmark.
 # Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
 schema_version = 1
 name = "dev"

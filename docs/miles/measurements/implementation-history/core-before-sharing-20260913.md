@@ -494,7 +494,7 @@ replay/restart, longer runs and additional topologies. The
 [qualification plan](../../plans/qualification-plan.md) defines bounded follow-up
 experiments and promotion criteria for the defaults.
 
-The corrected [tiny resident profile](../../../../configs/miles/profiles/tiny-resident.toml)
+The corrected [tiny resident profile](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/profiles/tiny-resident.toml)
 also completed two updates and a separate-process third update through the public
 entrypoint, with schema-2 checkpoints and a 12-response audit. Its 256-token
 prompt budget plus 256-token response budget match the fixture's 512-token HF

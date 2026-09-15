@@ -96,3 +96,9 @@ To verify that documentation changes don't alter the generated output:
 2. Switch to main branch and build: `cd /path/to/main && uv run mkdocs build`
 3. Compare the builds: `diff -rq site-branch /path/to/main/site`
 4. If no output, the docs are identical. If differences exist, review with: `diff -r site-branch /path/to/main/site`
+
+# MILES configuration examples
+- `configs/miles/examples/` is the maintained user-facing starting point, containing only `dev.toml`, `small.toml`, `medium.toml`, and `large.toml`.
+- Do not add configurations there without an explicit, distinct user-facing purpose and user agreement; update the existing tier when appropriate.
+- Put one-off runs, sweeps, debugging, qualification, and personal overrides in Git-ignored `runs/`. Copy an example there before editing it for a run.
+- Keep historical run provenance in measurement reports and immutable run artifacts, not additional maintained example configs. Tests must not depend on untracked `runs/` files.

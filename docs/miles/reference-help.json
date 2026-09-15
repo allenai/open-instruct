@@ -222,6 +222,7 @@
     "rubrics.NAME.max_response_tokens": "Positive judge output reservation, default 2048; smaller than judge context.",
     "rubrics.NAME.profile": "Required supported open-instruct/general-* profile; see managed judges guide.",
     "rubrics.NAME.temperature": "Nonnegative sampling temperature, default 1.0.",
-    "schema_version": "Required integer 1."
+    "schema_version": "Required integer 1.",
+    "judges.NAME.context_extension": "Optional explicit context extension recipe; qwen3-yarn-128k enables the validated Qwen3 YaRN settings for a 128K judge context."
   }
 }

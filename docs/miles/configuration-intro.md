@@ -14,7 +14,7 @@ and [miles] and support only plan/validate/train. Structured validate is CPU-saf
 low-level validate invokes the installed native parser. Neither certifies GPU fit.
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/grpo-async-disaggregated.toml \
+python -m open_instruct.miles plan configs/miles/examples/medium.toml \
   --set training.num_rollouts=20 \
   --set 'tracking.wandb_group="my-comparison"'
 ```

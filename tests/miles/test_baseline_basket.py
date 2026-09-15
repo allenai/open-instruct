@@ -47,14 +47,14 @@ def test_insufficient_domain_is_rejected():
 
 
 def test_baseline_allocation_and_cpu_placement():
-    run = RunSpec.load(ROOT / "configs/miles/qualification/full-sft-basket-fast-200.toml")
+    run = RunSpec.load(ROOT / "configs/miles/examples/medium.toml")
     layout = run.plan()["allocation"]
     assert (layout["replicas"], layout["allocated_gpus"], layout["unused_gpus"]) == (2, 16, 0)
     assert layout["nodes"][0]["trainer_gpus"] == 8
     assert layout["nodes"][1]["rollout_gpus"] == 7
     assert layout["nodes"][1]["judges"] == {"general": 1}
     compiled = run.compile()
-    assert compiled.core.sequence_packing and not compiled.core.activation_checkpointing
+    assert compiled.core.sequence_packing and compiled.core.activation_checkpointing
     assert not compiled.core.scoring_pass_required
     assert compiled.miles["num_rollout"] == 200
     assert compiled.miles["global_batch_size"] == 256
@@ -69,7 +69,7 @@ def test_baseline_allocation_and_cpu_placement():
 
 
 def test_preparation_writes_separate_partitions_and_canary_receipt(tmp_path, monkeypatch):
-    spec = RunSpec.load(ROOT / "configs/miles/qualification/full-sft-basket-fast-200.toml")
+    spec = RunSpec.load(ROOT / "configs/miles/examples/medium.toml")
     spec.data["prompt_data"] = str(tmp_path / "frozen/train.jsonl")
     names = ["math", "ifeval", "code", "general-quality"]
     partitions = {
@@ -120,12 +120,12 @@ def test_preparation_writes_separate_partitions_and_canary_receipt(tmp_path, mon
 
 
 def test_local_reward_learning_workflow_has_no_basket_verifier_dependency():
-    run = RunSpec.load(ROOT / "configs/miles/qualification/olmo3-sft-gsm8k-core-200-32k.toml")
+    run = RunSpec.load(ROOT / "configs/miles/examples/small.toml")
     compiled = run.compile()
-    assert compiled.miles["num_rollout"] == 200
-    assert compiled.miles["global_batch_size"] == 64
-    assert compiled.miles["rollout_max_response_len"] == 32768
-    assert run.plan()["allocation"]["allocated_gpus"] == 6
+    assert compiled.miles["num_rollout"] == 4
+    assert compiled.miles["global_batch_size"] == 8
+    assert compiled.miles["rollout_max_response_len"] == 256
+    assert run.plan()["allocation"]["allocated_gpus"] == 2
     assert not run.judges["judges"]
     document = launch_baseline_basket.document("image", run, "workflow", "source", "a" * 64)
     assert len(document["tasks"]) == 1
@@ -133,7 +133,7 @@ def test_local_reward_learning_workflow_has_no_basket_verifier_dependency():
 
 
 def test_judge_gpu_probe_does_not_inherit_cpu_cuda_compat_override():
-    spec = RunSpec.load("configs/miles/qualification/full-sft-basket-200-32k-yarn.toml")
+    spec = RunSpec.load("configs/miles/examples/medium.toml")
     document = launch_baseline_basket.document(
         "image", spec, "prepare", "source", "0" * 64, prepare_module="scripts.miles.qualify_judge_context"
     )
@@ -146,7 +146,7 @@ def test_judge_gpu_probe_does_not_inherit_cpu_cuda_compat_override():
 
 @pytest.mark.parametrize("name", ["full-sft-basket", "olmo3-think-sft-basket"])
 def test_recovery_campaign_propagates_preemption_to_all_replicas(name):
-    run = RunSpec.load(ROOT / f"configs/miles/qualification/{name}-200-32k-robust.toml")
+    run = RunSpec.load(ROOT / "configs/miles/examples/medium.toml")
     rendered = launch_baseline_basket.document("IMAGE", run, "train", "SOURCE", "DIGEST", hostnames=["a", "b"])
     assert len(rendered["tasks"]) == 2
     for task in rendered["tasks"]:

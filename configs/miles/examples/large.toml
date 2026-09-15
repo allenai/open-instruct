@@ -1,11 +1,12 @@
-# Measured full-SFT B300 starting point: one EP8 trainer node + eight TP1 engines.
-# Sixteen GPUs kept completed-buffer waiting near zero in qualification.
-# See docs/miles/throughput-profiles.md for workload and lifecycle limits.
+# LARGE: PROVISIONAL production layout, not qualified; do not submit unchanged.
+# 16 trainers (2 nodes x 8, EP8 with DP2), 32 TP1 engines, and one judge GPU.
+# Current whole-node launcher allocates 7 x 8 = 56 GPUs: 49 used, 7 idle on the judge node.
+# Inherited medium settings are placeholders pending workload/topology qualification.
 schema_version = 1
 name = "large"
 
 [model]
-source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/policy-hf"
+source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/checkpoints/policy-hf"
 format = "hf"
 
 [output]
@@ -17,58 +18,79 @@ workspace = "ai2/open-instruct-dev"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "urgent"
-min_runtime = "1h"
-timeout = "8h"
-auto_resume = false
+min_runtime = "8h"
+timeout = "48h"
+auto_resume = true
 gpus_per_replica = 8
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
 mount_path = "/weka/oe-training-default"
 
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[launch.env]
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+OI_MILES_CODE_FAILURE_POLICY = "zero"
+OI_MILES_JUDGE_FAILURE_POLICY = "zero"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+[launch.secrets]
+# WANDB_API_KEY = "YOUR_USERNAME_WANDB_API_KEY" # Required for online tracking.
+
 [data]
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/train.jsonl"
+eval_prompt_data = [
+  "math", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-math.jsonl",
+  "ifeval", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-ifeval.jsonl",
+  "code", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-code.jsonl",
+  "general", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-general.jsonl",
+]
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/verifiers.json"
 seed = 17
 shuffle = true
 
-[[data.tasks]]
-task = "gsm8k"
-train_count = 6400
-eval_count = 128
-
 [training]
-num_rollouts = 100
+num_rollouts = 200
 skip_eval_before_train = false
-eval_interval = 20
+eval_interval = 50
 save_checkpoints = true
-save_interval = 100
+save_interval = 5
 
 [trainer]
 gpus = 8
-trainer_num_nodes = 1
+trainer_num_nodes = 2
 expert_parallel_size = 8
 micro_batch_size = 1
-sequence_packing = false
+sequence_packing = true
+packing_max_tokens = 34816
+# Keep recomputation for 32K packs. The measured 4K no-recompute win is not a 32K qualification.
 activation_recompute = true
 trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 8
+gpus = 32
 rollout_tensor_parallel_size = 1
 rollout_batch_size = 64
 samples_per_prompt = 4
 global_batch_size = 256
-max_response_length = 4096
-max_context_length = 6144
+max_response_length = 32768
+max_context_length = 34816
+# Candidate long-context admission: measure KV occupancy/retractions before increasing.
 sglang_server_concurrency = 16
 sglang_max_running_requests = 16
-sglang_max_total_tokens = 131072
-sglang_max_mamba_cache_size = 128
-sglang_mem_fraction_static = 0.6
+sglang_max_total_tokens = 786432
+sglang_max_mamba_cache_size = 1024
+sglang_mem_fraction_static = 0.7
 radix_cache = true
 mamba_radix_cache_strategy = "extra_buffer"
 sglang_cuda_graph_backend_decode = "full"
-sglang_cuda_graph_max_bs_decode = 16
+sglang_cuda_graph_max_bs_decode = 32
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
@@ -91,8 +113,9 @@ eps_clip_high = 0.28
 
 [tracking]
 wandb_mode = "offline"
+wandb_team = "ai2-llm"
 wandb_project = "olmo-rl-comparison"
-wandb_group = "core-workflow-async"
+wandb_group = "large"
 
 [runtime]
 row_specialization = "dynamic"
@@ -102,7 +125,7 @@ row_specialization = "dynamic"
 publication_mode = "refresh"
 refresh_request_timeout = 1800.0
 engine_drain_timeout = 900.0
-scoring_pass_required = true
+scoring_pass_required = false
 pipeline_observation_interval = 2.0
 replay_diagnostics = false # Qualification enabled this extra audit.
 router_aux_loss_weight = 0.01
@@ -110,9 +133,12 @@ router_z_loss_weight = 0.00001
 stream_moe_export = true
 weight_sync_mode = "flattened"
 expert_publication = "per_expert"
-scoring_check_interval = 50
+scoring_check_interval = 20
+diagnostic_interval = 0
 
 [miles]
+eval_temperature = 0.0
+n_samples_per_eval_prompt = 1
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 use_miles_router = true
@@ -125,6 +151,7 @@ disable_grpo_std_normalization = true
 
 [async]
 fully_async = true
+# Auto-size producer admission to the fleet; completed-buffer capacity stays tied to batch size.
 max_weight_staleness = 2
 async_data_buffer_capacity_factor = 1.0
 async_unused_samples_handler = "retry"
@@ -135,3 +162,35 @@ off_policy_correction = "tis"
 enabled = true
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 restore = true
+
+[judges.general]
+mode = "managed"
+backend = "sglang"
+model = "Qwen/Qwen3-32B"
+revision = "9216db5781bf21249d130ec9da846c4624c16137"
+gpus = 1
+tensor_parallel_size = 1
+max_context_length = 131072
+context_extension = "qwen3-yarn-128k"
+max_concurrent_calls = 4
+timeout = 600
+chat_template = "qwen3-no-thinking"
+prepared_dir = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/checkpoints/qwen3-32b-judge"
+
+[rubrics.quality]
+profile = "open-instruct/general-quality"
+max_response_tokens = 2048
+temperature = 1.0
+
+[rubrics.reference_quality]
+profile = "open-instruct/general-quality_ref"
+max_response_tokens = 2048
+temperature = 1.0
+
+[judging.bindings."general-quality"]
+judge = "general"
+rubric = "quality"
+
+[judging.bindings."general-quality_ref"]
+judge = "general"
+rubric = "reference_quality"

@@ -14,7 +14,9 @@ from pathlib import Path
 
 from scripts.miles.prepare_gsm8k_parity import derive_rows, digest, json_bytes, write_immutable
 
-HISTORY_PATH = Path(__file__).resolve().parents[2] / "configs/miles/reference/light-sft1000-gsm8k-historical.json"
+HISTORY_PATH = (
+    Path(__file__).resolve().parents[2] / "scripts/miles/assets/reference/light-sft1000-gsm8k-historical.json"
+)
 ROOT = Path("/weka/oe-training-default/robertb/open-instruct/light-sft1000-gsm8k/20260911-v1")
 COUNTS = {"train": 7473, "eval": 128}
 CAMPAIGN = "gsm8k-light-sft1000-core-20260911-v1"

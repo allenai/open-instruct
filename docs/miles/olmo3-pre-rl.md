@@ -45,7 +45,7 @@ a 4096 sliding window, and YaRN factor 8 from an original 8192-token context.
 The checkpoint's HF chat template differs from the original open-instruct RL
 script's `olmo_thinker` template. In particular, the latter defaults to
 `You are a helpful AI assistant.` The copied original template is
-[`configs/miles/templates/olmo-thinker.jinja`](../../configs/miles/templates/olmo-thinker.jinja),
+[`configs/miles/templates/olmo-thinker.jinja`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/templates/olmo-thinker.jinja),
 SHA256 `eba6e269f669706e5c788e370160dad953137f3fa7014fa69d03c7b3ad9f0e72`.
 Use it in both comparison arms; recording only the checkpoint name is insufficient.
 
@@ -64,7 +64,7 @@ not download weights or authenticate their HF revision itself.
 
 ## Running a first dense baseline
 
-Copy [the dense qualification TOML](../../configs/miles/qualification/olmo3-think-gsm8k.toml),
+Copy [the dense qualification TOML](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/olmo3-think-gsm8k.toml),
 replace its checkpoint/output paths and inspect `plan`. Use the selected sharing
 image through the [launch guide](launching.md). Preserve checkpoint revision,
 chat template, held-out identities and reward settings when extending a run.
@@ -78,7 +78,7 @@ dense profile. The observed SGLang implementation does not apply hybrid sliding
 window KV memory savings. Long-context and high-concurrency dense capacity still
 need their own measurements.
 
-The [200-update mixture proposal](../../configs/miles/proposals/olmo3-think-dolci-200.toml)
+The [200-update mixture proposal](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/proposals/olmo3-think-dolci-200.toml)
 is a proposal with future asset paths, not a ready-to-submit baseline. The
 original [released RL script](../../scripts/train/olmo3/7b_think_rl_no_pipeline.sh)
 used DeepSpeed/vLLM, so matching architecture and recipe does not establish

@@ -94,10 +94,18 @@ def configuration(campaign, output, arm, updates):
             eval_max_response_len=4096,
         )
     if arm.endswith("-admission64"):
-        starter = RunConfig.load(
-            Path(__file__).resolve().parents[2] / "configs/miles/profiles/train-disaggregated.toml"
+        config.miles.update(
+            {
+                "global_batch_size": 64,
+                "rollout_batch_size": 8,
+                "sglang_cuda_graph_max_bs_decode": 64,
+                "sglang_log_level": "info",
+                "sglang_max_mamba_cache_size": 128,
+                "sglang_max_running_requests": 64,
+                "sglang_max_total_tokens": 524288,
+                "sglang_server_concurrency": 64,
+            }
         )
-        config.miles.update({key: starter.miles[key] for key in ADMISSION_KEYS})
         # Preserve this historical 16 x 4 measurement recipe as starter defaults evolve.
         # It also measures standalone scoring on every collection by design.
         config.miles.update(rollout_batch_size=16, n_samples_per_prompt=4, global_batch_size=64)

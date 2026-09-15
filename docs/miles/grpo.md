@@ -9,10 +9,10 @@ model and topology; retain each run's image, configuration and checkpoint identi
 
 1. Obtain the matching source bundle or supplied checkout, then follow the
    [laptop/session setup](launching.md). Sibling development worktrees are unnecessary.
-2. Copy [grpo-sharing.toml](../../configs/miles/examples/grpo-sharing.toml) to
-   Git-ignored `runs/my-grpo.toml`. Set your name and fresh output root; keep the
-   supplied checkpoint for the first four-B300-GPU check. W&B is offline, with
-   no extra HF/W&B credentials required for these inputs.
+2. Copy [small.toml](../../configs/miles/examples/small.toml) to ignored
+   `runs/my-grpo.toml`. Set model and output paths for a two-GPU disaggregated
+   mechanics check. Use [medium.toml](../../configs/miles/examples/medium.toml)
+   for mixed-workload training, after preparing its policy, data and judge assets.
 3. Run `plan` and `validate`, then set `MILES_EXISTING_IMAGE` to the immutable
    image ID and invoke `python -m open_instruct.miles run /path/to/run.toml`.
 4. Retain the launch receipt, submitted TOML and [completion artifacts](operations.md).
@@ -60,16 +60,15 @@ qualified binary foundation. See [architecture](architecture.md) for builds.
 and [throughput records](measurements/throughput-20260913.md) retain exact source,
 image/overlay identities and limits. Earlier dense/restart and 16K/32K checks
 remain historical evidence for their recorded images; they were not rerun merely
-by promoting this image. The first-run template shortens the measured small recipe
-to two updates and adds evaluation; it does not establish a performance or
-learning-quality result in advance.
+by promoting this image. The maintained templates document their model and capacity assumptions; historical
+qualification does not establish a new workload or topology in advance.
 
 ## Publication modes
 
 | Mode | Behavior and use |
 |---|---|
-| `core.publication_mode="refresh"` | Current full-model starter and small/large profiles. Preserve generated tokens and their original behavior log probabilities across publication; rebuild serving state under the new weights and continue decoding. A response can span multiple policy versions. |
-| `barrier` | Low-level config default, used by the older `grpo-basic`, `grpo-disaggregated`, `grpo-async-disaggregated` and `grpo-multitask` examples and tiny dev profiles. Does not continue mixed-policy responses across publication. |
+| `core.publication_mode="refresh"` | Medium and large templates. Preserve generated tokens and their original behavior log probabilities across publication; rebuild serving state under the new weights and continue decoding. A response can span multiple policy versions. |
+| `barrier` | Low-level default, used by dev and small mechanics examples. Does not continue mixed-policy responses across publication. |
 | `engine_drain` | Independent engine drain: finish requests on their admitted version before swapping weights. This mode is distinct from mixed-policy refresh; see [engine drain](engine-drain.md). |
 
 The first-run starter uses **EP2 + two TP1 engines**, 32 prompts × 4 responses,

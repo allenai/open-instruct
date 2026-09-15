@@ -27,11 +27,15 @@ belong to their own fixed-weight service. Plan reports unused slots. Consult
 
 ## Publication and recipe selection
 
-The [current first-run and small profiles](grpo.md) use EP2 + two engines,
-mixed-policy refresh, 32 prompts × 4 responses and batch 128 with lag two.
-`large.toml` uses EP8 + eight engines and batch 256. The `grpo-async-disaggregated`
-recipe below is the older 8 × 8, lag-one barrier control. Choosing the newer image
-does not silently change those settings; inspect the selected TOML and plan.
+The [four maintained examples](../../configs/miles/examples/README.md) separate
+mechanics from training. Dev uses one colocated GPU; small uses one trainer and
+one inference GPU. Medium uses EP8 + seven engines + one judge, mixed-policy
+refresh, 64 prompts × 4 responses and batch 256 with lag two. Large is an
+unqualified two-node trainer / 32-engine production proposal. Inspect `plan`
+for physical allocation, including the judge node's unused slots.
+
+The following smaller barrier recipe is an illustration of batch geometry,
+not an additional maintained configuration.
 
 ## Collections, optimization and async
 

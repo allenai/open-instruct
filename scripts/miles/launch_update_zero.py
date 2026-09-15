@@ -34,9 +34,11 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="o
     if pin_autotune_a:
         files["update_zero_autotune.py"] = (source / "update_zero_autotune.py").read_text()
         files["autotune-reference.json"] = (
-            source.parents[1] / "configs/miles/diagnostics/autotune-reference-hfmatched-a.json"
+            source.parents[1] / "scripts/miles/assets/diagnostics/autotune-reference-hfmatched-a.json"
         ).read_text()
-    files["inputs.json"] = (source.parents[1] / "configs/miles/reference/gsm8k-update-zero-inputs.json").read_text()
+    files["inputs.json"] = (
+        source.parents[1] / "scripts/miles/assets/reference/gsm8k-update-zero-inputs.json"
+    ).read_text()
     files["sitecustomize.py"] = (
         "import runpy\n"
         "runpy.run_path('/usr/lib/python3.12/sitecustomize.py')\n"

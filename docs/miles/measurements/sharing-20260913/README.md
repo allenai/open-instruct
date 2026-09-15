@@ -55,7 +55,7 @@ audit launcher; they do not change the image's runtime Python, lock or run confi
 
 The [full-SFT run](https://beaker.org/ex/01M2E5VRB83X9TFKFAVYMNMJXN) and
 [independent Saturn audit](https://beaker.org/ex/01M2E7CGNMDWPQCMMG1A7VS9BP)
-both exited zero. The submitted [configuration](../../../../configs/miles/qualification/sharing-sft-20260913.toml)
+both exited zero. The submitted [configuration](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/sharing-sft-20260913.toml)
 uses EP2 plus one serving engine, async TIS with lag one, 8 prompts × 8 responses,
 packing, dynamic rows, recomputation, router replay, and initial/final GSM8K evaluation.
 

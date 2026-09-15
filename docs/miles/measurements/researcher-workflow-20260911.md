@@ -8,7 +8,7 @@ counters. Both Beaker jobs exited 0.
 
 - Training: [01M29AQXT4NDWG5W5BPGZSTPG6](https://beaker.org/ex/01M29AQXT4NDWG5W5BPGZSTPG6)
 - Read-only Saturn audit: [01M29CBC996BG4THEF32YHF3NB](https://beaker.org/ex/01M29CBC996BG4THEF32YHF3NB)
-- [Exact run file](../../../configs/miles/qualification/workflow-async-gsm8k.toml)
+- [Exact run file](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/workflow-async-gsm8k.toml)
 - [Machine-readable evidence](researcher-workflow-20260911.json)
 
 Training source was `7aa5a3d51`; auditor source was `39014ae4f`.
