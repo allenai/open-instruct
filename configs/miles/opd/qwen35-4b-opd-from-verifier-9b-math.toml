@@ -1,0 +1,85 @@
+# Miles/Megatron replication of the Open Instruct Qwen3.5 math pure-OPD run:
+# 4B learner from the verifier-DPPO 9B teacher (Open Instruct canonical W&B rdcupvki; LR 5e-7).
+# Same fixed DAPO split, 128 prompts x 2 samples per update, 100 updates, 16k
+# responses, kl_coef 1.0 and rollout-engine student log-probs. Evaluation is
+# greedy on the DAPO holdout, AIME 2025, BRUMO 2025 and MATH-500 every ten
+# updates, matching scripts/general_agent/terminal/rl/qwen35_math_posthoc_eval.sh.
+# Differences from Open Instruct: Miles uses its PPO-clip policy loss (not
+# DPPO/TV), one 8-GPU node (4 trainer TP2 / 2 learner SGLang / 2 teacher SGLang),
+# and the three DAPO training prompts repeating holdout problems are dropped.
+# Data: scripts/miles/prepare_qwen35_math_prompts.py (see docs/miles/opd.md).
+schema_version = 1
+name = "qwen35-4b-opd-from-verifier-9b-math"
+
+[model]
+source = "Qwen/Qwen3.5-4B"
+
+[teacher]
+source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/qwen35_9b_verifier_dppo_math_fixed_dapo_100step_4node__42__1788828853"
+gpus = 2
+concurrency = 32
+request_timeout = 900
+startup_timeout = 1800
+
+[training]
+algorithm = "opd"
+num_rollouts = 100
+save_interval = 10
+eval_interval = 10
+
+[trainer]
+backend = "megatron"
+gpus = 4
+tensor_parallel_size = 2
+
+[inference]
+gpus = 2
+tensor_parallel_size = 1
+rollout_batch_size = 128
+samples_per_prompt = 2
+max_response_length = 16384
+max_context_length = 18432
+max_running_requests = 128
+temperature = 1.0
+eval_temperature = 0.0
+eval_samples_per_prompt = 1
+
+[distillation]
+kl_coef = 1.0
+use_rollout_logprobs = true
+
+[optimizer]
+learning_rate = 5e-7
+
+[output]
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-4b-opd-from-verifier-9b-math"
+assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
+
+[data]
+seed = 42
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/train.jsonl"
+eval_prompt_data = [
+  "dapo_math_holdout", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/dapo_math_holdout.jsonl",
+  "math_aime_2025", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/math_aime_2025.jsonl",
+  "math_brumo_2025", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/math_brumo_2025.jsonl",
+  "math_500", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/math_500.jsonl",
+]
+reward_config = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/verifiers.json"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "opd"
+wandb_entity = "allenai-team1"
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "4h"
+timeout = "72h"
+auto_resume = false
+weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
+
+[launch.secrets]
+WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
