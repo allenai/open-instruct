@@ -80,6 +80,27 @@ occupancy during the longest tails. Both dense runs restored the predecessor
 checkpoints and prompt ledgers, and both published a warm Triton cache after
 their first committed checkpoint through the new background publication.
 
+### Dense GSM8K control completed — September 15, 22:57 UTC
+
+r4 ran updates 151–200 in 69 minutes (median 1.4 min per update), evaluated the
+512 held-out questions in 15.6 minutes (r3 took 58–71 minutes at update 50 and
+100), and exited zero at 22:57 UTC after its final export and cache publication.
+Held-out RLVR GSM8K accuracy along the Core arm, greedy, one response per question:
+
+| Update | Core arm | Original comparator (evaluates the policy before the labelled update) |
+| ---: | ---: | ---: |
+| 0 | 441/512 (86.13%) | 437/512 (85.35%) |
+| 100 | 444/512 (86.72%) | matched export evaluation retained separately |
+| 150 (pre-150 for original) | not evaluated: r3 was stopped after the checkpoint commit | 451/512 (88.09%) |
+| 200 | 441/512 (86.13%), mean response 4,413 tokens | final export saved 20:58 UTC; matched evaluation pending |
+
+These are held-out rows from the RLVR training source, not the official GSM8K
+test split, and no learning verdict follows from them: run the full test
+evaluation (`scripts/miles/gsm8k_test_eval.py`) on the initial and final exports
+of both arms before comparing. Open follow-ups: evaluate the r3 update-150
+checkpoint, and evaluate the original's final export with the same frozen
+prompts and 32K cap used for its update-100 export.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
