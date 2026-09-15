@@ -13,7 +13,7 @@
 
 # ruff: noqa: E501
 
-"""Strict judge rewards ported from olmo-miles afbdd6f (rl/general_judge.py)."""
+"""Judge rewards ported from olmo-miles afbdd6f (rl/general_judge.py)."""
 
 from __future__ import annotations
 
@@ -212,16 +212,23 @@ def parse_judge_response(content: str) -> tuple[str, float]:
         reasoning = str(data.get("REASONING", ""))
         score_value = data["SCORE"]
         if isinstance(score_value, bool):
-            raise RuntimeError("general judge returned a boolean score")
+            raise JudgeResponseError("general judge returned a boolean score")
         score = float(score_value)
     except (json.JSONDecodeError, TypeError, ValueError, KeyError, AttributeError):
         match = re.search(r'"SCORE"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?', cleaned)
         if match is None:
-            raise RuntimeError("general judge response has no parseable SCORE") from None
+            # Accept a single explicit Markdown score line, not numbers in prose.
+            scores = re.findall(
+                r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$", content, flags=re.MULTILINE
+            )
+            if len(scores) != 1:
+                raise JudgeResponseError("general judge response has no unambiguous parseable SCORE") from None
+            score = float(scores[0])
+        else:
+            score = float(match.group(1))
         reasoning = cleaned
-        score = float(match.group(1))
     if not math.isfinite(score) or not 0 <= score <= 10:
-        raise RuntimeError(f"general judge returned out-of-range SCORE {score!r}")
+        raise JudgeResponseError(f"general judge returned out-of-range SCORE {score!r}")
     return reasoning, score / 10.0
 
 
@@ -232,7 +239,7 @@ def parse_web_instruct_judge_response(content: str) -> tuple[str, float]:
     normalized = cleaned.lower()
     decisions = set(re.findall(r"final decision:\s*(yes|no)\b", normalized))
     if len(decisions) != 1:
-        raise RuntimeError("binary judge response must contain one unambiguous Final Decision")
+        raise JudgeResponseError("binary judge response must contain one unambiguous Final Decision")
     return cleaned, float(decisions == {"yes"})
 
 
@@ -337,6 +344,10 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
         return content
     except JudgeResponseError:
         raise
+    except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as error:
+        raise JudgeResponseError(
+            f"general judge transport or response failure: {type(error).__name__}: {error}"
+        ) from error
     except Exception as error:
         raise RuntimeError(f"general judge request failed for {config.api_url}: {error}") from error
 
@@ -358,6 +369,9 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
         prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=str(sample.response), target=target)
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
+    policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
+    if policy not in {"zero", "raise"}:
+        raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
     started = time.monotonic()
     last_error: RuntimeError | None = None
     failed_attempts = []
@@ -374,7 +388,7 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
         except RuntimeError as error:
             last_error = error
             evidence = {"attempt": attempt + 1, "error": str(error), **getattr(error, "diagnostics", {})}
-            if isinstance(content, str) and not isinstance(error, JudgeResponseError):
+            if isinstance(content, str):
                 evidence["raw_reply"] = content[:65536]
             failed_attempts.append(evidence)
             metadata.setdefault("verifier_diagnostics", {})[name] = {
@@ -386,10 +400,19 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
                 "temperature": config.temperature,
                 "elapsed_seconds": time.monotonic() - started,
                 "verdict": "failed",
+                "kind": "general_judge",
+                "failure_policy": policy,
                 "attempts": list(failed_attempts),
             }
             if attempt == 2:
-                logger.error("General judge failed: %s", json.dumps(metadata["verifier_diagnostics"][name]))
+                diagnostics = metadata["verifier_diagnostics"][name]
+                if policy == "zero" and isinstance(error, JudgeResponseError):
+                    diagnostics.update(status="judge_error", fallback_reward=0.0)
+                    logger.warning(
+                        "General judge failed; assigning zero reward and continuing: %s", json.dumps(diagnostics)
+                    )
+                    return 0.0
+                logger.error("General judge failed: %s", json.dumps(diagnostics))
                 raise
             await asyncio.sleep(2**attempt)
     else:
@@ -398,6 +421,8 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
     if not math.isfinite(score):
         raise RuntimeError(f"general judge returned non-finite score {score!r}")
     metadata.setdefault("verifier_diagnostics", {})[name] = {
+        "kind": "general_judge",
+        "status": "ok",
         "binding": binding,
         "rubric_sha256": rubric_sha256,
         "elapsed_seconds": time.monotonic() - started,

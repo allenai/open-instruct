@@ -59,3 +59,15 @@ def test_service_failure_zeros_are_reported_separately():
     assert metrics["rollout/code_verifier/rejected"] == 1
     assert metrics["rollout/code_verifier/service_error_503"] == 1
     assert metrics["rollout/code_verifier/service_error_transport_or_response"] == 1
+
+
+def test_general_judge_failures_are_separate_from_valid_zero_scores():
+    samples = [
+        _sample({"general": {"kind": "general_judge", "status": "ok", "score": 0.0}}),
+        _sample({"general": {"kind": "general_judge", "status": "judge_error", "fallback_reward": 0.0}}),
+        _sample({"math": {"kind": "math", "status": "ok"}}),
+    ]
+    metrics = rollout_metrics.general_judge_metrics(samples)
+    assert metrics["rollout/general_judge/samples"] == 2
+    assert metrics["rollout/general_judge/errors"] == 1
+    assert metrics["rollout/general_judge/error_fraction"] == 0.5

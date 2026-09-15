@@ -6,6 +6,32 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
+## Progress — September 15, 02:12 UTC
+
+Original framework qualifier `01M2H7NFWZB8ERKFJ6XYAQABQ3` exited zero, completed
+three optimizer calls and exported both intermediate/final public HF models.
+The 200-driver-iteration GSM8K comparator is submitted as
+[01M2HDDJKQE4TSPYKFJFEN662Q](https://beaker.org/ex/01M2HDDJKQE4TSPYKFJFEN662Q).
+Count actual optimizer calls separately: original zero-advantage filtering still
+changes effective exposure. The larger qualifier batch was not the comparison.
+
+Dense GSM8K reached 44 updates; dense basket reached 5. Neither has reached its
+first post-training evaluation at 50. Dense basket takes about 30 minutes per
+collection despite 40–50 second optimizer calls. At that rate, 200 updates exceed
+its 24-hour allocation, and its first save at 50 is too late. This is unresolved;
+the active dense basket has not been stopped or silently reconfigured.
+
+MoE basket failed after 25 optimizer calls. Three judge attempts returned a
+Markdown `**SCORE:** 1` line that the JSON-style parser rejected. The result bundle
+has no committed checkpoint marker, consistent with first save scheduled at 50.
+These updates cannot be claimed as resumable. A fresh restart retains frozen
+inputs and initial-evaluation evidence, saves every five updates, and allows 48h.
+The parser now accepts a single explicit Markdown score line. Exhausted malformed
+or failed transport replies produce tagged zero rewards, with per-sample evidence
+and `rollout/general_judge/{samples,errors,error_fraction}`. Configuration/context
+errors remain fatal and startup judge canaries explicitly use strict mode.
+These changes are not retroactively present in the active dense basket.
+
 ## Progress — September 15, 00:28 UTC
 
 All three MILES runs remain active: MoE basket 14 completed optimizer updates,

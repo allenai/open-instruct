@@ -72,6 +72,23 @@ def math_verifier_metrics(samples) -> dict[str, float]:
     }
 
 
+def general_judge_metrics(samples) -> dict[str, float]:
+    records = [
+        record
+        for sample in samples
+        for record in ((getattr(sample, "metadata", None) or {}).get("verifier_diagnostics") or {}).values()
+        if isinstance(record, dict) and record.get("kind") == "general_judge"
+    ]
+    if not records:
+        return {}
+    failures = sum(record.get("status") == "judge_error" for record in records)
+    return {
+        "rollout/general_judge/samples": len(records),
+        "rollout/general_judge/errors": failures,
+        "rollout/general_judge/error_fraction": failures / len(records),
+    }
+
+
 def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_time) -> bool:
     metrics = code_service_metrics(samples)
     if metrics:
@@ -80,6 +97,10 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     if math_metrics:
         logger.info("math_verifier %d: %s", rollout_id, math_metrics)
         metrics.update(math_metrics)
+    judge_metrics = general_judge_metrics(samples)
+    if judge_metrics:
+        logger.info("general_judge %d: %s", rollout_id, judge_metrics)
+        metrics.update(judge_metrics)
     timing_metrics = sibling_timing.consumed_metrics(samples)
     if timing_metrics:
         logger.info("sibling_timing %d: %s", rollout_id, timing_metrics)
