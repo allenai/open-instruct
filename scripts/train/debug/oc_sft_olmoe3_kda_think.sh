@@ -88,8 +88,39 @@ MODE="${2:-gate}"
 # CONFIG_NAME must be regenerated from THIS checkpoint's config.json -- the
 # midtrain-derived kda_mt_sft.json has recompute_each_block=False and an
 # unfused loss head, the two levers that make long sequences fit.
-MODEL=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/long_context/legacy-cx8-v2/latent-kda-l2/1.2B/cx8-samebatch/step63802
-CONFIG_NAME=scripts/train/debug/kda_lc_sft.json
+# BASE selects the checkpoint + regenerated config pair. Both are overridable
+# individually (MODEL, CONFIG_NAME) for a checkpoint that has no preset yet.
+#   proxy            the 1.2B/18.5B latent-KDA proxy (~200B PT tokens; #1854..#1880)
+#   hero-small-nonemo  Olmo 3.5 hero small, 0.79B/12.5B, 2T PT + 100B MT + 100B LC,
+#                    non-EMO throughout (#1895). Lives in olmo-3p5-checkpoints,
+#                    which mason does not mount by default -- see EXTRA_BUCKET_FLAGS.
+BASE="${BASE:-proxy}"
+case "$BASE" in
+  proxy)
+    DEFAULT_MODEL=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/long_context/legacy-cx8-v2/latent-kda-l2/1.2B/cx8-samebatch/step63802
+    DEFAULT_CONFIG=scripts/train/debug/kda_lc_sft.json
+    ;;
+  hero-small-nonemo)
+    DEFAULT_MODEL=/weka/olmo-3p5-checkpoints/production-hero-small-lc/olmo35-small-2t-lc100b-20260913/olmo35-small-2t-lc100b-20260913-non-emo/step5961
+    DEFAULT_CONFIG=scripts/train/debug/kda_hero_small_sft.json
+    ;;
+  *)
+    echo "Unknown BASE=$BASE (expected proxy or hero-small-nonemo)" >&2
+    exit 1
+    ;;
+esac
+MODEL="${MODEL:-$DEFAULT_MODEL}"
+CONFIG_NAME="${CONFIG_NAME:-$DEFAULT_CONFIG}"
+# mason mounts only oe-adapt-default and oe-training-default; a base under any
+# other bucket needs --extra_weka_buckets or the job fails at load time with a
+# missing path (#1897). Derived from MODEL so a manual override cannot forget it.
+EXTRA_BUCKET_FLAGS=""
+if [[ "$MODEL" =~ ^/weka/([^/]+)/ ]]; then
+    bucket="${BASH_REMATCH[1]}"
+    if [[ "$bucket" != "oe-adapt-default" && "$bucket" != "oe-training-default" ]]; then
+        EXTRA_BUCKET_FLAGS="--extra_weka_buckets $bucket"
+    fi
+fi
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
 CHAT_TEMPLATE=olmo123
 # 32768 is the cache's native tokenisation length (no re-tokenize) and cuts
@@ -167,7 +198,9 @@ grad_accum_for() {
 }
 
 echo "Using Beaker image: $BEAKER_IMAGE"
-echo "Mode: $MODE | SEQ=$SEQ | LR=$LR | cluster=$CLUSTER | workspace=$WORKSPACE"
+echo "Mode: $MODE | BASE=$BASE | SEQ=$SEQ | LR=$LR | cluster=$CLUSTER | workspace=$WORKSPACE"
+echo "Model: $MODEL"
+echo "Config: $CONFIG_NAME ${EXTRA_BUCKET_FLAGS:+| $EXTRA_BUCKET_FLAGS}"
 
 case "$MODE" in
   tokenize_subset|tokenize_full)
@@ -190,6 +223,7 @@ case "$MODE" in
         --gpus 0 \
         --non_resumable \
         --no_auto_dataset_cache \
+        $EXTRA_BUCKET_FLAGS \
         -- uv run python open_instruct/olmo_core_finetune.py \
         --model_name_or_path "$MODEL" \
         --config_name $CONFIG_NAME \
@@ -220,6 +254,7 @@ case "$MODE" in
         --gpus 0 \
         --non_resumable \
         --no_auto_dataset_cache \
+        $EXTRA_BUCKET_FLAGS \
         -- uv run python open_instruct/olmo_core_finetune.py \
         --model_name_or_path "$MODEL" \
         --config_name $CONFIG_NAME \
@@ -308,6 +343,7 @@ case "$MODE" in
         --gpus $NPROC \
         --non_resumable \
         --no_auto_dataset_cache \
+        $EXTRA_BUCKET_FLAGS \
         --env OLMO_SHARED_FS=1 \
         -- torchrun \
         --nnodes=$NNODES \
@@ -361,6 +397,7 @@ case "$MODE" in
         --gpus "$CONVERT_GPUS" \
         --non_resumable \
         --no_auto_dataset_cache \
+        $EXTRA_BUCKET_FLAGS \
         -- /stage/.venv/bin/python scripts/train/debug/convert_moe_checkpoint_to_hf.py \
         -i "$CKPT_ROOT/$STEP" \
         -o "$CKPT_ROOT/hf_$STEP" \

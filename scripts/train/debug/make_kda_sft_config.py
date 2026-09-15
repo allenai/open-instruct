@@ -90,6 +90,14 @@ def main() -> int:
     if not args.keep_ep and block.pop("ep", None) is not None:
         print("dropped block.ep (no expert-parallel meshes in open-instruct)")
 
+    # Whole-block recomputation is how a 65536-token microbatch fits on one GPU
+    # without expert parallelism; Jacob's hero SFT sets exactly this pair.
+    model = payload["model"]
+    if not model.get("recompute_each_block") or model.get("recompute_all_blocks_by_chunk"):
+        model["recompute_each_block"] = True
+        model["recompute_all_blocks_by_chunk"] = False
+        print("set model.recompute_each_block=true, recompute_all_blocks_by_chunk=false")
+
     changes = retarget_attention_backend(block, "block") + disable_cute_kda_kernel(block, "block")
     assert_emo_off(block, "block")
     for name, override in (payload["model"].get("block_overrides") or {}).items():
