@@ -8,6 +8,7 @@ also bound peer failures and startup hangs from inside the allocation.
 import argparse
 import asyncio
 import contextlib
+import copy
 import importlib
 import ipaddress
 import json
@@ -22,7 +23,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from open_instruct.miles import judge_registry, judge_server, judging, topology
+from open_instruct.miles import core_opd, core_opd_teacher, judge_registry, judge_server, judging, topology
 from open_instruct.miles.run_spec import RunSpec
 
 
@@ -222,6 +223,38 @@ def run(path):
             {"address": address, "head": head, "ray_devices": ray_devices, "judge_devices": judges, "layout": layout},
         )
         env = dict(os.environ)
+        if spec.teacher:
+            devices = judges.pop("__opd_teacher__")
+            port = free_port()
+            service = copy.deepcopy(spec.teacher) | {
+                "alignment": spec.distillation["alignment"],
+                "endpoint": f"http://{address}:{port}",
+            }
+            teacher_path = root / "teacher.json"
+            write(teacher_path, service)
+            teacher_env = dict(env, CUDA_VISIBLE_DEVICES=",".join(devices))
+            teacher_env.pop("SGLANG_EXTERNAL_MODEL_PACKAGE", None)
+            teacher_env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "false"
+            supervisor.start(
+                "teacher",
+                [sys.executable, "-m", "open_instruct.miles.core_opd_teacher", str(teacher_path), str(port)],
+                teacher_env,
+            )
+
+            def teacher_ready():
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/get_model_info", timeout=3) as response:
+                        info = json.load(response)
+                    expected = read(teacher_path).get("snapshot")
+                    if info.get("model_path") != expected:
+                        raise RuntimeError("Teacher server model differs from prepared checkpoint")
+                    return True
+                except OSError:
+                    return False
+
+            supervisor.wait(teacher_ready, timeout=service["startup_timeout"])
+            supervisor.health["opd_teacher"] = f"http://127.0.0.1:{port}/health"
+            env[core_opd.ENV] = json.dumps(read(teacher_path))
         registry = judging.registry(spec.judges)
         health = {}
         for name, devices in judges.items():
@@ -308,6 +341,8 @@ def run(path):
             write(root / "registry.json", registry)
             print(f"Cluster ready; starting Core workflow. Driver log: {root}/driver-{rank}.log", flush=True)
             supervisor.run_child("driver", [sys.executable, "-m", "open_instruct.miles", "train", str(path)], env)
+            if spec.teacher and spec.output["export_hf"]:
+                reload_export(supervisor, spec, env, ray_devices, root)
             write(root / "complete.json", {"status": "complete", "time": time.time()})
         else:
             # No startup timeout on the training phase; Beaker's run timeout is
@@ -324,6 +359,48 @@ def run(path):
     finally:
         supervisor.close()
         write(root / f"cleanup-{rank}.json", {"complete": True})
+
+
+def reload_export(supervisor, spec, env, devices, root):
+    """Reload the completed HF export after the Core driver disposes its actors."""
+    service = dict(
+        spec.teacher,
+        snapshot=spec.output["hf_dir"],
+        tensor_parallel_size=1,
+        max_context_length=spec.compile().miles["sglang_context_length"],
+        concurrency=1,
+    )
+    port = free_port()
+    command = core_opd_teacher.command(service, port)
+    reload_env = dict(env, CUDA_VISIBLE_DEVICES=devices[-1])
+    supervisor.start("export-reload", command, reload_env)
+    url = f"http://127.0.0.1:{port}"
+
+    def ready():
+        try:
+            with urllib.request.urlopen(url + "/get_model_info", timeout=3) as response:
+                info = json.load(response)
+            if info.get("model_path") != service["snapshot"]:
+                raise RuntimeError("Export reload loaded an unexpected checkpoint")
+            return info
+        except OSError:
+            return False
+
+    info = supervisor.wait(ready)
+    prompt_path = Path(spec.output["root"]) / "prepared/data/eval.jsonl"
+    if not prompt_path.exists():
+        prompt_path = Path(spec.output["root"]) / "prepared/data/train.jsonl"
+    with prompt_path.open() as stream:
+        prompt = json.loads(next(stream))["input"]
+    payload = {"text": prompt, "sampling_params": {"temperature": 0, "max_new_tokens": 32}, "return_logprob": True}
+    request = urllib.request.Request(
+        url + "/generate", data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        generation = json.load(response)
+    if generation.get("meta_info", {}).get("completion_tokens", 0) <= 0:
+        raise RuntimeError("Reloaded export did not produce response tokens")
+    write(Path(spec.output["root"]) / "export-reload.json", {"model": info, "generation": generation})
 
 
 def probe(spec, root):

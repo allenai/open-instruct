@@ -87,6 +87,8 @@ def specification(image, spec, *, hostnames=None):
     preflight = ""
     if config.core.attention_backend in ("torch", "flash_4"):
         preflight = f"python -m scripts.miles.preflight_attention --backend {config.core.attention_backend}\n"
+    if spec.teacher:
+        preflight += "python -m pytest -q tests/miles/test_core_opd.py tests/miles/test_opd_hooks.py tests/miles/test_opd_attention.py\n"
     cleanup = "status=$?; python -c " + shlex.quote(collect) + ' || true; exit "$status"'
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
@@ -95,7 +97,7 @@ def specification(image, spec, *, hostnames=None):
         + preflight
         + (
             "python -m open_instruct.miles.cluster /output/submitted-run.json"
-            if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]
+            if layout["replicas"] > 1 or spec.judges["judging"]["bindings"] or spec.teacher
             else "python -m open_instruct.miles train /output/submitted-run.json"
         )
         + " 2>&1 | tee /output/run.log\n"
@@ -130,7 +132,7 @@ def specification(image, spec, *, hostnames=None):
     # Cluster bootstrap advertises the physical node IP for Ray and judges,
     # including single-node runs with judge bindings. That address requires
     # host networking; bridge networking can strand local GCS clients.
-    if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]:
+    if layout["replicas"] > 1 or spec.judges["judging"]["bindings"] or spec.teacher:
         task["hostNetworking"] = True
     tasks = [task]
     if layout["replicas"] > 1:

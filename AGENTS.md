@@ -31,6 +31,14 @@ MILES has its own Core adapter and uses SGLang. The deprecated Core/vLLM path in
 are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/legacy_grpo.md)
 contains the old CLI and reproduction instructions.
 
+# OPD through MILES
+
+For on-policy distillation, read [docs/miles/opd.md](docs/miles/opd.md).
+The Core examples in `configs/miles/opd/` reuse the registered OLMo-core trainer;
+Qwen-to-Olmo requires explicit cross-tokenizer alignment. Retain the image,
+teacher identity, alignment coverage, update diagnostics and export-reload result.
+Qualification means successful mechanics, not demonstrated learning gains.
+
 # Bash commands
 - `uv run pytest`: Run the tests.
 - `make style && make quality` run the linter + formatter.

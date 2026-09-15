@@ -146,7 +146,7 @@ flags, choices and source help see the [native appendix](native-options.md).
 | launch.weka_mounts[].weka | WEKA filesystem name; unique per mount. |
 | launch.workspace | Beaker workspace string; default ai2/open-instruct-dev. |
 | model.format | hf (default) or olmo_core. Megatron checkpoint inputs are rejected. |
-| model.hf_template | Tokenizer/chat-template override: a tokenizer directory (its tokenizer files, chat template and `generation_config.json` replace the checkpoint's in the prepared HF directory) or a single `chat_template.jinja`. Required for native olmo_core input; optional for hf input. The override's digest is recorded in `workflow-model.json`, and a template containing a literal `[CUTOFF_DATE]` placeholder is warned about at preparation. |
+| model.hf_template | Required only for native olmo_core input; compatible HF architecture/tokenizer template path. |
 | model.reference_hf | Rejected baseline conversion-validation field; use miles.ref_load for a frozen KL reference. |
 | model.source | Required checkpoint path, resolved relative to the run file; input remains read-only. |
 | name | Required run identifier: letters, digits, dots, underscores and hyphens; starts with a letter/digit. |

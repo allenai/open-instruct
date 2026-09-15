@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles import async_capacity, judging, options, run_data, topology, validation
+from open_instruct.miles import async_capacity, core_opd, judging, options, run_data, topology, validation
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.errors import InputError
 
@@ -166,6 +166,8 @@ class RunSpec:
     core: dict[str, Any]
     miles: dict[str, Any]
     judges: dict[str, Any]
+    teacher: dict[str, Any] = dataclasses.field(default_factory=dict)
+    distillation: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -190,6 +192,8 @@ class RunSpec:
             "miles",
             *WORKFLOW_SECTIONS,
             *RUN_SECTIONS,
+            "teacher",
+            "distillation",
             "judges",
             "rubrics",
             "judging",
@@ -239,6 +243,7 @@ class RunSpec:
                 _boolean(cache[key], f"compiler_cache.{key}")
         if "shared_root" in cache:
             cache["shared_root"] = _path(cache["shared_root"], base, "compiler_cache.shared_root")
+        teacher, distillation = core_opd.parse(document, base)
         result = cls(
             name,
             path,
@@ -252,6 +257,8 @@ class RunSpec:
             _table(document, "core", CORE_FIELDS),
             _table(document, "miles"),
             judging.parse(document),
+            teacher,
+            distillation,
         )
         result.compile()
         return result
@@ -272,6 +279,8 @@ class RunSpec:
             "miles": self.miles,
             **self.judges,
         }
+        if self.teacher:
+            payload.update(teacher=self.teacher, distillation=self.distillation)
         payload = copy.deepcopy(payload)
         for section in (*RUN_SECTIONS, "core", "miles"):
             for key, value in payload[section].items():
@@ -392,6 +401,7 @@ class RunSpec:
             "OI_MILES_REPLICA_COUNT",
             "OI_MILES_LAUNCH_ID",
             "OI_MILES_JUDGE_REGISTRY",
+            "OI_MILES_OPD_TEACHER",
             "RAY_ADDRESS",
             "PYTHONPATH",
             "CUDA_VISIBLE_DEVICES",
@@ -468,6 +478,8 @@ class RunSpec:
         for section in RUN_SECTIONS:
             for key, value in self.sections[section].items():
                 origin = f"{section}.{key}"
+                if (section, key) in (("training", "algorithm"), ("trainer", "backend")):
+                    continue
                 if key == "gpus" and section in ("trainer", "inference"):
                     put(
                         "miles.actor_num_gpus_per_node" if section == "trainer" else "miles.rollout_num_gpus",
@@ -715,6 +727,7 @@ class RunSpec:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
+        core_opd.compile_options(self, miles, core)
         result = RunConfig(CoreConfig(**core), miles)
         result.validate()
         return result
@@ -726,6 +739,7 @@ class RunSpec:
             "name": self.name,
             "config_path": str(self.config_path),
             "model": self.model,
+            **({"teacher": self.teacher, "distillation": self.distillation} if self.teacher else {}),
             "conversion": self.conversion,
             "data": self.data,
             "output": self.output,

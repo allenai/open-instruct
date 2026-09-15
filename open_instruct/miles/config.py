@@ -163,6 +163,8 @@ def scoring_pass(core: CoreConfig, options: dict[str, Any]) -> ScoringPass:
     samples = options.get("global_batch_size")
     collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
     steps = collection // samples if collection and samples else None
+    if options.get("use_opd", False):
+        return ScoringPass(True, "OPD requires pre-update student scores", steps)
     if core.scoring_pass_required:
         return ScoringPass(True, "core.scoring_pass_required", steps)
     if steps is None:
@@ -337,9 +339,20 @@ class RunConfig:
         for name in ("tensor_model_parallel_size", "pipeline_model_parallel_size", "context_parallel_size"):
             if options.get(name, 1) != 1:
                 raise InputError(f"Core RL does not yet support {name}>1")
-        for name in ("use_critic", "multi_lora", "indep_dp", "use_opd", "use_routing_replay"):
+        for name in ("use_critic", "multi_lora", "indep_dp", "use_routing_replay"):
             if options.get(name, False):
                 raise InputError(f"Core RL has no implementation for miles.{name}")
+        if options.get("use_opd", False):
+            if options.get("opd_type") != "sglang" or options.get("opd_log_prob_top_k", 0) != 0:
+                raise InputError("Core OPD supports external SGLang sampled-token scoring only")
+            if (
+                options.get("fully_async")
+                or self.core.publication_mode != "barrier"
+                or options.get("use_rollout_logprobs")
+            ):
+                raise InputError(
+                    "Core OPD requires synchronous barrier publication and trainer-scored log probabilities"
+                )
         if options.get("use_rollout_routing_replay", False) and not options.get("use_miles_router", False):
             raise InputError(
                 "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"

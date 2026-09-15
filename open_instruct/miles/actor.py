@@ -24,6 +24,7 @@ from open_instruct.miles import (
     checkpoint,
     config,
     contract,
+    core_opd_training,
     data,
     engine_delivery,
     models,
@@ -101,6 +102,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 "global_batch_size": args.global_batch_size,
                 "rollout_batch_size": getattr(args, "rollout_batch_size", None) or 0,
                 "n_samples_per_prompt": getattr(args, "n_samples_per_prompt", None) or 1,
+                "use_opd": bool(getattr(args, "use_opd", False)),
                 "kl_coef": getattr(args, "kl_coef", 0) or 0,
                 "use_rollout_logprobs": bool(getattr(args, "use_rollout_logprobs", False)),
             },
@@ -308,7 +310,12 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         # guarantees by admitting exactly one optimizer step per collection.
         capture = not decision.standalone
         scoring_mode = "standalone" if decision.standalone else ("checked" if checked else "skipped")
+        if self.args.use_opd:
+            self._agree(lambda: core_opd_training.prepare(rollout))
+            core_opd_training.record(self.args, rollout, rollout_id)
         miles_loss.compute_advantages_and_returns(self.args, rollout)
+        if self.args.use_opd:
+            self._agree(lambda: core_opd_training.audit_advantages(self.args, rollout, rollout_id))
         self._agree(lambda: contract.validate_training_data(rollout))
         for step_batches in self._batch_steps(rollout):
             if self.args.olmo_core.sequence_packing:
@@ -450,23 +457,19 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                     }
                 )
             logged = self._agree(
-                lambda losses=losses,
-                summary=summary,
-                lr_used=lr_used,
-                gradient_stats=gradient_stats,
-                difference=difference,
-                agreement=agreement,
-                profile=profile: training_metrics.log_step(
-                    self.args,
-                    losses=losses,
-                    summary=summary,
-                    scores=training_metrics.score_metrics(difference, int(agreement[1]), profile),
-                    clock=self.clock,
-                    rollout_id=rollout_id,
-                    lr_used=lr_used,
-                    lr_next=self.lr_scheduler.get_last_lr(),
-                    optimizer_metrics=self.train_module._trainer.metrics,
-                    gradient_stats=gradient_stats,
+                lambda losses=losses, summary=summary, lr_used=lr_used, gradient_stats=gradient_stats, difference=difference, agreement=agreement, profile=profile: (
+                    training_metrics.log_step(
+                        self.args,
+                        losses=losses,
+                        summary=summary,
+                        scores=training_metrics.score_metrics(difference, int(agreement[1]), profile),
+                        clock=self.clock,
+                        rollout_id=rollout_id,
+                        lr_used=lr_used,
+                        lr_next=self.lr_scheduler.get_last_lr(),
+                        optimizer_metrics=self.train_module._trainer.metrics,
+                        gradient_stats=gradient_stats,
+                    )
                 )
             )
             if logged is not None:

@@ -19,6 +19,11 @@ def plan(spec):
         for name, service in judging.registry(spec.judges)["judges"].items()
         if service["mode"] == "managed"
     }
+    teacher_gpus = spec.teacher.get("gpus", 0)
+    if teacher_gpus and (
+        trainer_nodes != 1 or policy_capacity(miles) + sum(managed.values()) + teacher_gpus > capacity
+    ):
+        raise InputError("Core OPD pilot requires all learner, rollout, teacher and judge GPUs on one node")
     if trainer_per_node > capacity or tp > capacity or capacity % tp:
         raise InputError(
             "Trainer ranks and each rollout engine must fit within launch.gpus_per_replica; capacity must divide into whole engines"
@@ -30,7 +35,7 @@ def plan(spec):
     if miles.get("eval_num_gpus", 0) or miles.get("rollout_external", False):
         raise InputError("The config launcher does not yet allocate dedicated eval or external rollout pools")
     policy = trainer if miles["colocate"] else trainer + rollout
-    total = policy + sum(managed.values())
+    total = policy + sum(managed.values()) + teacher_gpus
     nodes: list[dict[str, Any]]
     if total <= capacity and trainer_nodes == 1:
         nodes = [
@@ -39,6 +44,7 @@ def plan(spec):
                 "rollout_gpus": 0 if miles["colocate"] else rollout,
                 "ray_gpus": policy,
                 "judges": managed,
+                **({"teacher_gpus": teacher_gpus} if teacher_gpus else {}),
             }
         ]
         allocated = total
@@ -62,7 +68,7 @@ def plan(spec):
                 nodes.append({"trainer_gpus": 0, "rollout_gpus": 0, "ray_gpus": 0, "judges": {}})
             nodes[-1]["judges"][name] = count
         allocated = capacity
-    if (len(nodes) > 1 or managed) and spec.launch["auto_resume"]:
+    if (len(nodes) > 1 or managed or teacher_gpus) and spec.launch["auto_resume"]:
         raise InputError(
             "Multi-node/managed-judge launches require launch.auto_resume=false until coordinated restart is qualified"
         )
@@ -74,6 +80,7 @@ def plan(spec):
         "allocated_gpus": allocated * len(nodes),
         "policy_gpus": policy,
         "judge_gpus": sum(managed.values()),
+        "teacher_gpus": teacher_gpus,
         "nodes": nodes,
         "unused_gpus": allocated * len(nodes) - total,
     }
@@ -86,7 +93,7 @@ def assign(layout, addresses):
 
 
 def devices(node, visible):
-    required = node["ray_gpus"] + sum(node["judges"].values())
+    required = node["ray_gpus"] + sum(node["judges"].values()) + node.get("teacher_gpus", 0)
     if len(visible) < required or len(set(visible)) != len(visible) or any(not item for item in visible):
         raise ValueError("CUDA device visibility does not cover the disjoint role assignment")
     offset = node["ray_gpus"]
@@ -94,4 +101,11 @@ def devices(node, visible):
     for name, count in sorted(node["judges"].items()):
         judges[name] = visible[offset : offset + count]
         offset += count
+    if node.get("teacher_gpus"):
+        judges["__opd_teacher__"] = visible[offset : offset + node["teacher_gpus"]]
     return visible[: node["ray_gpus"]], judges
+
+
+def policy_capacity(miles):
+    trainer = miles["actor_num_nodes"] * miles["actor_num_gpus_per_node"]
+    return trainer if miles["colocate"] else trainer + miles["rollout_num_gpus"]

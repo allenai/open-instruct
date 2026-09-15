@@ -107,3 +107,68 @@ not an improvement in task accuracy.
 - Before a colleague scales up, review independent teacher/student probability
   agreement, publication correctness, resume behavior, longer contexts and task
   quality. The original plan describes those broader qualification gates.
+
+## OLMo-core learners and independent teachers
+
+The Core OPD extension uses the existing Core actor, optimizer, expert parallelism,
+publication, evaluation and checkpoint loop. It selects the learner architecture
+from the prepared HF `model_type`: our registered `olmo3moe` and dense `olmo3`
+paths are the initial targets. The teacher is an independent SGLang service and
+need not have the learner architecture. No additional CLI command is needed.
+
+Copy `configs/miles/opd/olmo-moe-tiny.toml` or `olmo3-tiny.toml`, choose a fresh
+`output.root`, then use the usual `plan`, `validate`, and `run` commands. These
+examples specify the checkpoint, two Core trainer GPUs, one learner rollout GPU,
+and one Qwen3.5-9B teacher GPU. A different teacher can use another local HF
+checkpoint or a remote repository with an immutable revision; set its GPU count
+and tensor parallelism together. This does not automatically implement new
+learner architectures or unsupported SGLang teacher architectures.
+
+```toml
+[training]
+algorithm = "opd"
+
+[trainer]
+backend = "olmo_core"
+
+[model]
+source = "/weka/path/to/learner-hf"
+format = "hf"
+
+[teacher]
+source = "Qwen/Qwen3.5-9B"
+revision = "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
+gpus = 1
+tensor_parallel_size = 1
+max_context_length = 8192
+chat_template_kwargs = { enable_thinking = false }
+
+[distillation]
+alignment = "exact_text_spans"
+kl_coef = 1.0
+```
+
+`shared_token_ids` requires identical tokenizers. `exact_text_spans` renders the
+original conversation with the teacher's template, scores the learner response
+under the teacher tokenizer, and supervises only identical token spans. This is
+a partial objective inspired by [SimpleOPD](https://arxiv.org/html/2608.14277v1),
+not full cross-vocabulary KL. Unmatched tokens, special tokens and `</think>`
+termination spans receive zero OPD contribution. The ordinary loss mask and
+normalization are preserved. Prepared inputs must retain `metadata.opd_messages`;
+the built-in task and manifest preparation paths now retain those messages.
+
+The first implementation requires synchronous barrier publication on one node.
+It forces pre-update Core scoring, uses zero task reward, disables advantage
+whitening, and leaves optional reference KL in `optimizer.kl_loss_coef`.
+The MoE example retains its existing router regularizers. Alignment coverage and
+an exact advantage check are recorded in `checkpoints/training_contract_rank*.jsonl`,
+alongside gradient and weight-change diagnostics. Teacher identity is retained in
+`cluster/<attempt>/teacher.json`; tokenizer fingerprints travel with each sample.
+An enabled final HF export is reloaded through SGLang and recorded in
+`export-reload.json` before the supervisor reports success.
+
+Build the committed integration using the existing `MILES_BASE_IMAGE` procedure;
+reusing the earlier Qwen image does not include Core OPD. The image retains
+Megatron/mbridge for the original Qwen OPD example and the existing Core GRPO
+path. Qualification results for this extension must identify the new immutable
+image and source revision; the original Qwen result above does not qualify it.

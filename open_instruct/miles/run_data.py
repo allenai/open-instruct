@@ -314,6 +314,7 @@ def _adopt(data, tokenizer, template, inputs):
         for row in source:
             messages = _messages({"messages": row[options["input_key"]]}, strip_answer=False)
             metadata = copy.deepcopy(row[options["metadata_key"]])
+            metadata["opd_messages"] = copy.deepcopy(messages)
             metadata.setdefault("query", messages[-1]["content"])
             partitions[split].append(
                 {
@@ -407,6 +408,7 @@ def _tasks(data, tokenizer, template, seed):
                 "source_dataset": source,
                 "source_revision": revision,
                 "source_row": index,
+                "opd_messages": copy.deepcopy(messages),
                 "query": messages[-1]["content"],
                 "prompt_wrapper": wrapper,
                 "verifiers": [{"name": verifier, "target": target, "weight": 1.0}],

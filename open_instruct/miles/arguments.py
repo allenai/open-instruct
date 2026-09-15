@@ -34,6 +34,8 @@ def load_core_args(extra_args_provider):
             "multi_lora",
             "indep_dp",
             "use_opd",
+            "opd_type",
+            "opd_log_prob_top_k",
             "fully_async",
         )
         and value is not None
