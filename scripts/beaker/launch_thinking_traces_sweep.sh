@@ -67,6 +67,7 @@ TASK_TIMEOUT="72h"
 BUDGET="ai2/oe-other"
 BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/olmo-instruct}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-ai2/cuda13.0-ubuntu22.04-torch2.11.0}"
+DOCKER_IMAGE=""
 WEKA_MOUNT="oe-adapt-default:/weka/oe-adapt-default"
 REPO_GIT_REF=""
 DRY_RUN=0
@@ -137,6 +138,7 @@ while [ $# -gt 0 ]; do
         --task-timeout)      TASK_TIMEOUT="$2"; shift 2 ;;
         --workspace)         BEAKER_WORKSPACE="$2"; shift 2 ;;
         --image)             BEAKER_IMAGE="$2"; shift 2 ;;
+        --docker-image)      DOCKER_IMAGE="$2"; shift 2 ;;
         --weka)              WEKA_MOUNT="$2"; shift 2 ;;
         --repo-ref)          REPO_GIT_REF="$2"; shift 2 ;;
         --dry-run)           DRY_RUN=1; shift ;;
@@ -160,6 +162,7 @@ cat <<EOF
 
 === Thinking-trace sweep ===
   Models      : ${MODELS}
+  Image       : ${DOCKER_IMAGE:-${BEAKER_IMAGE}}${DOCKER_IMAGE:+ (docker, vllm from image)}
   Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}}${DP_SIZE:+ DP=${DP_SIZE}}${ENABLE_EP:+ EP=on}), vLLM ${VLLM_PKG_VERSION}${LOAD_FORMAT:+, load-format ${LOAD_FORMAT}}${STARTUP_PROBE:+$([ "$STARTUP_PROBE" = 1 ] && printf ", STARTUP PROBE")}
   Context     : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   Sampling    : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples (seed ${SEED}), concurrency ${CONCURRENCY}
@@ -175,7 +178,7 @@ cmd=(
     --description "Thinking-trace length sweep over 4 frontier reasoning models on ${DATASET}"
     --ref "$REPO_GIT_REF" --cluster "$CLUSTER" --gpus "$GPU_COUNT"
     --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" --task-timeout "$TASK_TIMEOUT"
-    --beaker-image "$BEAKER_IMAGE" --budget "$BUDGET"
+    --budget "$BUDGET"
     --env "MODELS=${MODELS}" --env "VLLM_PKG_VERSION=${VLLM_PKG_VERSION}"
     --env "GPU_COUNT=${GPU_COUNT}" --env "TP_SIZE=${TP_SIZE}"
     --env "MAX_MODEL_LEN=${MAX_MODEL_LEN}" --env "MAX_TOKENS=${MAX_TOKENS}"
@@ -194,6 +197,14 @@ cmd=(
 # every rank and caps concurrency at a fraction of the intended value.
 [ -n "$DCP_SIZE" ] && cmd+=(--env "DCP_SIZE=${DCP_SIZE}")
 [ -n "$DP_SIZE" ] && cmd+=(--env "DP_SIZE=${DP_SIZE}")
+# A public Docker image that already contains vLLM replaces the Beaker image,
+# and VLLM_FROM_IMAGE tells the job to serve with that vLLM rather than
+# installing a second copy over the top of it.
+if [ -n "$DOCKER_IMAGE" ]; then
+    cmd+=(--docker-image "$DOCKER_IMAGE" --env "VLLM_FROM_IMAGE=1")
+else
+    cmd+=(--beaker-image "$BEAKER_IMAGE")
+fi
 [ -n "$LOAD_FORMAT" ] && cmd+=(--env "LOAD_FORMAT=${LOAD_FORMAT}")
 for _e in ${EXTRA_ENVS+"${EXTRA_ENVS[@]}"}; do cmd+=(--env "$_e"); done
 [ "$STARTUP_PROBE" = "1" ] && cmd+=(--env "STARTUP_PROBE=1")

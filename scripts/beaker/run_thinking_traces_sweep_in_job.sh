@@ -342,6 +342,16 @@ if ! command -v uv >/dev/null 2>&1; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# The official vllm/vllm-openai image ships vLLM but not uv, and the client
+# (generate_traces.py and its deps) runs through uv. Bootstrap it rather than
+# failing after the model is already loaded.
+if ! command -v uv >/dev/null 2>&1; then
+    log "uv not on PATH; installing"
+    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || true
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    command -v uv >/dev/null 2>&1 && log "uv installed: $(uv --version)" \
+        || { log "FATAL: could not install uv"; exit 1; }
+fi
 UV_RUN=( uv run --no-project --python 3.11
          --with datasets --with transformers --with openai --with numpy --with huggingface_hub
          --with tiktoken --with blobfile --with sentencepiece --with protobuf )
@@ -513,14 +523,28 @@ run_one_model() {
     #            zero CDN fetches
     # Same attention/MoE backends selected either way, so nothing is degraded.
     # Neither wheel is on PyPI at this version; they come from flashinfer.ai.
-    uvx --python 3.12 \
-        $([ "$LOAD_FORMAT" = instanttensor ] && printf -- '--with instanttensor') \
-        ${FLASHINFER_WHEELS:+--with flashinfer-cubin==${FLASHINFER_VERSION} \
-          --with flashinfer-jit-cache==${FLASHINFER_VERSION} \
-          --index-strategy unsafe-best-match \
-          --find-links https://flashinfer.ai/whl/flashinfer-cubin/ \
-          --find-links https://flashinfer.ai/whl/cu130/flashinfer-jit-cache/} \
-        "vllm==${VLLM_PKG_VERSION}" serve "$model" \
+    # When the image already ships vLLM (the official vllm/vllm-openai image
+    # does), serve with it directly. Installing a second copy through uvx would
+    # shadow the image's precompiled kernels and bundled flashinfer cache, which
+    # is the whole reason for using that image.
+    local -a serve_cmd
+    if [ -n "${VLLM_FROM_IMAGE:-}" ] && command -v vllm >/dev/null 2>&1; then
+        log "serving with the image's vllm: $(vllm --version 2>&1 | head -1)"
+        serve_cmd=( vllm serve "$model" )
+    else
+        serve_cmd=( uvx --python 3.12 )
+        [ "$LOAD_FORMAT" = instanttensor ] && serve_cmd+=( --with instanttensor )
+        if [ -n "${FLASHINFER_WHEELS:-}" ]; then
+            serve_cmd+=( --with "flashinfer-cubin==${FLASHINFER_VERSION}"
+                         --with "flashinfer-jit-cache==${FLASHINFER_VERSION}"
+                         --index-strategy unsafe-best-match
+                         --find-links https://flashinfer.ai/whl/flashinfer-cubin/
+                         --find-links https://flashinfer.ai/whl/cu130/flashinfer-jit-cache/ )
+        fi
+        serve_cmd+=( "vllm==${VLLM_PKG_VERSION}" serve "$model" )
+    fi
+
+    "${serve_cmd[@]}" \
         ${extra} \
         --served-model-name "$served" \
         --port "$SERVE_PORT" \
