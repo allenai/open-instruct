@@ -93,3 +93,47 @@ their unsaved updates must not be stitched into the new learning curves.
 At 07:40 UTC one dense replica remained pending because the workspace group had
 156/160 slots occupied and the replica required eight. Other replicas were
 scheduled or starting. Submission is not evidence of resumed training.
+
+
+## September 15, 17:30 UTC status and recovery evidence
+
+The three Core runs are active: dense GSM8K at update 125, broad MoE at 30,
+and broad dense at 7. Both broad runs were preempted after their four-hour
+minimum runtimes expired, queued for about three hours, and automatically
+restarted. Dense restored pending prompts and continued from update 5; the
+multi-node MoE also continued training after both replicas restarted. This is
+live scheduler-preemption recovery evidence, beyond the isolated save/resume
+qualification above. The currently slow broad runs are not completed baselines.
+
+Core GSM8K held-out accuracy at update 100 is 444/512 (86.72%), versus the
+retained update-zero result of 441/512 (86.13%). The separately completed original
+vLLM evaluation scored 437/512 (85.35%) at update zero, with all 512 generations
+retained and a mean response length of 4721 tokens. These small differences do
+not establish a learning advantage. Historical and current verifier versions
+remain a comparison caveat.
+
+The independent original update-100 export passed: 355 tensors, 14,596,022,272
+BF16 bytes reconstructed from the native checkpoint; source inventory unchanged.
+Its [matched evaluation](https://beaker.org/ex/01M2K1GZZKZEWGV61J7W312BXB)
+is running on one H100 using the same frozen 512 prompts and 32K generation cap.
+
+Original training was preempted by workspace-group balancing on Jupiter after
+update 145. Its last completed checkpoint was update 125. The historical wrapper
+previously rejected existing output directories, preventing a direct restart.
+Commit `af531f94d` adds an explicit `resume` stage: unchanged recipe/model checks,
+exclusive run ownership, four-rank native metadata and optimizer-shard checks,
+and archival of the unsaved update ledger before continuing from the saved clock.
+The resume allocation enables automatic preemption recovery. Thirty-five tests
+pass in the historical image, including invalid-state rejection and preservation
+of checkpoint files during ledger recovery; Ruff checks pass.
+
+[Original resume submission](https://beaker.org/ex/01M2K1SFCHC33S3R4JF9PWAF0F)
+is queued. Actual resumed optimizer progress remains to be verified. Its same
+output root and recipe are retained; updates 126–145 from the preempted attempt
+must not be counted twice. The updated evaluation collector will apply to the
+new process. The three Core jobs are unchanged.
+
+The dense broad run still logs individual code-service 503 failures that take
+about 517 seconds to exhaust retries before receiving zero reward. Continuation
+works, but the retry budget remains excessive and needs a separate bounded-time
+fix. This observation alone does not explain its entire roughly 50-minute cycle.
