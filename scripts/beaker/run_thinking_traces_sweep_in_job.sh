@@ -431,7 +431,17 @@ model_extra_args() {
         # trace from content and reasoning_content is the only path. The
         # client now reads that field off the raw HTTP body so SDK schema
         # validation cannot drop it.
-        *Kimi-K3*)       echo "--tokenizer-mode kimi_k3 --reasoning-parser kimi_k3 --kv-cache-dtype fp8" ;;
+        # Kimi-K3 flags are the official vLLM recipe's blackwell profile plus its
+        # text_only feature, from vllm-project/recipes models/moonshotai/Kimi-K3.yaml.
+        # The text_only block scopes --decode-context-parallel-size 8 together with
+        # a2a comm and TOKENSPEED_MLA; running DCP detached from those is not a
+        # configuration the recipe sanctions. attention_config is passed in dotted
+        # form rather than as JSON because model_extra_args is word-split, and a
+        # brace-and-comma JSON literal would be mangled by brace expansion.
+        # Deliberately omitted: --max-model-len 1048576 (we pin 131072 to match the
+        # other models in this study) and the DSpark speculative-decoding feature
+        # (probabilistic draft sampling could perturb the length distribution).
+        *Kimi-K3*)       echo "--reasoning-parser kimi_k3 --kv-cache-dtype fp8 --no-enable-flashinfer-autotune --attention-backend TOKENSPEED_MLA --attention_config.use_prefill_query_quantization=true --attention_config.mla_prefill_backend=TRTLLM_RAGGED --prefix-match-unit 128 --dcp-comm-backend a2a --gpu-memory-utilization 0.95" ;;
         *)               echo "" ;;
     esac
 }
