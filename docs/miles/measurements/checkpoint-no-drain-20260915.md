@@ -72,3 +72,24 @@ as diagnostic evidence; wall-clock expiration is not used for correctness.
 A missing restarted peer hits the existing startup deadline. Automatic preemption
 recovery still relies on Beaker restarting the peer tasks together; this does not
 introduce unlimited retries for application exceptions.
+
+
+## Relaunches
+
+The save/resume qualifier finished with exit code 0 at 07:32:49 UTC.
+Nineteen focused recovery, rendezvous and campaign-launch tests passed; Ruff
+checks passed. Forced multi-node preemption remains unqualified.
+
+- Dense GSM8K resume: https://beaker.org/ex/01M2HZKS5S3EJTP6QY3KBERG7D
+  (`dc1016c0c`, correct pinned base). Started at 07:37 UTC; restoration from the
+  committed update-50 checkpoint is pending observation.
+- MoE broad restart: https://beaker.org/ex/01M2J039655AS5BM5KZ9YQNQ3F
+- Dense broad restart: https://beaker.org/ex/01M2J03FM72JY7CAWAXKDY7ATA
+
+Both broad restarts use overlay `c1446a2b1` and the same pinned base. They retain
+model/data/objective settings, enable automatic preemption recovery and use fresh
+coordination state. Prior five-update attempts had no completed checkpoint;
+their unsaved updates must not be stitched into the new learning curves.
+At 07:40 UTC one dense replica remained pending because the workspace group had
+156/160 slots occupied and the replica required eight. Other replicas were
+scheduled or starting. Submission is not evidence of resumed training.
