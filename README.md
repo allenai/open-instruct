@@ -1,9 +1,10 @@
-# never_give_up
+# Learning to Solve Hard Problems in RL for LLMs by Never Giving Up
 
-Research code for our paper on **async RLVR training that never gives up on hard
-prompts**: instead of discarding prompts that produce no learning signal (every
-sampled completion gets the same reward), the trainer requeues them for more
-attempts at later policy versions and merges the attempts into one training group.
+Research code for our paper **Learning to Solve Hard Problems in RL for LLMs by Never Giving Up**. In order to do better async RL, we reallocate more compute to harder prompts. Instead of discarding prompts that get all completions incorrect, the trainer requeues them for another attempt with probability `ngu`. If a later attempt finds a correct response, all completions are merged one GRPO group for training.
+
+This is the code for reproducing the experiments in the paper. For cleaner code implementing NGU as an algorithm, check out the [PR in open-instruct](https://github.com/allenai/open-instruct/pull/1861).
+
+## Info
 
 This is a fork of [`allenai/open-instruct`](https://github.com/allenai/open-instruct)
 (forked at commit `3d761d0`). It adds the training-loop changes, three experiment
