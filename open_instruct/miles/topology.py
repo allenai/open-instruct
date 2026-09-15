@@ -62,10 +62,6 @@ def plan(spec):
                 nodes.append({"trainer_gpus": 0, "rollout_gpus": 0, "ray_gpus": 0, "judges": {}})
             nodes[-1]["judges"][name] = count
         allocated = capacity
-    if (len(nodes) > 1 or managed) and spec.launch["auto_resume"]:
-        raise InputError(
-            "Multi-node/managed-judge launches require launch.auto_resume=false until coordinated restart is qualified"
-        )
     if len(nodes) > 1 and not str(spec.output["root"]).startswith("/weka/"):
         raise InputError("Multi-node rendezvous requires output.root on shared WEKA")
     return {

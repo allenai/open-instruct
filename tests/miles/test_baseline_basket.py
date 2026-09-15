@@ -142,3 +142,14 @@ def test_judge_gpu_probe_does_not_inherit_cpu_cuda_compat_override():
     assert task["constraints"] == {"cluster": ["ai2/holmes"]}
     assert not any(entry["name"] == "LD_LIBRARY_PATH" for entry in task["envVars"])
     assert "scripts.miles.qualify_judge_context" in task["arguments"][0]
+
+
+@pytest.mark.parametrize("name", ["full-sft-basket", "olmo3-think-sft-basket"])
+def test_recovery_campaign_propagates_preemption_to_all_replicas(name):
+    run = RunSpec.load(ROOT / f"configs/miles/qualification/{name}-200-32k-robust.toml")
+    rendered = launch_baseline_basket.document("IMAGE", run, "train", "SOURCE", "DIGEST", hostnames=["a", "b"])
+    assert len(rendered["tasks"]) == 2
+    for task in rendered["tasks"]:
+        assert task["context"]["autoResume"] is True
+        assert task["propagatePreemption"] is True
+        assert task["propagateFailure"] is True
