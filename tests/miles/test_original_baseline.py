@@ -293,3 +293,51 @@ def test_partial_evaluation_timeout_does_not_remove_results_or_prompts():
     )
     assert result_queue.qsize() == 1
     assert pending == {7: "first prompt", 8: "second prompt"}
+
+
+def test_checkpoint_export_is_pinned_and_keeps_source_unchanged(tmp_path, monkeypatch):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text('{"model_type":"olmo3"}')
+    save_file({"weight": torch.ones(3, dtype=torch.bfloat16)}, model / "model.safetensors")
+    root = tmp_path / "checkpoint"
+    checkpoint = root / "global_step101"
+    checkpoint.mkdir(parents=True)
+    torch.save({"training_step": 100}, checkpoint / "mp_rank_00_model_states.pt")
+    before = (checkpoint / "mp_rank_00_model_states.pt").read_bytes()
+    values = torch.tensor([1.001, 2.123, -3.0])
+
+    def load(path, *, tag):
+        assert path == str(root) and tag == "global_step101"
+        return {"weight": values}
+
+    monkeypatch.setattr(
+        original_baseline,
+        "load_zero_converter",
+        lambda: SimpleNamespace(get_fp32_state_dict_from_zero_checkpoint=load),
+    )
+    output = tmp_path / "export"
+    original_baseline.export_checkpoint(model, root, "global_step101", output)
+    receipt = json.loads((output / "export.json").read_text())
+    assert receipt["training_step"] == 100
+    assert receipt["dtype"] == "bfloat16"
+    index = json.loads((output / "hf/model.safetensors.index.json").read_text())
+    with original_baseline.safe_open(output / "hf" / index["weight_map"]["weight"], framework="pt") as f:
+        actual = f.get_tensor("weight")
+    assert torch.equal(actual, values.bfloat16())
+    assert actual.dtype == torch.bfloat16
+    assert (checkpoint / "mp_rank_00_model_states.pt").read_bytes() == before
+
+
+def test_checkpoint_export_launch_is_cpu_only_on_saturn():
+    task = launch_original_baseline.specification(
+        "image", "source", "export", "test", checkpoint_root="/weka/checkpoint", checkpoint_tag="global_step101"
+    )["tasks"][0]
+    assert task["resources"]["gpuCount"] == 0
+    assert task["constraints"] == {"cluster": ["ai2/saturn"]}
+    assert "--checkpoint-tag global_step101" in task["arguments"][0]
+
+
+def test_historical_zero_converter_imports_on_cpu():
+    converter = original_baseline.load_zero_converter()
+    assert callable(converter.get_fp32_state_dict_from_zero_checkpoint)

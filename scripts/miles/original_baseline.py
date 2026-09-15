@@ -6,6 +6,7 @@ in that image; Adam beta2 is aligned and the initial evaluation is explicitly sc
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import shutil
@@ -14,7 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+import torch
 from safetensors import safe_open
+from safetensors.torch import save_file
 
 from open_instruct import dataset_transformation
 
@@ -370,16 +373,125 @@ def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False):
     print("ORIGINAL_BASELINE_COMPLETED", json.dumps(completion), flush=True)
 
 
+def load_zero_converter():
+    """Load DeepSpeed's CPU converter without initializing its Triton GPU ops.
+
+    This historical DeepSpeed version treats an installed Triton as usable even
+    on CPU-only workers. Suppress that optional dependency during its import;
+    restore module visibility afterward. Training processes do not use this.
+    """
+    if torch.cuda.is_available() or "deepspeed" in sys.modules:
+        return importlib.import_module("deepspeed.utils.zero_to_fp32")
+    previous = sys.modules.get("triton")
+    sys.modules["triton"] = None
+    try:
+        importlib.import_module("deepspeed")
+        return importlib.import_module("deepspeed.utils.zero_to_fp32")
+    finally:
+        if previous is None:
+            sys.modules.pop("triton", None)
+        else:
+            sys.modules["triton"] = previous
+
+
+def export_checkpoint(model, checkpoint_root, tag, output):
+    """Export one immutable DeepSpeed tag for independent held-out evaluation."""
+    if not tag.startswith("global_step") or not tag[len("global_step") :].isdigit():
+        raise ValueError("Use an explicit global_stepN checkpoint tag")
+    checkpoint = checkpoint_root / tag
+    files = sorted(checkpoint.glob("*.pt"))
+    if not files:
+        raise ValueError(f"No checkpoint shards in {checkpoint}")
+    inventory = {str(p): (p.stat().st_size, p.stat().st_mtime_ns) for p in files}
+    state_file = checkpoint / "zero_pp_rank_0_mp_rank_00_model_states.pt"
+    if not state_file.exists():
+        state_file = checkpoint / "mp_rank_00_model_states.pt"
+    model_state = torch.load(state_file, map_location="cpu", weights_only=False)
+    training_step = model_state.get("training_step")
+    if type(training_step) is not int or training_step < 1:
+        raise ValueError("Checkpoint lacks its completed driver step")
+    del model_state
+    expected = {}
+    for shard in sorted(model.glob("*.safetensors")):
+        with safe_open(shard, framework="pt", device="cpu") as tensors:
+            for name in list(tensors.keys()):
+                expected[name] = tuple(tensors.get_slice(name).get_shape())
+    if not expected:
+        raise ValueError("Reference HF model has no safetensors")
+    state = load_zero_converter().get_fp32_state_dict_from_zero_checkpoint(str(checkpoint_root), tag=tag)
+    if set(state) != set(expected):
+        raise ValueError(
+            f"Checkpoint tensor names differ: missing={set(expected) - set(state)}, extra={set(state) - set(expected)}"
+        )
+    output.mkdir(parents=True, exist_ok=True)
+    destination = output / "hf"
+    if destination.exists():
+        raise ValueError(f"Export already exists: {destination}")
+    with tempfile.TemporaryDirectory(prefix=".export-", dir=output) as temporary:
+        staging = Path(temporary)
+        weight_map, chunk, size, total, index = {}, {}, 0, 0, 0
+        for name, tensor in state.items():
+            if tuple(tensor.shape) != expected[name] or not torch.isfinite(tensor).all():
+                raise ValueError(f"Invalid checkpoint tensor: {name}")
+            value = tensor.to(torch.bfloat16).contiguous()
+            chunk[name] = value
+            size += value.numel() * value.element_size()
+            total += value.numel() * value.element_size()
+            if size >= 2_000_000_000:
+                filename = f"model-{index:05d}.safetensors"
+                save_file(chunk, staging / filename, metadata={"format": "pt"})
+                weight_map.update({key: filename for key in chunk})
+                chunk, size, index = {}, 0, index + 1
+        if chunk:
+            filename = f"model-{index:05d}.safetensors"
+            save_file(chunk, staging / filename, metadata={"format": "pt"})
+            weight_map.update({key: filename for key in chunk})
+        for path in model.iterdir():
+            if (
+                path.is_file()
+                and (path.suffix in {".json", ".jinja", ".txt", ".model"})
+                and "safetensors" not in path.name
+            ):
+                shutil.copyfile(path, staging / path.name)
+        (staging / "model.safetensors.index.json").write_bytes(
+            encoded({"metadata": {"total_size": total}, "weight_map": weight_map})
+        )
+        after = {str(p): (p.stat().st_size, p.stat().st_mtime_ns) for p in sorted(checkpoint.glob("*.pt"))}
+        if after != inventory:
+            raise ValueError("Checkpoint changed during export")
+        receipt = {
+            "checkpoint": str(checkpoint),
+            "training_step": training_step,
+            "tag": tag,
+            "tensors": len(weight_map),
+            "bytes": total,
+            "dtype": "bfloat16",
+            "reference_model": str(model),
+            "source_inventory": inventory,
+            "output": str(destination),
+        }
+        (staging / "export-receipt.json").write_bytes(encoded(receipt))
+        staging.rename(destination)
+    (output / "export.json").write_bytes(encoded(receipt))
+    print("ORIGINAL_CHECKPOINT_EXPORT_PASSED", json.dumps(receipt), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("prepare", "smoke", "train"))
+    parser.add_argument("stage", choices=("prepare", "smoke", "train", "export"))
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--prepared", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--keep-zero-advantage-groups", action="store_true")
+    parser.add_argument("--checkpoint-root", type=Path)
+    parser.add_argument("--checkpoint-tag")
     args = parser.parse_args()
-    if args.stage == "prepare":
+    if args.stage == "export":
+        if not args.checkpoint_root or not args.checkpoint_tag:
+            parser.error("export requires --checkpoint-root and --checkpoint-tag")
+        export_checkpoint(args.model, args.checkpoint_root, args.checkpoint_tag, args.output)
+    elif args.stage == "prepare":
         prepare(args.model, args.source, args.prepared)
     else:
         train(
