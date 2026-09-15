@@ -37,7 +37,8 @@ scripts/general_agent/terminal/rl/make_math_patch_dataset.sh            # note t
 PATCH_DATASET=<id> ARM=2b RUN_MODE=smoke scripts/general_agent/terminal/rl/qwen35_math_opd_sync_rerun.sh
 ```
 
-The smoke is one node and 64 episodes. In its log, every data-preparation step
+The smoke is one node and 192 episodes (three steps; the gate only engages from
+the second data-preparation step). In its log, every data-preparation step
 after the first should print `weights synced after ... queueing 64 on-policy
 prompts`. That confirms the gate engages and that the patch overlay is compatible
 with the image (image commit `154e1f701` is not in this repository's history, so

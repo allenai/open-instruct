@@ -52,8 +52,10 @@ case "$ARM" in
         export TEACHER_MODEL="${TEACHER_MODEL:-/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/qwen35_2b_verifier_dppo_math_fixed_dapo_100step_4node__42__1788675225}"
         if [[ "$RUN_MODE" == "smoke" ]]; then
             export EXP_NAME="${EXP_NAME:-qwen35_2b_opd_from_verifier_2b_sync_smoke_1node}"
-            # The smoke recipe already uses async_steps=1 and saves nothing.
-            SYNC_ARGS=(--inflight_updates false --synchronous_rollouts true)
+            # The smoke recipe already uses async_steps=1 and saves nothing. Its default
+            # 64 episodes is a single training step, but the on-policy gate only engages
+            # from the second data-preparation step, so run three steps (3 x 32 x 2).
+            SYNC_ARGS=(--inflight_updates false --synchronous_rollouts true --total_episodes 192)
         else
             export EXP_NAME="${EXP_NAME:-qwen35_2b_opd_from_verifier_2b_sync_lr1e6_100step_4node}"
         fi
