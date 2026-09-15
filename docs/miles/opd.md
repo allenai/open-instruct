@@ -133,7 +133,10 @@ schema accepts:
   `inference.gpus` (a multiple of `inference.tensor_parallel_size`) and
   `teacher.gpus` (the teacher's SGLang tensor parallelism). The task requests
   their sum, at most one node; roles occupy consecutive devices in that order.
-  Only 2/1/1 has been exercised; `plan` warns on any other topology.
+  Only 2/1/1 has been exercised; `plan` warns on any other topology. Keep
+  `teacher.gpus = 1` for Qwen3.5 hybrid GDN teachers: with SGLang tensor
+  parallelism 2 the first `/generate` probe returned NaN logits and the sampler
+  hit a CUDA device-side assert (Beaker 01M2K5Y9JT4CD9WN1HRD12GGA9).
 - `distillation.use_rollout_logprobs`: score the student side of the reverse KL
   with the rollout engine's log-probs instead of the trainer's pre-update forward
   pass. Open Instruct's `--use_vllm_logprobs` OPD runs behave like `true`; the

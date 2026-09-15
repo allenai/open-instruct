@@ -16,7 +16,9 @@ source = "Qwen/Qwen3.5-4B"
 
 [teacher]
 source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/qwen35_9b_verifier_dppo_math_fixed_dapo_100step_4node__42__1788828853"
-gpus = 2
+# SGLang serves the Qwen3.5 hybrid GDN teacher on one GPU: with tensor parallelism 2
+# the first /generate probe returned NaN logits and the sampler hit a CUDA assert.
+gpus = 1
 concurrency = 32
 request_timeout = 900
 startup_timeout = 1800
@@ -33,7 +35,7 @@ gpus = 4
 tensor_parallel_size = 2
 
 [inference]
-gpus = 2
+gpus = 3
 tensor_parallel_size = 1
 rollout_batch_size = 128
 samples_per_prompt = 2
