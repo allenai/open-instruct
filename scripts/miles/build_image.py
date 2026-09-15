@@ -24,6 +24,10 @@ def main():
         [
             "docker",
             "build",
+            # The qualified base image is linux/amd64; without the pin an arm64 host
+            # ignores the local image and tries to pull it from Docker Hub.
+            "--platform",
+            "linux/amd64",
             "--file",
             "runtime/miles/Dockerfile",
             "--build-arg",
