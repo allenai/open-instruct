@@ -9,7 +9,7 @@ from pathlib import Path
 import aiohttp
 from miles.rollout import on_policy_distillation, sglang_rollout
 
-from open_instruct.ground_truth_utils import GSM8KVerifier
+from open_instruct.miles import rewards
 
 _LIMIT = None
 
@@ -59,7 +59,8 @@ def post_process(args, samples, **kwargs):
 
 
 async def eval_reward(args, sample, **kwargs):
-    return float(GSM8KVerifier()([], sample.response, sample.label).score)
+    """Score held-out samples with the verifiers named in their metadata (prepared verifiers.json)."""
+    return await rewards.score(sample, os.environ["OI_OPD_REWARD_CONFIG"], args)
 
 
 def evaluate(args, rollout_id, data_source, evaluation=False):

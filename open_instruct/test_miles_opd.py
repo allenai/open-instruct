@@ -1,11 +1,17 @@
 """CPU checks for OPD configuration and allocation boundaries."""
 
+import asyncio
 import copy
+import importlib.util
+import json
+import os
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import launch, opd_config, opd_runtime, specs
+from open_instruct.miles import launch, opd_config, opd_runtime, rewards, specs
 from open_instruct.miles.errors import InputError
 
 CONFIG = Path(__file__).resolve().parents[1] / "configs/miles/opd/qwen35-4b-tiny.toml"
@@ -63,7 +69,7 @@ def test_cpu_preparation_requires_saturn():
         "launch.auto_resume=true",
         "distillation.log_prob_top_k=10",
         "distillation.task_reward_weight=0.5",
-        'model.source="Qwen/Qwen3.5-2B"',  # no pinned revision and no architecture profile
+        'model.source="Qwen/Qwen3.5-1.7B"',  # no pinned revision and no architecture profile
         'model.architecture="qwen3-4B"',
         'teacher.revision="main"',
         "trainer.gpus=3",
@@ -91,12 +97,68 @@ def test_mounts_and_credentials_checked_before_build():
         launch.specification("test-image", specs.from_dict(document))
 
 
-def test_opd_rejects_data_without_gsm8k_evaluation():
+def test_opd_task_data_needs_one_registered_task_with_evaluation():
     document = specs.load(CONFIG).to_dict()
-    for tasks in ([{"task": "math", "train_count": 16, "eval_count": 8}], [{"task": "gsm8k", "train_count": 16}]):
+    document["data"]["tasks"] = [{"task": "math", "train_count": 16, "eval_count": 8}]
+    assert specs.from_dict(document).document["data"]["tasks"][0]["task"] == "math"
+    for tasks in (
+        [{"task": "gsm8k", "train_count": 16}],
+        [{"task": "gsm8k", "train_count": 16, "eval_count": 8}, {"task": "math", "train_count": 16}],
+    ):
         document["data"]["tasks"] = tasks
-        with pytest.raises(InputError, match="GSM8K"):
+        with pytest.raises(InputError, match="eval_count"):
             specs.from_dict(document)
+    document["data"]["tasks"] = [{"task": "dapo", "train_count": 16, "eval_count": 8}]
+    with pytest.raises(InputError, match="data.tasks\\[0\\].task"):
+        specs.from_dict(document)
+
+
+def test_opd_accepts_prerendered_prompts_with_registry(tmp_path):
+    document = specs.load(CONFIG).to_dict()
+    document["data"] = {
+        "prompt_data": "data/train.jsonl",
+        "eval_prompt_data": ["dapo_math_holdout", "data/dapo_math_holdout.jsonl", "math_500", "data/math_500.jsonl"],
+        "reward_config": "data/verifiers.json",
+    }
+    spec = specs.from_dict(document, config_path=tmp_path / "run.toml")
+    assert spec.document["data"]["prompt_data"] == str(tmp_path / "data/train.jsonl")
+    assert spec.document["data"]["eval_prompt_data"][1] == str(tmp_path / "data/dapo_math_holdout.jsonl")
+    for missing in ("eval_prompt_data", "reward_config"):
+        broken = copy.deepcopy(document)
+        del broken["data"][missing]
+        with pytest.raises(InputError, match="prompt_data"):
+            specs.from_dict(broken, config_path=tmp_path / "run.toml")
+
+
+def test_registered_verifiers_score_held_out_samples(tmp_path):
+    registry = tmp_path / "verifiers.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "gsm8k": {"factory": "open_instruct.ground_truth_utils.GSM8KVerifier"},
+                "math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"},
+            }
+        )
+    )
+
+    async def run():
+        results = []
+        for name, response, target in (
+            ("gsm8k", "The answer is 7. #### 7", "7"),
+            ("math", "So the value is \\boxed{\\frac{1}{2}}.", "\\frac{1}{2}"),
+            ("math", "So the value is \\boxed{3}.", "\\frac{1}{2}"),
+        ):
+            sample = SimpleNamespace(
+                tokens=[1, 2, 3],
+                response_length=2,
+                response=response,
+                prompt="q",
+                metadata={"verifiers": [{"name": name, "target": target, "weight": 1.0}], "query": "q"},
+            )
+            results.append(await rewards.score(sample, str(registry)))
+        return results
+
+    assert asyncio.run(run()) == [1.0, 1.0, 0.0]
 
 
 def test_opd_honors_shared_memory_setting():
@@ -198,3 +260,21 @@ def test_online_tracking_requires_a_wandb_secret():
     task = launch.specification("test-image", spec)["tasks"][0]
     assert {"name": "WANDB_MODE", "value": "online"} in task["envVars"]
     assert {"name": "WANDB_API_KEY", "secret": "kevinfarhat_WANDB_API_KEY"} in task["envVars"]
+
+
+def test_repository_profiles_render_through_the_miles_loader():
+    miles = Path(os.environ.get("MILES_SOURCE", "")) / "miles/utils/external_utils/model_args_utils.py"
+    if not miles.is_file():
+        pytest.skip("Set MILES_SOURCE to a Miles checkout to render architecture profiles")
+    spec = importlib.util.spec_from_file_location("model_args_utils", miles)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["model_args_utils"] = module
+    spec.loader.exec_module(module)
+    for profile in opd_config.PROFILES:
+        directory = opd_runtime.PROFILES if (opd_runtime.PROFILES / f"{profile}.py").exists() else None
+        rendered = module.load_model_args(profile, model_script_dir=directory or miles.parents[3] / "scripts/models")
+        assert "--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec" in rendered
+    two_b = module.load_model_args("qwen3.5-2B", model_script_dir=opd_runtime.PROFILES).split()
+    assert two_b[two_b.index("--num-layers") + 1] == "24"
+    assert "--untie-embeddings-and-output-weights" not in two_b
+    assert specs.load(CONFIG, ['model.source="Qwen/Qwen3.5-2B"']).document["model"]["architecture"] == "qwen3.5-2B"

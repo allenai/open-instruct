@@ -105,12 +105,23 @@ not an improvement in task accuracy.
 schema accepts:
 
 - `model.source` / `teacher.source`: a Hugging Face repository with an immutable
-  40-character `revision` (the pinned Qwen3.5-4B and 9B revisions are filled in
-  when omitted) or a local checkpoint directory (`/weka/...`, `./relative`), which
-  must not set `revision`. `model.architecture` names the Megatron profile
-  (`qwen3.5-4B`, `qwen3.5-9B`); it is inferred for the pinned repositories and
-  required for local learners. Profiles under `open_instruct/miles/model_profiles/`
-  shadow the Miles copies.
+  40-character `revision` (the pinned Qwen3.5-2B, 4B and 9B revisions are filled
+  in when omitted) or a local checkpoint directory (`/weka/...`, `./relative`),
+  which must not set `revision`. `model.architecture` names the Megatron profile
+  (`qwen3.5-2B`, `qwen3.5-4B`, `qwen3.5-9B`); it is inferred for the pinned
+  repositories and required for local learners. Profiles under
+  `open_instruct/miles/model_profiles/` shadow the Miles copies; the 2B profile
+  lives there and has not been exercised on GPUs.
+- `[data]`: one registered task with `eval_count` (`gsm8k`, `math`, ...), or
+  pre-rendered prompts through `prompt_data`, `eval_prompt_data` name/path pairs
+  and the `reward_config` verifier registry. Held-out samples are scored by the
+  verifiers named in their `metadata.verifiers` (the Core route's registered
+  reward), so evaluation follows the data rather than a fixed GSM8K scorer.
+  `scripts/miles/prepare_qwen35_math_prompts.py` renders the Open Instruct
+  Qwen3.5 math campaign data (fixed DAPO split, AIME 2025, BRUMO 2025, MATH-500)
+  with the `qwen_instruct_user_boxed_math` template and the `math` verifier in
+  that layout; it drops the three DAPO training prompts that repeat holdout
+  problems, which Miles would otherwise reject.
 - `training.num_rollouts`, `training.save_interval` (HF export cadence) and
   `training.eval_interval` (`0` evaluates before the first update and after the
   last one, as the prototype did).
@@ -132,11 +143,10 @@ schema accepts:
 
 ## Qwen prototype limits
 
-- The 2B learner needs its own architecture profile and exercise.
 - Automatic restart and resume are rejected until native checkpoint restoration
   and the data cursor have been exercised together.
-- Only GSM8K with held-out evaluation, top-k zero and pure OPD are exposed; only
-  the default 2/1/1 topology, saving every update and offline tracking have been
+- Only top-k zero and pure OPD are exposed; only GSM8K data, the 4B learner, the
+  default 2/1/1 topology, saving every update and offline tracking have been
   exercised on GPUs. The general Core configuration reference does not describe
   this schema.
 - Before a colleague scales up, review independent teacher/student probability

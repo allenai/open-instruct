@@ -188,6 +188,7 @@ def execute(spec):
                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
                 "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
                 "OI_OPD_OUTPUT": str(root),
+                "OI_OPD_REWARD_CONFIG": prepared["data"]["reward_config"],
                 "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
                 "CONVERT_KEEP_PP1": "1",
             }

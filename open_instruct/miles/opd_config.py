@@ -5,17 +5,18 @@ import dataclasses
 import re
 from pathlib import Path
 
-from open_instruct.miles import run_spec, validation
+from open_instruct.miles import run_data, run_spec, validation
 from open_instruct.miles.errors import InputError
 
 REVISIONS = {
+    "Qwen/Qwen3.5-2B": "15852e8c16360a2fea060d615a32b45270f8a8fc",
     "Qwen/Qwen3.5-4B": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
     "Qwen/Qwen3.5-9B": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
 }
 # Megatron architecture profiles: Miles ships scripts/models/<profile>.py; profiles
 # under open_instruct/miles/model_profiles/ take precedence at runtime.
-PROFILES = ("qwen3.5-4B", "qwen3.5-9B")
-ARCHITECTURES = {"Qwen/Qwen3.5-4B": "qwen3.5-4B", "Qwen/Qwen3.5-9B": "qwen3.5-9B"}
+PROFILES = ("qwen3.5-2B", "qwen3.5-4B", "qwen3.5-9B")
+ARCHITECTURES = {"Qwen/Qwen3.5-2B": "qwen3.5-2B", "Qwen/Qwen3.5-4B": "qwen3.5-4B", "Qwen/Qwen3.5-9B": "qwen3.5-9B"}
 WANDB_MODES = ("offline", "online", "disabled")
 DEFAULTS = {
     "model": {"source": "Qwen/Qwen3.5-4B", "revision": "", "architecture": ""},
@@ -161,10 +162,19 @@ class OPDRunSpec:
         validation.text(tracking["wandb_project"], "tracking.wandb_project")
         if not isinstance(tracking["wandb_entity"], str):
             raise InputError("tracking.wandb_entity must be a string (empty for the default entity)")
-        document["data"] = run_spec.RunSpec._data(document.get("data", {}), base.parent)
-        tasks = document["data"].get("tasks", [])
-        if len(tasks) != 1 or tasks[0]["task"] != "gsm8k" or not tasks[0].get("eval_count"):
-            raise InputError("OPD prototype requires one GSM8K task with held-out eval_count")
+        document["data"] = data = run_spec.RunSpec._data(document.get("data", {}), base.parent)
+        if "tasks" in data:
+            if len(data["tasks"]) != 1 or not data["tasks"][0].get("eval_count"):
+                raise InputError("OPD data.tasks must hold one registered task with a held-out eval_count")
+            validation.choice(data["tasks"][0]["task"], "data.tasks[0].task", sorted(run_data.TASKS))
+        elif "prompt_data" in data:
+            if not data.get("eval_prompt_data") or "reward_config" not in data:
+                raise InputError(
+                    "OPD data.prompt_data (pre-rendered prompts) requires data.eval_prompt_data name/path pairs and "
+                    "the data.reward_config verifier registry; scripts/miles/prepare_qwen35_math_prompts.py writes them"
+                )
+        else:
+            raise InputError("OPD data must select tasks or pre-rendered prompt_data")
         document["launch"] = run_spec.RunSpec._launch(
             {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent
         )

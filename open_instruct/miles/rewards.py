@@ -264,8 +264,9 @@ def _registry(path):
     return result
 
 
-async def _score(args, sample):
-    registry = _registry(args.olmo_core.reward_config)
+async def score(sample, registry_path, args=None):
+    """Combine the sample's registered verifiers; ``args`` is needed only for judge-backed names."""
+    registry = _registry(registry_path)
     metadata = sample.metadata
     if not isinstance(metadata, dict) or not isinstance(metadata.get("verifiers"), list) or not metadata["verifiers"]:
         raise ValueError("Each sample requires nonempty metadata.verifiers")
@@ -280,11 +281,13 @@ async def _score(args, sample):
         # trajectory, while the policy loss uses the separate MILES loss mask.
         tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
         if judge_registry.bound(name):
-            score = await general_judge.general_judge_score(
+            if args is None:
+                raise ValueError(f"Judge-backed verifier {name!r} requires the training arguments")
+            judged = await general_judge.general_judge_score(
                 args, sample, name=name, target=copy.deepcopy(spec["target"])
             )
-            total += weight * score
-            components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
+            total += weight * judged
+            components.append({"name": name, "score": judged, "weight": weight, "cost": 0.0})
             continue
         result = await registry[name].async_call(
             tokens,
@@ -294,14 +297,18 @@ async def _score(args, sample):
             query=metadata.get("query", sample.prompt),
             rollout_state=metadata.get("rollout_state"),
         )
-        score = _finite(result.score, "verifier score")
-        total += weight * score
-        components.append({"name": name, "score": score, "weight": weight, "cost": result.cost})
+        value = _finite(result.score, "verifier score")
+        total += weight * value
+        components.append({"name": name, "score": value, "weight": weight, "cost": result.cost})
         if isinstance(getattr(result, "diagnostics", None), dict):
             metadata.setdefault("verifier_diagnostics", {})[name] = result.diagnostics
     total = _finite(total, "combined reward")
     metadata["reward_components"] = components
     return total
+
+
+async def _score(args, sample):
+    return await score(sample, args.olmo_core.reward_config, args)
 
 
 async def registered_reward(args, samples, **kwargs):
