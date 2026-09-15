@@ -4,7 +4,7 @@ The target is continuous useful generation and training. This requires matching
 rates, not an unlimited queue: if generation is persistently slower the trainer
 waits; if it is faster, bounded storage eventually pauses submission. A larger
 buffer absorbs bursts but does not fix a sustained rate mismatch. Publication
-still pauses the inference fleet; checkpoint/evaluation lifecycle drains are
+still pauses the inference fleet; evaluation/shutdown lifecycle drains are
 separate costs. Queue selection remains FIFO.
 
 ## Where work waits

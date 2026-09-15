@@ -1,6 +1,8 @@
 """Use actual MILES samples, buffers, and data cursors at the async boundary."""
 
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -130,3 +132,55 @@ def test_async_buffer_accepts_homogeneous_multisegment_trajectories():
         assert await asyncio.wait_for(buffer.get(current_version=3), 1) is item
 
     asyncio.run(exercise())
+
+
+def test_live_cursor_snapshot_is_atomic_and_resume_regenerates_only_unconsumed_groups(tmp_path, monkeypatch):
+    source = make_source(tmp_path)
+    consumed, generating, completed = source.get_samples(3)
+    source.acknowledge_groups([consumed])
+    completed[0].response_length = 2
+    completed[0].tokens = [1, 2, 3]
+    completed[0].weight_versions = [0, 1]
+    writing, release, admission_attempted = threading.Event(), threading.Event(), threading.Event()
+    original_save = torch.save
+
+    def delayed_write(state, stream):
+        writing.set()
+        assert release.wait(2)
+        return original_save(state, stream)
+
+    def admit_after_snapshot():
+        admission_attempted.set()
+        return source.get_samples(1)
+
+    monkeypatch.setattr(torch, "save", delayed_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        saved = pool.submit(source.save, 0)
+        assert writing.wait(2)
+        admitted = pool.submit(admit_after_snapshot)
+        try:
+            assert admission_attempted.wait(2)
+            assert not admitted.done()  # Cursor and ledger share the same lock.
+            # The actual request can still mutate its own response while saving;
+            # the ledger contains independent pristine prompt copies.
+            generating[0].response_length = 1
+            generating[0].tokens = [7, 8]
+            generating[0].weight_versions = [1]
+        finally:
+            release.set()
+        saved.result(timeout=2)
+        [new_group] = admitted.result(timeout=2)
+    source.acknowledge_groups([completed])
+    assert new_group[0].prompt == "prompt-3"
+
+    restored = make_source(tmp_path, load=tmp_path)
+    restored.load(0)
+    groups = restored.get_samples(3)
+    assert [g[0].prompt for g in groups] == ["prompt-1", "prompt-2", "prompt-3"]
+    assert [s.index for g in groups for s in g] == list(range(2, 8))
+    assert all(not s.tokens and not s.weight_versions and not s.response_length for g in groups for s in g)
+    # Neither a completion/acknowledgement nor new admission after the snapshot
+    # mutates that checkpoint; prompts trained before it are never regenerated.
+    state = torch.load(tmp_path / "rollout/global_dataset_state_dict_0.pt", weights_only=True)
+    assert state["sample_offset"] == 3
+    assert [g[0]["prompt"] for g in state["olmo_async_pending"]["groups"]] == ["prompt-1", "prompt-2"]

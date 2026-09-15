@@ -23,7 +23,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
-    """Publication gates new groups; lifecycle boundaries drain owned requests.
+    """Publication gates new groups; evaluation and teardown drain owned requests.
 
     SGLang owns request retraction, state invalidation and continuation. Core's
     actor publishes while source weights are fixed and reopens engines only
@@ -133,7 +133,7 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
                 f"Policy refresh request {payload['rid']} exceeded core.refresh_request_timeout={timeout:g}s. "
                 "This covers serving queue time, generation and refresh pauses. Check engine progress and "
                 "admission pressure; increase the request timeout for deliberately long responses. "
-                "core.engine_drain_timeout only controls save/eval/shutdown draining."
+                "core.engine_drain_timeout only controls eval/export/shutdown draining."
             ) from error
         sibling_timing.response_received(sample, payload["rid"], output.get("meta_info", {}))
         if output.get("meta_info", {}).get("finish_reason", {}).get("type") not in ("stop", "length"):
@@ -150,7 +150,7 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         return GenerateFnOutput(samples=sample)
 
     async def prepare_publication(self):
-        """Quiesce for save/eval/teardown, allowing only owned completions to drain."""
+        """Quiesce for eval/export/teardown, allowing only owned completions to drain."""
         if self._refreshing:
             raise RuntimeError("Policy refresh did not finish; engines must not be reused")
         self._producer_resumed.clear()

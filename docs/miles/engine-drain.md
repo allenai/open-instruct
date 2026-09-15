@@ -66,16 +66,16 @@ fails and a fresh process must restore a committed checkpoint. Automatic fault
 tolerance, external engines, custom generators/filters, serving TP/DP/EP/PP greater
 than one, and snapshot-fleet evaluation are rejected.
 
-Rolling publication is submitted before checkpoint quiescence. A one-step lag
-budget can leave already-submitted groups waiting for the newly completed version;
-publishing first lets them obtain admission and finish instead of blocking the save.
-Evaluation, checkpoint and final export stop producer submission, drain already-owned
-work and join publication. To prevent a full completion queue from blocking that
-join, its capacity expands only by the number of already-owned groups; it returns
-to its configured capacity afterward. Completed data is retained, and new producer
-submission waits until the excess completion queue is consumed. Repeated boundaries
-therefore cannot accumulate another generation wave on every save. Checkpoints use
-the existing atomic cursor/pristine-pending-prompt ledger and native model commit.
+Native checkpoints do not quiesce inference or join rolling publication. They
+snapshot the existing atomic cursor/pristine-pending-prompt ledger and commit
+native trainer state between optimizer updates. See [checkpoint resume
+semantics](operations.md#checkpoints-while-inference-continues).
+
+Evaluation and final export retain their separate lifecycle boundaries. Evaluation
+stops producer submission, drains already-owned work and joins publication. To
+prevent a full completion queue from blocking that join, its capacity expands by
+the number of already-owned groups and returns to its configured capacity afterward.
+Completed data is retained, and new submission waits until the excess is consumed.
 Resume regenerates outstanding prompts at restored weights; it does not restore
 partial decodes, KV/KDA state, publisher processes, or in-memory completion queues.
 Initial publication precedes all resumed admission. Shutdown joins publishers and

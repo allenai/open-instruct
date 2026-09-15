@@ -207,7 +207,7 @@ def test_failed_periodic_comparison_aborts_before_resume_or_next_generation(monk
     assert events[failure_index + 1 :] == expected_cleanup
 
 
-def test_rolling_checkpoint_unblocks_groups_waiting_for_one_step_lag(monkeypatch):
+def test_rolling_checkpoint_does_not_wait_for_groups_waiting_for_one_step_lag(monkeypatch):
     events = []
 
     async def event(name):
@@ -243,8 +243,7 @@ def test_rolling_checkpoint_unblocks_groups_waiting_for_one_step_lag(monkeypatch
 
         async def quiesce(self):
             assert self.pending is not None
-            await asyncio.wait_for(self.pending, 0.5)
-            await self.controller.pause()
+            pytest.fail("Checkpoint must not quiesce inference")
 
         async def resume(self):
             self.controller.resume()
@@ -296,7 +295,7 @@ def test_rolling_checkpoint_unblocks_groups_waiting_for_one_step_lag(monkeypatch
         num_rollout=1,
     )
     asyncio.run(driver.train(args))
-    assert events.index("captured") < events.index("completed-owned-group") < events.index("cursor-saved")
+    assert events.index("captured") < events.index("cursor-saved")
     assert events.count("captured") == 1
     assert events.index("cursor-saved") < events.index("model-saved") < events.index("committed")
 
@@ -348,3 +347,102 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
         "trainer_dispose",
     ]
     assert all(r["passed"] for r in timings)
+
+
+@pytest.mark.parametrize("fail_at", [None, "cursor-saved", "model-saved", "committed"])
+def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tmp_path, fail_at):
+    events = []
+    live = {}
+
+    async def event(name):
+        events.append(name)
+        if name == fail_at:
+            raise OSError(f"injected {name}")
+
+    async def boundary(paused, *, refresh=False):
+        if refresh:
+            await event(f"refresh-{paused}")
+        elif paused:
+            # Only final cleanup may wait for/stop outstanding inference.
+            assert any(name in events for name in ["cursor-saved", "model-saved", "committed"])
+            live["release"].set()
+            await live["request"]
+            await event("shutdown-drain")
+        else:
+            pytest.fail("Checkpoint must not close/reopen inference admission")
+
+    async def generate(rollout_id):
+        live["release"] = asyncio.Event()
+        live["request"] = asyncio.create_task(live["release"].wait())
+        await event("generated")
+
+    async def save_cursor(rollout_id):
+        assert not live["request"].done()
+        await event("cursor-saved")
+
+    async def save_model(*args, **kwargs):
+        assert not live["request"].done()
+        # Allow inference to make progress during the trainer save, without
+        # requiring the unfinished request to produce a response.
+        task = asyncio.create_task(event("inference-progress"))
+        await task
+        await event("model-saved")
+
+    manager = SimpleNamespace(
+        generate=SimpleNamespace(remote=generate),
+        save=SimpleNamespace(remote=save_cursor),
+        core_publication_boundary=SimpleNamespace(remote=boundary),
+        dispose=SimpleNamespace(remote=lambda: event("engines-disposed")),
+    )
+    learner = SimpleNamespace(
+        train=lambda *a: event("trained"),
+        update_weights=lambda *a: event("published"),
+        save_model=save_model,
+        finalize_checkpoint=lambda *a: event("committed"),
+        _broadcast=lambda method: event(method),
+        dispose=lambda: event("trainer-disposed"),
+    )
+
+    async def create(*args):
+        return learner, None
+
+    monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
+    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    monkeypatch.setattr(driver.placement_group, "create_training_models", create)
+    monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
+    monkeypatch.setattr(driver, "init_tracking", lambda args: None)
+    monkeypatch.setattr(driver, "finish_tracking", lambda: None)
+    monkeypatch.setattr(driver, "remove_rollout_data_refs", lambda *args: None)
+    monkeypatch.setattr(driver, "EvalDispatcher", lambda *args: SimpleNamespace(drain=lambda: event("eval-drained")))
+    args = SimpleNamespace(
+        fully_async=True,
+        offload_rollout=False,
+        check_weight_update_equal=False,
+        olmo_core=CoreConfig(publication_mode="refresh"),
+        save_trigger_sentinel=None,
+        save_interval=1,
+        update_weights_interval=1,
+        debug_exit_after_rollout=None,
+        eval_interval=None,
+        start_rollout_id=0,
+        num_rollout=1,
+        save=str(tmp_path),
+    )
+
+    async def exercise():
+        async with asyncio.timeout(2):
+            await driver.train(args)
+
+    if fail_at:
+        with pytest.raises(OSError, match=f"injected {fail_at}"):
+            asyncio.run(exercise())
+        expected = ["cursor-saved", "model-saved", "committed"]
+        assert [name for name in events if name in expected] == expected[: expected.index(fail_at) + 1]
+    else:
+        asyncio.run(exercise())
+        assert events.index("trained") < events.index("cursor-saved")
+        assert events.index("cursor-saved") < events.index("inference-progress") < events.index("model-saved")
+        assert events.index("model-saved") < events.index("committed") < events.index("shutdown-drain")
+    timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
+    assert not any(row["stage"] == "checkpoint_drain" for row in timings)
+    assert [row["passed"] for row in timings if row["stage"] == "checkpoint"] == [fail_at is None]

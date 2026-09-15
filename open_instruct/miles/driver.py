@@ -105,9 +105,7 @@ async def train(args, *, export_hf=None):
             finally:
                 remove_rollout_data_refs(args, batch)
             if rolling is not None:
-                # Publish before quiescing: with a one-step lag budget, already
-                # submitted groups may be waiting for this version's admission.
-                # Waiting for those tasks before publishing would deadlock save.
+                # Publish the completed optimizer version before the next collection.
                 with stage(args, "publication", rollout_id):
                     await rolling.publish()
             if refresh:
@@ -117,21 +115,14 @@ async def train(args, *, export_hf=None):
             if sentinel or should_run_periodic_action(
                 rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout
             ):
-                if rolling is not None:
-                    await rolling.quiesce()
-                elif refresh:
-                    with stage(args, "checkpoint_drain", rollout_id):
-                        await manager.core_publication_boundary.remote(True)
-                try:
-                    with stage(args, "checkpoint", rollout_id):
-                        await manager.save.remote(rollout_id)
-                        await learner.save_model(rollout_id, force_sync=True)
-                        await learner.finalize_checkpoint(rollout_id)
-                finally:
-                    if rolling is not None:
-                        await rolling.resume()
-                    elif refresh:
-                        await manager.core_publication_boundary.remote(False)
+                # The async data source snapshots its cursor and pristine pending
+                # prompt ledger under one lock. Completed-but-unused and in-flight
+                # groups regenerate on resume; live inference need not finish or
+                # pause. No new training batch is consumed until this save commits.
+                with stage(args, "checkpoint", rollout_id):
+                    await manager.save.remote(rollout_id)
+                    await learner.save_model(rollout_id, force_sync=True)
+                    await learner.finalize_checkpoint(rollout_id)
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:

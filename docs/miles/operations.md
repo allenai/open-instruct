@@ -68,3 +68,28 @@ Compiler-cache publication is best effort. It stages locally, limits publishers
 per node and uses a shared bounded publication wait; timeout must not turn completed
 training into failure. See [cache guide](compiler-cache.md). Report metadata I/O
 is outside that publication wait, so it is not an absolute shutdown deadline.
+
+## Checkpoints while inference continues
+
+Native trainer checkpoints are saved between optimizer updates without draining
+inference, including mixed-policy refresh and rolling engine publication. The
+driver saves the dataset cursor and pending-prompt ledger, writes the trainer's
+model/optimizer/scheduler/RNG state and policy clock, then commits the checkpoint
+with the cursor checksum. It does not consume another training batch during this
+sequence. Only a checkpoint with its completion marker is resumable.
+
+The async data source snapshots its cursor and pristine pending prompts under one
+lock. This briefly serializes prompt admission/bookkeeping with the cursor write;
+it does not wait for HTTP requests, generation, reward services, or the completed
+queue to empty. Live requests and buffered responses remain usable in the running
+job. On resume, **all unconsumed groups in that snapshot are regenerated** under
+the restored policy, including completed-but-unused responses. Request caches,
+partial responses and historical behavior log-probabilities are not restored.
+This preserves prompt accounting and trainer state, not an identical uninterrupted
+sampling trajectory. Work admitted after the snapshot is reached again through
+the restored dataset cursor.
+
+Evaluation on shared engines, final export and shutdown still have their own
+lifecycle boundaries. Removing the checkpoint drain does not qualify those paths
+for nonblocking operation. The native trainer write is still synchronous with
+training; this change allows inference to continue during it.
