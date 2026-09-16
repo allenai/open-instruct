@@ -335,6 +335,15 @@ case "$MODE" in
     # checkpoint (207 GB, ~95 s to write from 16 ranks), so 2000 costs ~2% wall
     # and caps a preemption at ~75 min of lost work.
     RESUME_FLAGS="${RESUME_FROM:+--resume_from_checkpoint $RESUME_FROM}"
+    # Where the run writes. mason mints CHECKPOINT_OUTPUT_DIR under
+    # /weka/oe-adapt-default/allennlp/deletable_checkpoint_states and keeps any
+    # explicit --output_dir that already lives under /weka/. That bucket hit 0
+    # bytes free on 2026-09-16 (three anchor attempts died in os.makedirs with
+    # ENOSPC, 01M2M4N5S1W617B2QKMKBVDPXW), so OUTPUT_DIR lets a run go to another
+    # bucket, e.g. /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/<run>.
+    # Serve HF exports for evals from oe-adapt-default regardless (olmo-eval's
+    # worker-init cap; #1875).
+    OUTPUT_DIR_ARG="${OUTPUT_DIR:-\$CHECKPOINT_OUTPUT_DIR}"
     # Probe modes default CKPT_STEPS above STEPS so nothing is written: each
     # checkpoint is 207 GB written synchronously (the DDP train module rejects
     # async), which a memory or LR screen does not need.
@@ -388,7 +397,7 @@ case "$MODE" in
         --local_cache_dir $LOCAL_CACHE_DIR \
         --seed $SEED \
         --data_loader_seed 34521 \
-        --output_dir \$CHECKPOINT_OUTPUT_DIR
+        --output_dir "$OUTPUT_DIR_ARG"
     ;;
 
   convert)
