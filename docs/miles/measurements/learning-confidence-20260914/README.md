@@ -164,6 +164,25 @@ minutes while the two-GPU judge compiled; the relaunch starts the judge eagerly
 ([01M2KXHQ5PDXRZDVQT86RK4JWB](https://beaker.org/ex/01M2KXHQ5PDXRZDVQT86RK4JWB)).
 Receipts: [relaunch-20260915.json](relaunch-20260915.json).
 
+### MoE update-100 evaluation lost to the engine drain timeout — September 16, 05:20 UTC
+
+The MoE continuation reached update 100 at 04:45 UTC (warm cadence 4.4 min per
+update after the cache-restored restart) and committed checkpoint 100, then its
+shared-engine evaluation timed out: evaluation first drains in-flight training
+requests under `core.engine_drain_timeout` (900 s), and at admission 16 with the
+code service returning read timeouts (127 s per attempt, several in flight) the
+engines did not go idle in time. The driver exited 1 at 05:05 UTC. The run was
+relaunched from checkpoint 100 as
+[01M2M9W9BN8WJRNH3ESSHZV9B9](https://beaker.org/ex/01M2M9W9BN8WJRNH3ESSHZV9B9)
+with a 2,700 s drain budget; the same budget is set on the pending dense
+continuation. The update-100 held-out evaluation is not repeated by the
+continuation and must be produced from the checkpoint-100 export separately.
+
+The original-framework arm (arm 1) is training on two Jupiter nodes
+([01M2M3D8QC3DJY1Q033YPESGSK](https://beaker.org/ex/01M2M3D8QC3DJY1Q033YPESGSK)):
+step 1 generated 256 samples in 1,075 s at 3,607 tokens/s across ten eager
+vLLM engines, versus 917 tokens/s from two engines in the single-node smoke.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
