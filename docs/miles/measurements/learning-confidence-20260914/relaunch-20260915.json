@@ -974,5 +974,18 @@
     "changes": "policy engines with CUDA graphs and 0.85 GPU memory; judge TP2 YaRN 131072 eager; 4 learners, 2 engines; saves every 25, evals at 0/50/100",
     "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-20260916",
     "outcome": "exit 1 at 03:10 UTC: judge ready in 85 s, then vLLM engine creation failed with 'vLLM failed to compile the model' because CUDA graphs were enabled for the retrofit Olmo model; engines reverted to eager"
+  },
+  {
+    "experiment": "01M2M3D8QC3DJY1Q033YPESGSK",
+    "source": "01M2M3D6MVG252F13C0JB3WAWG",
+    "commit": "ccf38a1c2",
+    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+    "stage": "train",
+    "steps": 100,
+    "arm": "original-open-instruct basket (arm 1)",
+    "profile": "basket",
+    "replaces": "01M2M2SFY1MBE9YGA3GTMRCE53",
+    "allocation": "2 x 8 H100 on ai2/jupiter via the image's ray_node_setup.sh: 4 DeepSpeed learners, 10 eager TP1 vLLM engines at 0.85 GPU memory, 2-GPU TP2 vLLM judge at 131072 YaRN context on the head node",
+    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916"
   }
 ]
