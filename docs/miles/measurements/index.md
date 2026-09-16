@@ -5,6 +5,8 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Dense GSM8K full test: Core versus original after 200 updates](gsm8k-dense-test-20260916.md) | Same-checkpoint framework comparison on 1,319 questions; original +48, Core −16, paired p=6e-7 |
+| [Reward by response length on the basket](length-reward-20260916.md) | Where reward is earned by length per domain and model; cost of the 32K cap |
 | [Overfit diagnostic: Core and Megatron on 16 fixed GSM8K prompts](overfit-20260915.md) | Fully async update-correctness check on both arms, plus Core null, sign-flip, learning-rate and re-score controls |
 | [Faster trainer and 200-update task baseline](full-sft-basket-20260914.md) | EP2 qualification, fixed multi-domain data and EP8 baseline |
 | [Throughput and queue qualification](throughput-20260913.md) | September 13 steady-state configuration comparisons, occupancy figures and limitations |

@@ -332,6 +332,19 @@ fraction against arm 3's group segments (12.6 min/update); it also supplies a
 second dense trajectory at the matched recipe. Training still consumes whole
 groups, so the objective is unchanged.
 
+### Dense GSM8K pair on the full test: original learned, Core did not — September 16, 18:00 UTC
+
+Both finals and the shared start were scored on the official 1,319-question
+test on one SGLang stack with one tokenizer
+([report](../gsm8k-dense-test-20260916.md)): start 1130, Core update 200 1114,
+original update 200 1178. Paired: original +48 (p=0.0002), Core −16 (p=0.21),
+head-to-head 64 questions (p=6e-7); sampled pass@1 0.917 → 0.919 (Core) versus
+0.941 (original). The change lives in the greedy truncation tail. Recipes were
+matched (synchronous, one step per collection, same batch, LR, clipping, seed);
+the listed mechanics difference is loss reduction: token mean in the original,
+per-response mean in Core (`calculate_per_token_loss` off). The single-knob
+rerun of the Core GSM8K arm with per-token loss is the discriminating test.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |

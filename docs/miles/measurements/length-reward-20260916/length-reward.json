@@ -1,0 +1,656 @@
+{
+ "dense": {
+  "files": 73,
+  "updates": 68,
+  "update_range": [
+   0,
+   67
+  ],
+  "samples": 17408,
+  "verifier_names": {
+   "ifeval": 5328,
+   "math": 5688,
+   "code": 2176,
+   "code_stdio": 1644,
+   "general-quality_ref": 3160,
+   "general-quality": 692
+  },
+  "domains": {
+   "code": {
+    "n": 3540,
+    "mean_reward": 0.2855769086406224,
+    "mean_tokens": 14395.387853107344,
+    "truncated_frac": 0.06016949152542373,
+    "reward_share_over_10k": 0.4520055128766669,
+    "reward_share_over_16k": 0.2858337083891269,
+    "positive_over_10k_frac_of_positive": 0.4520276953511375,
+    "positive_over_16k_frac_of_positive": 0.2858555885262117,
+    "truncated_positive_rate": 0.004694835680751174,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 520,
+      "frac_samples": 0.14689265536723164,
+      "mean_reward": 0.47307692307692306,
+      "reward_share": 0.2433373403841233,
+      "positive_rate": 0.47307692307692306
+     },
+     {
+      "bin": "2K-4K",
+      "n": 238,
+      "frac_samples": 0.0672316384180791,
+      "mean_reward": 0.3739495798319328,
+      "reward_share": 0.08803668005767062,
+      "positive_rate": 0.3739495798319328
+     },
+     {
+      "bin": "4K-8K",
+      "n": 529,
+      "frac_samples": 0.14943502824858756,
+      "mean_reward": 0.29678638941398866,
+      "reward_share": 0.15530066032645268,
+      "positive_rate": 0.29678638941398866
+     },
+     {
+      "bin": "8K-12K",
+      "n": 426,
+      "frac_samples": 0.12033898305084746,
+      "mean_reward": 0.2488046558923433,
+      "reward_share": 0.10484355829371016,
+      "positive_rate": 0.24882629107981222
+     },
+     {
+      "bin": "12K-16K",
+      "n": 362,
+      "frac_samples": 0.10225988700564972,
+      "mean_reward": 0.3425140856627099,
+      "reward_share": 0.12264805254891636,
+      "positive_rate": 0.3425414364640884
+     },
+     {
+      "bin": "16K-24K",
+      "n": 704,
+      "frac_samples": 0.19887005649717515,
+      "mean_reward": 0.26416027962262956,
+      "reward_share": 0.18395594371732474,
+      "positive_rate": 0.26420454545454547
+     },
+     {
+      "bin": "24K-32K",
+      "n": 548,
+      "frac_samples": 0.15480225988700566,
+      "mean_reward": 0.1861177688201329,
+      "reward_share": 0.10088858849137887,
+      "positive_rate": 0.18613138686131386
+     },
+     {
+      "bin": "cap",
+      "n": 213,
+      "frac_samples": 0.06016949152542373,
+      "mean_reward": 0.004694835680751174,
+      "reward_share": 0.0009891761804232653,
+      "positive_rate": 0.004694835680751174
+     }
+    ]
+   },
+   "general": {
+    "n": 3648,
+    "mean_reward": 0.5615131578947369,
+    "mean_tokens": 2425.060307017544,
+    "truncated_frac": 0.0027412280701754384,
+    "reward_share_over_10k": 0.04671939074399531,
+    "reward_share_over_16k": 0.014010935364186681,
+    "positive_over_10k_frac_of_positive": 0.04854368932038835,
+    "positive_over_16k_frac_of_positive": 0.012944983818770227,
+    "truncated_positive_rate": 0.0,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 2549,
+      "frac_samples": 0.6987390350877193,
+      "mean_reward": 0.5594350725774814,
+      "reward_share": 0.6961530950986136,
+      "positive_rate": 0.5076500588466065
+     },
+     {
+      "bin": "2K-4K",
+      "n": 520,
+      "frac_samples": 0.1425438596491228,
+      "mean_reward": 0.5650000000000001,
+      "reward_share": 0.1434290177699668,
+      "positive_rate": 0.5134615384615384
+     },
+     {
+      "bin": "4K-8K",
+      "n": 332,
+      "frac_samples": 0.09100877192982457,
+      "mean_reward": 0.5846385542168675,
+      "reward_share": 0.09475688342120679,
+      "positive_rate": 0.5090361445783133
+     },
+     {
+      "bin": "8K-12K",
+      "n": 121,
+      "frac_samples": 0.033168859649122806,
+      "mean_reward": 0.5611570247933885,
+      "reward_share": 0.033147822690880686,
+      "positive_rate": 0.5041322314049587
+     },
+     {
+      "bin": "12K-16K",
+      "n": 66,
+      "frac_samples": 0.018092105263157895,
+      "mean_reward": 0.5742424242424242,
+      "reward_share": 0.018502245655145477,
+      "positive_rate": 0.5909090909090909
+     },
+     {
+      "bin": "16K-24K",
+      "n": 39,
+      "frac_samples": 0.01069078947368421,
+      "mean_reward": 0.5435897435897435,
+      "reward_share": 0.01034954110525288,
+      "positive_rate": 0.48717948717948717
+     },
+     {
+      "bin": "24K-32K",
+      "n": 11,
+      "frac_samples": 0.0030153508771929823,
+      "mean_reward": 0.509090909090909,
+      "reward_share": 0.002733841046670572,
+      "positive_rate": 0.45454545454545453
+     },
+     {
+      "bin": "cap",
+      "n": 10,
+      "frac_samples": 0.0027412280701754384,
+      "mean_reward": 0.19,
+      "reward_share": 0.0009275532122632298,
+      "positive_rate": 0.0
+     }
+    ]
+   },
+   "if": {
+    "n": 4956,
+    "mean_reward": 0.3025827280064568,
+    "mean_tokens": 4641.723567393059,
+    "truncated_frac": 0.006053268765133172,
+    "reward_share_over_10k": 0.08866808926824932,
+    "reward_share_over_16k": 0.026051391482173024,
+    "positive_over_10k_frac_of_positive": 0.07715582450832073,
+    "positive_over_16k_frac_of_positive": 0.025718608169440244,
+    "truncated_positive_rate": 0.03333333333333333,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 1840,
+      "frac_samples": 0.37126715092816787,
+      "mean_reward": 0.3298460144927536,
+      "reward_share": 0.40471903618742777,
+      "positive_rate": 0.1673913043478261
+     },
+     {
+      "bin": "2K-4K",
+      "n": 1109,
+      "frac_samples": 0.22376916868442293,
+      "mean_reward": 0.3130898707544334,
+      "reward_share": 0.23153952165021782,
+      "positive_rate": 0.13706041478809738
+     },
+     {
+      "bin": "4K-8K",
+      "n": 1181,
+      "frac_samples": 0.23829701372074252,
+      "mean_reward": 0.2832486593282529,
+      "reward_share": 0.22307059660353873,
+      "positive_rate": 0.10245554614733277
+     },
+     {
+      "bin": "8K-12K",
+      "n": 466,
+      "frac_samples": 0.0940274414850686,
+      "mean_reward": 0.2586552217453505,
+      "reward_share": 0.08037698941940073,
+      "positive_rate": 0.09656652360515021
+     },
+     {
+      "bin": "12K-16K",
+      "n": 204,
+      "frac_samples": 0.04116222760290557,
+      "mean_reward": 0.2517156862745098,
+      "reward_share": 0.034242464657241935,
+      "positive_rate": 0.08823529411764706
+     },
+     {
+      "bin": "16K-24K",
+      "n": 110,
+      "frac_samples": 0.022195318805488296,
+      "mean_reward": 0.27954545454545454,
+      "reward_share": 0.02050546812483329,
+      "positive_rate": 0.14545454545454545
+     },
+     {
+      "bin": "24K-32K",
+      "n": 16,
+      "frac_samples": 0.003228410008071025,
+      "mean_reward": 0.10104166666666667,
+      "reward_share": 0.001078065261847604,
+      "positive_rate": 0.0
+     },
+     {
+      "bin": "cap",
+      "n": 30,
+      "frac_samples": 0.006053268765133172,
+      "mean_reward": 0.22333333333333333,
+      "reward_share": 0.0044678580954921315,
+      "positive_rate": 0.03333333333333333
+     }
+    ]
+   },
+   "math": {
+    "n": 5264,
+    "mean_reward": 0.2923632218844985,
+    "mean_tokens": 18665.913753799392,
+    "truncated_frac": 0.07484802431610943,
+    "reward_share_over_10k": 0.8680961663417803,
+    "reward_share_over_16k": 0.5133203378817414,
+    "positive_over_10k_frac_of_positive": 0.8680961663417803,
+    "positive_over_16k_frac_of_positive": 0.5133203378817414,
+    "truncated_positive_rate": 0.017766497461928935,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 85,
+      "frac_samples": 0.01614741641337386,
+      "mean_reward": 0.09411764705882353,
+      "reward_share": 0.005198180636777128,
+      "positive_rate": 0.09411764705882353
+     },
+     {
+      "bin": "2K-4K",
+      "n": 173,
+      "frac_samples": 0.03286474164133739,
+      "mean_reward": 0.10982658959537572,
+      "reward_share": 0.012345679012345678,
+      "positive_rate": 0.10982658959537572
+     },
+     {
+      "bin": "4K-8K",
+      "n": 331,
+      "frac_samples": 0.06287993920972644,
+      "mean_reward": 0.25075528700906347,
+      "reward_share": 0.0539311241065627,
+      "positive_rate": 0.25075528700906347
+     },
+     {
+      "bin": "8K-12K",
+      "n": 557,
+      "frac_samples": 0.10581306990881459,
+      "mean_reward": 0.40933572710951527,
+      "reward_share": 0.14814814814814814,
+      "positive_rate": 0.40933572710951527
+     },
+     {
+      "bin": "12K-16K",
+      "n": 972,
+      "frac_samples": 0.18465045592705168,
+      "mean_reward": 0.4228395061728395,
+      "reward_share": 0.26705653021442494,
+      "positive_rate": 0.4228395061728395
+     },
+     {
+      "bin": "16K-24K",
+      "n": 1852,
+      "frac_samples": 0.3518237082066869,
+      "mean_reward": 0.29481641468682507,
+      "reward_share": 0.35477582846003897,
+      "positive_rate": 0.29481641468682507
+     },
+     {
+      "bin": "24K-32K",
+      "n": 900,
+      "frac_samples": 0.17097264437689969,
+      "mean_reward": 0.2633333333333333,
+      "reward_share": 0.1539961013645224,
+      "positive_rate": 0.2633333333333333
+     },
+     {
+      "bin": "cap",
+      "n": 394,
+      "frac_samples": 0.07484802431610943,
+      "mean_reward": 0.017766497461928935,
+      "reward_share": 0.004548408057179987,
+      "positive_rate": 0.017766497461928935
+     }
+    ]
+   }
+  }
+ },
+ "moe": {
+  "files": 105,
+  "updates": 102,
+  "update_range": [
+   0,
+   101
+  ],
+  "samples": 26112,
+  "verifier_names": {
+   "ifeval": 7848,
+   "general-quality": 1000,
+   "general-quality_ref": 4484,
+   "code": 3012,
+   "math": 8148,
+   "code_stdio": 2388
+  },
+  "domains": {
+   "code": {
+    "n": 5264,
+    "mean_reward": 0.13392120964511942,
+    "mean_tokens": 16170.29331306991,
+    "truncated_frac": 0.0894756838905775,
+    "reward_share_over_10k": 0.20138858561516337,
+    "reward_share_over_16k": 0.08365161739758244,
+    "positive_over_10k_frac_of_positive": 0.20141843971631207,
+    "positive_over_16k_frac_of_positive": 0.08368794326241134,
+    "truncated_positive_rate": 0.0,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 619,
+      "frac_samples": 0.11759118541033435,
+      "mean_reward": 0.40387722132471726,
+      "reward_share": 0.3546294223421112,
+      "positive_rate": 0.40387722132471726
+     },
+     {
+      "bin": "2K-4K",
+      "n": 396,
+      "frac_samples": 0.07522796352583587,
+      "mean_reward": 0.29292929292929293,
+      "reward_share": 0.1645480519667396,
+      "positive_rate": 0.29292929292929293
+     },
+     {
+      "bin": "4K-8K",
+      "n": 629,
+      "frac_samples": 0.11949088145896657,
+      "mean_reward": 0.22414960096963593,
+      "reward_share": 0.19999694947135302,
+      "positive_rate": 0.22416534181240064
+     },
+     {
+      "bin": "8K-12K",
+      "n": 538,
+      "frac_samples": 0.10220364741641337,
+      "mean_reward": 0.17100371747211895,
+      "reward_share": 0.13050362742189692,
+      "positive_rate": 0.17100371747211895
+     },
+     {
+      "bin": "12K-16K",
+      "n": 510,
+      "frac_samples": 0.09688449848024316,
+      "mean_reward": 0.09215686274509804,
+      "reward_share": 0.0666703314003169,
+      "positive_rate": 0.09215686274509804
+     },
+     {
+      "bin": "16K-24K",
+      "n": 1074,
+      "frac_samples": 0.20402735562310031,
+      "mean_reward": 0.03257967042619725,
+      "reward_share": 0.049634736885543033,
+      "positive_rate": 0.032588454376163874
+     },
+     {
+      "bin": "24K-32K",
+      "n": 1027,
+      "frac_samples": 0.19509878419452886,
+      "mean_reward": 0.023350129040186803,
+      "reward_share": 0.0340168805120394,
+      "positive_rate": 0.023369036027263874
+     },
+     {
+      "bin": "cap",
+      "n": 471,
+      "frac_samples": 0.0894756838905775,
+      "mean_reward": 0.0,
+      "reward_share": 0.0,
+      "positive_rate": 0.0
+     }
+    ]
+   },
+   "general": {
+    "n": 5320,
+    "mean_reward": 0.43099624060150377,
+    "mean_tokens": 3925.606015037594,
+    "truncated_frac": 0.02199248120300752,
+    "reward_share_over_10k": 0.10397313445854595,
+    "reward_share_over_16k": 0.05107069649788477,
+    "positive_over_10k_frac_of_positive": 0.1218405703175632,
+    "positive_over_16k_frac_of_positive": 0.0524951393389501,
+    "truncated_positive_rate": 0.07692307692307693,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 3186,
+      "frac_samples": 0.5988721804511278,
+      "mean_reward": 0.4364092906465788,
+      "reward_share": 0.6063936499629291,
+      "positive_rate": 0.2900188323917137
+     },
+     {
+      "bin": "2K-4K",
+      "n": 943,
+      "frac_samples": 0.17725563909774436,
+      "mean_reward": 0.404559915164369,
+      "reward_share": 0.16638318286885603,
+      "positive_rate": 0.2492046659597031
+     },
+     {
+      "bin": "4K-8K",
+      "n": 530,
+      "frac_samples": 0.09962406015037593,
+      "mean_reward": 0.41962264150943396,
+      "reward_share": 0.09699507174320729,
+      "positive_rate": 0.27358490566037735
+     },
+     {
+      "bin": "8K-12K",
+      "n": 216,
+      "frac_samples": 0.0406015037593985,
+      "mean_reward": 0.5287037037037037,
+      "reward_share": 0.049805922630729645,
+      "positive_rate": 0.4537037037037037
+     },
+     {
+      "bin": "12K-16K",
+      "n": 130,
+      "frac_samples": 0.02443609022556391,
+      "mean_reward": 0.5176923076923077,
+      "reward_share": 0.02935147629639321,
+      "positive_rate": 0.46153846153846156
+     },
+     {
+      "bin": "16K-24K",
+      "n": 143,
+      "frac_samples": 0.026879699248120302,
+      "mean_reward": 0.479020979020979,
+      "reward_share": 0.029874831000043612,
+      "positive_rate": 0.3916083916083916
+     },
+     {
+      "bin": "24K-32K",
+      "n": 55,
+      "frac_samples": 0.010338345864661654,
+      "mean_reward": 0.4309090909090909,
+      "reward_share": 0.01033625539709538,
+      "positive_rate": 0.2909090909090909
+     },
+     {
+      "bin": "cap",
+      "n": 117,
+      "frac_samples": 0.02199248120300752,
+      "mean_reward": 0.21282051282051284,
+      "reward_share": 0.01085961010074578,
+      "positive_rate": 0.07692307692307693
+     }
+    ]
+   },
+   "if": {
+    "n": 7640,
+    "mean_reward": 0.2493869982547993,
+    "mean_tokens": 7801.303534031414,
+    "truncated_frac": 0.05327225130890052,
+    "reward_share_over_10k": 0.21372650215624697,
+    "reward_share_over_16k": 0.1111276340765752,
+    "positive_over_10k_frac_of_positive": 0.18055555555555555,
+    "positive_over_16k_frac_of_positive": 0.08888888888888889,
+    "truncated_positive_rate": 0.05896805896805897,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 1859,
+      "frac_samples": 0.24332460732984293,
+      "mean_reward": 0.28226645149722074,
+      "reward_share": 0.2754047883553915,
+      "positive_rate": 0.1172673480365788
+     },
+     {
+      "bin": "2K-4K",
+      "n": 1485,
+      "frac_samples": 0.1943717277486911,
+      "mean_reward": 0.26243546576879906,
+      "reward_share": 0.20454167723650485,
+      "positive_rate": 0.09764309764309764
+     },
+     {
+      "bin": "4K-8K",
+      "n": 1925,
+      "frac_samples": 0.2519633507853403,
+      "mean_reward": 0.2418268398268398,
+      "reward_share": 0.24432509031744504,
+      "positive_rate": 0.09402597402597403
+     },
+     {
+      "bin": "8K-12K",
+      "n": 873,
+      "frac_samples": 0.11426701570680628,
+      "mean_reward": 0.22164948453608246,
+      "reward_share": 0.10155792125543436,
+      "positive_rate": 0.07560137457044673
+     },
+     {
+      "bin": "12K-16K",
+      "n": 500,
+      "frac_samples": 0.06544502617801047,
+      "mean_reward": 0.24023333333333333,
+      "reward_share": 0.06304288875864904,
+      "positive_rate": 0.092
+     },
+     {
+      "bin": "16K-24K",
+      "n": 470,
+      "frac_samples": 0.061518324607329845,
+      "mean_reward": 0.2146808510638298,
+      "reward_share": 0.052957076251541745,
+      "positive_rate": 0.07021276595744681
+     },
+     {
+      "bin": "24K-32K",
+      "n": 121,
+      "frac_samples": 0.015837696335078533,
+      "mean_reward": 0.20785123966942148,
+      "reward_share": 0.013199905527515111,
+      "positive_rate": 0.05785123966942149
+     },
+     {
+      "bin": "cap",
+      "n": 407,
+      "frac_samples": 0.05327225130890052,
+      "mean_reward": 0.21052416052416054,
+      "reward_share": 0.04497065229751835,
+      "positive_rate": 0.05896805896805897
+     }
+    ]
+   },
+   "math": {
+    "n": 7888,
+    "mean_reward": 0.1265212981744422,
+    "mean_tokens": 22102.160496957404,
+    "truncated_frac": 0.18940162271805275,
+    "reward_share_over_10k": 0.812625250501002,
+    "reward_share_over_16k": 0.5831663326653307,
+    "positive_over_10k_frac_of_positive": 0.812625250501002,
+    "positive_over_16k_frac_of_positive": 0.5831663326653307,
+    "truncated_positive_rate": 0.012048192771084338,
+    "bins": [
+     {
+      "bin": "0K-2K",
+      "n": 105,
+      "frac_samples": 0.013311359026369169,
+      "mean_reward": 0.12380952380952381,
+      "reward_share": 0.013026052104208416,
+      "positive_rate": 0.12380952380952381
+     },
+     {
+      "bin": "2K-4K",
+      "n": 171,
+      "frac_samples": 0.021678498985801216,
+      "mean_reward": 0.23391812865497075,
+      "reward_share": 0.04008016032064128,
+      "positive_rate": 0.23391812865497075
+     },
+     {
+      "bin": "4K-8K",
+      "n": 334,
+      "frac_samples": 0.04234279918864097,
+      "mean_reward": 0.2275449101796407,
+      "reward_share": 0.07615230460921844,
+      "positive_rate": 0.2275449101796407
+     },
+     {
+      "bin": "8K-12K",
+      "n": 543,
+      "frac_samples": 0.06883874239350912,
+      "mean_reward": 0.21731123388581952,
+      "reward_share": 0.11823647294589178,
+      "positive_rate": 0.21731123388581952
+     },
+     {
+      "bin": "12K-16K",
+      "n": 899,
+      "frac_samples": 0.11397058823529412,
+      "mean_reward": 0.18798665183537264,
+      "reward_share": 0.16933867735470942,
+      "positive_rate": 0.18798665183537264
+     },
+     {
+      "bin": "16K-24K",
+      "n": 2426,
+      "frac_samples": 0.3075557809330629,
+      "mean_reward": 0.14798021434460015,
+      "reward_share": 0.35971943887775554,
+      "positive_rate": 0.14798021434460015
+     },
+     {
+      "bin": "24K-32K",
+      "n": 1916,
+      "frac_samples": 0.24290060851926978,
+      "mean_reward": 0.1069937369519833,
+      "reward_share": 0.20541082164328658,
+      "positive_rate": 0.1069937369519833
+     },
+     {
+      "bin": "cap",
+      "n": 1494,
+      "frac_samples": 0.18940162271805275,
+      "mean_reward": 0.012048192771084338,
+      "reward_share": 0.018036072144288578,
+      "positive_rate": 0.012048192771084338
+     }
+    ]
+   }
+  }
+ }
+}

@@ -1,0 +1,65 @@
+{
+ "questions": 1319,
+ "checkpoints": {
+  "start": {
+   "greedy_correct": 1130,
+   "greedy_truncated": 115,
+   "greedy_mean_tokens": 4596.7626990144045,
+   "greedy_median_tokens": 1579,
+   "sampled_pass1": 0.9166034874905231,
+   "sampled_pass4": 0.9605761940864291,
+   "sampled_truncated": 0
+  },
+  "core200": {
+   "greedy_correct": 1114,
+   "greedy_truncated": 128,
+   "greedy_mean_tokens": 4904.1652767247915,
+   "greedy_median_tokens": 1563,
+   "sampled_pass1": 0.91868840030326,
+   "sampled_pass4": 0.9628506444275967,
+   "sampled_truncated": 0
+  },
+  "original200": {
+   "greedy_correct": 1178,
+   "greedy_truncated": 108,
+   "greedy_mean_tokens": 4463.478392721759,
+   "greedy_median_tokens": 1638,
+   "sampled_pass1": 0.9414329037149356,
+   "sampled_pass4": 0.9689158453373768,
+   "sampled_truncated": 0
+  }
+ },
+ "settings": {
+  "gpus": 8,
+  "tokenizer": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915/prepared/hf",
+  "sampled_n": 4,
+  "max_new_tokens": 32768,
+  "server_flags": [
+   "--tp-size",
+   "1",
+   "--trust-remote-code",
+   "--context-length",
+   "34816",
+   "--mem-fraction-static",
+   "0.6",
+   "--max-running-requests",
+   "64",
+   "--max-total-tokens",
+   "524288",
+   "--chunked-prefill-size",
+   "16384",
+   "--disable-radix-cache",
+   "--attention-backend",
+   "triton",
+   "--sampling-backend",
+   "pytorch",
+   "--cuda-graph-backend-decode",
+   "full",
+   "--cuda-graph-max-bs",
+   "64",
+   "--cuda-graph-backend-prefill",
+   "disabled",
+   "--skip-server-warmup"
+  ]
+ }
+}
