@@ -548,10 +548,10 @@ def training_options(prepared, output, *, profile, steps, smoke, keep_zero_advan
         "num_learners_per_node": 4,
         "vllm_num_engines": settings["engines"],
         "vllm_tensor_parallel_size": 1,
-        # The GSM8K control kept eager vLLM engines; the basket follows the
-        # released recipe's defaults (CUDA graphs on) and gives its two
-        # engines more KV budget, since generation bounds its update cadence.
-        "vllm_enforce_eager": settings["judge"] is False,
+        # Eager engines: vLLM's torch.compile of the retrofit Olmo model fails
+        # in this image ("vLLM failed to compile the model"). The basket gives
+        # its engines more KV budget, since generation bounds its cadence.
+        "vllm_enforce_eager": True,
         "vllm_gpu_memory_utilization": 0.85 if settings["judge"] else 0.7,
         "vllm_enable_prefix_caching": False,
         "deepspeed_stage": 3,

@@ -583,7 +583,7 @@ def test_basket_training_options_follow_the_released_recipe_and_gsm8k_is_unchang
     assert basket["code_pass_rate_reward_threshold"] == 0.99
     assert basket["response_length"] == 32768 and basket["learning_rate"] == 1e-6 and basket["beta"] == 0.0
     assert basket["checkpoint_state_freq"] == 25 and basket["local_eval_every"] == 50
-    assert basket["vllm_enforce_eager"] is False and basket["vllm_gpu_memory_utilization"] == 0.85
+    assert basket["vllm_enforce_eager"] is True and basket["vllm_gpu_memory_utilization"] == 0.85
     gsm8k = original_baseline.training_options(
         tmp_path / "prepared", tmp_path / "run", profile="gsm8k", steps=200, smoke=False
     )
