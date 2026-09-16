@@ -222,6 +222,33 @@ consecutive transport failures before the run fails (overlay `d6fb0f05e`,
 The dense arm runs the older overlay and carries the same exposure until its
 next restart.
 
+### Arm 1 resume hung in its first weight broadcast — September 16, 16:35 UTC
+
+The first resume attempt ([01M2NE8N15FHRWV5ZVGWGHS590](https://beaker.org/ex/01M2NE8N15FHRWV5ZVGWGHS590))
+loaded `global_step26`, initialised all models and engines by 15:51:26 UTC and
+logged `Resuming training from step 26`, then made no visible progress until the
+head-node vLLM engines' NCCL watchdog reported 480 s without progress at
+16:07:26 and aborted the run. The reference-policy reload warning (`size
+mismatch ... torch.Size([0])`) is the historical trainer failing to load a full
+state dict into a ZeRO-3 sharded module and falling back to base weights; with
+beta 0 the reference policy is unused, so that warning is not the failure.
+
+In the historical trainer the weight-sync thread fires its own broadcast at
+start-up when `resume_training_step > 1`, and the main loop fires another at
+the top of every step, including the resumed one. A resume therefore queues two
+back-to-back rounds of 710 per-parameter broadcasts to ten engines, each engine
+first draining its in-flight requests; a fresh start queues one, and this run's
+fresh first sync measured 697 s. The per-step `[Weight Sync]` timer of the fresh
+run (606–1,520 s) is that drain overlapping the previous step's generation,
+which is the pipeline working as designed, not a stall.
+
+Relaunched at 16:33 UTC as [01M2NGJ2M6HPVHYCXQ5XBGEXBZ](https://beaker.org/ex/01M2NGJ2M6HPVHYCXQ5XBGEXBZ)
+on commit `41ce2a54f`, whose overlay patch `single_resume_sync` removes the
+thread's start-up trigger, so a resume syncs exactly as a fresh start does
+(the per-step trigger still runs before the first generation). If this attempt
+hangs in the same place, the double-sync explanation is wrong and the
+alternative, an interconnect fault on the new head node `10.93.1.91`, moves up.
+
 ### All three arms lost to a full shared filesystem — September 16, 15:50 UTC
 
 At 15:24–15:27 UTC every arm exited with `OSError: [Errno 28] No space left on

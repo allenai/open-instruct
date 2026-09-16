@@ -2536,6 +2536,23 @@
   "changes": "none; resume stage checks the unchanged command, rank clocks and optimizer shards, truncates the update ledger to step 26 and continues in the same output directory",
   "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
   "submitted": "2026-09-16T15:48Z",
-  "note": "steps 27-37 (about 3 hours) are repeated from the checkpoint"
+  "note": "steps 27-37 (about 3 hours) are repeated from the checkpoint",
+  "outcome": "exit 1 at 16:15 UTC: DeepSpeed checkpoint global_step26 loaded and the reference-policy reload fell back to base weights (ZeRO-3 shape mismatch warning, harmless with beta 0); all models and engines initialised by 15:51:26 and the driver logged 'Resuming training from step 26'; the first weight broadcast to the vLLM engines then made no progress: the head-node engines' NCCL watchdog reported 480 s without progress at 16:07:26 and aborted. On resume the weight-sync thread fires its own start-up sync while the main loop fires another at the top of the resumed step, queuing two 710-parameter broadcast rounds back to back; a fresh start queues one (measured 697 s in this run's first step). Not excluded: a node-specific interconnect fault on the new head node 10.93.1.91."
+ },
+ {
+  "experiment": "01M2NGJ2M6HPVHYCXQ5XBGEXBZ",
+  "source": "01M2NGJ0Q9XD6B2XKESW80T6K5",
+  "commit": "41ce2a54f5a3481fab16d4764a69f71b5234c081",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "resume",
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "continues": "01M2M3D8QC3DJY1Q033YPESGSK",
+  "replaces": "01M2NE8N15FHRWV5ZVGWGHS590",
+  "predecessor_checkpoint": "global_step26",
+  "changes": "overlay patch single_resume_sync: the weight-sync thread no longer fires a start-up broadcast on resume; the main loop's per-step trigger syncs the resumed weights before the first generation as before. Test test_resume_syncs_weights_once_per_step (48 pass in the Think image).",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
+  "submitted": "2026-09-16T16:33Z",
+  "discriminates": "if this attempt also hangs in the first broadcast, the double-sync explanation is wrong"
  }
 ]
