@@ -24,6 +24,7 @@ request_timeout = 900
 startup_timeout = 1800
 
 [training]
+resume = true
 algorithm = "opd"
 num_rollouts = 100
 save_interval = 10
@@ -78,9 +79,9 @@ workspace = "ai2/open-instruct-dev"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "urgent"
-min_runtime = "36h"
+min_runtime = "8h"
 timeout = "72h"
-auto_resume = false
+auto_resume = true
 weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
 
 [launch.secrets]

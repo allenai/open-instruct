@@ -52,7 +52,7 @@ def specification(image, spec):
         "context": {
             "priority": spec.launch["priority"],
             "minRuntime": spec.launch["min_runtime"],
-            "autoResume": False,
+            "autoResume": spec.launch["auto_resume"],
         },
         "constraints": {"cluster": [spec.launch["cluster"]]},
         "timeout": spec.launch["timeout"],

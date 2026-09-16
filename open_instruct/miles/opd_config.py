@@ -145,8 +145,6 @@ class OPDRunSpec:
                 raise InputError(f"{section}.gpus must be a multiple of {section}.tensor_parallel_size")
         validation.choice(document["training"]["phase"], "training.phase", ("prepare", "train"))
         validation.boolean(document["training"]["resume"], "training.resume")
-        if document["training"]["resume"]:
-            raise InputError("Resume is not yet qualified for Miles OPD; use a fresh run")
         validation.boolean(document["distillation"]["use_rollout_logprobs"], "distillation.use_rollout_logprobs")
         for section, key in (
             ("distillation", "kl_coef"),
@@ -178,8 +176,10 @@ class OPDRunSpec:
         document["launch"] = run_spec.RunSpec._launch(
             {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent
         )
-        if document["launch"]["auto_resume"]:
-            raise InputError("Automatic restart is not supported for Miles OPD")
+        if document["launch"]["auto_resume"] and not document["training"]["resume"]:
+            raise InputError(
+                "launch.auto_resume requires training.resume so a re-queued job continues its checkpoints"
+            )
         preparing = document["training"]["phase"] == "prepare"
         if preparing and document["launch"]["cluster"] != "ai2/saturn":
             raise InputError("CPU-only OPD preparation with WEKA must run on ai2/saturn")

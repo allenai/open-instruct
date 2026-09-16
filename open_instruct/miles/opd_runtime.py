@@ -135,7 +135,10 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "wandb-group": spec.name,
         "wandb-dir": str(root / "wandb"),
     }
-    if training["resume"]:
+    if training["resume"] and (root / "checkpoints" / "latest_checkpointed_iteration.txt").exists():
+        # Megatron restores weights, optimizer and RNG from the newest iteration and Miles
+        # restores the data cursor from checkpoints/rollout, then continues at the next
+        # rollout id. A first launch has no marker and starts from the converted learner.
         values["load"] = str(root / "checkpoints")
     args = list(architecture)
     for key, value in values.items():

@@ -150,8 +150,13 @@ schema accepts:
 
 ## Qwen prototype limits
 
-- Automatic restart and resume are rejected until native checkpoint restoration
-  and the data cursor have been exercised together.
+- Resume: set `training.resume = true` and `launch.auto_resume = true`. Beaker then
+  re-queues a preempted job, the workflow re-enters the same `output.root`, and the
+  learner passes `--load output.root/checkpoints` whenever
+  `latest_checkpointed_iteration.txt` exists there (weights, optimizer, RNG and the
+  data cursor from `checkpoints/rollout`; training continues at the next rollout).
+  Beaker caps `launch.min_runtime` at 8h, so runs longer than that need this.
+  W&B starts a new run per attempt inside the same group.
 - Only top-k zero and pure OPD are exposed; only GSM8K data, the 4B learner, the
   default 2/1/1 topology, saving every update and offline tracking have been
   exercised on GPUs. The general Core configuration reference does not describe
