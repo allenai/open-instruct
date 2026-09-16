@@ -157,6 +157,11 @@ schema accepts:
   data cursor from `checkpoints/rollout`; training continues at the next rollout).
   Beaker caps `launch.min_runtime` at 8h, so runs longer than that need this.
   W&B starts a new run per attempt inside the same group.
+- The student rollout router runs with `--router-disable-circuit-breaker`. Its default
+  breaker opens for 60s after ten failed requests within two minutes (the aborts at the
+  end of a rollout count), returning `503 no_available_workers` to every request, and
+  Miles retries a request at most 60 times one second apart. The 2B math runs logged
+  thousands of these retries per run and reached attempt 42 of 60 before the fix.
 - Only top-k zero and pure OPD are exposed; only GSM8K data, the 4B learner, the
   default 2/1/1 topology, saving every update and offline tracking have been
   exercised on GPUs. The general Core configuration reference does not describe

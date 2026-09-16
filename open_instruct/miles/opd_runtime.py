@@ -151,6 +151,11 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "--sglang-disable-flashinfer-autotune",
         "--sglang-disable-cuda-graph",
         "--sglang-disable-radix-cache",
+        # The student rollout router fronts a fixed set of engines on one node. Its
+        # circuit breaker opens for 60s after ten failed requests (aborts at the end
+        # of a rollout count), and Miles retries a request at most 60 times one second
+        # apart, so an open circuit can exhaust the retries and fail the rollout.
+        "--router-disable-circuit-breaker",
         "--accumulate-allreduce-grads-in-fp32",
         "--attention-softmax-in-fp32",
     ]
