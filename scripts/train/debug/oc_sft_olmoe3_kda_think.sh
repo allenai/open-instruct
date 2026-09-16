@@ -423,7 +423,7 @@ case "$MODE" in
         --image "$BEAKER_IMAGE" \
         --description "HF-convert KDA MoE think $STEP at seq $SEQ" \
         --pure_docker_mode \
-        --preemptible \
+        $PREEMPTIBLE_FLAG \
         --timeout "${JOB_TIMEOUT:-2h}" \
         --num_nodes 1 \
         --gpus "$CONVERT_GPUS" \
