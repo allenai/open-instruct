@@ -477,9 +477,15 @@ run_one_model() {
     # it. Without this exemption the probe silently skips the model and exits 0
     # having loaded nothing, which looks like a successful run.
     if [ -f "$done_marker" ] && [ "${STARTUP_PROBE:-0}" != "1" ]; then
-        log "SKIP ${model}: already complete ($(wc -l < "$store" 2>/dev/null || echo 0) traces in $store)"
-        cp "$store" "$traces" 2>/dev/null || true
-        return 0
+        _sgood=$(( $(wc -l < "$store" 2>/dev/null || echo 0) - $(grep -ac '"error"' "$store" 2>/dev/null || echo 0) ))
+        if [ "$_sgood" -lt $(( NUM_PROMPTS * NUM_SAMPLES * 95 / 100 )) ]; then
+            log "STALE done-marker for ${model}: only ${_sgood} usable traces in $store; regenerating"
+            rm -f "$done_marker"
+        else
+            log "SKIP ${model}: already complete (${_sgood} usable traces in $store)"
+            cp "$store" "$traces" 2>/dev/null || true
+            return 0
+        fi
     fi
 
     if [ -s "$TOKENIZER_FAIL_FILE" ] && grep -qxF "$model" "$TOKENIZER_FAIL_FILE"; then
@@ -656,8 +662,23 @@ run_one_model() {
         return 1
     fi
 
-    cp "$traces" "$store" && touch "$done_marker"
-    log "DONE ${model}: $(wc -l < "$traces") traces"
+    # Count usable traces, not lines. A crashed server produces a file full of
+    # error records: Kimi-K3 wrote 8,000 lines of which 6,585 were
+    # "Connection error.", and marking that complete made the next run skip the
+    # model in 33 seconds and report success.
+    _total=$(wc -l < "$traces")
+    _errs=$(grep -ac '"error"' "$traces" 2>/dev/null || echo 0)
+    _good=$(( _total - _errs ))
+    _want=$(( NUM_PROMPTS * NUM_SAMPLES ))
+    cp "$traces" "$store"
+    if [ "$_good" -ge $(( _want * 95 / 100 )) ]; then
+        touch "$done_marker"
+        log "DONE ${model}: ${_good} usable traces of ${_total} records (${_errs} errors)"
+    else
+        rm -f "$done_marker"
+        log "INCOMPLETE ${model}: only ${_good} usable traces of ${_want} wanted"
+        log "  (${_errs} error records). Not marking done, so a rerun will resume."
+    fi
 
     PYTHONPATH="$REPO_ROOT" "${UV_RUN[@]}" python scripts/thinking_traces/analyze_traces.py \
         --traces "${served}=${traces}" \
