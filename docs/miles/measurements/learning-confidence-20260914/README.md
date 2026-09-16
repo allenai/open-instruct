@@ -195,6 +195,17 @@ single `eval/scores`). Projection: 100 steps in about 21 hours of run time plus
 two evaluations, before Jupiter preemptions. Dense MILES arm: update 33 at
 12.4 min per update; MoE continuation from checkpoint 100 is queued for slots.
 
+### Dense admission 24: more occupancy, same cadence — September 16, 09:31 UTC
+
+The dense continuation at admission 24 (checkpoint 37 onward) raised mean
+running requests per engine from 8.8 to 11.9 and per-engine decode from 690 to
+762 tokens/s with three retractions in an hour, but updates 38–43 still took
+12.6 minutes median. The dense arm's cadence is set by the slowest group in each
+256-sample batch under whole-group submission, not by admission or KV capacity;
+the pool change and the admission change together bought nothing measurable.
+Remaining levers are structural (sample-level backfill, or a second engine node,
+which the planner cannot place without idling GPUs) and are not applied.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
