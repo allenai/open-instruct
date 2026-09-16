@@ -703,7 +703,8 @@
       "eval": 512
     },
     "prepare_experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
-    "allocation": "8 H100 on ai2/jupiter: 4 DeepSpeed learners, 2 vLLM policy engines, 2-GPU TP2 vLLM judge at 131072 YaRN context"
+    "allocation": "8 H100 on ai2/jupiter: 4 DeepSpeed learners, 2 vLLM policy engines, 2-GPU TP2 vLLM judge at 131072 YaRN context",
+    "outcome": "preempted by workspace-group balancing on ai2/jupiter at 01:28 UTC after its 30-minute minimum runtime, before the two-GPU judge reported healthy; judge log ended in torch.compile"
   },
   {
     "experiment": "01M2KWWP9GVQ55D1DP2GWY748F",
@@ -948,5 +949,16 @@
         }
       }
     }
+  },
+  {
+    "experiment": "01M2KXHQ5PDXRZDVQT86RK4JWB",
+    "source": "01M2KXHNEX5PWC8VPPTWA0N6WK",
+    "commit": "cc8e07487",
+    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+    "stage": "smoke",
+    "arm": "original-open-instruct basket (arm 1)",
+    "profile": "basket",
+    "changes": "judge started with --enforce-eager and an unbuffered log; smoke minimum runtime raised to 2h",
+    "replaces": "01M2KVC37AMZFJFDYR079V681V"
   }
 ]
