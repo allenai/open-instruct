@@ -206,6 +206,22 @@ the pool change and the admission change together bought nothing measurable.
 Remaining levers are structural (sample-level backfill, or a second engine node,
 which the planner cannot place without idling GPUs) and are not applied.
 
+### MoE continuation killed by one lost HTTP connection — September 16, 10:45 UTC
+
+The checkpoint-100 continuation rendezvoused after its second replica waited
+about an hour for slots, restored, and completed update 101, then died: one
+policy-refresh request to the serving router hit an httpx `ReadError`
+(connection reset) at 10:01 UTC. The refresh path deliberately refuses to
+resample a request whose delivery is unknown, and that refusal propagated out
+of the producer and exited the driver. The producer now discards such a group
+and requeues its pristine prompts through the same ledger path a preemption
+uses, regenerating them under the current weights, with a budget of eight
+consecutive transport failures before the run fails (overlay `d6fb0f05e`,
+117 runtime tests). Relaunched from checkpoint 100 as
+[01M2MWPWN1630EFRQCYB2KVZXX](https://beaker.org/ex/01M2MWPWN1630EFRQCYB2KVZXX).
+The dense arm runs the older overlay and carries the same exposure until its
+next restart.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
