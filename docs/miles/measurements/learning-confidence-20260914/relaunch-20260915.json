@@ -959,6 +959,19 @@
     "arm": "original-open-instruct basket (arm 1)",
     "profile": "basket",
     "changes": "judge started with --enforce-eager and an unbuffered log; smoke minimum runtime raised to 2h",
-    "replaces": "01M2KVC37AMZFJFDYR079V681V"
+    "replaces": "01M2KVC37AMZFJFDYR079V681V",
+    "outcome": "judge ready in 90 s; driver step 1 completed at 02:43 UTC: 3034 s per step with two eager vLLM engines (917 tokens/s), 143 s training, 8-prompt smoke eval 0.25; code service and judge calls succeeded"
+  },
+  {
+    "experiment": "01M2M2SFY1MBE9YGA3GTMRCE53",
+    "source": "01M2M2SE1B4C3CBT0E1EW04NMD",
+    "commit": "eb436d3fcec8ba35ec3aa3be2f2abc2ac64ac2d0",
+    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+    "stage": "train",
+    "steps": 100,
+    "arm": "original-open-instruct basket (arm 1)",
+    "profile": "basket",
+    "changes": "policy engines with CUDA graphs and 0.85 GPU memory; judge TP2 YaRN 131072 eager; 4 learners, 2 engines; saves every 25, evals at 0/50/100",
+    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-20260916"
   }
 ]
