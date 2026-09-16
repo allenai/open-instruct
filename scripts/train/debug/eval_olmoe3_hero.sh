@@ -43,6 +43,7 @@ CLUSTERS="${CLUSTERS:--c ai2/ceres -c ai2/jupiter -c ai2/saturn}"
 WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
+NUM_INSTANCES="${NUM_INSTANCES:-1}"  # vLLM instances; set with GPUS for wide suites
 
 OC_DEPS="cached-path>=1.7.2,dataclass-extensions>=0.3.0,bettermap,importlib_resources,safetensors,rich,pandas,flash-linear-attention==0.5.2"
 DEPS="datasets==4.8.4,vllm==0.19.1,huggingface-hub==1.16.1,${OC_DEPS}"
@@ -58,7 +59,7 @@ uv run olmo-eval beaker launch \
     -H default \
     -o provider.kind=vllm \
     -o provider.dtype=bfloat16 \
-    -o provider.num_instances=1 \
+    -o provider.num_instances="$NUM_INSTANCES" \
     -o provider.package=wheel \
     -o provider.max_model_len="$MAX_MODEL_LEN" \
     -o provider.dependencies="[${DEPS}]" \
