@@ -345,6 +345,25 @@ the listed mechanics difference is loss reduction: token mean in the original,
 per-response mean in Core (`calculate_per_token_loss` off). The single-knob
 rerun of the Core GSM8K arm with per-token loss is the discriminating test.
 
+### Sample backfill: engines full, throughput up 5–10% — September 16, 19:30 UTC
+
+The backfill arm's first six updates (18:23–19:23 UTC): 12, 10, 14, 12 and 12
+minutes per update delivering 2.29–3.03 million response tokens each, 3,600–3,900
+tokens/s aggregate over five engines, zero completed-queue drops, learner
+staleness 0.7–0.9. Policy-engine gauges read 23.9–24.0 running requests of 24
+in every five-minute bucket, against 8.8–11.9 under group submission, but
+per-engine throughput moved only from about 730 to about 770 tokens/s. The
+engines were already near their attention-bound ceiling at these context
+lengths (the planner's warning that the pool holds 13 full-length requests is
+the same fact), so full occupancy mostly slows each stream. Net: backfill
+removes the stranded slots at no cost and is worth roughly 5–10% on the dense
+32K basket against arm 3's 3,400 tokens/s; the binding limit remains per-engine
+decode throughput, i.e. engine count or the response budget. Its update-0
+evaluation (math 0.242, IF 0.310, code 0.109, general 0.737) matches the
+recorded dense start within cross-engine greedy noise. Reward per update is not
+recoverable from the combined Beaker log of this job because the long metric
+record is interleaved with the judge stream; use the run's W&B or WEKA records.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
