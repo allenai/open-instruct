@@ -576,9 +576,9 @@ def test_basket_training_options_follow_the_released_recipe_and_gsm8k_is_unchang
     )
     assert (basket["num_unique_prompts_rollout"], basket["num_samples_per_prompt_rollout"]) == (64, 4)
     assert basket["total_episodes"] == 100 * 64 * 4
-    assert (basket["num_learners_per_node"], basket["vllm_num_engines"]) == (4, 3)
+    assert (basket["num_learners_per_node"], basket["vllm_num_engines"]) == (4, 2)
     assert basket["llm_judge_model"] == "hosted_vllm/Qwen/Qwen3-32B"
-    assert basket["llm_judge_max_context_length"] == 32768 and basket["llm_judge_max_tokens"] == 2048
+    assert basket["llm_judge_max_context_length"] == 131072 and basket["llm_judge_max_tokens"] == 2048
     assert basket["code_api_url"] == original_baseline.CODE_API_URL
     assert basket["code_pass_rate_reward_threshold"] == 0.99
     assert basket["response_length"] == 32768 and basket["learning_rate"] == 1e-6 and basket["beta"] == 0.0
@@ -592,12 +592,19 @@ def test_basket_training_options_follow_the_released_recipe_and_gsm8k_is_unchang
         tmp_path / "prepared", tmp_path / "run", profile="gsm8k", steps=3, smoke=True
     )
     assert smoke["num_unique_prompts_rollout"] == 128
-    assert set(original_baseline.TRAINER_GPUS.split(",")).isdisjoint({original_baseline.JUDGE_GPU})
+    trainer_gpus, judge_gpus = original_baseline.TRAINER_GPUS.split(","), original_baseline.JUDGE_GPUS.split(",")
+    assert set(trainer_gpus).isdisjoint(judge_gpus) and len(trainer_gpus) + len(judge_gpus) == 8
+    assert len(trainer_gpus) == basket["num_learners_per_node"] + basket["vllm_num_engines"]
+    assert len(judge_gpus) == original_baseline.JUDGE_TENSOR_PARALLEL
 
 
 def test_judge_service_uses_the_prepared_miles_snapshot_and_template(tmp_path):
     template = tmp_path / "judge.jinja"
     template.write_text("{{ messages }}<|im_start|>assistant\n<think>\n\n</think>\n\n")
+    (tmp_path / "snapshot").mkdir()
+    (tmp_path / "snapshot" / "config.json").write_text(
+        json.dumps({"model_type": "qwen3", "max_position_embeddings": 40960})
+    )
     prepared = {
         "verdict": "passed",
         "model": "Qwen/Qwen3-32B",
@@ -613,6 +620,11 @@ def test_judge_service_uses_the_prepared_miles_snapshot_and_template(tmp_path):
     assert command[command.index("--model") + 1] == str(tmp_path / "snapshot")
     assert command[command.index("--chat-template") + 1] == str(template)
     assert command[command.index("--served-model-name") + 1] == "Qwen/Qwen3-32B"
+    assert command[command.index("--tensor-parallel-size") + 1] == "2"
+    assert command[command.index("--max-model-len") + 1] == "131072"
+    overrides = json.loads(command[command.index("--hf-overrides") + 1])
+    assert overrides["rope_scaling"] == {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}
+    assert overrides["max_position_embeddings"] == 131072
     assert service["api_base"] == "http://127.0.0.1:8001/v1"
     assert "command" in service and service["template_sha256"] == prepared["template_sha256"]
     template.write_text("changed")
@@ -622,6 +634,13 @@ def test_judge_service_uses_the_prepared_miles_snapshot_and_template(tmp_path):
     prepared["rendered_canary"] = "<|im_start|>assistant\n"
     (tmp_path / "prepared.json").write_text(json.dumps(prepared))
     with pytest.raises(ValueError, match="thinking block"):
+        original_baseline.judge_service(tmp_path)
+    prepared["rendered_canary"] = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    (tmp_path / "prepared.json").write_text(json.dumps(prepared))
+    (tmp_path / "snapshot" / "config.json").write_text(
+        json.dumps({"model_type": "qwen3", "rope_scaling": {"factor": 4.0}})
+    )
+    with pytest.raises(ValueError, match="unscaled Qwen3"):
         original_baseline.judge_service(tmp_path)
 
 

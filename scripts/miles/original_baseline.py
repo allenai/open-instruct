@@ -35,8 +35,12 @@ PASSTHROUGH_TEMPLATE = "{{ messages[0]['content'] }}"
 CODE_API_URL = "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program"
 JUDGE_PORT = 8001
 JUDGE_MODEL = "Qwen/Qwen3-32B"
-JUDGE_GPU = "7"
-TRAINER_GPUS = "0,1,2,3,4,5,6"
+# Two H100s host the judge at the MILES arms' 131,072-token YaRN context: the
+# bf16 weights alone fill most of one device. The trainer sees the other six.
+JUDGE_GPUS = "6,7"
+JUDGE_TENSOR_PARALLEL = 2
+JUDGE_CONTEXT = 131072
+TRAINER_GPUS = "0,1,2,3,4,5"
 PROFILES = {
     "gsm8k": {
         "verifiers": {"gsm8k"},
@@ -56,7 +60,7 @@ PROFILES = {
         "train_count": None,
         "eval_count": 512,
         "prompts": 64,
-        "engines": 3,
+        "engines": 2,
         "steps": 100,
         "judge": True,
         "wandb_group": "dolci-basket-32k-zero-20260914",
@@ -410,11 +414,12 @@ def train(
 
 
 def judge_service(judge_prepared):
-    """The vLLM OpenAI server hosting the recipe's Qwen3-32B judge on one reserved GPU.
+    """The vLLM OpenAI server hosting the recipe's Qwen3-32B judge on two reserved GPUs.
 
-    The prepared judge directory is the one MILES uses: same immutable snapshot
-    and the same no-thinking chat template, so both frameworks grade with the
-    identical judge model, prompt and template.
+    The prepared judge directory is the one MILES uses: same immutable snapshot,
+    the same no-thinking chat template and the same YaRN 128K rope override, so
+    both frameworks grade with the identical judge model, prompt, template and
+    context capacity; no judge-side truncation applies in either arm.
     """
     prepared = json.loads((Path(judge_prepared) / "prepared.json").read_text())
     if prepared.get("verdict") != "passed" or prepared.get("model") != JUDGE_MODEL:
@@ -423,6 +428,13 @@ def judge_service(judge_prepared):
         raise ValueError("Prepared judge template hash mismatch")
     if "<think>\n\n</think>" not in prepared.get("rendered_canary", ""):
         raise ValueError("Prepared judge template does not close its thinking block")
+    model_config = json.loads((Path(prepared["snapshot"]) / "config.json").read_text())
+    if model_config.get("model_type") != "qwen3" or model_config.get("rope_scaling"):
+        raise ValueError("The YaRN 128K judge override requires an unscaled Qwen3 checkpoint")
+    overrides = {
+        "max_position_embeddings": JUDGE_CONTEXT,
+        "rope_scaling": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768},
+    }
     command = [
         sys.executable,
         "-m",
@@ -435,10 +447,14 @@ def judge_service(judge_prepared):
         prepared["template"],
         "--dtype",
         "bfloat16",
+        "--tensor-parallel-size",
+        str(JUDGE_TENSOR_PARALLEL),
         "--max-model-len",
-        "40960",
+        str(JUDGE_CONTEXT),
+        "--hf-overrides",
+        json.dumps(overrides, sort_keys=True),
         "--gpu-memory-utilization",
-        "0.92",
+        "0.9",
         "--host",
         "127.0.0.1",
         "--port",
@@ -451,15 +467,20 @@ def judge_service(judge_prepared):
         "snapshot": prepared["snapshot"],
         "template_sha256": prepared["template_sha256"],
         "revision": prepared.get("revision"),
+        "context_length": JUDGE_CONTEXT,
+        "rope_overrides": overrides,
     }
 
 
 def start_judge(service, log_path, *, timeout=1800):
-    """Start the judge on the reserved GPU and wait until it serves /health."""
+    """Start the judge on the reserved GPUs and wait until it serves /health."""
     # The handle must outlive this function: the server writes to it for the whole run.
     log = open(log_path, "ab")  # noqa: SIM115
     process = subprocess.Popen(
-        service["command"], stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "CUDA_VISIBLE_DEVICES": JUDGE_GPU}
+        service["command"],
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": JUDGE_GPUS},
     )
     deadline = time.monotonic() + timeout
     health = service["api_base"].removesuffix("/v1") + "/health"
@@ -553,7 +574,7 @@ def training_options(prepared, output, *, profile, steps, smoke, keep_zero_advan
                 "llm_judge_model": f"hosted_vllm/{JUDGE_MODEL}",
                 "llm_judge_timeout": 600,
                 "llm_judge_max_tokens": 2048,
-                "llm_judge_max_context_length": 32768,
+                "llm_judge_max_context_length": JUDGE_CONTEXT,
                 "llm_judge_temperature": 1.0,
                 "code_api_url": CODE_API_URL,
                 "code_pass_rate_reward_threshold": 0.99,
@@ -635,9 +656,9 @@ def _train(
         ]
     else:
         differences += [
-            "Judge served by the original image's vLLM at a 32,768-token judge context with the recipe's "
-            "truncation, versus the MILES SGLang judge at 131,072 tokens without truncation",
-            "Four H100 trainers/three vLLM engines/one vLLM judge versus two B300 trainers/five SGLang engines/one SGLang judge",
+            "Judge served by the original image's vLLM (TP2, YaRN 131,072 context) versus the MILES SGLang judge "
+            "(TP1, same snapshot, template and YaRN context); identical prompts, no truncation in either arm",
+            "Four H100 trainers/two vLLM engines/two judge GPUs versus two B300 trainers/five SGLang engines/one SGLang judge",
         ]
     record = {
         "command": command,
