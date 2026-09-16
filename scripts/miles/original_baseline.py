@@ -474,6 +474,7 @@ def judge_service(judge_prepared):
 
 def start_judge(service, log_path, *, timeout=1800):
     """Start the judge on the reserved GPUs and wait until it serves /health."""
+    started = time.monotonic()
     # The handle must outlive this function: the server writes to it for the whole run.
     log = open(log_path, "ab")  # noqa: SIM115
     process = subprocess.Popen(
@@ -482,20 +483,35 @@ def start_judge(service, log_path, *, timeout=1800):
         stderr=subprocess.STDOUT,
         env={**os.environ, "CUDA_VISIBLE_DEVICES": JUDGE_GPUS},
     )
+    print("ORIGINAL_BASELINE_JUDGE_STARTING", json.dumps({"log": str(log_path), "gpus": JUDGE_GPUS}), flush=True)
     deadline = time.monotonic() + timeout
     health = service["api_base"].removesuffix("/v1") + "/health"
+
+    def tail():
+        try:
+            return Path(log_path).read_text(errors="replace").splitlines()[-40:]
+        except OSError:
+            return []
+
     while time.monotonic() < deadline:
         if process.poll() is not None:
+            print("ORIGINAL_BASELINE_JUDGE_LOG_TAIL", json.dumps(tail()), flush=True)
             raise RuntimeError(
                 f"Judge server exited with {process.returncode} before becoming healthy; see {log_path}"
             )
         try:
             with urllib.request.urlopen(health, timeout=5) as response:
                 if response.status == 200:
+                    print(
+                        "ORIGINAL_BASELINE_JUDGE_READY",
+                        json.dumps({"seconds": round(time.monotonic() - started, 1), "api_base": service["api_base"]}),
+                        flush=True,
+                    )
                     return process
         except Exception:
             pass
         time.sleep(5)
+    print("ORIGINAL_BASELINE_JUDGE_LOG_TAIL", json.dumps(tail()), flush=True)
     process.terminate()
     raise RuntimeError(f"Judge server did not become healthy within {timeout}s; see {log_path}")
 
