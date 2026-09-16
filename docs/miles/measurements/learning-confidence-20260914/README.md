@@ -142,6 +142,28 @@ generation-bound by its KV pool and the whole-group tail; the prepared
 `dense-broad-kv` continuation (static fraction 0.85, requested pool 458,752
 tokens) is the next change, to be applied at its four-hour preemption.
 
+### Preemptions at four hours and the first warm-cache restart — September 16, 02:40 UTC
+
+Both MILES arms were preempted at exactly their four-hour minimum runtime
+(dense g16 at 01:13 UTC after update 21, MoE c16 at 01:26 UTC after update 70),
+again by `ai2/oe-scaling` group balancing. The MoE's automatic resume restored
+checkpoint 70 and, for the first time, restored **warm Triton caches on every
+trainer and serving rank** (`status: hit`, 1–16 s each) from the background
+publication made after checkpoint 50. Its first update after restore took
+15 minutes including the first 256-sample collection, versus 39 minutes at the
+previous cold restart. The dense arm was relaunched as the `kv` continuation
+([01M2KWWP9GVQ55D1DP2GWY748F](https://beaker.org/ex/01M2KWWP9GVQ55D1DP2GWY748F),
+static fraction 0.85, requested pool 458,752 tokens) from checkpoint 21 and is
+queued behind the group slot limit.
+
+The original-framework basket arm (arm 1 of the three-arm design) has its data
+prepared (101,434 training and 512 held-out rows, every prompt token equal to
+the MILES frozen tokens). Its first smoke was preempted on Jupiter after 30
+minutes while the two-GPU judge compiled; the relaunch starts the judge eagerly
+(ready in 90 s), protects the smoke for two hours, and is running
+([01M2KXHQ5PDXRZDVQT86RK4JWB](https://beaker.org/ex/01M2KXHQ5PDXRZDVQT86RK4JWB)).
+Receipts: [relaunch-20260915.json](relaunch-20260915.json).
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
