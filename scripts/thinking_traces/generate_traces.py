@@ -204,6 +204,8 @@ def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
 
 
 _LOGGED_MESSAGE_KEYS = False
+# Enough to rule out a transient blip, small enough to stop within seconds.
+CONSECUTIVE_ERROR_LIMIT = 25
 
 
 def _extract_reasoning(message, raw_payload: dict | None = None) -> str | None:
@@ -456,6 +458,7 @@ def main() -> None:
     write_lock = threading.Lock()
     shapes: collections.Counter = collections.Counter()
     unaccounted_total = 0
+    consecutive_errors = 0
     done = 0
     started_at = time.monotonic()
 
@@ -476,6 +479,24 @@ def main() -> None:
                 # recoverable offline rather than needing the run repeated.
                 if record.get("unaccounted_tokens"):
                     unaccounted_total += record["unaccounted_tokens"]
+                # A dead server yields an unbroken run of error records. Writing
+                # thousands of them and exiting 0 looks like a completed run:
+                # Kimi-K3 recorded 6,585 "Connection error." entries that way.
+                if "error" in record:
+                    consecutive_errors += 1
+                    if consecutive_errors >= CONSECUTIVE_ERROR_LIMIT:
+                        handle.flush()
+                        for fut in futures:
+                            fut.cancel()
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        raise SystemExit(
+                            f"aborting: {consecutive_errors} consecutive request "
+                            f"failures, last was {record['error']!r}. The server is "
+                            "not answering; continuing would only fill the output "
+                            "with error records."
+                        )
+                else:
+                    consecutive_errors = 0
                 if done == args.parse_health_after:
                     logger.info("parse health after %d traces: %s", done, dict(shapes))
                     mean_lost = unaccounted_total / max(1, done)

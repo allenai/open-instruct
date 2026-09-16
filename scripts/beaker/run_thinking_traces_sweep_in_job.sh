@@ -599,9 +599,33 @@ run_one_model() {
     # vLLM logs them every few seconds to a file nobody was reading.
     ( while true; do sleep "$SYNC_INTERVAL"
         cp "$traces" "$store" 2>/dev/null || true
-        [ -f "$traces" ] && log "sync: $(wc -l < "$traces") traces for ${served}"
+        if [ -f "$traces" ]; then
+            _n=$(wc -l < "$traces")
+            # Error rate is the signal that catches a dead server. Kimi-K3 wrote
+            # 6,585 "Connection error." records after its engine died of a CUDA
+            # fault, finished "successfully", and reported 201 traces/min -- which
+            # was requests failing fast, not work completing. Counting errors here
+            # turns that into an alarm within one sync interval.
+            _e=$(grep -ac '"error"' "$traces" 2>/dev/null || echo 0)
+            _pct=$(awk -v e="$_e" -v n="$_n" 'BEGIN{printf "%.1f", (n>0? 100*e/n : 0)}')
+            log "sync: ${_n} traces for ${served} (errors: ${_e}, ${_pct}%)"
+            if [ "${_e}" -gt 50 ] && awk -v p="$_pct" 'BEGIN{exit !(p>20)}'; then
+                log "  ALARM: ${_pct}% of records are errors. The server is likely down;"
+                log "  check the vllm log now rather than waiting for the run to end."
+            fi
+        fi
+        # Scrape the Prometheus endpoint rather than the log. vLLM emits nothing
+        # parseable under some frontends (DP, and the rust frontend), which left
+        # earlier runs with no visibility into queue depth or KV pressure at all.
+        curl -sf --max-time 5 "http://localhost:${SERVE_PORT}/metrics" 2>/dev/null \
+          | awk '/^vllm:(num_requests_running|num_requests_waiting|gpu_cache_usage_perc|gpu_prefix_cache_hit_rate)/ \
+                 {split($1,a,"{"); printf "%s=%s  ", a[1], $2}
+                 END{print ""}' | sed 's/^/  metrics: /' || true
         grep -aoE "Avg generation throughput:[^,]*|Running: [0-9]+ reqs|Waiting: [0-9]+ reqs|GPU KV cache usage: [0-9.]+%|Prefix cache hit rate: [0-9.]+%" \
             "$vllm_log" 2>/dev/null | tail -5 | paste -sd' ' - | sed 's/^/  vllm: /' || true
+        # A dead engine shows up here before it shows up in trace counts.
+        curl -sf --max-time 5 "http://localhost:${SERVE_PORT}/health" >/dev/null 2>&1 \
+            || log "  ALARM: /health did not respond -- vllm may be down"
         nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw \
             --format=csv,noheader,nounits 2>/dev/null \
             | awk -F', ' '{printf "gpu%s %s%% %sMiB %sW  ", $1,$2,$3,$4} END{print ""}' | sed 's/^/  util: /' || true
