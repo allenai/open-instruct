@@ -278,6 +278,27 @@ from checkpoint 100. Neither continuation repeats the lost evaluation, so the
 dense update-50 and MoE update-100 held-out scores must come from checkpoint
 exports evaluated separately. Both checkpoints exist.
 
+### Sample-backfill dense arm launched — September 16, 17:05 UTC
+
+Group submission strands producer slots behind each group's slowest sibling: the
+dense arm's engines have run 9–12 of 24 allowed requests throughout. MILES
+upstream defaults its fully-async producer to sample backfill; the integration
+layer had overridden that to `group` since `7aa5a3d51` without a recorded reason,
+and the one earlier comparison (September 13, MoE at 4K responses, 487 vs 552
+useful tokens/s) was dominated by producer over-admission rather than stragglers.
+Commit `85353b7bc` makes `sample` the async default; existing continuation TOMLs
+pin `group` explicitly and are unaffected.
+
+[01M2NF8MHRRT6RBEW08Q4D883S](https://beaker.org/ex/01M2NF8MHRRT6RBEW08Q4D883S)
+starts the dense basket from update zero with `rollout_submission_granularity =
+"sample"` and otherwise the c24c settings (admission 24, static fraction 0.85,
+512 in-flight, 5,400 s drain, checkpoints every 5), overlay `85353b7bc` on the
+campaign base image. Config: `runs/dense-broad-backfill-20260916.toml`. Read its
+cadence, running requests per engine, KV retractions and completed-queue discard
+fraction against arm 3's group segments (12.6 min/update); it also supplies a
+second dense trajectory at the matched recipe. Training still consumes whole
+groups, so the objective is unchanged.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
