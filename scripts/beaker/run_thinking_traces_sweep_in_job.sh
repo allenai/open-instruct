@@ -144,6 +144,20 @@ case "$MODELS" in
         export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
         export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-1}"
         export NCCL_DMABUF_ENABLE="${NCCL_DMABUF_ENABLE:-0}"
+        # Torch's NCCL flight recorder keeps a ring buffer of every collective
+        # each rank has started and finished. On a watchdog timeout it writes
+        # the buffer out, which is the only way to see WHICH collective the
+        # stalled ranks were waiting on -- the thing four crash teardowns have
+        # failed to tell us. Costs a few MB of host memory and nothing else.
+        export TORCH_NCCL_TRACE_BUFFER_SIZE="${TORCH_NCCL_TRACE_BUFFER_SIZE:-20000}"
+        export TORCH_NCCL_DUMP_ON_TIMEOUT="${TORCH_NCCL_DUMP_ON_TIMEOUT:-1}"
+        export TORCH_NCCL_DEBUG_INFO_TEMP_FILE="${TORCH_NCCL_DEBUG_INFO_TEMP_FILE:-/tmp/nccl_trace_}"
+        # Turn an indefinite collective spin into a prompt, logged error. The
+        # default watchdog timeout is 10 minutes; the engine took four minutes
+        # to notice the last hang and produced only destructor frames.
+        export TORCH_NCCL_ASYNC_ERROR_HANDLING="${TORCH_NCCL_ASYNC_ERROR_HANDLING:-1}"
+        export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-300}"
+        export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
         ;;
 esac
 export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
@@ -247,6 +261,83 @@ if [ "$_need_s" -gt "$REQUEST_TIMEOUT" ]; then
     log "       request decodes faster, or lower MAX_TOKENS (which censors the length"
     log "       distribution and makes this model incomparable to the others)."
     exit 1
+fi
+
+# py-spy is how we read a wedged rank's stack. Resolve it once: prefer a real
+# binary, fall back to uvx, and degrade to a no-op rather than failing a run.
+PYSPY=(true)
+if command -v py-spy >/dev/null 2>&1; then
+    PYSPY=(py-spy)
+elif command -v uvx >/dev/null 2>&1; then
+    if uvx py-spy --version >/dev/null 2>&1; then PYSPY=(uvx py-spy); fi
+elif command -v pip >/dev/null 2>&1; then
+    pip install --quiet py-spy >/dev/null 2>&1 && command -v py-spy >/dev/null 2>&1 && PYSPY=(py-spy)
+fi
+log "py-spy: ${PYSPY[*]}"
+
+# --- hang diagnostics ---------------------------------------------------------
+# Four Kimi-K3 runs died the same way: all eight GPUs fell from ~670W to ~190W,
+# half the ranks dropped to 0% utilization, /health stopped answering, and only
+# four minutes LATER did CUDA report an illegal memory access -- asynchronously,
+# at a destructor, naming no kernel. Every traceback we have is from teardown.
+# The power collapse is the earliest observable, so it is the trigger: capture
+# per-rank state while the workers are still alive, because once the engine
+# tears down there is nothing left to ask.
+DIAG_DIR="${DIAG_DIR:-/weka/oe-adapt-default/${BEAKER_USER_ID:-shared}/k3_hang_diagnostics/$(date -u +%Y%m%dT%H%M%SZ)}"
+HANG_DUMPS_DONE=0
+HANG_DUMPS_MAX="${HANG_DUMPS_MAX:-3}"
+
+dump_hang_diagnostics() {
+    local reason="$1"
+    if [ "$HANG_DUMPS_DONE" -ge "$HANG_DUMPS_MAX" ]; then return 0; fi
+    HANG_DUMPS_DONE=$(( HANG_DUMPS_DONE + 1 ))
+    local out="$DIAG_DIR/dump${HANG_DUMPS_DONE}_$(date -u +%H%M%SZ)"
+    mkdir -p "$out" 2>/dev/null || true
+    log "  CAPTURING HANG DIAGNOSTICS (${reason}) -> ${out}"
+
+    # Python stacks for every rank. This is the one artifact that names what
+    # each worker is actually executing: whether ranks are inside a collective,
+    # inside an attention kernel launch, or waiting on a peer. --native adds the
+    # C/CUDA frames, which is where the answer lives; it needs ptrace, so fall
+    # back to pure-Python stacks when the kernel refuses.
+    local pids
+    pids=$(pgrep -f 'VLLM::Worker|vllm.*EngineCore|from multiprocessing' 2>/dev/null | head -20)
+    if [ -n "$pids" ]; then
+        for pid in $pids; do
+            ( "${PYSPY[@]}" dump --pid "$pid" --native > "$out/pyspy_native_$pid.txt" 2>&1               || "${PYSPY[@]}" dump --pid "$pid" > "$out/pyspy_$pid.txt" 2>&1 ) &
+        done
+        wait
+        log "  py-spy: dumped $(ls "$out" 2>/dev/null | grep -c pyspy) rank stacks"
+    else
+        log "  py-spy: no worker pids matched"
+    fi
+
+    # Per-GPU detail beyond the four fields the status loop prints: clocks,
+    # throttle reasons, ECC counts and retired pages. An illegal access that is
+    # really an ECC fault or a thermal/power clamp looks identical from outside.
+    nvidia-smi -q > "$out/nvidia_smi_full.txt" 2>&1 || true
+    nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw,clocks_throttle_reasons.active,temperature.gpu,ecc.errors.uncorrected.volatile.total         --format=csv > "$out/nvidia_smi_query.csv" 2>&1 || true
+    # Xid errors are the kernel's own verdict on a GPU fault and outrank
+    # anything CUDA reports from userspace.
+    (dmesg -T 2>/dev/null | tail -200 > "$out/dmesg.txt") || echo "dmesg unavailable" > "$out/dmesg.txt"
+    nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | while read -r g; do
+        nvidia-smi -i "$g" --query-remapped-rows=remapped_rows.pending,remapped_rows.failure             --format=csv >> "$out/remapped_rows.csv" 2>&1 || true
+    done
+
+    # NCCL's own view: the flight recorder dump written by the torch watchdog,
+    # plus whatever the communicator logged.
+    cp /tmp/nccl_trace_* "$out/" 2>/dev/null || true
+    curl -sf --max-time 10 "http://localhost:${SERVE_PORT}/metrics" > "$out/metrics.txt" 2>&1 || true
+    tail -400 "${vllm_log:-/tmp/vllm_${served:-model}.log}" > "$out/vllm_tail.txt" 2>&1 || true
+    log "  hang diagnostics written to ${out}"
+}
+
+# Say up front whether a coredump from a previous crash exists. CUDA writes
+# these only on an exception, and a hang that never raises leaves none -- so
+# an empty directory after a crash is itself evidence about the failure mode.
+if [ -d /weka/oe-adapt-default/shared/k3_coredumps ]; then
+    log "existing CUDA coredumps: $(ls -la /weka/oe-adapt-default/shared/k3_coredumps 2>/dev/null | tail -n +4 | wc -l | tr -d ' ') file(s)"
+    ls -la /weka/oe-adapt-default/shared/k3_coredumps 2>/dev/null | tail -5 | sed 's/^/  /' || true
 fi
 
 log "sweep configuration"
@@ -668,9 +759,25 @@ run_one_model() {
         # Scrape the Prometheus endpoint rather than the log. vLLM emits nothing
         # parseable under some frontends (DP, and the rust frontend), which left
         # earlier runs with no visibility into queue depth or KV pressure at all.
-        curl -sf --max-time 5 "http://localhost:${SERVE_PORT}/metrics" 2>/dev/null \
-          | awk '/^vllm:(num_requests_running|num_requests_waiting|gpu_cache_usage_perc|gpu_prefix_cache_hit_rate)/ \
-                 {split($1,a,"{"); printf "%s=%s  ", a[1], $2}
+        # Match on the exact metric name before the label brace, so that
+        # num_requests_waiting_by_reason stops being counted as
+        # num_requests_waiting (it matched twice and printed twice), and so
+        # that gpu_cache_usage_perc is actually captured. Counters that only
+        # move on completion -- request_success_total, preemptions, and the
+        # generation-token histogram sum -- are what separate "nothing is
+        # finishing" from "things are finishing slowly", which is the exact
+        # distinction four runs of monitoring could not make.
+        curl -sf --max-time 10 "http://localhost:${SERVE_PORT}/metrics" 2>/dev/null \
+          | awk -F'[{ ]' '/^vllm:/ {
+                 name=$1
+                 if (name=="vllm:num_requests_running"        || name=="vllm:num_requests_waiting" ||
+                     name=="vllm:gpu_cache_usage_perc"        || name=="vllm:kv_cache_usage_perc"  ||
+                     name=="vllm:num_preemptions_total"       || name=="vllm:request_success_total" ||
+                     name=="vllm:generation_tokens_total"     || name=="vllm:prompt_tokens_total"  ||
+                     name=="vllm:request_generation_tokens_sum" ||
+                     name=="vllm:request_generation_tokens_count") {
+                     sub(/^vllm:/,"",name); printf "%s=%s  ", name, $NF }
+                 }
                  END{print ""}' | sed 's/^/  metrics: /' || true
         grep -aoE "Avg generation throughput:[^,]*|Running: [0-9]+ reqs|Waiting: [0-9]+ reqs|GPU KV cache usage: [0-9.]+%|Prefix cache hit rate: [0-9.]+%" \
             "$vllm_log" 2>/dev/null | tail -5 | paste -sd' ' - | sed 's/^/  vllm: /' || true
@@ -685,11 +792,30 @@ run_one_model() {
         else
             _health_fails=$(( ${_health_fails:-0} + 1 ))
             log "  /health did not respond within 30s (${_health_fails} in a row)"
-            [ "$_health_fails" -ge 2 ] && log "  ALARM: /health has failed ${_health_fails} times running -- vllm may be down"
+            if [ "$_health_fails" -ge 2 ]; then
+                log "  ALARM: /health has failed ${_health_fails} times running -- vllm may be down"
+                dump_hang_diagnostics "health failed ${_health_fails}x"
+            fi
         fi
-        nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw \
+        _util_line=$(nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw \
             --format=csv,noheader,nounits 2>/dev/null \
-            | awk -F', ' '{printf "gpu%s %s%% %sMiB %sW  ", $1,$2,$3,$4} END{print ""}' | sed 's/^/  util: /' || true
+            | awk -F', ' '{printf "gpu%s %s%% %sMiB %sW  ", $1,$2,$3,$4} END{print ""}')
+        printf '%s\n' "$_util_line" | sed 's/^/  util: /'
+        # The crash signature, made machine-detectable. In all four Kimi-K3
+        # failures mean board power fell from ~670W to ~190W while some ranks
+        # sat at 0% utilization and others stayed pinned at 100% -- a collective
+        # where part of the world has stopped producing. That state persisted
+        # for about four minutes before CUDA raised anything, which is a wide
+        # enough window to capture per-rank stacks if we notice it immediately.
+        _mean_w=$(printf '%s\n' "$_util_line" | grep -oE '[0-9.]+W' | tr -d 'W' \
+                  | awk '{t+=$1; n++} END{if(n)printf "%.0f", t/n; else print 0}')
+        _zero_util=$(printf '%s\n' "$_util_line" | grep -oE ' 0%' | wc -l | tr -d ' ')
+        if [ "${_mean_w:-0}" -gt 0 ] && [ "${_prev_mean_w:-0}" -gt 400 ] && [ "${_mean_w}" -lt 350 ]; then
+            log "  CRITICAL: GPU power collapsed ${_prev_mean_w}W -> ${_mean_w}W with ${_zero_util} rank(s) at 0% util."
+            log "  This is the signature that preceded every previous Kimi-K3 engine death by ~4 minutes."
+            dump_hang_diagnostics "power collapse ${_prev_mean_w}W->${_mean_w}W, ${_zero_util} ranks idle"
+        fi
+        _prev_mean_w="$_mean_w"
       done ) &
     local sync_pid=$!
 

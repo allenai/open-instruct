@@ -204,6 +204,15 @@ def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
 
 
 _LOGGED_MESSAGE_KEYS = False
+# Start times of requests currently in flight, keyed by (prompt_index, sample).
+# A stalled run and a run whose remaining traces are simply long look identical
+# from a completion counter. They do not look identical from the age of the
+# oldest in-flight request: if the oldest is 40 minutes old and the cap needs
+# ~70 minutes at the observed rate, the run is working; if the oldest exceeds
+# the time the cap should take, requests are wedged.
+_INFLIGHT: dict[tuple, float] = {}
+_INFLIGHT_LOCK = threading.Lock()
+_COMPLETED = [0]
 # Enough to rule out a transient blip, small enough to stop within seconds.
 CONSECUTIVE_ERROR_LIMIT = 25
 
@@ -287,7 +296,27 @@ def split_trace(text: str, finish_reason: str) -> tuple[str, str, str]:
     return "", text, KIND_NO_BLOCK
 
 
+def _inflight_snapshot() -> tuple[int, float]:
+    """Number of in-flight requests and the age in seconds of the oldest."""
+    now = time.monotonic()
+    with _INFLIGHT_LOCK:
+        if not _INFLIGHT:
+            return 0, 0.0
+        return len(_INFLIGHT), now - min(_INFLIGHT.values())
+
+
 def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> dict:
+    _key = (prompt.get("index", id(prompt)), sample_index)
+    with _INFLIGHT_LOCK:
+        _INFLIGHT[_key] = time.monotonic()
+    try:
+        return _generate_one_inner(client, args, tokenizer, prompt, sample_index)
+    finally:
+        with _INFLIGHT_LOCK:
+            _INFLIGHT.pop(_key, None)
+
+
+def _generate_one_inner(client, args, tokenizer, prompt: dict, sample_index: int) -> dict:
     """Request a single completion and measure its trace, retrying transient errors."""
     last_error = None
     for attempt in range(args.max_retries + 1):
@@ -463,6 +492,35 @@ def main() -> None:
     started_at = time.monotonic()
 
     mode = "a" if completed else "w"
+    # The completion-driven progress line above prints every 25 traces, which
+    # means it goes silent exactly when a run stalls -- four Kimi-K3 attempts
+    # produced no client-side output at all for the 40+ minutes before they
+    # died. This heartbeat runs on a timer instead, so a stall is reported as
+    # it happens and carries the one number that distinguishes a stall from
+    # slow long traces: the age of the oldest request still in flight.
+    _hb_stop = threading.Event()
+
+    def _heartbeat() -> None:
+        while not _hb_stop.wait(120):
+            n_inflight, oldest_s = _inflight_snapshot()
+            logger.info(
+                "heartbeat: %d in flight, oldest %.1f min, deadline %.0f min, %d completed",
+                n_inflight,
+                oldest_s / 60,
+                args.request_timeout / 60,
+                _COMPLETED[0],
+            )
+            if oldest_s > 0.8 * args.request_timeout:
+                logger.warning(
+                    "heartbeat: oldest in-flight request is at %.0f%% of the %.0fs client "
+                    "deadline. Requests that reach it are killed, retried, and hold their "
+                    "concurrency slot for each attempt.",
+                    100 * oldest_s / args.request_timeout,
+                    args.request_timeout,
+                )
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
+
     with open(args.output, mode) as handle, concurrent.futures.ThreadPoolExecutor(args.concurrency) as pool:
         futures = [pool.submit(generate_one, client, args, tokenizer, p, s) for p, s in work]
         for future in concurrent.futures.as_completed(futures):
@@ -526,16 +584,22 @@ def main() -> None:
                             "model's chat template likely disagree. Full text is being stored, "
                             "so this is fixable offline, but check before trusting the lengths."
                         )
+                _COMPLETED[0] = done
                 if done % 25 == 0 or done == len(work):
                     elapsed = time.monotonic() - started_at
+                    n_inflight, oldest_s = _inflight_snapshot()
                     logger.info(
-                        "%d/%d traces done (%.1f min elapsed, %.1f traces/min)",
+                        "%d/%d traces done (%.1f min elapsed, %.1f traces/min, "
+                        "%d in flight, oldest %.1f min)",
                         done,
                         len(work),
                         elapsed / 60,
                         done / max(elapsed / 60, 1e-9),
+                        n_inflight,
+                        oldest_s / 60,
                     )
 
+    _hb_stop.set()
     logger.info("final trace-shape mix: %s", dict(shapes))
     logger.info("wrote %s", args.output)
 
