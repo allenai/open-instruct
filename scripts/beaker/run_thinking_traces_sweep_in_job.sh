@@ -90,6 +90,18 @@ dump_vllm_failure() {
 : "${TOP_P:=0.95}"
 : "${SEED:=1234}"
 : "${CONCURRENCY:=256}"
+# A completion that runs to MAX_TOKENS must fit inside the client's
+# per-request deadline, or it can never be recorded: the client gives up,
+# retries the same prompt, and gives up again, while the slot stays
+# occupied for the whole attempt. Enough such requests and every slot is
+# held by one, so completions stop entirely while the server still looks
+# healthy. Kimi-K3 deadlocked exactly this way: 128000 tokens at the ~27
+# tok/s/request that 128-way concurrency allows needs ~4700s, against the
+# openai client default of 3600s.
+: "${REQUEST_TIMEOUT:=9000}"
+# Conservative floor for per-request decode speed, used only by the
+# preflight below. Measured 27 tok/s/request for K3 at concurrency 128.
+: "${MIN_DECODE_TOKENS_PER_S:=20}"
 : "${VLLM_MAX_NUM_SEQS:=$CONCURRENCY}"
 : "${VLLM_READY_TIMEOUT:=14400}"
 # vLLM has its own, much shorter deadline for engine-core startup (default
@@ -122,6 +134,17 @@ unset VLLM_PORT
 # JIT-compiles with nvcc, which ensure_nvcc installs below.
 case "$MODELS" in
     *DeepSeek-V4*) : "${VLLM_USE_DEEP_GEMM:=1}"; : "${VLLM_MOE_USE_DEEP_GEMM:=1}" ;;
+    # NCCL settings the official Kimi-K3 recipe recommends for a single
+    # Blackwell node (recipes.vllm.ai/moonshotai/Kimi-K3). MNNVL/CUMEM/NVLS
+    # are the multicast and symmetric-memory paths the a2a DCP backend uses;
+    # DMABUF is turned off because mlx5 dmabuf registration fails on these
+    # nodes and the fallback registration path is what the recipe assumes.
+    *Kimi-K3*)
+        export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+        export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
+        export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-1}"
+        export NCCL_DMABUF_ENABLE="${NCCL_DMABUF_ENABLE:-0}"
+        ;;
 esac
 export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
 export VLLM_MOE_USE_DEEP_GEMM="${VLLM_MOE_USE_DEEP_GEMM:-0}"
@@ -211,6 +234,21 @@ probe_weka_read() {
     fi
 }
 
+# Refuse a configuration where a completion running to MAX_TOKENS cannot
+# finish inside REQUEST_TIMEOUT. Such a run looks healthy for its first
+# few minutes and then stops producing traces forever, which is far more
+# expensive to diagnose than to prevent.
+_need_s=$(( MAX_TOKENS / MIN_DECODE_TOKENS_PER_S ))
+if [ "$_need_s" -gt "$REQUEST_TIMEOUT" ]; then
+    log "FATAL: max_tokens=${MAX_TOKENS} needs ~${_need_s}s at ${MIN_DECODE_TOKENS_PER_S} tok/s/request,"
+    log "       but the client deadline is ${REQUEST_TIMEOUT}s. Long completions could never be"
+    log "       recorded, and would hold concurrency slots until the run stalled outright."
+    log "       Raise REQUEST_TIMEOUT to at least ${_need_s}s, or lower CONCURRENCY so each"
+    log "       request decodes faster, or lower MAX_TOKENS (which censors the length"
+    log "       distribution and makes this model incomparable to the others)."
+    exit 1
+fi
+
 log "sweep configuration"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv || true
 cat <<EOF
@@ -219,6 +257,7 @@ cat <<EOF
   context       : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
+  req deadline  : ${REQUEST_TIMEOUT}s vs ~$(( MAX_TOKENS / MIN_DECODE_TOKENS_PER_S ))s to reach max_tokens at ${MIN_DECODE_TOKENS_PER_S} tok/s/req
   trace store   : ${TRACE_STORE}
   flashinfer    : prebuilt wheels=${FLASHINFER_WHEELS:-off} v${FLASHINFER_VERSION} sampler=${VLLM_USE_FLASHINFER_SAMPLER}
   JIT paths off : DEEP_GEMM=${VLLM_USE_DEEP_GEMM} MOE_DEEP_GEMM=${VLLM_MOE_USE_DEEP_GEMM}
@@ -662,6 +701,7 @@ run_one_model() {
         --temperature "$TEMPERATURE" --top-p "$TOP_P" \
         --max-tokens "$MAX_TOKENS" --max-prompt-tokens "$MAX_PROMPT_TOKENS" \
         --seed "$SEED" --concurrency "$CONCURRENCY" \
+        --request-timeout "$REQUEST_TIMEOUT" \
         ${ctk:+--chat-template-kwargs "$ctk"} \
         --prompts-output "$RESULTS_DIR/prompts_${served}.jsonl" \
         ${resume_flag[@]+"${resume_flag[@]}"} \
