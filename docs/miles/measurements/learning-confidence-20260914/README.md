@@ -129,6 +129,19 @@ warm figure from the previous allocation was 44 s. The background compiler-cache
 publication ran after checkpoint 50; the next restart will show whether the
 restored cache removes this warmup.
 
+### Warm cadence at admission 16 — September 16, 00:25 UTC
+
+| Arm | Updates | Warm cadence | Wait for batch | Score + train | Engines |
+| --- | --- | --- | --- | --- | --- |
+| MoE c16 | 51 → 57 after the evaluation | **2.7–4.9 min/update** (admission 8: 7.8) | 2.4–3.3 min | 93 s and still falling toward the 44 s seen last allocation | 14.7 running of 16, 74% of samples full |
+| Dense g16 | 6 → 17 | 13.3 min/update (predecessor 47) | 11.0 min | 153 s | 8.9 running of 16, KV-limited; 49% of samples at ≤4 running |
+
+The MoE change paid off roughly twofold once the trainer warmed; its remaining
+143 updates project to about 9 hours of warm training. The dense arm remains
+generation-bound by its KV pool and the whole-group tail; the prepared
+`dense-broad-kv` continuation (static fraction 0.85, requested pool 458,752
+tokens) is the next change, to be applied at its four-hour preemption.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
