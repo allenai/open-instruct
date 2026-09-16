@@ -5,7 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
-| [Overfit diagnostic: Core and Megatron on 16 fixed GSM8K prompts](overfit-20260915.md) | Fully async update-correctness check; both arms raise training reward, mechanics and timing recorded |
+| [Overfit diagnostic: Core and Megatron on 16 fixed GSM8K prompts](overfit-20260915.md) | Fully async update-correctness check on both arms, plus Core null, sign-flip, learning-rate and re-score controls |
 | [Faster trainer and 200-update task baseline](full-sft-basket-20260914.md) | EP2 qualification, fixed multi-domain data and EP8 baseline |
 | [Throughput and queue qualification](throughput-20260913.md) | September 13 steady-state configuration comparisons, occupancy figures and limitations |
 | [Throughput campaign log](throughput-campaign-20260913.md) | Chronological controls, runtime repairs and allocation decisions |

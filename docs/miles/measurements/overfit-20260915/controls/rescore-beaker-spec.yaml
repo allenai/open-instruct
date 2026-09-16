@@ -1,0 +1,18 @@
+version: v2
+budget: ai2/oe-other
+description: Re-score Core overfit rollouts and write sign-flip and hard-subset prompt files
+tasks:
+- name: overfit-controls-prep-20260916
+  image: {beaker: 01M2F1RKZFZVJYAS0XQGEC3SEJ}
+  command: [bash, -c]
+  arguments: ["set -euo pipefail; cd /opt/core-rl; mkdir -p /output; echo <base64 of rescore_and_prepare.py> | base64 -d > /output/prep.py; python /output/prep.py 2>&1 | tee /output/prep.log"]
+  datasets:
+  - {mountPath: /weka/oe-training-default, source: {weka: oe-training-default}}
+  result: {path: /output}
+  resources: {gpuCount: 0, cpuCount: 4, memory: 32 GiB}
+  context: {priority: urgent, minRuntime: 5m}
+  constraints: {cluster: [ai2/saturn]}
+  timeout: 30m
+  envVars:
+  - {name: HF_HOME, value: /tmp/hf-cache}
+  - {name: TOKENIZERS_PARALLELISM, value: "false"}
