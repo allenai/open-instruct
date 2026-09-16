@@ -683,3 +683,22 @@ def test_basket_launch_passes_profile_steps_and_judge_only_to_gpu_stages():
     )
     assert "replicas" not in gsm8k["tasks"][0] and "ray_node_setup" not in gsm8k["tasks"][0]["arguments"][0]
     assert "replicas" not in prepare["tasks"][0] and "ray_node_setup" not in prepare["tasks"][0]["arguments"][0]
+
+
+def test_resume_syncs_weights_once_per_step():
+    source = Path("/stage/open_instruct/grpo_fast.py").read_text()
+    patched, _ = original_baseline.patch_trainer(source)
+    tree = ast.parse(patched)
+    thread = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "weight_sync_thread")
+    # The thread no longer fires its own start-up sync on resume ...
+    assert not [n for n in ast.walk(thread) if isinstance(n, ast.If) and "resume_training_step" in ast.unparse(n)]
+    # ... while the main loop still triggers one sync at the top of every step.
+    loop = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run_training")
+    triggers = [
+        n for n in ast.walk(loop) if "weight_sync_trigger_event.set()" in ast.unparse(n) and isinstance(n, ast.Expr)
+    ]
+    assert len(triggers) == 1
+    original_thread = next(
+        n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef) and n.name == "weight_sync_thread"
+    )
+    assert [n for n in ast.walk(original_thread) if isinstance(n, ast.If) and "resume_training_step" in ast.unparse(n)]

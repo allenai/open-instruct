@@ -307,6 +307,13 @@ def patch_trainer(text, *, keep_zero_advantage_groups=False):
             "before": "            training_step % args.local_eval_every == 0\n",
             "after": "            (training_step % args.local_eval_every == 0 or (training_step == 1 and args.eval_on_step_0))\n",
         },
+        "single_resume_sync": {
+            # The main loop triggers a weight sync at the top of every step, including the
+            # resumed one; the thread's own start-up trigger queued a second, redundant
+            # 710-parameter broadcast round immediately after the first.
+            "before": "    if resume_training_step > 1:\n        weight_sync_trigger_event.set()\n",
+            "after": "    # Resume relies on the main loop's per-step trigger; no extra start-up sync.\n",
+        },
     }
     if keep_zero_advantage_groups:
         changes["retain_zero_advantage_groups"] = {
