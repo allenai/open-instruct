@@ -30,7 +30,7 @@ uv run python mason.py \
     --lr_scheduler_type linear \
     --weight_decay 0.0 \
     --logging_steps 1 \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --chat_template_name olmo_thinker \
     --with_tracking \
     --eval_workspace usable-olmo \

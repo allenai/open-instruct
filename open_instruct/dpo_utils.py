@@ -214,6 +214,8 @@ class DPOExperimentConfig(
 
     _VALID_DICT_FIELDS = ["additional_model_arguments", "optimizer_kwargs"]
 
+    gradient_checkpointing: bool = False
+    """Deprecated. Use activation_memory_budget instead. When True, sets activation_memory_budget to 0.5."""
     exp_name: str = "dpo"
     transform_fn: list[str] = field(
         default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
@@ -335,6 +337,9 @@ class DPOExperimentConfig(
             )
         if isinstance(self.loss_type, str):
             self.loss_type = DPOLossType(self.loss_type)
+
+        if self.gradient_checkpointing and self.activation_memory_budget == 1.0:
+            self.activation_memory_budget = 0.5
 
         if self.dataset_name is None and self.dataset_mixer is None and self.mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")

@@ -43,7 +43,7 @@ do
         --lr_scheduler_type linear \
         --weight_decay 0.0 \
         --logging_steps 1 \
-        --gradient_checkpointing \
+        --activation_memory_budget 0.5 \
         --chat_template_name olmo123 \
         --with_tracking \
         --log_grad_norm True \
