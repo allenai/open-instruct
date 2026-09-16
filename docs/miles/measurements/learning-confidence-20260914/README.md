@@ -183,6 +183,18 @@ The original-framework arm (arm 1) is training on two Jupiter nodes
 step 1 generated 256 samples in 1,075 s at 3,607 tokens/s across ten eager
 vLLM engines, versus 917 tokens/s from two engines in the single-node smoke.
 
+### Arm 1 steady cadence — September 16, 05:42 UTC
+
+After its initial 512-prompt evaluation drained off the shared engines, the
+original-framework basket arm settled at **12–14 minutes per driver step**
+(steps 4–6: 747, 820 and 716 s), of which 673 s is waiting for the 256-sample
+collection and about 90 s is training on four learners; the trainer is idle
+about 85 percent of the time, as in the MILES dense arm. Initial held-out mean
+reward across all 512 prompts was 0.38 (all domains pooled, the original's
+single `eval/scores`). Projection: 100 steps in about 21 hours of run time plus
+two evaluations, before Jupiter preemptions. Dense MILES arm: update 33 at
+12.4 min per update; MoE continuation from checkpoint 100 is queued for slots.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
