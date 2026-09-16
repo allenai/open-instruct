@@ -517,3 +517,129 @@ def test_explicit_resume_launch_reuses_run_and_enables_preemption_recovery():
     assert "original_baseline.py resume" in task["arguments"][0]
     assert "--keep-zero-advantage-groups" in task["arguments"][0]
     assert {e["name"]: e.get("value") for e in task["envVars"]}["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] == "1"
+
+
+# --- Four-domain basket profile -------------------------------------------------
+
+
+def basket_row(name, target):
+    sample = row()
+    sample["metadata"]["prepared_sample_id"] = f"basket:{name}"
+    sample["metadata"]["verifiers"] = [{"name": name, "target": target, "weight": 1.0}]
+    return sample
+
+
+@pytest.mark.parametrize(
+    "name, target, expected",
+    [
+        ("math", "\\frac{1}{2}", "\\frac{1}{2}"),
+        ("ifeval", {"func_name": "validate_lowercase", "N": None}, '{"N": null, "func_name": "validate_lowercase"}'),
+        ("code", ["assert f(1) == 2", "assert f(2) == 3"], '["assert f(1) == 2", "assert f(2) == 3"]'),
+        ("code_stdio", '[{"input": "1", "output": "2"}]', '[{"input": "1", "output": "2"}]'),
+        ("general-quality", "reference answer", "reference answer"),
+        ("general-quality_ref", "reference answer", "reference answer"),
+    ],
+)
+def test_basket_rows_keep_the_original_verifier_name_and_serialize_labels(name, target, expected):
+    converted = original_baseline.convert_row(basket_row(name, target), Tokenizer(), profile="basket")
+    assert converted["dataset"] == name
+    assert converted["ground_truth"] == expected
+    assert isinstance(converted["ground_truth"], str)
+
+
+@pytest.mark.parametrize("bad", [basket_row("gsm8k", "1"), basket_row("math", {"unexpected": 1})])
+def test_basket_rows_reject_foreign_verifiers_and_unknown_label_types(bad):
+    with pytest.raises(ValueError, match="basket rows require|Unsupported frozen target"):
+        original_baseline.convert_row(bad, Tokenizer(), profile="basket")
+    with pytest.raises(ValueError, match="unit-weight GSM8K"):
+        original_baseline.convert_row(basket_row("math", "1"), Tokenizer())
+
+
+def test_basket_frozen_splits_merge_the_four_held_out_domains(tmp_path):
+    def write(name, count, label):
+        (tmp_path / name).write_text("".join(json.dumps({"input": f"{label} {i}"}) + "\n" for i in range(count)))
+
+    write("train.jsonl", 5, "train")
+    for domain in ("math", "ifeval", "code", "general"):
+        write(f"{domain}.jsonl", 128, domain)
+    splits = original_baseline.frozen_splits(tmp_path, "basket")
+    assert len(splits["train"]) == 5 and len(splits["eval"]) == 512
+    assert [r["input"] for r in splits["eval"][:2]] == ["math 0", "math 1"]
+    write("code.jsonl", 100, "code")
+    with pytest.raises(ValueError, match="128 frozen rows"):
+        original_baseline.frozen_splits(tmp_path, "basket")
+
+
+def test_basket_training_options_follow_the_released_recipe_and_gsm8k_is_unchanged(tmp_path):
+    basket = original_baseline.training_options(
+        tmp_path / "prepared", tmp_path / "run", profile="basket", steps=100, smoke=False
+    )
+    assert (basket["num_unique_prompts_rollout"], basket["num_samples_per_prompt_rollout"]) == (64, 4)
+    assert basket["total_episodes"] == 100 * 64 * 4
+    assert (basket["num_learners_per_node"], basket["vllm_num_engines"]) == (4, 3)
+    assert basket["llm_judge_model"] == "hosted_vllm/Qwen/Qwen3-32B"
+    assert basket["llm_judge_max_context_length"] == 32768 and basket["llm_judge_max_tokens"] == 2048
+    assert basket["code_api_url"] == original_baseline.CODE_API_URL
+    assert basket["code_pass_rate_reward_threshold"] == 0.99
+    assert basket["response_length"] == 32768 and basket["learning_rate"] == 1e-6 and basket["beta"] == 0.0
+    assert basket["checkpoint_state_freq"] == 25 and basket["local_eval_every"] == 50
+    gsm8k = original_baseline.training_options(
+        tmp_path / "prepared", tmp_path / "run", profile="gsm8k", steps=200, smoke=False
+    )
+    assert (gsm8k["num_unique_prompts_rollout"], gsm8k["vllm_num_engines"]) == (16, 4)
+    assert "llm_judge_model" not in gsm8k and "code_api_url" not in gsm8k
+    smoke = original_baseline.training_options(
+        tmp_path / "prepared", tmp_path / "run", profile="gsm8k", steps=3, smoke=True
+    )
+    assert smoke["num_unique_prompts_rollout"] == 128
+    assert set(original_baseline.TRAINER_GPUS.split(",")).isdisjoint({original_baseline.JUDGE_GPU})
+
+
+def test_judge_service_uses_the_prepared_miles_snapshot_and_template(tmp_path):
+    template = tmp_path / "judge.jinja"
+    template.write_text("{{ messages }}<|im_start|>assistant\n<think>\n\n</think>\n\n")
+    prepared = {
+        "verdict": "passed",
+        "model": "Qwen/Qwen3-32B",
+        "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+        "snapshot": str(tmp_path / "snapshot"),
+        "template": str(template),
+        "template_sha256": original_baseline.sha(template.read_bytes()),
+        "rendered_canary": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    }
+    (tmp_path / "prepared.json").write_text(json.dumps(prepared))
+    service = original_baseline.judge_service(tmp_path)
+    command = service["command"]
+    assert command[command.index("--model") + 1] == str(tmp_path / "snapshot")
+    assert command[command.index("--chat-template") + 1] == str(template)
+    assert command[command.index("--served-model-name") + 1] == "Qwen/Qwen3-32B"
+    assert service["api_base"] == "http://127.0.0.1:8001/v1"
+    assert "command" in service and service["template_sha256"] == prepared["template_sha256"]
+    template.write_text("changed")
+    with pytest.raises(ValueError, match="template hash"):
+        original_baseline.judge_service(tmp_path)
+    template.write_text("{{ messages }}<|im_start|>assistant\n<think>\n\n</think>\n\n")
+    prepared["rendered_canary"] = "<|im_start|>assistant\n"
+    (tmp_path / "prepared.json").write_text(json.dumps(prepared))
+    with pytest.raises(ValueError, match="thinking block"):
+        original_baseline.judge_service(tmp_path)
+
+
+def test_basket_launch_passes_profile_steps_and_judge_only_to_gpu_stages():
+    train = launch_original_baseline.specification("image", "source", "train", "test", profile="basket", steps=100)
+    command = train["tasks"][0]["arguments"][0]
+    assert "--profile basket" in command and "--steps 100" in command and "--judge-prepared" in command
+    assert launch_original_baseline.PROFILES["basket"]["source"].endswith("g16-20260915/prepared/data")
+    assert train["tasks"][0]["resources"]["gpuCount"] == 8
+    assert train["tasks"][0]["constraints"] == {"cluster": ["ai2/jupiter"]}
+    assert {e["name"]: e.get("value") for e in train["tasks"][0]["envVars"]}[
+        "WANDB_RUN_GROUP"
+    ] == "dolci-basket-32k-zero-20260914"
+    prepare = launch_original_baseline.specification("image", "source", "prepare", "test", profile="basket")
+    assert "--judge-prepared" not in prepare["tasks"][0]["arguments"][0]
+    assert "--profile basket" in prepare["tasks"][0]["arguments"][0]
+    gsm8k = launch_original_baseline.specification("image", "source", "train", "test")
+    assert (
+        "--profile gsm8k" in gsm8k["tasks"][0]["arguments"][0]
+        and "--judge-prepared" not in gsm8k["tasks"][0]["arguments"][0]
+    )

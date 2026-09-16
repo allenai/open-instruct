@@ -17,6 +17,17 @@ ROOT = Path(__file__).resolve().parents[2]
 MODEL = "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66"
 SOURCE = "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r2-20260914/prepared/data"
 PREPARED = "/weka/oe-training-default/robertb/open-instruct/data/olmo3-sft-gsm8k-original-retrofit-20260914"
+# The four-domain basket arm reuses the frozen data the MILES dense g16 run
+# prepared (same rendered prompts, labels and held-out identities) and the
+# MILES prepared judge (same Qwen3-32B snapshot and no-thinking template).
+PROFILES = {
+    "gsm8k": {"source": SOURCE, "prepared": PREPARED, "judge_prepared": None},
+    "basket": {
+        "source": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/data",
+        "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916",
+        "judge_prepared": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge",
+    },
+}
 
 
 def specification(
@@ -29,8 +40,11 @@ def specification(
     checkpoint_root=None,
     checkpoint_tag=None,
     evaluation_model=None,
+    profile="gsm8k",
+    steps=None,
 ):
     output = "/weka/oe-training-default/robertb/open-instruct/runs/" + name
+    paths = PROFILES[profile]
     args = [
         "python",
         "/tmp/qualification/scripts/miles/original_baseline.py",
@@ -38,12 +52,18 @@ def specification(
         "--model",
         evaluation_model or MODEL,
         "--source",
-        SOURCE,
+        paths["source"],
         "--prepared",
-        PREPARED,
+        paths["prepared"],
         "--output",
         output,
+        "--profile",
+        profile,
     ]
+    if steps is not None:
+        args.extend(["--steps", str(steps)])
+    if paths["judge_prepared"] and stage in {"train", "smoke", "resume"}:
+        args.extend(["--judge-prepared", paths["judge_prepared"]])
     if stage == "export":
         if not checkpoint_root or not checkpoint_tag:
             raise ValueError("export requires checkpoint_root and checkpoint_tag")
@@ -61,7 +81,9 @@ def specification(
         "TOKENIZERS_PARALLELISM": "false",
         "OMP_NUM_THREADS": "2",
         "HF_HOME": "/tmp/hf-cache",
-        "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914",
+        "WANDB_RUN_GROUP": (
+            "dolci-basket-32k-zero-20260914" if profile == "basket" else "olmo3-sft-learning-confidence-20260914"
+        ),
         "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
         "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     }
@@ -118,6 +140,8 @@ def main():
     parser.add_argument("--checkpoint-root")
     parser.add_argument("--checkpoint-tag")
     parser.add_argument("--evaluation-model", help="Public HF model for independent evaluation")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="gsm8k")
+    parser.add_argument("--steps", type=int, help="Driver steps for train/resume (default: profile budget)")
     args = parser.parse_args()
     if args.image != "01KA3FGCMVYGVEX2NG7Q2JWZ8E":
         raise ValueError("Use the qualified historical Think image 01KA3FGCMVYGVEX2NG7Q2JWZ8E")
@@ -135,6 +159,8 @@ def main():
             "archive_sha256": hashlib.sha256(raw).hexdigest(),
             "trainer": "original-open-instruct",
             "keep_zero_advantage_groups": args.keep_zero_advantage_groups,
+            "profile": args.profile,
+            "steps": args.steps,
         }
         (directory / "provenance.json").write_text(json.dumps(provenance, indent=2))
         source_dataset = "SOURCE_DATASET"
@@ -170,6 +196,8 @@ def main():
             checkpoint_root=args.checkpoint_root,
             checkpoint_tag=args.checkpoint_tag,
             evaluation_model=args.evaluation_model,
+            profile=args.profile,
+            steps=args.steps,
         )
         if args.render_only:
             print(json.dumps(spec, indent=2))

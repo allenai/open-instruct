@@ -1,10 +1,13 @@
-"""Frozen-data adapter for a historical Open Instruct GSM8K comparison.
+"""Frozen-data adapter for historical Open Instruct comparisons.
 
 Run inside the original Olmo 3 image. The original trainer and verifiers remain
 in that image; Adam beta2 is aligned and the initial evaluation is explicitly scheduled.
+Two profiles exist: the single-verifier GSM8K control and the four-domain Dolci
+basket, which also hosts the original recipe's Qwen3-32B judge inside the job.
 """
 
 import argparse
+import collections
 import fcntl
 import hashlib
 import importlib
@@ -14,6 +17,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -25,6 +30,38 @@ from open_instruct import dataset_transformation
 
 ORIGINAL_TRAINER_SHA256 = "6367478b4c957cfe595745dd1549ad1884585fc7bc4b21a589cbe8ed46cee3b1"
 PASSTHROUGH_TEMPLATE = "{{ messages[0]['content'] }}"
+# The released Olmo 3 Think recipe's shared code-execution endpoint; the MILES
+# basket grades against the same service with the same pass-rate threshold.
+CODE_API_URL = "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program"
+JUDGE_PORT = 8001
+JUDGE_MODEL = "Qwen/Qwen3-32B"
+JUDGE_GPU = "7"
+TRAINER_GPUS = "0,1,2,3,4,5,6"
+PROFILES = {
+    "gsm8k": {
+        "verifiers": {"gsm8k"},
+        "eval_files": ("eval.jsonl",),
+        "train_count": 6000,
+        "eval_count": 512,
+        "prompts": 16,
+        "engines": 4,
+        "steps": 200,
+        "judge": False,
+        "wandb_group": "olmo3-sft-learning-confidence-20260914",
+    },
+    "basket": {
+        # Original Open Instruct verifier names, as carried by the frozen Dolci basket rows.
+        "verifiers": {"math", "ifeval", "code", "code_stdio", "general-quality", "general-quality_ref"},
+        "eval_files": ("math.jsonl", "ifeval.jsonl", "code.jsonl", "general.jsonl"),
+        "train_count": None,
+        "eval_count": 512,
+        "prompts": 64,
+        "engines": 3,
+        "steps": 100,
+        "judge": True,
+        "wandb_group": "dolci-basket-32k-zero-20260914",
+    },
+}
 
 
 def sha(data):
@@ -35,14 +72,32 @@ def encoded(value):
     return (json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n").encode()
 
 
-def convert_row(row, tokenizer):
+def ground_truth(name, target):
+    """Serialize a frozen MILES verifier target as the original verifiers read labels.
+
+    The historical verifiers take one string label: scalar answers stay strings,
+    IFEval constraints and code tests are JSON strings (the original parses them).
+    """
+    if name == "gsm8k":
+        return str(target)
+    if isinstance(target, str):
+        return target
+    if name in ("ifeval", "code", "code_stdio") and isinstance(target, (dict, list)):
+        return json.dumps(target, sort_keys=True, ensure_ascii=False)
+    raise ValueError(f"Unsupported frozen target type for {name}: {type(target).__name__}")
+
+
+def convert_row(row, tokenizer, *, profile="gsm8k"):
     specs = row["metadata"]["verifiers"]
-    if len(specs) != 1 or specs[0]["name"] != "gsm8k" or specs[0].get("weight", 1) != 1:
-        raise ValueError("Original GSM8K control requires exactly one unit-weight GSM8K verifier")
+    names = PROFILES[profile]["verifiers"]
+    if len(specs) != 1 or specs[0]["name"] not in names or specs[0].get("weight", 1) != 1:
+        if profile == "gsm8k":
+            raise ValueError("Original GSM8K control requires exactly one unit-weight GSM8K verifier")
+        raise ValueError(f"Original basket rows require exactly one unit-weight verifier from {sorted(names)}")
     result = {
         "messages": [{"role": "user", "content": row["input"]}],
-        "ground_truth": str(specs[0]["target"]),
-        "dataset": "gsm8k",
+        "ground_truth": ground_truth(specs[0]["name"], specs[0]["target"]),
+        "dataset": specs[0]["name"],
         "prepared_sample_id": row["metadata"]["prepared_sample_id"],
     }
     transformed = dataset_transformation.rlvr_tokenize_v2(dict(result), tokenizer)
@@ -120,7 +175,28 @@ def restore_public_exports(output, source):
     return restored
 
 
-def prepare(model, source, output):
+def frozen_splits(source, profile):
+    """Read the frozen MILES splits; basket held-out domains merge into one eval file."""
+    settings = PROFILES[profile]
+    train = read_jsonl(source / "train.jsonl")
+    evaluation = []
+    for filename in settings["eval_files"]:
+        rows = read_jsonl(source / filename)
+        if profile == "basket" and len(rows) != settings["eval_count"] // len(settings["eval_files"]):
+            raise ValueError(
+                f"Expected {settings['eval_count'] // len(settings['eval_files'])} frozen rows in {filename}"
+            )
+        evaluation.extend(rows)
+    if settings["train_count"] is not None and len(train) != settings["train_count"]:
+        raise ValueError(f"Expected {settings['train_count']} frozen train rows")
+    if not train:
+        raise ValueError("Frozen training split is empty")
+    if len(evaluation) != settings["eval_count"]:
+        raise ValueError(f"Expected {settings['eval_count']} frozen eval rows")
+    return {"train": train, "eval": evaluation}
+
+
+def prepare(model, source, output, *, profile="gsm8k"):
     if output.exists():
         raise ValueError("Prepared comparison directory already exists; verify or use a fresh path")
     manifest = json.loads((source / "manifest.json").read_text())
@@ -143,6 +219,7 @@ def prepare(model, source, output):
         receipt = {
             "model": str(model),
             "source": str(source),
+            "profile": profile,
             "model_alias": alias,
             "splits": {},
             "original_chat_template_sha256": sha(original_template.encode()),
@@ -150,21 +227,22 @@ def prepare(model, source, output):
             "source_manifest_sha256": sha((source / "manifest.json").read_bytes()),
         }
         identities = []
-        for split, expected_count in (("train", 6000), ("eval", 512)):
-            rows = read_jsonl(source / f"{split}.jsonl")
-            if len(rows) != expected_count:
-                raise ValueError(f"Expected {expected_count} frozen {split} rows")
-            converted = [convert_row(row, tokenizer) for row in rows]
+        for split, rows in frozen_splits(source, profile).items():
+            converted = [convert_row(row, tokenizer, profile=profile) for row in rows]
             ids = {row["prepared_sample_id"] for row in converted}
-            if len(ids) != len(converted):
+            if profile == "gsm8k" and len(ids) != len(converted):
                 raise ValueError("Duplicate source identities")
             identities.append(ids)
             raw = b"".join(encoded(row) for row in converted)
             (staging / f"{split}.jsonl").write_bytes(raw)
-            (staging / f"smoke-{split}.jsonl").write_bytes(
-                b"".join(encoded(row) for row in converted[: 64 if split == "train" else 8])
-            )
-            receipt["splits"][split] = {"rows": len(converted), "sha256": sha(raw), "all_prompt_tokens_equal": True}
+            smoke_rows = converted[: (256 if profile == "basket" else 64) if split == "train" else 8]
+            (staging / f"smoke-{split}.jsonl").write_bytes(b"".join(encoded(row) for row in smoke_rows))
+            receipt["splits"][split] = {
+                "rows": len(converted),
+                "sha256": sha(raw),
+                "all_prompt_tokens_equal": True,
+                "datasets": dict(sorted(collections.Counter(row["dataset"] for row in converted).items())),
+            }
         if identities[0] & identities[1]:
             raise ValueError("Training and heldout identities overlap")
         receipt["files"] = {
@@ -250,7 +328,7 @@ def completion_record(steps, updates, exports, invocation):
     }
 
 
-def prepare_resume(output, record):
+def prepare_resume(output, record, *, steps=200):
     """Check the unchanged recipe and native rank metadata before resuming."""
     previous = json.loads((output / "invocation.json").read_text())
     for key in ("command", "original_source_sha256", "model_alias"):
@@ -266,23 +344,23 @@ def prepare_resume(output, record):
     newer = [p.name for p in root.glob("global_step*") if p.name[11:].isdigit() and int(p.name[11:]) > int(tag[11:])]
     if newer:
         raise ValueError(f"Inspect incomplete newer checkpoints before resuming: {newer}")
-    steps = []
+    clocks = []
     for rank in range(4):
         state = torch.load(
             checkpoint / f"zero_pp_rank_{rank}_mp_rank_00_model_states.pt", map_location="cpu", weights_only=False
         )
         if "rng_states" not in state or type(state.get("training_step")) is not int:
             raise ValueError("Checkpoint lacks optimizer update clock or RNG state")
-        steps.append(state["training_step"])
+        clocks.append(state["training_step"])
         shard = checkpoint / f"bf16_zero_pp_rank_{rank}_mp_rank_00_optim_states.pt"
         if not shard.is_file() or shard.stat().st_size == 0:
             raise ValueError(f"Missing optimizer shard for rank {rank}")
-    if len(set(steps)) != 1 or not 0 < steps[0] < 200:
-        raise ValueError(f"Invalid checkpoint update clocks: {steps}")
+    if len(set(clocks)) != 1 or not 0 < clocks[0] < steps:
+        raise ValueError(f"Invalid checkpoint update clocks: {clocks}")
     ledger = output / "optimizer-updates.jsonl"
     updates = read_jsonl(ledger)
-    retained = [u for u in updates if u["driver_step"] <= steps[0]]
-    if not retained or retained[-1]["driver_step"] != steps[0]:
+    retained = [u for u in updates if u["driver_step"] <= clocks[0]]
+    if not retained or retained[-1]["driver_step"] != clocks[0]:
         raise ValueError("Update ledger does not cover the saved checkpoint")
     attempt = uuid.uuid4().hex
     shutil.copyfile(ledger, output / f"optimizer-updates-before-resume-{attempt}.jsonl")
@@ -291,7 +369,7 @@ def prepare_resume(output, record):
     temporary.replace(ledger)
     result = {
         "checkpoint": str(checkpoint),
-        "completed_steps": steps[0],
+        "completed_steps": clocks[0],
         "discarded_unsaved_updates": len(updates) - len(retained),
         "invocation": record,
     }
@@ -300,7 +378,18 @@ def prepare_resume(output, record):
     return result
 
 
-def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, resume=False):
+def train(
+    model,
+    prepared,
+    output,
+    *,
+    smoke,
+    keep_zero_advantage_groups=False,
+    resume=False,
+    profile="gsm8k",
+    steps=None,
+    judge_prepared=None,
+):
     output.parent.mkdir(parents=True, exist_ok=True)
     with (output.parent / f".{output.name}.run.lock").open("a") as lock:
         try:
@@ -308,37 +397,98 @@ def train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, r
         except BlockingIOError as error:
             raise ValueError("Another process owns this original-framework run") from error
         return _train(
-            model, prepared, output, smoke=smoke, keep_zero_advantage_groups=keep_zero_advantage_groups, resume=resume
+            model,
+            prepared,
+            output,
+            smoke=smoke,
+            keep_zero_advantage_groups=keep_zero_advantage_groups,
+            resume=resume,
+            profile=profile,
+            steps=steps,
+            judge_prepared=judge_prepared,
         )
 
 
-def _train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, resume=False):
-    receipt = json.loads((prepared / "preparation.json").read_text())
-    if receipt["model"] != str(model):
-        raise ValueError("Prepared model identity differs")
-    for name, digest in receipt["files"].items():
-        if sha((prepared / name).read_bytes()) != digest:
-            raise ValueError(f"Prepared artifact changed: {name}")
-    for name, link in receipt["model_alias"]["links"].items():
-        path = prepared / "legacy-model" / name
-        if not path.is_symlink() or str(path.resolve()) != link["target"] or path.stat().st_size != link["size"]:
-            raise ValueError(f"Original model alias changed: {name}")
-    if output.exists() and not resume:
-        raise ValueError("Use a fresh original-framework run directory, or explicitly resume its native checkpoint")
-    if resume and not (output / "invocation.json").is_file():
-        raise ValueError("Resume requires an existing original-framework invocation")
-    output.mkdir(parents=True, exist_ok=resume)
-    trainer = Path("/stage/open_instruct/grpo_fast.py")
-    original = trainer.read_bytes()
-    if sha(original) != ORIGINAL_TRAINER_SHA256:
-        raise ValueError("Original trainer source differs from the audited image")
-    patched, changes = patch_trainer(original.decode(), keep_zero_advantage_groups=keep_zero_advantage_groups)
-    trainer.write_text(patched)
-    steps = 3 if smoke else 200
+def judge_service(judge_prepared):
+    """The vLLM OpenAI server hosting the recipe's Qwen3-32B judge on one reserved GPU.
+
+    The prepared judge directory is the one MILES uses: same immutable snapshot
+    and the same no-thinking chat template, so both frameworks grade with the
+    identical judge model, prompt and template.
+    """
+    prepared = json.loads((Path(judge_prepared) / "prepared.json").read_text())
+    if prepared.get("verdict") != "passed" or prepared.get("model") != JUDGE_MODEL:
+        raise ValueError("Prepared judge identity differs from the recipe's Qwen3-32B judge")
+    if sha(Path(prepared["template"]).read_bytes()) != prepared["template_sha256"]:
+        raise ValueError("Prepared judge template hash mismatch")
+    if "<think>\n\n</think>" not in prepared.get("rendered_canary", ""):
+        raise ValueError("Prepared judge template does not close its thinking block")
+    command = [
+        sys.executable,
+        "-m",
+        "vllm.entrypoints.openai.api_server",
+        "--model",
+        prepared["snapshot"],
+        "--served-model-name",
+        JUDGE_MODEL,
+        "--chat-template",
+        prepared["template"],
+        "--dtype",
+        "bfloat16",
+        "--max-model-len",
+        "40960",
+        "--gpu-memory-utilization",
+        "0.92",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(JUDGE_PORT),
+        "--disable-log-requests",
+    ]
+    return {
+        "command": command,
+        "api_base": f"http://127.0.0.1:{JUDGE_PORT}/v1",
+        "snapshot": prepared["snapshot"],
+        "template_sha256": prepared["template_sha256"],
+        "revision": prepared.get("revision"),
+    }
+
+
+def start_judge(service, log_path, *, timeout=1800):
+    """Start the judge on the reserved GPU and wait until it serves /health."""
+    # The handle must outlive this function: the server writes to it for the whole run.
+    log = open(log_path, "ab")  # noqa: SIM115
+    process = subprocess.Popen(
+        service["command"], stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "CUDA_VISIBLE_DEVICES": JUDGE_GPU}
+    )
+    deadline = time.monotonic() + timeout
+    health = service["api_base"].removesuffix("/v1") + "/health"
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"Judge server exited with {process.returncode} before becoming healthy; see {log_path}"
+            )
+        try:
+            with urllib.request.urlopen(health, timeout=5) as response:
+                if response.status == 200:
+                    return process
+        except Exception:
+            pass
+        time.sleep(5)
+    process.terminate()
+    raise RuntimeError(f"Judge server did not become healthy within {timeout}s; see {log_path}")
+
+
+def training_options(prepared, output, *, profile, steps, smoke, keep_zero_advantage_groups=False):
+    """The historical trainer arguments for one profile; pure so tests can check them."""
+    settings = PROFILES[profile]
     prefix = "smoke-" if smoke else ""
     # Exercise the historical filtering/packing loop with enough distinct prompts
-    # to fill four H100 ranks. Full comparisons retain their original batch size.
-    prompts_per_collection = 128 if smoke and not keep_zero_advantage_groups else 16
+    # to fill four H100 ranks. Full comparisons retain their profile's batch size.
+    if profile == "gsm8k":
+        prompts_per_collection = 128 if smoke and not keep_zero_advantage_groups else settings["prompts"]
+    else:
+        prompts_per_collection = settings["prompts"]
     options = {
         "exp_name": output.name,
         "model_name_or_path": str(prepared / "legacy-model"),
@@ -354,7 +504,7 @@ def _train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, 
         "response_length": 32768,
         "pack_length": 34816,
         "num_learners_per_node": 4,
-        "vllm_num_engines": 4,
+        "vllm_num_engines": settings["engines"],
         "vllm_tensor_parallel_size": 1,
         "vllm_enforce_eager": True,
         "vllm_gpu_memory_utilization": 0.7,
@@ -395,44 +545,136 @@ def _train(model, prepared, output, *, smoke, keep_zero_advantage_groups=False, 
         "wandb_project_name": "olmo-rl-comparison",
         "backend_timeout": 120,
     }
+    if settings["judge"]:
+        # The released recipe's judge and code settings; the code service and its
+        # pass-rate threshold are the ones the MILES basket grades against.
+        options.update(
+            {
+                "llm_judge_model": f"hosted_vllm/{JUDGE_MODEL}",
+                "llm_judge_timeout": 600,
+                "llm_judge_max_tokens": 2048,
+                "llm_judge_max_context_length": 32768,
+                "llm_judge_temperature": 1.0,
+                "code_api_url": CODE_API_URL,
+                "code_pass_rate_reward_threshold": 0.99,
+                "code_max_execution_time": 1.0,
+                "backend_timeout": 1200,
+            }
+        )
+    return options
+
+
+def _train(
+    model,
+    prepared,
+    output,
+    *,
+    smoke,
+    keep_zero_advantage_groups=False,
+    resume=False,
+    profile="gsm8k",
+    steps=None,
+    judge_prepared=None,
+):
+    receipt = json.loads((prepared / "preparation.json").read_text())
+    if receipt["model"] != str(model):
+        raise ValueError("Prepared model identity differs")
+    if receipt.get("profile", "gsm8k") != profile:
+        raise ValueError("Prepared data belongs to a different comparison profile")
+    for name, digest in receipt["files"].items():
+        if sha((prepared / name).read_bytes()) != digest:
+            raise ValueError(f"Prepared artifact changed: {name}")
+    for name, link in receipt["model_alias"]["links"].items():
+        path = prepared / "legacy-model" / name
+        if not path.is_symlink() or str(path.resolve()) != link["target"] or path.stat().st_size != link["size"]:
+            raise ValueError(f"Original model alias changed: {name}")
+    if output.exists() and not resume:
+        raise ValueError("Use a fresh original-framework run directory, or explicitly resume its native checkpoint")
+    if resume and not (output / "invocation.json").is_file():
+        raise ValueError("Resume requires an existing original-framework invocation")
+    output.mkdir(parents=True, exist_ok=resume)
+    trainer = Path("/stage/open_instruct/grpo_fast.py")
+    original = trainer.read_bytes()
+    if sha(original) != ORIGINAL_TRAINER_SHA256:
+        raise ValueError("Original trainer source differs from the audited image")
+    patched, changes = patch_trainer(original.decode(), keep_zero_advantage_groups=keep_zero_advantage_groups)
+    trainer.write_text(patched)
+    settings = PROFILES[profile]
+    steps = 3 if smoke else (steps or settings["steps"])
+    options = training_options(
+        prepared,
+        output,
+        profile=profile,
+        steps=steps,
+        smoke=smoke,
+        keep_zero_advantage_groups=keep_zero_advantage_groups,
+    )
+    service = None
+    if settings["judge"]:
+        if not judge_prepared:
+            raise ValueError("The basket profile requires --judge-prepared (the MILES prepared judge directory)")
+        service = judge_service(judge_prepared)
     command = [sys.executable, str(trainer)]
     for key, value in options.items():
         command.append("--" + key)
         command.extend(str(v) for v in (value if isinstance(value, list) else [value]))
+    differences = [
+        "vLLM versus SGLang",
+        "DeepSpeed/HF versus OLMo-core",
+        "Original token-mean packed loss versus Core response reduction",
+        (
+            "Zero-advantage groups retained to match Core; historical pruning disabled explicitly"
+            if keep_zero_advantage_groups
+            else "Original zero-advantage filtering can skip driver steps; completed optimizer calls are counted separately"
+        ),
+    ]
+    if profile == "gsm8k":
+        differences += [
+            "Original historical GSM8K verifier versus current verifier",
+            "Four H100 trainers/four inference GPUs versus the two-B300/four-inference Core control",
+        ]
+    else:
+        differences += [
+            "Judge served by the original image's vLLM at a 32,768-token judge context with the recipe's "
+            "truncation, versus the MILES SGLang judge at 131,072 tokens without truncation",
+            "Four H100 trainers/three vLLM engines/one vLLM judge versus two B300 trainers/five SGLang engines/one SGLang judge",
+        ]
     record = {
         "command": command,
+        "profile": profile,
+        "driver_steps": steps,
         "model_alias": receipt["model_alias"],
         "original_source_sha256": sha(original),
         "patched_source_sha256": sha(trainer.read_bytes()),
         "source_adjustments": changes,
         "eval_driver_step_offsets": sorted({0, *range((1 if smoke else 50) - 1, steps, 1 if smoke else 50)}),
-        "remaining_differences": [
-            "vLLM versus SGLang",
-            "DeepSpeed/HF versus OLMo-core",
-            "Original token-mean packed loss versus Core response reduction",
-            "Original historical GSM8K verifier versus current verifier",
-            (
-                "Zero-advantage groups retained to match Core; historical pruning disabled explicitly"
-                if keep_zero_advantage_groups
-                else "Original zero-advantage filtering can skip driver steps; completed optimizer calls are counted separately"
-            ),
-            "Four H100 trainers/four inference GPUs versus the two-B300/four-inference Core control",
-        ],
+        "remaining_differences": differences,
+        "judge": {k: v for k, v in service.items() if k != "command"} if service else None,
     }
     if resume:
-        prepare_resume(output, record)
+        prepare_resume(output, record, steps=steps)
     else:
         (output / "invocation.json").write_bytes(encoded(record))
     print("ORIGINAL_BASELINE_COMMAND", json.dumps(record), flush=True)
-    subprocess.run(
-        command,
-        check=True,
-        env={
-            **os.environ,
-            "WANDB_RUN_GROUP": "olmo3-sft-learning-confidence-20260914",
-            "OI_ORIGINAL_BASELINE_UPDATE_LEDGER": str(output / "optimizer-updates.jsonl"),
-        },
-    )
+    env = {
+        **os.environ,
+        "WANDB_RUN_GROUP": settings["wandb_group"],
+        "OI_ORIGINAL_BASELINE_UPDATE_LEDGER": str(output / "optimizer-updates.jsonl"),
+    }
+    judge = None
+    if service:
+        (output / "judge-command.json").write_bytes(encoded(service))
+        judge = start_judge(service, output / "judge-server.log")
+        env.update(HOSTED_VLLM_API_BASE=service["api_base"], CUDA_VISIBLE_DEVICES=TRAINER_GPUS)
+    try:
+        subprocess.run(command, check=True, env=env)
+    finally:
+        if judge is not None and judge.poll() is None:
+            judge.terminate()
+            try:
+                judge.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                judge.kill()
 
     exports = restore_public_exports(output, model)
     update_path = output / "optimizer-updates.jsonl"
@@ -648,15 +890,20 @@ def main():
     parser.add_argument("--keep-zero-advantage-groups", action="store_true")
     parser.add_argument("--checkpoint-root", type=Path)
     parser.add_argument("--checkpoint-tag")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="gsm8k")
+    parser.add_argument("--steps", type=int, help="Driver steps for train/resume; defaults to the profile budget")
+    parser.add_argument("--judge-prepared", type=Path, help="MILES prepared judge directory (basket profile)")
     args = parser.parse_args()
     if args.stage == "evaluate":
+        if args.profile != "gsm8k":
+            parser.error("Independent evaluation is only implemented for the GSM8K profile")
         evaluate_checkpoint(args.model, args.source, args.prepared, args.output)
     elif args.stage == "export":
         if not args.checkpoint_root or not args.checkpoint_tag:
             parser.error("export requires --checkpoint-root and --checkpoint-tag")
         export_checkpoint(args.model, args.checkpoint_root, args.checkpoint_tag, args.output)
     elif args.stage == "prepare":
-        prepare(args.model, args.source, args.prepared)
+        prepare(args.model, args.source, args.prepared, profile=args.profile)
     else:
         train(
             args.model,
@@ -665,6 +912,9 @@ def main():
             smoke=args.stage == "smoke",
             resume=args.stage == "resume",
             keep_zero_advantage_groups=args.keep_zero_advantage_groups,
+            profile=args.profile,
+            steps=args.steps,
+            judge_prepared=args.judge_prepared,
         )
 
 
