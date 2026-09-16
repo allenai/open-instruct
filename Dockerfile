@@ -102,6 +102,11 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
             --no-deps "torchvision==0.26.0+cu130"; \
     fi
 
+# TE's torch bindings compile ~a dozen C++ files; at 8 parallel jobs the compilers
+# need more than Docker Desktop's default 8 GiB VM and cc1plus is OOM-killed
+# ("Killed signal terminated program cc1plus", 2026-09-15, amd64 emulation on an
+# Apple-silicon Mac). 2 fits; raise it on a Linux host with real memory.
+ARG TE_MAX_JOBS=2
 # No pyproject/uv.lock mounts here: the project's extra-build-dependencies
 # config (torch, match-runtime, for flash-attn) would otherwise apply to these
 # unrelated installs and fail them. uv pip targets /stage/.venv directly.
@@ -113,7 +118,7 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
         CPLUS_INCLUDE_PATH="$CUDNN_DIR/include" \
         C_INCLUDE_PATH="$CUDNN_DIR/include" \
         LIBRARY_PATH="$CUDNN_DIR/lib" \
-        MAX_JOBS=8 uv pip install --no-build-isolation "transformer-engine[pytorch]==2.16.1"; \
+        MAX_JOBS="${TE_MAX_JOBS}" uv pip install --no-build-isolation "transformer-engine[pytorch]==2.16.1"; \
     fi
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
