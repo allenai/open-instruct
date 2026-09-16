@@ -688,5 +688,21 @@
     "config": "scripts/miles/launch_original_baseline.py --profile basket",
     "source_data": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/data",
     "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916"
+  },
+  {
+    "experiment": "01M2KVC37AMZFJFDYR079V681V",
+    "source": "01M2KVC1BS6GX3DM4GCXSCBEAX",
+    "commit": "2f0db7b3e018f2a1f86f2b3cb04f732e32ce7b84",
+    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+    "stage": "smoke",
+    "arm": "original-open-instruct basket (arm 1)",
+    "profile": "basket",
+    "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916",
+    "prepared_counts": {
+      "train": 101434,
+      "eval": 512
+    },
+    "prepare_experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
+    "allocation": "8 H100 on ai2/jupiter: 4 DeepSpeed learners, 2 vLLM policy engines, 2-GPU TP2 vLLM judge at 131072 YaRN context"
   }
 ]
