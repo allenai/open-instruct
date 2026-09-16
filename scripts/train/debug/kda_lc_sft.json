@@ -1,0 +1,972 @@
+{
+  "run_name": "legacycx8-latent-kda-l2-1p4b-cx8-lc20-train",
+  "launch": {
+    "name": "legacycx8-latent-kda-l2-1p4b-cx8-lc20-train-train-31a6ea2b",
+    "cmd": [
+      "ladders/olmoe3/workloads/long_context.py",
+      "train",
+      "legacycx8-latent-kda-l2-1p4b-cx8-lc20-train",
+      "ai2/holmes",
+      "--launch.num_nodes=3",
+      "--launch.num_gpus=4",
+      "--launch.priority=urgent",
+      "--launch.budget=ai2/oe-other",
+      "--launch.workspace=ai2/OLMo-3-moe-experiments",
+      "--launch.beaker_image=akshitab/olmo-core-tch2110cu130-fa4-rma-2026-07-24",
+      "--launch.min_runtime=8h",
+      "--launch.follow=false",
+      "--launch.step_soft_timeout=null",
+      "--launch.shared_memory=128GiB",
+      "--trainer.callbacks.wandb.project=jacobm-olmoe3-scaling-ladder",
+      "--trainer.callbacks.wandb.name=legacycx8-latent-kda-l2-1p2b-cx8-lc20-train",
+      "--trainer.callbacks.wandb.group=legacy-cx8-v2-1p2b-lc20-794664a0f142",
+      "--trainer.callbacks.wandb.tags=[\"long-context\",\"architecture:legacy-latent-kda-l2\",\"size:1.2B\",\"cx:8\",\"lr-fraction-of-pt:0.2\",\"ladder-run:legacy-cx8-v2-1p2b-lc20-794664a0f142\",\"ladder-job:legacycx8-latent-kda-l2-1p2b-cx8-lc20-train\"]",
+      "--train_module.optim.lr=8e-05",
+      "--dataset.work_dir=/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+      "--data_loader.global_batch_size=786432",
+      "--train_module.rank_microbatch_size=65536",
+      "--trainer.load_path=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1/step63802",
+      "--trainer.load_trainer_state=false",
+      "--trainer.load_optim_state=false",
+      "--train_module.reset_optimizer_states_on_load=true",
+      "--trainer.save_folder=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/long_context/legacy-cx8-v2/latent-kda-l2/1.2B/cx8-samebatch",
+      "--trainer.max_duration.value=50175380703",
+      "--trainer.max_duration.unit=tokens",
+      "--model.recompute_each_block=true",
+      "--model.lm_head.loss_implementation=fused_linear"
+    ],
+    "budget": "ai2/oe-other",
+    "task_name": "train",
+    "workspace": "ai2/OLMo-3-moe-experiments",
+    "beaker_image": "akshitab/olmo-core-tch2110cu130-fa4-rma-2026-07-24",
+    "num_nodes": 3,
+    "num_gpus": 4,
+    "shared_memory": "128GiB",
+    "clusters": [
+      "ai2/holmes"
+    ],
+    "shared_filesystem": true,
+    "priority": "urgent",
+    "min_runtime": "8h",
+    "env_vars": [
+      {
+        "name": "PYTORCH_CUDA_ALLOC_CONF",
+        "value": "expandable_segments:True",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "OLMO_SYMM_VDEV2D_AUTO_BUILD",
+        "value": "1",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "S3_PROFILE",
+        "value": "default",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "PYTHONPATH",
+        "value": "olmo-core/src",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "OLMOE3_EP_SIZE",
+        "value": "4",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "OLMOE3_SOURCE_MODEL_CONFIG",
+        "value": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1/step63802/config.json",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      }
+    ],
+    "env_secrets": [
+      {
+        "name": "BEAKER_TOKEN",
+        "secret": "jacobm_BEAKER_TOKEN",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "WANDB_API_KEY",
+        "secret": "jacobm_WANDB_API_KEY",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "AWS_ACCESS_KEY_ID",
+        "secret": "jacobm_AWS_ACCESS_KEY_ID",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "AWS_SECRET_ACCESS_KEY",
+        "secret": "jacobm_AWS_SECRET_ACCESS_KEY",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      }
+    ],
+    "google_credentials_secret": "jacobm_GOOGLE_CREDENTIALS",
+    "aws_config_secret": "jacobm_AWS_CONFIG",
+    "aws_credentials_secret": "jacobm_AWS_CREDENTIALS",
+    "weka_buckets": [
+      {
+        "bucket": "oe-training-default",
+        "mount": "/weka/oe-training-default",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerWekaBucket"
+      }
+    ],
+    "allow_dirty": false,
+    "git": {
+      "repo": "allenai/scaling-ladders",
+      "repo_url": "https://github.com/allenai/scaling-ladders",
+      "ref": "c5ecc2f70e83051a239be40b0746993e4f1c4c3f",
+      "_CLASS_": "gantry.git_utils.GitRepoState"
+    },
+    "gh_token_secret": "jacobm_GITHUB_TOKEN",
+    "result_dir": "/results",
+    "system_python": true,
+    "num_execution_units": 1,
+    "follow": false,
+    "launch_timeout": 300,
+    "post_setup": "python -m olmo_core.kernels.build_symm_mem_vdev2d_ext --inplace --backend cmake",
+    "_CLASS_": "olmo_core.launch.beaker.BeakerLaunchConfig"
+  },
+  "model": {
+    "d_model": 1280,
+    "vocab_size": 100352,
+    "n_layers": 20,
+    "block": {
+      "sequence_mixer": {
+        "n_heads": 16,
+        "n_v_heads": 16,
+        "head_dim": 128,
+        "expand_v": 2.0,
+        "allow_neg_eigval": true,
+        "conv_size": 4,
+        "conv_bias": false,
+        "norm_eps": 1e-05,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.attention.kda.KimiDeltaAttentionConfig",
+        "type": "kimi_delta_attention"
+      },
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-06,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "name": "moe_fused_v2",
+      "shared_experts": {
+        "d_model": 1280,
+        "hidden_size": 952,
+        "num_experts": 1,
+        "bias": false,
+        "dtype": "float32",
+        "activation": "swiglu",
+        "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+      },
+      "routed_experts": {
+        "d_model": 640,
+        "hidden_size": 952,
+        "num_experts": 512,
+        "bias": false,
+        "dtype": "float32",
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "activation": "swiglu",
+        "activation_alpha": 1.702,
+        "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+      },
+      "routed_experts_router": {
+        "d_model": 1280,
+        "num_experts": 512,
+        "top_k": 16,
+        "bias": false,
+        "normalize_expert_weights": 1.0,
+        "uniform_expert_assignment": false,
+        "random_expert_assignment": false,
+        "gating_function": "softmax",
+        "dtype": "float32",
+        "record_routing_batch_size": false,
+        "lb_loss_weight": 0.01,
+        "lb_loss_granularity": "instance",
+        "z_loss_weight": 1e-05,
+        "restore_weight_scale": true,
+        "use_recompute_fp32_cast": false,
+        "score_correction_bias": false,
+        "sigmoid_stability_epsilon": 1e-07,
+        "global_load_balancing": false,
+        "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+      },
+      "latent_moe": {
+        "latent_dim": 640,
+        "bias": false,
+        "up_proj_input_norm_enabled": false,
+        "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+      },
+      "use_peri_norm": true,
+      "use_pre_norm": false,
+      "checkpoint_attn": true,
+      "checkpoint_permute_moe_unpermute": true,
+      "checkpoint_second_unpermute": true,
+      "rowwise_fp8": {
+        "enabled": false,
+        "block_size": 32,
+        "scale_mode": "rceil",
+        "use_fast_accum": true,
+        "fp8_only_params": true,
+        "fused_autograd": true,
+        "fused_autograd_recompute_swiglu": true,
+        "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+      },
+      "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+    },
+    "lm_head": {
+      "name": "default",
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-06,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "bias": false,
+      "dtype": "float32",
+      "loss_implementation": "fused_linear",
+      "_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig"
+    },
+    "embedding_norm": {
+      "name": "rms",
+      "eps": 1e-06,
+      "bias": false,
+      "dtype": "float32",
+      "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+    },
+    "name": "moe_fused_v2",
+    "dtype": "float32",
+    "init_method": "normal",
+    "init_seed": 2026,
+    "init_std": 0.01,
+    "block_overrides": {
+      "0": {
+        "sequence_mixer": {
+          "n_heads": 16,
+          "n_v_heads": 16,
+          "head_dim": 128,
+          "expand_v": 2.0,
+          "allow_neg_eigval": true,
+          "conv_size": 4,
+          "conv_bias": false,
+          "norm_eps": 1e-05,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.attention.kda.KimiDeltaAttentionConfig",
+          "type": "kimi_delta_attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 8568,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "4": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "flash_2",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "9": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "flash_2",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "14": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "flash_2",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "19": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "flash_2",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      }
+    },
+    "embed_scale": 35.77708763999664,
+    "tie_word_embeddings": false,
+    "two_batch_overlap": false,
+    "recompute_all_blocks_by_chunk": false,
+    "recompute_each_block": true,
+    "_CLASS_": "olmo_core.nn.transformer.config.OLMoDDPModelConfig"
+  },
+  "dataset": {
+    "tokenizer": {
+      "vocab_size": 100278,
+      "eos_token_id": 100257,
+      "pad_token_id": 100277,
+      "identifier": "allenai/dolma2-tokenizer",
+      "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+    },
+    "paths": [
+      "/weka/oe-training-default/ai2-llm/preprocessed/tylerr/lc-reshard-final-cleaned/v0.1/allenai/dolma2-tokenizer/*.npy"
+    ],
+    "expand_glob": true,
+    "include_instance_metadata": true,
+    "instance_filter_config": {
+      "repetition_max_period": 13,
+      "repetition_min_period": 1,
+      "repetition_max_count": 32,
+      "_CLASS_": "olmo_core.data.numpy_dataset.InstanceFilterConfig"
+    },
+    "source_permutation_seed": 123,
+    "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+    "ignore_fingerprint_mismatch": false,
+    "sequence_length": 65536,
+    "generate_doc_lengths": false,
+    "long_doc_strategy": "truncate",
+    "source_group_size": 8,
+    "_CLASS_": "olmo_core.data.numpy_dataset.NumpyPackedFSLDatasetConfig"
+  },
+  "data_loader": {
+    "global_batch_size": 786432,
+    "seed": 993507523,
+    "num_workers": 16,
+    "prefetch_factor": 8,
+    "ignore_fingerprint_mismatch": false,
+    "_CLASS_": "olmo_core.data.data_loader.NumpyDataLoaderConfig",
+    "type": "numpy"
+  },
+  "train_module": {
+    "rank_microbatch_size": 65536,
+    "max_sequence_length": 65536,
+    "optim": {
+      "group_overrides": [
+        {
+          "params": [
+            "embeddings.weight"
+          ],
+          "opts": {
+            "weight_decay": 0.0
+          },
+          "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
+        },
+        {
+          "params": [
+            "*routed_experts.w_up_gate",
+            "*routed_experts.w_down"
+          ],
+          "opts": {},
+          "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
+        }
+      ],
+      "compile": true,
+      "fixed_fields": [
+        "initial_lr"
+      ],
+      "lr": 8e-05,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "eps": 1e-08,
+      "weight_decay": 0.1,
+      "dtype": "float32",
+      "rolling_interval_length": 128,
+      "sigma_factor": 6,
+      "max_grad_norm": 1.0,
+      "use_distributed": true,
+      "reset_optimizer_moments_on_load": false,
+      "check_nan_inf_grad": true,
+      "_CLASS_": "olmo_core.optim.moe_optimizer.OLMoDDPOptimizerConfig"
+    },
+    "max_grad_norm": 1.0,
+    "scheduler": {
+      "lr_field": "lr",
+      "initial_lr_field": "initial_lr",
+      "units": "steps",
+      "alpha_f": 0.0,
+      "warmup": 2000,
+      "warmup_min_lr": 0.0,
+      "_CLASS_": "olmo_core.optim.scheduler.LinearWithWarmup",
+      "type": "linear_with_warmup"
+    },
+    "compile_model": true,
+    "dp_config": {
+      "name": "ddp",
+      "reduce_dtype": "float32",
+      "wrapping_strategy": "full",
+      "prefetch_factor": 0,
+      "only_allreduce_last_microbatch": true,
+      "reduce_grads_in_fp32": true,
+      "accumulate_grads_in_fp32": true,
+      "use_reduce_scatter": false,
+      "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerDataParallelConfig"
+    },
+    "z_loss_multiplier": 1e-05,
+    "reset_optimizer_states_on_load": true,
+    "reset_optimizer_states_on_resume": false,
+    "label_ignore_index": -100,
+    "_CLASS_": "olmo_core.train.train_module.transformer.config.OLMoDDPTrainModuleConfig"
+  },
+  "trainer": {
+    "save_folder": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/long_context/legacy-cx8-v2/latent-kda-l2/1.2B/cx8-samebatch",
+    "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/dataset-cache",
+    "load_path": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1/step63802",
+    "load_strategy": "always",
+    "load_optim_state": false,
+    "load_trainer_state": false,
+    "checkpointer": {
+      "pre_download": false,
+      "save_thread_count": 3,
+      "load_thread_count": 8,
+      "throttle_uploads": true,
+      "_CLASS_": "olmo_core.train.checkpoint.CheckpointerConfig"
+    },
+    "save_overwrite": false,
+    "max_duration": {
+      "value": 50175380703,
+      "unit": "tokens",
+      "_CLASS_": "olmo_core.train.common.Duration"
+    },
+    "cancel_check_interval": 1000,
+    "metrics_collect_interval": 50,
+    "callbacks": {
+      "checkpointer": {
+        "save_interval": 5000,
+        "ephemeral_save_interval": 1000,
+        "pre_train_checkpoint": false,
+        "save_async": false,
+        "remove": "ephemeral_only",
+        "max_checkpoints": 3,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.checkpointer.CheckpointerCallback"
+      },
+      "speed_monitor": {
+        "_CLASS_": "olmo_core.train.callbacks.speed_monitor.SpeedMonitorCallback"
+      },
+      "beaker": {
+        "enabled": true,
+        "result_dir": "/results",
+        "_CLASS_": "olmo_core.train.callbacks.beaker.BeakerCallback"
+      },
+      "wandb": {
+        "enabled": true,
+        "name": "legacycx8-latent-kda-l2-1p2b-cx8-lc20-train",
+        "project": "jacobm-olmoe3-scaling-ladder",
+        "entity": "ai2-llm",
+        "group": "legacy-cx8-v2-1p2b-lc20-794664a0f142",
+        "tags": [
+          "long-context",
+          "architecture:legacy-latent-kda-l2",
+          "size:1.2B",
+          "cx:8",
+          "lr-fraction-of-pt:0.2",
+          "ladder-run:legacy-cx8-v2-1p2b-lc20-794664a0f142",
+          "ladder-job:legacycx8-latent-kda-l2-1p2b-cx8-lc20-train"
+        ],
+        "cancel_tags": [
+          "cancel",
+          "canceled",
+          "cancelled"
+        ],
+        "cancel_check_interval": 1000,
+        "_CLASS_": "olmo_core.train.callbacks.wandb.WandBCallback"
+      },
+      "config_saver": {
+        "fname": "config.json",
+        "_CLASS_": "olmo_core.train.callbacks.config_saver.ConfigSaverCallback"
+      },
+      "profiler": {
+        "skip_first": 0,
+        "wait": 1,
+        "warmup": 5,
+        "active": 3,
+        "repeat": 1,
+        "with_stack": true,
+        "profile_memory": false,
+        "enable_cuda_sync_events": false,
+        "export_distributed_event_summary": false,
+        "enabled": false,
+        "_CLASS_": "olmo_core.train.callbacks.profiler.ProfilerCallback"
+      },
+      "garbage_collector": {
+        "gc_interval": 1000,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.garbage_collector.GarbageCollectorCallback"
+      },
+      "slack_notifier": {
+        "name": "legacycx8-latent-kda-l2-1p4b-cx8-lc20-train",
+        "notifications": "end_only",
+        "enabled": false,
+        "_CLASS_": "olmo_core.train.callbacks.slack_notifier.SlackNotifierCallback"
+      },
+      "gap_monitor": {
+        "enabled": false,
+        "interval": 1,
+        "dump_gradients_start_step": 0,
+        "dump_gradients_step_interval": 1,
+        "_CLASS_": "olmo_core.train.callbacks.gap_monitor.GAPMonitorCallback"
+      },
+      "gpu_monitor": {
+        "_CLASS_": "olmo_core.train.callbacks.gpu_memory_monitor.GPUMemoryMonitorCallback"
+      }
+    },
+    "async_bookkeeping": false,
+    "bookkeeping_soft_timeout": 30,
+    "no_checkpoints": false,
+    "no_evals": false,
+    "_CLASS_": "olmo_core.train.config.TrainerConfig"
+  },
+  "init_seed": 12536,
+  "backend": "cpu:gloo,cuda:nccl",
+  "_CLASS_": "olmo_core.internal.experiment.ExperimentConfig"
+}
