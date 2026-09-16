@@ -654,7 +654,21 @@ run_one_model() {
 
     kill "$sync_pid" 2>/dev/null; wait "$sync_pid" 2>/dev/null
     kill "$vllm_pid" 2>/dev/null; wait "$vllm_pid" 2>/dev/null
+    # Keep the whole server log, not a tail. Two Kimi-K3 crashes were diagnosed
+    # only as far as "500 Internal Server Error" because the engine's actual
+    # fault had already scrolled past the last 200 lines by the time the client
+    # gave up. Compressed, even a long run's log is a few MB.
     tail -200 "$vllm_log" > "$RESULTS_DIR/vllm_tail_${served}.log" 2>/dev/null || true
+    gzip -c "$vllm_log" > "$RESULTS_DIR/vllm_full_${served}.log.gz" 2>/dev/null || true
+    # Pull out the engine-side failure explicitly so it is greppable in the job
+    # log itself, which survives even when the results dataset does not.
+    if grep -aqE "EngineDeadError|EngineCore.*(died|failed)|CUDA error|illegal memory|out of memory" "$vllm_log" 2>/dev/null; then
+        log "engine failure signatures in ${vllm_log}:"
+        grep -aoE "(EngineDeadError|EngineCore[^\"]{0,90}|CUDA error[^\"]{0,60}|CUDA_ERROR_[A-Z_]+|illegal memory access|out of memory|Error in model execution[^\"]{0,70})" \
+            "$vllm_log" 2>/dev/null | sort | uniq -c | sort -rn | head -12 || true
+        log "first 40 lines after the first engine error:"
+        grep -an -A40 -m1 -E "EngineDeadError|CUDA error|illegal memory|Error in model execution" "$vllm_log" 2>/dev/null | head -45 || true
+    fi
 
     if [ "$rc" != "0" ]; then
         log "FAILED ${model}: generation exited $rc (partial traces kept)"
