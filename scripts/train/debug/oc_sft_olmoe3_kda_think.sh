@@ -156,6 +156,9 @@ SUBSET_FRAC="${SUBSET_FRAC:-0.02}"
 # load is paid either way.
 PROBE_MIXER="${PROBE_MIXER:-allenai/Dolci-Think-SFT 1.0}"
 SEED=33333
+# Noise-floor seeds change the data order only (--data_loader_seed). SEED is a
+# tokenization cache key and must stay fixed (#1880, H001).
+DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
 # The 32768 Dolci-Think cache from the dense run lives here; keeping think
 # caches together is what makes the discover_cache/link shortcut possible.
 LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache
@@ -406,7 +409,7 @@ case "$MODE" in
         --mixer_list $MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
         --seed $SEED \
-        --data_loader_seed 34521 \
+        --data_loader_seed "${DATA_LOADER_SEED:-34521}" \
         --output_dir "$OUTPUT_DIR_ARG"
     ;;
 
