@@ -453,3 +453,482 @@ unchanged and are not repeated here. Two corrections this pass produced:
   DP=1 TP=8 job. The *advice* to set the value explicitly still stands.
 - **[D]** Its §4.5 recommendation of `sharded_state` as a TP-locked fast path does
   not work for a compressed-tensors MXFP4 checkpoint (see §6 above).
+
+---
+
+## 10. Crash investigation
+
+Research pass of 2026-09-16, against the three mid-generation CUDA faults on
+`vllm/vllm-openai:v0.28.0-x86_64`, 8x B300 (sm_103). Claim markers as elsewhere in
+this file: **[D]** read in code or in an issue/PR I opened, **[R]** third-party report,
+**[I]** my inference.
+
+### 10.1 The one-paragraph answer
+
+The prime suspect is **not** KDA and **not** `TOKENSPEED_MLA`. It is the
+**`--decode-context-parallel-size 8 --dcp-comm-backend a2a` subsystem**, and
+specifically the *direct symmetric-memory* implementation of the DCP collectives,
+which **0.28.0 turns on automatically and silently** whenever the DCP group spans
+NVLink — as it does on a single B300 node. That path is a set of hand-written CUDA
+kernels that write through raw peer pointers with `multimem.*` PTX and synchronise
+with a **device-side spin-wait that ends in `asm volatile("trap;")`**. It is gated by
+three env vars that default to "auto", it has **no layout or capacity fallback in
+0.28.0** (0.29.0 added one), and it is byte-identical between 0.28.0 and 0.29.0. The
+cheapest high-yield experiment is to disable it — three env vars, no serve-flag
+change, no re-plan of the KV cache. The observed pre-crash signature (power 620 W ->
+240 W, utilisation pinned at 100%, throughput 0, requests still `Running`) is the
+signature of a **device-side spin loop**, which is what that code does and what
+almost nothing else in the decode path does **[I]**.
+
+Secondarily: this box has **up to three independent NVLink-multicast consumers live
+at once** — the direct DCP kernels, `SymmMemCommunicator` (`VLLM_ALLREDUCE_USE_SYMM_MEM`,
+**defaults to 1** and you have not disabled it), and FlashInfer MNNVL all-reduce
+(Attempt A only). The nearest precedent on this exact hardware, issue #50147, was an
+IMA on 8x B300 Kimi-K3 whose coredump named a **multicast all-reduce kernel**.
+
+### 10.2 Ranked remediation list
+
+Ranked by (expected yield / cost). Items 0 and 1 are compatible with each other and
+with everything below; run 0 always.
+
+---
+
+**0. Capture a CUDA coredump. [diagnostic, ~zero cost — do this on the next run
+regardless of what else you change]**
+
+```bash
+CUDA_ENABLE_COREDUMP_ON_EXCEPTION=1
+CUDA_COREDUMP_SHOW_PROGRESS=1
+CUDA_COREDUMP_GENERATION_FLAGS='skip_nonrelocated_elf_images,skip_global_memory,skip_shared_memory,skip_local_memory,skip_constbank_memory'
+CUDA_COREDUMP_FILE="/weka/.../cuda_coredump_%h.%p.%t"
+```
+
+- **Cost:** negligible at runtime; a few hundred MB of dump per crash. Point
+  `CUDA_COREDUMP_FILE` at persistent storage, not container-local disk.
+- **Evidence:** **[R]** this is precisely what resolved #50147 — the same model on the
+  same 8x B300 hardware, crashing every 11-20 min with a *different reported site each
+  time*. Three engine-killing crashes and a pile of tracebacks got nowhere; one
+  coredump named `flashinfer::trtllm_mnnvl_allreduce::rmsNormLamport<__nv_bfloat16,
+  QuantType::kNone, false, 1, float4>` and the issue was closed four days later. The
+  procedure is vLLM's own, from https://vllm.ai/blog/2025-08-11-cuda-debugging .
+- **Why it matters here:** all three of your faults are *asynchronous* reports. The
+  `~CUDAEvent` warning, the `CachingHostAllocator` pinned-free exception and the
+  `cuMemFree` in `SymmDeviceMemory.__del__` are all **sticky-error teardown noise from
+  an already-poisoned context**, not the fault site **[I]**. You cannot rank
+  hypotheses further without naming the kernel.
+- **Also grep the next log for these three lines**, all of which are `info_once` in
+  0.28.0 (`vllm/v1/attention/ops/dcp_utils.py:655,691,726`) **[D]**:
+  `Using direct symmetric-memory DCP A2A for MLA.` /
+  `... DCP query gather for MLA.` / `... chunked-context KV gather for MLA.`
+  Their presence confirms hypothesis #1 is live in your build; their absence kills it.
+  Also grep for `direct DCP A2A timeout` / `direct DCP q-gather multimem timeout` —
+  those are `printf`s emitted from the device immediately before the `trap` **[D]**.
+- **Confidence:** n/a (diagnostic). This is the highest-information action available.
+
+---
+
+**1. Disable the direct symmetric-memory DCP kernels. [highest yield per unit cost]**
+
+```bash
+VLLM_USE_DIRECT_DCP_A2A=0
+VLLM_USE_DIRECT_DCP_Q_GATHER=0
+VLLM_USE_DIRECT_DCP_KV_GATHER=0
+```
+
+- **Throughput cost:** low — low single-digit percent of decode **[I]**. These are a
+  latency optimisation over the generic NCCL/Triton A2A combine, not a capability.
+  For calibration, the closely-related #55289 measured the *masking chain alone* at
+  1.23% of end-to-end decode throughput **[D]**. You keep DCP, keep `a2a`, keep
+  `TOKENSPEED_MLA`, keep the KV-cache layout; only the collective implementation
+  changes. No restart cost beyond the restart itself.
+- **Evidence:**
+  - **[D]** The three vars exist in 0.28.0 at `vllm/envs.py:199-201` typed
+    `bool | None = None`, parsed at `envs.py:2113-2121` via `maybe_convert_bool`, with
+    the in-source comment *"Direct DCP ops default on when applicable; set to 1 to
+    enforce or 0 to disable."* Auto-selection is `_direct_dcp_enabled` /
+    `_direct_dcp_multicast_enabled` (`dcp_utils.py:67-94`): with the var unset it
+    returns true when symmetric memory is available and `_symm_mem_spans_group()`
+    succeeds. On a single 8-GPU NVLink node that probe succeeds, so **you are on this
+    path today without having asked for it**.
+  - **[D]** In 0.28.0 `MLADCPManager._init_combine` (`dcp_utils.py:635-665`) binds
+    `functools.partial(direct_workspace.lse_reduce, ...)` **unconditionally** once the
+    workspace exists — there is no capacity check and no layout check. In 0.29.0 the
+    same method binds a new wrapper `_direct_workspace_combine` (`v1/attention/ops/dcp.py:1303-1328`)
+    that falls back to `dcp_a2a_lse_reduce` when `partial_output.shape[0] >
+    direct_workspace.max_num_tokens`, with the comment *"Forced MQA path pass all batch
+    tokens (including prefill) into combine, which may exceed the direct
+    symmetric-memory workspace."* **That fallback does not exist in 0.28.0.**
+  - **[D]** The kernels themselves: `csrc/libtorch_stable/attention/dcp_utils/`.
+    `dcp_direct_common.cuh` defines `get_peer_ptr` (a raw `int64 -> T*` reinterpret of a
+    peer address), `multimem_store_16` (`multimem.st.relaxed.sys.global.v4.f32`, a
+    16-byte-aligned multicast store), and `wait_for_epoch`, which spins up to
+    `kSpinLimit = 100000000` on `ld.global.acquire.sys.u32`. Every call site — 
+    `dcp_direct_a2a_lse_reduce.cu:158-166`, `dcp_direct_q_gather.cu:73-77` — responds to
+    a spin timeout with a `printf` followed by `asm volatile("trap;")`, which kills the
+    context.
+  - **[D]** Synchronisation is a two-slot double buffer keyed on `epoch & 1`
+    (`parity`/`buffer_slot`). If any rank's epoch skews by two relative to a peer, a
+    slot is reused before the peer has drained it. Nothing in the file enforces a
+    global barrier between layers.
+  - **[R]** Issue #54305 (open) — *"Direct DCP A2A crashes on GLM sparse-MLA strided
+    output"*: the reporter confirms auto-selection with `VLLM_USE_DIRECT_DCP_A2A` unset,
+    confirms *"the direct path calls the C++ kernel unconditionally"*, and lists
+    `VLLM_USE_DIRECT_DCP_A2A=0` as workaround 1 of 2, validated end to end.
+- **Honest caveat:** #54305's own failure mode is a **clean `RuntimeError` at
+  CUDA-graph capture**, not a mid-run IMA, and it is a different attention backend.
+  It establishes *that the path is auto-on and unguarded*; it does **not** establish
+  that it is your fault site. The IMA argument is the `trap` + spin-loop mechanism and
+  the power/utilisation signature, and that part is **[I]**.
+- **Confidence:** **High** that this is the right first experiment. **Medium** that it
+  is the root cause.
+
+---
+
+**2. Drop DCP entirely — fall back to the recipe's Blackwell baseline. [the known-good
+configuration]**
+
+Remove `--decode-context-parallel-size 8`, `--dcp-comm-backend a2a`, and change
+`--attention_config.mla_prefill_backend` from `TRTLLM_RAGGED` back to `TOKENSPEED_MLA`.
+Keep `--attention-backend TOKENSPEED_MLA`, `--kv-cache-dtype fp8` and
+`--attention_config.use_prefill_query_quantization=true`.
+
+- **Throughput cost:** real and workload-specific. DCP exists to shard the decode KV
+  cache across ranks for exactly your profile (decode-heavy, long context), so this is
+  the most expensive item on the list. I will not invent a number — measure it. **[I]**
+- **Evidence:**
+  - **[D]** In `recipes/models/moonshotai/Kimi-K3.yaml`, DCP is `features.text_only`,
+    an **opt-in** block, not part of `hardware_overrides.blackwell`. The Blackwell
+    baseline is `--kv-cache-dtype fp8`, `--attention-backend TOKENSPEED_MLA`,
+    `--attention-config '{"use_prefill_query_quantization":true,"mla_prefill_backend":"TOKENSPEED_MLA"}'`,
+    `--enable-prefix-caching`, `--prefix-match-unit 128`, `--load-format fastsafetensors`,
+    `--no-enable-flashinfer-autotune`. Note that **`TRTLLM_RAGGED` reaches your command
+    line only via the DCP block** — the baseline prefill backend is `TOKENSPEED_MLA`.
+    Dropping DCP therefore also drops `TRTLLM_RAGGED`, addressing item 5 for free.
+  - **[R]** #41623 (open since 2026-05, last touched 2026-09-02) — Kimi-K2.6,
+    `--tensor-parallel-size 8 --decode-context-parallel-size 8`, prefix caching,
+    262144 context: *"Decode Context Parallelism produces unrelated gibberish output in
+    latest nightly. This is a regression."* Your exact TP/DCP geometry and a sibling
+    model. Still open, no fix merged.
+  - **[R]** #54300 (open) — *"GlmMoeDsa (GLM-5.3) + decode-context-parallel: crashes on
+    0.28.0, silently returns random tokens on 0.29.0"*, on 8x B200. A DCP-conditional
+    regression whose crash half lands squarely on 0.28.0.
+  - **[D]** #55780 (merged 2026-09-08, **not** in 0.28.0) flipped
+    `AttentionImplBase.supports_dcp` to default `False` after finding that *"several
+    unsupported implementations also inherited `True` and failed the worker's
+    missing-LSE check after loading weights."* `TokenspeedMLAImpl` is on the explicit
+    opt-in list, so **your backend genuinely supports DCP** — but the PR is evidence
+    that DCP support was being advertised implicitly and inconsistently in the 0.28.0
+    era.
+- **Confidence:** **High** that this removes the suspect subsystem. **High** that it is
+  a serviceable configuration (it is the recipe's own baseline).
+
+---
+
+**3. Disable the symmetric-memory all-reduce. [cheap, addresses the #50147 precedent]**
+
+```bash
+VLLM_ALLREDUCE_USE_SYMM_MEM=0     # you have NOT set this; it defaults to 1
+VLLM_ALLREDUCE_USE_FLASHINFER=0   # you already set this
+```
+
+- **Throughput cost:** low-to-moderate. Falls back to vLLM's custom all-reduce / NCCL.
+  Affects small all-reduces at TP8, which at 92 layers is not nothing. **[I]**
+- **Evidence:**
+  - **[D]** `vllm/envs.py:260-261` — `VLLM_ALLREDUCE_USE_SYMM_MEM: bool = True`
+    (default `"1"` at `envs.py:1860-1862`) versus `VLLM_ALLREDUCE_USE_FLASHINFER: bool
+    = False` (default `"0"` at `envs.py:1864-1866`). **So in 0.28.0 the FlashInfer
+    all-reduce is off by default and the symmetric-memory one is on** — setting
+    `VLLM_ALLREDUCE_USE_FLASHINFER=0` between Attempt A and Attempt B changed less than
+    it looks like it did, because a second multicast all-reduce stayed live the whole
+    time. (This also corrects the recipe's Blackwell block, which sets
+    `VLLM_ALLREDUCE_USE_FLASHINFER: "1"`; you are deviating from the recipe here.)
+  - **[D]** `device_communicators/symm_mem.py` — `SymmMemCommunicator` calls
+    `torch.ops.symm_mem.multimem_all_reduce_` and its own failure message names
+    `VLLM_ALLREDUCE_USE_SYMM_MEM=0` as the escape hatch. sm_103 is an explicitly tuned
+    entry: `all_reduce_utils.py:71-76`, `"10.3": {2: 4 MiB, 4: 32 MiB, 6: 32 MiB,
+    8: 64 MiB}`. So this is a supported, deliberately enabled path on your card — not
+    an accident — but it is multicast, and it is the same family as #50147's fault.
+  - **[R]** #50147 (closed 2026-08-03) — *"Kimi-K3 (TP=8, prefix caching): recurring
+    illegal-memory-access crashes under concurrent load"* on **8x NVIDIA B300 SXM6**,
+    `VLLM_USE_V2_MODEL_RUNNER=1`, crashes at ~20 min and ~11 min, *"the reported crash
+    site differs each time"*, *"time-to-crash shrinks monotonically as concurrency
+    grows"*. Reported sites included `buildNdTmaDescriptor` (FlashInfer TRT-LLM MLA
+    decode) and `_causal_conv1d_fwd_kernel` (KDA conv state) — i.e. **the same
+    scattered-victim pattern you are seeing**. Root cause per coredump: the MNNVL
+    all-reduce `rmsNormLamport` kernel. Fixed by #50386, merged 2026-07-30, **which is
+    already in your 0.28.0** — so #50147 is not your bug, but it is the strongest
+    available evidence that on this exact hardware and model, multicast collectives are
+    where IMAs come from.
+- **Confidence:** **Medium.** The specific #50147 fault is fixed in your build; this is
+  betting on the subsystem, not on a named defect.
+
+---
+
+**4. Keep `--enable-prefix-caching` off. [already done, free, and now better
+justified than when you did it]**
+
+- **Throughput cost:** zero for you — the measured hit rate was 0.0%.
+- **Evidence:**
+  - **[R]** #50147's title and body single out prefix caching, and note that enabling
+    it *"forces mamba cache mode `align`"* on this hybrid model.
+  - **[D]** It also pre-empts a 0.29.0 landmine. `_store_cache_checkpoints_kernel` —
+    the KDA prefix-checkpoint store — **does not exist at all in 0.28.0** (I diffed
+    `vllm/models/kimi_k3/nvidia/kda.py` between the two tags; it is added at
+    `kda.py:238` in 0.29.0 by #53614, and reached only when `checkpoint is not None`,
+    i.e. with partial prefix caching on the `flashkda` prefill backend). If you later
+    upgrade *and* re-enable prefix caching, you walk into #55924 — see §10.4.
+- **Confidence:** **High** that it is free. **Low-to-medium** that it was the cause,
+  since your 0.0% hit rate means the code path was barely exercised. Do not expect
+  this alone to have fixed the crash.
+
+---
+
+**5. Move `mla_prefill_backend` off `TRTLLM_RAGGED`.**
+
+`--attention_config.mla_prefill_backend=TOKENSPEED_MLA` (or `FLASHINFER`). Subsumed by
+item 2; list it separately only if you keep DCP.
+
+- **Throughput cost:** low; a different prefill kernel. Prefill is a small share of
+  your workload (1000 prompts, up to 128k output tokens each). **[I]**
+- **Evidence:** **[D]** The recipe's own guide note says the three registered MLA
+  prefill backends — `FLASHINFER`, `TRTLLM_RAGGED`, `TOKENSPEED_MLA` — are
+  interchangeable with `use_prefill_query_quantization`, and that the Blackwell profile
+  emits `TOKENSPEED_MLA`. **[R]** #54300's reporter found that under DCP,
+  prefill-shaped batches routed through `TRTLLM_RAGGED` came back corrupt while
+  decode-shaped batches were correct.
+- **Confidence:** **Low-medium** on its own; **free** to fold into item 2.
+
+---
+
+**6. `--compilation-config '{"cudagraph_mode":"PIECEWISE"}'`. [diagnostic, expensive]**
+
+- **Throughput cost:** material — you lose full-graph decode. 10-30% of decode
+  throughput is the usual order **[I]**; also a shorter startup, since fewer graphs are
+  captured.
+- **Evidence:** **[R]** #52225 (which you found) recommends exactly this as an
+  isolation step. **[R]** #45487 (merged before 0.28.0) — *"Fix IMA in DCP a2a decode
+  under full CUDA graphs"*, repro `Kimi-K2.5-NVFP4`, DCP4, `a2a`, `--kv-cache-dtype
+  fp8`, full CUDA graphs: the A2A staging buffers came from a growable workspace that
+  was regrown after capture, invalidating addresses baked into captured graphs. The
+  original defect is fixed in your build, but it establishes the failure family
+  *a2a staging-buffer lifetime vs. graph-captured pointers*, and the direct DCP
+  workspace is a **persistent symmetric allocation shared by every MLA layer** with
+  device-side epoch state that graph replay cannot re-initialise **[I]**.
+- **Confidence:** **Medium** as a discriminator (it will tell you whether graphs are
+  involved), **low** as a fix you would want to keep.
+
+---
+
+**7. `--enforce-eager`. [last-resort discriminator]**
+
+- **Throughput cost:** severe — do not run a 1000x8-sample job like this. Use it for a
+  short reproduction only.
+- **Evidence:** **[R]** #54649 explicitly notes *"Eager mode avoids the graph failure
+  but is not performance-representative."*
+- **Confidence:** **High** as a discriminator, **not a deployment option.**
+
+---
+
+**8. Lower concurrency further / cap `--max-num-seqs`.**
+
+You went 256 -> 128 and still crashed, so this is mitigation, not a fix.
+
+- **Evidence:** **[R]** #50147: *"Time-to-crash shrinks monotonically as concurrency
+  grows — single-request testing will not reproduce this in reasonable time."*
+- **Confidence:** **[I]** It buys uptime, it does not remove the defect. Worth knowing
+  for planning a reproduction: to *reproduce* fast, raise concurrency.
+
+---
+
+**9. Upgrade to a nightly at or after `bfb443a6b6` (2026-09-08T21:07Z) — not to the
+0.29.0 tag.** See §10.4; this is deliberately last.
+
+---
+
+### 10.3 Evidence table
+
+| # | Item | URL | One-line | Applies? | Mark |
+|---|---|---|---|---|---|
+| E1 | `VLLM_USE_DIRECT_DCP_{A2A,Q_GATHER,KV_GATHER}` | `vllm/envs.py:199-201`, `:2112-2121` @ v0.28.0 | Typed `bool \| None = None`; comment: "Direct DCP ops default on when applicable; set to 1 to enforce or 0 to disable" | **Yes — auto-on for you** | **[D]** |
+| E2 | `_direct_dcp_enabled` / `_symm_mem_spans_group` | `vllm/v1/attention/ops/dcp_utils.py:40-94` @ v0.28.0 | With the env unset, direct path selected whenever symmetric memory spans the DCP group — true on a single NVLink node | **Yes** | **[D]** |
+| E3 | No fallback in 0.28.0 `_init_combine` | `dcp_utils.py:635-665` @ v0.28.0 vs `v1/attention/ops/dcp.py:1303-1328` @ v0.29.0 | 0.29.0 added `_direct_workspace_combine` with a capacity fallback to `dcp_a2a_lse_reduce`; 0.28.0 binds the direct kernel unconditionally | **Yes — genuine 0.28.0 defect** | **[D]** |
+| E4 | Spin-then-`trap` in the direct kernels | `csrc/libtorch_stable/attention/dcp_utils/dcp_direct_common.cuh:74-81`; `dcp_direct_a2a_lse_reduce.cu:158-166`; `dcp_direct_q_gather.cu:73-77` @ v0.28.0 | `wait_for_epoch` spins 1e8 times on `ld.global.acquire.sys.u32`, then `printf` + `asm volatile("trap;")` | **Yes — matches the 100%-util / low-power stall** | **[D]** mechanism, **[I]** attribution |
+| E5 | Direct DCP kernels unchanged 0.28.0 -> 0.29.0 | diff of all four files at both tags | **Byte-identical.** Upgrading does not touch the prime suspect | **Yes** | **[D]** |
+| E6 | #54305 Direct DCP A2A crashes on strided output | https://github.com/vllm-project/vllm/issues/54305 | Open. Direct path auto-selected and called with no layout gate; `VLLM_USE_DIRECT_DCP_A2A=0` is the accepted workaround | Partly — different backend, and its symptom is a clean `RuntimeError` at capture | **[R]** |
+| E7 | #50147 K3 IMA on 8x B300 | https://github.com/vllm-project/vllm/issues/50147 | Closed 2026-08-03. Same model + hardware + V2 runner; crashes at 11-20 min; different site each time; coredump named `flashinfer::trtllm_mnnvl_allreduce::rmsNormLamport<...,float4>`; fixed by #50386 | **Precedent only** — #50386 merged 2026-07-30, already in 0.28.0 | **[R]** + **[D]** on the merge date |
+| E8 | #50386 stale latent-MoE residual pointer in CUDA graphs | https://github.com/vllm-project/vllm/pull/50386 | Merged 2026-07-30, i.e. **in** 0.28.0 | Ruled out | **[D]** |
+| E9 | `VLLM_ALLREDUCE_USE_SYMM_MEM` defaults to 1 | `vllm/envs.py:260`, `:1860-1862`; `device_communicators/symm_mem.py`; `all_reduce_utils.py:71-76` | `multimem_all_reduce_`, live on your box; sm_103 TP8 threshold 64 MiB. `VLLM_ALLREDUCE_USE_FLASHINFER` defaults to **0**, not 1 | **Yes — an unexamined multicast path** | **[D]** |
+| E10 | #41623 DCP gibberish, TP8/DCP8 | https://github.com/vllm-project/vllm/issues/41623 | Open since 2026-05. Kimi-K2.6, TP8 + DCP8 + prefix caching, 262144 ctx: DCP alone produces unrelated gibberish. No fix | **Yes — same geometry, sibling model** | **[R]** |
+| E11 | #54300 GLM + DCP regression on 0.28.0 | https://github.com/vllm-project/vllm/issues/54300 | Open. Crashes on 0.28.0, silent garbage on 0.29.0, 8x B200, DCP. Reporter isolates `TRTLLM_RAGGED` prefill under DCP as corrupt | **Partly** — different model family | **[R]** |
+| E12 | #55780 Require explicit DCP support | https://github.com/vllm-project/vllm/pull/55780 | Merged 2026-09-08 (**not** in 0.28.0). Defaults `supports_dcp=False`; `TokenspeedMLAImpl` **is** an explicit opt-in | Confirms your backend is legitimately DCP-capable | **[D]** |
+| E13 | #55924 KDA IMA int32 overflow | https://github.com/vllm-project/vllm/pull/55924 | Merged 2026-09-08T21:07Z. `state_stride_0` up to 516096 x `state_idx` 4000+ overflows int32 in `_store_cache_checkpoints_kernel` | **Ruled out for 0.28.0** — the kernel does not exist there; and it is **still unfixed at the v0.29.0 tag** (verified `kda.py:263`) | **[D]** |
+| E14 | #53614 K3 internal prefix checkpoints | https://github.com/vllm-project/vllm/pull/53614 | Merged 2026-09-06; introduces the kernel E13 fixes, gated on prefix caching + `flashkda` prefill | Not in 0.28.0 | **[D]** |
+| E15 | #54649 Kimi-K3 DSpark/DCP IMA | https://github.com/vllm-project/vllm/issues/54649 | Closed 2026-09-04. `MLAAttentionSpec.merge()` used an `assert` for target/draft separation; optimized-Python containers strip asserts; `set.pop()` then picks wrong metadata -> CUDA-graph IMA. "Both TokenSpeed MLA and FlashInfer MLA reproduce it" | **Ruled out — requires DSpark spec decode** | **[R]** |
+| E16 | #55234 fix for E15 | https://github.com/vllm-project/vllm/pull/55234 | Merged 2026-09-04, so **is** in 0.29.0 | n/a (you have no spec decode) | **[D]** |
+| E17 | #51313 K3 fp8 KV gating | https://github.com/vllm-project/vllm/issues/51313 | Open. `backend_supports_prefill_query_quantization()` requires Blackwell **and** backend in `{FLASHINFER, TRTLLM_RAGGED, TOKENSPEED_MLA}` | Confirms **your fp8 + prefill-quant + backend combination is the sanctioned one.** Also documents `--kv-cache-dtype fp8_ds_mla` as the bf16-prefill-query alternative | **[D]** |
+| E18 | #45487 IMA in DCP a2a under full CUDA graphs | https://github.com/vllm-project/vllm/pull/45487 | Merged before 0.28.0. Kimi-K2.5, DCP4, `a2a`, fp8 KV, full graphs: growable A2A staging buffers regrown after capture | Fixed in your build; establishes the failure family | **[R]** |
+| E19 | #55289 / #54889 A2A empty-shard masking | https://github.com/vllm-project/vllm/pull/55289 | Merged 2026-09-04. "Under DCP... a rank whose local shard is empty produces **undefined output and LSE**"; masking drives those rows' LSE to `-inf` | Perf refactor, not a fix; documents that empty DCP shards are a live correctness hazard | **[D]** |
+| E20 | #54111 fused groupwise RMSNorm quant race | https://github.com/vllm-project/vllm/pull/54111 | Merged 2026-08-28 -> **in 0.29.0, not in 0.28.0.** Shared-memory race | Possible, unquantified | **[R]** |
+| E21 | #50729 Mamba overlapping state copy race | https://github.com/vllm-project/vllm/pull/50729 | Merged **2026-08-17** -> already in 0.28.0 | Ruled out as an upgrade motive | **[D]** |
+| E22 | #53000 MNNVL Lamport mailbox fix | https://github.com/vllm-project/vllm/pull/53000 | Merged **2026-08-24** -> already in 0.28.0 | Ruled out as an upgrade motive | **[D]** |
+| E23 | #52998 FlashInfer all-reduce by default | https://github.com/vllm-project/vllm/pull/52998 | Merged **2026-08-20**, before 0.28.0 — yet `envs.py` at v0.28.0 still defaults `VLLM_ALLREDUCE_USE_FLASHINFER` to `0` | Nothing changes at upgrade | **[D]** |
+| E24 | Kimi-K3 recipe | https://raw.githubusercontent.com/vllm-project/recipes/main/models/moonshotai/Kimi-K3.yaml | DCP is `features.text_only` (opt-in); Blackwell baseline prefill backend is `TOKENSPEED_MLA`, not `TRTLLM_RAGGED`; documents the `VLLM_USE_DIRECT_DCP_*` knobs as "default to auto" | **Yes** | **[D]** |
+| E25 | DCP workspace sizing | `dcp_utils.py:97-116` @ v0.28.0 | `min(max_num_batched_tokens, max(max_num_seqs * tokens_per_seq, max_cudagraph_capture_size))`. For you: no spec decode, `max_num_seqs=128`, Blackwell default capture size 1024 -> **1024 tokens** | See §10.5 — candidate explanation for Attempt B | **[D]** sizing, **[I]** attribution |
+
+### 10.4 Would 0.29.0 fix it? No — and the tag is a bad target
+
+Verified against both tags directly, not against the changelog:
+
+- **[D]** All four direct-DCP CUDA files are **byte-identical** between v0.28.0 and
+  v0.29.0. The prime suspect is untouched.
+- **[D]** 0.29.0 *does* add the capacity fallback of E3, which is a real robustness win
+  for the DCP combine and would convert a hard failure into a slow path.
+- **[D]** #50729, #53000, #52998 and #50386 — all four of the "that sounds relevant"
+  fixes — merged **before** 2026-08-26 and are therefore **already in your 0.28.0**.
+  The only post-0.28.0 memory-safety fix I found touching a subsystem you use is
+  #54111 (RMSNorm quantization shared-memory race).
+- **[D]** 0.29.0 *introduces a new KDA illegal-memory-access bug that 0.28.0 does not
+  have.* #53614 adds `_store_cache_checkpoints_kernel`; #55924 fixes an int32 address
+  overflow in it; #55924 merged 2026-09-08T21:07Z and the 0.29.0 release cut is
+  2026-09-09T08:54Z — but I checked `kda.py:263` at the **v0.29.0 tag** and the fix is
+  **not** there. Reached only with prefix caching on the `flashkda` prefill backend.
+- **[R]** #54300 reports GLM + DCP as *"crashes on 0.28.0, silently returns random
+  tokens on 0.29.0"* — a reminder that on the DCP path, 0.29.0 can trade a crash for
+  silent corruption, which for a 1000x8 generation job is strictly worse.
+- **[D]** #53183 makes Model Runner V2 the default for all models in 0.29.0. You
+  already force it with `VLLM_USE_V2_MODEL_RUNNER=1`, so this is neutral for you, but
+  the 0.28.0 -> 0.29.0 range is 607 commits — a large confounder to introduce
+  mid-investigation.
+
+**If you upgrade, target a nightly at or after `bfb443a6b6` (2026-09-08T21:07Z)**, which
+carries #55924 and #55234, rather than the v0.29.0 tag. But upgrading is item 9 for a
+reason: it changes 607 commits at once and does not touch the prime suspect.
+
+### 10.5 On the three specific attempts
+
+- **Attempt A** (`VLLM_ALLREDUCE_USE_FLASHINFER=1`, misaligned address in
+  `mnnvl.py:836 SymmDeviceMemory.__del__ -> cuMemFree(signal_pads_dev)`): a `cuMemFree`
+  in a `__del__` cannot itself be the origin. Once a context takes a fault, every
+  subsequent driver call returns the sticky error, and Python teardown is simply where
+  the next call happens to be. Read this as *"something poisoned the context; the
+  wreckage surfaced in FlashInfer's symmetric-memory teardown"* **[I]**. It does tell
+  you a fabric/multicast allocation was live, which all three of E1/E9 and FlashInfer
+  satisfy.
+- **Attempt B** (HTTP 500s, then engine death, root cause lost): there is a concrete
+  0.28.0 mechanism that produces exactly this shape. The direct A2A workspace is sized
+  to **1024 tokens** for your config (E25), and `direct_dcp_a2a_lse_reduce` enforces
+  `STD_TORCH_CHECK(num_tokens > 0 && num_tokens <= max_num_tokens)` host-side
+  (`dcp_direct_a2a_lse_reduce.cu:254`). In 0.28.0 there is **no fallback** when that
+  bound is exceeded (E3), so a combine call carrying prefill-shaped token counts raises
+  a `RuntimeError` per request — HTTP 500s — until the engine gives up. 0.29.0's new
+  wrapper exists precisely to catch this case, and its comment names the trigger as the
+  forced-MQA path passing prefill tokens into combine. **[D]** on the mechanism,
+  **[I]** that it is what you hit — the log that would confirm it scrolled away.
+  If you reproduce Attempt B, grep for `num tokens` / `max_num_tokens` in the traceback.
+- **Attempt C** (`~CUDAEvent` warning at rank 4, `EngineDeadError`,
+  `c10::AcceleratorError`, pinned-allocator rethrow): all four lines are sticky-error
+  teardown. The single informative detail is **rank 4** — a *specific* rank faulting
+  while others report only the collective aftermath is what you would expect from a
+  peer-to-peer collective in which one rank's spin-wait expired **[I]**.
+
+### 10.6 Ruled out
+
+- **#51508 (GDN/KDA recurrent-state corruption)** — **[R]/[D]** requires speculative
+  decoding **and** async scheduling to produce the stale zero-accept rows that index
+  `-1`. You run neither. Also still open and unmerged.
+- **#54649 (Kimi-K3 DSpark/DCP IMA)** — **[R]** requires DSpark spec decoding; the
+  mechanism is `MLAAttentionSpec.merge()` relying on an `assert` that optimized-Python
+  containers strip. No spec decode, no draft KV-cache spec, no merge.
+- **#55924 / the KDA int32 overflow** — **[D]** I diffed `kda.py` between the tags:
+  `_store_cache_checkpoints_kernel` is **absent from 0.28.0 entirely**. It cannot be
+  your fault. (It becomes relevant only if you upgrade *and* re-enable prefix caching.)
+- **#50147** — **[D]** closed by #50386, merged 2026-07-30, which is in your 0.28.0.
+  Retained above as a precedent and as the source of the coredump procedure, not as a
+  live candidate.
+- **#50729, #53000, #52998** — **[D]** all merged before the 0.28.0 cut. Already yours.
+- **#53377 (MNNVL allreduce fabric gating)** — as you found, multi-node InfiniBand only.
+- **#52225 (Xid 13 warp errors)** — **[R]** SM120 + Nemotron, different hardware and
+  model family. Its *isolation advice* is reused above (items 6 and 7); its diagnosis
+  is not transferable.
+- **#51986 (mnnvl allreduce workspace hang/leak)** — **[R]** IB-only multi-node. Single
+  node, not applicable.
+- **`TOKENSPEED_MLA` as the culprit** — **[D]** #55780 lists `TokenspeedMLAImpl` among
+  the eleven implementations that explicitly declare DCP support, and #51313 shows that
+  `TOKENSPEED_MLA` is one of only three backends that can satisfy K3's fp8-KV prefill
+  assertion on Blackwell at all. It is the recipe's Blackwell default for both decode
+  and prefill. There is no alternative decode backend for this configuration that
+  avoids it, and no evidence against it.
+- **fp8 KV cache as such** — **[D]** #44044 enabled DCP + fp8 KV in the MLA decode path
+  with GSM8K parity; I found no issue claiming a general DCP/fp8-KV incompatibility.
+  `--kv-cache-dtype fp8_ds_mla` remains an untested alternative (E17) that takes a bf16
+  prefill query and would let you drop `use_prefill_query_quantization`; I am not
+  ranking it because I found no evidence it is safer, only that it is different.
+- **Very long sequences specifically** — I looked for and did **not** find evidence that
+  the fault is tied to approaching the 131072 context limit. The available evidence
+  points the other way: #50147 states time-to-crash scales with **concurrency**, and
+  your own crashes came at 20-50 min under both 256- and 128-way concurrency. The
+  DCP-specific length hazard I did find is the opposite end — **empty shards on short
+  sequences** (E19), where a rank with no local KV produces undefined output and LSE.
+  Treat "long context" as unproven either way **[I]**.
+
+### 10.7 Safest known-good configuration
+
+If you want the highest probability of a clean 1000x8 run and will pay for it, run the
+recipe's Blackwell baseline with DCP and prefix caching removed and every multicast
+collective turned off:
+
+```text
+--tensor-parallel-size 8
+--attention-backend TOKENSPEED_MLA
+--attention_config.mla_prefill_backend=TOKENSPEED_MLA
+--attention_config.use_prefill_query_quantization=true
+--kv-cache-dtype fp8
+--no-enable-flashinfer-autotune
+--gpu-memory-utilization 0.95
+--max-model-len 131072
+--max-num-seqs 128
+--reasoning-parser kimi_k3
+--load-format fastsafetensors
+--trust-remote-code
+# dropped: --decode-context-parallel-size 8, --dcp-comm-backend a2a,
+#          --enable-prefix-caching, --prefix-match-unit 128 (a no-op without it)
+```
+
+```bash
+VLLM_USE_V2_MODEL_RUNNER=1
+VLLM_ALLREDUCE_USE_FLASHINFER=0
+VLLM_ALLREDUCE_USE_SYMM_MEM=0
+VLLM_ENGINE_READY_TIMEOUT_S=3600
+CUDA_ENABLE_COREDUMP_ON_EXCEPTION=1
+CUDA_COREDUMP_FILE=/weka/.../cuda_coredump_%h.%p.%t
+```
+
+This is the recipe's own validated Blackwell profile minus two opt-in features, so it
+is the configuration with the most third-party mileage on it **[D]**. Everything
+removed is either an opt-in performance feature (DCP) or a no-op for your workload
+(prefix caching at a 0.0% hit rate).
+
+**A cheaper first shot**, if you would rather not give up DCP yet: keep your current
+serve command exactly as it is and add only the three `VLLM_USE_DIRECT_DCP_*=0` vars
+plus `VLLM_ALLREDUCE_USE_SYMM_MEM=0` and the coredump vars. That is items 0, 1 and 3,
+costs a few percent, and discriminates the multicast hypothesis from everything else in
+one run.
+
+### 10.8 Is it unfixable in 0.28.0?
+
+**Not established either way, and I will not claim otherwise.** What I can say plainly:
+
+- I found **no named, confirmed defect in 0.28.0 that matches your three crashes**.
+  There is no issue for Kimi-K3 + DCP8 + `a2a` + `TOKENSPEED_MLA` on sm_103, and no
+  issue at all mentioning B300/sm_103 with DCP.
+- I did find **one genuine 0.28.0 defect that 0.29.0 fixes** in the exact code path you
+  run: the missing capacity fallback in `_init_combine` (E3). That plausibly explains
+  Attempt B, and nothing else.
+- The prime suspect — the direct symmetric-memory DCP kernels — is **unchanged in
+  0.29.0**, so "upgrade" is not the answer to it. It is, however, **fully disableable
+  in 0.28.0 by environment variable**, which is why it is item 1.
+- If items 1, 2 and 3 all fail, then the remaining honest position is that this is an
+  **unreported bug**, and the next step is not another configuration permutation but
+  the coredump from item 0, filed as a new issue against `vllm-project/vllm` with the
+  faulting kernel named. That is exactly the arc #50147 followed on this same hardware:
+  a week of inconclusive tracebacks, then one coredump, then a fix in four days.
