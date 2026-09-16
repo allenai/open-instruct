@@ -112,7 +112,11 @@ def specification(
         "constraints": {"cluster": ["ai2/saturn" if stage in {"prepare", "export"} else "ai2/jupiter"]},
         "context": {
             "priority": "urgent",
-            "minRuntime": "4h" if stage in {"train", "resume"} else "30m",
+            # The basket smoke loads a two-GPU judge and runs three 256-sample
+            # collections; 30 minutes of protection is shorter than its startup.
+            "minRuntime": "4h"
+            if stage in {"train", "resume"}
+            else ("2h" if stage == "smoke" and profile == "basket" else "30m"),
             "autoResume": stage == "resume",
         },
         "timeout": "1h" if stage in {"prepare", "export"} else ("3h" if stage in {"smoke", "evaluate"} else "48h"),

@@ -654,6 +654,12 @@ def test_basket_launch_passes_profile_steps_and_judge_only_to_gpu_stages():
     assert {e["name"]: e.get("value") for e in train["tasks"][0]["envVars"]}[
         "WANDB_RUN_GROUP"
     ] == "dolci-basket-32k-zero-20260914"
+    smoke = launch_original_baseline.specification("image", "source", "smoke", "test", profile="basket")
+    assert smoke["tasks"][0]["context"]["minRuntime"] == "2h"
+    assert (
+        launch_original_baseline.specification("image", "source", "smoke", "test")["tasks"][0]["context"]["minRuntime"]
+        == "30m"
+    )
     prepare = launch_original_baseline.specification("image", "source", "prepare", "test", profile="basket")
     assert "--judge-prepared" not in prepare["tasks"][0]["arguments"][0]
     assert "--profile basket" in prepare["tasks"][0]["arguments"][0]
