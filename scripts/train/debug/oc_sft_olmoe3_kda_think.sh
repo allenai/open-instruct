@@ -430,7 +430,7 @@ case "$MODE" in
         --non_resumable \
         --no_auto_dataset_cache \
         $EXTRA_BUCKET_FLAGS \
-        -- /stage/.venv/bin/python scripts/train/debug/convert_moe_checkpoint_to_hf.py \
+        -- /stage/.venv/bin/python "${CONVERT_SCRIPT:-scripts/train/debug/convert_moe_checkpoint_to_hf.py}" \
         -i "$CKPT_ROOT/$STEP" \
         -o "$CKPT_ROOT/hf_$STEP" \
         -c $CONFIG_NAME \

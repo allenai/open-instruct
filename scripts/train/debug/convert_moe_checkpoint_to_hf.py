@@ -31,15 +31,75 @@ the missing `feed_forward` attribute. KDA is unaffected because
 import argparse
 import json
 import pathlib
+import tempfile
 
 import torch
+import torch.distributed.checkpoint.state_dict as dist_cp_sd
 from olmo_core.config import DType
+from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_keys
 from olmo_core.nn.hf import convert_checkpoint_to_hf
+from olmo_core.nn.transformer.config import TransformerConfig
 from olmo_core.utils import prepare_cli_environment
 
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir: str) -> dict | None:
+    """Gather model weights from an OLMoDDP checkpoint, or return None for a conventional one.
+
+    ``OLMoDDPTrainModule`` stores the authoritative weights as the fused optimizer's fp32
+    ``module.<parameter>.main`` tensors, not under ``model.<parameter>``. olmo-core on
+    ``akshitab/emo_modularity`` (f2cf93839) taught ``convert_checkpoint_to_hf`` that layout
+    (``_load_ddp_optimizer_model_state``); the Olmo 3.5 hero lineage (89e7dcb7) never got it,
+    so every hero SFT conversion died with "Missing key in checkpoint state_dict:
+    model.embeddings.weight" (01M2N8CRTAZHXD6605MSY9615M, 2026-09-16). This is that function,
+    ported: the same key candidates, the converter then takes the gathered state dict.
+    """
+    checkpoint_keys = set(get_checkpoint_metadata(model_and_optim_dir).state_dict_metadata)
+    if not any(key.endswith(".main") for key in checkpoint_keys):
+        return None
+    logger.info("OLMoDDP checkpoint layout (<param>.main); gathering weights through the fused optimizer keys")
+    model = TransformerConfig.from_dict(model_config).build(init_device="meta")
+    model = model.to_empty(device="cpu")
+    keys_to_load: list[str] = []
+    destinations: list[tuple[str, torch.Tensor]] = []
+    missing: list[str] = []
+    for name, param in model.named_parameters():
+        candidates = (
+            f"model.{name}",
+            f"model.module.{name}",
+            name,
+            f"module.{name}",
+            f"{name}.main",
+            f"module.{name}.main",
+        )
+        key = next((k for k in candidates if k in checkpoint_keys), None)
+        if key is None:
+            missing.append(name)
+            continue
+        keys_to_load.append(key)
+        destinations.append((name, param))
+    if missing:
+        raise RuntimeError("DDP checkpoint is missing weights for model parameters: " + ", ".join(missing))
+    loaded = load_keys(model_and_optim_dir, keys_to_load, work_dir=work_dir)
+    with torch.no_grad():
+        for key, (name, destination), value in zip(keys_to_load, destinations, loaded, strict=True):
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"Checkpoint value '{key}' is not a tensor")
+            if value.numel() != destination.numel():
+                raise RuntimeError(
+                    f"Checkpoint value '{key}' has {value.numel()} elements, model parameter '{name}' has {destination.numel()}"
+                )
+            destination.copy_(value.reshape(destination.shape).to(destination.dtype))
+        for name, buffer in model.named_buffers():
+            key = f"model_buffer.{name}"
+            if key in checkpoint_keys:
+                value = next(load_keys(model_and_optim_dir, [key], work_dir=work_dir))
+                buffer.copy_(value.reshape(buffer.shape).to(buffer.dtype))
+    options = dist_cp_sd.StateDictOptions(full_state_dict=True, cpu_offload=True)
+    return dist_cp_sd.get_model_state_dict(model, options=options)
 
 
 def main() -> None:
@@ -65,11 +125,16 @@ def main() -> None:
         raise SystemExit(f"{args.config} has no dataset.tokenizer section")
 
     logger.info("converting %s -> %s", args.checkpoint_input_path, args.huggingface_output_dir)
+    with tempfile.TemporaryDirectory() as work_dir:
+        model_state_dict = load_ddp_main_params(
+            str(pathlib.Path(args.checkpoint_input_path) / "model_and_optim"), model_config, work_dir
+        )
     convert_checkpoint_to_hf(
         original_checkpoint_path=args.checkpoint_input_path,
         output_path=args.huggingface_output_dir,
         transformer_config_dict=model_config,
         tokenizer_config_dict=tokenizer_config,
+        model_state_dict=model_state_dict,
         dtype=DType.bfloat16,
         max_sequence_length=args.max_sequence_length,
         tokenizer_id=args.tokenizer,
