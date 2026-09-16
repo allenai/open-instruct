@@ -54,7 +54,7 @@ use_rollout_logprobs = true
 learning_rate = 1e-6
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-2b-opd-from-verifier-2b-math-v3"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-2b-opd-from-verifier-2b-math-v4"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]
