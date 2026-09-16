@@ -103,6 +103,13 @@ case "$BASE" in
   hero-small-nonemo)
     DEFAULT_MODEL=/weka/olmo-3p5-checkpoints/production-hero-small-lc/olmo35-small-2t-lc100b-20260913/olmo35-small-2t-lc100b-20260913-non-emo/step5961
     DEFAULT_CONFIG=scripts/train/debug/kda_hero_small_sft.json
+    # torch.compile on the packed path gives a non-finite loss at step 1 on this
+    # base: the gate died in the optimizer's finite check on both attempts
+    # (01M2KV7PJRGQ30KGFS6AZFCS72, "Non-finite loss encountered in
+    # OLMoDDPOptimizer"), and Jacob saw the same on both LC sources with the
+    # identical eager run finite. Eager until the compiler/varlen interaction is
+    # qualified separately. The proxy keeps compiling (its anchors were finite).
+    DEFAULT_COMPILE=0
     ;;
   *)
     echo "Unknown BASE=$BASE (expected proxy or hero-small-nonemo)" >&2
@@ -111,6 +118,8 @@ case "$BASE" in
 esac
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 CONFIG_NAME="${CONFIG_NAME:-$DEFAULT_CONFIG}"
+COMPILE="${COMPILE:-${DEFAULT_COMPILE:-1}}"
+if [[ "$COMPILE" == "1" ]]; then COMPILE_FLAG=""; else COMPILE_FLAG="--no_compile_model"; fi
 # mason mounts only oe-adapt-default and oe-training-default; a base under any
 # other bucket needs --extra_weka_buckets or the job fails at load time with a
 # missing path (#1897). Derived from MODEL so a manual override cannot forget it.
@@ -200,7 +209,7 @@ grad_accum_for() {
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Mode: $MODE | BASE=$BASE | SEQ=$SEQ | LR=$LR | cluster=$CLUSTER | workspace=$WORKSPACE"
 echo "Model: $MODEL"
-echo "Config: $CONFIG_NAME ${EXTRA_BUCKET_FLAGS:+| $EXTRA_BUCKET_FLAGS}"
+echo "Config: $CONFIG_NAME ${EXTRA_BUCKET_FLAGS:+| $EXTRA_BUCKET_FLAGS} | compile=$COMPILE"
 
 case "$MODE" in
   tokenize_subset|tokenize_full)
@@ -364,6 +373,7 @@ case "$MODE" in
         --num_epochs 1 \
         --max_train_steps "$STEPS" \
         --attn_implementation flash_2 \
+        $COMPILE_FLAG \
         --activation_checkpointing_mode "$ACT_CKPT_MODE" \
         --activation_memory_budget "$ACT_MEM_BUDGET" \
         --checkpointing_steps "$CKPT_STEPS" \
