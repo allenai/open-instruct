@@ -50,7 +50,7 @@ uv run python mason.py \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     "${BEAKER_DATASETS[@]}" \
-    --min_runtime 4h \
+    --min_runtime 8h \
     --no_auto_resume \
     --num_nodes 4 \
     --max_retries 0 \

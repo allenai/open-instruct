@@ -31,7 +31,7 @@ uv run python mason.py \
     --priority "$PRIORITY" \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
-    --min_runtime 6h \
+    --min_runtime 8h \
     --auto_resume \
     --num_nodes 4 \
     --max_retries 0 \

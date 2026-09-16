@@ -175,6 +175,7 @@ for the canonical runs.
 - Beaker caps `min_runtime` at 8h; the 4B rerun was preempted at its 4h `min_runtime` by
   workspace-group rebalancing (exit 134 after SIGTERM). Resume with
   `--checkpoint_state_dir /weka/.../deletable_checkpoint_states/kevinfarhat/<run>` and a new
-  run name; grpo_fast logs `Resuming training from step N`.
+  run name; grpo_fast logs `Resuming training from step N`. The 4-node full-run launch
+  scripts now request the 8h maximum.
 - `/weka/oe-adapt-default` reached 100% during the campaign (451T of 455T) and killed the
   first Miles attempts with ENOSPC.

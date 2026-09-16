@@ -71,7 +71,7 @@ case "$RUN_MODE" in
         SAVE_FREQ=20
         CHECKPOINT_STATE_FREQ=10
         MASON_CHECKPOINT_STATE_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint_states
-        MIN_RUNTIME=4h
+        MIN_RUNTIME=8h
         TIMEOUT=12h
         ;;
     *)
