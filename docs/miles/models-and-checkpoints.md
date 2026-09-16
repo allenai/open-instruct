@@ -43,6 +43,14 @@ cadence directly with update numbers. `output.export_hf=true` requests a final H
 export, separate from the recoverable native optimizer checkpoint. Megatron
 `async_save` and retention settings are not substitutes.
 
+Native checkpoints roll by default: after each commit, only the newest
+`core.checkpoint_keep_last` committed checkpoints (default 1) and every
+`core.checkpoint_keep_every`-th completed update (unset by default) remain; the
+others and their MILES cursors are deleted, interrupted saves are left alone, and
+the final save is always the newest. Set `core.checkpoint_keep_last` to a larger
+count, or explicitly unset it, to retain more. Retention never touches a
+checkpoint loaded from another run's root.
+
 `launch.auto_resume=true` permits supported Beaker retries. Workflow preparation
 is reused only for the same recorded specification; the latest completed native
 checkpoint is loaded when present, otherwise training restarts from the input.

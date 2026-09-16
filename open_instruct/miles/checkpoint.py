@@ -3,6 +3,8 @@
 import hashlib
 import json
 import random
+import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -10,8 +12,11 @@ import numpy as np
 import torch
 from torch import distributed as dist
 
+from open_instruct import logger_utils
 from open_instruct.miles import models
 from open_instruct.miles.state import PolicyClock, atomic_json
+
+logger = logger_utils.setup_logger(__name__)
 
 
 def checkpoint_path(root, rollout_id):
@@ -68,6 +73,60 @@ def finalize(actor, rollout_id):
         pending["cursor_sha256"] = hashlib.sha256(cursor.read_bytes()).hexdigest()
         atomic_json(path / "complete.json", pending)
         atomic_json(Path(actor.args.save) / "core-latest.json", {"rollout_id": rollout_id})
+        core = actor.args.olmo_core
+        try:
+            removed = prune(
+                actor.args.save, rollout_id, keep_last=core.checkpoint_keep_last, keep_every=core.checkpoint_keep_every
+            )
+        except OSError as error:
+            # Retention is housekeeping; a failed delete must not fail a committed checkpoint.
+            logger.warning("Checkpoint retention could not remove an older checkpoint: %s", error)
+        else:
+            if removed:
+                logger.info("Checkpoint retention removed committed rollouts %s; latest is %d", removed, rollout_id)
+
+
+def committed_rollout_ids(root):
+    """Rollout ids of committed checkpoints under root, ascending; interrupted saves are ignored."""
+    base = Path(root) / "core"
+    ids = []
+    if base.is_dir():
+        for entry in base.iterdir():
+            match = re.fullmatch(r"rollout_(\d{7})", entry.name)
+            if match and (entry / "complete.json").exists():
+                ids.append(int(match.group(1)))
+    return sorted(ids)
+
+
+def retained_rollout_ids(ids, latest_id, *, keep_last, keep_every):
+    """The newest keep_last committed checkpoints, every keep_every-th completed update, and the latest.
+
+    keep_last=None keeps everything. keep_every counts completed updates, so with
+    zero-based rollout ids the checkpoint after update 50 is rollout 49.
+    """
+    keep = {latest_id}
+    if keep_last is None:
+        return set(ids) | keep
+    keep.update(ids[-keep_last:])
+    if keep_every:
+        keep.update(rollout_id for rollout_id in ids if (rollout_id + 1) % keep_every == 0)
+    return keep
+
+
+def prune(root, latest_id, *, keep_last, keep_every):
+    """Delete committed checkpoints outside the retention set; returns the removed rollout ids."""
+    ids = committed_rollout_ids(root)
+    keep = retained_rollout_ids(ids, latest_id, keep_last=keep_last, keep_every=keep_every)
+    removed = []
+    for rollout_id in ids:
+        if rollout_id in keep:
+            continue
+        shutil.rmtree(checkpoint_path(root, rollout_id))
+        cursor = Path(root) / "rollout" / f"global_dataset_state_dict_{rollout_id}.pt"
+        if cursor.is_file():
+            cursor.unlink()
+        removed.append(rollout_id)
+    return removed
 
 
 def resume_manifest(root):

@@ -36,6 +36,11 @@ class CoreConfig:
     checkpoint_compact_storage: bool = True
     checkpoint_dedup_save_to_lowest_rank: bool = False
     checkpoint_constant_memory_planning: bool = True
+    # Committed native checkpoints to retain after each commit: the newest
+    # checkpoint_keep_last plus every checkpoint_keep_every-th completed update.
+    # None keeps every checkpoint.
+    checkpoint_keep_last: int | None = None
+    checkpoint_keep_every: int | None = None
     model_config: str | None = None
     reward_config: str | None = None
     expert_parallel_size: int = 1
@@ -113,7 +118,12 @@ class CoreConfig:
             "sequence_packing",
         ):
             validation.boolean(getattr(self, name), f"core.{name}")
-        for name in ("checkpoint_thread_count", "checkpoint_process_count"):
+        for name in (
+            "checkpoint_thread_count",
+            "checkpoint_process_count",
+            "checkpoint_keep_last",
+            "checkpoint_keep_every",
+        ):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
                 raise InputError(f"core.{name} must be a positive integer or unset")

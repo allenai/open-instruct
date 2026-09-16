@@ -269,3 +269,13 @@ def test_conversion_reference_is_not_silently_reinterpreted_as_kl_reference(tmp_
     run = spec(tmp_path, optimizer={"kl_loss_coef": 0.01}, miles={"ref_load": "reference"})
     assert run.compile().miles["ref_load"] == str(tmp_path / "reference")
     assert run.compile().miles["use_kl_loss"] is True
+
+
+def test_checkpoint_retention_defaults_to_one_and_accepts_milestones(tmp_path):
+    config = spec(tmp_path).compile()
+    assert config.core.checkpoint_keep_last == 1
+    assert config.core.checkpoint_keep_every is None
+    config = spec(tmp_path, core={"checkpoint_keep_last": 3, "checkpoint_keep_every": 50}).compile()
+    assert (config.core.checkpoint_keep_last, config.core.checkpoint_keep_every) == (3, 50)
+    with pytest.raises(ValueError, match="checkpoint_keep_every"):
+        spec(tmp_path, core={"checkpoint_keep_every": 0}).compile()

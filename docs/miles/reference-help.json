@@ -39,7 +39,9 @@
     "pipeline_observation_interval": "Seconds between read-only async producer/completed-buffer observations; zero disables. Engine metrics are sampled no more frequently than every five seconds when observation is enabled. Missing samples remain explicit.",
     "compile_model": "Compile native Core model forwards. Experimental for variable-shaped RL; monitor graph recompilation. Default false.",
     "compile_optimizer": "Compile the native MoE distributed optimizer update. Experimental; independent of model compilation. Default false.",
-    "use_reduce_scatter": "Use the native MoE reduce-scatter gradient path. Experimental; qualify EP topology before promoting. Default false."
+    "use_reduce_scatter": "Use the native MoE reduce-scatter gradient path. Experimental; qualify EP topology before promoting. Default false.",
+    "checkpoint_keep_last": "Committed native checkpoints to keep after each commit (newest first); unset keeps every checkpoint. Run files default to 1.",
+    "checkpoint_keep_every": "Also keep the checkpoint after every N completed updates (rollout id N-1, 2N-1, ...); unset keeps no milestones."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",

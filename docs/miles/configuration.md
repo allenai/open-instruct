@@ -233,6 +233,8 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.checkpoint_compact_storage | &lt;class &#x27;bool&#x27;&gt; | true | Compact tensor storage before native checkpoint writes. |
 | core.checkpoint_dedup_save_to_lowest_rank | &lt;class &#x27;bool&#x27;&gt; | false | Use the lowest rank for duplicated checkpoint entries; independent writer policy switch. |
 | core.checkpoint_constant_memory_planning | &lt;class &#x27;bool&#x27;&gt; | true | Use bounded-memory checkpoint planning; separate from async save (unsupported). |
+| core.checkpoint_keep_last | int &#124; None | null | Committed native checkpoints to keep after each commit (newest first); unset keeps every checkpoint. Run files default to 1. |
+| core.checkpoint_keep_every | int &#124; None | null | Also keep the checkpoint after every N completed updates (rollout id N-1, 2N-1, ...); unset keeps no milestones. |
 | core.model_config | str &#124; None | null | Optional Core model factory configuration path for supported construction. |
 | core.reward_config | str &#124; None | null | Trusted verifier registry path; structured workflow preparation supplies it. |
 | core.expert_parallel_size | &lt;class &#x27;int&#x27;&gt; | 1 | Expert-parallel group size; must divide trainer world size. |

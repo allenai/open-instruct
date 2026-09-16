@@ -560,6 +560,10 @@ class RunSpec:
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
         core.setdefault("attention_backend", "flash_4")
         core.setdefault("row_specialization", "dynamic")
+        # Roll native checkpoints by default: keep the newest committed one (the
+        # final save is always the newest). Set core.checkpoint_keep_every to also
+        # keep milestones, or unset checkpoint_keep_last explicitly to keep all.
+        core.setdefault("checkpoint_keep_last", 1)
         core.setdefault("max_policy_lag", 1 if asynchronous else 0)
         if "max_context_length" in controls:
             length, origin = controls["max_context_length"]
