@@ -74,6 +74,11 @@ dump_vllm_failure() {
 # can be A/B-tested in minutes on a small checkpoint instead of hours on a
 # large one.
 : "${LOAD_FORMAT:=}"
+# Hybrid recurrent-state models (Kimi-K3 carries KDA Mamba state alongside
+# its MLA cache) have documented corruption with automatic prefix caching.
+# On this workload the hit rate was 0.0% on every sample -- the prompts share
+# no prefixes -- so turning it off costs nothing and removes a known hazard.
+: "${NO_PREFIX_CACHE:=}"
 : "${STARTUP_PROBE:=0}"
 : "${ENABLE_EP:=}"
 : "${MAX_MODEL_LEN:=131072}"
@@ -557,7 +562,7 @@ run_one_model() {
         --tensor-parallel-size "$TP_SIZE" \
         --max-model-len "$MAX_MODEL_LEN" \
         --max-num-seqs "$VLLM_MAX_NUM_SEQS" \
-        --enable-prefix-caching \
+        $([ -n "$NO_PREFIX_CACHE" ] || printf -- "--enable-prefix-caching") \
         ${DCP_SIZE:+--decode-context-parallel-size "$DCP_SIZE"} \
         ${DP_SIZE:+--data-parallel-size "$DP_SIZE"} \
         ${ENABLE_EP:+--enable-expert-parallel} \
