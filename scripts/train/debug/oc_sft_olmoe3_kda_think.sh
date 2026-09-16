@@ -92,6 +92,7 @@ MODE="${2:-gate}"
 # individually (MODEL, CONFIG_NAME) for a checkpoint that has no preset yet.
 #   proxy            the 1.2B/18.5B latent-KDA proxy (~200B PT tokens; #1854..#1880)
 #   hero-small-nonemo  Olmo 3.5 hero small, 0.79B/12.5B, 2T PT + 100B MT + 100B LC,
+#   hero-small-ptemo   same, but EMO on during PT only (paired arm for the EMO question).
 #                    non-EMO throughout (#1895). Lives in olmo-3p5-checkpoints,
 #                    which mason does not mount by default -- see EXTRA_BUCKET_FLAGS.
 BASE="${BASE:-proxy}"
@@ -111,8 +112,17 @@ case "$BASE" in
     # qualified separately. The proxy keeps compiling (its anchors were finite).
     DEFAULT_COMPILE=0
     ;;
+  hero-small-ptemo)
+    # Same geometry and recipe as hero-small-nonemo; EMO was on during
+    # pretraining only (off for MT/LC, so the router config carries no emo
+    # field). The paired arm for the EMO-in-PT question; keep every other
+    # setting identical to the non-EMO anchor so the comparison stays paired.
+    DEFAULT_MODEL=/weka/olmo-3p5-checkpoints/production-hero-small-lc/olmo35-small-2t-lc100b-noemo-20260914/olmo35-small-2t-lc100b-noemo-20260914-emo/step5961
+    DEFAULT_CONFIG=scripts/train/debug/kda_hero_small_ptemo_sft.json
+    DEFAULT_COMPILE=0
+    ;;
   *)
-    echo "Unknown BASE=$BASE (expected proxy or hero-small-nonemo)" >&2
+    echo "Unknown BASE=$BASE (expected proxy, hero-small-nonemo or hero-small-ptemo)" >&2
     exit 1
     ;;
 esac
