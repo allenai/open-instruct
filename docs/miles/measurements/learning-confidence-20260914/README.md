@@ -222,6 +222,26 @@ consecutive transport failures before the run fails (overlay `d6fb0f05e`,
 The dense arm runs the older overlay and carries the same exposure until its
 next restart.
 
+### Evaluation drains are bounded by the in-flight budget, not the timeout — September 16, 12:00 UTC
+
+The dense arm's update-50 evaluation failed the same way the MoE's update-100
+did, now with a 2,700 s drain budget: at 11:45 UTC the producer was still
+draining owned groups (7, then 4, then 3 active) when the budget expired, and
+864 refresh requests completed during the drain window. Shared-engine
+evaluation first lets every group the producer owns run to completion, and
+`async_max_concurrent_samples = 1024` lets it own about four 256-sample
+batches, so the drain takes roughly four update-times: about 50 minutes for the
+dense arm, 30 for the MoE. No timeout that short was ever going to pass.
+
+Both arms are relaunched with `async_max_concurrent_samples = 512` (two
+batches in flight; lag limit two makes more than that unusable anyway) and a
+5,400 s budget as a backstop, under the transport-failure overlay `d6fb0f05e`:
+dense [01M2N0PEXEN2TZGGGZFYSVHMTT](https://beaker.org/ex/01M2N0PEXEN2TZGGGZFYSVHMTT)
+from checkpoint 50, MoE [01M2N0PNTM3HQXWXNXY5J8A656](https://beaker.org/ex/01M2N0PNTM3HQXWXNXY5J8A656)
+from checkpoint 100. Neither continuation repeats the lost evaluation, so the
+dense update-50 and MoE update-100 held-out scores must come from checkpoint
+exports evaluated separately. Both checkpoints exist.
+
 ## Superseded active runs — September 15, 03:06 UTC
 
 | Arm | Experiment | State |
