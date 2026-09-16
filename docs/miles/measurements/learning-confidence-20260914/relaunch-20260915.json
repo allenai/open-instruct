@@ -986,6 +986,7 @@
     "profile": "basket",
     "replaces": "01M2M2SFY1MBE9YGA3GTMRCE53",
     "allocation": "2 x 8 H100 on ai2/jupiter via the image's ray_node_setup.sh: 4 DeepSpeed learners, 10 eager TP1 vLLM engines at 0.85 GPU memory, 2-GPU TP2 vLLM judge at 131072 YaRN context on the head node",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916"
+    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
+    "outcome_startup": "both replicas started 03:25 UTC; Ray head and worker joined; judge ready in 80 s; driver step 1 (with the initial 512-prompt evaluation) completed at 03:53 UTC, 1499 s total, 111 s training"
   }
 ]
