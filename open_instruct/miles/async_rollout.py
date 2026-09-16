@@ -32,6 +32,9 @@ from open_instruct.miles.errors import GenerationInterrupted
 logger = logger_utils.setup_logger(__name__)
 
 _QUIESCE_LOG_INTERVAL_SECONDS = 30.0
+# Consecutive group requests that may lose their HTTP transport (connection
+# reset, closed stream) before the producer treats the router as dead.
+TRANSPORT_FAILURE_BUDGET = 8
 # A producer join that outlives the health-check budget gets one retry after the
 # engines abort their in-flight requests, which is what releases a generation
 # task still waiting on a response.
@@ -63,6 +66,11 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         self._stopping = False
         self._shutdown_complete = False
         self._producing_groups: dict[int, Any] = {}
+        # Group tasks keyed for failure bookkeeping; a transport failure on one
+        # request discards its whole group and requeues the pristine prompts.
+        self._task_groups: dict[asyncio.Task[Any], int] = {}
+        self._transport_requeues = 0
+        self._consecutive_transport_failures = 0
         self._ready_completion_counts: dict[int, dict[str, int]] = {}
         self._shutdown_unqueued_counts = dict(groups=0, samples=0, response_tokens=0)
         self._completed_put_wait_seconds = 0.0
@@ -134,7 +142,42 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         [group] = self.data_source.get_samples(1)
         self._producing_groups[group[0].group_index] = group
         self._scheduler.on_submit([group])
-        return asyncio.create_task(self._generate_group(group))
+        task = asyncio.create_task(self._generate_group(group))
+        self._task_groups[task] = group[0].group_index
+        return task
+
+    def _requeue_transport_failure(self, group_index: int | None, error: BaseException) -> bool:
+        """Discard a group whose request lost its HTTP transport and regenerate it later.
+
+        A lost connection (reset, closed stream, refused connect) leaves delivery
+        unknown, so the partial group is never reused; its pristine prompts go
+        back to the ledger exactly as after a preemption, and a fresh group is
+        sampled under the current weights. Anything other than a transport error,
+        or more than ``TRANSPORT_FAILURE_BUDGET`` failures in a row, still fails
+        the run: a dead router is not a transient.
+        """
+        if not isinstance(error, httpx.TransportError) or group_index is None:
+            return False
+        self._consecutive_transport_failures += 1
+        self._transport_requeues += 1
+        self._producing_groups.pop(group_index, None)
+        self.data_source.requeue_pending_groups([group_index])
+        logger.warning(
+            "Async group %s lost its HTTP transport (%s: %s); prompts requeued for regeneration "
+            "(requeues=%d consecutive=%d/%d)",
+            group_index,
+            type(error).__name__,
+            error,
+            self._transport_requeues,
+            self._consecutive_transport_failures,
+            TRANSPORT_FAILURE_BUDGET,
+        )
+        if self._consecutive_transport_failures > TRANSPORT_FAILURE_BUDGET:
+            raise RuntimeError(
+                f"{self._consecutive_transport_failures} consecutive async requests lost their HTTP transport; "
+                "the serving router is not reachable"
+            ) from error
+        return True
 
     async def _abort_engine_requests(self, timeout: float) -> None:
         """Ask every engine to abort its in-flight requests; unreachable engines are logged."""
@@ -266,7 +309,14 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                 except TimeoutError:
                     continue
                 self._active_tasks = active
-                completions = [task.result() for task in done]
+                completions = []
+                for task in done:
+                    group_index = self._task_groups.pop(task, None)
+                    error = None if task.cancelled() else task.exception()
+                    if error is not None and self._requeue_transport_failure(group_index, error):
+                        continue
+                    completions.append(task.result())
+                    self._consecutive_transport_failures = 0
                 self._ready_completion_counts.update(
                     (id(completion), pipeline_observer.completion_counts([completion])) for completion in completions
                 )
@@ -291,6 +341,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                 for task in unfinished:
                     task.cancel()
             await asyncio.gather(*active, return_exceptions=True)
+            self._task_groups.clear()
             self._active_tasks = set()
             self._producer_idle.set()
 
