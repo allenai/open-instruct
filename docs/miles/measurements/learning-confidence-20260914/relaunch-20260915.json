@@ -676,5 +676,17 @@
         }
       }
     }
+  },
+  {
+    "experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
+    "source": "01M2KTY6DEAJT0A7A9BJMC7XG2",
+    "commit": "1d1c02aac050f6f1493220f1ac983c171c46c45b",
+    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+    "stage": "prepare",
+    "arm": "original-open-instruct basket (arm 1)",
+    "profile": "basket",
+    "config": "scripts/miles/launch_original_baseline.py --profile basket",
+    "source_data": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/data",
+    "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916"
   }
 ]
