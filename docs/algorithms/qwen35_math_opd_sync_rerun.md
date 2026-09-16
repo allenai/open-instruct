@@ -122,6 +122,25 @@ The full 2B and 4B sync sweeps (every 10 steps) are in W&B under `qwen35_math_po
 2B sync DAPO sits at 44-50 from step 10 on; 4B sync DAPO sits at 74-78 from step 10 on. Neither collapses.
 AIME and BRUMO are 30 questions each, so one question is 3.3 points.
 
+### Miles replication (framework-native OPD, greedy post-hoc on hf exports)
+
+Miles runs on `robertb/miles-qwen35-opd` use the same prompts, teachers, students, batch
+shape, lengths, LR, seed and rollout-engine student log-probs, with strictly on-policy
+rollouts, but PPO clipping instead of the DPPO TV mask. `hf-N` is the export after
+rollout N (N+1 updates), so `hf-9` pairs with `step_10`.
+
+| Model | Export | DAPO | AIME | BRUMO | MATH-500 | Beaker |
+|-------|--------|-----:|-----:|------:|---------:|--------|
+| 2B sync (Open Instruct) | step 10 | 44.1 | 30.0 | 30.0 | 81.2 | `8cwnr6ku` (W&B) |
+| 2B Miles v5 | hf-9 | 53.1 | 26.7 | 40.0 | 81.0 | `01M2P1W1DRB0BCG1SW5AKA5ZXE` |
+| 4B sync (Open Instruct) | step 10 | 73.6 | 33.3 | 53.3 | 90.0 | `fk3gvxmc` (W&B) |
+| 4B Miles v4 | hf-9 | 75.0 | 43.3 | 66.7 | 89.0 | `01M2P1W3G8ED6042K0F8KARJEX` |
+
+Miles reverse KL tracks the Open Instruct sync runs at matched steps (2B 0.033 -> ~0.007
+by rollout 10, 4B flat ~0.07). Later exports (hf-19, hf-29, ...) are evaluated as the v5
+runs produce them; the Miles output roots are
+`.../deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-{2b-opd-from-verifier-2b,4b-opd-from-verifier-9b}-math-v5/hf-N`.
+
 ### What the reruns show
 
 1. **The canonical 2B collapses were an artifact of asynchronous sampling, not of pure OPD.**
