@@ -2507,7 +2507,8 @@
   "changes": "save_interval 1 -> 5 (41 GB per native checkpoint; the run was writing about 5.5 TB over its remaining updates to a shared filesystem that filled); otherwise identical to c24b",
   "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24c-20260916",
   "submitted": "2026-09-16T15:47Z",
-  "note": "submitted while the filesystem was being cleaned (3.4 TB free at 15:40 UTC); startup writes are small, the first checkpoint lands at update 70"
+  "note": "submitted while the filesystem was being cleaned (3.4 TB free at 15:40 UTC); startup writes are small, the first checkpoint lands at update 70",
+  "outcome_startup": "started 15:46 UTC; all compiler caches hit; 144 pending groups restored 16:02; updates 67/68/69 at 16:24/16:37/16:52 UTC (12.2 and 14.9 min)"
  },
  {
   "experiment": "01M2NE8HDC7Z352AGWBQ3VNW64",
@@ -2521,7 +2522,8 @@
   "predecessor_checkpoint": 100,
   "changes": "none (c16e never trained); loads full-sft-basket-200-32k-c16-20260915 checkpoint 100",
   "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16f-20260916",
-  "submitted": "2026-09-16T15:47Z"
+  "submitted": "2026-09-16T15:47Z",
+  "outcome_startup": "replica-0 15:46, replica-1 16:11 UTC (rendezvous 25 min, inside the 4 h window); engines up 16:24, health-check probe tracebacks at 16:32 are SGLang warm-up noise; refreshing restored partial samples at 16:52"
  },
  {
   "experiment": "01M2NE8N15FHRWV5ZVGWGHS590",
@@ -2553,6 +2555,7 @@
   "changes": "overlay patch single_resume_sync: the weight-sync thread no longer fires a start-up broadcast on resume; the main loop's per-step trigger syncs the resumed weights before the first generation as before. Test test_resume_syncs_weights_once_per_step (48 pass in the Think image).",
   "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
   "submitted": "2026-09-16T16:33Z",
-  "discriminates": "if this attempt also hangs in the first broadcast, the double-sync explanation is wrong"
+  "discriminates": "if this attempt also hangs in the first broadcast, the double-sync explanation is wrong",
+  "outcome_startup": "both replicas started 16:27 UTC on new nodes; resume check passed (global_step26, four rank clocks at 25); 'Resuming training from step 26' at 16:30:21; the single per-step weight sync took 6.1 s; driver step 26 completed at 16:47 UTC. The hang did not recur; nodes differed from the hung attempt, so the node-fault alternative is not formally excluded."
  }
 ]

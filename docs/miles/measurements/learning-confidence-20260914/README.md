@@ -249,6 +249,12 @@ thread's start-up trigger, so a resume syncs exactly as a fresh start does
 hangs in the same place, the double-sync explanation is wrong and the
 alternative, an interconnect fault on the new head node `10.93.1.91`, moves up.
 
+Outcome at 16:56 UTC: the patched resume synced weights in 6.1 s and completed
+driver step 26 at 16:47 UTC, so the hang did not recur. Dense c24c reached
+update 69 (12–15 min per update, all caches warm); MoE c16f's replicas met
+after a 25-minute rendezvous and its engines are refreshing the restored
+partial samples.
+
 ### All three arms lost to a full shared filesystem — September 16, 15:50 UTC
 
 At 15:24–15:27 UTC every arm exited with `OSError: [Errno 28] No space left on
