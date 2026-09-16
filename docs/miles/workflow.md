@@ -175,7 +175,7 @@ fully_async = true
 max_weight_staleness = 1
 async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"
-rollout_submission_granularity = "group"
+rollout_submission_granularity = "sample"
 off_policy_correction = "tis"
 ```
 

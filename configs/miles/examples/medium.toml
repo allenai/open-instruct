@@ -155,7 +155,7 @@ async_max_concurrent_samples = 1024
 max_weight_staleness = 2
 async_data_buffer_capacity_factor = 1.0
 async_unused_samples_handler = "retry"
-rollout_submission_granularity = "group"
+rollout_submission_granularity = "sample"
 off_policy_correction = "tis"
 
 [compiler_cache]

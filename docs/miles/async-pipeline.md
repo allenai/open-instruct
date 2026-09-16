@@ -84,7 +84,7 @@ fully_async = true
 # Omit async_max_concurrent_samples to derive it from the requested engine fleet.
 # An explicit value is preserved; e.g. async_max_concurrent_samples = 128.
 async_data_buffer_capacity_factor = 2.0
-rollout_submission_granularity = "group"
+rollout_submission_granularity = "sample"
 ```
 
 `plan` reports `runtime.async_capacity`; structured `validate` prints its warnings.

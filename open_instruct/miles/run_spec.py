@@ -666,7 +666,10 @@ class RunSpec:
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 2.0)
             miles.setdefault("async_unused_samples_handler", "retry")
-            miles.setdefault("rollout_submission_granularity", "group")
+            # MILES upstream also defaults its fully-async producer to sample backfill:
+            # a finished sibling frees its slot instead of idling until its slowest
+            # sibling and rewards finish. Training still consumes whole groups.
+            miles.setdefault("rollout_submission_granularity", "sample")
         if "kl_loss_coef" in miles and miles["kl_loss_coef"] > 0:
             miles.setdefault("use_kl_loss", True)
         if miles.get("use_kl_loss"):
