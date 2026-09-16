@@ -603,6 +603,7 @@ run_one_model() {
     # Trace counts alone cannot distinguish "KV-bound" from "concurrency-starved"
     # from "the traces are simply long" -- but Running/Waiting/KV-usage can, and
     # vLLM logs them every few seconds to a file nobody was reading.
+    _health_fails=0
     ( while true; do sleep "$SYNC_INTERVAL"
         cp "$traces" "$store" 2>/dev/null || true
         if [ -f "$traces" ]; then
@@ -630,8 +631,18 @@ run_one_model() {
         grep -aoE "Avg generation throughput:[^,]*|Running: [0-9]+ reqs|Waiting: [0-9]+ reqs|GPU KV cache usage: [0-9.]+%|Prefix cache hit rate: [0-9.]+%" \
             "$vllm_log" 2>/dev/null | tail -5 | paste -sd' ' - | sed 's/^/  vllm: /' || true
         # A dead engine shows up here before it shows up in trace counts.
-        curl -sf --max-time 5 "http://localhost:${SERVE_PORT}/health" >/dev/null 2>&1 \
-            || log "  ALARM: /health did not respond -- vllm may be down"
+        # /health shares the event loop with generation, so under a full batch of
+        # long-context requests it can take far longer than a few seconds to be
+        # scheduled. A 5s timeout produced four false alarms on a server whose
+        # GPUs were at 100% and still emitting thousands of tokens per second.
+        # Require two consecutive failures at a 30s timeout before alarming.
+        if curl -sf --max-time 30 "http://localhost:${SERVE_PORT}/health" >/dev/null 2>&1; then
+            _health_fails=0
+        else
+            _health_fails=$(( ${_health_fails:-0} + 1 ))
+            log "  /health did not respond within 30s (${_health_fails} in a row)"
+            [ "$_health_fails" -ge 2 ] && log "  ALARM: /health has failed ${_health_fails} times running -- vllm may be down"
+        fi
         nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw \
             --format=csv,noheader,nounits 2>/dev/null \
             | awk -F', ' '{printf "gpu%s %s%% %sMiB %sW  ", $1,$2,$3,$4} END{print ""}' | sed 's/^/  util: /' || true
