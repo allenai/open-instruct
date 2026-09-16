@@ -416,6 +416,18 @@ case "$MODE" in
   convert)
     CKPT_ROOT="${CKPT_ROOT:?set CKPT_ROOT to the deletable_checkpoint_states dir}"
     STEP="${STEP:?set STEP, e.g. step1723}"
+    # The Olmo 3.5 hero HF export (latent MoE, scalable softmax, per-head QK gains,
+    # bundled olmo3moe modeling code) lives on Jacob's olmo-core HF lineage
+    # (b1fd2c97, the revision in the base exports' conversion receipts), which
+    # diverged from the SFT pin: the pin's exporter raises "The EMo ladder export
+    # expects latent_moe=None". CONVERT_PYTHONPATH puts that lineage's src tree
+    # (staged on WEKA) ahead of the image's olmo-core for the conversion job only.
+    # OLMO_HF_MOE_CORE_REFERENCE / OLMO_USE_TORCH_GROUPED_MM mirror Jacob's
+    # conversion environment (reference expert kernels for the verifier).
+    CONVERT_ENV_FLAGS="--env OLMO_USE_TORCH_GROUPED_MM=0 --env OLMO_HF_MOE_CORE_REFERENCE=1"
+    if [[ -n "${CONVERT_PYTHONPATH:-}" ]]; then
+        CONVERT_ENV_FLAGS="$CONVERT_ENV_FLAGS --env PYTHONPATH=$CONVERT_PYTHONPATH"
+    fi
     $PY mason.py \
         --cluster $CONVERT_CLUSTER \
         --workspace "$WORKSPACE" \
@@ -430,6 +442,7 @@ case "$MODE" in
         --non_resumable \
         --no_auto_dataset_cache \
         $EXTRA_BUCKET_FLAGS \
+        $CONVERT_ENV_FLAGS \
         -- /stage/.venv/bin/python "${CONVERT_SCRIPT:-scripts/train/debug/convert_moe_checkpoint_to_hf.py}" \
         -i "$CKPT_ROOT/$STEP" \
         -o "$CKPT_ROOT/hf_$STEP" \
