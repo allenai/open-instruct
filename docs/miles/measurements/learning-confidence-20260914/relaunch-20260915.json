@@ -972,6 +972,7 @@
     "arm": "original-open-instruct basket (arm 1)",
     "profile": "basket",
     "changes": "policy engines with CUDA graphs and 0.85 GPU memory; judge TP2 YaRN 131072 eager; 4 learners, 2 engines; saves every 25, evals at 0/50/100",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-20260916"
+    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-20260916",
+    "outcome": "exit 1 at 03:10 UTC: judge ready in 85 s, then vLLM engine creation failed with 'vLLM failed to compile the model' because CUDA graphs were enabled for the retrofit Olmo model; engines reverted to eager"
   }
 ]
