@@ -1,0 +1,151 @@
+# Overfit diagnostic, Megatron arm: 16 fixed GSM8K prompts revisited every two updates
+# for 60 updates on the full-SFT MoE checkpoint through the fully-async TIS path.
+# A correct trainer drives training reward toward 1.0; held-out is a side view.
+# 3 GPUs: two EP2 trainers plus one TP1 engine. Same checkpoint, LR, batch shape,
+# response budget and verifier as the Core arm (open-instruct runs/overfit-gsm8k-core-20260915.toml).
+# Launch with the r3 parity candidate image (01M26TT1EQTB84RV0MM650W0YE). Diagnostic: no saves/export.
+schema_version = 1
+name = "overfit-gsm8k-megatron-20260915"
+
+[model]
+source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-megatron"
+format = "megatron"
+reference_hf = "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf"
+
+[conversion_validation]
+post_training_parity = false
+
+[data]
+seed = 17
+shuffle = true
+
+# 16 training prompts; 8 prompts x 4 responses per update, so every prompt
+# recurs every second update (30 passes over 60 updates). 32 disjoint held-out rows.
+[[data.tasks]]
+task = "gsm8k"
+train_count = 16
+eval_count = 32
+
+[output]
+root = "/weka/oe-training-default/robertb/open-instruct/runs/overfit-gsm8k-megatron-20260915"
+export_hf = false
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+gpus_per_replica = 3
+shared_memory = "100 GiB"
+priority = "urgent"
+min_runtime = "4h"
+auto_resume = false
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[launch.env]
+HF_HOME = "/tmp/hf-cache"
+WANDB_MODE = "online"
+
+[launch.secrets]
+WANDB_API_KEY = "robertb_WANDB_API_KEY"
+
+[training]
+seed = 17
+num_rollouts = 60
+skip_eval_before_train = false
+eval_interval = 20
+save_checkpoints = false
+async_save = false
+collect_dashboard = false
+generation_samples_per_rollout = 16
+
+[trainer]
+gpus = 2
+trainer_num_nodes = 1
+expert_parallel_size = 2
+trainer_backend = "compatibility"
+trainer_flash_attention_version = 4
+trainer_diagnostics = true
+activation_recompute = true
+micro_batch_size = 1
+data_pad_size_multiplier = 1
+use_rollout_logprobs = false
+calculate_per_token_loss = false
+accumulate_allreduce_grads_in_fp32 = true
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_gpus_per_node = 1
+rollout_tensor_parallel_size = 1
+rollout_expert_parallel_size = 1
+rollout_batch_size = 8
+samples_per_prompt = 4
+global_batch_size = 32
+rollout_temperature = 1.0
+rollout_top_p = 1.0
+rollout_top_k = -1
+rollout_seed = 17
+eval_temperature = 0.0
+eval_top_p = 1.0
+eval_top_k = -1
+eval_max_response_length = 4096
+max_response_length = 4096
+max_context_length = 6144
+use_routing_replay = true
+use_rollout_routing_replay = true
+use_miles_router = true
+use_fault_tolerance = false
+disable_radix_cache = true
+sglang_mem_fraction_static = 0.6
+sglang_server_concurrency = 16
+sglang_max_running_requests = 16
+sglang_max_mamba_cache_size = 128
+sglang_attention_backend = "triton"
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 16
+sglang_router_policy = "cache_aware"
+weight_export_mode = "olmo-direct"
+update_weight_buffer_size = 1073741824
+check_weight_update_equal = true
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.95
+adam_eps = 0.00000001
+clip_grad = 1.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.28
+moe_aux_loss_coeff = 0.01
+moe_z_loss_coeff = 0.00001
+
+[async]
+fully_async = true
+max_weight_staleness = 2
+async_data_buffer_capacity_factor = 1.0
+async_unused_samples_handler = "retry"
+rollout_submission_granularity = "group"
+off_policy_correction = "tis"
+max_train_rollout_logprob_abs_diff = 0.05
+policy_drift_action = "fail"
+
+[tracking]
+comparison_id = "overfit-gsm8k-20260915"
+wandb_project = "olmo-rl-comparison"
+wandb_group = "overfit-gsm8k-20260915"
+wandb_team = "ai2-llm"
+wandb_mode = "online"
+
+[runtime]
+hardware_profile = "b300"
+
+[compiler_cache]
+enabled = false
