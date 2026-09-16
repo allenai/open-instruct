@@ -73,3 +73,89 @@ Robert offered direct commits to that branch. Its Qwen OPD route
 Confirm whether Miles scores the student side of the reverse KL with rollout or
 trainer log-probabilities before comparing curves; Open Instruct uses rollout
 log-probabilities.
+
+## Results (2026-09-16)
+
+Both strictly-on-policy reruns finished. Beaker and W&B IDs:
+
+| Run | Beaker | W&B | Notes |
+|-----|--------|-----|-------|
+| 2B sync (verifier-2B -> 2B, LR 1e-6) | `01M2JXTZPDXTZDR217DKGAW48W` | `rg1a2gel` | exit 0, 2.15 min/step |
+| 4B sync (verifier-9B -> 4B, LR 5e-7), steps 1-85 | `01M2JXV53B6Z12BFNH3V74FVB6` | `zz3q6skv` | preempted at the 4h `min_runtime` |
+| 4B sync resume, steps 81-100 | `01M2M9EXJHA9FEW1Y5K0N2QJ46` | `8nlm6azd` | `--checkpoint_state_dir` from step 80, exit 0 |
+
+Checkpoints: `.../deletable_checkpoint/kevinfarhat/qwen35_2b_opd_from_verifier_2b_sync_lr1e6_100step_4node__42__1789491103_checkpoints/step_N`,
+`.../qwen35_4b_opd_from_verifier_9b_sync_lr5e7_100step_4node__42__1789505099_checkpoints/step_N` (N <= 80) and
+`..._4node__42__1789542980_checkpoints/step_N` (N = 90, 100).
+
+### In-loop eval (temperature 1.0, one sample per prompt, `eval/scores`)
+
+| step | 2B canonical `v171addf` | 2B sync | 4B canonical `rdcupvki` | 4B sync |
+|-----:|------:|------:|------:|------:|
+| 0 | 0.365 | 0.395 | 0.743 | 0.731 |
+| 20 | 0.065 | 0.510 | 0.795 | 0.792 |
+| 40 | 0.469 | 0.493 | 0.760 | 0.757 |
+| 60 | 0.469 | 0.514 | 0.753 | 0.757 |
+| 80 | 0.526 | 0.524 | 0.764 | 0.757 |
+| 100 | 0.007 | 0.498 | 0.745 | 0.760 |
+
+### Greedy post-hoc eval (matched harness, accuracy %)
+
+| Model | Checkpoint | DAPO | AIME | BRUMO | MATH-500 | W&B |
+|-------|-----------|-----:|-----:|------:|---------:|-----|
+| Base 2B | - | 30.7 | 13.3 | 23.3 | - | `1ywzoe3p` |
+| Verifier-DPPO 2B (teacher) | step 100 | 49.4 | 26.7 | 43.3 | - | `l7ioqxec` |
+| 2B canonical async | step 80 | 49.8 | 26.7 | 33.3 | - | `aa4lbbsg` |
+| 2B canonical async | step 100 | 1.0 | 0.0 | 0.0 | - | `pszko9zn` |
+| 2B sync | step 30 | 50.2 | 26.7 | 26.7 | 80.0 | `3kefkwtq` |
+| 2B sync | step 80 | 47.7 | 30.0 | 26.7 | 81.2 | `ho39pobq` |
+| 2B sync | step 100 | 47.7 | 26.7 | 36.7 | 80.2 | `4vadl3oy` |
+| Base 4B | - | 64.5 | 33.3 | 63.3 | 87.0 | `xr2sg6zd` |
+| Verifier-DPPO 9B (teacher) | step 100 | 82.4 | 66.7 | 63.3 | - | `7njterw1` |
+| 4B canonical async | step 20 | 78.5 | 56.7 | 60.0 | 91.0 | `ofh0xefj` |
+| 4B canonical async | step 100 | 74.8 | 50.0 | 60.0 | 89.6 | `vs4dibqv` |
+| 4B sync | step 20 | 77.5 | 50.0 | 53.3 | 90.2 | `3k3vpjsp` |
+| 4B sync | step 80 | 77.9 | 50.0 | 60.0 | 90.4 | `miaylnye` |
+| 4B sync | step 100 | 76.2 | 53.3 | 60.0 | 89.8 | `ymr3pohq` |
+
+The full 2B and 4B sync sweeps (every 10 steps) are in W&B under `qwen35_math_posthoc_{2b,4b}_sync_stepN_greedy`.
+2B sync DAPO sits at 44-50 from step 10 on; 4B sync DAPO sits at 74-78 from step 10 on. Neither collapses.
+AIME and BRUMO are 30 questions each, so one question is 3.3 points.
+
+### What the reruns show
+
+1. **The canonical 2B collapses were an artifact of asynchronous sampling, not of pure OPD.**
+   With `async_steps=4` and in-flight updates, the trainer consumes the first 256 of ~1024
+   in-flight responses, so each batch is length-sorted by completion order. The canonical 2B
+   train batches sawtooth between ~4.9k tokens / stop rate 1.0 and ~15.9k tokens / stop rate
+   0.09 with a ~6-step period (corr(batch length, batch score) = -0.87); the all-truncated
+   batches coincide with the eval collapses at steps 20 and 100, and reverse KL never falls
+   below 0.02. Pure OPD advantages are per-token and not group-centered, so batch composition
+   steers the update directly. The strictly-on-policy 2B has batch lengths of 11-14k tokens
+   with stop rate 0.40-0.70 at every step, reverse KL decays monotonically to 0.0005, and the
+   greedy DAPO score matches the verifier-2B teacher (47.7-50.2 vs 49.4).
+2. **The async pipeline never trained on the long tail.** The canonical runs dropped ~16.4k (2B)
+   and ~17.7k (4B) results as stale (`stale_results_dropped`) against 25.6k episodes trained;
+   the sync runs dropped zero. Canonical 4B train batches averaged 1.2-2.4k tokens with stop
+   rate 1.00 at 99 of 100 steps and train reward 0.94; sync 4B batches averaged 4.2-6.6k tokens
+   with train reward 0.79, and truncations fell from 38 per step to 0 by step 20. The higher
+   canonical train reward is selection, not learning.
+3. **For 4B the schedule did not change the outcome, only the cost.** Canonical and sync 4B
+   in-loop and greedy curves agree within eval noise at every step, and both keep the step-20
+   peak / step-100 softening pattern. Reverse KL for the 9B -> 4B pair is flat at 0.06-0.08
+   in both schedules (and in the Miles replication), so it is a property of the pair at LR
+   5e-7. The on-policy schedule costs 2.1x (2B: 2.15 vs 1.01 min/step) to 4x (4B: ~2.6 vs
+   0.65 min/step) because every batch waits for its longest response.
+
+Per-step train stats were parsed from the grpo_fast job logs (`val/sequence_lengths`,
+`val/stop_rate`, `stale_results_dropped`), not from W&B, which did not log train-time lengths
+for the canonical runs.
+
+### Operational notes
+
+- Beaker caps `min_runtime` at 8h; the 4B rerun was preempted at its 4h `min_runtime` by
+  workspace-group rebalancing (exit 134 after SIGTERM). Resume with
+  `--checkpoint_state_dir /weka/.../deletable_checkpoint_states/kevinfarhat/<run>` and a new
+  run name; grpo_fast logs `Resuming training from step N`.
+- `/weka/oe-adapt-default` reached 100% during the campaign (451T of 455T) and killed the
+  first Miles attempts with ENOSPC.
