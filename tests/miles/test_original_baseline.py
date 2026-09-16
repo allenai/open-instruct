@@ -576,7 +576,7 @@ def test_basket_training_options_follow_the_released_recipe_and_gsm8k_is_unchang
     )
     assert (basket["num_unique_prompts_rollout"], basket["num_samples_per_prompt_rollout"]) == (64, 4)
     assert basket["total_episodes"] == 100 * 64 * 4
-    assert (basket["num_learners_per_node"], basket["vllm_num_engines"]) == (4, 2)
+    assert (basket["num_learners_per_node"], basket["vllm_num_engines"]) == (4, 10)
     assert basket["llm_judge_model"] == "hosted_vllm/Qwen/Qwen3-32B"
     assert basket["llm_judge_max_context_length"] == 131072 and basket["llm_judge_max_tokens"] == 2048
     assert basket["code_api_url"] == original_baseline.CODE_API_URL
@@ -596,7 +596,8 @@ def test_basket_training_options_follow_the_released_recipe_and_gsm8k_is_unchang
     assert smoke["num_unique_prompts_rollout"] == 128
     trainer_gpus, judge_gpus = original_baseline.TRAINER_GPUS.split(","), original_baseline.JUDGE_GPUS.split(",")
     assert set(trainer_gpus).isdisjoint(judge_gpus) and len(trainer_gpus) + len(judge_gpus) == 8
-    assert len(trainer_gpus) == basket["num_learners_per_node"] + basket["vllm_num_engines"]
+    # Head node: six GPUs for Ray plus the two judge GPUs; second node: eight engines.
+    assert basket["num_learners_per_node"] + basket["vllm_num_engines"] == len(trainer_gpus) + 8
     assert len(judge_gpus) == original_baseline.JUDGE_TENSOR_PARALLEL
 
 
@@ -653,6 +654,16 @@ def test_basket_launch_passes_profile_steps_and_judge_only_to_gpu_stages():
     assert launch_original_baseline.PROFILES["basket"]["source"].endswith("g16-20260915/prepared/data")
     assert train["tasks"][0]["resources"]["gpuCount"] == 8
     assert train["tasks"][0]["constraints"] == {"cluster": ["ai2/jupiter"]}
+    task = train["tasks"][0]
+    assert (task["replicas"], task["leaderSelection"], task["propagatePreemption"], task["hostNetworking"]) == (
+        2,
+        True,
+        True,
+        True,
+    )
+    assert "source /stage/configs/beaker_configs/ray_node_setup.sh" in command
+    assert 'if [ "$BEAKER_REPLICA_RANK" = "0" ]; then export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5; fi' in command
+    assert command.index("ray_node_setup.sh") < command.index("original_baseline.py train")
     assert {e["name"]: e.get("value") for e in train["tasks"][0]["envVars"]}[
         "WANDB_RUN_GROUP"
     ] == "dolci-basket-32k-zero-20260914"
@@ -670,3 +681,5 @@ def test_basket_launch_passes_profile_steps_and_judge_only_to_gpu_stages():
         "--profile gsm8k" in gsm8k["tasks"][0]["arguments"][0]
         and "--judge-prepared" not in gsm8k["tasks"][0]["arguments"][0]
     )
+    assert "replicas" not in gsm8k["tasks"][0] and "ray_node_setup" not in gsm8k["tasks"][0]["arguments"][0]
+    assert "replicas" not in prepare["tasks"][0] and "ray_node_setup" not in prepare["tasks"][0]["arguments"][0]

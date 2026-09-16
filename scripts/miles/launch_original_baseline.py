@@ -20,6 +20,8 @@ PREPARED = "/weka/oe-training-default/robertb/open-instruct/data/olmo3-sft-gsm8k
 # The four-domain basket arm reuses the frozen data the MILES dense g16 run
 # prepared (same rendered prompts, labels and held-out identities) and the
 # MILES prepared judge (same Qwen3-32B snapshot and no-thinking template).
+NODES = {"gsm8k": 1, "basket": 2}
+TRAINER_GPUS = "0,1,2,3,4,5"
 PROFILES = {
     "gsm8k": {"source": SOURCE, "prepared": PREPARED, "judge_prepared": None},
     "basket": {
@@ -70,11 +72,23 @@ def specification(
         args.extend(["--checkpoint-root", checkpoint_root, "--checkpoint-tag", checkpoint_tag])
     if keep_zero_advantage_groups:
         args.append("--keep-zero-advantage-groups")
+    nodes = NODES[profile] if stage in {"train", "smoke", "resume"} else 1
+    ray_setup = ""
+    if nodes > 1:
+        # The image's own multi-node bootstrap: rank 0 starts the Ray head and
+        # runs the adapter; other ranks join as workers and block until the
+        # head goes away. The head hides the judge GPUs from Ray so engines
+        # never land on them; the adapter starts the judge on those explicitly.
+        ray_setup = (
+            f'if [ "$BEAKER_REPLICA_RANK" = "0" ]; then export CUDA_VISIBLE_DEVICES={TRAINER_GPUS}; fi\n'
+            "export REPO_PATH=/stage\n"
+            "source /stage/configs/beaker_configs/ray_node_setup.sh\n"
+        )
     command = (
         "set -euo pipefail\nmkdir -p /tmp/qualification /output\n"
         "cp /qualification-source/provenance.json /output/\n"
         "tar -xf /qualification-source/source.tar -C /tmp/qualification\n"
-        "cd /stage\n" + shlex.join(args) + " 2>&1 | tee /output/run.log\n"
+        "cd /stage\n" + ray_setup + shlex.join(args) + " 2>&1 | tee /output/run.log\n"
     )
     env = {
         "PYTHONPATH": "/stage",
@@ -124,6 +138,10 @@ def specification(
     }
     if stage in {"train", "smoke", "resume"}:
         task["envVars"].append({"name": "WANDB_API_KEY", "secret": "robertb_WANDB_API_KEY"})
+    if nodes > 1:
+        task.update(
+            replicas=nodes, leaderSelection=True, propagateFailure=True, propagatePreemption=True, hostNetworking=True
+        )
     return {
         "version": "v2",
         "budget": "ai2/oe-other",

@@ -48,6 +48,7 @@ PROFILES = {
         "train_count": 6000,
         "eval_count": 512,
         "prompts": 16,
+        "nodes": 1,
         "engines": 4,
         "steps": 200,
         "judge": False,
@@ -60,7 +61,12 @@ PROFILES = {
         "train_count": None,
         "eval_count": 512,
         "prompts": 64,
-        "engines": 2,
+        # Two H100 nodes: four learners, ten TP1 engines and the two-GPU judge.
+        # H100 KV capacity holds only a few 34K contexts per engine, so the
+        # basket is generation-bound; the single-node smoke measured 917
+        # tokens/s from two engines and 51 minutes per driver step.
+        "nodes": 2,
+        "engines": 10,
         "steps": 100,
         "judge": True,
         "wandb_group": "dolci-basket-32k-zero-20260914",
@@ -682,7 +688,8 @@ def _train(
         differences += [
             "Judge served by the original image's vLLM (TP2, YaRN 131,072 context) versus the MILES SGLang judge "
             "(TP1, same snapshot, template and YaRN context); identical prompts, no truncation in either arm",
-            "Four H100 trainers/two vLLM engines/two judge GPUs versus two B300 trainers/five SGLang engines/one SGLang judge",
+            "Four H100 trainers/ten vLLM engines over two nodes/two judge GPUs versus two B300 trainers/five SGLang "
+            "engines/one SGLang judge",
         ]
     record = {
         "command": command,
