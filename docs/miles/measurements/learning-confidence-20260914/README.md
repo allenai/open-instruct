@@ -222,6 +222,42 @@ consecutive transport failures before the run fails (overlay `d6fb0f05e`,
 The dense arm runs the older overlay and carries the same exposure until its
 next restart.
 
+### All three arms lost to a full shared filesystem — September 16, 15:50 UTC
+
+At 15:24–15:27 UTC every arm exited with `OSError: [Errno 28] No space left on
+device`: dense c24b ([01M2N0PEXEN2TZGGGZFYSVHMTT](https://beaker.org/ex/01M2N0PEXEN2TZGGGZFYSVHMTT))
+after update 66, MoE c16e ([01M2N0PNTM3HQXWXNXY5J8A656](https://beaker.org/ex/01M2N0PNTM3HQXWXNXY5J8A656))
+during startup before its first update, and the original arm 1
+([01M2M3D8QC3DJY1Q033YPESGSK](https://beaker.org/ex/01M2M3D8QC3DJY1Q033YPESGSK))
+after driver step 37 while writing its per-step trace file. A read-only probe
+showed `/weka/oe-training-default` at 1.8 PB used with 0 available and
+`/weka/oe-adapt-default` at 451 of 455 TB; inodes were at 5 percent. Our own run
+directories total about 8 TB (native checkpoints are 41 GB for the dense model
+and 207 GB for the MoE; the dense arms had accumulated 61 of them at one per
+update, the MoE arms 20), under 0.5 percent of the filesystem, so the fill came
+from elsewhere; the user began a cleanup and free space was 3.4 TB at 15:40 UTC.
+
+Surviving state: dense c24b's newest complete checkpoint is update 65 (the
+update-66 write was the one that failed); MoE c16 checkpoint 100 is intact; arm 1's
+last DeepSpeed checkpoint is `global_step26`, so its steps 27–37 (about three
+hours) are repeated. Nothing was deleted by the loop.
+
+Relaunched at 15:47–15:48 UTC on the same commit (`88e471b66`):
+
+| Arm | Experiment | Continues from | Change |
+| --- | --- | --- | --- |
+| Dense c24c | [01M2NE8AHWQXT87EXY3F038V55](https://beaker.org/ex/01M2NE8AHWQXT87EXY3F038V55) | c24b checkpoint 65 | `save_interval` 1 → 5; a per-update dense save was writing about 5.5 TB over the remaining run |
+| MoE c16f | [01M2NE8HDC7Z352AGWBQ3VNW64](https://beaker.org/ex/01M2NE8HDC7Z352AGWBQ3VNW64) | c16 checkpoint 100 | none (c16e never trained) |
+| Original arm 1 | [01M2NE8N15FHRWV5ZVGWGHS590](https://beaker.org/ex/01M2NE8N15FHRWV5ZVGWGHS590) | `global_step26`, same output directory | none; `--stage resume` |
+
+MILES has no checkpoint-retention setting, so older native checkpoints stay on
+disk until deleted by hand; the per-update dense saves were chosen on
+September 15 when an update took 47 minutes and a preemption could lose hours.
+At the current 10–12 minutes per update a five-update window bounds the loss to
+about an hour. If the filesystem fills again before the cleanup lands, the
+relaunches fail at their first checkpoint (dense update 70, MoE update 105, arm 1
+step 50) or, for arm 1, at its next per-step trace write.
+
 ### Evaluation drains are bounded by the in-flight budget, not the timeout — September 16, 12:00 UTC
 
 The dense arm's update-50 evaluation failed the same way the MoE's update-100

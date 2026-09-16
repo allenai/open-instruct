@@ -1,2494 +1,2541 @@
 [
-  {
-    "experiment": "01M2KEBH81YA9SH0HQ88XDD5YM",
-    "source": "01M2KEBEHX0FNZ1WDAZ6GAWV5Y",
-    "commit": "a20f785ff4058562e4aac007e025251a82f1e4bd",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "config": "runs/relaunch-20260915/dense-broad-g16.toml",
-    "continues": "01M2J19078AMKBCTARS065FZ9S",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915",
-    "allocation": {
-      "replicas": 1,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 8,
-      "policy_gpus": 7,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 2,
-          "rollout_gpus": 5,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "olmo3-think-sft-basket-200-32k-g16-20260915",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 1
-      },
-      "trainer": {
-        "gpus": 2,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 1,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 5,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 294912,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": false,
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 900.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.0,
-        "router_z_loss_weight": 0.0,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-single-node-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": false,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
+ {
+  "experiment": "01M2KEBH81YA9SH0HQ88XDD5YM",
+  "source": "01M2KEBEHX0FNZ1WDAZ6GAWV5Y",
+  "commit": "a20f785ff4058562e4aac007e025251a82f1e4bd",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "config": "runs/relaunch-20260915/dense-broad-g16.toml",
+  "continues": "01M2J19078AMKBCTARS065FZ9S",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915",
+  "allocation": {
+   "replicas": 1,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 8,
+   "policy_gpus": 7,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 2,
+     "rollout_gpus": 5,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
     }
+   ],
+   "unused_gpus": 0
   },
-  {
-    "experiment": "01M2KEPRMD3NGSJEV9GM7VR0HF",
-    "source": "01M2KEPM69MZ4CP7AG0PDP2Q0F",
-    "commit": "a6112ca5e7aaf66b807fb213c66beef3a77c815b",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "workflow",
-    "config": "runs/relaunch-20260915/gsm8k-core-r4.toml",
-    "continues": "01M2HZKS5S3EJTP6QY3KBERG7D",
-    "predecessor_stopped_after_checkpoint": 150,
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915",
-    "allocation": {
-      "replicas": 1,
-      "gpus_per_replica": 6,
-      "allocated_gpus": 6,
-      "policy_gpus": 6,
-      "judge_gpus": 0,
-      "nodes": [
-        {
-          "trainer_gpus": 2,
-          "rollout_gpus": 4,
-          "ray_gpus": 6,
-          "judges": {}
-        }
-      ],
-      "unused_gpus": 0
+  "spec": {
+   "schema_version": 1,
+   "name": "olmo3-think-sft-basket-200-32k-g16-20260915",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
     },
-    "spec": {
-      "schema_version": 1,
-      "name": "olmo3-sft-gsm8k-core-200-32k-r4-20260915",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
-        "format": "hf"
-      },
-      "data": {
-        "seed": 17,
-        "shuffle": true,
-        "tasks": [
-          {
-            "task": "gsm8k",
-            "train_count": 6000,
-            "eval_count": 512
-          }
-        ]
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 6,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 5
-      },
-      "trainer": {
-        "gpus": 2,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 1,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 4,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 16,
-        "samples_per_prompt": 4,
-        "global_batch_size": 64,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 294912,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": false,
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {},
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "olmo3-sft-learning-confidence-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "barrier",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 900.0,
-        "scoring_pass_required": true,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.0,
-        "router_z_loss_weight": 0.0,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r3-20260914/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": false,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {},
-      "rubrics": {},
-      "judging": {
-        "bindings": {}
-      }
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
     }
-  },
-  {
-    "experiment": "01M2KF9EW2ZX50X477D6CZWECG",
-    "source": "01M2KF99E3G0MRTJAWPWCXTC0Q",
-    "commit": "94d6c0268d3099efab9d85a135c25447a1906dfa",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "config": "runs/relaunch-20260915/moe-broad-c16-ep8.toml",
-    "continues": "01M2J039655AS5BM5KZ9YQNQ3F",
-    "predecessor_stopped_after_checkpoint": 45,
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915",
-    "allocation": {
-      "replicas": 2,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 16,
-      "policy_gpus": 15,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 8,
-          "rollout_gpus": 0,
-          "ray_gpus": 8,
-          "judges": {}
-        },
-        {
-          "trainer_gpus": 0,
-          "rollout_gpus": 7,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "full-sft-basket-200-32k-c16-20260915",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 5
-      },
-      "trainer": {
-        "gpus": 8,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 8,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 7,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 786432,
-        "sglang_max_mamba_cache_size": 1024,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": true,
-        "mamba_radix_cache_strategy": "extra_buffer",
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 900.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.01,
-        "router_z_loss_weight": 1e-05,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-robust-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": true,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
-    },
-    "outcome": "preempted at 01:26 UTC after update 70 (4 h); auto-resumed at 01:52 with warm Triton cache hits on every rank; reached update 100 and saved checkpoint 100 at 04:47 UTC; the update-100 shared-engine evaluation timed out draining in-flight groups (engine_drain_timeout 900 s) while the code service returned read timeouts, driver exit 1 at 05:05 UTC"
-  },
-  {
-    "experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
-    "source": "01M2KTY6DEAJT0A7A9BJMC7XG2",
-    "commit": "1d1c02aac050f6f1493220f1ac983c171c46c45b",
-    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
-    "stage": "prepare",
-    "arm": "original-open-instruct basket (arm 1)",
-    "profile": "basket",
-    "config": "scripts/miles/launch_original_baseline.py --profile basket",
-    "source_data": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/data",
-    "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916"
-  },
-  {
-    "experiment": "01M2KVC37AMZFJFDYR079V681V",
-    "source": "01M2KVC1BS6GX3DM4GCXSCBEAX",
-    "commit": "2f0db7b3e018f2a1f86f2b3cb04f732e32ce7b84",
-    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
-    "stage": "smoke",
-    "arm": "original-open-instruct basket (arm 1)",
-    "profile": "basket",
-    "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916",
-    "prepared_counts": {
-      "train": 101434,
-      "eval": 512
-    },
-    "prepare_experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
-    "allocation": "8 H100 on ai2/jupiter: 4 DeepSpeed learners, 2 vLLM policy engines, 2-GPU TP2 vLLM judge at 131072 YaRN context",
-    "outcome": "preempted by workspace-group balancing on ai2/jupiter at 01:28 UTC after its 30-minute minimum runtime, before the two-GPU judge reported healthy; judge log ended in torch.compile"
-  },
-  {
-    "experiment": "01M2KWWP9GVQ55D1DP2GWY748F",
-    "source": "01M2KWWKY70DAMMY5475671SP1",
-    "commit": "5a083682c16da2a595fd6870527683d35e3c2195",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES dense basket (arm 3)",
-    "config": "runs/relaunch-20260915/dense-broad-kv.toml",
-    "continues": "01M2KEBH81YA9SH0HQ88XDD5YM",
-    "predecessor_preempted_after_update": 21,
-    "changes": "sglang_mem_fraction_static 0.7 -> 0.85; requested KV pool 294912 -> 458752 tokens",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915",
-    "allocation": {
-      "replicas": 1,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 8,
-      "policy_gpus": 7,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 2,
-          "rollout_gpus": 5,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "olmo3-think-sft-basket-200-32k-kv-20260915",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 1
-      },
-      "trainer": {
-        "gpus": 2,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 1,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 5,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 458752,
-        "sglang_mem_fraction_static": 0.85,
-        "radix_cache": false,
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 900.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.0,
-        "router_z_loss_weight": 0.0,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": false,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
-    },
-    "outcome": "restored checkpoint 21 at 02:39 UTC; updates 22-37 at 12.7 min median with KV usage max 0.66 (pool no longer binding) but engines still averaging 8.8 running and groups waiting 6-34 min for admission; preempted at 06:23 UTC after 4 h with checkpoint 37 saved"
-  },
-  {
-    "experiment": "01M2KXHQ5PDXRZDVQT86RK4JWB",
-    "source": "01M2KXHNEX5PWC8VPPTWA0N6WK",
-    "commit": "cc8e07487",
-    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
-    "stage": "smoke",
-    "arm": "original-open-instruct basket (arm 1)",
-    "profile": "basket",
-    "changes": "judge started with --enforce-eager and an unbuffered log; smoke minimum runtime raised to 2h",
-    "replaces": "01M2KVC37AMZFJFDYR079V681V",
-    "outcome": "judge ready in 90 s; driver step 1 completed at 02:43 UTC: 3034 s per step with two eager vLLM engines (917 tokens/s), 143 s training, 8-prompt smoke eval 0.25; code service and judge calls succeeded; step 2 at 03:36 UTC (3128 s); hit the 3 h smoke timeout at 04:49 UTC during step 3. Code service returned 413/500/read-timeout errors that the original trainer scores zero, as in the historical audit; judge calls succeeded; no OOM on four learners"
-  },
-  {
-    "experiment": "01M2M2SFY1MBE9YGA3GTMRCE53",
-    "source": "01M2M2SE1B4C3CBT0E1EW04NMD",
-    "commit": "eb436d3fcec8ba35ec3aa3be2f2abc2ac64ac2d0",
-    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
-    "stage": "train",
-    "steps": 100,
-    "arm": "original-open-instruct basket (arm 1)",
-    "profile": "basket",
-    "changes": "policy engines with CUDA graphs and 0.85 GPU memory; judge TP2 YaRN 131072 eager; 4 learners, 2 engines; saves every 25, evals at 0/50/100",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-20260916",
-    "outcome": "exit 1 at 03:10 UTC: judge ready in 85 s, then vLLM engine creation failed with 'vLLM failed to compile the model' because CUDA graphs were enabled for the retrofit Olmo model; engines reverted to eager"
-  },
-  {
-    "experiment": "01M2M3D8QC3DJY1Q033YPESGSK",
-    "source": "01M2M3D6MVG252F13C0JB3WAWG",
-    "commit": "ccf38a1c2",
-    "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
-    "stage": "train",
-    "steps": 100,
-    "arm": "original-open-instruct basket (arm 1)",
-    "profile": "basket",
-    "replaces": "01M2M2SFY1MBE9YGA3GTMRCE53",
-    "allocation": "2 x 8 H100 on ai2/jupiter via the image's ray_node_setup.sh: 4 DeepSpeed learners, 10 eager TP1 vLLM engines at 0.85 GPU memory, 2-GPU TP2 vLLM judge at 131072 YaRN context on the head node",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
-    "outcome_startup": "both replicas started 03:25 UTC; Ray head and worker joined; judge ready in 80 s; driver step 1 (with the initial 512-prompt evaluation) completed at 03:53 UTC, 1499 s total, 111 s training"
-  },
-  {
-    "experiment": "01M2M9W9BN8WJRNH3ESSHZV9B9",
-    "source": "01M2M9W2ABH7N95R51HG55V8S5",
-    "commit": "18d679c511eccc002848cf050d10a390da943440",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES MoE basket (arm 2)",
-    "config": "runs/relaunch-20260915/moe-broad-c16b.toml",
-    "continues": "01M2KF9EW2ZX50X477D6CZWECG",
-    "predecessor_failed_after_checkpoint": 100,
-    "changes": "core.engine_drain_timeout 900 -> 2700 s; the update-100 evaluation is not repeated by the continuation and must be run on the checkpoint-100 export separately",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916",
-    "allocation": {
-      "replicas": 2,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 16,
-      "policy_gpus": 15,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 8,
-          "rollout_gpus": 0,
-          "ray_gpus": 8,
-          "judges": {}
-        },
-        {
-          "trainer_gpus": 0,
-          "rollout_gpus": 7,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "full-sft-basket-200-32k-c16b-20260916",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 5
-      },
-      "trainer": {
-        "gpus": 8,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 8,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 7,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 786432,
-        "sglang_max_mamba_cache_size": 1024,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": true,
-        "mamba_radix_cache_strategy": "extra_buffer",
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 2700.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.01,
-        "router_z_loss_weight": 1e-05,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": true,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
-    },
-    "outcome": "replica-0 got a node at 06:05 UTC, replica-1 stayed queued; replica-0 hit launch.coordination.startup_timeout (1200 s) at 06:26 waiting for its peer and exited 1, cancelling both; no training"
-  },
-  {
-    "experiment": "01M2ME5P9C7N6NW3ZDV1A4Q6VM",
-    "source": "01M2ME5K513R5YZXC18KWFG5PR",
-    "commit": "c727b5b72fba3aa0dc17500ca4d1b0b1273e03a9",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES dense basket (arm 3)",
-    "config": "runs/relaunch-20260915/dense-broad-c24.toml",
-    "continues": "01M2KWWP9GVQ55D1DP2GWY748F",
-    "predecessor_preempted_after_update": 37,
-    "changes": "admission 16 -> 24 per engine; core.engine_drain_timeout 900 -> 2700 s",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916",
-    "allocation": {
-      "replicas": 1,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 8,
-      "policy_gpus": 7,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 2,
-          "rollout_gpus": 5,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "olmo3-think-sft-basket-200-32k-c24-20260916",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 1
-      },
-      "trainer": {
-        "gpus": 2,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 1,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 5,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 24,
-        "sglang_max_running_requests": 24,
-        "sglang_max_total_tokens": 458752,
-        "sglang_mem_fraction_static": 0.85,
-        "radix_cache": false,
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 2700.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.0,
-        "router_z_loss_weight": 0.0,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": false,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
-    },
-    "outcome": "restored checkpoint 37; updates 38-50 at 12.4 min median with 11.9 running per engine (admission 24 did not change cadence); checkpoint 50 committed at 10:55 UTC; the update-50 evaluation drain timed out after 2700 s with the producer still draining about 216 owned groups (864 requests); driver exit 1 at 11:46 UTC"
-  },
-  {
-    "experiment": "01M2MEJYGQY1R77P2C6GYJT4EE",
-    "source": "01M2MEJS673BRBYA2ZJYA0Y83V",
-    "commit": "032a01b3de31241cc81a93f1058e72220b1f3add",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES MoE basket (arm 2)",
-    "config": "runs/relaunch-20260915/moe-broad-c16c.toml",
-    "continues": "01M2KF9EW2ZX50X477D6CZWECG",
-    "replaces": "01M2M9W9BN8WJRNH3ESSHZV9B9",
-    "changes": "launch.coordination.startup_timeout 1200 -> 14400 s so the first-scheduled replica waits for its queued peer; engine_drain_timeout 2700 s",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916",
-    "allocation": {
-      "replicas": 2,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 16,
-      "policy_gpus": 15,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 8,
-          "rollout_gpus": 0,
-          "ray_gpus": 8,
-          "judges": {}
-        },
-        {
-          "trainer_gpus": 0,
-          "rollout_gpus": 7,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "full-sft-basket-200-32k-c16c-20260916",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "coordination": {
-          "startup_timeout": 14400,
-          "heartbeat_timeout": 120
-        },
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 5
-      },
-      "trainer": {
-        "gpus": 8,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 8,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 7,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 786432,
-        "sglang_max_mamba_cache_size": 1024,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": true,
-        "mamba_radix_cache_strategy": "extra_buffer",
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 2700.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.01,
-        "router_z_loss_weight": 1e-05,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": true,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
-    },
-    "outcome": "replica-1 joined after about an hour in the queue; restored checkpoint 100 (cold Triton cache: changed core config); completed update 101 at 10:24 UTC; one policy-refresh request hit an httpx ReadError on the router at 10:01 and the producer failure exited the driver with 1 at 10:24"
-  },
-  {
-    "experiment": "01M2MWPWN1630EFRQCYB2KVZXX",
-    "source": "01M2MWPQFZWKG5D3FR0GTT6YXT",
-    "commit": "d6fb0f05ef3f313c311247ee57fe16b782608db7",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES MoE basket (arm 2)",
-    "config": "runs/relaunch-20260915/moe-broad-c16d.toml",
-    "continues": "01M2KF9EW2ZX50X477D6CZWECG",
-    "replaces": "01M2MEJYGQY1R77P2C6GYJT4EE",
-    "changes": "overlay d6fb0f05e: async producer requeues groups that lose their HTTP transport; same 4 h peer wait and 2700 s drain budget",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916",
-    "allocation": {
-      "replicas": 2,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 16,
-      "policy_gpus": 15,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 8,
-          "rollout_gpus": 0,
-          "ray_gpus": 8,
-          "judges": {}
-        },
-        {
-          "trainer_gpus": 0,
-          "rollout_gpus": 7,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "full-sft-basket-200-32k-c16d-20260916",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "coordination": {
-          "startup_timeout": 14400,
-          "heartbeat_timeout": 120
-        },
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 5
-      },
-      "trainer": {
-        "gpus": 8,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 8,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 7,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 786432,
-        "sglang_max_mamba_cache_size": 1024,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": true,
-        "mamba_radix_cache_strategy": "extra_buffer",
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 1024,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 2700.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.01,
-        "router_z_loss_weight": 1e-05,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": true,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
-    },
-    "outcome": "cancelled while queued; superseded by c16e with the smaller in-flight budget"
-  },
-  {
-    "experiment": "01M2N0PEXEN2TZGGGZFYSVHMTT",
-    "source": "01M2N0PC405S20072P2Z76TSWR",
-    "commit": "ae650c04f042430ec101c9ec70a6a8c6dd865a11",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES dense basket (arm 3)",
-    "config": "runs/relaunch-20260915/dense-broad-c24b.toml",
-    "continues": "01M2ME5P9C7N6NW3ZDV1A4Q6VM",
-    "predecessor_checkpoint": 50,
-    "changes": "async_max_concurrent_samples 1024 -> 512 (two batches in flight instead of four, so the pre-evaluation drain is bounded); core.engine_drain_timeout 5400 s; overlay d6fb0f05e transport-failure requeue",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916",
-    "allocation": {
-      "replicas": 1,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 8,
-      "policy_gpus": 7,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 2,
-          "rollout_gpus": 5,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
-    },
-    "spec": {
-      "schema_version": 1,
-      "name": "olmo3-think-sft-basket-200-32k-c24b-20260916",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        },
-        "coordination": {
-          "startup_timeout": 1200,
-          "heartbeat_timeout": 120
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 1
-      },
-      "trainer": {
-        "gpus": 2,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 1,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 5,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 24,
-        "sglang_max_running_requests": 24,
-        "sglang_max_total_tokens": 458752,
-        "sglang_mem_fraction_static": 0.85,
-        "radix_cache": false,
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 512,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 5400.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.0,
-        "router_z_loss_weight": 0.0,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": false,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 1
+   },
+   "trainer": {
+    "gpus": 2,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 1,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 5,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 294912,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": false,
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 900.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-single-node-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": false,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
     }
-  },
-  {
-    "experiment": "01M2N0PNTM3HQXWXNXY5J8A656",
-    "source": "01M2N0PFTH8QY89TN8PA4H15SR",
-    "commit": "ae650c04f042430ec101c9ec70a6a8c6dd865a11",
-    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
-    "stage": "train",
-    "arm": "MILES MoE basket (arm 2)",
-    "config": "runs/relaunch-20260915/moe-broad-c16e.toml",
-    "continues": "01M2KF9EW2ZX50X477D6CZWECG",
-    "predecessor_checkpoint": 100,
-    "changes": "async_max_concurrent_samples 1024 -> 512 (two batches in flight instead of four, so the pre-evaluation drain is bounded); core.engine_drain_timeout 5400 s; overlay d6fb0f05e transport-failure requeue",
-    "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916",
-    "allocation": {
-      "replicas": 2,
-      "gpus_per_replica": 8,
-      "allocated_gpus": 16,
-      "policy_gpus": 15,
-      "judge_gpus": 1,
-      "nodes": [
-        {
-          "trainer_gpus": 8,
-          "rollout_gpus": 0,
-          "ray_gpus": 8,
-          "judges": {}
-        },
-        {
-          "trainer_gpus": 0,
-          "rollout_gpus": 7,
-          "ray_gpus": 7,
-          "judges": {
-            "general": 1
-          }
-        }
-      ],
-      "unused_gpus": 0
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
     },
-    "spec": {
-      "schema_version": 1,
-      "name": "full-sft-basket-200-32k-c16e-20260916",
-      "model": {
-        "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
-        "format": "hf"
-      },
-      "data": {
-        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
-        "eval_prompt_data": [
-          "math",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
-          "ifeval",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
-          "code",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
-          "general",
-          "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
-        ],
-        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
-        "seed": 17,
-        "shuffle": true
-      },
-      "output": {
-        "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916",
-        "export_hf": true,
-        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916/export-hf"
-      },
-      "launch": {
-        "workspace": "ai2/open-instruct-dev",
-        "budget": "ai2/oe-other",
-        "cluster": "ai2/holmes",
-        "priority": "urgent",
-        "min_runtime": "4h",
-        "auto_resume": true,
-        "shared_memory": "200 GiB",
-        "timeout": "48h",
-        "gpus_per_replica": 8,
-        "coordination": {
-          "startup_timeout": 14400,
-          "heartbeat_timeout": 120
-        },
-        "weka_mounts": [
-          {
-            "weka": "oe-training-default",
-            "mount_path": "/weka/oe-training-default"
-          },
-          {
-            "weka": "oe-adapt-default",
-            "mount_path": "/weka/oe-adapt-default"
-          }
-        ],
-        "env": {
-          "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
-          "OI_MILES_CODE_FAILURE_POLICY": "zero",
-          "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
-          "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
-          "NCCL_SOCKET_IFNAME": "ib",
-          "NCCL_IB_HCA": "^=mlx5_bond_0"
-        },
-        "secrets": {
-          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-        }
-      },
-      "conversion": {
-        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916/prepared/hf"
-      },
-      "compiler_cache": {
-        "enabled": true,
-        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
-        "restore": true
-      },
-      "training": {
-        "num_rollouts": 200,
-        "skip_eval_before_train": true,
-        "eval_interval": 50,
-        "save_checkpoints": true,
-        "save_interval": 5
-      },
-      "trainer": {
-        "gpus": 8,
-        "trainer_num_nodes": 1,
-        "expert_parallel_size": 8,
-        "micro_batch_size": 1,
-        "sequence_packing": true,
-        "packing_max_tokens": 34816,
-        "activation_recompute": true,
-        "trainer_flash_attention_version": 4
-      },
-      "inference": {
-        "placement_mode": "disaggregated",
-        "gpus": 7,
-        "rollout_tensor_parallel_size": 1,
-        "rollout_batch_size": 64,
-        "samples_per_prompt": 4,
-        "global_batch_size": 256,
-        "max_response_length": 32768,
-        "max_context_length": 34816,
-        "sglang_server_concurrency": 16,
-        "sglang_max_running_requests": 16,
-        "sglang_max_total_tokens": 786432,
-        "sglang_max_mamba_cache_size": 1024,
-        "sglang_mem_fraction_static": 0.7,
-        "radix_cache": true,
-        "mamba_radix_cache_strategy": "extra_buffer",
-        "sglang_cuda_graph_backend_decode": "full",
-        "sglang_cuda_graph_max_bs_decode": 32,
-        "sglang_cuda_graph_backend_prefill": "disabled",
-        "sglang_sampling_backend": "pytorch",
-        "sglang_attention_backend": "triton",
-        "check_weight_update_equal": true,
-        "update_weight_buffer_size": 1073741824
-      },
-      "optimizer": {
-        "learning_rate": 1e-06,
-        "lr_decay_style": "constant",
-        "lr_warmup_iters": 0,
-        "weight_decay": 0.0,
-        "adam_beta1": 0.9,
-        "adam_beta2": 0.95,
-        "adam_eps": 1e-08,
-        "clip_grad": 1.0,
-        "kl_loss_coef": 0.0,
-        "entropy_coef": 0.0,
-        "eps_clip": 0.2,
-        "eps_clip_high": 0.28
-      },
-      "async": {
-        "fully_async": true,
-        "async_max_concurrent_samples": 512,
-        "max_weight_staleness": 2,
-        "async_data_buffer_capacity_factor": 1.0,
-        "async_unused_samples_handler": "retry",
-        "rollout_submission_granularity": "group",
-        "off_policy_correction": "tis"
-      },
-      "tracking": {
-        "wandb_mode": "online",
-        "wandb_team": "ai2-llm",
-        "wandb_project": "olmo-rl-comparison",
-        "wandb_group": "dolci-basket-32k-zero-20260914"
-      },
-      "runtime": {
-        "row_specialization": "dynamic"
-      },
-      "core": {
-        "publication_mode": "refresh",
-        "refresh_request_timeout": 1800.0,
-        "engine_drain_timeout": 5400.0,
-        "scoring_pass_required": false,
-        "pipeline_observation_interval": 2.0,
-        "replay_diagnostics": false,
-        "router_aux_loss_weight": 0.01,
-        "router_z_loss_weight": 1e-05,
-        "stream_moe_export": true,
-        "weight_sync_mode": "flattened",
-        "expert_publication": "per_expert",
-        "scoring_check_interval": 20,
-        "diagnostic_interval": 0
-      },
-      "miles": {
-        "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
-        "eval_temperature": 0.0,
-        "n_samples_per_eval_prompt": 1,
-        "sglang_enable_metrics": true,
-        "use_rollout_routing_replay": true,
-        "use_miles_router": true,
-        "sglang_chunked_prefill_size": 8192,
-        "rollout_temperature": 1.0,
-        "rollout_seed": 17,
-        "rollout_max_prompt_len": 2048,
-        "seed": 17,
-        "disable_grpo_std_normalization": true
-      },
-      "judges": {
-        "general": {
-          "mode": "managed",
-          "backend": "sglang",
-          "model": "Qwen/Qwen3-32B",
-          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
-          "gpus": 1,
-          "tensor_parallel_size": 1,
-          "max_context_length": 131072,
-          "context_extension": "qwen3-yarn-128k",
-          "max_concurrent_calls": 4,
-          "timeout": 600,
-          "chat_template": "qwen3-no-thinking",
-          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
-        }
-      },
-      "rubrics": {
-        "quality": {
-          "profile": "open-instruct/general-quality",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        },
-        "reference_quality": {
-          "profile": "open-instruct/general-quality_ref",
-          "max_response_tokens": 2048,
-          "temperature": 1.0
-        }
-      },
-      "judging": {
-        "bindings": {
-          "general-quality": {
-            "judge": "general",
-            "rubric": "quality"
-          },
-          "general-quality_ref": {
-            "judge": "general",
-            "rubric": "reference_quality"
-          }
-        }
-      }
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
     }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
   }
+ },
+ {
+  "experiment": "01M2KEPRMD3NGSJEV9GM7VR0HF",
+  "source": "01M2KEPM69MZ4CP7AG0PDP2Q0F",
+  "commit": "a6112ca5e7aaf66b807fb213c66beef3a77c815b",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "workflow",
+  "config": "runs/relaunch-20260915/gsm8k-core-r4.toml",
+  "continues": "01M2HZKS5S3EJTP6QY3KBERG7D",
+  "predecessor_stopped_after_checkpoint": 150,
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915",
+  "allocation": {
+   "replicas": 1,
+   "gpus_per_replica": 6,
+   "allocated_gpus": 6,
+   "policy_gpus": 6,
+   "judge_gpus": 0,
+   "nodes": [
+    {
+     "trainer_gpus": 2,
+     "rollout_gpus": 4,
+     "ray_gpus": 6,
+     "judges": {}
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "olmo3-sft-gsm8k-core-200-32k-r4-20260915",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
+    "format": "hf"
+   },
+   "data": {
+    "seed": 17,
+    "shuffle": true,
+    "tasks": [
+     {
+      "task": "gsm8k",
+      "train_count": 6000,
+      "eval_count": 512
+     }
+    ]
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 6,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r4-20260915/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 5
+   },
+   "trainer": {
+    "gpus": 2,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 1,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 4,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 16,
+    "samples_per_prompt": 4,
+    "global_batch_size": 64,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 294912,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": false,
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {},
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "olmo3-sft-learning-confidence-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "barrier",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 900.0,
+    "scoring_pass_required": true,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-sft-gsm8k-core-200-32k-r3-20260914/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": false,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {},
+   "rubrics": {},
+   "judging": {
+    "bindings": {}
+   }
+  }
+ },
+ {
+  "experiment": "01M2KF9EW2ZX50X477D6CZWECG",
+  "source": "01M2KF99E3G0MRTJAWPWCXTC0Q",
+  "commit": "94d6c0268d3099efab9d85a135c25447a1906dfa",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "config": "runs/relaunch-20260915/moe-broad-c16-ep8.toml",
+  "continues": "01M2J039655AS5BM5KZ9YQNQ3F",
+  "predecessor_stopped_after_checkpoint": 45,
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915",
+  "allocation": {
+   "replicas": 2,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 16,
+   "policy_gpus": 15,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 8,
+     "rollout_gpus": 0,
+     "ray_gpus": 8,
+     "judges": {}
+    },
+    {
+     "trainer_gpus": 0,
+     "rollout_gpus": 7,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "full-sft-basket-200-32k-c16-20260915",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 5
+   },
+   "trainer": {
+    "gpus": 8,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 8,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 7,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 786432,
+    "sglang_max_mamba_cache_size": 1024,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": true,
+    "mamba_radix_cache_strategy": "extra_buffer",
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 900.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.01,
+    "router_z_loss_weight": 1e-05,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-robust-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": true,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "preempted at 01:26 UTC after update 70 (4 h); auto-resumed at 01:52 with warm Triton cache hits on every rank; reached update 100 and saved checkpoint 100 at 04:47 UTC; the update-100 shared-engine evaluation timed out draining in-flight groups (engine_drain_timeout 900 s) while the code service returned read timeouts, driver exit 1 at 05:05 UTC"
+ },
+ {
+  "experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
+  "source": "01M2KTY6DEAJT0A7A9BJMC7XG2",
+  "commit": "1d1c02aac050f6f1493220f1ac983c171c46c45b",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "prepare",
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "config": "scripts/miles/launch_original_baseline.py --profile basket",
+  "source_data": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/prepared/data",
+  "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916"
+ },
+ {
+  "experiment": "01M2KVC37AMZFJFDYR079V681V",
+  "source": "01M2KVC1BS6GX3DM4GCXSCBEAX",
+  "commit": "2f0db7b3e018f2a1f86f2b3cb04f732e32ce7b84",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "smoke",
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "prepared": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-original-retrofit-20260916",
+  "prepared_counts": {
+   "train": 101434,
+   "eval": 512
+  },
+  "prepare_experiment": "01M2KTY87YYQAYQ6VJJPP51HD7",
+  "allocation": "8 H100 on ai2/jupiter: 4 DeepSpeed learners, 2 vLLM policy engines, 2-GPU TP2 vLLM judge at 131072 YaRN context",
+  "outcome": "preempted by workspace-group balancing on ai2/jupiter at 01:28 UTC after its 30-minute minimum runtime, before the two-GPU judge reported healthy; judge log ended in torch.compile"
+ },
+ {
+  "experiment": "01M2KWWP9GVQ55D1DP2GWY748F",
+  "source": "01M2KWWKY70DAMMY5475671SP1",
+  "commit": "5a083682c16da2a595fd6870527683d35e3c2195",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES dense basket (arm 3)",
+  "config": "runs/relaunch-20260915/dense-broad-kv.toml",
+  "continues": "01M2KEBH81YA9SH0HQ88XDD5YM",
+  "predecessor_preempted_after_update": 21,
+  "changes": "sglang_mem_fraction_static 0.7 -> 0.85; requested KV pool 294912 -> 458752 tokens",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915",
+  "allocation": {
+   "replicas": 1,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 8,
+   "policy_gpus": 7,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 2,
+     "rollout_gpus": 5,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "olmo3-think-sft-basket-200-32k-kv-20260915",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 1
+   },
+   "trainer": {
+    "gpus": 2,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 1,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 5,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 458752,
+    "sglang_mem_fraction_static": 0.85,
+    "radix_cache": false,
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 900.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-g16-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": false,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "restored checkpoint 21 at 02:39 UTC; updates 22-37 at 12.7 min median with KV usage max 0.66 (pool no longer binding) but engines still averaging 8.8 running and groups waiting 6-34 min for admission; preempted at 06:23 UTC after 4 h with checkpoint 37 saved"
+ },
+ {
+  "experiment": "01M2KXHQ5PDXRZDVQT86RK4JWB",
+  "source": "01M2KXHNEX5PWC8VPPTWA0N6WK",
+  "commit": "cc8e07487",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "smoke",
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "changes": "judge started with --enforce-eager and an unbuffered log; smoke minimum runtime raised to 2h",
+  "replaces": "01M2KVC37AMZFJFDYR079V681V",
+  "outcome": "judge ready in 90 s; driver step 1 completed at 02:43 UTC: 3034 s per step with two eager vLLM engines (917 tokens/s), 143 s training, 8-prompt smoke eval 0.25; code service and judge calls succeeded; step 2 at 03:36 UTC (3128 s); hit the 3 h smoke timeout at 04:49 UTC during step 3. Code service returned 413/500/read-timeout errors that the original trainer scores zero, as in the historical audit; judge calls succeeded; no OOM on four learners"
+ },
+ {
+  "experiment": "01M2M2SFY1MBE9YGA3GTMRCE53",
+  "source": "01M2M2SE1B4C3CBT0E1EW04NMD",
+  "commit": "eb436d3fcec8ba35ec3aa3be2f2abc2ac64ac2d0",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "train",
+  "steps": 100,
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "changes": "policy engines with CUDA graphs and 0.85 GPU memory; judge TP2 YaRN 131072 eager; 4 learners, 2 engines; saves every 25, evals at 0/50/100",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-20260916",
+  "outcome": "exit 1 at 03:10 UTC: judge ready in 85 s, then vLLM engine creation failed with 'vLLM failed to compile the model' because CUDA graphs were enabled for the retrofit Olmo model; engines reverted to eager"
+ },
+ {
+  "experiment": "01M2M3D8QC3DJY1Q033YPESGSK",
+  "source": "01M2M3D6MVG252F13C0JB3WAWG",
+  "commit": "ccf38a1c2",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "train",
+  "steps": 100,
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "replaces": "01M2M2SFY1MBE9YGA3GTMRCE53",
+  "allocation": "2 x 8 H100 on ai2/jupiter via the image's ray_node_setup.sh: 4 DeepSpeed learners, 10 eager TP1 vLLM engines at 0.85 GPU memory, 2-GPU TP2 vLLM judge at 131072 YaRN context on the head node",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
+  "outcome_startup": "both replicas started 03:25 UTC; Ray head and worker joined; judge ready in 80 s; driver step 1 (with the initial 512-prompt evaluation) completed at 03:53 UTC, 1499 s total, 111 s training",
+  "outcome": "exit 1 at 15:27 UTC after driver step 37 (12-17 min per step) while writing the per-step trace JSON: OSError: [Errno 28] No space left on device; /weka/oe-training-default was 1.8 PB used, 0 available at 15:25 UTC (oe-adapt-default 451 of 455 TB). Our run directories hold about 8 TB in total (dense native checkpoints 41 GB each, MoE 207 GB each), under 0.5 percent of the filesystem. Last DeepSpeed checkpoint: global_step26 (saved 11:24 UTC)."
+ },
+ {
+  "experiment": "01M2M9W9BN8WJRNH3ESSHZV9B9",
+  "source": "01M2M9W2ABH7N95R51HG55V8S5",
+  "commit": "18d679c511eccc002848cf050d10a390da943440",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES MoE basket (arm 2)",
+  "config": "runs/relaunch-20260915/moe-broad-c16b.toml",
+  "continues": "01M2KF9EW2ZX50X477D6CZWECG",
+  "predecessor_failed_after_checkpoint": 100,
+  "changes": "core.engine_drain_timeout 900 -> 2700 s; the update-100 evaluation is not repeated by the continuation and must be run on the checkpoint-100 export separately",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916",
+  "allocation": {
+   "replicas": 2,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 16,
+   "policy_gpus": 15,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 8,
+     "rollout_gpus": 0,
+     "ray_gpus": 8,
+     "judges": {}
+    },
+    {
+     "trainer_gpus": 0,
+     "rollout_gpus": 7,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "full-sft-basket-200-32k-c16b-20260916",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16b-20260916/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 5
+   },
+   "trainer": {
+    "gpus": 8,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 8,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 7,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 786432,
+    "sglang_max_mamba_cache_size": 1024,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": true,
+    "mamba_radix_cache_strategy": "extra_buffer",
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 2700.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.01,
+    "router_z_loss_weight": 1e-05,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": true,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "replica-0 got a node at 06:05 UTC, replica-1 stayed queued; replica-0 hit launch.coordination.startup_timeout (1200 s) at 06:26 waiting for its peer and exited 1, cancelling both; no training"
+ },
+ {
+  "experiment": "01M2ME5P9C7N6NW3ZDV1A4Q6VM",
+  "source": "01M2ME5K513R5YZXC18KWFG5PR",
+  "commit": "c727b5b72fba3aa0dc17500ca4d1b0b1273e03a9",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES dense basket (arm 3)",
+  "config": "runs/relaunch-20260915/dense-broad-c24.toml",
+  "continues": "01M2KWWP9GVQ55D1DP2GWY748F",
+  "predecessor_preempted_after_update": 37,
+  "changes": "admission 16 -> 24 per engine; core.engine_drain_timeout 900 -> 2700 s",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916",
+  "allocation": {
+   "replicas": 1,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 8,
+   "policy_gpus": 7,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 2,
+     "rollout_gpus": 5,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "olmo3-think-sft-basket-200-32k-c24-20260916",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 1
+   },
+   "trainer": {
+    "gpus": 2,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 1,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 5,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 24,
+    "sglang_max_running_requests": 24,
+    "sglang_max_total_tokens": 458752,
+    "sglang_mem_fraction_static": 0.85,
+    "radix_cache": false,
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 2700.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-kv-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": false,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "restored checkpoint 37; updates 38-50 at 12.4 min median with 11.9 running per engine (admission 24 did not change cadence); checkpoint 50 committed at 10:55 UTC; the update-50 evaluation drain timed out after 2700 s with the producer still draining about 216 owned groups (864 requests); driver exit 1 at 11:46 UTC"
+ },
+ {
+  "experiment": "01M2MEJYGQY1R77P2C6GYJT4EE",
+  "source": "01M2MEJS673BRBYA2ZJYA0Y83V",
+  "commit": "032a01b3de31241cc81a93f1058e72220b1f3add",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES MoE basket (arm 2)",
+  "config": "runs/relaunch-20260915/moe-broad-c16c.toml",
+  "continues": "01M2KF9EW2ZX50X477D6CZWECG",
+  "replaces": "01M2M9W9BN8WJRNH3ESSHZV9B9",
+  "changes": "launch.coordination.startup_timeout 1200 -> 14400 s so the first-scheduled replica waits for its queued peer; engine_drain_timeout 2700 s",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916",
+  "allocation": {
+   "replicas": 2,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 16,
+   "policy_gpus": 15,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 8,
+     "rollout_gpus": 0,
+     "ray_gpus": 8,
+     "judges": {}
+    },
+    {
+     "trainer_gpus": 0,
+     "rollout_gpus": 7,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "full-sft-basket-200-32k-c16c-20260916",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "coordination": {
+     "startup_timeout": 14400,
+     "heartbeat_timeout": 120
+    },
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16c-20260916/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 5
+   },
+   "trainer": {
+    "gpus": 8,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 8,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 7,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 786432,
+    "sglang_max_mamba_cache_size": 1024,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": true,
+    "mamba_radix_cache_strategy": "extra_buffer",
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 2700.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.01,
+    "router_z_loss_weight": 1e-05,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": true,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "replica-1 joined after about an hour in the queue; restored checkpoint 100 (cold Triton cache: changed core config); completed update 101 at 10:24 UTC; one policy-refresh request hit an httpx ReadError on the router at 10:01 and the producer failure exited the driver with 1 at 10:24"
+ },
+ {
+  "experiment": "01M2MWPWN1630EFRQCYB2KVZXX",
+  "source": "01M2MWPQFZWKG5D3FR0GTT6YXT",
+  "commit": "d6fb0f05ef3f313c311247ee57fe16b782608db7",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES MoE basket (arm 2)",
+  "config": "runs/relaunch-20260915/moe-broad-c16d.toml",
+  "continues": "01M2KF9EW2ZX50X477D6CZWECG",
+  "replaces": "01M2MEJYGQY1R77P2C6GYJT4EE",
+  "changes": "overlay d6fb0f05e: async producer requeues groups that lose their HTTP transport; same 4 h peer wait and 2700 s drain budget",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916",
+  "allocation": {
+   "replicas": 2,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 16,
+   "policy_gpus": 15,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 8,
+     "rollout_gpus": 0,
+     "ray_gpus": 8,
+     "judges": {}
+    },
+    {
+     "trainer_gpus": 0,
+     "rollout_gpus": 7,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "full-sft-basket-200-32k-c16d-20260916",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "coordination": {
+     "startup_timeout": 14400,
+     "heartbeat_timeout": 120
+    },
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16d-20260916/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 5
+   },
+   "trainer": {
+    "gpus": 8,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 8,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 7,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 786432,
+    "sglang_max_mamba_cache_size": 1024,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": true,
+    "mamba_radix_cache_strategy": "extra_buffer",
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 1024,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 2700.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.01,
+    "router_z_loss_weight": 1e-05,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": true,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "cancelled while queued; superseded by c16e with the smaller in-flight budget"
+ },
+ {
+  "experiment": "01M2N0PEXEN2TZGGGZFYSVHMTT",
+  "source": "01M2N0PC405S20072P2Z76TSWR",
+  "commit": "ae650c04f042430ec101c9ec70a6a8c6dd865a11",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES dense basket (arm 3)",
+  "config": "runs/relaunch-20260915/dense-broad-c24b.toml",
+  "continues": "01M2ME5P9C7N6NW3ZDV1A4Q6VM",
+  "predecessor_checkpoint": 50,
+  "changes": "async_max_concurrent_samples 1024 -> 512 (two batches in flight instead of four, so the pre-evaluation drain is bounded); core.engine_drain_timeout 5400 s; overlay d6fb0f05e transport-failure requeue",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916",
+  "allocation": {
+   "replicas": 1,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 8,
+   "policy_gpus": 7,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 2,
+     "rollout_gpus": 5,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "olmo3-think-sft-basket-200-32k-c24b-20260916",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-think-sft-6ff857587e040d6d523a3d5f3a56e918f5401d66",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/olmo3-think-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "coordination": {
+     "startup_timeout": 1200,
+     "heartbeat_timeout": 120
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24b-20260916/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 1
+   },
+   "trainer": {
+    "gpus": 2,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 1,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 5,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 24,
+    "sglang_max_running_requests": 24,
+    "sglang_max_total_tokens": 458752,
+    "sglang_mem_fraction_static": 0.85,
+    "radix_cache": false,
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 512,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 5400.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24-20260916/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": false,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "exit 1 at 15:24 UTC after update 66 at 9.9-11.5 min per update: OSError: [Errno 28] No space left on device; /weka/oe-training-default was 1.8 PB used, 0 available at 15:25 UTC (oe-adapt-default 451 of 455 TB). Our run directories hold about 8 TB in total (dense native checkpoints 41 GB each, MoE 207 GB each), under 0.5 percent of the filesystem. Newest complete checkpoint: 65."
+ },
+ {
+  "experiment": "01M2N0PNTM3HQXWXNXY5J8A656",
+  "source": "01M2N0PFTH8QY89TN8PA4H15SR",
+  "commit": "ae650c04f042430ec101c9ec70a6a8c6dd865a11",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES MoE basket (arm 2)",
+  "config": "runs/relaunch-20260915/moe-broad-c16e.toml",
+  "continues": "01M2KF9EW2ZX50X477D6CZWECG",
+  "predecessor_checkpoint": 100,
+  "changes": "async_max_concurrent_samples 1024 -> 512 (two batches in flight instead of four, so the pre-evaluation drain is bounded); core.engine_drain_timeout 5400 s; overlay d6fb0f05e transport-failure requeue",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916",
+  "allocation": {
+   "replicas": 2,
+   "gpus_per_replica": 8,
+   "allocated_gpus": 16,
+   "policy_gpus": 15,
+   "judge_gpus": 1,
+   "nodes": [
+    {
+     "trainer_gpus": 8,
+     "rollout_gpus": 0,
+     "ray_gpus": 8,
+     "judges": {}
+    },
+    {
+     "trainer_gpus": 0,
+     "rollout_gpus": 7,
+     "ray_gpus": 7,
+     "judges": {
+      "general": 1
+     }
+    }
+   ],
+   "unused_gpus": 0
+  },
+  "spec": {
+   "schema_version": 1,
+   "name": "full-sft-basket-200-32k-c16e-20260916",
+   "model": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/hf",
+    "format": "hf"
+   },
+   "data": {
+    "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/train.jsonl",
+    "eval_prompt_data": [
+     "math",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-math.jsonl",
+     "ifeval",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-ifeval.jsonl",
+     "code",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-code.jsonl",
+     "general",
+     "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/eval-general.jsonl"
+    ],
+    "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/full-sft-basket-20260914/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+   },
+   "output": {
+    "root": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916",
+    "export_hf": true,
+    "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916/export-hf"
+   },
+   "launch": {
+    "workspace": "ai2/open-instruct-dev",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "4h",
+    "auto_resume": true,
+    "shared_memory": "200 GiB",
+    "timeout": "48h",
+    "gpus_per_replica": 8,
+    "coordination": {
+     "startup_timeout": 14400,
+     "heartbeat_timeout": 120
+    },
+    "weka_mounts": [
+     {
+      "weka": "oe-training-default",
+      "mount_path": "/weka/oe-training-default"
+     },
+     {
+      "weka": "oe-adapt-default",
+      "mount_path": "/weka/oe-adapt-default"
+     }
+    ],
+    "env": {
+     "OI_MILES_MATH_TIMEOUT_POLICY": "zero",
+     "OI_MILES_CODE_FAILURE_POLICY": "zero",
+     "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+     "SGLANG_TIMEOUT_KEEP_ALIVE": "60",
+     "NCCL_SOCKET_IFNAME": "ib",
+     "NCCL_IB_HCA": "^=mlx5_bond_0"
+    },
+    "secrets": {
+     "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    }
+   },
+   "conversion": {
+    "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16e-20260916/prepared/hf"
+   },
+   "compiler_cache": {
+    "enabled": true,
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d",
+    "restore": true
+   },
+   "training": {
+    "num_rollouts": 200,
+    "skip_eval_before_train": true,
+    "eval_interval": 50,
+    "save_checkpoints": true,
+    "save_interval": 5
+   },
+   "trainer": {
+    "gpus": 8,
+    "trainer_num_nodes": 1,
+    "expert_parallel_size": 8,
+    "micro_batch_size": 1,
+    "sequence_packing": true,
+    "packing_max_tokens": 34816,
+    "activation_recompute": true,
+    "trainer_flash_attention_version": 4
+   },
+   "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 7,
+    "rollout_tensor_parallel_size": 1,
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 4,
+    "global_batch_size": 256,
+    "max_response_length": 32768,
+    "max_context_length": 34816,
+    "sglang_server_concurrency": 16,
+    "sglang_max_running_requests": 16,
+    "sglang_max_total_tokens": 786432,
+    "sglang_max_mamba_cache_size": 1024,
+    "sglang_mem_fraction_static": 0.7,
+    "radix_cache": true,
+    "mamba_radix_cache_strategy": "extra_buffer",
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 32,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_sampling_backend": "pytorch",
+    "sglang_attention_backend": "triton",
+    "check_weight_update_equal": true,
+    "update_weight_buffer_size": 1073741824
+   },
+   "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "lr_warmup_iters": 0,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "adam_eps": 1e-08,
+    "clip_grad": 1.0,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.28
+   },
+   "async": {
+    "fully_async": true,
+    "async_max_concurrent_samples": 512,
+    "max_weight_staleness": 2,
+    "async_data_buffer_capacity_factor": 1.0,
+    "async_unused_samples_handler": "retry",
+    "rollout_submission_granularity": "group",
+    "off_policy_correction": "tis"
+   },
+   "tracking": {
+    "wandb_mode": "online",
+    "wandb_team": "ai2-llm",
+    "wandb_project": "olmo-rl-comparison",
+    "wandb_group": "dolci-basket-32k-zero-20260914"
+   },
+   "runtime": {
+    "row_specialization": "dynamic"
+   },
+   "core": {
+    "publication_mode": "refresh",
+    "refresh_request_timeout": 1800.0,
+    "engine_drain_timeout": 5400.0,
+    "scoring_pass_required": false,
+    "pipeline_observation_interval": 2.0,
+    "replay_diagnostics": false,
+    "router_aux_loss_weight": 0.01,
+    "router_z_loss_weight": 1e-05,
+    "stream_moe_export": true,
+    "weight_sync_mode": "flattened",
+    "expert_publication": "per_expert",
+    "scoring_check_interval": 20,
+    "diagnostic_interval": 0
+   },
+   "miles": {
+    "load": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16-20260915/checkpoints",
+    "eval_temperature": 0.0,
+    "n_samples_per_eval_prompt": 1,
+    "sglang_enable_metrics": true,
+    "use_rollout_routing_replay": true,
+    "use_miles_router": true,
+    "sglang_chunked_prefill_size": 8192,
+    "rollout_temperature": 1.0,
+    "rollout_seed": 17,
+    "rollout_max_prompt_len": 2048,
+    "seed": 17,
+    "disable_grpo_std_normalization": true
+   },
+   "judges": {
+    "general": {
+     "mode": "managed",
+     "backend": "sglang",
+     "model": "Qwen/Qwen3-32B",
+     "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+     "gpus": 1,
+     "tensor_parallel_size": 1,
+     "max_context_length": 131072,
+     "context_extension": "qwen3-yarn-128k",
+     "max_concurrent_calls": 4,
+     "timeout": 600,
+     "chat_template": "qwen3-no-thinking",
+     "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+    }
+   },
+   "rubrics": {
+    "quality": {
+     "profile": "open-instruct/general-quality",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    },
+    "reference_quality": {
+     "profile": "open-instruct/general-quality_ref",
+     "max_response_tokens": 2048,
+     "temperature": 1.0
+    }
+   },
+   "judging": {
+    "bindings": {
+     "general-quality": {
+      "judge": "general",
+      "rubric": "quality"
+     },
+     "general-quality_ref": {
+      "judge": "general",
+      "rubric": "reference_quality"
+     }
+    }
+   }
+  },
+  "outcome": "replica-1 exit 1 at 15:24 UTC during startup (started 14:59, never trained), replica-0 cancelled by propagation: OSError: [Errno 28] No space left on device; /weka/oe-training-default was 1.8 PB used, 0 available at 15:25 UTC (oe-adapt-default 451 of 455 TB). Our run directories hold about 8 TB in total (dense native checkpoints 41 GB each, MoE 207 GB each), under 0.5 percent of the filesystem."
+ },
+ {
+  "experiment": "01M2NE8AHWQXT87EXY3F038V55",
+  "source": "01M2NE887SKQME8R05VCZZ3GW9",
+  "commit": "88e471b6656f3a6c35138d7a43e49b309c93b8fd",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES dense basket (arm 3)",
+  "config": "runs/relaunch-20260915/dense-broad-c24c.toml",
+  "continues": "01M2N0PEXEN2TZGGGZFYSVHMTT",
+  "predecessor_checkpoint": 65,
+  "changes": "save_interval 1 -> 5 (41 GB per native checkpoint; the run was writing about 5.5 TB over its remaining updates to a shared filesystem that filled); otherwise identical to c24b",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-200-32k-c24c-20260916",
+  "submitted": "2026-09-16T15:47Z",
+  "note": "submitted while the filesystem was being cleaned (3.4 TB free at 15:40 UTC); startup writes are small, the first checkpoint lands at update 70"
+ },
+ {
+  "experiment": "01M2NE8HDC7Z352AGWBQ3VNW64",
+  "source": "01M2NE8BFBAZVG3AGBK92KMCFV",
+  "commit": "88e471b6656f3a6c35138d7a43e49b309c93b8fd",
+  "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "stage": "train",
+  "arm": "MILES MoE basket (arm 2)",
+  "config": "runs/relaunch-20260915/moe-broad-c16f.toml",
+  "continues": "01M2N0PNTM3HQXWXNXY5J8A656",
+  "predecessor_checkpoint": 100,
+  "changes": "none (c16e never trained); loads full-sft-basket-200-32k-c16-20260915 checkpoint 100",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/full-sft-basket-200-32k-c16f-20260916",
+  "submitted": "2026-09-16T15:47Z"
+ },
+ {
+  "experiment": "01M2NE8N15FHRWV5ZVGWGHS590",
+  "source": "01M2NE8JMD2RM49SMR8K44AEPQ",
+  "commit": "88e471b6656f3a6c35138d7a43e49b309c93b8fd",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "resume",
+  "arm": "original-open-instruct basket (arm 1)",
+  "profile": "basket",
+  "continues": "01M2M3D8QC3DJY1Q033YPESGSK",
+  "predecessor_checkpoint": "global_step26",
+  "changes": "none; resume stage checks the unchanged command, rank clocks and optimizer shards, truncates the update ledger to step 26 and continues in the same output directory",
+  "output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-sft-basket-original-100-2n-20260916",
+  "submitted": "2026-09-16T15:48Z",
+  "note": "steps 27-37 (about 3 hours) are repeated from the checkpoint"
+ }
 ]
