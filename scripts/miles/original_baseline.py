@@ -455,6 +455,10 @@ def judge_service(judge_prepared):
         json.dumps(overrides, sort_keys=True),
         "--gpu-memory-utilization",
         "0.9",
+        # Judge traffic is a few dozen requests per collection; skip graph
+        # capture and compilation so the server is up in minutes, like the
+        # MILES judge, which also runs without CUDA graphs.
+        "--enforce-eager",
         "--host",
         "127.0.0.1",
         "--port",
@@ -481,7 +485,8 @@ def start_judge(service, log_path, *, timeout=1800):
         service["command"],
         stdout=log,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": JUDGE_GPUS},
+        # Unbuffered so the judge log is complete if the job is interrupted.
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": JUDGE_GPUS, "PYTHONUNBUFFERED": "1"},
     )
     print("ORIGINAL_BASELINE_JUDGE_STARTING", json.dumps({"log": str(log_path), "gpus": JUDGE_GPUS}), flush=True)
     deadline = time.monotonic() + timeout

@@ -620,7 +620,7 @@ def test_judge_service_uses_the_prepared_miles_snapshot_and_template(tmp_path):
     assert command[command.index("--model") + 1] == str(tmp_path / "snapshot")
     assert command[command.index("--chat-template") + 1] == str(template)
     assert command[command.index("--served-model-name") + 1] == "Qwen/Qwen3-32B"
-    assert command[command.index("--tensor-parallel-size") + 1] == "2"
+    assert command[command.index("--tensor-parallel-size") + 1] == "2" and "--enforce-eager" in command
     assert command[command.index("--max-model-len") + 1] == "131072"
     overrides = json.loads(command[command.index("--hf-overrides") + 1])
     assert overrides["rope_scaling"] == {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}
