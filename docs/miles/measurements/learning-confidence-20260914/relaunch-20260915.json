@@ -960,7 +960,7 @@
     "profile": "basket",
     "changes": "judge started with --enforce-eager and an unbuffered log; smoke minimum runtime raised to 2h",
     "replaces": "01M2KVC37AMZFJFDYR079V681V",
-    "outcome": "judge ready in 90 s; driver step 1 completed at 02:43 UTC: 3034 s per step with two eager vLLM engines (917 tokens/s), 143 s training, 8-prompt smoke eval 0.25; code service and judge calls succeeded"
+    "outcome": "judge ready in 90 s; driver step 1 completed at 02:43 UTC: 3034 s per step with two eager vLLM engines (917 tokens/s), 143 s training, 8-prompt smoke eval 0.25; code service and judge calls succeeded; step 2 at 03:36 UTC (3128 s); hit the 3 h smoke timeout at 04:49 UTC during step 3. Code service returned 413/500/read-timeout errors that the original trainer scores zero, as in the historical audit; judge calls succeeded; no OOM on four learners"
   },
   {
     "experiment": "01M2M2SFY1MBE9YGA3GTMRCE53",
