@@ -140,7 +140,9 @@ case "$MODELS" in
     # DMABUF is turned off because mlx5 dmabuf registration fails on these
     # nodes and the fallback registration path is what the recipe assumes.
     *Kimi-K3*)
-        export NCCL_MNNVL_ENABLE="${NCCL_MNNVL_ENABLE:-1}"
+        # NCCL_MNNVL_ENABLE is deliberately NOT set. The recipe scopes multi-node
+        # NVLink to GB200/GB300 NVL systems; holmes is HGX B300 (SXM6), where
+        # NCCL does not implicitly fall back if MNNVL fabric init fails.
         export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
         export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-1}"
         export NCCL_DMABUF_ENABLE="${NCCL_DMABUF_ENABLE:-0}"
