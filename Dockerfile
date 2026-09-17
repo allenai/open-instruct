@@ -54,10 +54,10 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 ENV BEAKER_VERSION=v1.5.235
 RUN curl --silent \
     --connect-timeout 5 \
-    --max-time 10 \
+    --max-time 180 \
     --retry 5 \
     --retry-delay 0 \
-    --retry-max-time 40 \
+    --retry-max-time 600 \
     --output beaker.tar.gz \
     "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
