@@ -13,11 +13,14 @@ python -c 'import torch, torch_npu; assert torch.npu.is_available()'
 
 The validated smoke environment used Python 3.12, CANN 9.0.0, PyTorch 2.10.0, and `torch_npu` 2.10.0 on Ascend 910B3. These versions describe the observed environment; use the official compatibility matrix rather than treating them as universal pins.
 
-The repository's default `uv sync` sources CUDA PyTorch and CUDA attention packages. For NPU, start from a compatible NPU environment, install the non-CUDA project dependencies, and install this checkout without dependency resolution:
+The repository's default `uv sync` sources CUDA PyTorch and CUDA attention packages. For NPU, start from a compatible NPU environment, install the NPU-specific pins, and install this checkout without dependency resolution (after sourcing CANN):
 
 ```bash
+python -m pip install --no-deps -r requirements_npu.txt
 python -m pip install -e . --no-deps
 ```
+
+`requirements_npu.txt` pins only the packages that must match the vLLM-Ascend stack or diverge from the default dependency set; everything else resolves from `pyproject.toml`. `requirements_npu.lock.txt` holds the full freeze of the validated environment, for reproducing it exactly.
 
 Do not install CUDA FlashAttention, bitsandbytes, or CUDA vLLM wheels into the NPU environment.
 
