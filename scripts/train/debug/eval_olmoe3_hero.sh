@@ -44,6 +44,7 @@ WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
 NUM_INSTANCES="${NUM_INSTANCES:-1}"  # vLLM instances; set with GPUS for wide suites
+TIMEOUT="${TIMEOUT:-24h}"  # Beaker job timeout; paper-protocol popqa/MATH at one instance need >24h
 
 OC_DEPS="cached-path>=1.7.2,dataclass-extensions>=0.3.0,bettermap,importlib_resources,safetensors,rich,pandas,flash-linear-attention==0.5.2"
 DEPS="datasets==4.8.4,vllm==0.19.1,huggingface-hub==1.16.1,${OC_DEPS}"
@@ -71,7 +72,7 @@ uv run olmo-eval beaker launch \
     -o provider.kwargs.enable_prefix_caching=false \
     -n "$RUN_NAME" -m "$CKPT" "${TASK_ARGS[@]}" \
     -I akshitab/olmo-core-tch2110cu128-rma-2026-08-04 \
-    --gpus "$GPUS" --retries 3 \
+    --gpus "$GPUS" --retries 3 -T "$TIMEOUT" \
     -e 'UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache && rm -rf /opt/*/lib/python3*/site-packages/flash_attn' \
     -e UV_CONSTRAINT="$CONSTRAINTS" \
     -e PYTHONPATH=/gantry-runtime/src \
