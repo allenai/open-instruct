@@ -31,6 +31,7 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import data_types, launch_utils, utils
+from open_instruct.npu import numa_affinity
 
 
 def _load_mbu_test_cases():
@@ -171,6 +172,95 @@ class TestAcceleratorSelection(unittest.TestCase):
             mock_npu.is_available.return_value = True
 
             self.assertEqual(utils.get_accelerator_type(), "npu")
+
+
+class TestNodeLocalEnvVars(unittest.TestCase):
+    def test_node_local_vars_are_all_excluded(self):
+        for var in ("CUDA_VISIBLE_DEVICES", "ASCEND_RT_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "VLLM_HOST_IP"):
+            self.assertIn(var, utils.NODE_LOCAL_ENV_VARS)
+
+
+class TestNpuNumaAffinityIndex(unittest.TestCase):
+    """Pure index math from open_instruct.npu.numa_affinity."""
+
+    def test_parse_visible_devices(self):
+        self.assertEqual(numa_affinity.parse_visible_devices("0,1,2"), [0, 1, 2])
+        self.assertEqual(numa_affinity.parse_visible_devices("6"), [6])
+        self.assertEqual(numa_affinity.parse_visible_devices(""), [])
+
+    def test_numa_node_index_uses_physical_device_id(self):
+        # 8 NPUs across 2 NUMA nodes: devices 0-3 -> node 0, devices 4-7 -> node 1.
+        self.assertEqual(numa_affinity.npu_numa_node_index(0, [0, 1], 8, 2), 0)
+        self.assertEqual(numa_affinity.npu_numa_node_index(1, [0, 1], 8, 2), 0)
+        self.assertEqual(numa_affinity.npu_numa_node_index(1, [4, 5, 6, 7], 8, 2), 1)
+
+    def test_numa_node_index_maps_single_visible_device_to_its_node(self):
+        # A single-card actor pinned to physical device 6 must bind node 1;
+        # deriving the node from the actor-local rank would try node 0.
+        self.assertEqual(numa_affinity.npu_numa_node_index(0, [6], 8, 2), 1)
+
+    def test_numa_node_index_falls_back_to_local_rank_without_visibility_mask(self):
+        self.assertEqual(numa_affinity.npu_numa_node_index(2, [], 8, 2), 0)
+        self.assertEqual(numa_affinity.npu_numa_node_index(5, [], 8, 2), 1)
+
+
+class TestNumaAffinityBinding(unittest.TestCase):
+    """Dispatch of RayProcess._set_numa_affinity against a fake libnuma."""
+
+    def _bound_node(self, *, local_rank, rank, numa_nodes=2, env, method):
+        libnuma = mock.MagicMock()
+        libnuma.numa_num_configured_nodes.return_value = numa_nodes
+        bound = []
+        libnuma.numa_parse_nodestring.side_effect = lambda raw: bound.append(int(raw.decode("ascii")))
+        proc = SimpleNamespace(local_rank=local_rank)
+        with (
+            mock.patch.object(utils, "_SET_AFFINITY", False),
+            mock.patch.object(utils, "get_accelerator_type", return_value="cuda"),
+            mock.patch.object(utils, "CDLL", return_value=libnuma) as cdll,
+            mock.patch("ctypes.util.find_library", return_value="fake_numa"),
+            mock.patch.dict(os.environ, env, clear=False),
+        ):
+            method(proc, rank)
+        cdll.assert_called_once_with("fake_numa")
+        return bound
+
+    def test_cuda_path_binds_by_local_rank_not_visible_device(self):
+        # Upstream semantics: a worker at local_rank 0 with CUDA_VISIBLE_DEVICES=6
+        # (physical id 6, one visible device) on a 2-node host binds node 0.
+        # Mixing the physical id into the bind index would try node 6.
+        self.assertEqual(
+            self._bound_node(
+                local_rank=0,
+                rank=0,
+                env={"CUDA_VISIBLE_DEVICES": "6"},
+                method=utils.RayProcess._set_numa_affinity,
+            ),
+            [0],
+        )
+        self.assertEqual(
+            self._bound_node(
+                local_rank=5,
+                rank=5,
+                env={"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7"},
+                method=utils.RayProcess._set_numa_affinity,
+            ),
+            [1],
+        )
+
+    def test_npu_path_binds_by_physical_device_id(self):
+        # ASCEND_RT_VISIBLE_DEVICES=6, 8 host NPUs, 2 NUMA nodes -> node 1.
+        # _set_numa_affinity dispatches to this method on NPU (see the CUDA test
+        # above for the dispatch entry point).
+        with mock.patch("open_instruct.npu.numa_affinity.host_npu_device_count", return_value=8):
+            self.assertEqual(
+                self._bound_node(
+                    local_rank=0,
+                    rank=0,
+                    env={"ASCEND_RT_VISIBLE_DEVICES": "6"},
+                    method=utils.RayProcess._set_npu_numa_affinity,
+                ),
+                [1],
+            )
 
 
 class GetDatasetsTest(unittest.TestCase):

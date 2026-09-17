@@ -29,8 +29,6 @@ try:
     # https://github.com/deepspeedai/DeepSpeed/issues/7028
 except Exception:
     pass
-with contextlib.suppress(ImportError):
-    import torch_npu  # noqa: F401
 # isort: on
 import dataclasses
 import functools
@@ -90,16 +88,48 @@ logger = logger_utils.setup_logger(__name__)
 DataClassType = NewType("DataClassType", Any)
 
 
+def _load_npu_backend() -> None:
+    """Make the Ascend NPU backend visible without breaking CUDA environments.
+
+    torch_npu >= 2.5.1 auto-registers the ``npu`` backend while ``import torch``
+    runs, so an explicit ``import torch_npu`` is normally unnecessary. It is
+    only a fallback for installs where auto-registration did not happen, and it
+    must never run while CUDA is the active accelerator: torch_npu raises
+    ``RuntimeError`` at import time ("Two accelerators cannot be used at the
+    same time in PyTorch"), which an ``ImportError`` guard would not swallow.
+    """
+    if torch.cuda.is_available():
+        return
+    if os.environ.get("ASCEND_RT_VISIBLE_DEVICES") or os.environ.get("ASCEND_HOME_URL"):
+        with contextlib.suppress(ImportError, RuntimeError):
+            import torch_npu  # noqa: F401, PLC0415
+
+
 def get_accelerator_module(device: torch.device):
+    # Not torch.get_device_module(): that helper is functools.cache'd, which
+    # would pin whatever module object is visible on first call and leak mocks
+    # across tests / runtime re-configurations.
     return getattr(torch, device.type, None)
 
 
 def get_accelerator_type() -> str:
     if torch.cuda.is_available():
         return "cuda"
+    _load_npu_backend()
     if hasattr(torch, "npu") and torch.npu.is_available():
         return "npu"
     return "cpu"
+
+
+# Environment variables whose values are node-local. Ray's ``runtime_env``
+# broadcasts ``env_vars`` to every node in the cluster, so per-node/per-worker
+# values must stay out of the broadcast: Ray re-assigns the accelerator
+# visibility variables per actor, and VLLM_HOST_IP must differ on every node
+# for multi-node vLLM inference (a broadcast head-node value makes every worker
+# node's vLLM engine advertise the head's IP and hangs cross-node rendezvous).
+NODE_LOCAL_ENV_VARS = frozenset(
+    {"ASCEND_RT_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "VLLM_HOST_IP"}
+)
 
 
 def get_distributed_backend() -> str:
@@ -1709,18 +1739,17 @@ class RayProcess:
         empty_accelerator_cache()
 
     def _set_numa_affinity(self, rank):
-        def local_rank_to_real_device_id(local_rank):
-            visible_devices_env = (
-                "ASCEND_RT_VISIBLE_DEVICES" if get_accelerator_type() == "npu" else "CUDA_VISIBLE_DEVICES"
-            )
-            device_module = get_accelerator_module(torch.device(get_accelerator_type()))
-            device_count = device_module.device_count() if device_module is not None else 1
-            visible_devices = [
-                int(x) for x in os.environ.get(visible_devices_env, ",".join(map(str, range(device_count)))).split(",")
-            ]
-            return visible_devices[local_rank]
+        if get_accelerator_type() == "npu":
+            self._set_npu_numa_affinity(rank)
+            return
 
-        rank = local_rank_to_real_device_id(rank)
+        def local_rank_to_real_gpu_id(local_rank):
+            cuda_visible_devices = [
+                int(x) for x in os.environ.get("CUDA_VISIBLE_DEVICES", "0,1,2,3,4,5,6,7").split(",")
+            ]
+            return cuda_visible_devices[local_rank]
+
+        rank = local_rank_to_real_gpu_id(rank)
 
         global _SET_AFFINITY
         if _SET_AFFINITY:
@@ -1747,10 +1776,56 @@ class RayProcess:
             LIBNUMA.numa_set_membind(bitmask)
 
         numa_nodes = LIBNUMA.numa_num_configured_nodes()
-        device_module = get_accelerator_module(torch.device(get_accelerator_type()))
-        device_count = device_module.device_count() if device_module is not None else 1
-        devices_per_numa_node = max(device_count // numa_nodes, 1)
-        numa_bind(rank // devices_per_numa_node)
+        num_gpu_pre_numa_node = 8 // numa_nodes
+        numa_bind(self.local_rank // num_gpu_pre_numa_node)
+        _SET_AFFINITY = True
+
+    def _set_npu_numa_affinity(self, rank):
+        global _SET_AFFINITY
+        if _SET_AFFINITY:
+            return
+
+        from open_instruct.npu.numa_affinity import (  # noqa: PLC0415
+            host_npu_device_count,
+            npu_numa_node_index,
+            parse_visible_devices,
+        )
+
+        visible_devices = parse_visible_devices(os.environ.get("ASCEND_RT_VISIBLE_DEVICES", str(rank)))
+        host_device_count = host_npu_device_count()
+        if host_device_count == 0:
+            logger.debug("Skipping NPU NUMA affinity: no /dev/davinci* devices to derive host topology")
+            return
+
+        from ctypes.util import find_library  # noqa: PLC0415
+
+        class bitmask_t(Structure):
+            _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
+
+        LIBNUMA = CDLL(find_library("numa"))
+        LIBNUMA.numa_parse_nodestring.argtypes = [c_char_p]
+        LIBNUMA.numa_parse_nodestring.restype = POINTER(bitmask_t)
+        LIBNUMA.numa_run_on_node_mask.argtypes = [POINTER(bitmask_t)]
+        LIBNUMA.numa_run_on_node_mask.restype = c_int
+        LIBNUMA.numa_set_membind.argtypes = [POINTER(bitmask_t)]
+        LIBNUMA.numa_set_membind.restype = c_void_p
+        LIBNUMA.numa_num_configured_nodes.argtypes = []
+        LIBNUMA.numa_num_configured_nodes.restype = c_int
+
+        def numa_bind(nid: int):
+            bitmask = LIBNUMA.numa_parse_nodestring(bytes(str(nid), "ascii"))
+            LIBNUMA.numa_run_on_node_mask(bitmask)
+            LIBNUMA.numa_set_membind(bitmask)
+
+        numa_nodes = LIBNUMA.numa_num_configured_nodes()
+        numa_bind(
+            npu_numa_node_index(
+                local_rank=rank,
+                visible_devices=visible_devices,
+                host_device_count=host_device_count,
+                numa_nodes=numa_nodes,
+            )
+        )
         _SET_AFFINITY = True
 
     def offload_to_cpu(self, model, pin_memory=True, non_blocking=True):
