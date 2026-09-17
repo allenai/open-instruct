@@ -135,9 +135,13 @@ rollout N (N+1 updates), so `hf-9` pairs with `step_10`.
 | 2B Miles v5 | hf-9 | 53.1 | 26.7 | 40.0 | 81.0 | `01M2P1W1DRB0BCG1SW5AKA5ZXE` |
 | 2B sync (Open Instruct) | step 20 | 45.1 | 26.7 | 33.3 | 77.0 | `810bopdx` (W&B) |
 | 2B Miles v5 | hf-19 | 49.0 | 30.0 | 40.0 | 80.0 | `01M2P5B859FGCX0GM6WZ5PRHPK` |
+| 2B sync (Open Instruct) | step 30 | 50.2 | 26.7 | 26.7 | 80.0 | `3kefkwtq` (W&B) |
+| 2B Miles v5 | hf-29 | 49.0 | 30.0 | 33.3 | 81.0 | `01M2PCYN9JK4KKEYA2CQG62QXM` |
 | 4B sync (Open Instruct) | step 10 | 73.6 | 33.3 | 53.3 | 90.0 | `fk3gvxmc` (W&B) |
 | 4B Miles v4 | hf-9 | 75.0 | 43.3 | 66.7 | 89.0 | `01M2P1W3G8ED6042K0F8KARJEX` |
 | 4B Miles v5 | hf-9 | 75.0 | 53.3 | 60.0 | 89.0 | `01M2P5BD1R4TKSV4MZ4PQ8NZ01` |
+| 4B sync (Open Instruct) | step 20 | 77.5 | 50.0 | 53.3 | 90.2 | `3k3vpjsp` (W&B) |
+| 4B Miles v5 | hf-19 | 79.0 | 46.7 | 66.7 | 91.0 | `01M2PCYRS3T1C093AZT3MKR4SY` |
 
 Both frameworks land in the same band: 2B DAPO 44-53 and 4B DAPO 74-78 from step 10
 on, with AIME/BRUMO differences within the noise of 30-question sets. The 2B Miles hf-9
