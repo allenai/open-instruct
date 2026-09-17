@@ -1,6 +1,6 @@
 # Ascend NPU SFT
 
-Ascend NPU supervised fine-tuning is supported through `open_instruct/finetune.py` with Hugging Face Accelerate. The NPU path has been exercised with single-card training, two-card HCCL training, DeepSpeed ZeRO-3, Ulysses sequence parallelism (without packing), LoRA, gradient checkpointing, checkpoint resume, model reload, and padding-free packing.
+Ascend NPU supervised fine-tuning is supported through `open_instruct/finetune.py` with Hugging Face Accelerate. The NPU path has been exercised with single-card training, two-card HCCL training, DeepSpeed ZeRO-3, LoRA, gradient checkpointing, checkpoint resume, model reload, and padding-free packing.
 
 ## Environment
 
@@ -88,9 +88,14 @@ accelerate launch --num_processes 2 --mixed_precision bf16 \
   ...
 ```
 
-The weighted loss aggregation uses DeepSpeed's Ulysses process group on NPU (Accelerate's `torch_device_mesh` SP group is not wired up the same way there). With SP enabled and packing disabled, the collator injects per-sample `position_ids` and pads the sequence dimension to a multiple of the SP size, which is what DeepSpeed's `UlyssesSPDataLoaderAdapter` requires; validated with a two-rank smoke (ZeRO-3, SP=2) on the stack above.
+The weighted loss aggregation uses DeepSpeed's Ulysses process group on NPU (Accelerate's `torch_device_mesh` SP group is not wired up the same way there).
 
-Known limitation: `--packing` cannot be combined with sequence parallelism. The padding-free collator emits 1-D flattened tensors, while DeepSpeed's Ulysses dataloader adapter (unchanged across 0.19.4–0.19.6) assumes 2-D `[batch, seq]` batches and raises `IndexError`. Resolving this needs an upstream fix or a padded 2-D packing collator.
+Known limitation: sequence parallelism cannot currently run end to end on this stack. This is not an NPU-specific gap — it matches upstream GPU behavior under the same DeepSpeed version:
+
+- Without `--packing`, DeepSpeed >= 0.19.0 raises `ValueError` because `UlyssesSPDataLoaderAdapter.refill` requires `position_ids` in every dataloader batch, and upstream `finetune.py`'s non-packing collator does not emit them. The upstream SP run in PR #1539 predates this check (DeepSpeed 0.18.x tolerated a missing `position_ids`); with `pyproject.toml`'s open `deepspeed>=0.18.3` resolving to 0.19.x today, the same launch fails identically on CUDA.
+- With `--packing`, the padding-free collator emits 1-D flattened tensors while the adapter assumes 2-D `[batch, seq]` batches (`IndexError`), on any device and any DeepSpeed version.
+
+Fixing the non-packing path (inject per-sample `arange` `position_ids` in the SP collator) is planned as a separate upstream PR, so this branch stays behavior-aligned with `main`.
 
 ## Packing
 
