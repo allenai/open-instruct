@@ -849,7 +849,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 del outputs
 
                 if args.sequence_parallel_size > 1:
-                    sp_group = deepspeed.utils.groups._get_sequence_parallel_group()
+                    if accelerator.device.type == "npu":
+                        # TODO(npu): on NPU the Accelerate torch_device_mesh SP
+                        # group is not wired up the same way; use DeepSpeed's own
+                        # Ulysses group. Unify with the CUDA path once equivalence
+                        # is verified.
+                        sp_group = deepspeed.utils.groups._get_sequence_parallel_group()
+                    else:
+                        sp_group = accelerator.torch_device_mesh["sp"].get_group()
                     losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
                     labels_for_counting = batch["shift_labels"]
                     good_tokens = (labels_for_counting != -100).view(-1).sum().float()
