@@ -75,9 +75,13 @@ def complete_export(root, base, rollout_id):
     original = json.loads((base / "model.safetensors.index.json").read_text())
     original_map, weight_map = original["weight_map"], index["weight_map"]
     changed, fp32_a_logs, changed_since_previous = 0, 0, 0
-    previous = root / f"hf-{rollout_id - 1}"
+    # Exports land every save interval, so the previous export is the newest hf-N below this one.
+    previous_ids = sorted(
+        int(path.name[3:]) for path in root.glob("hf-*") if path.name[3:].isdigit() and int(path.name[3:]) < rollout_id
+    )
+    previous = root / f"hf-{previous_ids[-1]}" if previous_ids else None
     previous_map = (
-        json.loads((previous / "model.safetensors.index.json").read_text())["weight_map"] if rollout_id else {}
+        json.loads((previous / "model.safetensors.index.json").read_text())["weight_map"] if previous else {}
     )
     for shard in sorted(set(weight_map.values())):
         tensors = safetensors_torch.load_file(export / shard)
@@ -97,7 +101,7 @@ def complete_export(root, base, rollout_id):
                 changed += int(not torch.equal(old, tensor))
     if changed == 0 or fp32_a_logs == 0:
         raise ValueError("Export lacks changed weights or FP32 A_log tensors")
-    if rollout_id and not changed_since_previous:
+    if previous is not None and not changed_since_previous:
         raise ValueError("Weights did not change between learner updates")
     missing = sorted(set(original_map) - set(weight_map))
     # Missing language weights would be an export failure, not frozen extras.
@@ -117,6 +121,7 @@ def complete_export(root, base, rollout_id):
     result = {
         "path": str(export),
         "changed_tensors": changed,
+        "previous_export": str(previous) if previous else None,
         "changed_since_previous_update": changed_since_previous,
         "fp32_a_log_tensors": fp32_a_logs,
         "frozen_base_tensors": missing,

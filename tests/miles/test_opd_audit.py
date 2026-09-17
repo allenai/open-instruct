@@ -64,6 +64,26 @@ def test_export_preserves_frozen_weights_and_fp32_a_log(tmp_path):
     torch.testing.assert_close(frozen["model.visual.weight"], tensors["model.visual.weight"])
 
 
+def test_export_compares_against_the_newest_earlier_export(tmp_path):
+    """Exports are saved every N rollouts, so hf-19 is preceded by hf-9, not hf-18."""
+    base = tmp_path / "base"
+    base.mkdir()
+    name = "model.language_model.layers.0.linear_attn.A_log"
+    safetensors_torch.save_file({name: torch.tensor([0.1])}, base / "model.safetensors")
+    (base / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {name: "model.safetensors"}}))
+    for rollout_id, value in ((9, 0.2), (19, 0.2)):
+        export = tmp_path / f"hf-{rollout_id}"
+        export.mkdir()
+        safetensors_torch.save_file({name: torch.tensor([value])}, export / "model.safetensors")
+        (export / "model.safetensors.index.json").write_text(
+            json.dumps({"metadata": {"total_size": 4}, "weight_map": {name: "model.safetensors"}})
+        )
+        (export / ".complete").touch()
+    assert opd_audit.complete_export(tmp_path, base, 9)["previous_export"] is None
+    with pytest.raises(ValueError, match="did not change between"):
+        opd_audit.complete_export(tmp_path, base, 19)
+
+
 def test_optimizer_audit_requires_every_nonzero_update(tmp_path):
     path = tmp_path / "training.log"
     path.write_text("step 0: {'train/step': 0, 'train/grad_norm': 0.5, 'train/loss': 1.0}\n")
