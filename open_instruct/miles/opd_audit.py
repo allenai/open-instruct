@@ -19,7 +19,10 @@ def audit_training(root, num_rollouts, coefficient):
     for rollout_id in range(num_rollouts):
         path = root / f"debug/train_data/{rollout_id}_0.pt"
         data = torch.load(path, map_location="cpu", weights_only=False)["rollout_data"]
-        student, teacher, advantages = (data[key] for key in ("log_probs", "teacher_log_probs", "advantages"))
+        # With distillation.use_rollout_logprobs the trainer never scores the student, so the
+        # dump only carries the rollout engine's log-probs; that is the tensor the advantages used.
+        student_key = "log_probs" if "log_probs" in data else "rollout_log_probs"
+        student, teacher, advantages = (data[key] for key in (student_key, "teacher_log_probs", "advantages"))
         if not student or not len(student) == len(teacher) == len(advantages):
             raise ValueError("Missing or misaligned OPD training data")
         errors, signals = [], []
@@ -37,6 +40,7 @@ def audit_training(root, num_rollouts, coefficient):
         records.append(
             {
                 "rollout_id": rollout_id,
+                "student_log_probs": student_key,
                 "samples": len(student),
                 "max_advantage_error": max(errors),
                 "max_abs_opd_signal": max(signals),

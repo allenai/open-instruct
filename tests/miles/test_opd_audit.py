@@ -27,6 +27,21 @@ def test_advantages_must_match_teacher_signal(tmp_path):
         opd_audit.audit_training(tmp_path, 1, 1.0)
 
 
+def test_audit_accepts_rollout_logprobs_as_student(tmp_path):
+    """use_rollout_logprobs runs dump rollout_log_probs instead of trainer log_probs."""
+    folder = tmp_path / "debug/train_data"
+    folder.mkdir(parents=True)
+    data = {
+        "rollout_log_probs": [torch.tensor([-2.0, -3.0])],
+        "teacher_log_probs": [torch.tensor([-1.0, -4.0])],
+        "advantages": [torch.tensor([0.5, -0.5])],
+    }
+    torch.save({"rollout_data": data}, folder / "0_0.pt")
+    record = opd_audit.audit_training(tmp_path, 1, 0.5)[0]
+    assert record["max_advantage_error"] == 0
+    assert record["student_log_probs"] == "rollout_log_probs"
+
+
 def test_export_preserves_frozen_weights_and_fp32_a_log(tmp_path):
     base, export = tmp_path / "base", tmp_path / "hf-0"
     base.mkdir()
