@@ -80,11 +80,6 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-try:
-    from vllm_ascend.distributed.weight_transfer.hccl_engine import HCCLWeightTransferEngine
-except ImportError:
-    HCCLWeightTransferEngine = None
-
 from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
@@ -166,14 +161,17 @@ WEIGHT_SYNC_TIMEOUT_S = 120.0
 CLUSTER_STARTUP_TIMEOUT_S = 1200.0
 PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
 LEARNER_ACTOR_NUM_CPUS = 4
-EXCLUDED_ENV_VARS = {"ASCEND_RT_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "VLLM_HOST_IP"}
+# Node-local values Ray must not broadcast cluster-wide via runtime_env
+# (see utils.NODE_LOCAL_ENV_VARS for the rationale).
+EXCLUDED_ENV_VARS = utils.NODE_LOCAL_ENV_VARS
 
 
 def _get_collective_weight_transfer_engine():
     if utils.get_accelerator_type() == "npu":
-        if HCCLWeightTransferEngine is None:
-            raise RuntimeError("vLLM-Ascend HCCL weight transfer is unavailable")
-        return HCCLWeightTransferEngine
+        # Import lazily so GPU processes never import vllm_ascend.
+        from open_instruct.npu import vllm_compat  # noqa: PLC0415
+
+        return vllm_compat.get_collective_weight_transfer()[1]
     return NCCLWeightTransferEngine
 
 
@@ -437,7 +435,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 accelerator_rng_key = f"torch_{self.device.type}_rng_states"
                 accelerator_rng_all_key = f"torch_{self.device.type}_rng_state_all"
-                if self.accelerator is not None and accelerator_rng_key in rng_states:
+                if (
+                    self.accelerator is not None
+                    and hasattr(self.accelerator, "set_rng_state")
+                    and accelerator_rng_key in rng_states
+                ):
                     for device_str, rng_state in rng_states[accelerator_rng_key].items():
                         device_id = int(device_str.split(":")[1])
                         self.accelerator.set_rng_state(rng_state, device_id)

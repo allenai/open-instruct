@@ -53,28 +53,6 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
 
-try:
-    from vllm_ascend.distributed.weight_transfer.hccl_engine import (
-        HCCLTrainerSendWeightsArgs,
-        HCCLWeightTransferEngine,
-    )
-    from vllm_ascend.distributed.weight_transfer.npu_ipc_engine import (
-        NPUIPCTrainerSendWeightsArgs,
-        NPUIPCWeightTransferEngine,
-    )
-except ImportError:
-    HCCLTrainerSendWeightsArgs = None
-    HCCLWeightTransferEngine = None
-    NPUIPCTrainerSendWeightsArgs = None
-    NPUIPCWeightTransferEngine = None
-
-try:
-    from vllm_ascend.sample.sampler import AscendSampler
-    from vllm_ascend.worker.worker import NPUWorker
-except ImportError:
-    AscendSampler = None
-    NPUWorker = None
-
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
     EnvConfig,
@@ -114,51 +92,15 @@ MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
 MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 
-if NPUWorker is not None and AscendSampler is not None:
-
-    class OpenInstructNPUWorker(NPUWorker):
-        """Pass vLLM's requested logprob mode to the vLLM-Ascend sampler.
-
-        vLLM passes ``logprobs_mode`` through ``ModelConfig``.  The affected
-        vLLM-Ascend v1 runner creates ``AscendSampler()`` without that value,
-        which silently falls back to ``raw_logprobs``.  The worker is resolved
-        by its qualified name inside the EngineCore worker process, so this
-        keeps the compatibility fix in Open-Instruct rather than modifying an
-        installed package.
-        """
-
-        def init_device(self):
-            super().init_device()
-
-            if getattr(self, "use_v2_model_runner", False):
-                return
-
-            logprobs_mode = getattr(self.vllm_config.model_config, "logprobs_mode", None)
-            sampler = getattr(self.model_runner, "sampler", None)
-            if logprobs_mode is None or sampler is None or sampler.logprobs_mode == logprobs_mode:
-                return
-
-            assert AscendSampler is not None
-            self.model_runner.sampler = AscendSampler(logprobs_mode=logprobs_mode)
-
-            rejection_sampler = getattr(self.model_runner, "rejection_sampler", None)
-            if rejection_sampler is not None:
-                self.model_runner.rejection_sampler = type(rejection_sampler)(self.model_runner.sampler)
-
-            logger.info(
-                "Recreated vLLM-Ascend sampler with logprobs_mode=%s (was %s)",
-                logprobs_mode,
-                sampler.logprobs_mode,
-            )
-
-else:
-    OpenInstructNPUWorker = None
-
-
 def _get_vllm_worker_cls() -> str:
-    if utils.get_accelerator_type() == "npu" and OpenInstructNPUWorker is not None:
-        return f"{__name__}.OpenInstructNPUWorker"
+    if utils.get_accelerator_type() == "npu":
+        # Import lazily so GPU processes never import vllm_ascend.
+        from open_instruct.npu import vllm_compat  # noqa: PLC0415
+
+        if vllm_compat.OpenInstructNPUWorker is not None:
+            return vllm_compat.WORKER_CLS_PATH
     return "auto"
+
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -169,17 +111,19 @@ VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 def _get_collective_weight_transfer():
     if utils.get_accelerator_type() == "npu":
-        if HCCLTrainerSendWeightsArgs is None or HCCLWeightTransferEngine is None:
-            raise RuntimeError("vLLM-Ascend HCCL weight transfer is unavailable")
-        return HCCLTrainerSendWeightsArgs, HCCLWeightTransferEngine
+        # Import lazily so GPU processes never import vllm_ascend.
+        from open_instruct.npu import vllm_compat  # noqa: PLC0415
+
+        return vllm_compat.get_collective_weight_transfer()
     return NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
 
 
 def _get_ipc_weight_transfer():
     if utils.get_accelerator_type() == "npu":
-        if NPUIPCTrainerSendWeightsArgs is None or NPUIPCWeightTransferEngine is None:
-            raise RuntimeError("vLLM-Ascend NPU IPC weight transfer is unavailable")
-        return NPUIPCTrainerSendWeightsArgs, NPUIPCWeightTransferEngine
+        # Import lazily so GPU processes never import vllm_ascend.
+        from open_instruct.npu import vllm_compat  # noqa: PLC0415
+
+        return vllm_compat.get_ipc_weight_transfer()
     return IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
 
 

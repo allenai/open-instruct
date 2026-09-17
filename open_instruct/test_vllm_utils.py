@@ -10,6 +10,7 @@ from parameterized import parameterized
 
 from open_instruct import vllm_utils
 from open_instruct.data_types import PromptRequest
+from open_instruct.npu import vllm_compat
 from open_instruct.utils import ModelDims
 
 
@@ -37,12 +38,24 @@ class TestVllmWorkerHelpers(unittest.TestCase):
 
     def test_vllm_worker_cls_uses_open_instruct_npu_worker(self):
         with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="npu"):
-            expected = (
-                f"{vllm_utils.__name__}.OpenInstructNPUWorker"
-                if vllm_utils.OpenInstructNPUWorker is not None
-                else "auto"
-            )
+            expected = vllm_compat.WORKER_CLS_PATH if vllm_compat.OpenInstructNPUWorker is not None else "auto"
             self.assertEqual(vllm_utils._get_vllm_worker_cls(), expected)
+
+    def test_npu_worker_cls_path_is_anchored_in_vllm_compat_module(self):
+        # The worker class is resolved by its qualified name inside the EngineCore
+        # worker process, so the path must stay anchored in open_instruct.npu.
+        self.assertEqual(vllm_compat.WORKER_CLS_PATH, "open_instruct.npu.vllm_compat.OpenInstructNPUWorker")
+
+    def test_weight_transfer_helpers_preserve_cuda_default(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="cuda"):
+            self.assertEqual(
+                vllm_utils._get_collective_weight_transfer(),
+                (vllm_utils.NCCLTrainerSendWeightsArgs, vllm_utils.NCCLWeightTransferEngine),
+            )
+            self.assertEqual(
+                vllm_utils._get_ipc_weight_transfer(),
+                (vllm_utils.IPCTrainerSendWeightsArgs, vllm_utils.IPCWeightTransferEngine),
+            )
 
     def test_update_weights_uses_complete_vllm_lifecycle(self):
         actor = object.__new__(vllm_utils.LLMRayActor)
