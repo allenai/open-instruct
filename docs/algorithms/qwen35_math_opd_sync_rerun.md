@@ -149,6 +149,8 @@ rollout N (N+1 updates), so `hf-9` pairs with `step_10`.
 | 2B Miles v5 | hf-79 | 46.0 | 23.3 | 33.3 | 81.0 | `01M2QY17CYPTGMZ9TVWVADKTZ4` |
 | 2B sync (Open Instruct) | step 90 | 49.0 | 33.3 | 30.0 | 81.0 | `01M2KQK4FBYPS341HHPPXV0PAE` |
 | 2B Miles v5 | hf-89 | 51.0 | 33.3 | 43.3 | 80.0 | `01M2R72P5H7GSD2TZFBT28PNR4` |
+| 2B sync (Open Instruct) | step 100 | 48.0 | 26.7 | 36.7 | 80.0 | `01M2M8Y5BSKVDDN2FW0DJK9RHF` |
+| 2B Miles v5 | hf-99 | 49.0 | 26.7 | 23.3 | 80.0 | `01M2RD932J83K39RG0NN6FJNVN` |
 | 4B sync (Open Instruct) | step 10 | 73.6 | 33.3 | 53.3 | 90.0 | `fk3gvxmc` (W&B) |
 | 4B Miles v4 | hf-9 | 75.0 | 43.3 | 66.7 | 89.0 | `01M2P1W3G8ED6042K0F8KARJEX` |
 | 4B Miles v5 | hf-9 | 75.0 | 53.3 | 60.0 | 89.0 | `01M2P5BD1R4TKSV4MZ4PQ8NZ01` |
@@ -169,8 +171,12 @@ Both frameworks land in the same band: 2B DAPO 44-53 and 4B DAPO 74-78 from step
 on, with AIME/BRUMO differences within the noise of 30-question sets. The 2B Miles hf-9
 DAPO of 53.1 is not sustained at hf-19 (49.0), so it reads as noise rather than a PPO-clip
 advantage. Miles reverse KL tracks the Open Instruct sync runs at matched steps (2B 0.033 -> ~0.007
-by rollout 10, 4B flat ~0.07). Later exports (hf-19, hf-29, ...) are evaluated as the v5
-runs produce them; the Miles output roots are
+by rollout 10, 4B flat ~0.07). The 2B Miles run finished all 100 rollouts (three 8h Beaker
+windows, two auto-resumes) and every one of its ten exports sits in the Open Instruct sync band,
+ending at hf-99 DAPO 49.0 vs sync step 100 48.0. Its post-training `opd_audit` step then crashed
+(the dumps carry `rollout_log_probs`, not `log_probs`, under `use_rollout_logprobs = true`; fixed on
+`robertb/miles-qwen35-opd`) so the job exited 1 after training; the exports were unaffected. Remaining
+4B exports (hf-79 onward) are evaluated as the run produces them; the Miles output roots are
 `.../deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-{2b-opd-from-verifier-2b,4b-opd-from-verifier-9b}-math-v5/hf-N`.
 
 ### What the reruns show
