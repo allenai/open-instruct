@@ -88,7 +88,9 @@ accelerate launch --num_processes 2 --mixed_precision bf16 \
   ...
 ```
 
-The weighted loss aggregation uses DeepSpeed's Ulysses process group. The validated NPU smoke used two local ranks and sequence-parallel size 2.
+The weighted loss aggregation uses DeepSpeed's Ulysses process group on NPU (Accelerate's `torch_device_mesh` SP group is not wired up the same way there).
+
+Known limitation: sequence parallelism currently cannot be re-validated end to end on the tested stack. Without `--packing` the dataloader batch carries no `position_ids`, which Accelerate's Ulysses adapter requires; with `--packing`, DeepSpeed 0.17.x's `UlyssesSPDataLoaderAdapter.refill` assumes 2-D `[batch, seq]` tensors and raises `IndexError` on the padding-free collator's 1-D packed tensors. Both behaviors predate the NPU rework and are identical before and after it (verified by A/B runs); resolving them needs an upstream fix or a 2-D-collating variant, after which the two-local-rank SP smoke should be re-run.
 
 ## Packing
 
