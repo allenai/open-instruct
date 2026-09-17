@@ -1,6 +1,6 @@
 # Ascend NPU SFT
 
-Ascend NPU supervised fine-tuning is supported through `open_instruct/finetune.py` with Hugging Face Accelerate. The NPU path has been exercised with single-card training, two-card HCCL training, DeepSpeed ZeRO-3, LoRA, gradient checkpointing, checkpoint resume, model reload, and padding-free packing.
+Ascend NPU supervised fine-tuning is supported through `open_instruct/finetune.py` with Hugging Face Accelerate. The NPU path has been exercised with single-card training, two-card HCCL training, DeepSpeed ZeRO-3, Ulysses sequence parallelism (without packing), LoRA, gradient checkpointing, checkpoint resume, model reload, and padding-free packing.
 
 ## Environment
 
@@ -11,7 +11,7 @@ source /path/to/Ascend/cann/set_env.sh
 python -c 'import torch, torch_npu; assert torch.npu.is_available()'
 ```
 
-The validated smoke environment used Python 3.12, CANN 9.0.0, PyTorch 2.10.0, and `torch_npu` 2.10.0 on Ascend 910B3. These versions describe the observed environment; use the official compatibility matrix rather than treating them as universal pins.
+The validated smoke environment used Python 3.12, CANN 9.1.0-beta.3, PyTorch 2.10.0, `torch_npu` 2.10.0.post2, and DeepSpeed 0.19.6 on Ascend 910B3. These versions describe the observed environment; use the official compatibility matrix rather than treating them as universal pins.
 
 The repository's default `uv sync` sources CUDA PyTorch and CUDA attention packages. For NPU, start from a compatible NPU environment, install the NPU-specific pins, and install this checkout without dependency resolution (after sourcing CANN):
 
@@ -88,9 +88,9 @@ accelerate launch --num_processes 2 --mixed_precision bf16 \
   ...
 ```
 
-The weighted loss aggregation uses DeepSpeed's Ulysses process group on NPU (Accelerate's `torch_device_mesh` SP group is not wired up the same way there).
+The weighted loss aggregation uses DeepSpeed's Ulysses process group on NPU (Accelerate's `torch_device_mesh` SP group is not wired up the same way there). With SP enabled and packing disabled, the collator injects per-sample `position_ids` and pads the sequence dimension to a multiple of the SP size, which is what DeepSpeed's `UlyssesSPDataLoaderAdapter` requires; validated with a two-rank smoke (ZeRO-3, SP=2) on the stack above.
 
-Known limitation: sequence parallelism currently cannot be re-validated end to end on the tested stack. Without `--packing` the dataloader batch carries no `position_ids`, which Accelerate's Ulysses adapter requires; with `--packing`, DeepSpeed 0.17.x's `UlyssesSPDataLoaderAdapter.refill` assumes 2-D `[batch, seq]` tensors and raises `IndexError` on the padding-free collator's 1-D packed tensors. Both behaviors predate the NPU rework and are identical before and after it (verified by A/B runs); resolving them needs an upstream fix or a 2-D-collating variant, after which the two-local-rank SP smoke should be re-run.
+Known limitation: `--packing` cannot be combined with sequence parallelism. The padding-free collator emits 1-D flattened tensors, while DeepSpeed's Ulysses dataloader adapter (unchanged across 0.19.4–0.19.6) assumes 2-D `[batch, seq]` batches and raises `IndexError`. Resolving this needs an upstream fix or a padded 2-D packing collator.
 
 ## Packing
 
