@@ -669,6 +669,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     for k in batch:
                         pad_value = -100 if k == "labels" else 0
                         batch[k] = torch.nn.functional.pad(batch[k], (0, pad_len), value=pad_value)
+                # DeepSpeed's UlyssesSPDataLoaderAdapter requires position_ids in
+                # every batch: after sharding the sequence it all-gathers them so
+                # each token keeps its global position (otherwise causal masking
+                # sees every chunk as starting at position 0). For non-packed
+                # sequences that is arange(seq_len) per sample; padded positions
+                # get arange values too but are masked out via labels.
+                batch["position_ids"] = (
+                    torch.arange(batch["input_ids"].shape[1], dtype=torch.long)
+                    .unsqueeze(0)
+                    .repeat(batch["input_ids"].shape[0], 1)
+                )
                 return batch
         else:
             collate_fn = base_collate_fn
