@@ -158,6 +158,8 @@ rollout N (N+1 updates), so `hf-9` pairs with `step_10`.
 | 4B Miles v5 | hf-39 | 76.0 | 50.0 | 66.7 | 91.0 | `01M2QFQA6KRJ59ZH9MZP9M2KQW` |
 | 4B sync (Open Instruct) | step 50 | 76.0 | 46.7 | 63.3 | 90.0 | `01M2NHSTPQ33W41BP7FYMX86FS` |
 | 4B Miles v5 | hf-49 | 76.0 | 50.0 | 66.7 | 91.0 | `01M2QNSHDE9HA9HQRW63W7VFCG` |
+| 4B sync (Open Instruct) | step 60 | 75.0 | 40.0 | 56.7 | 90.0 | `01M2NJD18ZM2QKBYA32BSD1NVF` |
+| 4B Miles v5 | hf-59 | 76.0 | 36.7 | 63.3 | 90.0 | `01M2R1GDDQBB8K8Y0CQBQQ6YKJ` |
 
 Both frameworks land in the same band: 2B DAPO 44-53 and 4B DAPO 74-78 from step 10
 on, with AIME/BRUMO differences within the noise of 30-question sets. The 2B Miles hf-9
