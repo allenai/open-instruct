@@ -137,6 +137,8 @@ rollout N (N+1 updates), so `hf-9` pairs with `step_10`.
 | 2B Miles v5 | hf-19 | 49.0 | 30.0 | 40.0 | 80.0 | `01M2P5B859FGCX0GM6WZ5PRHPK` |
 | 2B sync (Open Instruct) | step 30 | 50.2 | 26.7 | 26.7 | 80.0 | `3kefkwtq` (W&B) |
 | 2B Miles v5 | hf-29 | 49.0 | 30.0 | 33.3 | 81.0 | `01M2PCYN9JK4KKEYA2CQG62QXM` |
+| 2B sync (Open Instruct) | step 40 | 49.0 | 33.3 | 33.3 | 79.0 | `dks8tr3b` (W&B) |
+| 2B Miles v5 | hf-39 | 50.0 | 33.3 | 33.3 | 80.0 | `01M2PKZC7SA36MGK00MWDZ70P3` |
 | 4B sync (Open Instruct) | step 10 | 73.6 | 33.3 | 53.3 | 90.0 | `fk3gvxmc` (W&B) |
 | 4B Miles v4 | hf-9 | 75.0 | 43.3 | 66.7 | 89.0 | `01M2P1W3G8ED6042K0F8KARJEX` |
 | 4B Miles v5 | hf-9 | 75.0 | 53.3 | 60.0 | 89.0 | `01M2P5BD1R4TKSV4MZ4PQ8NZ01` |
