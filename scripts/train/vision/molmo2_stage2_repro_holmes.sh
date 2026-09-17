@@ -60,6 +60,14 @@ echo "holmes run: ${MAX_STEPS} steps, ${NUM_NODES} node(s), ref ${GIT_REF}, ckpt
 # by workspace allocation balance, and open-instruct-dev ran 271-302% over target, so
 # every job past its 8h minimum runtime lost the fairness contest and was preempted
 # (repeatedly, mid-run). molmofication is this work's own allocation.
+#
+# Checkpoint cadence: permanent saves every 1000 steps, plus an ephemeral save every
+# 250 (only the latest ephemeral is kept, ~52G). Allocation-fairness preemption lands
+# reliably 8-13h into a job, and 1000 steps is ~8h of training, so without the
+# ephemeral saves each preemption discarded most of an interval (1,759 steps across
+# three preemptions). Resume also replays the current epoch's consumed batches
+# (see _RESUME_REPLAY_TIMEOUT_HOURS in the entry point), so it is the launch that
+# should be rare, not the save.
 uv run python mason.py \
     --cluster ai2/holmes \
     --workspace ai2/molmofication \
@@ -90,7 +98,7 @@ uv run python mason.py \
     "${COMPILE_ARGS[@]}" \
     --max_train_steps "$MAX_STEPS" \
     --checkpointing_steps 1000 \
-    --ephemeral_save_interval -1 \
+    --ephemeral_save_interval 250 \
     --keep_last_n_checkpoints -1 \
     --logging_steps 5 \
     --prefetch_workers 8 \

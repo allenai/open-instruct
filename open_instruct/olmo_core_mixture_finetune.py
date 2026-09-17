@@ -37,6 +37,7 @@ The merged single stage (image mixture + open-instruct text mix):
 """
 
 import dataclasses
+import datetime
 import os
 
 import torch
@@ -65,6 +66,15 @@ from open_instruct import (
 logger = logger_utils.setup_logger(__name__)
 
 _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
+
+# On resume, MixtureDataLoader rebuilds its position by replaying every batch already
+# consumed in the current epoch — decoding and preprocessing each image, then discarding
+# it. Each rank replays its own slice, so ranks finish at different times, and the first
+# one to finish sits in the first collective (a 1-element all-reduce) until the slowest
+# arrives. Replay from late in an epoch takes 3h+ and the rank spread routinely exceeds
+# OLMo-core's 15-minute default, at which point the NCCL watchdog aborts the job with
+# `Watchdog caught collective operation timeout ... OpType=ALLREDUCE, NumelIn=1`.
+_RESUME_REPLAY_TIMEOUT_HOURS = 4
 
 
 @dataclasses.dataclass
@@ -104,7 +114,9 @@ def main(args: MultimodalSFTArguments) -> None:
             f"MOLMO_DATA_DIR in the launch environment (mason.py --env MOLMO_DATA_DIR=...)."
         )
 
-    _, world_size, _ = olmo_core_utils.setup_distributed_env(args.tracking.seed)
+    _, world_size, _ = olmo_core_utils.setup_distributed_env(
+        args.tracking.seed, timeout=datetime.timedelta(hours=_RESUME_REPLAY_TIMEOUT_HOURS)
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model.tokenizer_name_or_path or args.model.base_hf_model_id,
