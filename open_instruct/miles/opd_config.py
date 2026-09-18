@@ -65,6 +65,8 @@ DEFAULTS = {
         "eval_temperature": 0.0,
         "eval_top_p": 1.0,
         "eval_samples_per_prompt": 1,
+        # 0 evaluates with max_response_length; a larger cap needs a matching max_context_length.
+        "eval_max_response_length": 0,
     },
     "distillation": {"kl_coef": 1.0, "log_prob_top_k": 0, "task_reward_weight": 0.0, "use_rollout_logprobs": False},
     "optimizer": {"learning_rate": 1e-6, "lr_decay_style": "constant", "lr_warmup_iters": 0, "min_lr": 0.0},
@@ -149,6 +151,11 @@ class OPDRunSpec:
             for key in keys:
                 validation.integer(document[section][key], f"{section}.{key}")
         validation.integer(document["training"]["eval_interval"], "training.eval_interval", minimum=0)
+        validation.integer(
+            document["inference"]["eval_max_response_length"], "inference.eval_max_response_length", minimum=0
+        )
+        if document["inference"]["eval_max_response_length"] >= document["inference"]["max_context_length"]:
+            raise InputError("max_context_length must exceed eval_max_response_length")
         validation.integer(document["optimizer"]["lr_warmup_iters"], "optimizer.lr_warmup_iters", minimum=0)
         validation.number(document["optimizer"]["min_lr"], "optimizer.min_lr")
         if document["optimizer"]["min_lr"] > document["optimizer"]["learning_rate"]:

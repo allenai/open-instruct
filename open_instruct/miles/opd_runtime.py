@@ -115,7 +115,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "eval-function-path": "open_instruct.miles.opd_hooks.evaluate",
         "eval-interval": training["eval_interval"] or training["num_rollouts"],
         "n-samples-per-eval-prompt": inf["eval_samples_per_prompt"],
-        "eval-max-response-len": inf["max_response_length"],
+        "eval-max-response-len": inf["eval_max_response_length"] or inf["max_response_length"],
         "eval-temperature": inf["eval_temperature"],
         "eval-top-p": inf["eval_top_p"],
         "optimizer": "adam",

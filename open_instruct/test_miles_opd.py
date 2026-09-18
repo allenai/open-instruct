@@ -216,6 +216,7 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
             "inference.max_running_requests=64",
             "inference.eval_temperature=0.6",
             "inference.eval_top_p=0.8",
+            "inference.eval_max_response_length=1024",
             "inference.eval_samples_per_prompt=4",
             "training.optimizer_steps_per_rollout=4",
             'optimizer.lr_decay_style="cosine"',
@@ -241,6 +242,7 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
     assert values["--num-rollout"] == "100"
     assert values["--eval-temperature"] == "0.6"
     assert values["--eval-top-p"] == "0.8"
+    assert values["--eval-max-response-len"] == "1024"
     assert values["--rollout-top-p"] == "1.0"
     assert values["--n-samples-per-eval-prompt"] == "4"
     # 4 prompts x 2 samples per rollout split into 4 optimizer steps of 2 samples.
@@ -266,6 +268,7 @@ def test_default_schedule_is_one_constant_lr_step_per_rollout():
     assert values["--lr-decay-style"] == "constant"
     assert values["--min-lr"] == "0.0"
     assert values["--rollout-top-p"] == "1.0"
+    assert values["--eval-max-response-len"] == values["--rollout-max-response-len"]
     assert "--lr-decay-iters" not in values
 
 
@@ -281,6 +284,7 @@ def test_qwen3_replication_models_resolve_to_upstream_profiles():
     [
         ("training.optimizer_steps_per_rollout=3", "must divide"),
         ("inference.eval_top_p=1.5", "inference.eval_top_p"),
+        ("inference.eval_max_response_length=4096", "exceed eval_max_response_length"),
         ('optimizer.lr_decay_style="step"', "optimizer.lr_decay_style"),
         ("optimizer.min_lr=1e-3", "min_lr must not exceed"),
         (["inference.top_p=0.9", "distillation.use_rollout_logprobs=true"], "inference.top_p must be 1.0"),

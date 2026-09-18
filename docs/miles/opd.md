@@ -124,6 +124,10 @@ schema accepts:
   with the `qwen_instruct_user_boxed_math` template and the `math` verifier in
   that layout; it drops the three DAPO training prompts that repeat holdout
   problems, which Miles would otherwise reject.
+  `scripts/miles/prepare_eopd_math_prompts.py` renders the EOPD paper's
+  (arXiv 2603.07079) MATH / DAPO-Math-14k training prompts and its six
+  evaluation sets through the Qwen3 chat template in non-thinking mode for the
+  `configs/miles/opd/eopd-opd-*.toml` replication specs.
 - `training.num_rollouts`, `training.save_interval` (HF export cadence) and
   `training.eval_interval` (`0` evaluates before the first update and after the
   last one, as the prototype did). `training.optimizer_steps_per_rollout`
@@ -140,9 +144,11 @@ schema accepts:
   `inference.max_running_requests` (learner SGLang concurrency; the KV budget is
   `max_context_length` times this), `inference.top_p` (rollout nucleus
   sampling; must stay `1.0` while the rollout log-probs are the student side),
-  `inference.eval_temperature`, `inference.eval_top_p` and
+  `inference.eval_temperature`, `inference.eval_top_p`,
   `inference.eval_samples_per_prompt` (the logged `eval/<set>` reward is the mean
-  over every sample, i.e. Avg@k).
+  over every sample, i.e. Avg@k) and `inference.eval_max_response_length` (`0`
+  reuses `max_response_length`; a longer evaluation budget must still fit in
+  `max_context_length`).
 - Topology: `trainer.gpus` (a multiple of `trainer.tensor_parallel_size`),
   `inference.gpus` (a multiple of `inference.tensor_parallel_size`) and
   `teacher.gpus` (the teacher's SGLang tensor parallelism). The task requests

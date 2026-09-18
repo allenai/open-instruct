@@ -1,0 +1,94 @@
+# EOPD (arXiv 2603.07079) plain-OPD baseline, setting 2: Qwen3-4B-Base student distilled
+# from Qwen3-8B on DAPO-Math-14k. Paper Appendix A: batch 128 prompts x 1 sample, PPO
+# mini-batch 32 (4 optimizer steps per rollout), LR 3e-6 cosine, 4096-token responses,
+# rollout temperature 1.0, 2 epochs (14,116 prompts -> 220 rollouts), kl_coef 1.0, PPO clip
+# 0.2 (Miles default). Evaluation matches the paper's Qwen2.5-Math harness settings for
+# Qwen students: temperature 1.0, top-p 1.0, 8192 tokens, 8 samples per prompt (eval/<set>
+# = Avg@8) on
+# MATH-500, AIME24, AIME25 and AMC23 in-run; the full six-benchmark Avg@8 / Pass@8 table is
+# produced post hoc from the HF exports. Paper OPD-baseline target: MATH-500 Avg@8 78.81,
+# Pass@8 90.80. One 8-GPU node: 4 trainer TP2 / 3 student SGLang / 1 teacher SGLang.
+# Data: scripts/miles/prepare_eopd_math_prompts.py (see docs/miles/opd.md).
+schema_version = 1
+name = "eopd-opd-qwen3-4b-base-dapo14k"
+
+[model]
+source = "Qwen/Qwen3-4B-Base"
+
+[teacher]
+source = "Qwen/Qwen3-8B"
+gpus = 1
+concurrency = 32
+request_timeout = 900
+startup_timeout = 1800
+
+[training]
+resume = true
+algorithm = "opd"
+num_rollouts = 220
+save_interval = 20
+eval_interval = 44
+optimizer_steps_per_rollout = 4
+
+[trainer]
+backend = "megatron"
+gpus = 4
+tensor_parallel_size = 2
+
+[inference]
+gpus = 3
+tensor_parallel_size = 1
+rollout_batch_size = 128
+samples_per_prompt = 1
+max_response_length = 4096
+eval_max_response_length = 8192
+max_context_length = 10240
+max_running_requests = 128
+temperature = 1.0
+top_p = 1.0
+eval_temperature = 1.0
+eval_top_p = 1.0
+eval_samples_per_prompt = 8
+
+[distillation]
+kl_coef = 1.0
+use_rollout_logprobs = true
+
+[optimizer]
+learning_rate = 3e-6
+lr_decay_style = "cosine"
+lr_warmup_iters = 0
+min_lr = 0.0
+
+[output]
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-4b-base-dapo14k-v1"
+assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
+
+[data]
+seed = 42
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/dapo_math_14k.jsonl"
+eval_prompt_data = [
+  "math_500", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/math_500.jsonl",
+  "aime24", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/aime24.jsonl",
+  "aime25", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/aime25.jsonl",
+  "amc23", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/amc23.jsonl",
+]
+reward_config = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/verifiers.json"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "opd"
+wandb_entity = "allenai-team1"
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "8h"
+timeout = "72h"
+auto_resume = true
+weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
+
+[launch.secrets]
+WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
