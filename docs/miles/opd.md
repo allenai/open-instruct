@@ -100,9 +100,11 @@ is measured separately for evaluation. Thinking is disabled in the prepared
 chat templates. This prototype does not train the vision tower.
 
 The run retains native Megatron checkpoints and HF exports on WEKA. The final
-HF export includes the trained language weights and unchanged base vision/MTP
-weights. An audit checks teacher-derived advantages, finite nonzero gradients,
-weight changes, and FP32 `A_log` tensors. The exported model is loaded in a fresh
+HF export includes the trained language weights and, for Qwen3.5, the unchanged
+base vision/MTP weights. An audit checks teacher-derived advantages, finite nonzero
+gradients, weight changes, and (for Qwen3.5) FP32 `A_log` tensors; a plain language
+model such as Qwen3 has neither frozen extras nor `A_log` tensors, and every base
+tensor must appear in its export. The exported model is loaded in a fresh
 SGLang process and used to generate a short response before marking completion.
 
 Inspect `result.json`, `audit.json`, `teacher-preflight.json`,

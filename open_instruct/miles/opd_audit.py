@@ -13,6 +13,7 @@ from safetensors import safe_open
 from safetensors import torch as safetensors_torch
 
 from open_instruct.miles import eopd_math, workflow
+from open_instruct.miles.opd_prepare import _INDEX_NAME, _VL_TEXT_PREFIX
 
 
 def audit_training(root, num_rollouts, coefficient):
@@ -115,24 +116,45 @@ def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1):
     return list(steps.values())
 
 
+def _weight_map(directory):
+    """Tensor name -> shard file from the HF index, or from the shards of a single-file checkpoint."""
+    index_path = directory / _INDEX_NAME
+    if index_path.is_file():
+        return json.loads(index_path.read_text())["weight_map"]
+    weight_map = {}
+    for shard in sorted(directory.glob("*.safetensors")):
+        with safe_open(shard, framework="pt", device="cpu") as source:
+            weight_map.update(dict.fromkeys(source.keys(), shard.name))
+    return weight_map
+
+
 def complete_export(root, base, rollout_id):
-    """Preserve frozen vision/MTP weights omitted by the native language-only exporter."""
+    """Check the native HF export against the base and preserve frozen weights it omitted.
+
+    Qwen3.5 exports are language-only, so the base's vision/MTP tensors are copied into a
+    ``frozen-base.safetensors`` shard and the FP32 ``A_log`` tensors must survive; plain language
+    models (Qwen3) have neither, and every base tensor must be present.
+    """
     export = root / f"hf-{rollout_id}"
     if not (export / ".complete").exists():
         raise ValueError(f"Native HF export did not complete: {export}")
-    index_path = export / "model.safetensors.index.json"
-    index = json.loads(index_path.read_text())
-    original = json.loads((base / "model.safetensors.index.json").read_text())
-    original_map, weight_map = original["weight_map"], index["weight_map"]
+    index_path = export / _INDEX_NAME
+    weight_map = _weight_map(export)
+    index = (
+        json.loads(index_path.read_text())
+        if index_path.is_file()
+        else {"metadata": {"total_size": 0}, "weight_map": weight_map}
+    )
+    original_map = _weight_map(base)
+    multimodal_base = any(name.startswith(_VL_TEXT_PREFIX) for name in original_map)
+    has_a_log = any(name.endswith("A_log") for name in original_map)
     changed, fp32_a_logs, changed_since_previous = 0, 0, 0
     # Exports land every save interval, so the previous export is the newest hf-N below this one.
     previous_ids = sorted(
         int(path.name[3:]) for path in root.glob("hf-*") if path.name[3:].isdigit() and int(path.name[3:]) < rollout_id
     )
     previous = root / f"hf-{previous_ids[-1]}" if previous_ids else None
-    previous_map = (
-        json.loads((previous / "model.safetensors.index.json").read_text())["weight_map"] if previous else {}
-    )
+    previous_map = _weight_map(previous) if previous else {}
     for shard in sorted(set(weight_map.values())):
         tensors = safetensors_torch.load_file(export / shard)
         for name, tensor in tensors.items():
@@ -149,14 +171,17 @@ def complete_export(root, base, rollout_id):
                 with safe_open(base / original_map[name], framework="pt", device="cpu") as source:
                     old = source.get_tensor(name)
                 changed += int(not torch.equal(old, tensor))
-    if changed == 0 or fp32_a_logs == 0:
-        raise ValueError("Export lacks changed weights or FP32 A_log tensors")
+    if changed == 0:
+        raise ValueError("Export lacks changed weights")
+    if has_a_log and fp32_a_logs == 0:
+        raise ValueError("Export lost its FP32 A_log tensors")
     if previous is not None and not changed_since_previous:
         raise ValueError("Weights did not change between learner updates")
     missing = sorted(set(original_map) - set(weight_map))
-    # Missing language weights would be an export failure, not frozen extras.
-    if any(name.startswith("model.language_model.") for name in missing):
-        raise ValueError("Native export omitted language model weights")
+    # Missing language weights would be an export failure, not frozen extras; a plain language
+    # model has no frozen extras at all.
+    if any(name.startswith(_VL_TEXT_PREFIX) or not multimodal_base for name in missing):
+        raise ValueError(f"Native export omitted language model weights: {missing[:5]}")
     frozen = {}
     for name in missing:
         with safe_open(base / original_map[name], framework="pt", device="cpu") as source:
@@ -175,7 +200,7 @@ def complete_export(root, base, rollout_id):
         "changed_since_previous_update": changed_since_previous,
         "fp32_a_log_tensors": fp32_a_logs,
         "frozen_base_tensors": missing,
-        "training_scope": "language only",
+        "training_scope": "language only" if multimodal_base else "full model",
     }
     workflow.write_json(export / "opd-export.json", result)
     (export / ".complete").touch()

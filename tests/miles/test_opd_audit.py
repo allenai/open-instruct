@@ -64,6 +64,30 @@ def test_export_preserves_frozen_weights_and_fp32_a_log(tmp_path):
     torch.testing.assert_close(frozen["model.visual.weight"], tensors["model.visual.weight"])
 
 
+def test_export_of_a_plain_language_model_needs_no_index_or_a_log(tmp_path):
+    """Qwen3 bases ship one model.safetensors without an index and without A_log tensors."""
+    base, export = tmp_path / "base", tmp_path / "hf-2"
+    base.mkdir()
+    export.mkdir()
+    tensors = {"model.layers.0.mlp.up_proj.weight": torch.tensor([0.1]), "model.norm.weight": torch.tensor([1.0])}
+    safetensors_torch.save_file(tensors, base / "model.safetensors")
+    exported = {**tensors, "model.layers.0.mlp.up_proj.weight": torch.tensor([0.2])}
+    safetensors_torch.save_file(exported, export / "model.safetensors")
+    (export / "model.safetensors.index.json").write_text(
+        json.dumps({"metadata": {"total_size": 8}, "weight_map": {key: "model.safetensors" for key in exported}})
+    )
+    (export / ".complete").touch()
+    result = opd_audit.complete_export(tmp_path, base, 2)
+    assert result["changed_tensors"] == 1 and result["fp32_a_log_tensors"] == 0
+    assert result["frozen_base_tensors"] == [] and result["training_scope"] == "full model"
+    assert not (export / "frozen-base.safetensors").exists()
+    # A language tensor missing from the export is a failure, not a frozen extra.
+    safetensors_torch.save_file({"model.norm.weight": torch.tensor([2.0])}, export / "model.safetensors")
+    (export / "model.safetensors.index.json").unlink()
+    with pytest.raises(ValueError, match="omitted language model weights"):
+        opd_audit.complete_export(tmp_path, base, 2)
+
+
 def test_export_compares_against_the_newest_earlier_export(tmp_path):
     """Exports are saved every N rollouts, so hf-19 is preceded by hf-9, not hf-18."""
     base = tmp_path / "base"
