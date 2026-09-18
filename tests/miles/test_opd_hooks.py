@@ -136,7 +136,10 @@ def test_eopd_post_process_stores_the_top_k_for_training(monkeypatch, tmp_path):
     assert opd_hooks.post_process(args, [sample]) == ([0.0], [0.0])
     torch.testing.assert_close(sample.teacher_log_probs, torch.tensor([-1.0, -2.0]))
     assert sample.train_metadata["eopd_topk_ids"] == [[2, 7], [3, 8]]
-    assert sample.train_metadata["eopd_topk_logprobs"] == [[-0.1, -2.0], [-0.5, -0.9]]
+    # Stored from float32 tensors, so -0.1 and -0.9 are rounded.
+    torch.testing.assert_close(
+        torch.tensor(sample.train_metadata["eopd_topk_logprobs"]), torch.tensor([[-0.1, -2.0], [-0.5, -0.9]])
+    )
     record = json.loads((tmp_path / "teacher-scores.jsonl").read_text().splitlines()[0])
     # Position 0 is nearly one-hot (gate off at tau 0.5); position 1 is close to even (gate on).
     assert record["eopd_gate"] == [0, 1]
