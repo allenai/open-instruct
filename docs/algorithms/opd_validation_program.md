@@ -20,7 +20,7 @@ going forward. Then use that validated base to test one method improvement (EOPD
 |---|----------|-----|
 | D1 | Replicate the **plain-OPD baseline** of the EOPD paper ([arXiv 2603.07079](https://arxiv.org/abs/2603.07079)) first, then its EOPD result. | Their OPD baseline is our exact algorithm (sampled-token reverse-KL advantage under PPO clipping). Everything is public: Qwen3-Base students, Qwen3-8B teacher, MATH / DAPO-Math-14k, all hyperparameters in Appendix A, a verl fork on GitHub, 4xA100 compute. MATH500 Avg@8 over 4000 samples is a low-variance matching target. The Thinking Machines recipe (Qwen3-8B-Base from a 32B teacher, 70 on AIME24) needs a 400k-example SFT stage and a 32B teacher, so it is a later, larger validation. |
 | D2 | **Do not migrate wholesale to Miles.** Miles is the research vehicle for OPD (replication + EOPD); Open Instruct stays for production training and gets its OPD pipeline hardened. Results that matter run in both until they disagree. | Two independent implementations agreed on 18/18 checkpoints, so the Open Instruct math is right; its flaws are pipeline-level and fixable. Miles already has a separate SGLang teacher with top-k scoring, minibatching (`global_batch_size`), and a runtime contract/audit, which EOPD needs. Miles' costs: only a Qwen3.5-2B model profile in the wrapper, pure-OPD wrapper pins top-k to 0, one person's branch on a young framework, GPU-efficiency not clearly better (136 vs 83 GPU-min per 4B step, with under-provisioned inference). |
-| D3 | Evaluation for the replication and EOPD must be **sampled** (T=1.0, top-p 1.0 for Qwen students [0.8 was the paper's Llama setting], 8192 tokens, Avg@8 and Pass@8), matching the Qwen2.5-Math harness the paper uses. | Our greedy pass@1 eval cannot see the diversity effect the paper claims. |
+| D3 | Evaluation for the replication and EOPD must be **sampled** (T=1.0, **top-p 0.8**, 8192 tokens, 8 samples, Avg@8 and Pass@8), matching the paper's Qwen2.5-Math harness run (Sec. 5.1 and App. C). Corrected 2026-09-18: Table 9's top-p 1.0 (Qwen) is the *training* rollout setting; evaluation uses 0.8 for every model. Arm configs fixed in Miles commit (eval_top_p 0.8). | Our greedy pass@1 eval cannot see the diversity effect the paper claims. |
 | D4 | Gate EOPD on a **teacher-entropy diagnostic** before writing training code. | If our teachers rarely exceed the entropy threshold, EOPD reduces to OPD and there is nothing to test. |
 | D5 | Miles replication and EOPD work lands **directly on `robertb/miles-qwen35-opd`** (Kevin, 2026-09-18: Robert cleared the branch for us, treat it as ours). | No separate branch or review gate for the wrapper changes in step 3 and 6. |
 
@@ -343,3 +343,14 @@ lower; it does not affect the per-token statistics above.
   optimizer step (step 11 of 12), so the final step is a no-op; set a nonzero min-LR ratio or
   accept it. **Steps 3 and 6 are done; step 4 (baseline arms) is the next launch and needs
   Kevin's compute sign-off (see "Open questions for Kevin / Robert").**
+- **2026-09-18 03:05Z** Re-read the paper's setup for Kevin's sign-off. Confirmed from the text:
+  students Qwen3-0.6B-Base / 1.7B-Base / 4B-Base; teacher Qwen3-8B with thinking disabled (the
+  post-trained Qwen3-8B, non-thinking template with an empty `<think>` block, which is what our
+  prepared assets use); MATH for the 0.6B/1.7B students, DAPO-Math-14k for the 4B; batch 128 × 1
+  sample, mini-batch 32 (4 gradient steps per iteration), LR 3e-6 cosine, AdamW, 4096-token
+  responses, training temperature 1.0 / top-p 1.0 (Qwen), 3 epochs MATH / 2 epochs DAPO, k=16,
+  4×A100-80GB, ~47.8 s per training step of which ~37.7 s is student generation. Evaluation:
+  Qwen2.5-Math pipeline, zero-shot, 8 samples, T=1.0, **top-p 0.8**, 8192 tokens, Avg@8 and
+  Pass@8 on MATH500 / AIME24 / AIME25 / AMC23 / Minerva / OlympiadBench. Our arm configs had
+  eval top-p 1.0; fixed to 0.8 (Miles branch), D3 corrected. Kevin: skip step 2c (agreed), copy the
+  paper's schedule exactly for the arms (min LR 0 stays).
