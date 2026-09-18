@@ -44,7 +44,8 @@ if [[ "$RUN_MODE" == "smoke" ]]; then
     # batches at async_steps=2 so the parking path is exercised (4 x 32 x 2).
     FIXED_ARGS=(--async_steps 2 --fixed_prompt_batches true --total_episodes 256)
 else
-    export EXP_NAME="${EXP_NAME:-qwen35_2b_opd_from_verifier_2b_fixed_batches_async4_lr1e6_100step_4node}"
+    # W&B tags are capped at 64 characters and the exp name becomes a tag, so keep it short.
+    export EXP_NAME="${EXP_NAME:-qwen35_2b_opd_fixed_batches_async4_lr1e6_100step_4node}"
     FIXED_ARGS=(--fixed_prompt_batches true --save_freq 10)
 fi
 
