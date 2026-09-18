@@ -523,3 +523,31 @@ lower; it does not affect the per-token statistics above.
   (0.744 → 0.764 → 0.7575; paper 0.788), all eval responses still at the 8192 cap. Pace since
   rollout 87 is 7.4 min/rollout including evals, so the run should finish ~2026-09-19 07:00Z.
 
+
+### 2026-09-18 21:37Z
+
+- Paper-fidelity audit of the arm 2 Miles recipe against the paper (App. A / C, Sec. 5.1) and
+  the authors' code ([github.com/WLS04/EOPD](https://github.com/WLS04/EOPD), a verl fork;
+  files saved under `scratchpad/eopd_src/`). **Their trainer does the same eos remap we just
+  added**: `OnPolicyDistillTrainer._replace_eos_token_for_teacher` swaps the first
+  `<|endoftext|>` (151643) in each response for `<|im_end|>` (151645) on a copy of the batch
+  sent to the teacher, "because student model uses <|endoftext|> while teacher expects
+  <|im_end|>". This confirms the attempt 2 diagnosis and that Miles `f92685054` is the paper's
+  behaviour. Their launch script (`on_policy_it.sh`) is not in the repo, so hyperparameters
+  beyond Table 9 are verl defaults.
+- Matches: models, non-thinking teacher and template (`<think>\n\n</think>`), DAPO-Math-14k,
+  B=128 x 1 sample, mini-batch 32 (4 steps), LR 3e-6 cosine, no warmup, AdamW, 4096 train
+  response, T=1.0 top-p 1.0, 2 epochs (220 rollouts), PPO clip 0.2, advantage
+  `teacher − old` (kl_coef 1), no entropy bonus / KL-to-ref, eval T=1.0 top-p 0.8 8192 Avg@8 with
+  the App. C suffix "Please reason step by step, and put your final answer within \boxed{}."
+- Deviations: (1) student side of the advantage: verl recomputes `old_log_prob` in the trainer
+  (`calculate_log_probs: False`); our arm uses `use_rollout_logprobs = true` (SGLang). Miles
+  supports `false`; our EOPD wrapper currently requires `true`. (2) Loss aggregation: verl
+  default `token-mean`; Miles default is per-response mean (`calculate_per_token_loss` off).
+  (3) Optimizer details hard-coded in our launcher: weight decay 0.0, betas 0.9/0.98 vs verl
+  defaults 0.01, 0.9/0.999. (4) Training prompt suffix: their preprocessing uses "Let's think
+  step by step and output the final answer within \boxed{}."; we train with the App. C wording.
+  (5) 14109 vs 14116 prompts (7 eval-overlap rows removed). (6) Teacher scored by an SGLang
+  server (bf16 logprobs) vs an in-trainer verl ref worker; eval by our SGLang loop + verifiers
+  vs the Qwen2.5-Math harness. (7) 8xH100 one node vs 4xA100. None of these is the truncation
+  bug; (1)-(4) are cheap to flip before attempt 3 if Kevin wants an exact copy.
