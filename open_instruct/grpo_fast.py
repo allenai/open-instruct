@@ -1117,6 +1117,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # Keep the pre-split (full-sequence) batch around when any OPD teacher
         # cannot consume SP shards; it is re-sharded after scoring.
         teacher_full_data_BT: data_types.CollatedBatchData | None = None
+        # Combined teacher logprobs per micro-batch, kept for the trace dump so
+        # the OPD advantage identity can be audited offline.
+        opd_trace_teacher_logprobs_BT: list[torch.Tensor] | None = None
         if self.teacher_models and any(self._teacher_full_sequence_scoring) and self.splitter is not None:
             teacher_full_data_BT = data_BT
 
@@ -1185,6 +1188,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 per_teacher_kl_sums = torch.zeros(num_teachers, device=self.device)
                 per_teacher_route_counts = torch.zeros(num_teachers, device=self.device)
                 per_teacher_routed_kl_sums = torch.zeros(num_teachers, device=self.device)
+                opd_trace_teacher_logprobs_BT = []
                 for i in range(len(data_BT.query_responses)):
                     opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
                     behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
@@ -1202,6 +1206,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         log_weights=self._opd_log_weights,
                         teacher_ids=teacher_ids_BT[i] if teacher_ids_BT is not None else None,
                     )
+                    opd_trace_teacher_logprobs_BT.append(combined_teacher_logprobs)
                     data_BT.advantages[i], reverse_kl = grpo_utils.compute_opd_advantages(
                         advantages=data_BT.advantages[i],
                         behavior_logprobs=behavior_logprobs,
@@ -1326,6 +1331,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     world_size=self.world_size,
                     dp_rank=self.rank // sp_size,
                     sp_rank=self.rank % sp_size,
+                    teacher_logprobs=opd_trace_teacher_logprobs_BT,
+                    advantages=data_BT.advantages if opd_trace_teacher_logprobs_BT is not None else None,
                 )
 
         local_step = 0

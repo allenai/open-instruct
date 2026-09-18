@@ -341,6 +341,8 @@ def _save_trainer_logprobs(
     world_size: int | None = None,
     dp_rank: int | None = None,
     sp_rank: int | None = None,
+    teacher_logprobs=None,
+    advantages=None,
 ) -> None:
     """Append per-sample trainer logprobs for ``step`` to a step-keyed JSONL."""
     rank_suffix = "" if rank is None or world_size == 1 else f"_rank{rank:05d}"
@@ -395,6 +397,14 @@ def _save_trainer_logprobs(
                 logprobs = vllm_logprobs[i]
                 record["vllm_logprobs_shape"] = list(logprobs.shape)
                 record["vllm_logprobs"] = _flatten_tensor(logprobs, torch.float32)
+            if teacher_logprobs is not None:
+                teacher = teacher_logprobs[i]
+                record["teacher_logprobs_shape"] = list(teacher.shape)
+                record["teacher_logprobs"] = _flatten_tensor(teacher, torch.float32)
+            if advantages is not None:
+                advantage = advantages[i]
+                record["advantages_shape"] = list(advantage.shape)
+                record["advantages"] = _flatten_tensor(advantage, torch.float32)
             if prompt_masks is not None:
                 prompt_mask = prompt_masks[i].bool()
                 record["prompt_mask_shape"] = list(prompt_mask.shape)
@@ -432,6 +442,8 @@ def save_trainer_logprobs_to_disk(
     world_size: int | None = None,
     dp_rank: int | None = None,
     sp_rank: int | None = None,
+    teacher_logprobs=None,
+    advantages=None,
 ) -> None:
     """Asynchronously save trainer-side logprobs alongside rollouts for offline
     analysis (e.g. diagnosing vLLM-vs-trainer logprob divergence).
@@ -446,6 +458,10 @@ def save_trainer_logprobs_to_disk(
 
     When ``rank`` is provided, each rank writes to its own file to avoid
     cross-process appends to the same JSONL.
+
+    ``teacher_logprobs`` and ``advantages`` (both shifted like ``trainer_logprobs``)
+    are recorded when on-policy distillation is active so
+    ``open_instruct.opd_trace_audit`` can check the advantage identity offline.
     """
     trainer_logprobs = _to_cpu_tensor_list(trainer_logprobs)
     response_masks = _to_cpu_tensor_list(response_masks)
@@ -456,6 +472,8 @@ def save_trainer_logprobs_to_disk(
     rollout_sample_ids = _to_cpu_tensor_list(rollout_sample_ids)
     model_steps = _to_cpu_tensor_list(model_steps)
     vllm_logprobs = _to_cpu_tensor_list(vllm_logprobs)
+    teacher_logprobs = _to_cpu_tensor_list(teacher_logprobs)
+    advantages = _to_cpu_tensor_list(advantages)
 
     future = _rollout_executor.submit(
         _save_trainer_logprobs,
@@ -477,6 +495,8 @@ def save_trainer_logprobs_to_disk(
         world_size,
         dp_rank,
         sp_rank,
+        teacher_logprobs,
+        advantages,
     )
     future.add_done_callback(_log_rollout_save_failure)
 

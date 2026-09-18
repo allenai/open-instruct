@@ -215,6 +215,8 @@ class TestRLUtils(unittest.TestCase):
             world_size=8,
             dp_rank=1,
             sp_rank=1,
+            teacher_logprobs=[torch.tensor([[0.0, -0.3, -0.1, 0.0]])],
+            advantages=[torch.tensor([[0.0, -0.2, 0.1, 0.0]])],
         )
 
         filepath = os.path.join(self.temp_dir, "test_trainer_logprobs_step000007_rank00003.jsonl")
@@ -228,6 +230,10 @@ class TestRLUtils(unittest.TestCase):
         self.assertEqual(record["trainer_model_step"], 8)
         self.assertEqual(record["model_step"], 9)
         self.assertEqual(record["model_steps"], [9, 9, 9, -1])
+        self.assertEqual(record["teacher_logprobs_shape"], [1, 4])
+        self.assertAlmostEqual(record["teacher_logprobs"][1], -0.3, places=6)
+        self.assertEqual(record["advantages_shape"], [1, 4])
+        self.assertAlmostEqual(record["advantages"][2], 0.1, places=6)
         self.assertEqual(record["trainer_logprobs_shape"], [1, 4])
         self.assertEqual(record["input_token_ids"], [11, 12, 13, 14, 0])
         self.assertEqual(record["token_ids"], [12, 13, 14, 0])
