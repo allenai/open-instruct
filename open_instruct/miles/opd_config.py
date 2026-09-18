@@ -71,7 +71,18 @@ DEFAULTS = {
         # 0 evaluates with max_response_length; a larger cap needs a matching max_context_length.
         "eval_max_response_length": 0,
     },
-    "distillation": {"kl_coef": 1.0, "log_prob_top_k": 0, "task_reward_weight": 0.0, "use_rollout_logprobs": False},
+    "distillation": {
+        "kl_coef": 1.0,
+        "log_prob_top_k": 0,
+        "task_reward_weight": 0.0,
+        "use_rollout_logprobs": False,
+        # EOPD (arXiv 2603.07079): add alpha * 1[H_teacher > tau] * FKL over the teacher's top-k
+        # to the sampled-token OPD loss. Paper defaults alpha 1.0, tau 0.8, k 16.
+        "eopd": False,
+        "eopd_alpha": 1.0,
+        "eopd_tau": 0.8,
+        "eopd_top_k": 16,
+    },
     "optimizer": {"learning_rate": 1e-6, "lr_decay_style": "constant", "lr_warmup_iters": 0, "min_lr": 0.0},
     "output": {"root": "", "assets": ""},
     "tracking": {"wandb_mode": "offline", "wandb_project": "open-instruct-opd", "wandb_entity": ""},
@@ -190,6 +201,15 @@ class OPDRunSpec:
         validation.boolean(document["training"]["resume"], "training.resume")
         validation.boolean(document["model"]["align_eos_with_teacher"], "model.align_eos_with_teacher")
         validation.boolean(document["distillation"]["use_rollout_logprobs"], "distillation.use_rollout_logprobs")
+        distillation = document["distillation"]
+        validation.boolean(distillation["eopd"], "distillation.eopd")
+        validation.integer(distillation["eopd_top_k"], "distillation.eopd_top_k")
+        validation.number(distillation["eopd_alpha"], "distillation.eopd_alpha", exclusive_min=True)
+        validation.number(distillation["eopd_tau"], "distillation.eopd_tau")
+        if distillation["eopd"] and not distillation["use_rollout_logprobs"]:
+            raise InputError(
+                "distillation.eopd requires distillation.use_rollout_logprobs (the paper's SGLang OPD path)"
+            )
         for section, key in (
             ("distillation", "kl_coef"),
             ("optimizer", "learning_rate"),

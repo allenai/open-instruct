@@ -1,11 +1,9 @@
-# Tiny GPU smoke for the EOPD replication path before the full runs: Qwen3-1.7B-Base
-# student, Qwen3-8B teacher, 8 MATH prompts x 1 sample per rollout split into 4 PPO
-# optimizer steps (global batch 2), cosine LR, sampled evaluation (4 samples, top-p 1.0,
-# 512 tokens) on the 30 AIME24 prompts. Exercises the upstream qwen3-1.7B Megatron profile,
-# the Qwen3 HF conversion, SGLang teacher scoring, the multi-step schedule and the audit
-# (num_rollouts x optimizer_steps_per_rollout optimizer steps) on one 8-GPU node.
+# Tiny GPU smoke for the EOPD arm: the OPD tiny run (same student, teacher, prompts,
+# schedule and evaluation) with distillation.eopd on, so the teacher top-k request, the
+# metadata path into the Megatron train step, the custom loss (upstream policy loss plus
+# alpha * 1[H > tau] * FKL over the teacher top-16) and the EOPD audit are exercised on one node.
 schema_version = 1
-name = "eopd-opd-qwen3-tiny"
+name = "eopd-eopd-qwen3-tiny"
 
 [model]
 source = "Qwen/Qwen3-1.7B-Base"
@@ -47,6 +45,10 @@ eval_samples_per_prompt = 4
 [distillation]
 kl_coef = 1.0
 use_rollout_logprobs = true
+eopd = true
+eopd_alpha = 1.0
+eopd_tau = 0.8
+eopd_top_k = 16
 
 [optimizer]
 learning_rate = 3e-6
@@ -55,7 +57,7 @@ lr_warmup_iters = 0
 min_lr = 0.0
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-tiny-v6"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-eopd-qwen3-tiny-v1"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]

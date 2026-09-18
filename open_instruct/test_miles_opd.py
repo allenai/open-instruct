@@ -392,3 +392,47 @@ def test_eos_token_ids_puts_teacher_eos_first_and_keeps_learner_eos():
     assert opd_prepare.eos_token_ids({"eos_token_id": 151643}, 151645) == [151645, 151643]
     assert opd_prepare.eos_token_ids({"eos_token_id": [151645, 151643]}, 151645) == [151645, 151643]
     assert opd_prepare.eos_token_ids({}, 7) == [7]
+
+
+def test_eopd_selects_the_custom_loss_and_forwards_its_settings():
+    values, flags = native(specs.load(CONFIG))
+    assert "--loss-type" not in values and "--custom-loss-function-path" not in values
+    assert not opd_runtime.eopd_settings(specs.load(CONFIG)).enabled
+    spec = specs.load(
+        CONFIG, ["distillation.use_rollout_logprobs=true", "distillation.eopd=true", "distillation.eopd_tau=0.7"]
+    )
+    values, flags = native(spec)
+    assert values["--loss-type"] == "custom_loss"
+    assert values["--custom-loss-function-path"] == "open_instruct.miles.eopd_loss.policy_loss"
+    assert values["--opd-log-prob-top-k"] == "0"  # the upstream top-k reverse-KL path stays off
+    assert "--use-opd" in flags and "--use-rollout-logprobs" in flags
+    assert opd_runtime.eopd_settings(spec).environment() == {
+        "OI_OPD_EOPD_TOP_K": "16",
+        "OI_OPD_EOPD_ALPHA": "1.0",
+        "OI_OPD_EOPD_TAU": "0.7",
+    }
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        (["distillation.eopd=true"], "use_rollout_logprobs"),
+        (["distillation.eopd_top_k=0"], "positive integer"),
+        (["distillation.eopd_alpha=0"], "> 0"),
+        (["distillation.eopd_tau=-1"], ">= 0"),
+        (['distillation.eopd="yes"'], "distillation.eopd"),
+    ],
+)
+def test_eopd_knobs_are_validated(override, message):
+    with pytest.raises(InputError, match=message):
+        specs.load(CONFIG, override)
+
+
+def test_eopd_tiny_smoke_config_mirrors_the_opd_tiny_run():
+    folder = CONFIG.parent
+    opd = specs.load(folder / "eopd-opd-qwen3-tiny.toml").to_dict()
+    eopd = specs.load(folder / "eopd-eopd-qwen3-tiny.toml").to_dict()
+    assert eopd["distillation"] == opd["distillation"] | {"eopd": True}
+    for section in ("model", "teacher", "training", "trainer", "inference", "optimizer", "data"):
+        assert eopd[section] == opd[section], section
+    assert eopd["output"]["root"] != opd["output"]["root"]

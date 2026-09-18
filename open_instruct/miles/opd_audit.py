@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import dataclasses
 import json
 import math
 import re
@@ -11,7 +12,7 @@ import torch
 from safetensors import safe_open
 from safetensors import torch as safetensors_torch
 
-from open_instruct.miles import workflow
+from open_instruct.miles import eopd_math, workflow
 
 
 def audit_training(root, num_rollouts, coefficient):
@@ -47,6 +48,55 @@ def audit_training(root, num_rollouts, coefficient):
             }
         )
     return records
+
+
+def audit_eopd(root, num_rollouts, settings, optimizer_steps):
+    """Check the teacher top-k that reached the trainer and the gated forward-KL metrics it logged.
+
+    The train-data dump holds each sample's ``metadata`` (top-k ids/log-probs, ``[R, k]``); the
+    gate is re-derived from those log-probs. The FKL itself needs the student's logits, so its
+    evidence is the per-step ``train/eopd_*`` metrics: finite, gate fraction in [0, 1] and a
+    nonnegative FKL (zero only if no token was gated).
+    """
+    records = []
+    for rollout_id in range(num_rollouts):
+        data = torch.load(root / f"debug/train_data/{rollout_id}_0.pt", map_location="cpu", weights_only=False)
+        data = data["rollout_data"]
+        metadata, teacher = data.get("metadata"), data["teacher_log_probs"]
+        if not metadata or len(metadata) != len(teacher):
+            raise ValueError("EOPD training data lacks per-sample teacher top-k metadata")
+        gates, entropies, masses, tokens = [], [], [], 0
+        for sample_metadata, sampled in zip(metadata, teacher, strict=True):
+            ids, log_probs = eopd_math.sample_tensors(sample_metadata, settings.top_k)
+            if ids.shape[0] != sampled.shape[0]:
+                raise ValueError("EOPD top-k covers different positions than the teacher scores")
+            if not torch.isfinite(log_probs).all() or (log_probs > 1e-6).any():
+                raise ValueError("EOPD teacher top-k log-probs are nonfinite or positive")
+            if (ids.sort(dim=-1).values[:, 1:] == ids.sort(dim=-1).values[:, :-1]).any():
+                raise ValueError("EOPD teacher top-k repeats a token id")
+            gates.append(eopd_math.gate(log_probs, settings.tau))
+            entropies.append(eopd_math.proxy_entropy(log_probs))
+            masses.append(eopd_math.topk_mass(log_probs))
+            tokens += ids.shape[0]
+        records.append(
+            {
+                "rollout_id": rollout_id,
+                "samples": len(metadata),
+                "tokens": tokens,
+                "gate_frac": float(torch.cat(gates).mean()),
+                "proxy_entropy_mean": float(torch.cat(entropies).mean()),
+                "topk_mass_mean": float(torch.cat(masses).mean()),
+            }
+        )
+    for values in optimizer_steps:
+        for key in ("train/eopd_fkl_loss", "train/eopd_fkl", "train/eopd_gate_frac"):
+            if key not in values or not math.isfinite(values[key]):
+                raise ValueError(f"Missing or nonfinite {key} in the optimizer metrics")
+        if not 0.0 <= values["train/eopd_gate_frac"] <= 1.0 or values["train/eopd_fkl_loss"] < 0:
+            raise ValueError("EOPD metrics out of range")
+        if values["train/eopd_gate_frac"] > 0 and values["train/eopd_fkl_loss"] == 0:
+            raise ValueError("Gated tokens without a forward-KL contribution")
+    return {"settings": dataclasses.asdict(settings), "rollouts": records}
 
 
 def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1):
@@ -139,11 +189,12 @@ def main():
     spec = json.loads((args.root / "run-spec.json").read_text())
     prepared = json.loads((args.root / "prepared.json").read_text())
     count = spec["training"]["num_rollouts"]
-    result = {
-        "optimizer": audit_optimizer(args.root, count, spec["training"].get("optimizer_steps_per_rollout", 1)),
-        "updates": audit_training(args.root, count, spec["distillation"]["kl_coef"]),
-        "export": complete_export(args.root, Path(prepared["model"]), count - 1),
-    }
+    optimizer = audit_optimizer(args.root, count, spec["training"].get("optimizer_steps_per_rollout", 1))
+    result = {"optimizer": optimizer, "updates": audit_training(args.root, count, spec["distillation"]["kl_coef"])}
+    settings = eopd_math.Settings.from_distillation(spec["distillation"])
+    if settings.enabled:
+        result["eopd"] = audit_eopd(args.root, count, settings, optimizer)
+    result["export"] = complete_export(args.root, Path(prepared["model"]), count - 1)
     workflow.write_json(args.root / "audit.json", result)
 
 

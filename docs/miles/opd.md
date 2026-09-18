@@ -90,7 +90,12 @@ ran; the job log prints `code overlay: <revision>`.
 
 Training uses pure sampled-token OPD: task rewards are zero, and each response
 position receives `kl_coef * (teacher_logp - student_logp)` as its advantage.
-Missing, nonfinite or misaligned teacher scores fail the run. GSM8K correctness
+The reward hook returns that zero as `sample.reward` and keeps the teacher's
+scoring response in `sample.metadata` until `post_process` turns it into
+`teacher_log_probs`; Miles's rollout metrics round and group by the reward, so
+with one sample per prompt every group reports under `zero_std/count_0.0`
+(expected noise, not a signal). Missing, nonfinite or misaligned teacher scores
+fail the run. GSM8K correctness
 is measured separately for evaluation. Thinking is disabled in the prepared
 chat templates. This prototype does not train the vision tower.
 
@@ -105,6 +110,33 @@ Inspect `result.json`, `audit.json`, `teacher-preflight.json`,
 Small JSON/log artifacts are copied to Beaker results; tensor checkpoints and
 training dumps remain on WEKA. A successful two-update run establishes mechanics,
 not an improvement in task accuracy.
+
+## EOPD: entropy-gated forward KL over the teacher top-k
+
+`[distillation] eopd = true` adds the EOPD term of arXiv 2603.07079 (Eq. 9-10) on top of the
+sampled-token OPD update above: `L = L_OPD + eopd_alpha * 1[H_t > eopd_tau] * FKL_t`, where
+`FKL_t = sum_{j in top-k} q~_t(j) (log q~_t(j) - log p_theta,t(j))` runs over the teacher's
+`eopd_top_k` tokens at each response position, `q~_t` is the teacher renormalised over those
+tokens and `p_theta` is the student's full-vocabulary probability. `H_t` is the entropy of
+`q~_t`, the paper's proxy for the teacher entropy (an SGLang teacher only returns its top-k).
+Defaults follow the paper: alpha 1.0, tau 0.8, k 16. It requires
+`distillation.use_rollout_logprobs = true`.
+
+Mechanics: `opd_hooks.reward` asks the teacher for `top_logprobs_num = k` alongside the
+sampled-token scores and checks every position returned exactly k finite entries;
+`opd_hooks.post_process` stores the ids and log-probs in `sample.train_metadata`, which Miles
+ships to the trainer as the batch's `metadata` list (the runtime patch adds `metadata` to the
+Megatron train-step keys). The learner runs with `--loss-type custom_loss
+--custom-loss-function-path open_instruct.miles.eopd_loss.policy_loss`: upstream
+`policy_loss_function` unchanged plus the gated FKL through the same per-sample reducer, with the
+student log-probs at the k ids computed on each tensor-parallel vocabulary shard
+(`eopd_math.student_log_probs_at`). Settings reach the hooks and the loss as
+`OI_OPD_EOPD_TOP_K/ALPHA/TAU`. Training logs `train/eopd_fkl_loss`, `train/eopd_fkl`,
+`train/eopd_gate_frac`, `train/eopd_teacher_proxy_entropy` and `train/eopd_teacher_topk_mass`;
+`teacher-scores.jsonl` gains per-token `eopd_gate`, `eopd_proxy_entropy` and `eopd_topk_mass`;
+`audit.json` gains an `eopd` block that re-derives the gate from the dumped top-k and checks the
+logged metrics. [The EOPD tiny run](https://github.com/allenai/open-instruct/blob/robertb/miles-qwen35-opd/configs/miles/opd/eopd-eopd-qwen3-tiny.toml)
+is the OPD tiny run with the term switched on.
 
 ## Qwen configuration reference
 

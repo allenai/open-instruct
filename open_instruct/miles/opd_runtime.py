@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles import opd_prepare, workflow
+from open_instruct.miles import eopd_math, opd_prepare, workflow
 from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
@@ -58,6 +58,11 @@ def model_args(miles_root, environment, architecture):
     return shlex.split(
         subprocess.check_output([sys.executable, "-c", code, architecture, str(directory)], env=environment, text=True)
     )
+
+
+def eopd_settings(spec):
+    """EOPD settings for the hooks and the custom loss, forwarded as OI_OPD_EOPD_* environment."""
+    return eopd_math.Settings.from_distillation(spec.document["distillation"])
 
 
 def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
@@ -172,6 +177,15 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         # matching Open Instruct's --use_vllm_logprobs behaviour instead of the trainer's
         # pre-update forward pass.
         args.append("--use-rollout-logprobs")
+    if doc["distillation"]["eopd"]:
+        # EOPD: upstream policy loss plus the entropy-gated forward KL over the teacher's top-k.
+        # The hooks request the top-k and the loss reads OI_OPD_EOPD_* (see eopd_settings).
+        args += [
+            "--loss-type",
+            "custom_loss",
+            "--custom-loss-function-path",
+            "open_instruct.miles.eopd_loss.policy_loss",
+        ]
     if tracking["wandb_mode"] != "disabled":
         args += ["--use-wandb", "--wandb-mode", tracking["wandb_mode"]]
         if tracking["wandb_entity"]:
@@ -207,6 +221,7 @@ def execute(spec):
                 "OI_OPD_REWARD_CONFIG": prepared["data"]["reward_config"],
                 "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
                 "CONVERT_KEEP_PP1": "1",
+                **eopd_settings(spec).environment(),
             }
         )
         with (root / "runtime-tests.log").open("w") as stream:

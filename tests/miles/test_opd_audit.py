@@ -7,7 +7,7 @@ import pytest
 import torch
 from safetensors import torch as safetensors_torch
 
-from open_instruct.miles import opd_audit
+from open_instruct.miles import eopd_math, opd_audit
 
 
 def test_advantages_must_match_teacher_signal(tmp_path):
@@ -93,3 +93,30 @@ def test_optimizer_audit_requires_every_nonzero_update(tmp_path):
     path.write_text("step 0: {'train/step': 0, 'train/grad_norm': 0.0}\n")
     with pytest.raises(ValueError, match="zero gradient"):
         opd_audit.audit_optimizer(tmp_path, 1)
+
+
+def test_eopd_audit_rederives_the_gate_and_requires_the_loss_metrics(tmp_path):
+    folder = tmp_path / "debug/train_data"
+    folder.mkdir(parents=True)
+    log_probs = [[-0.05, -3.0], [-0.7, -0.7]]  # first position peaked, second even -> one gated token
+    data = {
+        "teacher_log_probs": [torch.tensor([-1.0, -4.0])],
+        "metadata": [{"eopd_topk_ids": [[2, 7], [3, 8]], "eopd_topk_logprobs": log_probs}],
+    }
+    torch.save({"rollout_data": data}, folder / "0_0.pt")
+    settings = eopd_math.Settings(top_k=2, alpha=1.0, tau=0.5)
+    steps = [{"train/step": 0, "train/eopd_fkl_loss": 0.2, "train/eopd_fkl": 0.3, "train/eopd_gate_frac": 0.5}]
+    result = opd_audit.audit_eopd(tmp_path, 1, settings, steps)
+    assert result["rollouts"][0]["gate_frac"] == 0.5 and result["rollouts"][0]["tokens"] == 2
+    with pytest.raises(ValueError, match="Missing or nonfinite"):
+        opd_audit.audit_eopd(tmp_path, 1, settings, [{"train/eopd_gate_frac": 0.5}])
+    with pytest.raises(ValueError, match="without a forward-KL"):
+        opd_audit.audit_eopd(tmp_path, 1, settings, [dict(steps[0], **{"train/eopd_fkl_loss": 0.0})])
+    data["metadata"][0]["eopd_topk_ids"] = [[2, 2], [3, 8]]
+    torch.save({"rollout_data": data}, folder / "0_0.pt")
+    with pytest.raises(ValueError, match="repeats"):
+        opd_audit.audit_eopd(tmp_path, 1, settings, steps)
+    del data["metadata"]
+    torch.save({"rollout_data": data}, folder / "0_0.pt")
+    with pytest.raises(ValueError, match="lacks per-sample"):
+        opd_audit.audit_eopd(tmp_path, 1, settings, steps)
