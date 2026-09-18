@@ -168,7 +168,7 @@ For each metric: *what it is → why log it → healthy shape → failure modes 
 
 ### Reward / score (`scores`, `objective/*reward`)
 
-- **What:** the mean reward over the batch. In this repo `scores` is `raw_scores.mean()` — the actual environment reward before any length shaping.
+- **What:** the mean reward over the batch. In this repo `scores` is `raw_scores.mean()` — the actual environment reward before any length shaping. With $R_i$ the reward of trained rollout $i$ and $N$ the number of trained rollouts, $\texttt{scores} = \tfrac{1}{N}\sum_{i=1}^{N} R_i$. For the sandbox env $R_i$ is the value of `/logs/verifier/reward.txt` clamped to $[0,1]$ (the `last` aggregator over per-turn rewards; the verifier path adds $0$). Exact definitions for every key: [Part 9.0](#90-exact-definitions-as-implemented).
 - **Why:** it's the objective. Everything else is in service of moving this.
 - **Healthy shape:** noisy but upward, *then* a plateau. Plateaus are normal and not necessarily bad — the model may have saturated the easy gains. The slope matters more than any single point; fit a trend over a window, don't eyeball two points.
 - **Failure modes:**
@@ -188,6 +188,15 @@ For each metric: *what it is → why log it → healthy shape → failure modes 
 
 ### Advantage statistics (`val/advantages_mean/min/max`, `val/advantages_hist`)
 
+For group $g$ of $K$ rollouts with mean $\bar R_g = \tfrac1K\sum_{i\in g} R_i$ and population std $\sigma_g$:
+
+$$
+A_i \;=\; \begin{cases} R_i - \bar R_{g(i)} & \texttt{centered (default)} \\[2pt] \dfrac{R_i - \bar R_{g(i)}}{\sigma_{g(i)} + 10^{-8}} & \texttt{standard} \\[6pt] \dfrac{R_i - \bar R_{g(i)}}{\bar R_{g(i)}}\;\mathbb 1[\bar R_{g(i)}>0] & \texttt{maxrl}\end{cases}
+\qquad A_{i,t} = A_i \;\;\forall\, t \text{ with } m_{i,t}=1
+$$
+
+The same scalar is broadcast to every trained token of the rollout. A group with $\sigma_g = 0$ is dropped before this step (`filter_zero_std_samples`). With binary rewards and $K=8$ the only possible values are $\pm\tfrac{j}{8}$, so `val/advantages_hist` should be a comb, not a bell.
+
 - **What:** the per-token/-response advantage after group normalization.
 - **Why log it:** this is your **"is there a gradient signal at all"** gauge. After group-centering, the **mean is ~0 by construction** — do *not* be alarmed that `advantages_mean ≈ 0`; that's correct, not a bug. What you care about is the **spread**: `min`/`max` and the histogram width.
 - **Healthy shape:** a symmetric spread around zero with real width (e.g. ±0.5 to ±1.0). In the example run, advantages spanned ±0.875 every step — healthy.
@@ -202,7 +211,13 @@ For each metric: *what it is → why log it → healthy shape → failure modes 
 1. **KL to the *reference/initial* model** — "how far have we wandered from the starting model." This is what the optional KL *penalty* (controlled by `beta`) pulls back on. Purpose: stop the policy from exploiting the reward by degenerating into fluent nonsense or repetitive hacks that no longer resemble a real model.
 2. **KL to the *previous* policy / behavior policy** — "how big was this one update." This is the **trust region**: the idea that an update should only be trusted to move the policy a *small* amount, because the advantages you computed are only valid near the policy that generated the data — step too far in one update and you're optimizing against stale information. PPO/GRPO clipping (below) is the mechanism that enforces this limit.
 
-This repo logs **four estimators** of KL (all functions of `Δ = new_logprobs − ref_logprobs`). Why four? You can't compute the true KL exactly from a handful of sampled tokens — you *estimate* it, and different formulas trade **bias** (a systematic offset — consistently reads a bit high or low) against **variance** (run-to-run noise — jumps around even when nothing changed). You want low-bias *and* low-variance, but you usually can't have both, so the repo logs several and you pick ([model_utils.py:`estimate_kl`](../../open_instruct/model_utils.py)):
+This repo logs **four estimators** of KL, all functions of the per-token gap $\Delta_{i,t} = \operatorname{clamp}(\ell^{\theta}_{i,t} - \ell^{\text{ref}}_{i,t},\,-40,\,40)$ where $\ell^{\theta}$ and $\ell^{\text{ref}}$ are the trainer's and the frozen reference model's log-probs of the sampled token:
+
+$$
+\texttt{kl0} = \Delta,\qquad \texttt{kl1} = \tfrac12\Delta^2,\qquad \texttt{kl2} = e^{-\Delta} - 1 + \Delta,\qquad \texttt{kl3} = r\,\Delta \quad (r = \text{the policy ratio below})
+$$
+
+Each is masked-averaged over a row's response tokens, then token-weighted across rows and ranks (Part 9.0). One caveat the formulas make visible: all four are single-sample estimators that assume the token was drawn from $\pi_\theta$, but it was drawn from the (stale) rollout policy $\mu$, so they carry a staleness bias of the same order as the mismatch metrics below. Why four? You can't compute the true KL exactly from a handful of sampled tokens — you *estimate* it, and different formulas trade **bias** (a systematic offset — consistently reads a bit high or low) against **variance** (run-to-run noise — jumps around even when nothing changed). You want low-bias *and* low-variance, but you usually can't have both, so the repo logs several and you pick ([model_utils.py:`estimate_kl`](../../open_instruct/model_utils.py)):
 
 - **`kl0`** — linear, `Δ = logp_new − logp_ref`. The raw mean log-ratio. **Can be negative** (it's not a true KL, it's the inside of one). Useful as a signed "which direction did we move."
 - **`kl1`** — quadratic, `Δ²/2`. Always ≥ 0, grows as the policy diverges. In the example run this rose 0 → 0.09, cleanly showing "the policy is steadily moving away from base." Good drift tracker.
@@ -220,7 +235,13 @@ This repo logs **four estimators** of KL (all functions of `Δ = new_logprobs �
 
 ### Policy ratio & clip fraction (`val/ratio`, `val/ratio_var`, `policy/clipfrac_avg`)
 
-- **Ratio** = `exp(new_logprob − old_logprob)` per token = "how much more/less likely is this token under the policy being trained vs the policy that generated it." In PPO/DAPO the ratio is **clipped** to `[1−ε_l, 1+ε_h]` so a single update can't move any token's probability too far.
+- **Ratio** $r_{i,t} = \exp(\ell^{\theta}_{i,t} - \ell^{\text{old}}_{i,t})$ per token = "how much more/less likely is this token under the policy being trained vs the policy that generated it." The DAPO surrogate is
+
+$$
+L^{(1)}_{i,t} = -A_{i,t}\, r_{i,t},\qquad L^{(2)}_{i,t} = -A_{i,t}\,\operatorname{clip}(r_{i,t},\,1-\epsilon_l,\,1+\epsilon_h),\qquad L_{i,t} = \max\!\big(L^{(1)}_{i,t}, L^{(2)}_{i,t}\big)
+$$
+
+and $\texttt{policy/clipfrac\_avg} = \overline{\mathbb 1[L^{(2)} > L^{(1)}]}$, i.e. the fraction of tokens with ($A>0$ and $r>1+\epsilon_h$) or ($A<0$ and $r<1-\epsilon_l$). $\texttt{val/ratio} = \sum_i w_i\,\bar r_i$ and $\texttt{val/ratio\_var} = \sum_i w_i(\bar r_i - \texttt{val/ratio})^2$, where $\bar r_i$ is the masked mean over row $i$ and $w_i$ its token weight.
 - **What `old_logprob` is depends on one flag.** With `--use_vllm_logprobs true` (every Terminal script) it is the logprob vLLM recorded while *sampling* the token, so the ratio measures the current trainer policy against the actual **behavior** policy — which includes both weight staleness from the async pipeline and the vLLM-vs-HF numerical mismatch. With it false and one mini-batch, `old_logprob` is the trainer's own detached logprob on the first pass, so the ratio is **identically 1** and the clip can never fire; the flag is not a nicety, it is what makes clipping/DPPO do anything at all.
 - **`val/ratio`** is the token-weighted mean of the per-row mean ratio. ≈ 1.0 means on-policy on average (the sample run sits at 1.0000 to four decimals). **`val/ratio_var`** is the variance *across packed rows* of those per-row means, not the per-token variance — so it is tiny (1e-8 on the sample run) even when individual tokens have ratios of 0.5 or 2. A jump in `ratio_var` means some rows are systematically off-policy: a weight-sync bug, or a batch mixing very stale and very fresh rollouts. For per-token mismatch use the `debug/vllm_vs_local_*` metrics below.
 - **`policy/clipfrac_avg`** = fraction of response tokens where the clipped surrogate was the active one (`pg_losses2 > pg_losses`). Under **DAPO** a few % is normal and healthy; >20–30% means the update wants to move far beyond the trust region → LR too high or data too stale.
@@ -240,7 +261,16 @@ All the Terminal scripts leave these at 0 and rely on `use_vllm_logprobs` + the 
 
 ### Train/inference mismatch (`debug/vllm_vs_local_logprob_diff_mean/max/std`, `debug/vllm_local_reverse_kl`)
 
-- **What:** on every packed row the trainer compares its own logprob of each sampled token against the one vLLM recorded at sampling time. `_mean`/`_max`/`_std` are over `|log π_trainer − log π_vllm|` on response tokens; `vllm_local_reverse_kl` is `Σ π_vllm · (log π_vllm − log π_trainer)`. Under the liger loss these come from an extra no-grad forward, so they cost a little.
+- **What:** on every packed row the trainer compares its own logprob of each sampled token against the one vLLM recorded at sampling time. With $V_i = \{t : m_{i,t}=1 \wedge \ell^\mu_{i,t} \neq \text{NaN}\}$ and $d_{i,t} = |\ell^\theta_{i,t} - \ell^\mu_{i,t}|$:
+
+$$
+\texttt{diff\_mean}_i = \tfrac{1}{|V_i|}\sum_{t\in V_i} d_{i,t},\quad
+\texttt{diff\_max}_i = \max_{t\in V_i} d_{i,t},\quad
+\texttt{diff\_std}_i = \operatorname{std}_{t\in V_i}(d_{i,t}),\quad
+\texttt{reverse\_kl}_i = \tfrac{1}{|V_i|}\sum_{t\in V_i} e^{\ell^\mu_{i,t}}\big(\ell^\mu_{i,t} - \ell^\theta_{i,t}\big)
+$$
+
+The last one is *not* a full $\mathrm{KL}(\mu\|\pi)$: it is the single summand of that KL at the sampled token, so it can be negative and is best read as a signed, $\mu$-weighted version of the mean diff. Under the liger loss these come from an extra no-grad forward, so they cost a little.
 - **Why:** this is the *direct* measurement of the two mismatch sources the ratio has to absorb: kernel/precision differences and weight staleness. Everything in the ratio/clip/DPPO machinery is downstream of this number.
 - **Healthy shape (sample 9B run, `async_steps=4`):** `_mean` ≈ 0.005–0.011 nats/token, `_max` ≈ 0.27–0.49 (a handful of tokens per 64k-token row disagree a lot; that is normal), `reverse_kl` ≈ 1e-4–6e-4. These should be **flat over training**. The fp32 LM-head patches on both sides (`patch_vllm_qwen3_5_lm_head_fp32`, `--lm_head_fp32`) exist to keep them there.
 - **Failure modes:** a **step change** in `_mean` = something structural changed (a weight-sync silently failed, a vLLM backend flag differs from the trainer, prefix-cache corruption after an in-flight update). A **slow climb** that tracks `stale_results_dropped` or the `model_step` gap = staleness, not numerics. `_max` alone spiking on isolated steps is usually one degenerate row and can be ignored.
@@ -256,6 +286,24 @@ All the Terminal scripts leave these at 0 and rely on `use_vllm_logprobs` + the 
 | `dppo` (Terminal 9B/27B) | per-token **mask**: zero the update on tokens where the Bernoulli TV/KL between `π_vllm` and `π_trainer` exceeds `dppo_divergence_threshold` *and* the update would push further away | `debug/dppo_mask_frac_kept` — fraction of response tokens that survived. Sample run: **0.9999**, i.e. the mask almost never fires at this staleness. A drop toward 0.99 or below is the DPPO early-warning that the policy is moving faster than the rollouts can follow; correlate with `kl1` and `vllm_vs_local_logprob_diff_mean`. | `policy/clipfrac_avg` ≡ 0 |
 | `tvpo` | prompt-level TV bound; freeze whole prompts over threshold | `debug/tvpo_mask_frac_kept`, `actor/ppo_tv` (mean prompt-level TV) | `policy/clipfrac_avg` ≡ 0 |
 | `cispo` | one-sided cap on the detached ratio | nothing dedicated; watch `val/ratio` and the mismatch metrics | `policy/clipfrac_avg` ≡ 0 |
+
+**DPPO mask, exactly** (`grpo_utils.compute_dppo_mask`, `compute_binary_divergence`), with $p_{i,t} = e^{\operatorname{clamp}(\ell^\theta_{i,t},-30,0)}$ and $\mu_{i,t} = e^{\operatorname{clamp}(\ell^\mu_{i,t},-30,0)}$ the probabilities of the *sampled* token under trainer and rollout policy:
+
+$$
+D^{\text{tv}}_{i,t} = |\mu_{i,t} - p_{i,t}|,\qquad
+D^{\text{kl}}_{i,t} = \mu\log\tfrac{\mu}{p} + (1-\mu)\log\tfrac{1-\mu}{1-p}\;\;(\mu,p \text{ clipped to } [10^{-9}, 1-10^{-9}])
+$$
+
+$$
+M_{i,t} = 1 - \mathbb 1\!\Big[\big((A_{i,t}>0 \wedge r_{i,t}>1)\;\vee\;(A_{i,t}<0 \wedge r_{i,t}<1)\big)\;\wedge\; D_{i,t} > \delta\Big],\qquad
+L_{i,t} = -A_{i,t}\, r_{i,t}\, M_{i,t}
+$$
+
+$$
+\texttt{debug/dppo\_mask\_frac\_kept} = \frac{\sum_{i,t} M_{i,t}}{\sum_{i,t} m_{i,t}} \quad\text{(summed over the whole rank, then token-weighted across ranks)}
+$$
+
+Both divergences are the Bernoulli collapse of the vocabulary into {sampled token, everything else}; they are lower bounds on the true per-position divergence and cost no extra forward. `dppo_divergence_type` picks $D^{\text{tv}}$ (default) or $D^{\text{kl}}$; $\delta$ = `dppo_divergence_threshold` (0.1 in the Terminal scripts).
 
 DPPO requires `use_vllm_logprobs=true` (validated in config) so that the mask's anchor `μ` is the actual rollout policy. Its mask is computed twice on the liger path — once inside the tiled loss for the gradient and once outside for the logged fraction — so the metric is exact, not an approximation.
 
@@ -335,7 +383,7 @@ Agentic RL is slow to generate (a rollout might be minutes of sandbox execution)
 | `packed_ratio` | Sequences per packed block — efficiency, interacts with length growth. |
 | `batch/total_prompts`, `batch/filtered_prompts`, `batch/filtered_prompts_zero / _solved / _nonzero`, `batch/no_resampled_prompts` | **Active-sampling health.** `total_prompts` is the number of groups that made it into the trained batch (= `num_unique_prompts_rollout` when `active_sampling` is on). `filtered_prompts` is how many *additional* groups were generated and thrown away as zero-std to get there, split into all-failed (`_zero`), all-solved (`_solved`) and same-non-zero-score (`_nonzero`). Sample run: 8 kept, 5–18 filtered per step → **1.6–3.2× generation overhead** per useful group. `_solved` rising over training is the curriculum graduating (good); `_zero` rising is the task mix getting too hard. `no_resampled_prompts` counts groups excluded for good via `no_resampling_pass_rate`. |
 | `batch/percent_solved_mean`, `batch/percent_solved_hist`, `batch/prompt_lengths`, `batch/response_lengths` | Per-group solve rates and raw length histograms for the *kept* batch. `percent_solved_hist` is the per-prompt solve-rate distribution over the trained groups; with active sampling it is bimodal by construction (only mixed groups survive). |
-| `time/total`, `time/training`, `time/getting_response`, `time/weight_sync*`, `time/saving`, `time/health_check` | Where wall-clock goes. `time/training` is the trainer `step()` including its wait for data; `time/total` adds sync and checkpointing. **`time/getting_response` is not "generation cost per step":** it is the longest (enqueue → reward) latency among the batch's groups, and under async that latency overlaps several training steps, so it is normal for it to exceed `time/total` (sample: ~900–2400 s vs ~400–500 s). `weight_sync` is the cost of pushing fresh weights to the vLLM engines (sample: 7–10 s for 9B with `gather_whole_model`). |
+| `time/total`, `time/training`, `time/getting_response`, `time/weight_sync*`, `time/saving`, `time/health_check` | Where wall-clock goes. `time/training` is the trainer `step()` including its wait for data; `time/total` adds sync and checkpointing. **`time/getting_response` is not "generation cost per step":** it is the longest (engine-dequeue → reward) latency among the batch's groups, and under async that latency overlaps several training steps, so it is normal for it to exceed `time/total` (sample: ~900–2400 s vs ~400–500 s). `weight_sync` is the cost of pushing fresh weights to the vLLM engines (sample: 7–10 s for 9B with `gather_whole_model`). |
 | `time/trainer_idle_waiting_for_inference`, `time/generation_idle_waiting_for_trainer` | **The two-sided bottleneck detector.** The trainer's wait inside `get_data` vs DataPrep's wait for the trainer to consume a step so it may run ahead again. Sample run: trainer idle ≈ 2 s, generation idle ≈ 0 → balanced, with a 940 s trainer-idle spike on the first step after a resume (the engines were refilling the buffer). Trainer-idle chronically high = generation-bound: add engines, shrink `response_length`, or raise `async_steps`. Generation-idle chronically high = training-bound: `async_steps` is only buying staleness, lower it. |
 | `learner_mfu`, `actor_mfu`, `actor_mbu` | Percent utilization. `learner_mfu` = training FLOPs / (`time/training` × learner peak); sample ≈ 3–4%, low because `time/training` includes the data wait and SP=4/ZeRO-3 communication. `actor_mfu` / `actor_mbu` = generation FLOPs / memory bytes over `time/getting_response` × engine peak; since that denominator is a latency, not busy time, these **under**-report (sample: MFU 0.2–0.4%, MBU 0.4–0.8%). Use them for *relative* comparison between runs, not as absolute efficiency. |
 | `learner_tokens_per_second_step / _overall`, `val/actor_tokens_per_second`, `val/num_step_tokens`, `val/num_total_tokens` | Throughput in tokens. `val/num_step_tokens` is prompt + response tokens in the trained batch; `_overall` divides the running total by total training time and is the number to use for wall-clock projections. |
@@ -440,7 +488,235 @@ The hard-won meta-lessons:
 
 ## Part 9 — This codebase's exact metric glossary
 
-Every wandb key `grpo_fast.py` can emit, grouped by which process produces it. **(conditional)** = only present under the stated flag; **(loss-specific)** = only meaningful for that `--loss_fn`. Verified against the code on `omni_agent` and against run `g55rr33t` (2026-09-18).
+Every wandb key `grpo_fast.py` can emit, grouped by which process produces it. **(conditional)** = only present under the stated flag; **(loss-specific)** = only meaningful for that `--loss_fn`. Verified against the code on `omni_agent` and against run `g55rr33t` (2026-09-18). Section 9.0 gives the exact formula for each; the tables that follow give the one-line meaning.
+
+### 9.0 — Exact definitions (as implemented)
+
+**Notation.** A training step trains $N$ rollouts (indexed $i$) from $G = N/K$ prompt groups of $K$ samples each; they are packed into rows and sharded across ranks, but every formula below is stated per rollout or per token so packing does not matter. For rollout $i$, token position $t$ ranges over the full `prompt + response` sequence, and
+
+| symbol | meaning | where it comes from |
+|---|---|---|
+| $m_{i,t}\in\{0,1\}$ | **response mask**: 1 on tokens the model generated, 0 on prompt tokens and (with `mask_tool_use`, default) on tool-output tokens | `response_masks[:, 1:]` |
+| $n_i = \sum_t m_{i,t}$ | trained tokens in rollout $i$ | |
+| $\ell^{\mu}_{i,t}$ | log-prob of the sampled token under the **rollout (behavior) policy**, recorded by vLLM at sampling time after temperature | `vllm_logprobs` (NaN on prompt, $0$ on tool tokens) |
+| $\ell^{\theta}_{i,t}$ | log-prob of the same token under the **trainer policy** now, logits divided by `temperature` | `forward_for_logprobs` |
+| $\ell^{\text{ref}}_{i,t}$ | log-prob under the frozen **reference** model | ref forward, only if `load_ref_policy` |
+| $\ell^{\text{old}}_{i,t}$ | the ratio's denominator: $=\ell^\mu$ with `use_vllm_logprobs` (all Terminal runs); $=\ell^\theta$ detached on the first pass otherwise | `resolve_old_logprob` |
+| $r_{i,t} = \exp(\ell^\theta_{i,t} - \ell^{\text{old}}_{i,t})$ | policy ratio | |
+| $R_i \in [0, R_{\max}]$ | raw reward ($R_{\max}$ = `max_possible_score`, 1.0 here) | env `reward.txt` via the `last` aggregator |
+| $A_{i,t}$ | per-token advantage (constant along $t$) | Part 4 |
+| $\lvert y_i \rvert$ | response length **including tool-output tokens** | `len(response)` |
+| $\overline{x}_i$ | masked mean over a rollout: $\overline{x}_i = \dfrac{\sum_t m_{i,t} x_{i,t}}{\sum_t m_{i,t}}$, defined as 0 when $n_i = 0$ | `masked_mean` |
+| $\langle x \rangle_w$ | **token-weighted mean over rollouts**: $\sum_i w_i\, \overline{x}_i$ with $w_i = n_i / \sum_j n_j$ | `compute_metrics_from_loss_stats` + `compute_token_weights` |
+
+**How a trainer scalar reaches wandb.** Every key in the "trainer ranks" table is computed as $\overline{x}_i$ per packed row (per SP shard, when SP>1), then $\langle\cdot\rangle_w$ over the rows on the rank, then $\langle\cdot\rangle_w$ again across ranks using each rank's `_token_count`. Net effect for the keys in the token-weighted set (`objective/kl*`, `loss/*`, `policy/*`, `val/ratio*`, `debug/*_frac_kept`, `actor/ppo_tv`): **a token-weighted mean over all trained tokens in the step**, so a 32k-token rollout counts 32× a 1k one. Everything else (`optim/grad_norm`, `lr`, the DataPrep keys) is a plain mean across ranks (and is identical on every rank for the DataPrep keys). Under the liger loss the same quantities are accumulated as $\sum_{\text{tokens}} / \sum m$ inside the tiled kernel and all-reduced across the SP group, so they are exact rather than mean-of-means.
+
+#### Reward, advantages, batch composition (DataPrep)
+
+$$
+\texttt{scores} = \tfrac1N\textstyle\sum_i R_i
+\qquad
+\texttt{unsolved\_batch\_size\_ratio} = \tfrac1N\textstyle\sum_i \mathbb 1[R_i < R_{\max} - 10^{-8}]
+\qquad
+\texttt{real\_batch\_size\_ratio} = \dfrac{N}{K\cdot\texttt{num\_unique\_prompts\_rollout}}
+$$
+
+$$
+\bar R_g = \tfrac1K\textstyle\sum_{i\in g} R_i,\qquad
+\sigma_g = \operatorname{std}_{i\in g}(R_i)\ \text{(population)},\qquad
+\texttt{percent\_solved}_g = \bar R_g / R_{\max}
+$$
+
+Group $g$ is **filtered** (not trained) iff $\sigma_g = 0$; it is counted in `batch/filtered_prompts_zero` if $R=0$, `_solved` if $R \ge R_{\max}-10^{-8}$, else `_nonzero`. With `active_sampling` the loop keeps pulling groups until $G$ *unfiltered* ones exist, so
+
+$$
+\texttt{batch/total\_prompts} = G,\qquad
+\text{generation overhead} = 1 + \frac{\texttt{batch/filtered\_prompts}}{\texttt{batch/total\_prompts}},\qquad
+\texttt{episode} \mathrel{+}= K\,(G + \texttt{batch/filtered\_prompts}) \text{ per step}
+$$
+
+Advantages: see Part 4 (`centered` default: $A_i = R_i - \bar R_{g(i)}$). `val/advantages_mean/min/max/hist` are over the $N$ per-rollout scalars (after any truncation/non-submitting masking).
+
+$$
+\texttt{val/avg\_group\_performance\_pre\_filter} = \frac{n_{\text{solved}} + G\,\bar s_{\text{pre}}}{n_{\text{solved}} + n_{\text{zero}} + G},
+\qquad
+\texttt{\_post\_filter} = \frac{n_{\text{solved}} + G\,\bar s_{\text{post}}}{n_{\text{solved}} + n_{\text{zero}} + G}
+$$
+
+where $n_{\text{solved}}, n_{\text{zero}}$ are the all-solved / all-failed filtered groups, $\bar s_{\text{pre}} = \tfrac1N\sum_i R_i / R_{\max}$ over the kept rollouts **before** `mask_truncated_completions` / `mask_non_submitting_completions`, and $\bar s_{\text{post}}$ the same **after**. Filtered all-solved groups count as 1.0 and all-failed as 0.0, which is why this number keeps moving when the trained-batch `scores` is pinned near 0.5 by active sampling. `_nonzero` groups appear in neither numerator nor denominator. With no masking flags on (the Terminal scripts) pre = post.
+
+$$
+\texttt{packed\_ratio} = \frac{\#\text{packed rows}}{N},\qquad
+\texttt{val/total\_reward\_groups} = N/K,\qquad
+\texttt{epoch} = \frac{\texttt{episode}}{K\,\lvert\mathcal D_{\text{train}}\rvert}
+$$
+
+#### Lengths, truncation, submission (DataPrep, computed on the unmasked batch)
+
+$$
+\texttt{truncated}_i = \mathbb 1\big[\texttt{finish\_reason}_i \ne \texttt{stop}\big] \;\vee\; \mathbb 1\big[\lvert y_i\rvert \ge \texttt{response\_length}\big],\qquad
+\texttt{non\_submitting}_i = \neg\,\texttt{done}_i,\qquad
+\texttt{solved}_i = \mathbb 1[R_i \ge R_{\max} - 10^{-8}]
+$$
+
+$$
+\texttt{val/stop\_rate} = \tfrac1N\textstyle\sum_i \mathbb 1[\texttt{finish\_reason}_i = \texttt{stop}],\qquad
+\texttt{val/truncated\_completion\_fraction} = \tfrac1N\textstyle\sum_i \texttt{truncated}_i,\qquad
+\texttt{\_correct\_count} = \textstyle\sum_i \texttt{truncated}_i\,\mathbb 1[R_i > 0]
+$$
+
+$$
+\texttt{val/sequence\_lengths} = \tfrac1N\textstyle\sum_i \lvert y_i\rvert,\qquad
+\texttt{\_solved} = \operatorname{mean}_{i:\,\texttt{solved}_i}\lvert y_i\rvert,\qquad
+\texttt{\_unsolved} = \operatorname{mean}_{i:\,\neg\texttt{solved}_i}\lvert y_i\rvert
+$$
+
+`finish_reason` is the reason of the **last vLLM turn** only, hence the second disjunct in `truncated`. $\lvert y_i \rvert$ counts tool-output tokens, so `sequence_lengths` can grow because the model reads more, not because it writes more.
+
+#### Tools and environments (DataPrep)
+
+For tool name $\tau$, with $c_{\tau}$ calls, $f_{\tau}$ failures ($\texttt{success}=\text{false}$: an error in the step metadata **or** a timeout) and $\rho_\tau$ summed runtime over the batch's $N$ rollouts:
+
+$$
+\texttt{tools/}\tau\texttt{/avg\_calls\_per\_rollout} = c_\tau / N,\qquad
+\texttt{failure\_rate} = f_\tau / c_\tau,\qquad
+\texttt{avg\_runtime} = \rho_\tau / c_\tau;\qquad
+\texttt{tools/aggregate/*} = \text{the same over } \textstyle\sum_\tau
+$$
+
+$\texttt{env/}e\texttt{/}k = \tfrac1N\sum_i \texttt{get\_metrics}_i[k]$ for every numeric key the env returns (sandbox: `step_count` only).
+
+#### KL to the reference (trainer; only if `load_ref_policy`)
+
+$$
+\Delta_{i,t} = \operatorname{clamp}(\ell^\theta_{i,t} - \ell^{\text{ref}}_{i,t}, -40, 40),\qquad
+\texttt{kl0} = \langle \Delta\rangle_w,\quad
+\texttt{kl1} = \langle \tfrac12\Delta^2\rangle_w,\quad
+\texttt{kl2} = \langle e^{-\Delta} - 1 + \Delta\rangle_w,\quad
+\texttt{kl3} = \langle r\,\Delta\rangle_w
+$$
+
+$$
+\texttt{loss/kl\_avg} = \beta\cdot\texttt{kl}_{\texttt{kl\_estimator}}\ (\text{default index } 2)
+$$
+
+#### Ratio, surrogate, clip (trainer)
+
+$$
+r_{i,t} = e^{\ell^\theta_{i,t} - \ell^{\text{old}}_{i,t}},\qquad
+\texttt{val/ratio} = \langle r\rangle_w,\qquad
+\texttt{val/ratio\_var} = \textstyle\sum_i w_i\big(\bar r_i - \langle r\rangle_w\big)^2
+$$
+
+$$
+\text{DAPO: } L^{(1)} = -A\,r,\;\; L^{(2)} = -A\,\operatorname{clip}(r, 1-\epsilon_l, 1+\epsilon_h);\qquad
+\text{CISPO: } L^{(1)} = L^{(2)} = -A\,\operatorname{clip}(r, \max = 1+\epsilon_h)^{\text{detached}}\,\ell^\theta;\qquad
+\text{DPPO: } L^{(1)} = L^{(2)} = -A\,r\,M
+$$
+
+$$
+L = \max(L^{(1)}, L^{(2)}),\qquad
+\texttt{policy/clipfrac\_avg} = \langle \mathbb 1[L^{(2)} > L^{(1)}]\rangle_w \;(\equiv 0 \text{ unless DAPO}),\qquad
+\texttt{loss/policy\_avg} = \langle L \cdot \omega\rangle_w
+$$
+
+where $\omega_{i,t}$ is the product of whatever optional weights/masks are active (TIS cap, TIS masks, DPPO $M$). The per-row scalar that is back-propagated, and logged as `loss/total_avg`, is
+
+$$
+\texttt{loss}_i = \frac{\sum_t m_{i,t}\,\big(L_{i,t}\,\omega_{i,t} + \beta\,\texttt{kl}_{i,t}\big)}{D}\cdot\frac{W}{S},\qquad
+D = \begin{cases}\sum_{\text{all ranks}}\sum_{j\in\text{acc. group}} n_j & \texttt{loss\_denominator=token}\\ \#\text{sequences in the acc. group (tokens weighted } 1/n_j) & \texttt{sequence}\\ \text{the float you passed} & \text{otherwise}\end{cases}
+$$
+
+with $W$ = `world_size` and $S$ = `sequence_parallel_size`; the $W/S$ factor undoes DeepSpeed's mean over the $W/S$ data-parallel ranks so that each trained token in the global batch has weight exactly $1/D$. `loss/total_avg` is therefore a *fraction of the global loss*, not a per-token quantity, and shrinks when you add ranks.
+
+#### Optional importance-sampling terms (trainer)
+
+$$
+\rho_{i,t} = e^{\operatorname{clamp}(\ell^{\text{old}} - \ell^{\mu}, -10, 10)},\quad \hat\rho = \min(\rho, C);\qquad
+\texttt{val/tis\_ratio} = \langle \hat\rho\rangle_w,\quad
+\texttt{val/tis\_clipfrac} = \langle \mathbb 1[\hat\rho < \rho]\rangle_w
+\quad (C = \texttt{truncated\_importance\_sampling\_ratio\_cap};\ \rho\equiv 1 \text{ when } \ell^{\text{old}}=\ell^\mu)
+$$
+
+$$
+\texttt{tis\_mask}_{i,t} = \mathbb 1\big[\,l < e^{\operatorname{clamp}(\ell^\theta - \ell^\mu, -10, 10)} < u\,\big]\ (l,u = \texttt{tis\_mask\_lower/upper}),\qquad
+\texttt{seq\_tis\_mask}_i = 1 - \mathbb 1\Big[\overline{(\ell^\mu - \ell^\theta)}_i > \delta_{\text{seq}} \;\wedge\; \bar A_i < 0\Big]
+$$
+
+$$
+\texttt{debug/tis\_mask\_frac\_kept} = \frac{\sum_{i,t}\texttt{tis\_mask}_{i,t}\cdot\texttt{seq\_tis\_mask}_i}{\sum_{i,t} m_{i,t}}
+$$
+
+#### DPPO and TVPO masks (trainer, loss-specific)
+
+DPPO: Part 4 gives $D$, $M$ and `debug/dppo_mask_frac_kept` $= \sum M / \sum m$. TVPO, with $\tau_{i,t} = \tfrac12|r_{i,t} - 1|$ (the importance-sampling upper bound on TV):
+
+$$
+\text{TV}_i = \overline{\tau}_i,\qquad
+\text{TV}_g = \operatorname{mean}_{i\in g}\text{TV}_i,\qquad
+\texttt{actor/ppo\_tv} = \langle \text{TV}_{g(i)}\rangle_w
+$$
+
+$$
+M^{\text{tvpo}}_{i,t} = \begin{cases} 1 & \max_g \text{TV}_g \le \delta \\ \mathbb 1\big[\text{TV}_{g(i)} \le \delta\big] \vee \mathbb 1\big[A_{i,t}\cdot\operatorname{sign}(p_{i,t} - \mu_{i,t}) \le 0\big] & \text{otherwise}\end{cases},\qquad
+\texttt{debug/tvpo\_mask\_frac\_kept} = \frac{\sum M^{\text{tvpo}}}{\sum m}
+$$
+
+Masked TVPO tokens are frozen (loss replaced by its detached value), not zeroed, so they still appear in `loss/policy_avg`.
+
+#### Mismatch, entropy, gradient (trainer)
+
+Mismatch: Part 4. Entropy, with $z_{i,t,v}$ the temperature-scaled logits over vocabulary $v$ and $p = \operatorname{softmax}(z)$:
+
+$$
+H_{i,t} = \log\textstyle\sum_v e^{z_{i,t,v}} - \sum_v p_{i,t,v}\, z_{i,t,v},\qquad
+\texttt{policy/entropy\_avg} = \langle H\rangle_w \quad(\texttt{record\_entropy}, \text{non-liger only})
+$$
+
+$\texttt{optim/grad\_norm}$ = DeepSpeed's global $\lVert g\rVert_2$ over all parameters after the accumulation group's backward (the pre-clip norm it uses for clipping); averaged across ranks and across accumulation groups if `num_mini_batches > 1`. `lr` = the scheduler's current value.
+
+#### Staleness and time (DataPrep / main thread)
+
+Each group carries the engine's `current_model_step` at the moment its prompt was **dequeued** by that engine, $k_g$. Then
+
+$$
+\texttt{model\_step\_min/max/mean} = \min_g k_g,\ \max_g k_g,\ \operatorname{mean}_g k_g,\qquad
+\text{a group is dropped (}\texttt{stale\_results\_dropped}\mathrel{+}=1\text{) iff } s_{\text{prep}} - k_g > \texttt{async\_steps}
+$$
+
+where $s_{\text{prep}}$ is DataPrep's 0-based step counter and the logged `training_step` $= s_{\text{prep}} + 1$, so $\texttt{training\_step} - \texttt{model\_step\_min} \le \texttt{async\_steps} + 1$ always.
+
+$$
+\texttt{time/getting\_response} = \max_{g \in \text{batch}}\big(t^{\text{reward}}_g - t^{\text{dequeue}}_g\big),\qquad
+\texttt{val/actor\_tokens\_per\_second} = \frac{\sum_g \lvert x_g\rvert + \sum_i \lvert y_i\rvert}{\texttt{time/getting\_response}}
+$$
+
+$$
+\texttt{val/num\_step\_tokens} = \textstyle\sum_g \lvert x_g\rvert + \sum_i \lvert y_i\rvert\ \ (\text{prompt counted once per group, not } K \text{ times}),\qquad
+\texttt{learner\_tokens\_per\_second\_step} = \frac{\texttt{val/num\_step\_tokens}}{\texttt{time/total}},\qquad
+\texttt{\_overall} = \frac{\texttt{val/num\_total\_tokens}}{t_{\text{now}} - t_{\text{train start}}}
+$$
+
+$$
+\texttt{learner\_mfu} = 100\cdot\frac{3\,F_{\text{fwd}}\big(\{\lvert x_{g(i)}\rvert + \lvert y_i\rvert\}_i\big)}{\texttt{time/training}\cdot N_{\text{learner GPUs}}\cdot F_{\text{peak}}},\qquad
+\texttt{actor\_mfu} = 100\cdot\frac{F_{\text{prefill}}(\{x_g\}) + F_{\text{decode}}(\{x_g\},\{y_i\})}{\texttt{time/getting\_response}\cdot N_{\text{engines}}\cdot TP\cdot F_{\text{peak}}}
+$$
+
+$\texttt{actor\_mbu}$ is the same ratio with bytes moved (weights read per decode step + KV-cache reads/writes) over $N_{\text{engines}}\cdot TP\cdot\text{BW}_{\text{peak}}$. $F$ comes from `ModelDims` (attention + MLP + LM-head FLOPs from the model config, sliding-window aware); the factor 3 is forward + 2× backward. Both MFUs are *lower bounds*: `time/training` includes the data wait, and `time/getting_response` is a latency that overlaps other steps.
+
+`time/total` = wall-clock of one `run_training` iteration; `time/training` = the `step()` RPC round-trip (includes `time/trainer_idle_waiting_for_inference`); `time/weight_sync` = the sync thread's wall-clock for the previous step's broadcast; `time/weight_sync_mean/min/max/median` are over the per-trainer-rank `broadcast_to_vllm` durations.
+
+#### Eval (only with an eval set)
+
+With $n$ = `eval_pass_at_k` samples per prompt and $c_p$ correct among them for prompt $p$:
+
+$$
+\texttt{eval/pass\_at\_1} = \operatorname{mean}_p \tfrac{c_p}{n},\qquad
+\texttt{eval/pass\_at\_}n = \operatorname{mean}_p \mathbb 1[c_p > 0],\qquad
+\texttt{eval/pass\_at\_}k\texttt{\_unbiased} = \operatorname{mean}_p\Big(1 - \tfrac{\binom{n - c_p}{k}}{\binom{n}{k}}\Big)\ \text{for } k = 1,2,4,\dots \le n
+$$
+
+(the unbiased estimator is 1 for a prompt with fewer than $k$ wrong samples). `eval/scores`, `eval/sequence_lengths*`, `eval/stop_rate` are the train-side definitions applied to the eval rollouts.
 
 ### Emitted by the trainer ranks (token-weighted average across ranks)
 
