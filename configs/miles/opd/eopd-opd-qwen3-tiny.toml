@@ -36,7 +36,7 @@ tensor_parallel_size = 1
 rollout_batch_size = 8
 samples_per_prompt = 1
 max_response_length = 512
-max_context_length = 2048
+max_context_length = 4096
 max_running_requests = 16
 temperature = 1.0
 top_p = 1.0
@@ -55,7 +55,7 @@ lr_warmup_iters = 0
 min_lr = 0.0
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-tiny-v2"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-tiny-v3"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]
