@@ -1,0 +1,82 @@
+# Tiny GPU smoke for the EOPD replication path before the full runs: Qwen3-1.7B-Base
+# student, Qwen3-8B teacher, 8 MATH prompts x 1 sample per rollout split into 4 PPO
+# optimizer steps (global batch 2), cosine LR, sampled evaluation (4 samples, top-p 1.0,
+# 512 tokens) on the 30 AIME24 prompts. Exercises the upstream qwen3-1.7B Megatron profile,
+# the Qwen3 HF conversion, SGLang teacher scoring, the multi-step schedule and the audit
+# (num_rollouts x optimizer_steps_per_rollout optimizer steps) on one 8-GPU node.
+schema_version = 1
+name = "eopd-opd-qwen3-tiny"
+
+[model]
+source = "Qwen/Qwen3-1.7B-Base"
+
+[teacher]
+source = "Qwen/Qwen3-8B"
+gpus = 1
+concurrency = 8
+request_timeout = 600
+startup_timeout = 1800
+
+[training]
+algorithm = "opd"
+num_rollouts = 3
+save_interval = 3
+eval_interval = 3
+optimizer_steps_per_rollout = 4
+
+[trainer]
+backend = "megatron"
+gpus = 4
+tensor_parallel_size = 2
+
+[inference]
+gpus = 3
+tensor_parallel_size = 1
+rollout_batch_size = 8
+samples_per_prompt = 1
+max_response_length = 512
+max_context_length = 2048
+max_running_requests = 16
+temperature = 1.0
+top_p = 1.0
+eval_temperature = 1.0
+eval_top_p = 1.0
+eval_samples_per_prompt = 4
+
+[distillation]
+kl_coef = 1.0
+use_rollout_logprobs = true
+
+[optimizer]
+learning_rate = 3e-6
+lr_decay_style = "cosine"
+lr_warmup_iters = 0
+min_lr = 0.0
+
+[output]
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-tiny-v1"
+assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
+
+[data]
+seed = 42
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/math_train.jsonl"
+eval_prompt_data = ["aime24", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/aime24.jsonl"]
+reward_config = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/verifiers.json"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "opd"
+wandb_entity = "allenai-team1"
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "1h"
+timeout = "6h"
+auto_resume = false
+weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
+
+[launch.secrets]
+WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
