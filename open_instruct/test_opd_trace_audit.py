@@ -56,6 +56,17 @@ class TestAuditRecord:
         assert report["max_abs_opd_signal"] > 0
         assert report["mean_abs_trainer_rollout_gap"] == pytest.approx(1e-3, rel=1e-3)
 
+    def test_full_frame_advantages_are_shifted_before_the_check(self):
+        record = _record()
+        batch, length = record["advantages_shape"]
+        full = torch.tensor([0.0 if v is None else v for v in record["advantages"]]).reshape(batch, length)
+        full = torch.cat([torch.full((batch, 1), 123.0), full], dim=1)  # position 0 is never consumed
+        record["advantages"] = full.flatten().tolist()
+        record["advantages_shape"] = [batch, length + 1]
+        report = opd_trace_audit.audit_record(record, KL_COEF, None, 1e-5)
+        assert report["errors"] == []
+        assert report["advantages_shifted_in_audit"] is True
+
     def test_shifted_advantages_fail(self):
         report = opd_trace_audit.audit_record(_record(shift_advantages=True), KL_COEF, None, 1e-5)
         assert any("differs" in e for e in report["errors"])

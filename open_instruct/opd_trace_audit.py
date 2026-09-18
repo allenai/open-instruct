@@ -67,13 +67,19 @@ def audit_record(record: dict, kl_coef: float, adv_clip: float | None, atol: flo
     if missing:
         return {"sample_idx": record.get("sample_idx"), "errors": [f"record lacks {missing}"]}
     shapes = {key: tuple(record[f"{key}_shape"]) for key in REQUIRED_KEYS}
-    if len(set(shapes.values())) != 1:
-        return {"sample_idx": record.get("sample_idx"), "errors": [f"shape mismatch {shapes}"]}
-
     mask = _tensor(record, "response_mask", torch.float32).bool()
     rollout = _tensor(record, "vllm_logprobs", torch.float32)
     teacher = _tensor(record, "teacher_logprobs", torch.float32)
     advantage = _tensor(record, "advantages", torch.float32)
+    # Dumps written before the advantages were shifted carry them in the full query_response
+    # frame ([B, T+1]); the trainer consumes advantages[:, 1:], so audit that view.
+    advantages_shifted = False
+    if advantage.shape[:-1] == mask.shape[:-1] and advantage.shape[-1] == mask.shape[-1] + 1:
+        advantage = advantage[..., 1:]
+        advantages_shifted = True
+    shapes["advantages"] = tuple(advantage.shape)
+    if len(set(shapes.values())) != 1:
+        return {"sample_idx": record.get("sample_idx"), "errors": [f"shape mismatch {shapes}"]}
 
     response_tokens = int(mask.sum())
     if response_tokens == 0:
@@ -110,6 +116,7 @@ def audit_record(record: dict, kl_coef: float, adv_clip: float | None, atol: flo
         "max_advantage_error": max_error,
         "max_abs_opd_signal": signal,
         "mean_reverse_kl": float((rollout - teacher)[mask].mean()) if response_tokens else 0.0,
+        "advantages_shifted_in_audit": advantages_shifted,
         "errors": errors,
     }
     if "trainer_logprobs" in record:
@@ -132,6 +139,7 @@ def audit_trace(
             "response_tokens": sum(r.get("response_tokens", 0) for r in reports),
             "max_advantage_error": max((r.get("max_advantage_error", 0.0) for r in reports), default=0.0),
             "max_abs_opd_signal": max((r.get("max_abs_opd_signal", 0.0) for r in reports), default=0.0),
+            "records_with_unshifted_advantages": sum(r.get("advantages_shifted_in_audit", False) for r in reports),
             "failed_records": [{"sample_idx": r["sample_idx"], "errors": r["errors"]} for r in failures],
         }
     return summary

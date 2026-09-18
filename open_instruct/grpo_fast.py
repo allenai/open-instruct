@@ -1332,7 +1332,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     dp_rank=self.rank // sp_size,
                     sp_rank=self.rank % sp_size,
                     teacher_logprobs=opd_trace_teacher_logprobs_BT,
-                    advantages=data_BT.advantages if opd_trace_teacher_logprobs_BT is not None else None,
+                    # Dump the advantages in the same [:, 1:] frame as the logprobs and the mask.
+                    advantages=[a[:, 1:] for a in data_BT.advantages]
+                    if opd_trace_teacher_logprobs_BT is not None
+                    else None,
                 )
 
         local_step = 0
