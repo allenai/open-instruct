@@ -79,6 +79,13 @@ Preparation runs automatically if assets are absent; the separate Saturn step
 above avoids staging downloads on the GPU allocation. For runtime code changes,
 leave `MILES_EXISTING_IMAGE` unset and build with `MILES_BASE_IMAGE`.
 
+When the image cannot be rebuilt locally but only wrapper source changed (no new
+dependencies), add `MILES_CODE_OVERLAY=1`: the job fetches the exact committed
+HEAD from `origin` (push it first) and copies `open_instruct/`, `scripts/miles/`
+and `configs/miles/` over `/opt/core-rl` before `open_instruct.miles train`
+starts. The launch receipt records `code_overlay: true` and the `revision` that
+ran; the job log prints `code overlay: <revision>`.
+
 ## Semantics and evidence
 
 Training uses pure sampled-token OPD: task rewards are zero, and each response

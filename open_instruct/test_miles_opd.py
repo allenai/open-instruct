@@ -5,13 +5,14 @@ import copy
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import launch, opd_config, opd_runtime, rewards, specs
+from open_instruct.miles import launch, opd_config, opd_launch, opd_runtime, rewards, specs
 from open_instruct.miles.errors import InputError
 
 CONFIG = Path(__file__).resolve().parents[1] / "configs/miles/opd/qwen35-4b-tiny.toml"
@@ -325,3 +326,24 @@ def test_repository_profiles_render_through_the_miles_loader():
     assert two_b[two_b.index("--num-layers") + 1] == "24"
     assert "--untie-embeddings-and-output-weights" not in two_b
     assert specs.load(CONFIG, ['model.source="Qwen/Qwen3.5-2B"']).document["model"]["architecture"] == "qwen3.5-2B"
+
+
+def test_code_overlay_is_off_by_default(monkeypatch):
+    monkeypatch.delenv("MILES_CODE_OVERLAY", raising=False)
+    spec = specs.load(CONFIG)
+    assert opd_launch.code_overlay() == ""
+    assert "oi-overlay" not in launch.specification("test-image", spec)["tasks"][0]["arguments"][0]
+
+
+def test_code_overlay_fetches_head_before_training(monkeypatch):
+    monkeypatch.setenv("MILES_CODE_OVERLAY", "1")
+    spec = specs.load(CONFIG)
+    command = launch.specification("test-image", spec)["tasks"][0]["arguments"][0]
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    assert "fetch -q --depth 1 https://github.com/" in command
+    assert revision in command
+    for directory in opd_launch.OVERLAY_DIRS:
+        assert f"cp -r /tmp/oi-overlay/{directory}/. /opt/core-rl/{directory}/" in command
+    assert command.index("cp -r /tmp/oi-overlay/open_instruct/.") < command.index(
+        "python -m open_instruct.miles train"
+    )

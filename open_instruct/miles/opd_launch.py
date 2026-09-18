@@ -2,10 +2,41 @@
 
 import base64
 import json
+import os
 import shlex
+import subprocess
 from pathlib import Path
 
 from open_instruct.miles.errors import InputError
+
+# Directories the application image layer copies from the repository (runtime/miles/Dockerfile).
+OVERLAY_DIRS = ("open_instruct", "scripts/miles", "configs/miles")
+
+
+def code_overlay():
+    """Shell lines that replace the image's wrapper source with the committed HEAD, or ``""``.
+
+    Set ``MILES_CODE_OVERLAY=1`` together with ``MILES_EXISTING_IMAGE`` when the runtime image
+    cannot be rebuilt locally: the job fetches the exact HEAD commit (which must be pushed to
+    ``origin``) and copies ``OVERLAY_DIRS`` over ``/opt/core-rl`` before ``open_instruct.miles``
+    starts, so the code that runs matches the ``revision`` in the launch receipt. Runtime
+    dependencies still come from the image; use a rebuilt image for dependency changes.
+    """
+    if os.environ.get("MILES_CODE_OVERLAY", "") not in ("1", "true"):
+        return ""
+    root = Path(__file__).resolve().parents[2]
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    origin = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=root, text=True).strip()
+    if origin.startswith("git@github.com:"):
+        origin = "https://github.com/" + origin[len("git@github.com:") :]
+    lines = [
+        "git init -q /tmp/oi-overlay",
+        f"git -C /tmp/oi-overlay fetch -q --depth 1 {shlex.quote(origin)} {revision}",
+        "git -C /tmp/oi-overlay checkout -q FETCH_HEAD",
+        f"echo 'code overlay: {revision}'",
+    ]
+    lines += [f"cp -r /tmp/oi-overlay/{d}/. /opt/core-rl/{d}/" for d in OVERLAY_DIRS]
+    return "".join(line + "\n" for line in lines)
 
 
 def specification(image, spec):
@@ -26,7 +57,8 @@ def specification(image, spec):
     cleanup = "status=$?; python -c " + shlex.quote(collect) + ' || true; exit "$status"'
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
-        f"python -c {shlex.quote(setup)}\ntrap {shlex.quote(cleanup)} EXIT\n"
+        + code_overlay()
+        + f"python -c {shlex.quote(setup)}\ntrap {shlex.quote(cleanup)} EXIT\n"
         "python -m open_instruct.miles train /output/submitted-run.json 2>&1 | tee /output/run.log\n"
     )
     env = {

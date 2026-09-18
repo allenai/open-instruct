@@ -228,6 +228,7 @@ def submit(image, spec):
         image=resolved_image,
         requested_image=image,
         revision=revision,
+        code_overlay=bool(opd_launch.code_overlay()),
         spec_sha256=workflow.fingerprint(spec.to_dict()),
         spec=spec.to_dict(),
         allocation=spec.allocation() if isinstance(spec, opd_config.OPDRunSpec) else topology.plan(spec),
