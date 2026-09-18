@@ -6,17 +6,19 @@ set -euo pipefail
 CKPT="${1:?HF checkpoint directory required}"
 LABEL="${2:?run label required}"
 MODE="${3:?omega or lcb required}"
+shift 3
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export CLUSTERS='-c ai2/holmes'
 export WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 export PRIORITY="${PRIORITY:-normal}"
-export GPUS="${GPUS:-4}" NUM_INSTANCES="${NUM_INSTANCES:-4}" TIMEOUT="${TIMEOUT:-6h}"
+export GPUS="${GPUS:-4}"
+export NUM_INSTANCES="${NUM_INSTANCES:-$GPUS}" TIMEOUT="${TIMEOUT:-6h}"
 case "$MODE" in
     omega)
         bash "$HERE/eval_olmoe3_hero.sh" "$CKPT" "$LABEL-omega" \
             -t omega_500 -o max_tokens=32768 -o num_samples=1 \
             -t omega_500_out -o max_tokens=32768 -o num_samples=1 \
-            --no-preemptible
+            --no-preemptible "$@"
         ;;
     lcb)
         export HARNESS=codex_python EVAL_IMAGE=01KVTPSG86RYVXV13FGQDM9GXT PTXAS_PATH=
@@ -24,7 +26,7 @@ case "$MODE" in
             -o sandboxes.0.inject_swerex=true -o sandboxes.0.instances=4 \
             -o sandboxes.0.startup_timeout=900 -o sandboxes.0.command_timeout=900 \
             -t livecodebench:lite -o max_tokens=32768 -o num_samples=1 \
-            --no-preemptible
+            --no-preemptible "$@"
         ;;
     *) echo "Expected omega or lcb" >&2; exit 1 ;;
 esac
