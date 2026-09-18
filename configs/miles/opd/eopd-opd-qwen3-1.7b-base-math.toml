@@ -2,8 +2,8 @@
 # from Qwen3-8B on the MATH training set. Paper Appendix A: batch 128 prompts x 1 sample, PPO
 # mini-batch 32 (4 optimizer steps per rollout), LR 3e-6 cosine, 4096-token responses,
 # rollout temperature 1.0, 3 epochs (7,500 prompts -> 176 rollouts), kl_coef 1.0, PPO clip
-# 0.2 (Miles default). Evaluation matches the paper's Qwen2.5-Math harness settings for
-# Qwen students: temperature 1.0, top-p 1.0, 8192 tokens, 8 samples per prompt (eval/<set>
+# 0.2 (Miles default). Training top-p 1.0 (Table 9, Qwen). Evaluation matches the paper
+# (Sec. 5.1 and App. C): temperature 1.0, top-p 0.8, 8192 tokens, 8 samples per prompt (eval/<set>
 # = Avg@8) on
 # MATH-500, AIME24, AIME25 and AMC23 in-run; the full six-benchmark Avg@8 / Pass@8 table is
 # produced post hoc from the HF exports. Paper OPD-baseline target: MATH-500 Avg@8 67.76,
@@ -48,7 +48,7 @@ max_running_requests = 128
 temperature = 1.0
 top_p = 1.0
 eval_temperature = 1.0
-eval_top_p = 1.0
+eval_top_p = 0.8
 eval_samples_per_prompt = 8
 
 [distillation]
