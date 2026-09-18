@@ -181,17 +181,17 @@ lower; it does not affect the per-token statistics above.
   pip-installs wheels onto the pinned base, which builds locally). Building it and launching the
   Saturn CPU `prepare` phase for Qwen3-1.7B-Base / Qwen3-8B assets first
   (`name="eopd-opd-qwen3-tiny-prepare"`), then the 4-GPU smoke on the same image.
-- **2026-09-18 01:10Z** hf-89 greedy on band with sync step 90 (rows appended to the sync-rerun
+- **2026-09-18 00:45Z** hf-89 greedy on band with sync step 90 (rows appended to the sync-rerun
   doc). Pinned Miles base image had disappeared from local Docker; re-pulled from Beaker (docker
   id matches `runtime.lock.json`), built overlay image `01M2RZHM7E5Z91M10H9SJBMF85` from
   37f2bd8c5, launched the Saturn prepare job `01M2RZHTYE1Y6H0DB9JR0NKX2W`. Also added
   `MILES_CODE_OVERLAY=1` to the Miles launcher (in-job fetch of the committed HEAD over the
   exercised image) as the fallback when the image cannot be rebuilt; documented in
   `docs/miles/opd.md`. Real-dump audit relaunch `01M2RZ8YYFT927SM1EDC7646ST` still running.
-- **2026-09-18 01:30Z** Prepare job rejected on the eos mismatch (see step 3 row); fixed with
+- **2026-09-18 00:50Z** Prepare job rejected on the eos mismatch (see step 3 row); fixed with
   `model.align_eos_with_teacher`, enabled in all three EOPD specs. Step 5 tooling landed and its
   first job launched (Qwen3-8B teacher on Qwen3-4B-Base rollouts). Real-dump audit at step 15/16.
-- **2026-09-18 01:55Z** Real-dump audit, first pass: training ran 16 steps and dumped every
+- **2026-09-18 00:58Z** Real-dump audit, first pass: training ran 16 steps and dumped every
   trace; the in-job audit command failed only because mason appends its own flags to the end of
   the command line (launcher fixed). Re-running the audit on CPU over the saved traces failed
   every record on shape alone: I had dumped `advantages` in the full query_response frame
@@ -200,7 +200,7 @@ lower; it does not affect the per-token statistics above.
   (OI 70dd732e1) and made the audit slice full-frame dumps the same way; CPU audit rerun
   `01M2S0BG4NP4878N18VASKNY6P`. Step 5 second run launched: verifier-DPPO 9B teacher on
   Qwen3.5-4B rollouts (`01M2S08RST44V0RFTGRFRSS72Y`).
-- **2026-09-18 02:20Z** Real-dump audit passed (step 2b done): max advantage error 0.0 over 65k
+- **2026-09-18 01:02Z** Real-dump audit passed (step 2b done): max advantage error 0.0 over 65k
   response tokens across steps 1/2/8/16; alignment verified on real dumps. Miles prepare attempt 3
   failed on the tiny spec's own context limit (a MATH train prompt of 1681 tokens > 1536); tiny spec now uses
   4096 context and root v3, prepare attempt 4 launched. Upstream Miles at the pinned revision
@@ -208,14 +208,16 @@ lower; it does not affect the per-token statistics above.
   `--opd-reward-weight-mode`, `--opd-topk-per-position`, in `miles/rollout/on_policy_distillation.py`
   and `loss_hub/opd.py`); step 6 should build on that path rather than a parallel one. The wrapper
   currently pins `log_prob_top_k = 0`.
-- **2026-09-18 02:35Z** Miles prepare passed on attempt 4 (data only; model assets were staged by
+- **2026-09-18 01:05Z** Miles prepare passed on attempt 4 (data only; model assets were staged by
   the earlier attempts). Tiny Qwen3 smoke launched: `01M2S0PHCCAKCY6B4WHWYN257J`. It exercises the
   Qwen3 Megatron profile, the 4-steps-per-rollout schedule, cosine LR, eos alignment and Avg@k eval
   end to end before any paper arm spends GPU time.
-- **2026-09-18 03:05Z** Tiny smoke `01M2S0PHCCAKCY6B4WHWYN257J` exited 2 in 8 s: "Run configuration
+- **2026-09-18 01:12Z** Tiny smoke `01M2S0PHCCAKCY6B4WHWYN257J` exited 2 in 8 s: "Run configuration
   changed; choose a new output.root". Cause: the prepare phase had been launched into the training
   root (v3) and left a completed `workflow.json` there; `docs/miles/opd.md` runs preparation in its
   own root. Relaunched into root v4 as `01M2S132HYR6PX5Z1GNH2VPE3N` (Miles commit b3c895243, same
   image; assets are already staged). Step 5: verifier-DPPO teacher diagnostic finished, results in
   "Step 5 results"; launcher fixed so an empty revision is omitted (OI c5ab6d759). Qwen3-8B
   diagnostic still scoring.
+- **2026-09-18 01:15Z** Log clock corrected: the six entries above from 00:45Z on had been stamped
+  up to two hours ahead of UTC; times now follow the Beaker job timestamps.
