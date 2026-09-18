@@ -78,6 +78,28 @@ def eos_token_ids(generation_config, eos_token_id):
     return [eos_token_id] + [i for i in previous if i != eos_token_id]
 
 
+EOS_REMAP_ENV = "OI_OPD_TEACHER_EOS_REMAP"
+"""Launcher -> rollout hooks: ``"learner_stop_id:teacher_eos_id[,...]"`` (see ``opd_hooks.eos_remap``)."""
+
+
+def teacher_eos_remap(model_path):
+    """``{learner_stop_id: teacher_eos_id}`` for a learner prepared with ``align_eos``: its
+    ``generation_config.json`` lists the teacher's eos first and the learner's own stop id(s) after."""
+    path = Path(model_path) / "generation_config.json"
+    ids = json.loads(path.read_text()).get("eos_token_id", []) if path.is_file() else []
+    ids = [ids] if isinstance(ids, int) else list(ids)
+    if len(ids) < 2:
+        raise InputError(
+            f"model.align_eos_with_teacher: {path} does not list the learner's own stop id after the teacher's"
+        )
+    return {i: ids[0] for i in ids[1:]}
+
+
+def eos_remap_environment(remap):
+    """Encode ``teacher_eos_remap`` for ``opd_hooks.EOS_REMAP_ENV``."""
+    return ",".join(f"{source}:{target}" for source, target in sorted(remap.items()))
+
+
 def align_eos(target, eos_token):
     """Make the prepared learner at ``target`` stop on ``eos_token`` (the teacher's eos) as well."""
     tokenizer = AutoTokenizer.from_pretrained(target)

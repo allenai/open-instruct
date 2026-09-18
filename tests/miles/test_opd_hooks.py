@@ -89,6 +89,75 @@ def test_reward_is_numeric_and_post_process_extracts_the_teacher_scores(monkeypa
         opd_hooks.post_process(SimpleNamespace(reward_key=None), [Sample(tokens=[1, 2], response_length=1)])
 
 
+def test_eos_remap_parses_the_launcher_environment():
+    assert opd_hooks.eos_remap({}) == {}
+    assert opd_hooks.eos_remap({opd_hooks.EOS_REMAP_ENV: "151643:151645"}) == {151643: 151645}
+    assert opd_hooks.eos_remap({opd_hooks.EOS_REMAP_ENV: "3:9,4:9"}) == {3: 9, 4: 9}
+
+
+def test_tokens_for_teacher_remaps_only_a_terminal_learner_stop_id():
+    remap = {3: 9}
+    assert opd_hooks.tokens_for_teacher([1, 2, 3], 2, remap) == ([1, 2, 9], True)
+    # A learner stop id inside the response (not terminal) is an ordinary token.
+    assert opd_hooks.tokens_for_teacher([1, 3, 2], 2, remap) == ([1, 3, 2], False)
+    # Truncated responses end on an ordinary token; no remap without a table.
+    assert opd_hooks.tokens_for_teacher([1, 2, 5], 2, remap) == ([1, 2, 5], False)
+    assert opd_hooks.tokens_for_teacher([1, 2, 3], 2, {}) == ([1, 2, 3], False)
+    assert opd_hooks.tokens_for_teacher([3], 0, remap) == ([3], False)
+
+
+def test_reward_scores_the_terminal_learner_eos_as_the_teacher_eos(monkeypatch, tmp_path):
+    """The learner stopped with its own eos (3); the teacher is asked about its eos (9) at that
+    position, the sample keeps its real tokens, and the score log records the remap."""
+    seen = {}
+
+    async def scores(args, sample, **kwargs):
+        seen["tokens"] = list(sample.tokens)
+        return {"meta_info": {"input_token_logprobs": [[None, 1], [-1.0, 2], [-0.2, 9]]}}
+
+    monkeypatch.delenv("OI_OPD_EOPD_TOP_K", raising=False)
+    monkeypatch.setenv(opd_hooks.EOS_REMAP_ENV, "3:9")
+    monkeypatch.setenv("OI_OPD_OUTPUT", str(tmp_path))
+    monkeypatch.setattr(opd_hooks.on_policy_distillation, "reward_func", scores)
+    monkeypatch.setattr(opd_hooks, "_LIMIT", None)
+    sample = Sample(index=1, tokens=[1, 2, 3], response_length=2, response="a<|endoftext|>")
+    assert asyncio.run(opd_hooks.reward(SimpleNamespace(), sample)) == 0.0
+    assert seen["tokens"] == [1, 2, 9] and sample.tokens == [1, 2, 3]
+    opd_hooks.post_process(SimpleNamespace(reward_key=None), [sample])
+    torch.testing.assert_close(sample.teacher_log_probs, torch.tensor([-1.0, -0.2]))
+    record = json.loads((tmp_path / "teacher-scores.jsonl").read_text().splitlines()[0])
+    assert record["eos_remapped"] is True and record["tokens"] == [1, 2, 3]
+
+    # A teacher answering about the learner's literal eos is still a mismatch.
+    async def literal(args, sample, **kwargs):
+        return {"meta_info": {"input_token_logprobs": [[None, 1], [-1.0, 2], [-21.0, 3]]}}
+
+    monkeypatch.setattr(opd_hooks.on_policy_distillation, "reward_func", literal)
+    with pytest.raises(ValueError, match="positions or IDs"):
+        asyncio.run(opd_hooks.reward(SimpleNamespace(), Sample(index=2, tokens=[1, 2, 3], response_length=2)))
+
+
+def test_eopd_reward_remaps_the_terminal_eos_in_the_scoring_payload(monkeypatch, tmp_path):
+    seen = {}
+
+    async def post(url, payload, **kwargs):
+        seen["ids"] = payload["input_ids"]
+        return {
+            "meta_info": {
+                "input_token_logprobs": [[None, 1], [-1.0, 2], [-0.2, 9]],
+                "input_top_logprobs": [None, [[-0.1, 2], [-2.0, 7]], [[-0.1, 9], [-0.9, 8]]],
+            }
+        }
+
+    _eopd_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv(opd_hooks.EOS_REMAP_ENV, "3:9")
+    monkeypatch.setattr(opd_hooks.on_policy_distillation, "_post_json", post)
+    args = SimpleNamespace(rm_url="http://teacher", opd_teacher_urls=None)
+    sample = Sample(index=1, tokens=[1, 2, 3], response_length=2, response="a<|endoftext|>")
+    assert asyncio.run(opd_hooks.reward(args, sample)) == 0.0
+    assert seen["ids"] == [1, 2, 9] and sample.tokens == [1, 2, 3]
+
+
 TEACHER_TOP_K = {
     "meta_info": {
         "input_token_logprobs": [[None, 1], [-1.0, 2], [-2.0, 3]],

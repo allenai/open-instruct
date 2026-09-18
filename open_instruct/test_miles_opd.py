@@ -378,6 +378,17 @@ def test_code_overlay_fetches_head_before_training(monkeypatch):
     )
 
 
+def test_teacher_eos_remap_reads_the_prepared_generation_config(tmp_path):
+    (tmp_path / "generation_config.json").write_text(json.dumps({"eos_token_id": [151645, 151643]}))
+    remap = opd_prepare.teacher_eos_remap(tmp_path)
+    assert remap == {151643: 151645}
+    assert opd_prepare.eos_remap_environment(remap) == "151643:151645"
+    assert opd_prepare.eos_remap_environment({4: 9, 3: 9}) == "3:9,4:9"
+    (tmp_path / "generation_config.json").write_text(json.dumps({"eos_token_id": 151645}))
+    with pytest.raises(InputError, match="own stop id"):
+        opd_prepare.teacher_eos_remap(tmp_path)
+
+
 def test_align_eos_with_teacher_default_and_validation():
     spec = specs.load(CONFIG)
     assert spec.document["model"]["align_eos_with_teacher"] is False

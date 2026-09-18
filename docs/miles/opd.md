@@ -213,6 +213,15 @@ schema accepts:
   asset gets an `-eos` suffix and its `generation_config.json` keeps `<|endoftext|>` as a
   second stop id), so rollouts stop where the teacher's answers end instead of running on
   after `<|im_end|>` until `<|endoftext|>`, and the special-token identity check passes.
+  The learner still ends most answers with its own `<|endoftext|>`, which the chat-trained
+  teacher never emits after an answer (its log-prob there is around -21 nats, so pure OPD
+  would punish stopping and drive every response to the length cap; arm 2 attempt 2 hit
+  100% truncation by rollout 20 this way). The launcher therefore reads the prepared
+  learner's `generation_config.json` and exports `OI_OPD_TEACHER_EOS_REMAP`
+  (`learner_stop_id:teacher_eos_id`), and the rollout hook scores a *terminal* learner stop
+  id as the teacher's eos: the teacher is asked about `<|im_end|>` at that position, the
+  sample keeps its real tokens, and the `teacher-scores.jsonl` record carries
+  `eos_remapped`. A learner stop id inside a response and truncated responses are untouched.
 - Qwen3 learners use the repository profiles `open_instruct/miles/model_profiles/qwen3-1.7B.py`
   and `qwen3-4B.py`, which pin `--padded-vocab-size 151936`. Without it Megatron pads the
   vocabulary to 152064 under TP2 while mbridge 0.15.1 scatters the unpadded HF embedding, and

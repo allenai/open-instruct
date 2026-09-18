@@ -222,6 +222,15 @@ def execute(spec):
                 "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
                 "CONVERT_KEEP_PP1": "1",
                 **eopd_settings(spec).environment(),
+                **(
+                    {
+                        opd_prepare.EOS_REMAP_ENV: opd_prepare.eos_remap_environment(
+                            opd_prepare.teacher_eos_remap(prepared["model"])
+                        )
+                    }
+                    if spec.document["model"]["align_eos_with_teacher"]
+                    else {}
+                ),
             }
         )
         with (root / "runtime-tests.log").open("w") as stream:

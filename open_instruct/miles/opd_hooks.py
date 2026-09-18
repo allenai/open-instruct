@@ -1,6 +1,7 @@
 """Teacher score validation and task evaluation around upstream sampled-token OPD."""
 
 import asyncio
+import copy
 import json
 import math
 import os
@@ -9,13 +10,40 @@ from pathlib import Path
 import aiohttp
 from miles.rollout import on_policy_distillation, sglang_rollout
 
-from open_instruct.miles import eopd_math, rewards
+from open_instruct.miles import eopd_math, opd_prepare, rewards
 
 _LIMIT = None
 # The teacher's scoring response rides on the sample here (samples are deep-copied per group);
 # `sample.reward` stays the numeric task reward (0.0 under pure OPD) because Miles's rollout
 # metrics round and group by it. `post_process` turns the response into teacher_log_probs.
 TEACHER_RESPONSE_KEY = "opd_teacher_response"
+# ``model.align_eos_with_teacher``: the learner keeps stopping on its own eos (Qwen3-Base:
+# ``<|endoftext|>``) while the teacher ends turns with another token (``<|im_end|>``). A chat
+# teacher gives the learner's eos about -21 nats, so scoring it literally hands every completed
+# response one huge negative advantage on the act of stopping and the learner learns never to
+# stop (arm 2 of the OPD validation program: 100 % truncation by rollout 20). The launcher
+# exports the learner's stop ids -> teacher eos id here, and the terminal token is scored as the
+# teacher's eos: "stop here" is one event with two spellings.
+EOS_REMAP_ENV = opd_prepare.EOS_REMAP_ENV
+EOS_REMAPPED_KEY = "oi_eos_remapped"
+
+
+def eos_remap(environment=None):
+    """``{learner_stop_id: teacher_eos_id}`` from ``OI_OPD_TEACHER_EOS_REMAP`` (``"151643:151645"``)."""
+    value = (os.environ if environment is None else environment).get(EOS_REMAP_ENV, "")
+    remap = {}
+    for item in filter(None, value.split(",")):
+        source, target = item.split(":")
+        remap[int(source)] = int(target)
+    return remap
+
+
+def tokens_for_teacher(tokens, response_length, remap):
+    """The token ids the teacher scores: the response's terminal token remapped if it is a learner
+    stop id, else ``tokens`` unchanged. Returns ``(ids, remapped)``."""
+    if remap and response_length > 0 and tokens[-1] in remap:
+        return [*tokens[:-1], remap[tokens[-1]]], True
+    return list(tokens), False
 
 
 def _eopd():
@@ -23,15 +51,24 @@ def _eopd():
 
 
 async def _score(args, sample, settings, **kwargs):
-    """Teacher scores for the sampled tokens, plus the teacher's top-k per position under EOPD."""
+    """Teacher scores for the sampled tokens (terminal learner eos scored as the teacher's eos, see
+    ``EOS_REMAP_ENV``), plus the teacher's top-k per position under EOPD. Returns
+    ``(response, scored_tokens, eos_remapped)``."""
+    tokens, remapped = tokens_for_teacher(sample.tokens, sample.response_length, eos_remap())
     if not settings.enabled:
-        return await on_policy_distillation.reward_func(args, sample, **kwargs)
-    payload = on_policy_distillation._score_payload(sample.tokens, top_k=settings.top_k)
-    return await on_policy_distillation._post_json(
-        on_policy_distillation._teacher_url_for_sample(args, sample),
-        payload,
-        timeout_secs=getattr(args, "sglang_router_request_timeout_secs", None),
-    )
+        scored = sample
+        if remapped:
+            scored = copy.copy(sample)
+            scored.tokens = tokens
+        response = await on_policy_distillation.reward_func(args, scored, **kwargs)
+    else:
+        payload = on_policy_distillation._score_payload(tokens, top_k=settings.top_k)
+        response = await on_policy_distillation._post_json(
+            on_policy_distillation._teacher_url_for_sample(args, sample),
+            payload,
+            timeout_secs=getattr(args, "sglang_router_request_timeout_secs", None),
+        )
+    return response, tokens, remapped
 
 
 def _top_k(result, sample, settings):
@@ -51,10 +88,11 @@ async def reward(args, sample, **kwargs):
     async with _LIMIT:
         for attempt in range(3):
             try:
-                result = await _score(args, sample, settings, **kwargs)
+                result, scored_tokens, remapped = await _score(args, sample, settings, **kwargs)
                 entries = result["meta_info"]["input_token_logprobs"][1:][-sample.response_length :]
-                if [entry[1] for entry in entries] != sample.tokens[-sample.response_length :]:
+                if [entry[1] for entry in entries] != scored_tokens[-sample.response_length :]:
                     raise ValueError("Teacher scored different token positions or IDs")
+                result[EOS_REMAPPED_KEY] = remapped
                 scores = on_policy_distillation._teacher_sampled_log_probs(result, sample.response_length)
                 if len(scores) != sample.response_length or not all(math.isfinite(x) for x in scores.tolist()):
                     raise ValueError("Teacher scores are missing, misaligned or nonfinite")
@@ -89,6 +127,7 @@ def post_process(args, samples, **kwargs):
                 "response_length": sample.response_length,
                 "teacher_log_probs": values,
                 "response": sample.response,
+                "eos_remapped": bool(response.get(EOS_REMAPPED_KEY, False)),
             }
             if settings.enabled:
                 # The top-k rides to the trainer in train_metadata (the batch's `metadata` list);
