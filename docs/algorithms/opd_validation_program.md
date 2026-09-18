@@ -578,3 +578,17 @@ lower; it does not affect the per-token statistics above.
   Attempt 2 (`01M2SEQX9NMEZ6K13RJ586FZJ0`, rollout ~150/220) keeps running as the buggy
   reference until Kevin says otherwise.
 
+
+### 2026-09-18 22:27Z
+- Kevin asked whether to also replicate the LMSYS post "OPD support in Miles" (2026-07-18). Facts
+  gathered: the post's run is upstream `examples/on_policy_distillation/qwen3_5_35b_selfdistill`
+  (Qwen3.5-35B-A3B base student, teacher = the same model after GRPO on DAPO, public weights
+  `cm00cm/Qwen3.5-35B-A3B-DAPO-RLVR-teacher`, DAPO 16,886/512 split, T 0.6, 24k cap, one 8xH200
+  node at ~124-143 GB/GPU, in-process Megatron teacher via `--opd-type megatron`). It is the same
+  native Miles OPD primitive our wrapper already drives (`--use-opd`, sglang teacher). The post
+  gives no hyperparameters and its pure-OPD number (0.8457 -> 0.8945) disagrees with the README
+  table (0.840 -> 0.852). Recommendation recorded in the conversation: not a validation target
+  now (EOPD paper has hard, independent numbers); a candidate follow-on for the Qwen3.5 MoE
+  campaign once arm 2 lands. Blockers if pursued: wrapper lacks `--opd-type megatron`, and the
+  memory footprint does not fit 8x80 GB H100. Attempt 3 job `01M2V7VG8TSV2TZNJ3H538396P` still
+  queued at 22:04Z.
