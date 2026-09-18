@@ -12,8 +12,11 @@
 # Launch with ./scripts/train/build_image_and_launch.sh so the image carries the
 # current commit; the trace directory is printed at launch and in the job log.
 # When the image cannot be rebuilt locally, set CODE_REF=<pushed branch or commit>:
-# the job then clones that ref of `git remote get-url origin` and runs it on top of
-# the image's environment via PYTHONPATH, so the audit code matches the ref.
+# the job then clones that ref of `git remote get-url origin` and copies its
+# `open_instruct/` package over the image's editable install (`/stage/open_instruct`,
+# the same overlay `scripts/general_agent/terminal/rl/qwen35_math_posthoc_eval.sh`
+# uses), so the code under test matches the ref. A PYTHONPATH overlay is not enough:
+# the image's editable install resolves `open_instruct.*` imports to `/stage` first.
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -23,7 +26,7 @@ SETUP="source configs/beaker_configs/ray_node_setup.sh"
 if [[ -n "$CODE_REF" ]]; then
     ORIGIN_URL=$(git remote get-url origin | sed -E 's#^git@github.com:#https://github.com/#')
     # Plain && here: an unquoted $SETUP expansion yields literal "&&" words for mason to join.
-    SETUP="git clone --depth 1 --branch $CODE_REF $ORIGIN_URL /tmp/oi && cd /tmp/oi && export PYTHONPATH=/tmp/oi && $SETUP"
+    SETUP="git clone --depth 1 --branch $CODE_REF $ORIGIN_URL /tmp/oi && cp -r /tmp/oi/open_instruct/. /stage/open_instruct/ && $SETUP"
 fi
 
 echo "Using Beaker image: $BEAKER_IMAGE"
