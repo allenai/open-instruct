@@ -9,7 +9,7 @@ MODE="${3:?omega or lcb required}"
 shift 3
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export CLUSTERS='-c ai2/holmes'
-export WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
+export WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 export PRIORITY="${PRIORITY:-normal}"
 export GPUS="${GPUS:-4}"
 export NUM_INSTANCES="${NUM_INSTANCES:-$GPUS}" TIMEOUT="${TIMEOUT:-6h}"
