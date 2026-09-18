@@ -117,8 +117,19 @@ is an extension of its OPD path, not a parallel implementation:
   existing contract records; `opd_audit` re-derives the gate from the dumped top-k logprobs and
   checks `FKL_t` on a sample of positions. Metrics per rollout: gated fraction, mean proxy
   entropy, mean FKL, mean top-k mass, plus the existing reverse KL.
-- **Image.** All of this is wrapper code (`open_instruct/miles`), so the light overlay image
-  suffices; no runtime rebuild.
+- **Carrying the top-k data to the loss (checked against upstream `dbbab156`).** `Sample` has no
+  top-k fields, but `sample.train_metadata` already travels to the trainer as the `metadata` list
+  (`train_data_conversion.py`, packaged per DP shard by our runtime patch). The Megatron train step
+  requests a fixed key list from the micro-batch iterator (`megatron_utils/model.py::train_one_step`:
+  tokens, loss_masks, log_probs, advantages, rollout_log_probs, opd_reverse_kl, ...), so the only
+  runtime change is adding `metadata` to that list in `runtime/miles/patches/miles.patch`; the
+  custom loss then reads `teacher_topk_ids`, `teacher_topk_logprobs` and `opd_fkl_gate` from each
+  sample's metadata dict and tensorises them on device (micro-batch size is 1). The debug dump
+  (`debug/train_data/<rollout>_0.pt`) carries `metadata` too, so `opd_audit` can re-derive the
+  gate and check the FKL term offline.
+- **Image.** The wrapper code is `open_instruct/miles`, but the one-line key-list change lives in
+  the runtime patch, so the image must be rebuilt through `runtime/miles/Dockerfile`'s
+  `runtime-base` stage (which re-applies the patch); still a local build, no new base image.
 - **Paper check (resolved 2026-09-18).** Eq. 9-10 of arXiv 2603.07079: `L_EOPD = L_OPD +
   alpha * 1[H_t > tau] * L_FKL`, a hard gate, with `L_FKL = sum_{x in S_k^t} q~(x) log(q~(x) /
   p_theta(x))` summed over the **teacher's** top-k `S_k^t`, the teacher renormalised over that set
