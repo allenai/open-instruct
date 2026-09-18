@@ -168,6 +168,8 @@ rollout N (N+1 updates), so `hf-9` pairs with `step_10`.
 | 4B Miles v5 | hf-69 | 77.0 | 50.0 | 56.7 | 91.0 | `01M2RBHY5BRYCQX148D6HZQFKC` |
 | 4B sync (Open Instruct) | step 80 | 78.0 | 50.0 | 60.0 | 90.0 | `01M2NKKMTK0F5PNQXQM9Y7XNN6` |
 | 4B Miles v5 | hf-79 | 79.0 | 56.7 | 50.0 | 90.0 | `01M2RJ7EMESQS8CDJ3W0NVC990` |
+| 4B sync (Open Instruct) | step 90 | 77.0 | 43.3 | 56.7 | 90.0 | `01M2NMB2XDVJF0T5MHWXFHYZH7` |
+| 4B Miles v5 | hf-89 | 78.0 | 46.7 | 63.3 | 90.0 | `01M2RYZ320TBZWY8C89W92D84E` |
 
 Both frameworks land in the same band: 2B DAPO 44-53 and 4B DAPO 74-78 from step 10
 on, with AIME/BRUMO differences within the noise of 30-question sets. The 2B Miles hf-9
@@ -177,8 +179,8 @@ by rollout 10, 4B flat ~0.07). The 2B Miles run finished all 100 rollouts (three
 windows, two auto-resumes) and every one of its ten exports sits in the Open Instruct sync band,
 ending at hf-99 DAPO 49.0 vs sync step 100 48.0. Its post-training `opd_audit` step then crashed
 (the dumps carry `rollout_log_probs`, not `log_probs`, under `use_rollout_logprobs = true`; fixed on
-`robertb/miles-qwen35-opd`) so the job exited 1 after training; the exports were unaffected. Remaining
-4B exports (hf-89 onward) are evaluated as the run produces them; the Miles output roots are
+`robertb/miles-qwen35-opd`) so the job exited 1 after training; the exports were unaffected. The 4B
+hf-89 export sits on the sync step-90 band (DAPO 78.0 vs 77.0); hf-99 is evaluated when the run produces it; the Miles output roots are
 `.../deletable_checkpoint/kevinfarhat/miles-opd/runs/qwen35-{2b-opd-from-verifier-2b,4b-opd-from-verifier-9b}-math-v5/hf-N`.
 
 ### What the reruns show
