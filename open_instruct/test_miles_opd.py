@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import launch, opd_config, opd_launch, opd_runtime, rewards, specs
+from open_instruct.miles import launch, opd_config, opd_launch, opd_prepare, opd_runtime, rewards, specs
 from open_instruct.miles.errors import InputError
 
 CONFIG = Path(__file__).resolve().parents[1] / "configs/miles/opd/qwen35-4b-tiny.toml"
@@ -347,3 +347,19 @@ def test_code_overlay_fetches_head_before_training(monkeypatch):
     assert command.index("cp -r /tmp/oi-overlay/open_instruct/.") < command.index(
         "python -m open_instruct.miles train"
     )
+
+
+def test_align_eos_with_teacher_default_and_validation():
+    spec = specs.load(CONFIG)
+    assert spec.document["model"]["align_eos_with_teacher"] is False
+    with pytest.raises(InputError, match="align_eos_with_teacher"):
+        specs.load(CONFIG, ['model.align_eos_with_teacher="yes"'])
+    assert (
+        specs.load(CONFIG, ["model.align_eos_with_teacher=true"]).document["model"]["align_eos_with_teacher"] is True
+    )
+
+
+def test_eos_token_ids_puts_teacher_eos_first_and_keeps_learner_eos():
+    assert opd_prepare.eos_token_ids({"eos_token_id": 151643}, 151645) == [151645, 151643]
+    assert opd_prepare.eos_token_ids({"eos_token_id": [151645, 151643]}, 151645) == [151645, 151643]
+    assert opd_prepare.eos_token_ids({}, 7) == [7]

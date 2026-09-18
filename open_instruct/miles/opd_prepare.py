@@ -70,6 +70,27 @@ def rewrite_text_keys(original, target):
     return weight_map
 
 
+def eos_token_ids(generation_config, eos_token_id):
+    """``eos_token_id`` list for a generation config after adding the teacher's eos: the new id first,
+    then the learner's original id(s), so the engine still stops on the learner's own eos."""
+    previous = generation_config.get("eos_token_id", [])
+    previous = [previous] if isinstance(previous, int) else list(previous)
+    return [eos_token_id] + [i for i in previous if i != eos_token_id]
+
+
+def align_eos(target, eos_token):
+    """Make the prepared learner at ``target`` stop on ``eos_token`` (the teacher's eos) as well."""
+    tokenizer = AutoTokenizer.from_pretrained(target)
+    if eos_token not in tokenizer.get_vocab():
+        raise InputError(f"model.align_eos_with_teacher: {eos_token!r} is not in the learner vocabulary")
+    tokenizer.eos_token = eos_token
+    tokenizer.save_pretrained(target)
+    path = Path(target) / "generation_config.json"
+    generation_config = json.loads(path.read_text()) if path.is_file() else {}
+    generation_config["eos_token_id"] = eos_token_ids(generation_config, tokenizer.convert_tokens_to_ids(eos_token))
+    workflow.write_json(path, generation_config)
+
+
 def prepare(spec):
     assets = Path(spec.output["assets"])
     assets.mkdir(parents=True, exist_ok=True)
@@ -77,9 +98,13 @@ def prepare(spec):
         fcntl.flock(lock, fcntl.LOCK_EX)
         identities = {}
         paths = {}
-        for role in ("model", "teacher"):
+        # The teacher goes first so the learner can adopt its eos token.
+        for role in ("teacher", "model"):
             item = spec.document[role]
             original = None
+            align_eos_token = None
+            if role == "model" and spec.document["model"]["align_eos_with_teacher"]:
+                align_eos_token = AutoTokenizer.from_pretrained(paths["teacher"]).eos_token
             if opd_config.is_local(item["source"]):
                 original = Path(item["source"])
                 if not (original / "config.json").is_file():
@@ -98,6 +123,9 @@ def prepare(spec):
                 rewrite = False
                 identity = {"source": item["source"], "revision": item["revision"], "thinking": False}
                 target = assets / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}"
+            if align_eos_token is not None:
+                identity["eos_token"] = align_eos_token
+                target = target.with_name(target.name + "-eos")
             marker = target / "opd-source.json"
             if marker.exists():
                 if json.loads(marker.read_text()) != identity:
@@ -132,6 +160,8 @@ def prepare(spec):
                 template = tokenizer.get_chat_template()
                 tokenizer.chat_template = "{% set enable_thinking = false %}\n" + template
                 tokenizer.save_pretrained(target)
+                if align_eos_token is not None:
+                    align_eos(target, align_eos_token)
                 workflow.write_json(marker, identity)
             tokenizer = AutoTokenizer.from_pretrained(target)
             identities[role] = {

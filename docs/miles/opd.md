@@ -174,6 +174,11 @@ schema accepts:
   exercised prototype used `false`.
 - `tracking.wandb_mode` (`offline`, `online`, `disabled`), `tracking.wandb_project`
   and `tracking.wandb_entity`; `online` requires `launch.secrets.WANDB_API_KEY`.
+  `model.align_eos_with_teacher = true` (set in the `eopd-opd-qwen3-*` specs) gives the
+  Qwen3-Base learner the teacher's `<|im_end|>` as its eos during preparation (the prepared
+  asset gets an `-eos` suffix and its `generation_config.json` keeps `<|endoftext|>` as a
+  second stop id), so rollouts stop where the teacher's answers end instead of running on
+  after `<|im_end|>` until `<|endoftext|>`, and the special-token identity check passes.
 
 ## Qwen prototype limits
 

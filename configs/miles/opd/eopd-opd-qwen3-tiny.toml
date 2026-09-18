@@ -9,6 +9,7 @@ name = "eopd-opd-qwen3-tiny"
 
 [model]
 source = "Qwen/Qwen3-1.7B-Base"
+align_eos_with_teacher = true
 
 [teacher]
 source = "Qwen/Qwen3-8B"

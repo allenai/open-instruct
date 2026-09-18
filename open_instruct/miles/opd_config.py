@@ -31,7 +31,10 @@ ARCHITECTURES = {
 LR_DECAY_STYLES = ("constant", "cosine", "linear")
 WANDB_MODES = ("offline", "online", "disabled")
 DEFAULTS = {
-    "model": {"source": "Qwen/Qwen3.5-4B", "revision": "", "architecture": ""},
+    # align_eos_with_teacher: give a base-model learner the teacher's end-of-turn token as its
+    # eos (Qwen3-Base stops on <|endoftext|>, Qwen3-8B on <|im_end|>) so rollouts stop where the
+    # teacher's answers end and the special-token identity check passes; the vocabulary must match.
+    "model": {"source": "Qwen/Qwen3.5-4B", "revision": "", "architecture": "", "align_eos_with_teacher": False},
     "teacher": {
         "source": "Qwen/Qwen3.5-9B",
         "revision": "",
@@ -185,6 +188,7 @@ class OPDRunSpec:
                 raise InputError(f"{section}.gpus must be a multiple of {section}.tensor_parallel_size")
         validation.choice(document["training"]["phase"], "training.phase", ("prepare", "train"))
         validation.boolean(document["training"]["resume"], "training.resume")
+        validation.boolean(document["model"]["align_eos_with_teacher"], "model.align_eos_with_teacher")
         validation.boolean(document["distillation"]["use_rollout_logprobs"], "distillation.use_rollout_logprobs")
         for section, key in (
             ("distillation", "kl_coef"),
