@@ -94,4 +94,7 @@ uv run python mason.py \
     --rollouts_save_path "$TRACE_DIR" \
     --push_to_hub false \
     \&\& python -m open_instruct.opd_trace_audit --trace_dir "$TRACE_DIR" \
-    --step 1 --step 2 --step 8 --step 16 --kl_coef 1.0 --output "$TRACE_DIR/audit.json"
+    --step 1 --step 2 --step 8 --step 16 --kl_coef 1.0 --output "$TRACE_DIR/audit.json" \
+    \&\& true
+# The trailing `true` absorbs the flags mason appends to the end of the command line
+# (--hf_entity, --output_dir, ...), which would otherwise reach the audit tool.
