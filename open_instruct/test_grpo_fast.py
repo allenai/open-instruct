@@ -179,7 +179,13 @@ class TestGrpoFastBase(unittest.TestCase):
         return self.create_mock_result(request.index, request.prompt_id, num_samples_per_prompt)
 
     def create_mock_result(
-        self, index: int, prompt_id: str, num_samples_per_prompt=1, reward_scores=None, model_step: int | None = None
+        self,
+        index: int,
+        prompt_id: str,
+        num_samples_per_prompt=1,
+        reward_scores=None,
+        model_step: int | None = None,
+        batch_index: int | None = None,
     ):
         """Create a mock GenerationResult."""
         total_responses = num_samples_per_prompt
@@ -208,6 +214,7 @@ class TestGrpoFastBase(unittest.TestCase):
             reward_scores=reward_scores,
             reward_metrics={"time/reward": 0.0},
             model_step=model_step,
+            batch_index=batch_index,
         )
 
     def create_mock_tokenizer_and_reward_fn(self):
@@ -598,6 +605,135 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(reward_metrics["stale_results_dropped"], 1.0)
         self.assertEqual(reward_metrics["model_step_min"], 8.0)
         self.assertEqual(reward_metrics["model_step_max"], 10.0)
+
+    def test_fixed_prompt_batches_consume_only_their_batch_and_park_the_rest(self):
+        """With ``batch_index`` set, a batch is exactly the prompt set queued for it, whatever finished first."""
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=8)
+        self._ray_queues.append(inference_results_Q)
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(4)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        # Batch 0 is prompts {0, 1}, batch 1 is prompts {2, 3}. Prompt 1 (the "long response")
+        # finishes last and is far older than the age limit that would normally drop it.
+        inference_results_Q.put(self.create_mock_result(2, "0_2", model_step=3, batch_index=1))
+        inference_results_Q.put(self.create_mock_result(0, "0_0", model_step=0, batch_index=0))
+        inference_results_Q.put(self.create_mock_result(3, "0_3", model_step=3, batch_index=1))
+        inference_results_Q.put(self.create_mock_result(1, "0_1", model_step=0, batch_index=0))
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+        mock_model_dims = self.create_llama7b_model_dims()
+        pending: dict[int, list[GenerationResult]] = {}
+
+        combined_result, batch, reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=2,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            training_step=8,
+            batch_index=0,
+            pending_results=pending,
+        )
+        self.assertEqual(sorted(batch.indices), [0, 1])
+        self.assertEqual(len(combined_result.responses), 2)
+        self.assertEqual(reward_metrics["stale_results_dropped"], 0.0)
+        self.assertEqual(reward_metrics["results_parked_for_later_batches"], 2.0)
+        self.assertEqual(reward_metrics["model_step_max"], 0.0)
+        self.assertEqual(sorted(r.index for r in pending[1]), [2, 3])
+        self.assertTrue(inference_results_Q.empty())
+
+        # The next step is served from the parked results without touching the queue.
+        _, batch, reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=2,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            training_step=9,
+            batch_index=1,
+            pending_results=pending,
+        )
+        self.assertEqual(sorted(batch.indices), [2, 3])
+        self.assertEqual(reward_metrics["results_parked_for_later_batches"], 0.0)
+        self.assertEqual(pending, {})
+
+    def test_fixed_prompt_batches_finish_a_batch_from_parked_and_queued_results(self):
+        """A batch whose results are split between the parking buffer and the queue is still completed."""
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=8)
+        self._ray_queues.append(inference_results_Q)
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(2)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        pending = {5: [self.create_mock_result(0, "0_0", batch_index=5)]}
+        inference_results_Q.put(self.create_mock_result(1, "0_1", batch_index=5))
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+        _, batch, _, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=2,
+            model_dims=self.create_llama7b_model_dims(),
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            batch_index=5,
+            pending_results=pending,
+        )
+        self.assertEqual(sorted(batch.indices), [0, 1])
+        self.assertEqual(pending, {})
+
+    def test_add_prompt_to_generator_tags_the_batch_index(self):
+        prompt_Q = ray_queue.Queue(maxsize=2)
+        self._ray_queues.append(prompt_Q)
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(1)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+
+        data_loader_lib.add_prompt_to_generator(
+            mock_dataset[0],
+            0,
+            prompt_Q,
+            mock_generation_config,
+            is_eval=False,
+            base_env_config=EnvConfig(),
+            batch_index=7,
+        )
+        data_loader_lib.add_prompt_to_generator(
+            mock_dataset[0], 0, prompt_Q, mock_generation_config, is_eval=False, base_env_config=EnvConfig()
+        )
+        self.assertEqual(prompt_Q.get().batch_index, 7)
+        self.assertIsNone(prompt_Q.get().batch_index)
+
+    def test_fixed_prompt_batches_config_validation(self):
+        base = dict(
+            max_prompt_token_length=8,
+            response_length=8,
+            pack_length=16,
+            num_samples_per_prompt_rollout=2,
+            filter_zero_std_samples=False,
+        )
+        data_loader_lib.StreamingDataLoaderConfig(**base, fixed_prompt_batches=True, async_steps=4)
+        with self.assertRaisesRegex(ValueError, "active_sampling"):
+            data_loader_lib.StreamingDataLoaderConfig(
+                **(base | {"filter_zero_std_samples": True}),
+                fixed_prompt_batches=True,
+                active_sampling=True,
+                async_steps=4,
+            )
+        with self.assertRaisesRegex(ValueError, "synchronous_rollouts"):
+            data_loader_lib.StreamingDataLoaderConfig(
+                **base, fixed_prompt_batches=True, synchronous_rollouts=True, async_steps=1
+            )
 
     @unittest.skip("Timing-sensitive test that is flaky in CI environments")
     def test_accumulate_waits_for_all_engines(self):

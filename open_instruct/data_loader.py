@@ -16,6 +16,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -576,6 +577,28 @@ class StreamingDataLoaderConfig:
     Requires ``async_steps=1``, ``inflight_updates=False``, no zero-std filtering or active
     sampling (dropped prompts are not replenished in this mode), and DeepSpeed ZeRO-3.
     """
+    fixed_prompt_batches: bool = False
+    """Form each training batch from the prompt set queued for that step, not from whatever
+    finishes first.
+
+    By default the data-preparation actor takes the first ``num_unique_prompts_rollout``
+    results that come back from the generators, whatever prompts they belong to, and drops
+    results older than ``async_steps`` weight updates. Under a pipelined generator that
+    orders batches by response length (short responses finish first) and discards the long
+    tail as stale. For losses whose per-token advantages are not group-centered (pure
+    on-policy distillation) that composition steers the update.
+
+    With this flag every prompt is tagged with the training step it was queued for,
+    ``async_steps`` such batches are in flight, and step ``s`` waits for *all* results of
+    batch ``s`` (results of later batches that arrive early are parked, not consumed; nothing
+    is dropped for age). Batch composition is then a uniform random prompt set regardless of
+    response length, while the generators keep working on the following batches. Staleness
+    of up to ``async_steps`` weight versions remains and is handled by the importance ratio
+    between the stored rollout log-probs and the current policy, as in any async run.
+    Incompatible with ``active_sampling`` (which refills a batch from whatever finishes next)
+    and redundant with ``synchronous_rollouts`` (one batch in flight, held for the on-policy
+    weights, is already a fixed prompt set).
+    """
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -750,6 +773,17 @@ class StreamingDataLoaderConfig:
                 raise ValueError(
                     "`synchronous_rollouts` does not replenish dropped prompts, so it requires "
                     "`active_sampling=False`, `filter_zero_std_samples=False` and no `no_resampling_pass_rate`."
+                )
+        if self.fixed_prompt_batches:
+            if self.active_sampling:
+                raise ValueError(
+                    "`fixed_prompt_batches` forms each batch from the prompt set queued for that step, so it cannot "
+                    "refill a batch the way `active_sampling` does; set `active_sampling=False`."
+                )
+            if self.synchronous_rollouts:
+                raise ValueError(
+                    "`synchronous_rollouts` already trains each step on exactly the prompt set queued for it; "
+                    "`fixed_prompt_batches` is only meaningful with `async_steps>1` and `synchronous_rollouts=False`."
                 )
         if not 0.0 <= self.mask_non_submitting_completions_percent < 1.0:
             raise ValueError("`mask_non_submitting_completions_percent` must be in [0.0, 1.0).")
@@ -1002,6 +1036,7 @@ def add_prompt_to_generator(
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
     image_prewarm_actors: list[ray.actor.ActorHandle] | None = None,
+    batch_index: int | None = None,
 ) -> None:
     index = int(example["index"])
 
@@ -1021,6 +1056,7 @@ def add_prompt_to_generator(
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
             ground_truth=ground_truth,
+            batch_index=batch_index,
         )
     )
 
@@ -1051,10 +1087,20 @@ def accumulate_inference_batches(
     save_filtered_rollouts: bool = False,
     filtered_rollouts_save_path: str | None = None,
     run_name: str | None = None,
+    batch_index: int | None = None,
+    pending_results: dict[int, list[data_types.GenerationResult]] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
 ):
+    """Collect ``num_prompts`` prompt results into one training batch.
+
+    With ``batch_index`` set (``fixed_prompt_batches``), only results tagged with that batch
+    are consumed: results of other batches are parked in ``pending_results`` (keyed by their
+    batch index) for the call that owns them, and previously parked results for
+    ``batch_index`` are consumed before reading the queue. Nothing is dropped for age in this
+    mode. Without it, the first ``num_prompts`` results to arrive form the batch.
+    """
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
 
@@ -1062,6 +1108,15 @@ def accumulate_inference_batches(
         assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
+
+    if batch_index is not None:
+        assert pending_results is not None, "batch_index requires the pending_results buffer"
+        assert not replenish_prompts and not active_sampling, (
+            "fixed prompt batches are refilled one batch at a time by the caller, not per result"
+        )
+        assert max_result_age_steps is None, "fixed prompt batches never drop results for age"
+    parked_for_this_batch = deque(pending_results.pop(batch_index, [])) if batch_index is not None else deque()
+    results_parked_for_later_batches = 0
 
     results = []
     all_queries = []
@@ -1097,22 +1152,38 @@ def accumulate_inference_batches(
         logger.info(
             f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
         )
-        try:
-            result = inference_results_Q.get(timeout=timeout)
-        except Empty:
-            if requeue_on_timeout and collected_results:
-                logger.info(
-                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
-                )
-                for r in collected_results:
-                    inference_results_Q.put(r)
-            raise
+        if parked_for_this_batch:
+            result = parked_for_this_batch.popleft()
+        else:
+            try:
+                result = inference_results_Q.get(timeout=timeout)
+            except Empty:
+                if requeue_on_timeout and collected_results:
+                    logger.info(
+                        f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                    )
+                    for r in collected_results:
+                        inference_results_Q.put(r)
+                raise
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )
 
         if isinstance(result, data_types.ShutdownSentinel):
             return result, None, None, None
+
+        if batch_index is not None and result.batch_index != batch_index:
+            assert result.batch_index is not None, (
+                f"fixed prompt batches: result for index={result.index} prompt_id={result.prompt_id} has no batch_index"
+            )
+            assert pending_results is not None
+            pending_results.setdefault(result.batch_index, []).append(result)
+            results_parked_for_later_batches += 1
+            logger.info(
+                f"[accumulate_inference_batches] Parking result for batch {result.batch_index} "
+                f"(index={result.index}) while assembling batch {batch_index}"
+            )
+            continue
 
         if (
             max_result_age_steps is not None
@@ -1365,6 +1436,8 @@ def accumulate_inference_batches(
 
     combined_reward_metrics = combine_reward_metrics(all_reward_metrics)
     combined_reward_metrics["stale_results_dropped"] = float(stale_results_dropped)
+    if batch_index is not None:
+        combined_reward_metrics["results_parked_for_later_batches"] = float(results_parked_for_later_batches)
     if all_model_steps:
         model_steps_array = np.array(all_model_steps, dtype=float)
         combined_reward_metrics["model_step_min"] = float(model_steps_array.min())
@@ -1609,6 +1682,8 @@ class DataPreparationActor:
         routing) recover each packed token's source dataset."""
         self.current_prepared_step = -1
         self._last_consumed_step = -1
+        self._pending_results: dict[int, list[data_types.GenerationResult]] = {}
+        """``fixed_prompt_batches``: results that arrived before their batch's turn, by batch index."""
         self.lock = threading.Lock()
         self.training_step = 0
         self.total_samples_written = 0
@@ -1650,17 +1725,9 @@ class DataPreparationActor:
             f"queueing {self.global_batch_size} on-policy prompts"
         )
 
-    def _data_preparation_loop(self):
-        logger.info("[DataPreparationActor] Starting _data_preparation_loop")
-
-        should_save_rollout_metadata = self.config.save_traces or self.config.save_filtered_rollouts
-        if should_save_rollout_metadata and self.config.rollouts_save_path and not self.metadata_saved:
-            save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
-            self.metadata_saved = True
-
-        num_initial_prompts = self.config.async_steps * self.global_batch_size
-        logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        for _ in range(num_initial_prompts):
+    def _queue_prompt_batch(self, batch_index: int | None) -> None:
+        """Queue one training batch of prompts, tagged with ``batch_index`` (``fixed_prompt_batches``)."""
+        for _ in range(self.global_batch_size):
             add_prompt_to_generator(
                 next(self.iter_dataloader),
                 self.iter_dataloader._epoch,
@@ -1670,7 +1737,22 @@ class DataPreparationActor:
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
                 image_prewarm_actors=self.image_prewarm_actors,
+                batch_index=batch_index,
             )
+
+    def _data_preparation_loop(self):
+        logger.info("[DataPreparationActor] Starting _data_preparation_loop")
+
+        should_save_rollout_metadata = self.config.save_traces or self.config.save_filtered_rollouts
+        if should_save_rollout_metadata and self.config.rollouts_save_path and not self.metadata_saved:
+            save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
+            self.metadata_saved = True
+
+        fixed_batches = self.config.fixed_prompt_batches
+        num_initial_prompts = self.config.async_steps * self.global_batch_size
+        logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
+        for offset in range(self.config.async_steps):
+            self._queue_prompt_batch(self.training_step + offset if fixed_batches else None)
 
         for step in range(self.training_step, self.num_training_steps):
             generation_idle_wait_start_time = time.perf_counter()
@@ -1685,17 +1767,7 @@ class DataPreparationActor:
                 # batch has finished, so its rollouts are sampled from exactly the policy that
                 # trainer step ``step + 1`` will update.
                 self._wait_for_on_policy_weights(step)
-                for _ in range(self.global_batch_size):
-                    add_prompt_to_generator(
-                        next(self.iter_dataloader),
-                        self.iter_dataloader._epoch,
-                        self.param_prompt_Q,
-                        self.generation_config,
-                        is_eval=False,
-                        base_env_config=self.base_env_config,
-                        ground_truth_overrides=self.ground_truth_overrides,
-                        image_prewarm_actors=self.image_prewarm_actors,
-                    )
+                self._queue_prompt_batch(None)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
@@ -1711,20 +1783,22 @@ class DataPreparationActor:
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
-                replenish_prompts=not self.config.synchronous_rollouts,
+                replenish_prompts=not (self.config.synchronous_rollouts or fixed_batches),
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
-                max_result_age_steps=self.config.async_steps,
+                max_result_age_steps=None if fixed_batches else self.config.async_steps,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
                 image_prewarm_actors=self.image_prewarm_actors,
                 save_filtered_rollouts=self.config.save_filtered_rollouts,
                 filtered_rollouts_save_path=os.path.join(self.config.rollouts_save_path, "filtered"),
                 run_name=self.run_name,
+                batch_index=step if fixed_batches else None,
+                pending_results=self._pending_results if fixed_batches else None,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1732,6 +1806,11 @@ class DataPreparationActor:
 
             if isinstance(result, data_types.ShutdownSentinel):
                 return
+
+            if fixed_batches and step + self.config.async_steps < self.num_training_steps:
+                # Batch ``step`` is consumed: refill the pipeline with the batch for step
+                # ``step + async_steps`` so ``async_steps`` batches stay in flight.
+                self._queue_prompt_batch(step + self.config.async_steps)
 
             if result is None:
                 empty_data = [

@@ -3790,6 +3790,18 @@ def main(
         # as an initial sync, which would leave the on-policy gate waiting forever.
         raise ValueError("`synchronous_rollouts` is only supported with `deepspeed_stage=3`.")
 
+    if (
+        args.opd_teacher_model_name_or_path is not None
+        and args.opd_pure
+        and streaming_config.async_steps > 1
+        and not streaming_config.fixed_prompt_batches
+    ):
+        logger.warning(
+            "Pure OPD with `async_steps>1` forms each batch from the first responses to finish and drops the long "
+            "tail as stale, so batches are length-sorted and the per-token (not group-centered) OPD advantages "
+            "steer the update. Set `--fixed_prompt_batches True` to train every step on the prompt set queued "
+            "for it, or run strictly on-policy with `--async_steps 1 --synchronous_rollouts True`."
+        )
     if args.opd_teacher_model_name_or_path is not None and args.opd_pure and streaming_config.filter_zero_std_samples:
         logger.warning(
             "Pure OPD is enabled but `filter_zero_std_samples=True` (implied by `active_sampling`): groups whose "

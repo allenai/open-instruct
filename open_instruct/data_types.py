@@ -60,6 +60,9 @@ class GenerationResult:
     reward_metrics: dict[str, Any] | None = None
     model_step: int | None = None
     model_steps: list[int | None] | None = None
+    batch_index: int | None = None
+    """Index of the fixed prompt batch this prompt belongs to (``fixed_prompt_batches``); ``None``
+    when batches are formed from whatever finishes first."""
 
 
 @dataclass
@@ -100,6 +103,10 @@ class PromptRequest:
     ground_truth: Any = None
     """Optional ground truth override (e.g. from evolving rubrics). When set, the vLLM
     engine uses this instead of looking up the ground truth from the dataset."""
+    batch_index: int | None = None
+    """Index of the fixed prompt batch this prompt belongs to (``fixed_prompt_batches``). The
+    generator echoes it on the ``GenerationResult`` so the data loader can assemble each
+    training batch from exactly the prompt set it queued for that step."""
 
 
 @dataclass

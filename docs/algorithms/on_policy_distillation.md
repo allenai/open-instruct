@@ -181,13 +181,19 @@ prefer a smaller `opd_kl_coef` (0.25–0.5) and/or keep the environment reward
   hybrid-attention models, the teacher must also share the linear-attention conv-kernel
   configuration (true for same-family checkpoints), since the FLA CP contexts are built
   from the policy's config.
-- **Run OPD strictly on-policy** (`--async_steps 1 --inflight_updates false
-  --synchronous_rollouts true`). Under `async_steps>1` the trainer consumes the
-  first-finished responses, so batches are length-sorted and the long tail is dropped as
-  stale; pure-OPD advantages are per-token and not group-centered, so batch composition
-  steers the update directly. On the Qwen3.5 math runs this collapsed the 2B student
-  (vLLM-vs-trainer reverse KL 0.01-0.04 and 4-8% of tokens DPPO-masked, vs 1e-4 and 0.003%
-  in sync mode). See [qwen35_math_opd_sync_rerun.md](qwen35_math_opd_sync_rerun.md) and
+- **Do not let batch composition follow response length.** By default, under
+  `async_steps>1`, the trainer consumes the first-finished responses, so batches are
+  length-sorted and the long tail is dropped as stale; pure-OPD advantages are per-token and
+  not group-centered, so batch composition steers the update directly. On the Qwen3.5 math
+  runs this collapsed the 2B student (vLLM-vs-trainer reverse KL 0.01-0.04 and 4-8% of tokens
+  DPPO-masked, vs 1e-4 and 0.003% in sync mode). Two fixes: run strictly on-policy
+  (`--async_steps 1 --inflight_updates false --synchronous_rollouts true`), or keep the
+  pipeline and set `--fixed_prompt_batches true`, which trains every step on exactly the
+  prompt set queued for it (early results of later batches are parked, nothing is dropped
+  for age) while the generators keep working on the next `async_steps` batches; staleness
+  is then handled by the rollout-logprob importance ratio like any async run. The trainer
+  warns when pure OPD runs with `async_steps>1` and neither. See
+  [qwen35_math_opd_sync_rerun.md](qwen35_math_opd_sync_rerun.md) and
   [opd_validation_program.md](opd_validation_program.md).
 - The student side of the reverse KL is the rollout engine's logprob (`--use_vllm_logprobs`),
   the teacher side is the trainer's fp32 forward. In sync mode the engine-vs-trainer gap is

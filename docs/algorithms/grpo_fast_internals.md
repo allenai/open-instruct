@@ -196,6 +196,18 @@ nearly always compute-bound.
 `async_steps × num_unique_prompts_rollout` unique examples to avoid repeating prompts
 within the pipeline buffer.
 
+**Batch composition.** By default a training batch is the first
+`num_unique_prompts_rollout` results to come back, whatever prompts they belong to; a
+result whose generating weights are more than `async_steps` updates old is dropped and its
+prompt slot refilled. Because short responses finish first, batches are ordered by response
+length and the long tail is the part that goes stale. Group-centered advantages (GRPO) are
+largely insensitive to this; per-token advantages that are not centered (pure on-policy
+distillation) are not. `--fixed_prompt_batches` instead tags every prompt with the step it
+was queued for, keeps `async_steps` such batches in flight, and has step `s` wait for all
+results of batch `s`, parking early results of later batches (`results_parked_for_later_batches`)
+and never dropping for age. Each consumed batch is replaced by the batch for step
+`s + async_steps`. Incompatible with `active_sampling`; redundant with `synchronous_rollouts`.
+
 ---
 
 ## 5. Weight Sync Mechanism
@@ -502,6 +514,7 @@ From `GRPOExperimentConfig` (grpo_utils.py) and `StreamingConfig` (data_loader.p
 | `--num_unique_prompts_rollout` | 16 | Unique prompts per generation batch |
 | `--num_samples_per_prompt_rollout` | 4 | Completions per prompt |
 | `--async_steps` | 8 | Pipeline depth (steps DataPrep works ahead) |
+| `--fixed_prompt_batches` | False | Train step `s` on exactly the prompt set queued for it (see §4), instead of the first results to finish |
 | `--response_length` | 256 | Max tokens per response |
 | `--pack_length` | 512 | Max tokens in a packed training sequence |
 | `--temperature` | 0.7 | vLLM sampling temperature |
