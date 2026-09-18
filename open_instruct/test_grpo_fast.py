@@ -601,7 +601,9 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         self.assertEqual(batch.indices, [1, 2])
         self.assertEqual(len(combined_result.responses), num_prompts)
-        self.assertEqual(prompt_Q.qsize(), 1)
+        # Every result taken off the queue frees one generator slot: the dropped result and the
+        # two consumed ones are each replaced by a fresh prompt.
+        self.assertEqual(prompt_Q.qsize(), 3)
         self.assertEqual(reward_metrics["stale_results_dropped"], 1.0)
         self.assertEqual(reward_metrics["model_step_min"], 8.0)
         self.assertEqual(reward_metrics["model_step_max"], 10.0)
