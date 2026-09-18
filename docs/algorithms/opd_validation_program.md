@@ -290,5 +290,5 @@ lower; it does not affect the per-token statistics above.
   in-image runtime tests 13 passed, 1 failed (`test_eopd_post_process_stores_the_top_k_for_training`
   asserted exact equality on float32-rounded log-probs; `tests/miles/test_opd_hooks.py` imports
   Miles and cannot be collected on the Mac, so the GPU job was its first run). Test fixed (Miles
-  c098412e0, tolerance compare); image rebuilding and smoke #5 launching into root v7. The
+  c098412e0, tolerance compare); smoke #5 launched into root v7 as `01M2S3K7CNWARHB1VEPHTYXCFW` (image `01M2S3K0X8R43DJTJFEFEQBY87`). The
   `Sample` dataclass in the image has both `metadata` and `train_metadata`, as the EOPD path assumes.
