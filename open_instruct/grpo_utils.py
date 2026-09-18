@@ -1199,6 +1199,30 @@ def combine_opd_teacher_logprobs(
     return torch.where(response_mask, combined, torch.zeros_like(combined))
 
 
+def validate_opd_logprobs(
+    behavior_logprobs: torch.Tensor, teacher_logprobs: torch.Tensor, response_mask: torch.Tensor
+) -> None:
+    """Fail loudly when a response-token logprob feeding the OPD advantage is unusable.
+
+    ``mask_logprobs`` maps NaN to ``INVALID_LOGPROB`` (+1.0) so masked positions are
+    harmless downstream, but a NaN *inside* the response mask would silently become a
+    large positive advantage (``+1 - log π_teacher``). Call this on the *raw* rollout
+    logprobs before masking. Positive logprobs (beyond bf16 rounding) are rejected too.
+
+    Raises:
+        ValueError: with the count of offending tokens.
+    """
+    response_mask = response_mask.bool()
+    bad_behavior = response_mask & (~torch.isfinite(behavior_logprobs) | (behavior_logprobs > 1e-3))
+    bad_teacher = response_mask & (~torch.isfinite(teacher_logprobs) | (teacher_logprobs > 1e-3))
+    n_behavior, n_teacher = int(bad_behavior.sum()), int(bad_teacher.sum())
+    if n_behavior or n_teacher:
+        raise ValueError(
+            f"OPD received {n_behavior} rollout and {n_teacher} teacher response-token logprobs that are "
+            "NaN, infinite or positive; refusing to fold them into advantages."
+        )
+
+
 def compute_opd_advantages(
     advantages: torch.Tensor,
     behavior_logprobs: torch.Tensor,

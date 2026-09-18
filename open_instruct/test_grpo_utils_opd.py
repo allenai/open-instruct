@@ -136,6 +136,32 @@ class TestComputeOPDAdvantages(unittest.TestCase):
         torch.testing.assert_close(reverse_kl[0, 0], torch.tensor(9.9))
 
 
+class TestValidateOPDLogprobs(unittest.TestCase):
+    def test_clean_inputs_pass(self):
+        _, behavior, teacher, mask = _make_inputs()
+        grpo_utils.validate_opd_logprobs(behavior, teacher, mask)
+
+    def test_nan_outside_mask_is_ignored(self):
+        _, behavior, teacher, mask = _make_inputs()
+        behavior = behavior.clone()
+        behavior[0, 3] = float("nan")  # position masked out for sample 0
+        grpo_utils.validate_opd_logprobs(behavior, teacher, mask)
+
+    def test_nan_inside_mask_raises(self):
+        _, behavior, teacher, mask = _make_inputs()
+        behavior = behavior.clone()
+        behavior[0, 1] = float("nan")
+        with self.assertRaisesRegex(ValueError, "1 rollout and 0 teacher"):
+            grpo_utils.validate_opd_logprobs(behavior, teacher, mask)
+
+    def test_positive_teacher_logprob_raises(self):
+        _, behavior, teacher, mask = _make_inputs()
+        teacher = teacher.clone()
+        teacher[1, 2] = grpo_utils.INVALID_LOGPROB
+        with self.assertRaisesRegex(ValueError, "0 rollout and 1 teacher"):
+            grpo_utils.validate_opd_logprobs(behavior, teacher, mask)
+
+
 class TestCombineOPDTeacherLogprobs(unittest.TestCase):
     def _teachers(self):
         # [K=2, B=1, T-1=4]

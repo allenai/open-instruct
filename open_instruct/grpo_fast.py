@@ -1191,6 +1191,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     stacked_teacher_logprobs = torch.stack(
                         [all_teacher_logprobs_BT[k][i] for k in range(num_teachers)], dim=0
                     )
+                    for k in range(num_teachers):
+                        grpo_utils.validate_opd_logprobs(
+                            data_BT.vllm_logprobs[i][:, 1:], stacked_teacher_logprobs[k], opd_response_mask
+                        )
                     combined_teacher_logprobs = grpo_utils.combine_opd_teacher_logprobs(
                         stacked_teacher_logprobs,
                         self.args.opd_teacher_combine,

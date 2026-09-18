@@ -51,9 +51,9 @@ From reading `grpo_fast.py` / `grpo_utils.py` on `codex/qwen35-math-opd`:
 | Step | What | Why | Status |
 |-----:|------|-----|--------|
 | 1 | Close out the Qwen3.5 4B Miles v5 replication: eval hf-89, hf-99; manual `opd_audit` on the 4B root; final docs pass. | Completes the 2-framework cross-check (2B done 10/10, 4B 8/8 so far). | In progress: 4B job R8CZMP at rollout ~85; hf-89 ~00:30Z, hf-99 ~03:20Z 2026-09-18. |
-| 2a | Measure the vLLM-vs-trainer logprob gap against the OPD signal on the sync runs (`debug/vllm_local_reverse_kl` vs `objective/opd_reverse_kl`, W&B `rg1a2gel`, `zz3q6skv`, `8nlm6azd`). | Decides whether flaw 2 matters. | Not started. |
-| 2b | Open Instruct hardening: real-dump OPD audit (advantage identity + alignment), NaN-inside-mask becomes an error, document the temperature coupling. | Flaws 3, 5, 4. | Not started. |
-| 2c | One 2B sync arm with `--use_vllm_logprobs false` (trainer-side student logprobs). | Direct test of flaw 2. Needs 4 nodes for ~4h. | Not started; needs Kevin's OK on compute. |
+| 2a | Measure the vLLM-vs-trainer logprob gap against the OPD signal on the sync runs (`debug/vllm_local_reverse_kl` vs `objective/opd_reverse_kl`, W&B `rg1a2gel`, `zz3q6skv`, `8nlm6azd`). | Decides whether flaw 2 matters. | **Done 2026-09-17** (Beaker `01M2RXC2NK173XAYCHEZRYDARY`). Sync: gap 1e-4 to 2e-4 at every step; 4B signal 0.07 (gap negligible), 2B signal decays 0.033 -> 0.0005 so the gap is ~30% of the signal only in the last 30 steps. DPPO mask keeps 99.997% of tokens, ratio 1.0000. Flaw 2 downgraded to minor. Async: gap 0.01-0.036 for 2B (100-300x sync), mask keeps only 92-96% of tokens; 4B async gap ~1e-3, mask 99.0-99.9%. Quantifies flaw 1. |
+| 2b | Open Instruct hardening: real-dump OPD audit (advantage identity + alignment), NaN-inside-mask becomes an error, document the temperature coupling. | Flaws 3, 5, 4. | In progress: `validate_opd_logprobs` guard + tests landed; caveats documented; real-dump audit being scoped. |
+| 2c | One 2B sync arm with `--use_vllm_logprobs false` (trainer-side student logprobs). | Direct test of flaw 2. Needs 4 nodes for ~4h. | **Proposed skip** after 2a: the gap is 1e-4 against a 0.07 signal at 4B and only matters for the tail of the 2B run. Kevin to confirm. |
 | 2d | Decide: fix the async path for OPD or fence it off (assert `async_steps==1` when `opd_pure`). | Flaw 1. | Decision pending. |
 | 3 | Miles replication prep: Qwen3-1.7B-Base, Qwen3-4B-Base, Qwen3-8B model profiles; expose minibatching (4 optimizer steps per rollout) and 1 sample/prompt in the OPD TOML; cosine LR; sampled Avg@8/Pass@8 eval matching the Qwen2.5-Math harness. | Paper setting: B=128, mini 32, LR 3e-6 cosine, 4096 response, T=1.0, 3 epochs MATH / 2 epochs DAPO-Math-14k. | Not started; Robert to review scope. |
 | 4 | Run the OPD baseline: arm 2 (Qwen3-4B-Base from Qwen3-8B on DAPO-Math-14k), then arm 1 (Qwen3-1.7B-Base on MATH). Target: MATH500 Avg@8 within ~1 point of 78.8 / 67.8. | Infra validation against a public number. | Not started. |
@@ -89,3 +89,10 @@ See the latest Log entry.
   78.0/50.0/60.0/90.0 (DAPO/AIME/BRUMO/MATH-500). 4B 8/8, 2B 10/10 in band.
 - **2026-09-17 ~22:30Z** Audit of the Open Instruct OPD path (flaws 1-6 above). Deep dive on
   EOPD (arXiv 2603.07079); decisions D1-D4 recorded. This tracker created.
+- **2026-09-17 23:20Z** Step 2a done. Sync runs: `debug/vllm_local_reverse_kl` 1e-4 to 2e-4 at
+  every step vs `objective/opd_reverse_kl` 0.033 -> 0.0005 (2B) and 0.07 flat (4B); DPPO mask
+  kept 99.997%. Async canonical runs: 2B gap 0.01-0.036 and mask kept 92-96%; 4B gap ~1e-3, mask
+  kept 99.0-99.9%. Conclusion: mixed numerics are a minor issue; staleness under async is the
+  real one. Added `validate_opd_logprobs` (NaN/inf/positive logprob inside the response mask now
+  raises) with tests; documented the temperature coupling and the async warning in
+  `on_policy_distillation.md`. Proposed skipping step 2c.

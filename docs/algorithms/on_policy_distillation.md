@@ -181,6 +181,24 @@ prefer a smaller `opd_kl_coef` (0.25–0.5) and/or keep the environment reward
   hybrid-attention models, the teacher must also share the linear-attention conv-kernel
   configuration (true for same-family checkpoints), since the FLA CP contexts are built
   from the policy's config.
+- **Run OPD strictly on-policy** (`--async_steps 1 --inflight_updates false
+  --synchronous_rollouts true`). Under `async_steps>1` the trainer consumes the
+  first-finished responses, so batches are length-sorted and the long tail is dropped as
+  stale; pure-OPD advantages are per-token and not group-centered, so batch composition
+  steers the update directly. On the Qwen3.5 math runs this collapsed the 2B student
+  (vLLM-vs-trainer reverse KL 0.01-0.04 and 4-8% of tokens DPPO-masked, vs 1e-4 and 0.003%
+  in sync mode). See [qwen35_math_opd_sync_rerun.md](qwen35_math_opd_sync_rerun.md) and
+  [opd_validation_program.md](opd_validation_program.md).
+- The student side of the reverse KL is the rollout engine's logprob (`--use_vllm_logprobs`),
+  the teacher side is the trainer's fp32 forward. In sync mode the engine-vs-trainer gap is
+  ~1e-4 nats/token, negligible against a 0.07 signal (4B) and ~30% of the signal only once the
+  2B student is within 0.0005 of its teacher. `debug/vllm_local_reverse_kl` tracks it.
+- The teacher's logits are divided by the rollout `--temperature`, like the student's. At
+  T=1.0 this is a no-op; at other temperatures the distillation target is the tempered
+  teacher.
+- A NaN, infinite or positive rollout/teacher logprob inside the response mask raises
+  (`validate_opd_logprobs`) instead of being folded into the advantage as the
+  `INVALID_LOGPROB` sentinel.
 - Tool/observation tokens are excluded automatically: the reverse KL is masked with the
   same `response_mask` the loss uses, while the teacher still conditions on the full
   trajectory context.
