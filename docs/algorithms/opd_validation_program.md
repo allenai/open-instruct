@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-18 17:48Z (details in the latest Log entries).
+Updated 2026-09-18 21:13Z (details in the latest Log entries).
 
 - Done: step 1 (Qwen3.5 4B Miles replication closed out, both frameworks agree at every matched
   step), step 2b (Open Instruct OPD hardening), step 3 (Qwen3 Miles path: Qwen3-1.7B-Base ←
@@ -90,8 +90,8 @@ Updated 2026-09-18 17:48Z (details in the latest Log entries).
 - Step 4 arm 2 OPD baseline (Qwen3-4B-Base ← Qwen3-8B on DAPO-Math-14k): attempt 1
   `01M2SD1X7WTE4KCKAA4XR7YZQ8` failed at 05:02Z (verifier timeout fatal; fixed in Miles
   `0058e0028`). Attempt 2 `01M2SEQX9NMEZ6K13RJ586FZJ0` (root `-v2`, image
-  `01M2SEQPBZRNP1HBWC72N71JCQ`) is at rollout 131/220 at 17:48Z, uninterrupted since 05:12Z,
-  ETA ~2026-09-19 03:30Z. **It has an eos-mismatch bug**: the learner stops with
+  `01M2SEQPBZRNP1HBWC72N71JCQ`) is at rollout 143/220 at 21:07Z, uninterrupted since 05:12Z,
+  ETA ~2026-09-19 07:00Z (7.4 min/rollout including evals). **It has an eos-mismatch bug**: the learner stops with
   `<|endoftext|>`, the chat teacher never does (log-prob ≈ -21 nats there), so OPD punishes
   stopping; training truncation hit 100% by rollout 20 and every eval response sits at the
   8192 cap. MATH500 Avg@8 is still 0.764 at rollout 88 (paper 0.788) because the boxed answer
@@ -515,4 +515,11 @@ lower; it does not affect the per-token statistics above.
   Attempt 3 (OPD + eos fix, rebuilt image) then EOPD is Kevin's call; attempt 2 is kept running
   as the buggy reference (rollout 131/220 at 17:48Z). Beaker's log endpoint went blank for the
   arm 2 job around 17:40Z; monitoring continues from Weka `training.log`.
+
+### 2026-09-18 21:13Z
+
+- Arm 2 status check (Weka read `01M2V5RVM5Z53DTTV6GA06QZ03`): rollout 143/220 at 21:07Z, job
+  still running, no errors. Third mid-run eval at rollout 131 (20:23Z): MATH500 Avg@8 0.7575
+  (0.744 → 0.764 → 0.7575; paper 0.788), all eval responses still at the 8192 cap. Pace since
+  rollout 87 is 7.4 min/rollout including evals, so the run should finish ~2026-09-19 07:00Z.
 
