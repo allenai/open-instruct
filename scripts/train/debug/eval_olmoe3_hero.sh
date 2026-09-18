@@ -45,6 +45,8 @@ PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
 NUM_INSTANCES="${NUM_INSTANCES:-1}"  # vLLM instances; set with GPUS for wide suites
 HARNESS="${HARNESS:-default}"
+EVAL_RETRIES="${EVAL_RETRIES:-3}"
+TORCH_GROUPED_MOE="${TORCH_GROUPED_MOE:-1}"
 EVAL_IMAGE="${EVAL_IMAGE:-akshitab/olmo-core-tch2110cu128-rma-2026-08-04}"
 # Empty PTXAS_PATH selects Triton's bundled compiler (sandbox image has no conda).
 PTXAS_ARGS=(-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1)
@@ -79,12 +81,12 @@ uv run olmo-eval beaker launch \
     -o provider.kwargs.enable_prefix_caching=false \
     -n "$RUN_NAME" -m "$CKPT" "${TASK_ARGS[@]}" \
     -I "$EVAL_IMAGE" \
-    --gpus "$GPUS" --retries 3 -T "$TIMEOUT" \
+    --gpus "$GPUS" --retries "$EVAL_RETRIES" -T "$TIMEOUT" \
     -e 'UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache && rm -rf /opt/*/lib/python3*/site-packages/flash_attn' \
     -e UV_CONSTRAINT="$CONSTRAINTS" \
     -e PYTHONPATH=/gantry-runtime/src \
     "${PTXAS_ARGS[@]}" \
-    -e OLMO_VLLM_TORCH_GROUPED_MOE=1 \
+    -e OLMO_VLLM_TORCH_GROUPED_MOE="$TORCH_GROUPED_MOE" \
     -e OLMO_VLLM_FLA_KDA=1 \
     -e OLMO_EVAL_RUNTIME_TORCH_VERSION=2.10.0+cu128 \
     -e OLMO_EVAL_RUNTIME_TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
