@@ -59,7 +59,7 @@ From reading `grpo_fast.py` / `grpo_utils.py` on `codex/qwen35-math-opd`:
 | 3 | Miles replication prep: Qwen3-1.7B-Base, Qwen3-4B-Base, Qwen3-8B model profiles; expose minibatching (4 optimizer steps per rollout) and 1 sample/prompt in the OPD TOML; cosine LR; sampled Avg@8/Pass@8 eval matching the Qwen2.5-Math harness. | Paper setting: B=128, mini 32, LR 3e-6 cosine, 4096 response, T=1.0, 3 epochs MATH / 2 epochs DAPO-Math-14k. | **Mostly done 2026-09-18** on `robertb/miles-qwen35-opd`: Qwen3 model map (upstream `qwen3-1.7B/4B/8B` profiles), `training.optimizer_steps_per_rollout`, `optimizer.lr_decay_style/lr_warmup_iters/min_lr`, `inference.top_p/eval_top_p/eval_max_response_length`, `scripts/miles/prepare_eopd_math_prompts.py`, specs `configs/miles/opd/eopd-opd-qwen3-{4b-base-dapo14k,1.7b-base-math}.toml`. Data rendered on Weka (`miles-opd/data/eopd-math-v1`, Beaker `01M2RYRHTNKRMPKNVJXRT7SHTX`): math_train 7496 (4 MATH rows lack a boxed answer), dapo_math_14k 14109 (7 overlap eval sets), math_500 500, aime24 30, aime25 30, amc23 40, minerva 272, olympiadbench 674; non-thinking Qwen3 template, paper suffix. First prepare job `01M2RZHTYE1Y6H0DB9JR0NKX2W` was rejected: Qwen3-Base stops on `<|endoftext|>`, Qwen3-8B on `<|im_end|>` (vocab identical). Added `model.align_eos_with_teacher` (Miles commit d2256c371): the learner adopts the teacher's eos, keeps its own as a second stop id. Without it a base learner would run on after `<|im_end|>` until `<|endoftext|>` or the length cap, which is the likeliest way to silently miss the paper's numbers. Rebuilding the image and relaunching prepare, then the tiny 4-GPU smoke. Pass@8: the paper's headline is Avg@8, which Miles in-run eval reports (8 samples, T 1.0, top-p 1.0); a Pass@8 post-hoc path (Open Instruct `--eval_pass_at_k 8` over the rendered sets converted to `messages`/`ground_truth` JSONL) is scoped but deferred until an arm needs it. |
 | 4 | Run the OPD baseline: arm 2 (Qwen3-4B-Base from Qwen3-8B on DAPO-Math-14k), then arm 1 (Qwen3-1.7B-Base on MATH). Target: MATH500 Avg@8 within ~1 point of 78.8 / 67.8. | Infra validation against a public number. | Not started. |
 | 5 | Teacher-entropy diagnostic on Qwen3-8B and on our verifier-DPPO teachers: histogram, % tokens with H>0.8, top-16 mass, % student tokens outside teacher top-16 (paper Fig. 3 / Fig. 9). | D4 gate; calibrates tau for our teachers. | In progress: `open_instruct/teacher_entropy.py` + `scripts/eopd/teacher_entropy_diagnostic.py` (OI commit 52de60681; exact entropy, top-16 mass, EOPD's renormalized top-k proxy and its gate agreement, sampled-token teacher rank). First run `01M2RZXXTT0GBCQSJCFKYAA76C`: Qwen3-8B on 256 Qwen3-4B-Base DAPO rollouts (T 1.0, 4096 tokens), output under `deletable_checkpoint/kevinfarhat/eopd/teacher_entropy/`. Verifier-DPPO teacher variant next (same script, Weka teacher path). |
-| 6 | Implement EOPD in Miles (teacher top-k via SGLang `top_logprobs_num`, top-k-renormalized entropy proxy, student log-probs gathered at teacher indices under TP, gated FKL term, audit + metrics). A/B vs the matched baseline, 2 seeds. Target: +1.8 Avg@8 / +5 Pass@8 at 4B. | Methodology validation. | Not started. |
+| 6 | Implement EOPD in Miles (teacher top-k via SGLang `top_logprobs_num`, top-k-renormalized entropy proxy, student log-probs gathered at teacher indices under TP, gated FKL term, audit + metrics). A/B vs the matched baseline, 2 seeds. Target: +1.8 Avg@8 / +5 Pass@8 at 4B. | Methodology validation. | Designed (see "Step 6 design" below); coding starts after the tiny smoke passes and the baseline arms are launched. |
 | 7 | Port the winner to the Qwen3.5 verifier-teacher setting; consider the Thinking Machines 8B-from-32B AIME24 run as the large-scale validation. | | Not started. |
 
 ### Paper targets (EOPD Table 2, OPD column, Avg@8 / Pass@8)
@@ -81,6 +81,48 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 ## Where we are
 
 See the latest Log entry.
+
+
+## Step 6 design: EOPD on top of Miles's native OPD path
+
+Upstream Miles at the pinned revision (`dbbab156`) already has the plumbing we need, so EOPD
+is an extension of its OPD path, not a parallel implementation:
+
+- **Teacher top-k (rollout side).** `miles/rollout/on_policy_distillation.py::_score_payload`
+  already sends `top_logprobs_num = k` and reads `input_top_logprobs` per position, aligned to
+  `logprob_start_len = 0`. Our hook (`open_instruct.miles.opd_hooks.reward`) keeps the
+  sampled-token score it fetches today and additionally requests `top_logprobs_num = k` (k = 16),
+  storing `teacher_topk_ids [R, k]` and `teacher_topk_logprobs [R, k]` on the sample. The Miles
+  patch already adds `teacher_log_probs` to the rollout→train conversion key list
+  (`train_data_conversion.py`); the two new keys go in the same list.
+- **Gate (rollout side).** `open_instruct.teacher_entropy.token_statistics` gives the paper's
+  proxy: entropy of the renormalized top-k teacher distribution. Gate `g_t = 1[H_proxy,t > tau]`
+  (tau = 0.8) is computed once per token when the teacher scores arrive and stored as
+  `opd_fkl_gate [R]`, so the trainer never re-derives it. Step 5's diagnostic tells us how well
+  the proxy tracks the exact entropy for our teachers (`proxy_gate_agreement`).
+- **Loss (Megatron side).** Miles accepts `--loss-type custom_loss
+  --custom-loss-function-path <module.fn>`. `open_instruct.miles.eopd_loss.policy_loss` wraps
+  upstream `policy_loss_function` (unchanged sampled-token OPD advantage, PPO clip) and adds
+  `alpha * sum_t g_t * FKL_t / num_tokens`, with `FKL_t = sum_{j in topk_t} q_t(j) *
+  (log q_t(j) - log p_S,t(j))`, `q_t` the renormalized teacher top-k. Student log-probs at the k
+  teacher indices under tensor parallelism: `log p_S(j) = logit_j - logsumexp_V(logits)`; the
+  logsumexp follows `_VocabParallelEntropy` (max all-reduce, sum-exp all-reduce) and the
+  gathered `logit_j` comes from the owning vocab shard with a SUM all-reduce of zeros elsewhere,
+  both through autograd-aware collectives (`torch.distributed.nn.functional`), chunked over
+  tokens like `calculate_log_probs_and_entropy`. Only `[tokens, k]` extra activations.
+- **Wrapper.** `[distillation] eopd = false, eopd_alpha = 1.0, eopd_tau = 0.8, eopd_top_k = 16`
+  in `opd_config`; when `eopd = true` the runtime emits the custom loss path and the extra
+  request fields; validation requires `use_rollout_logprobs = true` and `top_p = 1.0`.
+- **Audit and metrics.** Dump `teacher_topk_*`, `opd_fkl_gate` and the per-token FKL through the
+  existing contract records; `opd_audit` re-derives the gate from the dumped top-k logprobs and
+  checks `FKL_t` on a sample of positions. Metrics per rollout: gated fraction, mean proxy
+  entropy, mean FKL, mean top-k mass, plus the existing reverse KL.
+- **Image.** All of this is wrapper code (`open_instruct/miles`), so the light overlay image
+  suffices; no runtime rebuild.
+- **To verify before coding.** Whether the paper normalises the student side over the same top-k
+  set or uses the full-vocabulary student log-probs at those indices (the design above uses
+  full-vocabulary student log-probs, which is the direct reading of a forward KL restricted to
+  the teacher's support); and whether the gate uses the proxy or exact entropy in their code.
 
 ## Log
 
@@ -139,7 +181,7 @@ See the latest Log entry.
   Qwen3.5-4B rollouts (`01M2S08RST44V0RFTGRFRSS72Y`).
 - **2026-09-18 02:20Z** Real-dump audit passed (step 2b done): max advantage error 0.0 over 65k
   response tokens across steps 1/2/8/16; alignment verified on real dumps. Miles prepare attempt 3
-  failed on the tiny spec's own context limit (DAPO prompt 1681 tokens > 1536); tiny spec now uses
+  failed on the tiny spec's own context limit (a MATH train prompt of 1681 tokens > 1536); tiny spec now uses
   4096 context and root v3, prepare attempt 4 launched. Upstream Miles at the pinned revision
   already ships top-k OPD options (`--opd-log-prob-top-k`, `--opd-top-k-strategy`,
   `--opd-reward-weight-mode`, `--opd-topk-per-position`, in `miles/rollout/on_policy_distillation.py`
