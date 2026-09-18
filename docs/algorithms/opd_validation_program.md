@@ -119,10 +119,15 @@ is an extension of its OPD path, not a parallel implementation:
   entropy, mean FKL, mean top-k mass, plus the existing reverse KL.
 - **Image.** All of this is wrapper code (`open_instruct/miles`), so the light overlay image
   suffices; no runtime rebuild.
-- **To verify before coding.** Whether the paper normalises the student side over the same top-k
-  set or uses the full-vocabulary student log-probs at those indices (the design above uses
-  full-vocabulary student log-probs, which is the direct reading of a forward KL restricted to
-  the teacher's support); and whether the gate uses the proxy or exact entropy in their code.
+- **Paper check (resolved 2026-09-18).** Eq. 9-10 of arXiv 2603.07079: `L_EOPD = L_OPD +
+  alpha * 1[H_t > tau] * L_FKL`, a hard gate, with `L_FKL = sum_{x in S_k^t} q~(x) log(q~(x) /
+  p_theta(x))` summed over the **teacher's** top-k `S_k^t`, the teacher renormalised over that set
+  and the student left as its full-vocabulary probability at those indices. That is exactly the
+  design above. The paper writes `H_t` of the unrestricted teacher distribution; an SGLang teacher
+  only returns top-k log-probs, so our gate uses the renormalised top-k entropy, which step 5
+  shows agrees with the exact gate on 99.9 % of tokens for our teacher (false-negative 1.1 %).
+  Paper Fig. 9: 15-20 % of tokens exceed tau 0.8 once training stabilises; our pre-training
+  measurement on the Qwen3.5 pair is 11.4 %.
 
 ## Step 5 results: teacher entropy over student rollouts
 
