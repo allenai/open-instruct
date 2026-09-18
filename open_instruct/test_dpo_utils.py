@@ -24,6 +24,29 @@ def make_test_args(**overrides) -> DPOExperimentConfig:
     return DPOExperimentConfig(**defaults)
 
 
+class TestLocalEvalConfig(unittest.TestCase):
+    def test_requires_tasks_when_enabled(self):
+        with self.assertRaisesRegex(ValueError, "requires at least one"):
+            make_test_args(try_launch_local_eval=True)
+
+    def test_accepts_local_eval_without_hub_push(self):
+        args = make_test_args(
+            try_launch_beaker_eval_jobs=False, try_launch_local_eval=True, push_to_hub=False, oe_eval_tasks=["gsm8k"]
+        )
+        self.assertTrue(args.try_launch_local_eval)
+
+    @parameterized.expand(
+        [
+            ("num_gpus", {"local_eval_num_gpus": 0}, "local_eval_num_gpus"),
+            ("limit", {"local_eval_limit": 0}, "local_eval_limit"),
+            ("max_tokens", {"local_eval_max_tokens": 0}, "local_eval_max_tokens"),
+        ]
+    )
+    def test_rejects_invalid_limits(self, _name, overrides, expected_message):
+        with self.assertRaisesRegex(ValueError, expected_message):
+            make_test_args(**overrides)
+
+
 class TestDPOLoss(unittest.TestCase):
     """Tests for dpo_loss function."""
 

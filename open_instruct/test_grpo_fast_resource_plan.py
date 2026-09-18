@@ -48,6 +48,22 @@ class TestGrpoFastResourcePlanning(unittest.TestCase):
         self.assertEqual(requirements["min_total_cluster_gpus"], 1.0)
         self.assertEqual(requirements["min_total_cluster_cpus"], 13.0)
 
+    def test_build_resource_plan_uses_npu_resource(self):
+        requirements = grpo_fast_resource_plan.build_grpo_fast_startup_requirements(
+            num_learners_per_node=[2],
+            single_gpu_mode=False,
+            vllm_num_engines=1,
+            vllm_tensor_parallel_size=1,
+            accelerator_resource="NPU",
+        )
+
+        self.assertEqual(requirements["accelerator_resource"], "NPU")
+        self.assertEqual(requirements["learner_pg_bundles"], [{"NPU": 2, "CPU": 20}])
+        self.assertEqual(requirements["min_total_cluster_gpus"], 3.0)
+        self.assertEqual(
+            grpo_fast_resource_plan.get_grpo_fast_resource_shortfalls(requirements, {"NPU": 3, "CPU": 24}), []
+        )
+
     def test_resource_shortfalls_report_learner_pg_cpu_gap_first(self):
         args = self._make_args(num_learners_per_node=[6])
         vllm_config = self._make_vllm_config(vllm_num_engines=2, vllm_tensor_parallel_size=1)

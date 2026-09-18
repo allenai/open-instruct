@@ -1,0 +1,25 @@
+# NPU-only dependency pins for Ascend training environments.
+#
+# Everything not listed here resolves from pyproject.toml. This file only pins
+# packages that must match the vLLM-Ascend stack or diverge from the default
+# (CUDA) dependency set. See requirements_npu.lock.txt for the full freeze of
+# the validated environment (Python 3.12.13, CANN 9.1.0-beta.3, Ascend 910B3).
+#
+# Install after sourcing CANN, with --no-deps so CUDA vLLM metadata does not
+# drag CUDA wheels into the NPU environment:
+#   python -m pip install --no-deps -r requirements_npu.txt
+#   python -m pip install --no-deps -e .
+
+# Ascend adapter stack. vllm must match vllm-ascend's requirement exactly.
+torch==2.10.0
+torch_npu==2.10.0.post2
+vllm==0.22.1
+vllm-ascend==0.22.1rc1
+
+# The validated NPU environment ran numpy 1.x; the default numpy>=2 stack has
+# not been validated against this torch_npu build.
+numpy<2
+
+# OLMo-core commit used by the validated NPU environment (pyproject.toml pins
+# a different commit).
+ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@9aa3280fd5331b93fc766206eadec42ee73befc0

@@ -31,6 +31,7 @@ from dateutil import parser
 from parameterized import parameterized
 
 from open_instruct import data_types, launch_utils, utils
+from open_instruct.npu import numa_affinity
 
 
 def _load_mbu_test_cases():
@@ -88,6 +89,178 @@ MODEL_DIMS: dict[str, utils.ModelDims] = {
         device_name="h100",
     ),
 }
+
+
+class TestEnsureHfRepoCached(unittest.TestCase):
+    @mock.patch("open_instruct.utils.huggingface_hub.snapshot_download")
+    def test_local_path_skips_hub_download(self, mock_snapshot_download):
+        with tempfile.TemporaryDirectory() as model_dir:
+            utils.ensure_hf_repo_cached(model_dir, revision="main")
+
+        mock_snapshot_download.assert_not_called()
+
+
+class TestLaunchLocalVllmEval(unittest.TestCase):
+    @mock.patch("open_instruct.utils.subprocess.run")
+    @mock.patch("open_instruct.utils.shutil.which", return_value="/env/bin/olmo-eval")
+    def test_builds_vllm_command_and_bypasses_proxy_for_local_health_checks(self, _mock_which, mock_run):
+        with mock.patch.dict(os.environ, {"NO_PROXY": "internal.example"}, clear=False):
+            utils.launch_local_vllm_eval(
+                model_path="/models/checkpoint",
+                tasks=["gsm8k", "ifeval"],
+                output_dir="/results/eval",
+                num_gpus=2,
+                max_model_len=2048,
+                limit=3,
+                max_tokens=64,
+                trust_remote_code=True,
+            )
+
+        command = mock_run.call_args.args[0]
+        self.assertEqual(
+            command[:6], ["/env/bin/olmo-eval", "run", "-m", "/models/checkpoint", "--harness", "default"]
+        )
+        self.assertIn("provider.kind=vllm_server", command)
+        self.assertIn("provider.trust_remote_code=true", command)
+        self.assertIn("provider.max_model_len=2048", command)
+        self.assertEqual(command.count("-t"), 2)
+        self.assertEqual(command.count("limit=3"), 2)
+        self.assertEqual(command.count("max_tokens=64"), 2)
+        self.assertEqual(command[-4:], ["--num-gpus", "2", "--output-dir", "/results/eval"])
+        self.assertTrue(mock_run.call_args.kwargs["check"])
+        no_proxy = mock_run.call_args.kwargs["env"]["NO_PROXY"].split(",")
+        self.assertEqual(no_proxy, ["internal.example", "localhost", "127.0.0.1", "0.0.0.0"])
+
+    @mock.patch("open_instruct.utils.shutil.which", return_value=None)
+    def test_fails_loud_when_olmo_eval_is_missing(self, _mock_which):
+        with self.assertRaisesRegex(RuntimeError, "olmo-eval.*not installed"):
+            utils.launch_local_vllm_eval("/models/checkpoint", ["gsm8k"], "/results/eval")
+
+
+class TestGetDeviceMemoryMetrics(unittest.TestCase):
+    @mock.patch("open_instruct.utils.torch.cuda")
+    def test_uses_selected_accelerator_module(self, mock_cuda):
+        mock_cuda.current_device.return_value = 2
+        mock_cuda.max_memory_reserved.return_value = 3 * 2**30
+        mock_cuda.max_memory_allocated.return_value = 2 * 2**30
+
+        metrics = utils.get_device_memory_metrics(torch.device("cuda"))
+
+        self.assertEqual(metrics, {"reserved_mem_GiB": 3.0, "allocated_mem_GiB": 2.0})
+        mock_cuda.max_memory_reserved.assert_called_once_with(device=2)
+        mock_cuda.max_memory_allocated.assert_called_once_with(device=2)
+
+    def test_cpu_has_no_accelerator_memory_metrics(self):
+        self.assertEqual(utils.get_device_memory_metrics(torch.device("cpu")), {})
+
+
+class TestAcceleratorSelection(unittest.TestCase):
+    def test_preserves_cuda_default_when_cuda_and_npu_are_available(self):
+        with (
+            mock.patch("open_instruct.utils.torch.cuda.is_available", return_value=True),
+            mock.patch.object(utils.torch, "npu", create=True) as mock_npu,
+        ):
+            mock_npu.is_available.return_value = True
+
+            self.assertEqual(utils.get_accelerator_type(), "cuda")
+
+    def test_selects_npu_when_cuda_is_unavailable(self):
+        with (
+            mock.patch("open_instruct.utils.torch.cuda.is_available", return_value=False),
+            mock.patch.object(utils.torch, "npu", create=True) as mock_npu,
+        ):
+            mock_npu.is_available.return_value = True
+
+            self.assertEqual(utils.get_accelerator_type(), "npu")
+
+
+class TestNodeLocalEnvVars(unittest.TestCase):
+    def test_node_local_vars_are_all_excluded(self):
+        for var in ("CUDA_VISIBLE_DEVICES", "ASCEND_RT_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "VLLM_HOST_IP"):
+            self.assertIn(var, utils.NODE_LOCAL_ENV_VARS)
+
+
+class TestNpuNumaAffinityIndex(unittest.TestCase):
+    """Pure index math from open_instruct.npu.numa_affinity."""
+
+    def test_parse_visible_devices(self):
+        self.assertEqual(numa_affinity.parse_visible_devices("0,1,2"), [0, 1, 2])
+        self.assertEqual(numa_affinity.parse_visible_devices("6"), [6])
+        self.assertEqual(numa_affinity.parse_visible_devices(""), [])
+
+    def test_numa_node_index_uses_physical_device_id(self):
+        # 8 NPUs across 2 NUMA nodes: devices 0-3 -> node 0, devices 4-7 -> node 1.
+        self.assertEqual(numa_affinity.npu_numa_node_index(0, [0, 1], 8, 2), 0)
+        self.assertEqual(numa_affinity.npu_numa_node_index(1, [0, 1], 8, 2), 0)
+        self.assertEqual(numa_affinity.npu_numa_node_index(1, [4, 5, 6, 7], 8, 2), 1)
+
+    def test_numa_node_index_maps_single_visible_device_to_its_node(self):
+        # A single-card actor pinned to physical device 6 must bind node 1;
+        # deriving the node from the actor-local rank would try node 0.
+        self.assertEqual(numa_affinity.npu_numa_node_index(0, [6], 8, 2), 1)
+
+    def test_numa_node_index_falls_back_to_local_rank_without_visibility_mask(self):
+        self.assertEqual(numa_affinity.npu_numa_node_index(2, [], 8, 2), 0)
+        self.assertEqual(numa_affinity.npu_numa_node_index(5, [], 8, 2), 1)
+
+
+class TestNumaAffinityBinding(unittest.TestCase):
+    """Dispatch of RayProcess._set_numa_affinity against a fake libnuma."""
+
+    def _bound_node(self, *, local_rank, rank, numa_nodes=2, env, method):
+        libnuma = mock.MagicMock()
+        libnuma.numa_num_configured_nodes.return_value = numa_nodes
+        bound = []
+        libnuma.numa_parse_nodestring.side_effect = lambda raw: bound.append(int(raw.decode("ascii")))
+        proc = SimpleNamespace(local_rank=local_rank)
+        with (
+            mock.patch.object(utils, "_SET_AFFINITY", False),
+            mock.patch.object(utils, "get_accelerator_type", return_value="cuda"),
+            mock.patch.object(utils, "CDLL", return_value=libnuma) as cdll,
+            mock.patch("ctypes.util.find_library", return_value="fake_numa"),
+            mock.patch.dict(os.environ, env, clear=False),
+        ):
+            method(proc, rank)
+        cdll.assert_called_once_with("fake_numa")
+        return bound
+
+    def test_cuda_path_binds_by_local_rank_not_visible_device(self):
+        # Upstream semantics: a worker at local_rank 0 with CUDA_VISIBLE_DEVICES=6
+        # (physical id 6, one visible device) on a 2-node host binds node 0.
+        # Mixing the physical id into the bind index would try node 6.
+        self.assertEqual(
+            self._bound_node(
+                local_rank=0,
+                rank=0,
+                env={"CUDA_VISIBLE_DEVICES": "6"},
+                method=utils.RayProcess._set_numa_affinity,
+            ),
+            [0],
+        )
+        self.assertEqual(
+            self._bound_node(
+                local_rank=5,
+                rank=5,
+                env={"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7"},
+                method=utils.RayProcess._set_numa_affinity,
+            ),
+            [1],
+        )
+
+    def test_npu_path_binds_by_physical_device_id(self):
+        # ASCEND_RT_VISIBLE_DEVICES=6, 8 host NPUs, 2 NUMA nodes -> node 1.
+        # _set_numa_affinity dispatches to this method on NPU (see the CUDA test
+        # above for the dispatch entry point).
+        with mock.patch("open_instruct.npu.numa_affinity.host_npu_device_count", return_value=8):
+            self.assertEqual(
+                self._bound_node(
+                    local_rank=0,
+                    rank=0,
+                    env={"ASCEND_RT_VISIBLE_DEVICES": "6"},
+                    method=utils.RayProcess._set_npu_numa_affinity,
+                ),
+                [1],
+            )
 
 
 class GetDatasetsTest(unittest.TestCase):
@@ -533,6 +706,7 @@ class TestUtilityFunctions(unittest.TestCase):
             ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "pro 6000"),
             ("NVIDIA RTX 6000 Ada Generation", "6000"),
             ("NVIDIA GeForce RTX 4090 Laptop GPU", "4090 laptop"),
+            ("Ascend910B3", "ascend910b"),
         ]
     )
     def test_get_device_name(self, device_name: str, expected_name: str):
@@ -678,6 +852,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/model")
 
@@ -706,6 +881,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/defaults")
         self.assertEqual(
@@ -741,6 +917,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/model")
 
@@ -754,6 +931,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cpu"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/cpu")
 

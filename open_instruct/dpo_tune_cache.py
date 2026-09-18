@@ -18,6 +18,7 @@ DPO tuning script. Adapted from our finetuning script.
 
 # isort: off
 import contextlib
+import gc
 import os
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
@@ -64,6 +65,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
+    launch_local_vllm_eval,
     maybe_get_beaker_config,
     maybe_update_beaker_description,
     maybe_use_ai2_hf_entity,
@@ -114,7 +116,7 @@ def build_deepspeed_config(
     return config
 
 
-def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
+def _run_training(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig) -> bool:
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -266,7 +268,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
     if args.cache_dataset_only:
-        return
+        return False
 
     # Load pretrained model and tokenizer
     if args.config_name:
@@ -746,8 +748,34 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     if args.push_to_hub and accelerator.is_main_process:
         model_utils.push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
     accelerator.wait_for_everyone()
-    if args.with_tracking:
+    should_launch_local_eval = args.try_launch_local_eval and accelerator.is_main_process
+    if args.with_tracking or args.try_launch_local_eval:
         accelerator.end_training()
+    return should_launch_local_eval
+
+
+def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig) -> None:
+    should_launch_local_eval = _run_training(args, tc)
+    if not should_launch_local_eval:
+        return
+
+    gc.collect()
+    accelerator_module = utils.get_accelerator_module(torch.device(utils.get_accelerator_type()))
+    if accelerator_module is not None and hasattr(accelerator_module, "empty_cache"):
+        accelerator_module.empty_cache()
+
+    assert args.oe_eval_tasks is not None
+    local_eval_output_dir = args.local_eval_output_dir or f"{args.output_dir}_eval"
+    launch_local_vllm_eval(
+        model_path=args.output_dir,
+        tasks=args.oe_eval_tasks,
+        output_dir=local_eval_output_dir,
+        num_gpus=args.local_eval_num_gpus,
+        max_model_len=args.oe_eval_max_length,
+        limit=args.local_eval_limit,
+        max_tokens=args.local_eval_max_tokens,
+        trust_remote_code=tc.trust_remote_code,
+    )
 
 
 def print_gpu_stats(init_gpu_memory: int | None):
