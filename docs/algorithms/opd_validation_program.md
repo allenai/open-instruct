@@ -128,3 +128,12 @@ See the latest Log entry.
 - **2026-09-18 01:30Z** Prepare job rejected on the eos mismatch (see step 3 row); fixed with
   `model.align_eos_with_teacher`, enabled in all three EOPD specs. Step 5 tooling landed and its
   first job launched (Qwen3-8B teacher on Qwen3-4B-Base rollouts). Real-dump audit at step 15/16.
+- **2026-09-18 01:55Z** Real-dump audit, first pass: training ran 16 steps and dumped every
+  trace; the in-job audit command failed only because mason appends its own flags to the end of
+  the command line (launcher fixed). Re-running the audit on CPU over the saved traces failed
+  every record on shape alone: I had dumped `advantages` in the full query_response frame
+  (`[B, T+1]`) while the logprobs and mask are `[:, 1:]`-shifted; the trainer consumes
+  `advantages[:, 1:]`, so this was a dump inconsistency, not a training defect. Fixed the dump
+  (OI 70dd732e1) and made the audit slice full-frame dumps the same way; CPU audit rerun
+  `01M2S0BG4NP4878N18VASKNY6P`. Step 5 second run launched: verifier-DPPO 9B teacher on
+  Qwen3.5-4B rollouts (`01M2S08RST44V0RFTGRFRSS72Y`).
