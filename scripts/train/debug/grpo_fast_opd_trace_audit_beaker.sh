@@ -11,13 +11,24 @@
 # 1 node x 2 GPUs (1 learner + 1 engine), 16 training steps, ~20 minutes.
 # Launch with ./scripts/train/build_image_and_launch.sh so the image carries the
 # current commit; the trace directory is printed at launch and in the job log.
+# When the image cannot be rebuilt locally, set CODE_REF=<pushed branch or commit>:
+# the job then clones that ref of `git remote get-url origin` and runs it on top of
+# the image's environment via PYTHONPATH, so the audit code matches the ref.
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 TRACE_DIR="${TRACE_DIR:-/weka/oe-adapt-default/allennlp/deletable_rollouts/opd_trace_audit/$(date -u +%Y%m%dT%H%M%SZ)}"
+CODE_REF="${CODE_REF:-}"
+SETUP="source configs/beaker_configs/ray_node_setup.sh"
+if [[ -n "$CODE_REF" ]]; then
+    ORIGIN_URL=$(git remote get-url origin | sed -E 's#^git@github.com:#https://github.com/#')
+    # Plain && here: an unquoted $SETUP expansion yields literal "&&" words for mason to join.
+    SETUP="git clone --depth 1 --branch $CODE_REF $ORIGIN_URL /tmp/oi && cd /tmp/oi && export PYTHONPATH=/tmp/oi && $SETUP"
+fi
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Trace directory: $TRACE_DIR"
+[[ -n "$CODE_REF" ]] && echo "Running code from $CODE_REF"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -36,7 +47,7 @@ uv run python mason.py \
        --budget ai2/oe-other \
        --gpus 2 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- $SETUP \&\& python open_instruct/grpo_fast.py \
     --exp_name opd_trace_audit_qwen3 \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
