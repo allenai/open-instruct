@@ -44,6 +44,13 @@ WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 PRIORITY="${PRIORITY:-urgent}"
 GPUS="${GPUS:-1}"
 NUM_INSTANCES="${NUM_INSTANCES:-1}"  # vLLM instances; set with GPUS for wide suites
+HARNESS="${HARNESS:-default}"
+EVAL_IMAGE="${EVAL_IMAGE:-akshitab/olmo-core-tch2110cu128-rma-2026-08-04}"
+# Empty PTXAS_PATH selects Triton's bundled compiler (sandbox image has no conda).
+PTXAS_ARGS=()
+if [[ -n "${PTXAS_PATH-/opt/conda/bin/ptxas}" ]]; then
+    PTXAS_ARGS=(-e "TRITON_PTXAS_PATH=${PTXAS_PATH-/opt/conda/bin/ptxas}")
+fi
 TIMEOUT="${TIMEOUT:-24h}"  # Beaker job timeout; paper-protocol popqa/MATH at one instance need >24h
 
 OC_DEPS="cached-path>=1.7.2,dataclass-extensions>=0.3.0,bettermap,importlib_resources,safetensors,rich,pandas,flash-linear-attention==0.5.2"
@@ -57,7 +64,7 @@ DEPS="${DEPS},transformers==5.14.1,huggingface-hub==1.16.1"  # last steps win; s
 cd "$OLMO_EVAL_DIR"
 # shellcheck disable=SC2086
 uv run olmo-eval beaker launch \
-    -H default \
+    -H "$HARNESS" \
     -o provider.kind=vllm \
     -o provider.dtype=bfloat16 \
     -o provider.num_instances="$NUM_INSTANCES" \
@@ -71,12 +78,12 @@ uv run olmo-eval beaker launch \
     -o provider.kwargs.enable_flashinfer_autotune=false \
     -o provider.kwargs.enable_prefix_caching=false \
     -n "$RUN_NAME" -m "$CKPT" "${TASK_ARGS[@]}" \
-    -I akshitab/olmo-core-tch2110cu128-rma-2026-08-04 \
+    -I "$EVAL_IMAGE" \
     --gpus "$GPUS" --retries 3 -T "$TIMEOUT" \
     -e 'UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache && rm -rf /opt/*/lib/python3*/site-packages/flash_attn' \
     -e UV_CONSTRAINT="$CONSTRAINTS" \
     -e PYTHONPATH=/gantry-runtime/src \
-    -e TRITON_PTXAS_PATH=/opt/conda/bin/ptxas \
+    "${PTXAS_ARGS[@]}" \
     -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -e OLMO_VLLM_TORCH_GROUPED_MOE=1 \
     -e OLMO_VLLM_FLA_KDA=1 \

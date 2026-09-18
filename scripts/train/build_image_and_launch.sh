@@ -91,8 +91,12 @@ if ! command -v uv &> /dev/null; then
 fi
 
 # Install Python dependencies
-echo "Installing dependencies with uv..."
-uv sync
+if [[ "${UV_NO_SYNC:-0}" == "1" ]]; then
+  echo "Using the existing local Python environment (UV_NO_SYNC=1)."
+else
+  echo "Installing dependencies with uv..."
+  uv sync
+fi
 
 # Run the provided script with the image name and all remaining arguments
 script="$1"
