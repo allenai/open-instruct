@@ -5,10 +5,10 @@
 set -euo pipefail
 CKPT="${1:?HF checkpoint directory required}"
 LABEL="${2:?run label required}"
-MODE="${3:?omega or lcb required}"
+MODE="${3:?omega, lcb, ifeval, gpqa, popqa, or ruler required}"
 shift 3
 HERE="$(cd "$(dirname "$0")" && pwd)"
-export CLUSTERS='-c ai2/holmes'
+export CLUSTERS="${CLUSTERS:--c ai2/ceres -c ai2/jupiter -c ai2/saturn}"
 export WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 export PRIORITY="${PRIORITY:-normal}"
 export GPUS="${GPUS:-4}"
@@ -28,5 +28,23 @@ case "$MODE" in
             -t livecodebench:lite -o max_tokens=32768 -o num_samples=1 \
             --no-preemptible "$@"
         ;;
-    *) echo "Expected omega or lcb" >&2; exit 1 ;;
+    ifeval)
+        export OLMO_EVAL_DIR="${OLMO_EVAL_DIR_IFEVAL:?Pinned H008 ifeval checkout required}"
+        bash "$HERE/eval_olmoe3_hero.sh" "$CKPT" "$LABEL-screen-ifeval" -t ifeval --no-preemptible "$@"
+        ;;
+    gpqa)
+        bash "$HERE/eval_olmoe3_hero.sh" "$CKPT" "$LABEL-screen-gpqa" \
+            -t gpqa_main:cot -o max_tokens=32768 -o num_samples=1 --no-preemptible "$@"
+        ;;
+    popqa)
+        export OLMO_EVAL_DIR="${OLMO_EVAL_DIR_PAPER:?Pinned H008 paper checkout required}"
+        bash "$HERE/eval_olmoe3_hero.sh" "$CKPT" "$LABEL-screen-popqa" \
+            -t popqa:chat -o max_tokens=32768 -o strip_thinking=true -o limit=2000 -o seed=42 --no-preemptible "$@"
+        ;;
+    ruler)
+        export OLMO_EVAL_DIR="${OLMO_EVAL_DIR_DEV:?Pinned H008 dev checkout required}"
+        bash "$HERE/eval_olmoe3_hero.sh" "$CKPT" "$LABEL-screen-ruler64k" \
+            -t ruler_all__65536 --no-preemptible "$@"
+        ;;
+    *) echo "Expected omega, lcb, ifeval, gpqa, popqa, or ruler" >&2; exit 1 ;;
 esac

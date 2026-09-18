@@ -22,6 +22,10 @@ set -euo pipefail
 CKPT="${1:?usage: $0 <hf_checkpoint_dir> <label> dev|paper|both}"
 LABEL="${2:?usage: $0 <hf_checkpoint_dir> <label> dev|paper|both}"
 WHICH="${3:-both}"
+if [[ "${SCREEN_PASSED:-0}" != 1 ]]; then
+    echo "Full confirmation requires SCREEN_PASSED=1 after paired CI and H008 seed-floor review." >&2
+    exit 1
+fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LAUNCHER="$HERE/eval_olmoe3_hero.sh"
 LAUNCH_LOG="${LAUNCH_LOG:-./hero_eval_launches.txt}"

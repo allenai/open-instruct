@@ -65,7 +65,7 @@ DEPS="${DEPS},transformers==5.14.1,huggingface-hub==1.16.1"  # last steps win; s
 
 cd "$OLMO_EVAL_DIR"
 # shellcheck disable=SC2086
-uv run olmo-eval beaker launch \
+PYTHONPATH="$OLMO_EVAL_DIR/src${PYTHONPATH:+:$PYTHONPATH}" uv run olmo-eval beaker launch \
     -H "$HARNESS" \
     -o provider.kind=vllm \
     -o provider.dtype=bfloat16 \
