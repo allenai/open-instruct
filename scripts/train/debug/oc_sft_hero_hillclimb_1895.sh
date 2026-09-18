@@ -21,7 +21,21 @@ case "$MODE" in
         export STEPS=30 NPROC=8 CKPT_STEPS=1000000 EPHEMERAL_STEPS=-1
         export JOB_TIMEOUT=45m
         ;;
-    *) echo "Expected train or gate" >&2; exit 1 ;;
+    convert)
+        # Both arms use the current converter; only legacy training uses H008's image.
+        IMAGE="$BUILT_IMAGE"
+        export JOB_TIMEOUT=2h CONVERT_GPUS=1 CONVERT_DEVICE=cuda CONVERT_CLUSTER=ai2/holmes
+        export CONVERT_PYTHONPATH=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-anchor/olmo-core-b1fd2c97/src
+        export CKPT_ROOT="${CKPT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-train-20260918}"
+        export STEP=step3072
+        if [[ "$ARM" == "legacy" ]]; then
+            CACHE=15bfc110a1-6068a350
+        else
+            CACHE=062b8a3d20-6068a350
+        fi
+        export CONVERT_TOKENIZER="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE/tokenizer"
+        ;;
+    *) echo "Expected train, gate or convert" >&2; exit 1 ;;
 esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5 DATA_LOADER_SEED=34521
 export CLUSTER=ai2/holmes WORKSPACE=ai2/olmo-instruct PREEMPTIBLE=0
