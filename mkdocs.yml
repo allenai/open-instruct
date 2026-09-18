@@ -99,6 +99,7 @@ nav:
     - algorithms/multi_task_rl.md
     - algorithms/on_policy_distillation.md
     - algorithms/qwen35_math_opd_sync_rerun.md
+    - algorithms/opd_validation_program.md
     - algorithms/olmo_core_sharding.md
     - algorithms/olmo_core_reference.md
     - algorithms/tool_training.md
