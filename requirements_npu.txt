@@ -3,7 +3,7 @@
 # Everything not listed here resolves from pyproject.toml. This file only pins
 # packages that must match the vLLM-Ascend stack or diverge from the default
 # (CUDA) dependency set. See requirements_npu.lock.txt for the full freeze of
-# the validated environment (Python 3.12.13, CANN 9.0.0, Ascend 910B3).
+# the validated environment (Python 3.12.13, CANN 9.1.0-beta.3, Ascend 910B3).
 #
 # Install after sourcing CANN, with --no-deps so CUDA vLLM metadata does not
 # drag CUDA wheels into the NPU environment:

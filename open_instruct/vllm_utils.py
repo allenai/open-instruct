@@ -846,6 +846,9 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        # vLLM >= 0.22 exposes an explicit weight-update lifecycle (start/finish).
+        # Older vLLM (e.g. the 0.19.1 pinned for CUDA) only has `update_weights`
+        # and takes the legacy branch below, which matches upstream behavior.
         has_start = hasattr(self.llm_engine, "start_weight_update")
         has_finish = hasattr(self.llm_engine, "finish_weight_update")
         if has_start != has_finish:

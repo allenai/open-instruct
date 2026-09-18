@@ -2816,7 +2816,8 @@ def check_calculation(
 
     device_type = get_accelerator_type()
     device_module = get_accelerator_module(torch.device(device_type))
-    full_device_name = device_module.get_device_name(0) if device_module is not None else "CPU"
+    # `torch.cpu` has no `get_device_name`; fall back like upstream does for CPU-only hosts.
+    full_device_name = device_module.get_device_name(0) if hasattr(device_module, "get_device_name") else "CPU"
 
     avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
     avg_response_length = sum(response_lengths) / len(response_lengths) if response_lengths else 0

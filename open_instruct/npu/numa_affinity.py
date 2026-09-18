@@ -39,5 +39,8 @@ def npu_numa_node_index(local_rank: int, visible_devices: list[int], host_device
     what determines the NUMA node on the host.
     """
     physical_device_id = visible_devices[local_rank] if local_rank < len(visible_devices) else local_rank
-    devices_per_numa_node = max(host_device_count // numa_nodes, 1)
-    return physical_device_id // devices_per_numa_node
+    # Guard a zero node count and clamp so non-divisible topologies never hand
+    # `numa_bind` a node id that does not exist.
+    devices_per_numa_node = max(host_device_count // max(numa_nodes, 1), 1)
+    node_index = physical_device_id // devices_per_numa_node
+    return min(node_index, max(numa_nodes - 1, 0))

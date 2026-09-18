@@ -32,7 +32,9 @@ try:
         NPUIPCTrainerSendWeightsArgs,
         NPUIPCWeightTransferEngine,
     )
-except ImportError:
+# RuntimeError mirrors `_load_npu_backend`: Ascend packages can raise it at import
+# time when another accelerator is active.
+except (ImportError, RuntimeError):
     HCCLTrainerSendWeightsArgs = None
     HCCLWeightTransferEngine = None
     NPUIPCTrainerSendWeightsArgs = None
@@ -41,7 +43,7 @@ except ImportError:
 try:
     from vllm_ascend.sample.sampler import AscendSampler
     from vllm_ascend.worker.worker import NPUWorker
-except ImportError:
+except (ImportError, RuntimeError):
     AscendSampler = None
     NPUWorker = None
 
