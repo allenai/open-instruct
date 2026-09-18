@@ -22,6 +22,7 @@ going forward. Then use that validated base to test one method improvement (EOPD
 | D2 | **Do not migrate wholesale to Miles.** Miles is the research vehicle for OPD (replication + EOPD); Open Instruct stays for production training and gets its OPD pipeline hardened. Results that matter run in both until they disagree. | Two independent implementations agreed on 18/18 checkpoints, so the Open Instruct math is right; its flaws are pipeline-level and fixable. Miles already has a separate SGLang teacher with top-k scoring, minibatching (`global_batch_size`), and a runtime contract/audit, which EOPD needs. Miles' costs: only a Qwen3.5-2B model profile in the wrapper, pure-OPD wrapper pins top-k to 0, one person's branch on a young framework, GPU-efficiency not clearly better (136 vs 83 GPU-min per 4B step, with under-provisioned inference). |
 | D3 | Evaluation for the replication and EOPD must be **sampled** (T=1.0, top-p 0.8, 8192 tokens, Avg@8 and Pass@8), matching the Qwen2.5-Math harness the paper uses. | Our greedy pass@1 eval cannot see the diversity effect the paper claims. |
 | D4 | Gate EOPD on a **teacher-entropy diagnostic** before writing training code. | If our teachers rarely exceed the entropy threshold, EOPD reduces to OPD and there is nothing to test. |
+| D5 | Miles replication and EOPD work lands **directly on `robertb/miles-qwen35-opd`** (Kevin, 2026-09-18: Robert cleared the branch for us, treat it as ours). | No separate branch or review gate for the wrapper changes in step 3 and 6. |
 
 ## Known flaws in the Open Instruct OPD path (audit 2026-09-17)
 
@@ -55,7 +56,7 @@ From reading `grpo_fast.py` / `grpo_utils.py` on `codex/qwen35-math-opd`:
 | 2b | Open Instruct hardening: real-dump OPD audit (advantage identity + alignment), NaN-inside-mask becomes an error, document the temperature coupling. | Flaws 3, 5, 4. | In progress: `validate_opd_logprobs` guard + tests landed; caveats documented; real-dump audit being scoped. |
 | 2c | One 2B sync arm with `--use_vllm_logprobs false` (trainer-side student logprobs). | Direct test of flaw 2. Needs 4 nodes for ~4h. | **Proposed skip** after 2a: the gap is 1e-4 against a 0.07 signal at 4B and only matters for the tail of the 2B run. Kevin to confirm. |
 | 2d | Decide: fix the async path for OPD or fence it off (assert `async_steps==1` when `opd_pure`). | Flaw 1. | Decision pending. |
-| 3 | Miles replication prep: Qwen3-1.7B-Base, Qwen3-4B-Base, Qwen3-8B model profiles; expose minibatching (4 optimizer steps per rollout) and 1 sample/prompt in the OPD TOML; cosine LR; sampled Avg@8/Pass@8 eval matching the Qwen2.5-Math harness. | Paper setting: B=128, mini 32, LR 3e-6 cosine, 4096 response, T=1.0, 3 epochs MATH / 2 epochs DAPO-Math-14k. | Not started; Robert to review scope. |
+| 3 | Miles replication prep: Qwen3-1.7B-Base, Qwen3-4B-Base, Qwen3-8B model profiles; expose minibatching (4 optimizer steps per rollout) and 1 sample/prompt in the OPD TOML; cosine LR; sampled Avg@8/Pass@8 eval matching the Qwen2.5-Math harness. | Paper setting: B=128, mini 32, LR 3e-6 cosine, 4096 response, T=1.0, 3 epochs MATH / 2 epochs DAPO-Math-14k. | In progress (2026-09-18): upstream Miles ships `qwen3-1.7B/4B/8B` profiles, so only the wrapper's model map, minibatch/LR-schedule/eval-sampling knobs and the prompt data need adding. |
 | 4 | Run the OPD baseline: arm 2 (Qwen3-4B-Base from Qwen3-8B on DAPO-Math-14k), then arm 1 (Qwen3-1.7B-Base on MATH). Target: MATH500 Avg@8 within ~1 point of 78.8 / 67.8. | Infra validation against a public number. | Not started. |
 | 5 | Teacher-entropy diagnostic on Qwen3-8B and on our verifier-DPPO teachers: histogram, % tokens with H>0.8, top-16 mass, % student tokens outside teacher top-16 (paper Fig. 3 / Fig. 9). | D4 gate; calibrates tau for our teachers. | Not started. |
 | 6 | Implement EOPD in Miles (teacher top-k via SGLang `top_logprobs_num`, top-k-renormalized entropy proxy, student log-probs gathered at teacher indices under TP, gated FKL term, audit + metrics). A/B vs the matched baseline, 2 seeds. Target: +1.8 Avg@8 / +5 Pass@8 at 4B. | Methodology validation. | Not started. |
@@ -75,8 +76,6 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 - Compute and cluster for steps 2c and 4-6 (one 8-GPU node per Miles run; 4 nodes for the
   Open Instruct 2B ablation).
-- Robert: scope of Miles wrapper changes in step 3 (model profiles, minibatch exposure,
-  top-k unpinning) on `robertb/miles-qwen35-opd` vs a new branch.
 - Step 2d: fix or fence the async path.
 
 ## Where we are
@@ -96,3 +95,5 @@ See the latest Log entry.
   real one. Added `validate_opd_logprobs` (NaN/inf/positive logprob inside the response mask now
   raises) with tests; documented the temperature coupling and the async warning in
   `on_policy_distillation.md`. Proposed skipping step 2c.
+- **2026-09-18 00:20Z** Kevin: treat `robertb/miles-qwen35-opd` as our branch (D5). Step 3
+  starts there. 4B Miles job R8CZMP still running (hf-89 export expected ~00:30Z).
