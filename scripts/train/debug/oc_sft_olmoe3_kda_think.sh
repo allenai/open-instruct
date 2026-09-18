@@ -405,6 +405,7 @@ case "$MODE" in
         --dist_timeout_hours "${DIST_TIMEOUT_HOURS:-2}" \
         --no_save_async \
         --with_tracking \
+        --run_name "${RUN_NAME:-sft-${BASE}-${MODE}}" \
         --logging_steps 1 \
         --mixer_list $MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \

@@ -26,6 +26,7 @@ esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5 DATA_LOADER_SEED=34521
 export CLUSTER=ai2/holmes WORKSPACE=ai2/olmo-instruct PREEMPTIBLE=0
 export PRIORITY="${PRIORITY:-normal}" MAX_RETRIES=0 KEEP_LAST_N=1
+export RUN_NAME="hero-sft-h010-${ARM}-${MODE}-s34521-20260918"
 export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${MODE}-20260918}"
 # Caller accounts for all queued/running jobs against 32 urgent + 32 normal.
 # Explicit interpreter avoids local sync of the separately pinned MoE runtime.
