@@ -121,6 +121,13 @@ wandb_group = "large"
 row_specialization = "dynamic"
 
 [core]
+# Keep only the newest committed checkpoint; failed writes never remove the prior save.
+checkpoint_keep_last = 1
+# Router objective defaults; see docs/miles/core.md#router-auxiliary-objectives.
+router_aux_loss_grouping = "pack"
+router_aux_loss_reduction = "token"
+router_z_loss_reduction = "token"
+router_aux_count_source = "dispatch"
 # Async score differences include policy age; establish a workload-specific gate if needed.
 publication_mode = "refresh"
 refresh_request_timeout = 1800.0

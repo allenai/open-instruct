@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+import torch
 from olmo_core import config as core_config
 from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.distributed.parallel import DataParallelType
@@ -141,10 +142,17 @@ def replay_context(module, batch):
 
 def build_train_module(args, *, common, optim, hf_config, hf_state):
     validate_training_options(args)
+    # AdamW updates parameters in their storage dtype and has no master weights.
+    # Promote before FSDP/optimizer construction so small RL updates accumulate;
+    # compute and published inference weights remain BF16.
+    common = {**common, "model": common["model"].float()}
     module = train_transformer.TransformerTrainModule(
         **common,
         optim=AdamWConfig(**optim),
-        dp_config=train_config.TransformerDataParallelConfig(name=DataParallelType.fsdp)
+        autocast_precision=torch.bfloat16,
+        dp_config=train_config.TransformerDataParallelConfig(
+            name=DataParallelType.fsdp, param_dtype=core_config.DType.bfloat16, reduce_dtype=core_config.DType.float32
+        )
         if dist.get_world_size() > 1
         else None,
         ac_config=train_config.TransformerActivationCheckpointingConfig()
@@ -163,6 +171,8 @@ def iter_export_state(module, hf, *, stream_moe=True, fused_experts=False):
         raise ValueError("Fused expert publication applies to routed MoE models only")
     for name, value in module.model.state_dict().items():
         native = value.full_tensor() if isinstance(value, DTensor) else value
+        if native.is_floating_point():
+            native = native.to(torch.bfloat16)
         yield from convert.convert_state_to_hf(hf, {name: native}).items()
 
 

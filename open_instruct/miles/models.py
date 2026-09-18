@@ -12,6 +12,7 @@ from olmo_core import config as core_config
 from olmo_core.nn import transformer
 from olmo_core.nn.transformer import config as transformer_config
 
+from open_instruct.miles import router_objective
 from open_instruct.miles.timing import startup_stage
 
 
@@ -89,6 +90,7 @@ def build_train_module(args, source=None):
         module = backend.build_train_module(
             args, common=common, optim=optim, hf_config=hf, hf_state=hf_model.state_dict()
         )
+    router_objective.install(module.model, args.olmo_core)
     module._trainer = MetricSink()
     module._miles_model_backend = kind
     # Capture optimizer-owned parameters before any forward. FSDP temporarily

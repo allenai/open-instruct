@@ -32,6 +32,7 @@ from open_instruct.miles import (
     policy_refresh,
     publication,
     replay_diagnostics,
+    router_objective,
     scheduler,
 )
 from open_instruct.miles import metrics as training_metrics
@@ -205,11 +206,13 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             raise RuntimeError("Core RL validation failed: " + "; ".join(e for e in errors if e))
         return result
 
+    @contextlib.contextmanager
     def _replay_context(self, module, batch):
         context = models.replay_context(module, batch, enabled=self.args.use_rollout_routing_replay)
         if getattr(self.args.olmo_core, "replay_diagnostics", False):
-            return replay_diagnostics.checked_context(self, module, batch, context)
-        return context
+            context = replay_diagnostics.checked_context(self, module, batch, context)
+        with router_objective.batch_context(batch, module.model), context:
+            yield
 
     def _forward(self, module, batch):
         forward = getattr(module, "model_forward_no_pipeline", None) or module.model_forward
@@ -332,6 +335,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             normalization = contract.step_normalization(step_batches, self.args.global_batch_size)
             for batch in step_batches:
                 batch["aux_loss_div_factor"] = normalization.auxiliary_denominator
+                batch["aux_loss_response_div_factor"] = normalization.samples / normalization.world_size
             interval = self.args.olmo_core.diagnostic_interval
             diagnostic = interval > 0 and self.clock.completed_steps % interval == 0
             probe = contract.ParameterProbe(self.train_module._miles_named_parameters) if diagnostic else None
@@ -411,6 +415,13 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                         "rollout_id": rollout_id,
                         "normalization": vars(normalization),
                         "auxiliary_denominator": normalization.auxiliary_denominator,
+                        "auxiliary_response_denominator": normalization.samples / normalization.world_size,
+                        "router_objective": {
+                            "grouping": self.args.olmo_core.router_aux_loss_grouping,
+                            "count_source": self.args.olmo_core.router_aux_count_source,
+                            "balancing_reduction": self.args.olmo_core.router_aux_loss_reduction,
+                            "z_reduction": self.args.olmo_core.router_z_loss_reduction,
+                        },
                         "reduction": "token" if self.args.calculate_per_token_loss else "response",
                         "scoring_pass": scoring_mode,
                         "local_policy_objective": sum(float(m["normalized_policy_objective"]) for m in metrics),

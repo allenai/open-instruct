@@ -166,3 +166,115 @@ MILES_EXISTING_IMAGE=IMMUTABLE_IMAGE_ID \
 The [historical local MoE procedure](measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check)
 records the original fixture/debug workflow. Use the current structured examples
 for new runs; old trial commands and then-pending gates are not current defaults.
+
+## Router auxiliary objectives
+
+These optional controls change the MoE router's auxiliary losses. They are
+independent of the RL policy loss's token-versus-response normalization and of
+whether routing replay is enabled. Existing defaults remain unchanged.
+
+| Field under `[core]` | Default | Alternative and meaning |
+|---|---|---|
+| `router_aux_loss_grouping` | `"pack"` | `"sequence"`: compute balancing statistics separately for each original prompt-plus-response document. |
+| `router_aux_loss_reduction` | `"token"` | `"response"`: give each document equal weight instead of weighting by model-token count. |
+| `router_z_loss_reduction` | `"token"` | `"response"`: independently give each document equal weight for z-loss. |
+| `router_aux_count_source` | `"dispatch"` | `"current"`: use the current forward's router top-k choices to count expert selections for balancing. |
+| `router_aux_loss_weight` | `0.01` | Balancing coefficient; `0.0` disables its gradient contribution. |
+| `router_z_loss_weight` | `1e-5` | Z-loss coefficient; `0.0` disables its gradient contribution. |
+
+### Grouping, then averaging, then the coefficient
+
+Grouping decides which tokens share an expert-usage histogram. `"pack"` shares
+one histogram across the physical forward; `"sequence"` makes a separate histogram
+for each original document even when several documents occupy one pack. Neither
+choice changes attention boundaries or physical packing.
+
+Averaging decides how each document contributes to the update. With sequence
+grouping, suppose two documents have 2 and 6 model tokens and their balancing
+penalties are 1 and 3. Token averaging gives `(2*1 + 6*3) / 8 = 2.5`; response
+averaging gives `(1 + 3) / 2 = 2`. A balancing coefficient of `0.01` makes their
+contributions to the training objective `0.025` and `0.02`, respectively. The same
+weights and coefficient scale their gradients.
+
+With pack grouping and response averaging, documents share the pack's expert
+histogram, but each document's mean router probabilities has equal weight.
+Response averaging does not implicitly select sequence grouping. Z-loss has no
+expert histogram; its averaging is selected independently.
+
+Here a document is **the prompt plus its response**, including the final forwarded
+token and its synthetic replay assignment. These are model tokens, not only
+policy-loss tokens. Padding is excluded. The token and document denominators span
+the optimizer update and data-parallel ranks, accounting for gradient averaging;
+this is not an average of microbatch means.
+
+### Dispatched versus current counts
+
+`"dispatch"` counts the actual selected experts. With replay active, those are the
+replayed assignments. `"current"` instead derives a detached top-k histogram from
+this forward's router scores. It changes the balancing statistics only: replayed
+expert dispatch, selected expert weights, load metrics and z-loss keep their
+existing meanings. Gradients still flow through router probabilities; the discrete
+expert counts themselves are not differentiable.
+
+Count-source selection works with both grouping choices and both averaging
+choices. It does not change rollout publication, discard behavior, or inference
+routing. Matching this setting alone does not establish equivalence with Megatron.
+
+### Configuration examples
+
+The following explicitly spells out the defaults:
+
+```toml
+[core]
+router_aux_loss_grouping = "pack"
+router_aux_loss_reduction = "token"
+router_z_loss_reduction = "token"
+router_aux_count_source = "dispatch"
+router_aux_loss_weight = 0.01
+router_z_loss_weight = 1e-5
+```
+
+For equal document weighting and current-score balancing counts, change the
+following fields in a copied run configuration:
+
+```toml
+[core]
+compile_model = false
+router_aux_loss_grouping = "sequence"
+router_aux_loss_reduction = "response"
+router_aux_count_source = "current"
+# Z-loss stays token-weighted unless router_z_loss_reduction is also changed.
+```
+
+Set either coefficient to `0.0` to disable that auxiliary loss; set both to zero
+to disable both. These are experimental objective choices, not recommended new
+recipe defaults.
+
+### Supported scope and runtime
+
+The all-default pack/token/token objective uses Core's native router methods;
+current counts with that objective use Core's native count-source option. Other
+grouping/averaging combinations use document metadata preserved across backward
+recomputation. They require one unpadded instance per forward (which can contain
+multiple packed documents), trainer TP=CP=1, `compile_model=false`, and no global
+balancing or router orthogonal loss. Packed and unpacked execution are supported.
+
+Current counts additionally require plain softmax, local balancing, and no EMO
+routing, routing biases, expert groups, or uniform/random assignment overrides.
+Unsupported native routing combinations fail during model construction. Router
+objective controls require the Core MoE backend.
+
+The source integration updates the checksum-pinned Core patch in
+`runtime/miles/runtime.lock.json` to include development commit `ab64c3069`.
+Build a new application/runtime image from this checkout to use the combined
+controls; the earlier image in the GRPO guide does not contain them. Selecting
+current counts with an older Core dependency fails explicitly. This source merge
+does not promote a new default image.
+
+`open_instruct/test_miles_router_objective.py` checks losses and gradients against
+an independent reference for every grouping/averaging/count-source combination,
+with and without activation recomputation. It also checks unchanged replay
+outputs and policy gradients. The pinned Core patch includes native count-source
+regressions. `tests/miles/router_objective_contract.py` supplies GPU training and
+repacking checks; its `--count-source` option selects either count source. CPU
+checks do not establish distributed GPU qualification for every combination.

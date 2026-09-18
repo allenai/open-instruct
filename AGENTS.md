@@ -6,14 +6,16 @@ Start with [docs/miles/grpo.md](docs/miles/grpo.md); it is the main RL guide.
 Follow this workflow without requiring the user to supply a special agent prompt:
 
 1. Read the guide, model/topology support and launch instructions before choosing a run.
-2. For a first exercise, copy `configs/miles/examples/grpo-sharing.toml` to
+2. For a first exercise, copy `configs/miles/examples/small.toml` to
    Git-ignored `runs/my-grpo.toml`. Keep tracked templates unchanged. Set the user's
-   run name and fresh output path; keep its supplied checkpoint, mixed-policy refresh and offline W&B
-   unless the user requests another model or tracking mode.
+   run name, fresh output path and a compatible tiny checkpoint. Keep barrier
+   publication and offline W&B for this two-GPU mechanics check unless requested
+   otherwise. Use `medium.toml` for mixed-policy refresh after preparing its
+   full-policy, dataset, verifier and judge inputs.
 3. Use the documented compatible image and Python 3.12 submission environment.
-   Check Beaker resource access; optional HF/W&B credentials are not needed for
-   the supplied starter inputs. Do not install the local CUDA training stack just
-   to submit a job.
+   Check Beaker resource access; supply credentials only where required by the
+   selected inputs or tracking mode. Example model/data paths are placeholders.
+   Do not install the local CUDA training stack just to submit a job.
 4. Run `plan` and `validate`. When the user requests a run, launch through the MILES
    committed-image wrapper and follow completion using the operations guide.
    Report the configuration, image, experiment link and validation outcomes.

@@ -20,23 +20,16 @@ and the [chronological campaign log](measurements/throughput-campaign-20260913.m
 
 ## Runtime image
 
-Use immutable image `01M2F1RKZFZVJYAS0XQGEC3SEJ` for these throughput profiles.
-It builds the merged source at `2c477efd5` with the locked Core/MILES/SGLang
-sources, including refresh and completed-queue instrumentation. No experimental
-source overlay is needed. The earlier sharing image predates this integration;
-do not assume a local TOML upgrades code inside an existing image.
+For the maintained examples, use the current image and qualification boundaries
+in the [MILES GRPO guide](grpo.md). Its [September 18 qualification record](measurements/router-controls-20260918.md)
+distinguishes completed tiny-model checks from the full-policy checks still in progress.
 
-The new image passed source reconstruction/build checks; its runtime code passed
-113 packaged CPU tests. GPU evidence is the matching EP2 runtime exercised through
-the committed qualification overlay. The EP8 mixed-task attempt stopped after one update on an HTTP transport error;
-its [record](measurements/full-sft-basket-20260914.md) distinguishes successful
-first-step checks from the uncompleted baseline. This image is the current
-MILES GRPO runtime; qualification remains specific to the recorded workload.
-
-```bash
-MILES_EXISTING_IMAGE=01M2F1RKZFZVJYAS0XQGEC3SEJ \
-  python -m open_instruct.miles run /path/to/my-small.toml
-```
+The historical throughput results below used application source `2c477efd5`
+and image `01M2F1RKZFZVJYAS0XQGEC3SEJ`, with the exact qualification overlays
+recorded in [the original report](measurements/full-sft-basket-20260914.md).
+That runtime passed 113 packaged CPU tests; the EP8 mixed-task attempt stopped
+after one update on an HTTP transport error. These measurements are not a new
+throughput qualification of the current image or the 32K medium template.
 
 ## Choose a profile
 
@@ -54,25 +47,26 @@ The measurements below describe historical 4K experiments. Their labels such as
 Do not transfer the 4K no-recomputation setting to 32K packs without measuring
 memory. The maintained medium uses recomputation and candidate admission 16.
 
-## Settings behind the recommendation
+## Settings in the historical 4K measurements
 
 * Enable **full decode CUDA graphs** through the configured request admission;
   keep prefill graphs disabled for this qualified refresh path. The historical EP2 experiment
   used 32 HTTP/running slots per engine and capture through batch 32.
 * Keep radix caching with the `extra_buffer` KDA strategy and static memory
-  fraction 0.6. Small uses 786432 token slots and 1024 recurrent-state slots per
-  engine; large retains its qualified 131072/128 pools at concurrency 16. These are requested
+  fraction 0.6. The historical small profile used 786432 token slots and 1024
+  recurrent-state slots per engine; the historical large profile used
+  131072/128 pools at concurrency 16. These are requested
   limits; inspect the engine's resolved capacities and memory after capture.
 * Use dynamic-row Core kernels and persistent Triton caching. Cache namespaces
   include source/configuration identity; new configurations can still start cold.
 * Publish every optimizer step using flattened 1-GiB buckets and per-expert
   export. Warm publication was about three to four seconds in these trials.
-* The small example enables 6144-token trainer packing, disables activation
-  recomputation and uses guarded scoring skip. The full-SFT EP2 live test passed
+* The historical EP2 profile enabled 6144-token trainer packing, disabled
+  activation recomputation and used guarded scoring skip. The full-SFT EP2 live test passed
   all 24 updates, with an initial bit-exact scoring check. It used about 197 GiB
   per trainer GPU in the matched screen; restore recomputation for smaller memory
   budgets. See [qualification and the larger baseline](measurements/full-sft-basket-20260914.md).
-* Keep the completed FIFO to one collection. Small explicitly uses the measured
+* Keep the completed FIFO to one collection. The historical small profile used a
   512-sample producer budget; it can retain substantial work at shutdown.
   The automatic producer default, when not overridden, is
   one collection or two waves of requested serving admission, whichever is larger.

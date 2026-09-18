@@ -42,6 +42,7 @@ switching to a deprecated backend.
 | [Packing](sequence-packing.md) | Understanding document isolation, loss semantics and qualification |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
 | [Run-control semantics](run-controls.md) | Comparing Core controls with olmo-miles/Megatron terminology |
+| [Router auxiliary objectives](core.md#router-auxiliary-objectives) | Selecting grouping, averaging, count source and coefficients |
 | [Implementation contracts](core.md) | Reviewing detailed trainer, replay and publication checks |
 | [Measurements](measurements/index.md) | Finding point-in-time evidence, configurations and limitations |
 | [Historical plans](plans/index.md) | Understanding previous proposals, not selecting operating defaults |

@@ -39,13 +39,22 @@ Use those recorded boundaries when choosing a model, topology or recipe.
 
 ## Current runtime and qualification
 
-Use **`01M2F1RKZFZVJYAS0XQGEC3SEJ`**
+For the current example files and router controls, use
+**`01M2V3EGGYA2YFMYCAS1X6JSD7`**
+(`robertb/open-instruct-router-controls-dcc77a875`), application source `dcc77a875`
+and Core `ab64c30699d5c3de327830be6f4b2e2277a0edd3`. Dev and small have
+completed bounded lifecycle checks; full-policy and optional-objective
+qualification is in progress. Read the [current qualification record](measurements/router-controls-20260918.md)
+for scope, results and limitations. Do not treat this image as a completed
+qualification of every template.
+
+The preceding runtime was **`01M2F1RKZFZVJYAS0XQGEC3SEJ`**
 (`robertb/open-instruct-miles-fast-2c477efd5`), built from application source
 `2c477efd5`. It contains the merged mixed-policy refresh, queue instrumentation,
 packing and scoring optimizations; no source overlay is needed. Its Docker ID is
 `sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f`.
 
-The lock pins Core adapter `3d35ab326`, MILES backend `b18b71b18` and serving
+That earlier runtime pinned Core adapter `3d35ab326`, MILES backend `b18b71b18` and serving
 adapter `02ccb5d`. The reusable runtime/application image layers retain the
 qualified binary foundation. See [architecture](architecture.md) for builds.
 
@@ -71,9 +80,11 @@ qualification does not establish a new workload or topology in advance.
 | `barrier` | Low-level default, used by dev and small mechanics examples. Does not continue mixed-policy responses across publication. |
 | `engine_drain` | Independent engine drain: finish requests on their admitted version before swapping weights. This mode is distinct from mixed-policy refresh; see [engine drain](engine-drain.md). |
 
-The first-run starter uses **EP2 + two TP1 engines**, 32 prompts × 4 responses,
-128 samples per update, FIFO groups, lag at most two optimizer updates, and TIS.
-Lag is measured from the oldest token's policy version. Original sampled-token
+The `small` starter uses one trainer and one TP1 engine with barrier publication,
+four prompts × two responses and eight samples per update. The `medium` refresh
+template uses **EP8 + seven TP1 engines + one judge**, 64 prompts × four responses,
+256 samples per update, FIFO groups, lag at most two optimizer updates, and TIS.
+In refresh mode, lag is measured from the oldest token's policy version. Original sampled-token
 log probabilities remain the behavior denominator; trainer scoring supplies the
 PPO anchor. Replay routes describe the final forward that rebuilt the route table,
 not the historical expert choice for every previously sampled token.

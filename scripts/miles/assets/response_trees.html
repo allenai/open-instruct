@@ -1,0 +1,134 @@
+<div id="moe-response-tree-gallery">
+  <h2 data-title>Response trees</h2>
+  <div class="text-small" data-contract></div>
+  <div class="viz-controls">
+    <label class="form-label">Example<select class="form-select" data-case aria-label="Example"></select></label>
+    <label class="form-label">Compare<select class="form-select" data-view aria-label="Text to compare"></select></label>
+    <label class="form-label">Prefix length<select class="form-select" data-depth aria-label="Prefix length"><option value="12">12 words</option><option value="28" selected>28 words</option><option value="60">60 words</option></select></label>
+  </div>
+  <div data-case-label aria-live="polite"></div>
+  <details data-prompt-wrap><summary>Task prompt and scoring rule</summary><pre data-prompt></pre><div class="text-small" data-rule></div></details>
+  <div class="rt-legend text-small"><span><i class="rt-key rt-pass"></i>Verifier pass</span><span><i class="rt-key rt-fail"></i>Verifier fail</span><span>▧ token cap</span><span>∅ no final answer</span><span>H: sample branching · IG: verdict association (bits)</span></div>
+  <div data-stages></div>
+  <details data-reader><summary data-reader-label>Full response</summary>
+    <div class="viz-controls"><label class="form-label">Inspect<select class="form-select" data-reader-view aria-label="Inspect response"><option value="answer">Final answer</option><option value="code">Graded code</option><option value="response">Full generated response</option></select></label></div>
+    <pre data-response></pre>
+  </details>
+  <div data-error role="alert"></div>
+</div>
+<style>
+#moe-response-tree-gallery {color:var(--foreground); min-width:0;}
+#moe-response-tree-gallery .viz-controls {margin-block:16px;}
+#moe-response-tree-gallery pre {white-space:pre-wrap; overflow-wrap:anywhere; margin-block:12px;}
+#moe-response-tree-gallery .rt-legend {display:flex;flex-wrap:wrap;gap:8px 16px;margin-block:14px;}
+#moe-response-tree-gallery .rt-legend span {display:inline-flex;align-items:center;gap:5px;}
+#moe-response-tree-gallery .rt-key {display:inline-block;width:12px;height:12px;background:var(--green);}
+#moe-response-tree-gallery .rt-fail {background:var(--red);}
+#moe-response-tree-gallery .rt-stage {margin-block:24px;}
+#moe-response-tree-gallery .rt-stage h3 {margin-bottom:5px;}
+#moe-response-tree-gallery .rt-tree {list-style:none;padding:0;margin-block:12px;}
+#moe-response-tree-gallery .rt-tree ul {list-style:none;padding-left:18px;margin:8px 0 10px 8px;border-left:1px solid var(--border);}
+#moe-response-tree-gallery .rt-tree li {position:relative;margin-block:9px;min-width:0;}
+#moe-response-tree-gallery .rt-tree ul > li::before {content:"";position:absolute;left:-18px;top:12px;width:14px;border-top:1px solid var(--border);}
+#moe-response-tree-gallery .rt-node {display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+#moe-response-tree-gallery .rt-words {font-family:monospace;overflow-wrap:anywhere;padding:3px 5px;background:color-mix(in srgb,var(--viz-series-1) var(--shade),transparent);border-radius:3px;}
+#moe-response-tree-gallery .rt-info {display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap;}
+#moe-response-tree-gallery .rt-ring {display:inline-block;width:11px;height:11px;border:var(--ig-width) solid var(--viz-series-4);border-radius:50%;}
+#moe-response-tree-gallery .rt-samples {display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-block:5px;}
+#moe-response-tree-gallery .rt-sample {display:flex;align-items:center;gap:5px;}
+#moe-response-tree-gallery .rt-mark {width:5px;align-self:stretch;background:var(--green);}
+#moe-response-tree-gallery .rt-mark[data-fail="true"] {background:var(--red);}
+#moe-response-tree-gallery .rt-lengths {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px;margin-block:12px;}
+#moe-response-tree-gallery .rt-length-item {min-width:0;display:grid;gap:2px;}
+#moe-response-tree-gallery .rt-length-track {height:7px;background:color-mix(in srgb,var(--foreground) 8%,transparent);}
+#moe-response-tree-gallery .rt-length-fill {height:100%;background:var(--green);}
+#moe-response-tree-gallery .rt-length-fill[data-fail="true"] {background:var(--red);}
+#moe-response-tree-gallery .rt-length-value {overflow-wrap:anywhere;}
+@media (max-width:480px) {
+ #moe-response-tree-gallery .rt-tree ul {padding-left:10px;margin-left:3px;}
+ #moe-response-tree-gallery .rt-tree ul > li::before {left:-10px;width:7px;}
+ #moe-response-tree-gallery .rt-lengths {grid-template-columns:repeat(4,minmax(0,1fr));}
+}
+</style>
+<script>
+(async () => {
+  const root=document.getElementById('moe-response-tree-gallery');
+  const q=s=>root.querySelector(s);
+  const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
+  try {
+    const bytes=Uint8Array.from(atob('__RESPONSE_TREE_DATA__'),c=>c.charCodeAt(0));
+    const unpacked=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    const data=JSON.parse(await new Response(unpacked).text());
+    let selected=null;
+    const labels={response:'Generated opening',answer:'Final answer',code:'Graded code'};
+    q('[data-title]').textContent=data.title;
+    q('[data-contract]').textContent=data.contract_label;
+    data.cases.forEach((c,i)=>{const b=c.stages.before.summary,a=c.stages.after.summary;
+      q('[data-case]').append(new Option(`${c.title} · ${b.passed}/${b.n} → ${a.passed}/${a.n}`,i));});
+    const current=()=>data.cases[Number(q('[data-case]').value)];
+    function showResponse(stage,sample) {
+      selected={stage,sample};
+      const s=current().stages[stage].samples.find(x=>x.sample===sample);
+      q('[data-reader-label]').textContent=`${data.labels[stage]} · sample ${sample+1} · verifier ${s.score?'pass':'fail'} · ${s.tokens.toLocaleString()} tokens${s.finish==='length'?' · token cap':''}`;
+      q('[data-response]').textContent=s[q('[data-reader-view]').value]||'(No extracted text in this view.)';
+      q('[data-reader]').open=true;
+    }
+    function leaf(stage,s,view,depth) {
+      const wrapper=el('span','rt-sample');
+      const mark=el('span','rt-mark');mark.dataset.fail=String(!s.score);mark.setAttribute('aria-hidden','true');
+      const words=(s[view]||'').match(/\S+/g)||[];
+      const ending=!words.length?'empty':words.length>depth?'prefix limit':'text end';
+      const noAnswer=!s.answer.trim()&&Object.hasOwn(current().stages[stage].trees,'answer');
+      const text=`${s.score?'✓':'×'} #${s.sample+1} · ${s.tokens.toLocaleString()}t${s.finish==='length'?' ▧':''}${noAnswer?' ∅':''}`;
+      const button=el('button','btn btn-ghost',text);button.type='button';
+      button.setAttribute('aria-label',`${data.labels[stage]}, sample ${s.sample+1}, verifier ${s.score?'pass':'fail'}, ${s.tokens} tokens, ${ending}. Inspect full response.`);
+      button.dataset.tooltip=ending;
+      button.onclick=()=>{q('[data-reader-view]').value=view==='code'?'code':'answer';showResponse(stage,s.sample);q('[data-reader]').scrollIntoView({block:'nearest'});};
+      wrapper.append(mark,button);return wrapper;
+    }
+    function treeNode(node,stage,view,depth) {
+      const li=el('li');const line=el('div','rt-node');
+      const label=el('span','rt-words',node.label);label.style.setProperty('--shade',`${8+node.h/3*30}%`);
+      line.append(label);
+      const terminalFork=node.terminal.length&&node.children.length;
+      if(node.children.length>1||terminalFork) {
+        const info=el('span','rt-info text-small',`n=${node.n} · H ${node.h.toFixed(2)} · IG ${node.ig.toFixed(2)}`);
+        if(node.ig>0.005){const ring=el('i','rt-ring');ring.style.setProperty('--ig-width',`${1+node.ig*2}px`);ring.setAttribute('aria-hidden','true');info.prepend(ring);}
+        line.append(info);
+      }
+      li.append(line);
+      if(node.terminal.length){const samples=el('div','rt-samples');
+        if(terminalFork){const empty=node.terminal.every(id=>!current().stages[stage].samples.find(s=>s.sample===id)[view].trim());samples.append(el('span','text-small',empty?'Empty '+labels[view].toLowerCase()+':':'This text ends here:'));}
+        node.terminal.forEach(id=>samples.append(leaf(stage,current().stages[stage].samples.find(s=>s.sample===id),view,depth)));
+        li.append(samples);
+      }
+      if(node.children.length){const ul=el('ul');node.children.forEach(c=>ul.append(treeNode(c,stage,view,depth)));li.append(ul);}
+      return li;
+    }
+    function draw() {
+      const c=current(),view=q('[data-view]').value,depth=Number(q('[data-depth]').value);
+      q('[data-case-label]').textContent=c.id+' · '+c.tag;
+      q('[data-prompt]').textContent=c.prompt;q('[data-rule]').textContent=c.rule;
+      q('[data-stages]').replaceChildren();
+      for(const stage of ['before','after']) {
+        const arm=c.stages[stage],s=arm.summary,section=el('section','rt-stage');
+        section.append(el('h3','',`${data.labels[stage]} · ${s.passed}/${s.n} verifier passes`));
+        section.append(el('div','text-small',`Mean ${Math.round(s.mean_tokens).toLocaleString()} tokens · ${s.capped}/${s.n} at cap${s.no_answer===null?'':` · ${s.no_answer}/${s.n} without final answer`}`));
+        const lengths=el('div','rt-lengths text-small');lengths.setAttribute('aria-label','Response lengths; each bar uses the same token-cap scale');
+        arm.samples.forEach(sample=>{const item=el('div','rt-length-item');item.append(el('span','',`#${sample.sample+1}`));const track=el('div','rt-length-track'),fill=el('div','rt-length-fill');fill.style.width=`${100*sample.tokens/(sample.cap||Math.max(...arm.samples.map(x=>x.tokens)))}%`;fill.dataset.fail=String(!sample.score);track.append(fill);item.append(track,el('span','rt-length-value',`${sample.tokens.toLocaleString()}${sample.finish==='length'?' ▧':''}`));lengths.append(item);});
+        section.append(lengths);
+        const tree=el('ul','rt-tree');tree.setAttribute('aria-label',`${data.labels[stage]}, ${depth}-word ${labels[view]} prefix tree`);
+        tree.append(treeNode(arm.trees[view][depth],stage,view,depth));section.append(tree);q('[data-stages]').append(section);
+      }
+    }
+    function changeCase() {
+      const c=current();q('[data-view]').replaceChildren();
+      Object.keys(c.stages.before.trees).forEach(v=>q('[data-view]').append(new Option(labels[v],v)));
+      q('[data-view]').value=c.default_view||'response';q('[data-reader]').open=false;q('[data-reader-label]').textContent='Full response · choose a sample';q('[data-response]').textContent='';selected=null;draw();
+    }
+    q('[data-case]').onchange=changeCase;q('[data-view]').onchange=draw;q('[data-depth]').onchange=draw;
+    q('[data-reader-view]').onchange=()=>{if(selected)showResponse(selected.stage,selected.sample);};
+    changeCase();root.dataset.ready='true';
+  } catch(error) {q('[data-error]').textContent='Unable to load response trees: '+error.message;}
+})();
+</script>

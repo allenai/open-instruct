@@ -1,5 +1,10 @@
 # Sequence packing in the Core trainer
 
+Packed full-attention models require an attention backend that supports document
+boundaries, such as `core.attention_backend="flash_4"`. The `dev` and `small`
+examples use Torch attention without packing; enabling packing in a copy also
+requires changing that backend. Torch attention rejects intra-document masking.
+
 Basic sequence packing is incorporated into project primary branches
 `robertb/miles-olmo-core` (Open Instruct) and `robertb/miles-rl-adapter` (Core).
 The implementation was qualified on `robertb/miles-sequence-packing`, originally

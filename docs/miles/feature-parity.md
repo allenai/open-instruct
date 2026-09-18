@@ -1,7 +1,7 @@
 # Support and remaining parity gaps
 
 MILES + OLMo-core is the preferred GRPO path. This is the current support summary
-for the project branches, reconciled with the merged runtime on September 14, 2026. An image qualification
+for the project branches, updated September 18, 2026; historical evidence retains its original runtime identity. An image qualification
 applies to its recorded model, hardware and configuration; a combination of
 individually tested flags is not automatically qualified.
 
@@ -12,20 +12,24 @@ individually tested flags is not automatically qualified.
 | Dense Olmo 3 | Separate Core/FSDP adapter, YaRN reference tests, full 7B two-GPU resident save/resume/export/reload lifecycle | Full-model nonzero-gradient learning and long-run quality still need evidence; see [dense guide](olmo3-pre-rl.md) |
 | Hero | Config-driven conversion and exact full-checkpoint tensor round trip, tiny attention/gain/scale tests | The full-checkpoint probability gate failed; hero RL is not an accepted sharing baseline |
 | Async and replay | Bounded async/TIS, mixed-policy token spans, packing/replay; EP2 and EP8 refresh throughput gates. Earlier barrier-path EP2 fresh-process resume | Refresh retains historical behavior probabilities and final-forward replay routes. Its throughput gates do not establish checkpoint/resume or exact future-sampling reproduction |
-| Packing and compute | Document-isolated packing, activation recomputation, dynamic no-gradient SwiGLU rows, checked scoring-pass elision | Auxiliary loss uses Core local-batch tokens within each packed forward; packing changes that objective relative to separate samples |
+| Packing and compute | Document-isolated packing, activation recomputation, dynamic no-gradient SwiGLU rows, checked scoring-pass elision | Default auxiliary loss uses pack-local token averaging; optional [document grouping, averaging and count-source controls](core.md#router-auxiliary-objectives) require the updated runtime |
 | Serving capacity | Multiple TP1 engines, independent inference GPU counts, multi-node startup; radix/cache-aware and mixed-chunk exercises | Engine-pool recommendations are workload measurements; TP>1 cache/replay combinations need separate qualification |
 | Data and rewards | Math, GSM8K, IF, function and stdio execution, both named judge rubrics; positive natural stdio rewards and mixed groups | Code executor is an external service; judge calibration and the complete published Olmo 3 learning recipe are separate questions |
 | Combined workload | Four-update EP2 + three policy engines + one judge: async/TIS, packing/replay, actual radix hits, saves, six reward domains | The EP8 mixed-task attempt stopped after one update on a producer HTTP transport error; sustained mixed-task operation remains unqualified |
-| Checkpoints | Synchronous native saves, topology/cursor validation, same-topology restore, final HF export and fresh dense serving reload | Background saves, retention policy and token-per-expert cadence are not ported; multi-node/managed automatic restart is disabled |
+| Checkpoints | Synchronous native saves, topology/cursor validation, same-topology restore, final HF export and fresh dense serving reload | Rolling retention is implemented; background saves and token-per-expert cadence are not ported. Multi-node/managed automatic restart is configurable but remains unqualified |
 | Health and recovery | Separate health/generation connections, stale-probe guards, bounded HTTP retries and explicit failures | No general automatic trainer recovery or qualified engine-replacement/republish lifecycle; restore a completed checkpoint |
 | Publication | Streamed/fused tensors, flattened NCCL or colocated IPC, startup full-weight audit; periodic full audits default off | Current full-model starters select mixed-policy refresh. Barrier remains the low-level default; [engine drain](engine-drain.md) finishes requests before swapping and is a separate mode |
 | Compiler caches | Private local Triton caches, verified immutable shared generations, bounded best-effort publication | Other compiler families and CUDA graphs are not persisted by the Ray integration |
 | Long sequences | Actual 16K/32K/64K input serving probes; bounded 16K and 32K RL exercises | Read [length evidence](long-sequences.md): serving success does not establish 64K backward or high-concurrency memory fit |
 
-Use image **`01M2F1RKZFZVJYAS0XQGEC3SEJ`**; [MILES GRPO](grpo.md) records its
+Use image **`01M2V3EGGYA2YFMYCAS1X6JSD7`**; [MILES GRPO](grpo.md) records its
 source identity, publication modes and qualification boundaries.
 
 ## Evidence to read first
+
+- [Current router controls and standard examples](measurements/router-controls-20260918.md):
+  dev/small lifecycle and retention passed; medium and optional controls remain
+  in qualification. Large is excluded at the user’s request.
 
 - [Merged refresh and fast EP2 qualification](measurements/full-sft-basket-20260914.md),
   [EP8 GSM8K throughput](measurements/throughput-20260913.md) and
@@ -52,8 +56,8 @@ as separate conclusions in each report.
 Core owns its optimizer/checkpoint lifecycle and parallelism semantics; a native
 Megatron flag is not a substitute. See [run controls](run-controls.md) for exact
 mappings and rejected settings, and the generated [configuration reference](configuration.md)
-for the accepted surface. Trainer offload, async checkpoint writing, checkpoint
-retention/cadence, the full recipe catalog, some external judge modes, and advanced
+for the accepted surface. Trainer offload, async checkpoint writing, token-per-expert checkpoint
+cadence, the full recipe catalog, some external judge modes, and advanced
 parallel layouts remain implementation gaps. Selecting larger batch sizes or more
 engines cannot supply those features.
 

@@ -20,8 +20,9 @@ python -m open_instruct.miles run runs/my-run.toml
 ```
 
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test
-mechanics. They are not accuracy baselines. They exercise evaluation, save and
-resume as well as generation and training.
+mechanics. They are not accuracy baselines. They exercise evaluation, saving and HF export as well as generation and
+training. Resume needs a separate interrupted-run check; a completed run alone
+does not test recovery.
 
 `medium` targets our latent KDA MoE on B300 hardware. Supply an HF policy,
 prepared immutable mixed-task training/held-out JSONL files and verifier registry,
@@ -44,7 +45,9 @@ The completed queue holds one 256-response collection; the producer permits
 1,024 outstanding responses, including those waiting for inference admission.
 Mixed-policy refresh and TIS retain a lag limit of two updates. Evaluation runs
 before training and every 50 updates; native checkpoints every five updates
-protect progress against preemption. Compiler-cache restore is enabled, but
+protect progress against preemption. All four templates explicitly keep only
+the newest committed checkpoint (`core.checkpoint_keep_last=1`); retention runs
+after a successful commit. Compiler-cache restore is enabled, but
 publication before preemption remains follow-up work.
 
 `large` keeps the same workload and numerical settings as a planning baseline.
@@ -52,6 +55,12 @@ Trainer parallelism is two eight-GPU nodes, EP8 with DP2. Its topology,
 throughput, recovery and memory use require qualification before production.
 Thirty-two engines plus a one-GPU judge currently need a fifth serving/service
 node, leaving seven allocated GPUs unused. `plan` reports this explicitly.
+
+Router grouping, auxiliary averaging and balancing-count source are explicit
+in all four examples and preserve the existing pack/token/token/dispatch defaults.
+See [router objectives](../../../docs/miles/core.md#router-auxiliary-objectives)
+for alternatives and their runtime requirements. A qualification of the defaults
+does not by itself exercise the optional objectives.
 
 W&B defaults to offline; configure an API-key secret and online mode when needed.
 Do not run any template unchanged: model, data, output and judge paths are

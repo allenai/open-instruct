@@ -54,7 +54,7 @@ exist on the submitting host.
 ## Laptop: choose or build an image
 
 The current [MILES GRPO](grpo.md) uses image
-`01M2F1RKZFZVJYAS0XQGEC3SEJ`. Choose a starter from the four maintained examples and verify image compatibility
+`01M2V3EGGYA2YFMYCAS1X6JSD7`. Choose a starter from the four maintained examples and verify image compatibility
 with its backend and serving features. Supply the model/data paths and any secrets
 needed by your run. Beaker resource permissions are required.
 
@@ -121,8 +121,8 @@ selection before training.
 
 ## Placement, secrets and results
 
-GPU examples use Holmes, `ai2/open-instruct-dev`, urgent priority and a one-hour
-minimum runtime. CPU-only preparation requiring WEKA must use **ai2/saturn**.
+GPU examples use Holmes, `ai2/open-instruct-dev`, urgent priority and minimum runtimes of one hour for dev/small, four hours for
+medium and eight hours for large. CPU-only preparation requiring WEKA must use **ai2/saturn**.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.
 See [topology](topology.md) for replica and engine counts and
 [managed judges](managed-judges.md) for preparation and placement.

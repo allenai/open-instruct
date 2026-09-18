@@ -26,7 +26,7 @@
     "publication_mode": "barrier (low-level default) synchronously publishes the fleet; engine_drain finishes admitted TP1 requests before independent publication; refresh (current full-model starters) preserves sampled tokens/behavior logprobs across publication and continues decoding with policy-span metadata. Refresh requires managed disaggregated TP1 async GRPO, one optimizer step per collection, MILES router, TIS, and use_rollout_logprobs=false; consult docs/miles/grpo.md for scope.",
     "replay_diagnostics": "Retain expert-ID replay diagnostics; does not enable replay itself.",
     "reward_config": "Trusted verifier registry path; structured workflow preparation supplies it.",
-    "router_aux_loss_weight": "Coefficient for native Core load-balancing auxiliary loss; with packing, use packed-forward local-batch semantics.",
+    "router_aux_loss_weight": "Coefficient for Core router balancing loss; zero disables its gradient contribution. Grouping, reduction and count source are configured independently.",
     "router_z_loss_weight": "Router z-loss coefficient; replay does not itself disable router losses or gradients.",
     "row_specialization": "static specializes no-gradient SwiGLU on capacity; dynamic avoids capacity-specific compilation. Independent of arithmetic flags.",
     "scoring_check_interval": "Periodic standalone-versus-training score check; startup/resume also checks the first update.",
@@ -41,7 +41,11 @@
     "compile_optimizer": "Compile the native MoE distributed optimizer update. Experimental; independent of model compilation. Default false.",
     "use_reduce_scatter": "Use the native MoE reduce-scatter gradient path. Experimental; qualify EP topology before promoting. Default false.",
     "checkpoint_keep_last": "Committed native checkpoints to keep after each commit (newest first); unset keeps every checkpoint. Run files default to 1.",
-    "checkpoint_keep_every": "Also keep the checkpoint after every N completed updates (rollout id N-1, 2N-1, ...); unset keeps no milestones."
+    "checkpoint_keep_every": "Also keep the checkpoint after every N completed updates (rollout id N-1, 2N-1, ...); unset keeps no milestones.",
+    "router_aux_loss_grouping": "pack retains native Core local-forward balancing; sequence computes counts and mean scores within each original response document while preserving physical packing. Experimental; requires MoE, TP=CP=1, no global balancing and no model compilation.",
+    "router_aux_loss_reduction": "token weights each document by its full model-token count; response averages document token means equally over all responses in the optimizer update.",
+    "router_z_loss_reduction": "token preserves native global model-token normalization; response averages per-document z-loss token means equally. Independent of balancing grouping and weighting.",
+    "router_aux_count_source": "Balancing histogram source: dispatch (default, includes replay) or current (fresh trainer top-k). Current changes balancing only; replay dispatch, selected weights and z-loss are unchanged. Supported for local, plain-softmax MoE routing."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",

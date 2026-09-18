@@ -34,6 +34,13 @@ def prepare_model_config(config, hf, options):
     config.recompute_each_block = options.activation_checkpointing
     blocks = list(config.block.values()) if isinstance(config.block, dict) else [config.block]
     for block in [*blocks, *(config.block_overrides or {}).values()]:
+        router = getattr(block, "routed_experts_router", None)
+        if router is not None:
+            if options.router_aux_count_source == "current" and not hasattr(router, "lb_loss_count_source"):
+                raise ValueError(
+                    "Current router counts require the updated Core runtime; rebuild from runtime.lock.json"
+                )
+            router.lb_loss_count_source = options.router_aux_count_source
         experts = getattr(block, "routed_experts", None)
         if experts is not None:
             experts.row_specialization = options.row_specialization

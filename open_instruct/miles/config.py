@@ -53,6 +53,10 @@ class CoreConfig:
     sequence_packing: bool = False
     packing_max_tokens: int | None = None
     max_policy_lag: int = 0
+    router_aux_loss_grouping: str = "pack"
+    router_aux_loss_reduction: str = "token"
+    router_z_loss_reduction: str = "token"
+    router_aux_count_source: str = "dispatch"
     router_aux_loss_weight: float = 0.01
     router_z_loss_weight: float = 1e-5
     # The standalone pre-update scoring pass is skipped when the recipe makes it
@@ -135,6 +139,16 @@ class CoreConfig:
             validation.integer(self.packing_max_tokens, "core.packing_max_tokens", minimum=1)
         if type(self.max_policy_lag) is not int or self.max_policy_lag < 0:
             raise InputError("core.max_policy_lag must be a nonnegative integer")
+        validation.choice(self.router_aux_loss_grouping, "core.router_aux_loss_grouping", ("pack", "sequence"))
+        validation.choice(self.router_aux_count_source, "core.router_aux_count_source", ("dispatch", "current"))
+        for name in ("router_aux_loss_reduction", "router_z_loss_reduction"):
+            validation.choice(getattr(self, name), f"core.{name}", ("token", "response"))
+        if self.compile_model and (
+            self.router_aux_loss_grouping,
+            self.router_aux_loss_reduction,
+            self.router_z_loss_reduction,
+        ) != ("pack", "token", "token"):
+            raise InputError("Document router objectives currently require core.compile_model=false")
         for name in ("router_aux_loss_weight", "router_z_loss_weight"):
             value = getattr(self, name)
             validation.number(value, f"core.{name}")
@@ -144,7 +158,9 @@ class CoreConfig:
         return {
             field.name.removeprefix("checkpoint_"): getattr(self, field.name)
             for field in dataclasses.fields(self)
-            if field.name.startswith("checkpoint_") and getattr(self, field.name) is not None
+            if field.name.startswith("checkpoint_")
+            and field.name not in {"checkpoint_keep_last", "checkpoint_keep_every"}
+            and getattr(self, field.name) is not None
         }
 
 

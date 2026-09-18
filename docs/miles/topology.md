@@ -2,7 +2,7 @@
 
 Start with [structured examples](../../configs/miles/examples/README.md) and inspect
 `plan` before allocating GPUs. The full async starter is **one EP8 trainer node
-plus eight TP1 rollout engines on a second node**, not the historical EP2 + one
+plus seven TP1 rollout engines and one judge on a second node**, not the historical EP2 + one
 engine study. Recommended configuration and measured qualification are distinct.
 
 | Control | Meaning |
@@ -60,7 +60,7 @@ Do not infer an eightfold speedup from eight rollout GPUs.
 
 Set client concurrency, engine maximum running requests, decode graph size,
 full-attention token capacity and recurrent-state cache capacity together. The
-starters expose concurrency 64; shared-engine held-out evaluation uses those same
+medium and large starters expose concurrency 16 per engine; dev/small use 8; shared-engine held-out evaluation uses those same
 limits. Context includes prompt plus response; response caps alone do not bound
 prompt memory. Trainer pack budget and serving context are different controls.
 

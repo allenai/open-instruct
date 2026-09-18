@@ -66,7 +66,7 @@ def rollout(rank, world):
     return rows
 
 
-def make_worker(root, world, packed, auxiliary, checkpointing):
+def make_worker(root, world, packed, auxiliary, checkpointing, **router_options):
     name = f"ep{world}-pack{int(packed)}-aux{int(auxiliary)}-ac{int(checkpointing)}"
     run = RunConfig(
         CoreConfig(
@@ -80,6 +80,7 @@ def make_worker(root, world, packed, auxiliary, checkpointing):
             scoring_check_interval=50,
             router_aux_loss_weight=0.01 if auxiliary else 0.0,
             router_z_loss_weight=1e-5 if auxiliary else 0.0,
+            **router_options,
         ),
         dict(
             hf_checkpoint=str(root / "hf"),
