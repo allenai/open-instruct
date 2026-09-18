@@ -16,7 +16,7 @@ export NUM_INSTANCES="${NUM_INSTANCES:-$GPUS}" TIMEOUT="${TIMEOUT:-6h}"
 case "$MODE" in
     omega)
         bash "$HERE/eval_olmoe3_hero.sh" "$CKPT" "$LABEL-omega" \
-            -t omega_500 -o max_tokens=32768 -o num_samples=1 \
+            -t omega_500:hillclimb -o max_tokens=32768 -o num_samples=1 \
             -t omega_500_out -o max_tokens=32768 -o num_samples=1 \
             --no-preemptible "$@"
         ;;
