@@ -447,6 +447,7 @@ case "$MODE" in
         -i "$CKPT_ROOT/$STEP" \
         -o "$CKPT_ROOT/hf_$STEP" \
         -c $CONFIG_NAME \
+        -t "${CONVERT_TOKENIZER:-$TOKENIZER}" \
         -s "$SEQ" \
         --skip-validation \
         --device "$CONVERT_DEVICE"
