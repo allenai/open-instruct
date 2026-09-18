@@ -47,9 +47,9 @@ NUM_INSTANCES="${NUM_INSTANCES:-1}"  # vLLM instances; set with GPUS for wide su
 HARNESS="${HARNESS:-default}"
 EVAL_IMAGE="${EVAL_IMAGE:-akshitab/olmo-core-tch2110cu128-rma-2026-08-04}"
 # Empty PTXAS_PATH selects Triton's bundled compiler (sandbox image has no conda).
-PTXAS_ARGS=()
+PTXAS_ARGS=(-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1)
 if [[ -n "${PTXAS_PATH-/opt/conda/bin/ptxas}" ]]; then
-    PTXAS_ARGS=(-e "TRITON_PTXAS_PATH=${PTXAS_PATH-/opt/conda/bin/ptxas}")
+    PTXAS_ARGS+=(-e "TRITON_PTXAS_PATH=${PTXAS_PATH-/opt/conda/bin/ptxas}")
 fi
 TIMEOUT="${TIMEOUT:-24h}"  # Beaker job timeout; paper-protocol popqa/MATH at one instance need >24h
 
@@ -84,7 +84,6 @@ uv run olmo-eval beaker launch \
     -e UV_CONSTRAINT="$CONSTRAINTS" \
     -e PYTHONPATH=/gantry-runtime/src \
     "${PTXAS_ARGS[@]}" \
-    -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     -e OLMO_VLLM_TORCH_GROUPED_MOE=1 \
     -e OLMO_VLLM_FLA_KDA=1 \
     -e OLMO_EVAL_RUNTIME_TORCH_VERSION=2.10.0+cu128 \
