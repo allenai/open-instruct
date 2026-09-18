@@ -121,8 +121,9 @@ sampled-token OPD update above: `L = L_OPD + eopd_alpha * 1[H_t > eopd_tau] * FK
 `eopd_top_k` tokens at each response position, `q~_t` is the teacher renormalised over those
 tokens and `p_theta` is the student's full-vocabulary probability. `H_t` is the entropy of
 `q~_t`, the paper's proxy for the teacher entropy (an SGLang teacher only returns its top-k).
-Defaults follow the paper: alpha 1.0, tau 0.8, k 16. It requires
-`distillation.use_rollout_logprobs = true`.
+Defaults follow the paper: alpha 1.0, tau 0.8, k 16. It works with either student side
+(`distillation.use_rollout_logprobs`); only the rollout-log-prob path has run on GPUs so far
+(the tiny EOPD smoke), so a trainer-log-prob EOPD arm wants a tiny smoke first.
 
 Mechanics: `opd_hooks.reward` asks the teacher for `top_logprobs_num = k` alongside the
 sampled-token scores and checks every position returned exactly k finite entries;
@@ -168,19 +169,27 @@ schema accepts:
   `scripts/miles/prepare_eopd_math_prompts.py` renders the EOPD paper's
   (arXiv 2603.07079) MATH / DAPO-Math-14k training prompts and its six
   evaluation sets through the Qwen3 chat template in non-thinking mode for the
-  `configs/miles/opd/eopd-opd-*.toml` replication specs.
+  `configs/miles/opd/eopd-opd-*.toml` replication specs. `eopd-math-v1` on Weka carries
+  the paper's App. C suffix on every set (evaluation); `eopd-math-v2-train` re-renders only
+  the two training sets with the suffix the authors' verl preprocessing uses ("Let's think
+  step by step and output the final answer within \boxed{}."), keeping all 14,116 DAPO
+  prompts as the paper did (no eval-overlap drop, since the rendered strings differ).
 - `training.num_rollouts`, `training.save_interval` (HF export cadence) and
   `training.eval_interval` (`0` evaluates before the first update and after the
   last one, as the prototype did). `training.optimizer_steps_per_rollout`
   (default 1) splits each rollout into that many PPO mini-batches: Miles'
   `--global-batch-size` becomes `rollout_batch_size * samples_per_prompt`
   divided by it, so `128 x 1` prompts with `4` steps is the paper-style
-  "batch 128, mini-batch 32" schedule. The rollout log-probs stay the PPO anchor
-  (`distillation.use_rollout_logprobs`); the audit expects
+  "batch 128, mini-batch 32" schedule; the audit expects
   `num_rollouts * optimizer_steps_per_rollout` optimizer steps.
+  `training.loss_aggregation` (`response`, the Miles default per-response mean, or `token`,
+  verl's `token-mean` over the mini-batch via `--calculate-per-token-loss`; the EOPD
+  replication specs use `token`).
 - `optimizer.learning_rate`, `optimizer.lr_decay_style` (`constant`, `cosine`,
   `linear`; anything but `constant` sets `--lr-decay-iters` to the total number
-  of optimizer steps), `optimizer.lr_warmup_iters` and `optimizer.min_lr`.
+  of optimizer steps), `optimizer.lr_warmup_iters` and `optimizer.min_lr`;
+  `optimizer.weight_decay`, `optimizer.adam_beta1`, `optimizer.adam_beta2` (defaults 0.0,
+  0.9, 0.98 as the Qwen3.5 runs used; the EOPD replication specs set verl's 0.01, 0.9, 0.999).
 - `inference.max_response_length`, `inference.max_context_length`,
   `inference.max_running_requests` (learner SGLang concurrency; the KV budget is
   `max_context_length` times this), `inference.top_p` (rollout nucleus

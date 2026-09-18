@@ -29,6 +29,8 @@ ARCHITECTURES = {
     "Qwen/Qwen3-8B": "qwen3-8B",
 }
 LR_DECAY_STYLES = ("constant", "cosine", "linear")
+# Per-response mean (Miles default) or token-mean over the mini-batch (verl default, the EOPD paper).
+LOSS_AGGREGATIONS = ("response", "token")
 WANDB_MODES = ("offline", "online", "disabled")
 DEFAULTS = {
     # align_eos_with_teacher: give a base-model learner the teacher's end-of-turn token as its
@@ -53,6 +55,7 @@ DEFAULTS = {
         # Optimizer steps per rollout: Miles' global batch is the rollout batch divided by
         # this, so 4 gives the paper-style "batch 128, mini-batch 32" PPO schedule.
         "optimizer_steps_per_rollout": 1,
+        "loss_aggregation": "response",
     },
     "trainer": {"backend": "megatron", "gpus": 2, "tensor_parallel_size": 2},
     "inference": {
@@ -83,7 +86,17 @@ DEFAULTS = {
         "eopd_tau": 0.8,
         "eopd_top_k": 16,
     },
-    "optimizer": {"learning_rate": 1e-6, "lr_decay_style": "constant", "lr_warmup_iters": 0, "min_lr": 0.0},
+    "optimizer": {
+        "learning_rate": 1e-6,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "min_lr": 0.0,
+        # Megatron Adam defaults used by the exercised Qwen3.5 runs; verl (the EOPD paper) uses
+        # weight decay 0.01 and betas 0.9/0.999.
+        "weight_decay": 0.0,
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.98,
+    },
     "output": {"root": "", "assets": ""},
     "tracking": {"wandb_mode": "offline", "wandb_project": "open-instruct-opd", "wandb_entity": ""},
 }
@@ -175,6 +188,12 @@ class OPDRunSpec:
         if document["optimizer"]["min_lr"] > document["optimizer"]["learning_rate"]:
             raise InputError("optimizer.min_lr must not exceed optimizer.learning_rate")
         validation.choice(document["optimizer"]["lr_decay_style"], "optimizer.lr_decay_style", LR_DECAY_STYLES)
+        validation.number(document["optimizer"]["weight_decay"], "optimizer.weight_decay", minimum=0.0)
+        for key in ("adam_beta1", "adam_beta2"):
+            validation.number(
+                document["optimizer"][key], f"optimizer.{key}", minimum=0.0, exclusive_max=True, maximum=1.0
+            )
+        validation.choice(document["training"]["loss_aggregation"], "training.loss_aggregation", LOSS_AGGREGATIONS)
         inference = document["inference"]
         collection = inference["rollout_batch_size"] * inference["samples_per_prompt"]
         if collection % document["training"]["optimizer_steps_per_rollout"]:
@@ -206,10 +225,6 @@ class OPDRunSpec:
         validation.integer(distillation["eopd_top_k"], "distillation.eopd_top_k")
         validation.number(distillation["eopd_alpha"], "distillation.eopd_alpha", exclusive_min=True)
         validation.number(distillation["eopd_tau"], "distillation.eopd_tau")
-        if distillation["eopd"] and not distillation["use_rollout_logprobs"]:
-            raise InputError(
-                "distillation.eopd requires distillation.use_rollout_logprobs (the paper's SGLang OPD path)"
-            )
         for section, key in (
             ("distillation", "kl_coef"),
             ("optimizer", "learning_rate"),

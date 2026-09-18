@@ -8,6 +8,13 @@
 # MATH-500, AIME24, AIME25 and AMC23 in-run; the full six-benchmark Avg@8 / Pass@8 table is
 # produced post hoc from the HF exports. Paper OPD-baseline target: MATH-500 Avg@8 78.81,
 # Pass@8 90.80. One 8-GPU node: 4 trainer TP2 / 3 student SGLang / 1 teacher SGLang.
+# Matched to the authors' verl code (github.com/WLS04/EOPD): the student side of the advantage
+# is the trainer's pre-update log-prob (use_rollout_logprobs = false), the loss is token-mean
+# (loss_aggregation = "token"), AdamW weight decay 0.01 with betas 0.9/0.999 (verl defaults),
+# training prompts carry their preprocessing suffix "Let's think step by step and output the
+# final answer within \boxed{}." (eopd-math-v2-train) while evaluation keeps App. C's
+# "Please reason step by step, ..." (eopd-math-v1), and a terminal <|endoftext|> is scored as
+# the teacher's <|im_end|> (their _replace_eos_token_for_teacher).
 # Data: scripts/miles/prepare_eopd_math_prompts.py (see docs/miles/opd.md).
 schema_version = 1
 name = "eopd-opd-qwen3-4b-base-dapo14k"
@@ -30,6 +37,7 @@ num_rollouts = 220
 save_interval = 20
 eval_interval = 44
 optimizer_steps_per_rollout = 4
+loss_aggregation = "token"
 
 [trainer]
 backend = "megatron"
@@ -53,21 +61,24 @@ eval_samples_per_prompt = 8
 
 [distillation]
 kl_coef = 1.0
-use_rollout_logprobs = true
+use_rollout_logprobs = false
 
 [optimizer]
 learning_rate = 3e-6
 lr_decay_style = "cosine"
 lr_warmup_iters = 0
 min_lr = 0.0
+weight_decay = 0.01
+adam_beta1 = 0.9
+adam_beta2 = 0.999
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-4b-base-dapo14k-v2"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-4b-base-dapo14k-v3"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]
 seed = 42
-prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/dapo_math_14k.jsonl"
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v2-train/dapo_math_14k.jsonl"
 eval_prompt_data = [
   "math_500", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/math_500.jsonl",
   "aime24", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/aime24.jsonl",

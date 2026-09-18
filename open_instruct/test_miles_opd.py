@@ -223,6 +223,9 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
             'optimizer.lr_decay_style="cosine"',
             "optimizer.lr_warmup_iters=10",
             "optimizer.min_lr=1e-7",
+            "optimizer.weight_decay=0.01",
+            "optimizer.adam_beta2=0.999",
+            'training.loss_aggregation="token"',
             "distillation.use_rollout_logprobs=true",
             'tracking.wandb_mode="disabled"',
             'model.source="Qwen/Qwen3.5-9B"',
@@ -252,6 +255,10 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
     assert values["--lr-warmup-iters"] == "10"
     assert values["--min-lr"] == "1e-07"
     assert values["--lr-decay-iters"] == "400"
+    assert values["--weight-decay"] == "0.01"
+    assert values["--adam-beta1"] == "0.9"
+    assert values["--adam-beta2"] == "0.999"
+    assert "--calculate-per-token-loss" in flags
     assert values["--sglang-max-running-requests"] == "64"
     assert values["--sglang-max-total-tokens"] == str(2048 * 64)
     assert values["--actor-num-gpus-per-node"] == "4"
@@ -264,13 +271,16 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
 
 
 def test_default_schedule_is_one_constant_lr_step_per_rollout():
-    values, _ = native(specs.load(CONFIG))
+    values, flags = native(specs.load(CONFIG))
     assert values["--global-batch-size"] == "8"
     assert values["--lr-decay-style"] == "constant"
     assert values["--min-lr"] == "0.0"
     assert values["--rollout-top-p"] == "1.0"
     assert values["--eval-max-response-len"] == values["--rollout-max-response-len"]
     assert "--lr-decay-iters" not in values
+    assert values["--weight-decay"] == "0.0"
+    assert values["--adam-beta2"] == "0.98"
+    assert "--calculate-per-token-loss" not in flags
 
 
 def test_qwen3_replication_models_resolve_to_upstream_profiles():
@@ -288,6 +298,9 @@ def test_qwen3_replication_models_resolve_to_upstream_profiles():
         ("inference.eval_max_response_length=4096", "exceed eval_max_response_length"),
         ('optimizer.lr_decay_style="step"', "optimizer.lr_decay_style"),
         ("optimizer.min_lr=1e-3", "min_lr must not exceed"),
+        ("optimizer.weight_decay=-0.1", "optimizer.weight_decay"),
+        ("optimizer.adam_beta2=1.0", "optimizer.adam_beta2"),
+        ('training.loss_aggregation="mean"', "training.loss_aggregation"),
         (["inference.top_p=0.9", "distillation.use_rollout_logprobs=true"], "inference.top_p must be 1.0"),
     ],
 )
@@ -427,7 +440,6 @@ def test_eopd_selects_the_custom_loss_and_forwards_its_settings():
 @pytest.mark.parametrize(
     ("override", "message"),
     [
-        (["distillation.eopd=true"], "use_rollout_logprobs"),
         (["distillation.eopd_top_k=0"], "positive integer"),
         (["distillation.eopd_alpha=0"], "> 0"),
         (["distillation.eopd_tau=-1"], ">= 0"),

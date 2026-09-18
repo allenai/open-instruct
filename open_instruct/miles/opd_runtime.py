@@ -128,9 +128,9 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "lr-decay-style": optimizer["lr_decay_style"],
         "lr-warmup-iters": optimizer["lr_warmup_iters"],
         "min-lr": optimizer["min_lr"],
-        "weight-decay": 0.0,
-        "adam-beta1": 0.9,
-        "adam-beta2": 0.98,
+        "weight-decay": optimizer["weight_decay"],
+        "adam-beta1": optimizer["adam_beta1"],
+        "adam-beta2": optimizer["adam_beta2"],
         "clip-grad": 1.0,
         "attention-dropout": 0.0,
         "attention-backend": "flash",
@@ -172,6 +172,10 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "--accumulate-allreduce-grads-in-fp32",
         "--attention-softmax-in-fp32",
     ]
+    if training["loss_aggregation"] == "token":
+        # Token-mean over the mini-batch (verl's loss_agg_mode=token-mean) instead of Miles'
+        # per-response mean.
+        args.append("--calculate-per-token-loss")
     if doc["distillation"]["use_rollout_logprobs"]:
         # Score the student side of the reverse KL with the rollout engine's log-probs,
         # matching Open Instruct's --use_vllm_logprobs behaviour instead of the trainer's
