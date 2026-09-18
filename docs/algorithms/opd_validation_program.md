@@ -308,4 +308,4 @@ lower; it does not affect the per-token statistics above.
   did not apply. Fixed in Miles 50dab1a1d: weight maps come from the index or the shards, the
   `A_log` and frozen-extras rules apply only to multimodal bases, and a plain LM must export
   every base tensor (`training_scope` "full model"); in-image audit tests 7 passed. Image
-  rebuilding; smoke #6 (OPD tiny, root v8) and the first EOPD tiny smoke (root v1) launch on it.
+  rebuilt as `01M2S4ME34M3JHMMGT5S23TMXM` (Miles 66379207a); smoke #6 (OPD tiny, root v8) is `01M2S4MN9628M5C6900CRV3E4K` and the first EOPD tiny smoke (root v1, `configs/miles/opd/eopd-eopd-qwen3-tiny.toml`) is `01M2S4MQ9MKXWSQFZSEWX5C9CC`, both launched 02:23Z on that image.
