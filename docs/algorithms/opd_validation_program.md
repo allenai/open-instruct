@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-18 05:20Z (details in the latest Log entries).
+Updated 2026-09-18 07:10Z (details in the latest Log entries).
 
 - Done: step 1 (Qwen3.5 4B Miles replication closed out, both frameworks agree at every matched
   step), step 2b (Open Instruct OPD hardening), step 3 (Qwen3 Miles path: Qwen3-1.7B-Base ←
@@ -90,11 +90,13 @@ Updated 2026-09-18 05:20Z (details in the latest Log entries).
 - Step 4 arm 2 OPD baseline (Qwen3-4B-Base ← Qwen3-8B on DAPO-Math-14k): attempt 1
   `01M2SD1X7WTE4KCKAA4XR7YZQ8` failed at 05:02Z in the step-0 MATH500 eval (a single verifier
   timeout was fatal); fixed in Miles `0058e0028`; attempt 2 `01M2SEQX9NMEZ6K13RJ586FZJ0` running on root `-v2`
-  (image `01M2SEQPBZRNP1HBWC72N71JCQ`). The EOPD arm launches on the same image once the baseline
-  lands.
+  (image `01M2SEQPBZRNP1HBWC72N71JCQ`). At 07:06Z it had finished rollout 19 of 220 and saved
+  `iter_0000019` (~5.8 min/rollout, no errors; first mid-run eval at rollout 44), so the baseline
+  should land around 2026-09-19 06:00Z across three 8h Beaker windows. The EOPD arm launches on
+  the same image once the baseline lands.
 - Step 2d (async fix, "fix not fence" per Kevin): implemented as `--fixed_prompt_batches` in
-  Open Instruct (commit `25e39f4db`), unit tests running on Beaker (`01M2SDPBBNYVR73RDGPC28XY6D`,
-  vLLM is not importable locally). GPU verification (2B arm at `async_steps=4` with fixed batches
+  Open Instruct (commit `25e39f4db`, test fix `b6f315bba`), 5 unit tests pass on Beaker
+  (`01M2SE7GZZM6TGZD07T5KDATA4`; vLLM is not importable locally). GPU verification (2B arm at `async_steps=4` with fixed batches
   vs the sync rerun, `qwen35_math_opd_fixed_batches_rerun.sh`) is new compute: about 4 nodes for
   ~5h, plus a one-node smoke first. Needs Kevin's OK.
 - Skipped: step 2c (Kevin, 2026-09-18).
@@ -416,3 +418,9 @@ lower; it does not affect the per-token statistics above.
   `01M2SEQPBZRNP1HBWC72N71JCQ` built from Miles `0058e0028` (verifier timeout scores 0), root
   `eopd-opd-qwen3-4b-base-dapo14k-v2`. The build itself needed the local base image re-tagged
   by ID first: Docker Desktop kept listing `olmo-miles:gate-…` but could not resolve it by name.
+- **2026-09-18 07:10Z** Arm 2 attempt 2 progress check (CPU read of root `-v2`,
+  `01M2SNFRFB94FGF0GVVZ1F5R5Y`): rollout 19/220 done, checkpoint `iter_0000019` written, PPO
+  clipfrac ~0.002-0.005, `opd_reverse_kl` ~0.07, ESS ~0.998, LR on the cosine schedule (2.94e-6).
+  Step-0 eval completed without a verifier timeout ending the run. Only errors in the log are
+  SGLang "request disconnected" aborts at 05:52Z from the eval's own cancellation, harmless.
+  Projected finish ~2026-09-19 06:00Z; auto-resume across 8h windows.
