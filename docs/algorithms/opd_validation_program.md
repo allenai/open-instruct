@@ -278,4 +278,4 @@ lower; it does not affect the per-token statistics above.
   hook returns 0.0 and keeps the payload in `sample.metadata`; `post_process` derives
   `teacher_log_probs` from it. Same commit lands the step 6 EOPD code (off by default) and the
   runtime-patch key-list change, so the image is rebuilt from f78a618a1 and smoke #4 launches
-  into root v6 (ID to follow). 4B job `01M2NJB63SB0E636G6JPJ63KZ2` still running; hf-99 not yet seen.
+  into root v6 as `01M2S32Q4NE37G0N4TAZDGA4EH` (image `01M2S31VDMXVBAG5DY65119A7Q`). 4B job `01M2NJB63SB0E636G6JPJ63KZ2` still running; hf-99 not yet seen.
