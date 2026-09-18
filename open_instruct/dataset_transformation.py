@@ -63,7 +63,7 @@ from rich.text import Text
 from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
-from open_instruct import launch_utils, logger_utils
+from open_instruct import launch_utils, logger_utils, tokenizer_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -642,7 +642,7 @@ CHAT_TEMPLATES = {
 
 
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -652,7 +652,7 @@ def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -713,7 +713,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -791,7 +791,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
 
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -946,9 +946,9 @@ ENV_CONFIG_KEY = "env_config"
 EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
-# template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
-DATASET_CACHE_VERSION = "v7"
+# to invalidate old caches. v8: preserve the serialized GPT-2 pre-tokenizer,
+# including Dolma 2's Split regex, when loading tokenizer-only repositories.
+DATASET_CACHE_VERSION = "v8"
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
