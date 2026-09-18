@@ -298,3 +298,14 @@ lower; it does not affect the per-token statistics above.
   Instruct sync band, matching the 2B result. Rows and closing prose added to
   `docs/algorithms/qwen35_math_opd_sync_rerun.md` and `docs/experiments/qwen35_math_opd_results.md`.
   Smoke #5 `01M2S3K7CNWARHB1VEPHTYXCFW` running since 01:57Z (past the runtime-test point of smoke #4).
+- **2026-09-18 02:20Z** Smoke #5 `01M2S3K7CNWARHB1VEPHTYXCFW` ran the whole training chain: runtime
+  tests passed, teacher up, aime24 pre-eval, 3 rollouts × 8 prompts with the numeric reward
+  (`zero_std` metric no longer trips), 12 policy-loss calls (4 optimizer steps per rollout),
+  24 teacher-score records, aime24 post-eval, hf-2 export with `.complete`. It exited 1 at
+  02:08Z inside the audit's `complete_export`: the Qwen3-1.7B base is a single
+  `model.safetensors` (no index) and has no `A_log` tensors, so the Qwen3.5-shaped checks
+  (`model.safetensors.index.json`, FP32 `A_log`, `model.language_model.*` frozen extras)
+  did not apply. Fixed in Miles 50dab1a1d: weight maps come from the index or the shards, the
+  `A_log` and frozen-extras rules apply only to multimodal bases, and a plain LM must export
+  every base tensor (`training_scope` "full model"); in-image audit tests 7 passed. Image
+  rebuilding; smoke #6 (OPD tiny, root v8) and the first EOPD tiny smoke (root v1) launch on it.
