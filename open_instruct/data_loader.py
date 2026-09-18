@@ -588,13 +588,17 @@ class StreamingDataLoaderConfig:
     tail as stale. For losses whose per-token advantages are not group-centered (pure
     on-policy distillation) that composition steers the update.
 
-    With this flag every prompt is tagged with the training step it was queued for,
-    ``async_steps`` such batches are in flight, and step ``s`` waits for *all* results of
-    batch ``s`` (results of later batches that arrive early are parked, not consumed; nothing
-    is dropped for age). Batch composition is then a uniform random prompt set regardless of
-    response length, while the generators keep working on the following batches. Staleness
-    of up to ``async_steps`` weight versions remains and is handled by the importance ratio
-    between the stored rollout log-probs and the current policy, as in any async run.
+    With this flag every prompt is tagged with the training step it was queued for, and step
+    ``s`` waits for *all* results of batch ``s`` (results of later batches that arrive early
+    are parked, not consumed; nothing is dropped for age). Batch composition is then a uniform
+    random prompt set regardless of response length, while the generators keep working on
+    the following batches. Batch ``t + async_steps`` is queued once the *trainer* has consumed
+    batch ``t`` (not when the data actor has assembled it, which can run ``async_steps`` steps
+    ahead of the trainer), so at most ``async_steps`` batches are in flight against weights
+    the trainer has not trained on yet and rollouts are at most ``async_steps`` (+1 for the
+    sync that publishes them) weight versions stale, the same bound the default path
+    enforces by dropping. That staleness is handled by the importance ratio between the
+    stored rollout log-probs and the current policy, as in any async run.
     Incompatible with ``active_sampling`` (which refills a batch from whatever finishes next)
     and redundant with ``synchronous_rollouts`` (one batch in flight, held for the on-policy
     weights, is already a fixed prompt set).
@@ -1061,6 +1065,19 @@ def add_prompt_to_generator(
     )
 
 
+def fixed_batches_due(
+    last_consumed_step: int, next_batch_to_queue: int, async_steps: int, num_training_steps: int
+) -> list[int]:
+    """Batch indices to queue now under ``fixed_prompt_batches``.
+
+    Every batch up to ``async_steps`` past the last step the trainer has consumed is due, so
+    at most ``async_steps`` batches are ever in flight against weights the trainer has not
+    trained on yet; the data actor running ahead of the trainer does not deepen the pipeline.
+    """
+    limit = min(last_consumed_step + async_steps, num_training_steps - 1)
+    return list(range(next_batch_to_queue, limit + 1))
+
+
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
     generation_config: vllm.SamplingParams,
@@ -1089,6 +1106,7 @@ def accumulate_inference_batches(
     run_name: str | None = None,
     batch_index: int | None = None,
     pending_results: dict[int, list[data_types.GenerationResult]] | None = None,
+    on_result_received: Callable[[], None] | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1100,6 +1118,8 @@ def accumulate_inference_batches(
     batch index) for the call that owns them, and previously parked results for
     ``batch_index`` are consumed before reading the queue. Nothing is dropped for age in this
     mode. Without it, the first ``num_prompts`` results to arrive form the batch.
+    ``on_result_received`` is called after every result read from the queue, so the caller
+    can refill the generators while this call blocks on a slow batch.
     """
     if no_resampling_pass_rate is not None:
         assert iter_dataloader is not None, "no_resampling requires the iter_dataloader passed"
@@ -1165,6 +1185,8 @@ def accumulate_inference_batches(
                     for r in collected_results:
                         inference_results_Q.put(r)
                 raise
+            if on_result_received is not None:
+                on_result_received()
         logger.info(
             f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
         )
@@ -1684,6 +1706,8 @@ class DataPreparationActor:
         self._last_consumed_step = -1
         self._pending_results: dict[int, list[data_types.GenerationResult]] = {}
         """``fixed_prompt_batches``: results that arrived before their batch's turn, by batch index."""
+        self._next_batch_to_queue = 0
+        """``fixed_prompt_batches``: the next batch index to hand to the generators."""
         self.lock = threading.Lock()
         self.training_step = 0
         self.total_samples_written = 0
@@ -1740,6 +1764,14 @@ class DataPreparationActor:
                 batch_index=batch_index,
             )
 
+    def _queue_due_fixed_batches(self) -> None:
+        """``fixed_prompt_batches``: queue every batch that is due given the trainer's progress."""
+        for batch_index in fixed_batches_due(
+            self._last_consumed_step, self._next_batch_to_queue, self.config.async_steps, self.num_training_steps
+        ):
+            self._queue_prompt_batch(batch_index)
+            self._next_batch_to_queue = batch_index + 1
+
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
 
@@ -1751,8 +1783,14 @@ class DataPreparationActor:
         fixed_batches = self.config.fixed_prompt_batches
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
-        for offset in range(self.config.async_steps):
-            self._queue_prompt_batch(self.training_step + offset if fixed_batches else None)
+        if fixed_batches:
+            # Batches ``training_step`` .. ``training_step + async_steps - 1``; later batches are
+            # queued as the trainer consumes earlier ones (``_queue_due_fixed_batches``).
+            self._next_batch_to_queue = self.training_step
+            self._queue_due_fixed_batches()
+        else:
+            for _ in range(self.config.async_steps):
+                self._queue_prompt_batch(None)
 
         for step in range(self.training_step, self.num_training_steps):
             generation_idle_wait_start_time = time.perf_counter()
@@ -1799,6 +1837,7 @@ class DataPreparationActor:
                 run_name=self.run_name,
                 batch_index=step if fixed_batches else None,
                 pending_results=self._pending_results if fixed_batches else None,
+                on_result_received=self._queue_due_fixed_batches if fixed_batches else None,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1807,10 +1846,9 @@ class DataPreparationActor:
             if isinstance(result, data_types.ShutdownSentinel):
                 return
 
-            if fixed_batches and step + self.config.async_steps < self.num_training_steps:
-                # Batch ``step`` is consumed: refill the pipeline with the batch for step
-                # ``step + async_steps`` so ``async_steps`` batches stay in flight.
-                self._queue_prompt_batch(step + self.config.async_steps)
+            if fixed_batches:
+                # The trainer may have consumed earlier steps while this batch was assembled.
+                self._queue_due_fixed_batches()
 
             if result is None:
                 empty_data = [

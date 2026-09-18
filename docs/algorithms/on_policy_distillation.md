@@ -192,7 +192,12 @@ prefer a smaller `opd_kl_coef` (0.25–0.5) and/or keep the environment reward
   prompt set queued for it (early results of later batches are parked, nothing is dropped
   for age) while the generators keep working on the next `async_steps` batches; staleness
   is then handled by the rollout-logprob importance ratio like any async run. The trainer
-  warns when pure OPD runs with `async_steps>1` and neither. See
+  warns when pure OPD runs with `async_steps>1` and neither. Caution: the first 2B
+  verification of `--fixed_prompt_batches` at `async_steps=4` (2026-09-18) collapsed like
+  the canonical async run (DAPO holdout 0.37 -> 0.03 by step 100, stop rate 0.67 -> 0.00,
+  vs 0.48 for the sync rerun), so on that setup composition alone did not explain the
+  collapse and staleness itself is the leading suspect; that run also carried a 9-version
+  lag from a pipeline-depth bug since fixed, so it is not a clean isolation. See
   [qwen35_math_opd_sync_rerun.md](qwen35_math_opd_sync_rerun.md) and
   [opd_validation_program.md](opd_validation_program.md).
 - The student side of the reverse KL is the rollout engine's logprob (`--use_vllm_logprobs`),

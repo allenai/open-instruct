@@ -203,10 +203,15 @@ prompt slot refilled. Because short responses finish first, batches are ordered 
 length and the long tail is the part that goes stale. Group-centered advantages (GRPO) are
 largely insensitive to this; per-token advantages that are not centered (pure on-policy
 distillation) are not. `--fixed_prompt_batches` instead tags every prompt with the step it
-was queued for, keeps `async_steps` such batches in flight, and has step `s` wait for all
-results of batch `s`, parking early results of later batches (`results_parked_for_later_batches`)
-and never dropping for age. Each consumed batch is replaced by the batch for step
-`s + async_steps`. Incompatible with `active_sampling`; redundant with `synchronous_rollouts`.
+was queued for and has step `s` wait for all results of batch `s`, parking early results of
+later batches (`results_parked_for_later_batches`) and never dropping for age. Batch
+`t + async_steps` is queued when the *trainer* consumes batch `t` (the data actor itself may
+run up to `async_steps` steps ahead of the trainer, and keying the refill off its progress
+would double the pipeline depth: the first GPU run of this flag showed rollouts 9 weight
+versions stale at `async_steps=4`, against 4-5 for the default path, which bounds staleness
+by dropping). Rollouts are therefore at most `async_steps` (+1) versions stale, the same bound
+as the default path, without the length ordering. Incompatible with `active_sampling`;
+redundant with `synchronous_rollouts`.
 
 ---
 

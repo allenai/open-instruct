@@ -790,6 +790,18 @@ class GrpoIntegrationTests(TestGrpoFastBase):
 
         self.assertEqual(inference_results_Q.qsize(), 0)
 
+    def test_fixed_batches_due_bounds_the_pipeline_by_trainer_progress(self):
+        # Start: nothing consumed, async_steps batches are due.
+        self.assertEqual(data_loader_lib.fixed_batches_due(-1, 0, 4, 100), [0, 1, 2, 3])
+        # Data actor assembled batches 0..3 but the trainer has consumed nothing: nothing more is due.
+        self.assertEqual(data_loader_lib.fixed_batches_due(-1, 4, 4, 100), [])
+        # Trainer consumed step 0: batch 4 is due; consumed 2 (skipping ahead): 5 and 6 too.
+        self.assertEqual(data_loader_lib.fixed_batches_due(0, 4, 4, 100), [4])
+        self.assertEqual(data_loader_lib.fixed_batches_due(2, 5, 4, 100), [5, 6])
+        # Never queue past the last training step.
+        self.assertEqual(data_loader_lib.fixed_batches_due(97, 98, 4, 100), [98, 99])
+        self.assertEqual(data_loader_lib.fixed_batches_due(99, 100, 4, 100), [])
+
 
 class TestStreamingAccumulation(TestGrpoFastBase):
     """Test the new streaming accumulation functionality."""
