@@ -45,9 +45,19 @@ analysis tooling and report insights — don't make them ask for each piece.
      budget-bound (lever: `response_length` / conciseness / curriculum).
      Stopped-but-wrong = genuine difficulty (real learning headroom).
    - **beta=0** ⇒ KL is monitor-only; watch `objective/kl2_avg` yourself.
+   - **Trust region depends on `loss_fn`:** under `dppo` (all current Terminal
+     runs) `policy/clipfrac_avg` is identically 0 — read
+     `debug/dppo_mask_frac_kept` instead (≈0.9999 healthy; falling = policy
+     outrunning the rollouts). Under `dapo` read clipfrac.
+   - **Staleness is capped** at `async_steps` by DataPrep, so the gap cannot
+     run away; generation falling behind shows as *sustained* non-zero
+     `stale_results_dropped` (bursts after a restart are benign).
+   - **Mismatch:** `debug/vllm_vs_local_logprob_diff_mean` should be flat
+     (~0.005–0.01 nats/token); a step change = sync/kernel issue.
    - **Call out**: tail regression, degenerate advantages, KL runaway, high
-     truncation/non-submitting, `stale_results_dropped` bursts (usually
-     preemption), staleness gap, throughput/ETA.
+     truncation/non-submitting, stale-drop pattern, DPPO mask fraction,
+     active-sampling overhead (`batch/filtered_prompts` vs `batch/total_prompts`),
+     throughput/ETA.
 
 4. **Offer the deeper drills** (don't run unprompted unless the user wants depth):
    per-step (uncapped) failure trend, decoding more examples from a specific step,

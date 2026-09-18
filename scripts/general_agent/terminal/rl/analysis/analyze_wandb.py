@@ -40,7 +40,9 @@ STABILITY_KEYS = [
     "objective/kl2_avg",  # preferred (stable k3) KL-to-reference estimator
     "objective/kl1_avg",
     "optim/grad_norm",
-    "policy/clipfrac_avg",
+    "policy/clipfrac_avg",  # identically 0 under dppo/cispo/tvpo (no symmetric clip)
+    "debug/dppo_mask_frac_kept",  # DPPO trust-region signal; absent for other loss_fn
+    "debug/vllm_vs_local_logprob_diff_mean",  # trainer-vs-vLLM logprob mismatch
     "val/advantages_min",
     "val/advantages_max",
     "val/ratio",
@@ -61,6 +63,8 @@ BEHAVIOR_KEYS = [
 ]
 INFRA_KEYS = [
     "stale_results_dropped",
+    "batch/filtered_prompts",
+    "batch/total_prompts",
     "real_batch_size_ratio",
     "unsolved_batch_size_ratio",
     "model_step_mean",
@@ -81,6 +85,7 @@ CONFIG_KEYS = [
     "num_unique_prompts_rollout",
     "num_samples_per_prompt_rollout",
     "beta",
+    "loss_fn",
     "learning_rate",
     "rollouts_save_path",
     "save_traces",
@@ -142,6 +147,7 @@ def compute_flags(history: dict, config: dict) -> list:
     resp_len = config.get("response_length")
     async_steps = config.get("async_steps")
     beta = config.get("beta")
+    loss_fn = str(config.get("loss_fn") or "dapo").lower()
 
     # --- which reward key is live? ---
     sc = _get(history, "scores")
@@ -212,13 +218,48 @@ def compute_flags(history: dict, config: dict) -> list:
         else:
             flags.append(("INFO", f"KL-to-ref steady ({kl['early']:.3f} -> {kl['late']:.3f}){note}."))
 
-    # --- clip fraction ---
-    cf = _get(history, "policy/clipfrac_avg")
-    if cf and cf["late"] > 0.2:
+    # --- trust region: clip fraction (DAPO) or mask kept-fraction (DPPO/TVPO) ---
+    # `policy/clipfrac_avg` is structurally 0 for dppo/cispo/tvpo, so only read it for dapo.
+    if loss_fn == "dapo":
+        cf = _get(history, "policy/clipfrac_avg")
+        if cf and cf["late"] > 0.2:
+            flags.append(
+                (
+                    "WARN",
+                    f"High clip fraction ({cf['late']:.2%}): updates want to exceed the trust region. LR too high or data too stale.",
+                )
+            )
+    else:
+        mask_key = "debug/tvpo_mask_frac_kept" if loss_fn == "tvpo" else "debug/dppo_mask_frac_kept"
+        mk = _get(history, mask_key)
+        if mk:
+            if mk["late"] < 0.98:
+                flags.append(
+                    (
+                        "WARN",
+                        f"`{mask_key}` fell to {mk['late']:.4f} (early {mk['early']:.4f}): the {loss_fn.upper()} trust region is masking >2% of tokens. "
+                        "Policy is moving faster than rollouts can follow; correlate with kl1 and the vLLM-vs-trainer logprob diff; lower LR / async_steps.",
+                    )
+                )
+            else:
+                flags.append(
+                    (
+                        "INFO",
+                        f"{loss_fn.upper()} mask kept-fraction {mk['late']:.4f} (trust region essentially inactive).",
+                    )
+                )
+        flags.append(
+            ("INFO", f"loss_fn={loss_fn}: `policy/clipfrac_avg` is identically 0 for this loss and was not read.")
+        )
+
+    # --- train/inference mismatch ---
+    md = _get(history, "debug/vllm_vs_local_logprob_diff_mean")
+    if md and md["max"] > 0 and md["late"] > 3 * (md["early"] + 1e-9) and md["late"] > 0.02:
         flags.append(
             (
                 "WARN",
-                f"High clip fraction ({cf['late']:.2%}): updates want to exceed the trust region. LR too high or data too stale.",
+                f"vLLM-vs-trainer logprob diff grew ({md['early']:.4f} -> {md['late']:.4f} nats/token; typical ~0.005-0.01). "
+                "Step change = weight-sync / kernel / precision mismatch; slow climb = staleness.",
             )
         )
 
@@ -252,8 +293,19 @@ def compute_flags(history: dict, config: dict) -> list:
         )
 
     # --- staleness / preemption ---
+    # DataPrep drops any group older than async_steps, so the staleness gap is CAPPED at
+    # async_steps (+1 off-by-one) and can never "run away". Generation falling behind shows
+    # up as a sustained non-zero `stale_results_dropped`, not as a growing gap.
     sd = _get(history, "stale_results_dropped")
-    if sd and sd["max"] > 5 and sd["max"] > 4 * (sd["late"] + 1e-9):
+    if sd and sd["late"] > 0.5 and sd["late"] > 0.25 * sd["max"]:
+        flags.append(
+            (
+                "WARN",
+                f"`stale_results_dropped` is sustained (~{sd['late']:.1f}/step late, max {sd['max']:.0f}): generation cannot keep up at async_steps={async_steps}; "
+                "rollouts are being thrown away to hold the staleness cap. Add engines or raise async_steps.",
+            )
+        )
+    elif sd and sd["max"] > 5:
         flags.append(
             (
                 "INFO",
@@ -264,11 +316,30 @@ def compute_flags(history: dict, config: dict) -> list:
     ts = _get(history, "training_step")
     if ms and ts and async_steps:
         gap = ts["late"] - ms["late"]
-        if gap > 2 * async_steps:
+        if gap >= async_steps:
+            flags.append(
+                (
+                    "INFO",
+                    f"Staleness gap (training_step - model_step_mean ~= {gap:.1f}) is pinned at the async_steps={async_steps} cap: the trainer is consuming the oldest allowed data. Fine if `stale_results_dropped` is 0.",
+                )
+            )
+    # active-sampling overhead
+    fp = _get(history, "batch/filtered_prompts")
+    tp = _get(history, "batch/total_prompts")
+    if fp and tp and tp["late"] > 0:
+        overhead = 1.0 + fp["late"] / tp["late"]
+        if overhead > 3.0:
             flags.append(
                 (
                     "WARN",
-                    f"Staleness gap (training_step - model_step ~= {gap:.1f}) exceeds 2x async_steps ({async_steps}): generation falling behind -> off-policy data.",
+                    f"Active sampling is generating ~{overhead:.1f}x groups per kept group ({fp['late']:.0f} zero-std filtered vs {tp['late']:.0f} kept, late). Task mix is too easy/hard for the policy.",
+                )
+            )
+        else:
+            flags.append(
+                (
+                    "INFO",
+                    f"Active-sampling overhead ~{overhead:.1f}x ({fp['late']:.0f} filtered / {tp['late']:.0f} kept per step, late).",
                 )
             )
 
@@ -331,7 +402,7 @@ def run(run_path: str, samples: int = 100000) -> dict:
     print(f"  run_name={config.get('run_name')}")
     print(
         f"  beta={config.get('beta')}  lr={config.get('learning_rate')}  response_length={config.get('response_length')}  "
-        f"async_steps={config.get('async_steps')}"
+        f"async_steps={config.get('async_steps')}  loss_fn={config.get('loss_fn')}"
     )
     print(f"  rollouts_save_path={config.get('rollouts_save_path')}  save_traces={config.get('save_traces')}")
     runtime = run_obj.summary.get("_runtime")

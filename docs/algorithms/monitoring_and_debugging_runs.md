@@ -8,8 +8,11 @@ It is grounded in the metrics this repo actually logs (the exact wandb keys appe
 - [grpo_pipeline_overview.md](grpo_pipeline_overview.md) — plain-language pipeline
 - [grpo_fast_internals.md](grpo_fast_internals.md) — Ray actors, async pipeline, loss/KL/advantage math
 - [rollout_loop_internals.md](rollout_loop_internals.md) — token-level multi-turn rollout detail
+- [terminal_rl_walkthrough.md](terminal_rl_walkthrough.md) — end-to-end story of one Terminal-RL step (who computes which logprobs, where mismatch comes from, how async is layered on)
 - [rl_with_environments.md](rl_with_environments.md), [tool_training.md](tool_training.md) — environments & tools
 - [tmax_4b_script_reference.md](tmax_4b_script_reference.md) — an annotated agentic-RL script
+
+> **Last audited 2026-09-18** against the metric keys emitted by `grpo_fast.py` / `data_loader.py` / `grpo_utils.py` on `omni_agent` and against a live 9B DPPO Terminal run (`oe-general-agents/g55rr33t`: `loss_fn=dppo`, `async_steps=4`, `use_vllm_logprobs`, `beta=0`, liger loss, SP=4). Keys marked **(conditional)** in [Part 9](#part-9-this-codebases-exact-metric-glossary) only appear under the stated flag; if you cannot find a key on your dashboard, check there first.
 
 ---
 
@@ -155,7 +158,7 @@ Memorize these five. Almost every RL diagnosis is some combination:
 | **Advantage spread (std)** | Is there a usable gradient signal at all | Dead signal (all-zero advantages) |
 | **Policy ratio + clip fraction** | How aggressive each update is | Instability / off-policy drift |
 
-> **Note on this repo:** entropy isn't logged as a top-level scalar in the keys we inspected, but its *symptoms* are everywhere — collapsing `val/avg_group_performance`, falling `unsolved_batch_size_ratio`, sequence lengths converging, and reward plateauing are how you detect entropy collapse here. If you can add an explicit entropy/log-prob-of-sampled-token metric, do — it's the cleanest leading indicator there is. Until then, watch the proxies.
+> **Note on this repo:** entropy **is** available as `policy/entropy_avg`, but only with `--record_entropy` (default off), and it is **incompatible with `--use_liger_grpo_loss`** (the config rejects the combination, because the tiled loss never materializes the full logits the entropy needs). The 9B/27B Terminal runs use liger, so they do not have it. Without it, watch the *symptoms*: collapsing `val/avg_group_performance_pre_filter`, `unsolved_batch_size_ratio` drifting to 0, solved/unsolved sequence-length histograms converging, `debug/dppo_mask_frac_kept` dropping (DPPO), and reward plateauing. If you can afford the non-liger path on a small run, turn `--record_entropy` on: it is the cleanest leading indicator there is.
 
 ---
 
@@ -208,6 +211,8 @@ This repo logs **four estimators** of KL (all functions of `Δ = new_logprobs �
 
 - **`loss/kl_avg`** is the KL *penalty term actually added to the loss* = `kl_estimator_value × beta`. **With `beta = 0.0` (your tmax/swerl scripts) this is identically 0** and KL is *not* constraining training at all — it's monitor-only. That's a deliberate choice (let the policy move freely, rely on clipping + low LR for stability), but it means **you alone are the KL safety check** — if KL runs away, nothing in the loss stops it. Watch it.
 
+- **All five KL keys exist only because `load_ref_policy` defaults to `True`.** The ref forward is what produces them. If you pass `--load_ref_policy false` to save the ref's memory and the per-step ref forward (legitimate when `beta=0`), `objective/kl{0..3}_avg` and `loss/kl_avg` **disappear from the dashboard** and you lose your drift odometer. Decide which you value more before flipping it. Under liger only `kl2` enters the loss, but all four are still logged.
+
 - **Healthy shape:** slow, steady growth (the policy *should* move away from base — that's the point). 
 - **Failure modes:**
   - **KL explodes** (sharp upward, often with a grad-norm spike) → the policy is diverging; reward usually collapses right after. Lever: lower LR, turn on/raise `beta`, tighten the clip range.
@@ -215,14 +220,44 @@ This repo logs **four estimators** of KL (all functions of `Δ = new_logprobs �
 
 ### Policy ratio & clip fraction (`val/ratio`, `val/ratio_var`, `policy/clipfrac_avg`)
 
-- **Ratio** = `exp(new_logprob − old_logprob)` per token = "how much more/less likely is this token under the updated policy vs the policy that generated it." PPO/GRPO **clips** this ratio to `[1−ε, 1+ε]` so a single update can't move any token's probability too far.
-- **`val/ratio`** ≈ 1.0 means the policy that's training is ≈ the policy that generated the data (on-policy). **`policy/clipfrac_avg`** = fraction of tokens that hit the clip boundary.
-- **Why:** these tell you how **off-policy** and how **aggressive** your updates are. A little clipping (a few %) is normal and healthy — it's the safety rail doing its job. **A lot** of clipping (e.g. >20–30%) means the update wants to move far beyond the trust region → either LR too high, or the data is stale (generated by a much older policy).
-- **`ratio_var ≈ 0`** in your runs is expected because `use_vllm_logprobs=true` makes the behavior logprobs (from vLLM) ≈ the training logprobs by construction. If `ratio_var` suddenly grows, the inference and training policies have desynced (a weight-sync bug, or heavy staleness).
+- **Ratio** = `exp(new_logprob − old_logprob)` per token = "how much more/less likely is this token under the policy being trained vs the policy that generated it." In PPO/DAPO the ratio is **clipped** to `[1−ε_l, 1+ε_h]` so a single update can't move any token's probability too far.
+- **What `old_logprob` is depends on one flag.** With `--use_vllm_logprobs true` (every Terminal script) it is the logprob vLLM recorded while *sampling* the token, so the ratio measures the current trainer policy against the actual **behavior** policy — which includes both weight staleness from the async pipeline and the vLLM-vs-HF numerical mismatch. With it false and one mini-batch, `old_logprob` is the trainer's own detached logprob on the first pass, so the ratio is **identically 1** and the clip can never fire; the flag is not a nicety, it is what makes clipping/DPPO do anything at all.
+- **`val/ratio`** is the token-weighted mean of the per-row mean ratio. ≈ 1.0 means on-policy on average (the sample run sits at 1.0000 to four decimals). **`val/ratio_var`** is the variance *across packed rows* of those per-row means, not the per-token variance — so it is tiny (1e-8 on the sample run) even when individual tokens have ratios of 0.5 or 2. A jump in `ratio_var` means some rows are systematically off-policy: a weight-sync bug, or a batch mixing very stale and very fresh rollouts. For per-token mismatch use the `debug/vllm_vs_local_*` metrics below.
+- **`policy/clipfrac_avg`** = fraction of response tokens where the clipped surrogate was the active one (`pg_losses2 > pg_losses`). Under **DAPO** a few % is normal and healthy; >20–30% means the update wants to move far beyond the trust region → LR too high or data too stale.
+- **Under DPPO, CISPO and TVPO this key is identically 0.** Those losses set `pg_losses2 = pg_losses` (no symmetric clip), so the comparison is never true. It is not "no clipping happened", it is "this metric does not apply". The DPPO equivalent is `debug/dppo_mask_frac_kept` (next section).
 
-### Truncated importance sampling (`val/tis_ratio`, `val/tis_clipfrac`, `truncated_importance_sampling_ratio_cap`)
+### Truncated importance sampling and trust-region masks (`val/tis_ratio`, `val/tis_clipfrac`, `debug/tis_mask_frac_kept`)
 
-When rollouts are generated by vLLM but scored/trained by the learner, the two computations of token probabilities differ slightly (different kernels, precision). **Truncated importance sampling (TIS)** corrects for this mismatch by reweighting, with the ratio capped to avoid blow-ups. If `truncated_importance_sampling_ratio_cap=0.0` (as in the example script) it's **off**, so `tis_ratio`/`tis_clipfrac` sit at 0 — expected, not broken. If you enable it, watch `tis_clipfrac`: a high value means a big inference/training mismatch worth investigating.
+When rollouts are generated by vLLM but trained by the learner, the two computations of token probabilities differ slightly (different kernels, precision) and the weights may be a few steps stale. Several optional mechanisms compensate; each has its own metric, and each metric sits at 0 (or is absent) when the mechanism is off — **expected, not broken**:
+
+| flag | mechanism | metric |
+|---|---|---|
+| `--truncated_importance_sampling_ratio_cap C` (0 = off) | multiply the loss by `min(π_old/π_vllm, C)`; only meaningful when `old ≠ vllm`, i.e. `use_vllm_logprobs=false` | `val/tis_ratio` (mean clamped weight), `val/tis_clipfrac` (fraction capped) |
+| `--tis_mask_lower / --tis_mask_upper` (0 = off) | zero the gradient on tokens whose ratio leaves `[1−l, 1+u]` | `debug/tis_mask_frac_kept` |
+| `--sequence_tis_mask_log_ratio_threshold` (0 = off) | zero whole rollouts whose mean log-ratio exceeds the threshold | folded into `debug/tis_mask_frac_kept` |
+
+All the Terminal scripts leave these at 0 and rely on `use_vllm_logprobs` + the loss's own trust region instead.
+
+### Train/inference mismatch (`debug/vllm_vs_local_logprob_diff_mean/max/std`, `debug/vllm_local_reverse_kl`)
+
+- **What:** on every packed row the trainer compares its own logprob of each sampled token against the one vLLM recorded at sampling time. `_mean`/`_max`/`_std` are over `|log π_trainer − log π_vllm|` on response tokens; `vllm_local_reverse_kl` is `Σ π_vllm · (log π_vllm − log π_trainer)`. Under the liger loss these come from an extra no-grad forward, so they cost a little.
+- **Why:** this is the *direct* measurement of the two mismatch sources the ratio has to absorb: kernel/precision differences and weight staleness. Everything in the ratio/clip/DPPO machinery is downstream of this number.
+- **Healthy shape (sample 9B run, `async_steps=4`):** `_mean` ≈ 0.005–0.011 nats/token, `_max` ≈ 0.27–0.49 (a handful of tokens per 64k-token row disagree a lot; that is normal), `reverse_kl` ≈ 1e-4–6e-4. These should be **flat over training**. The fp32 LM-head patches on both sides (`patch_vllm_qwen3_5_lm_head_fp32`, `--lm_head_fp32`) exist to keep them there.
+- **Failure modes:** a **step change** in `_mean` = something structural changed (a weight-sync silently failed, a vLLM backend flag differs from the trainer, prefix-cache corruption after an in-flight update). A **slow climb** that tracks `stale_results_dropped` or the `model_step` gap = staleness, not numerics. `_max` alone spiking on isolated steps is usually one degenerate row and can be ignored.
+- **Related knob:** `--save_trainer_logprobs` (with `--save_traces`) dumps per-token trainer and vLLM logprobs to `rollouts_save_path` so you can find *which* tokens disagree offline.
+
+### Loss-function-specific metrics (DAPO / DPPO / TVPO / CISPO)
+
+`--loss_fn` changes which trust-region metric is meaningful. Read the row for your loss and ignore the others:
+
+| `loss_fn` | trust region | metric to watch | dead metrics |
+|---|---|---|---|
+| `dapo` (default) | symmetric clip `[1−ε_l, 1+ε_h]` | `policy/clipfrac_avg` (few % healthy) | `debug/dppo_mask_frac_kept`, `debug/tvpo_mask_frac_kept`, `actor/ppo_tv` absent |
+| `dppo` (Terminal 9B/27B) | per-token **mask**: zero the update on tokens where the Bernoulli TV/KL between `π_vllm` and `π_trainer` exceeds `dppo_divergence_threshold` *and* the update would push further away | `debug/dppo_mask_frac_kept` — fraction of response tokens that survived. Sample run: **0.9999**, i.e. the mask almost never fires at this staleness. A drop toward 0.99 or below is the DPPO early-warning that the policy is moving faster than the rollouts can follow; correlate with `kl1` and `vllm_vs_local_logprob_diff_mean`. | `policy/clipfrac_avg` ≡ 0 |
+| `tvpo` | prompt-level TV bound; freeze whole prompts over threshold | `debug/tvpo_mask_frac_kept`, `actor/ppo_tv` (mean prompt-level TV) | `policy/clipfrac_avg` ≡ 0 |
+| `cispo` | one-sided cap on the detached ratio | nothing dedicated; watch `val/ratio` and the mismatch metrics | `policy/clipfrac_avg` ≡ 0 |
+
+DPPO requires `use_vllm_logprobs=true` (validated in config) so that the mask's anchor `μ` is the actual rollout policy. Its mask is computed twice on the liger path — once inside the tiled loss for the gradient and once outside for the logged fraction — so the metric is exact, not an approximation.
 
 ### Policy loss — why its value is meaningless
 
@@ -263,8 +298,10 @@ There are (at least) two reward code paths in this repo:
 |---|---|
 | `tools/aggregate/avg_calls_per_rollout`, `tools/bash/avg_calls_per_rollout` | How many tool calls per trajectory. Tracks the agent's *strategy*. A healthy agent often *reduces* calls over training (gets more efficient) — but a sudden drop to ~0 means it stopped using tools (collapse / learned to give up). A blow-up to the max means it's flailing/looping. |
 | `tools/aggregate/avg_runtime`, `tools/bash/avg_runtime` | Wall-clock per tool call. Spikes = the sandbox/environment is slow or overloaded — an *infra* signal, not a learning one, but it dominates your throughput. |
-| `tools/aggregate/failure_rate`, `tools/bash/failure_rate` | Fraction of tool calls that errored. **Distinguish two kinds:** (a) the *model* wrote a broken command (legitimately part of the task — should fall as it learns), vs (b) the *infra* failed (container died, OOM, timeout — this is your problem, not the model's). A creeping infra failure rate silently poisons training because failed executions usually mean zero reward through no fault of the policy. |
-| `tools/env_reset/*` | Environment reset calls — setting up the sandbox per episode. High failure/runtime here = your environment provisioning is the bottleneck. |
+| `tools/aggregate/failure_rate`, `tools/bash/failure_rate` | Fraction of tool calls that errored **or timed out** (a per-call timeout is recorded as `success=False`, so it lands here; there is no separate timeout-rate key). **Distinguish two kinds:** (a) the *model* wrote a broken command (a non-zero exit code is *not* a failure — only a timeout or an infra error is), vs (b) the *infra* failed (container died, OOM, gateway 503). A creeping infra failure rate silently poisons training because failed executions usually mean zero reward through no fault of the policy. Sample run: 0.07–2%. |
+| `tools/env_reset/failure_rate` **(conditional)** | Appears **only** when a sandbox reset exhausted its retries under `SWERL_RESET_FAILURE_ZERO_REWARD=1`: the rollout loop records a synthetic `env_reset` failure, ends the episode with reward 0, and that zero **enters the group's advantage computation**. If this key exists at all on your run, your environment provisioning is failing and some of your "negative examples" are infra noise. Successful resets are not counted anywhere, so there is no `tools/env_reset/avg_runtime`. |
+| `tools/tool_call_format_error/*` **(conditional)** | Appears only with `tool_call_format_error_feedback=true` in the env config (off by default for the sandbox): counts turns where the model emitted no / a malformed tool call and was nudged instead of ended. |
+| `env/<env_name>/<metric>` (e.g. `env/swerl_vanillux_sandbox/step_count`) | Whatever the environment's `get_metrics()` returns, averaged over the batch. The sandbox currently reports only `step_count` (turns used per episode), which for a bash-only env equals `tools/bash/avg_calls_per_rollout`. Sample run: ~27–33 of `max_steps=64`. Rising toward `max_steps` with flat reward = the agent is flailing / not submitting; add per-env metrics here if you want richer behaviour signals (Part 11). |
 
 > **Why these matter so much:** in agentic RL, **infra failures masquerade as learning signal.** If 10% of sandboxes silently OOM and return reward 0, the model is being told "those trajectories were bad" when actually your cluster hiccuped. The model can't learn the task if the reward is dominated by infra noise. **Watch failure rates as obsessively as you watch reward.**
 
@@ -287,16 +324,21 @@ The model has to emit *syntactically valid tool calls* and *actually submit an a
 
 ### 5.4 — The async pipeline: staleness, dropped rollouts, weight sync
 
-Agentic RL is slow to generate (a rollout might be minutes of sandbox execution), so this repo runs generation and training **asynchronously and pipelined** (`async_steps`, `inflight_updates`) — the generators are always working a few steps ahead of the trainer using slightly older weights. See [grpo_fast_internals.md](grpo_fast_internals.md). This buys throughput but introduces **off-policyness**, and several metrics police it:
+Agentic RL is slow to generate (a rollout might be minutes of sandbox execution), so this repo runs generation and training **asynchronously and pipelined** (`async_steps`, `inflight_updates`) — the generators are always working a few steps ahead of the trainer using slightly older weights. See [terminal_rl_walkthrough.md §7](terminal_rl_walkthrough.md) for how the pipeline is layered on the synchronous loop and [grpo_fast_internals.md](grpo_fast_internals.md) for the actors. This buys throughput but introduces **off-policyness**, and several metrics police it. Two mechanics to keep in mind while reading them: (1) DataPrep refuses to prepare step `s` until step `s − async_steps` has been consumed, and drops any group older than that, so staleness is *bounded*, not merely discouraged; (2) with `inflight_updates=true` a trajectory can straddle a weight update mid-episode, and its `model_step` stamp will not show it.
 
 | Metric | Meaning & healthy reading |
 |---|---|
-| `model_step_min/max/mean` vs `training_step` | The "age" of the weights that generated the current batch. The **gap** = staleness. With `async_steps=8`, a gap of ~5–9 is in-spec. A gap that **grows without bound** = generation is falling behind and your data is getting dangerously old → updates become off-policy → instability. |
-| `stale_results_dropped` | Rollouts thrown away for being too old. Steady-state should be near 0. **Bursts** (the example run jumped to 30–59 at a few steps) almost always coincide with **preemption/restart events** (preemptible jobs) where the in-flight buffer is dumped and refilled. Occasional bursts = wasted compute, not corrupted training. *Constant* high drop = your async window is mistuned or generation can't keep up. |
+| `model_step_min/max/mean` vs `training_step` | The weight version that generated each *group* in the batch (stamped when the prompt was dequeued, so a trajectory that straddles an in-flight weight update still reports the older step). `training_step − model_step_min` is the staleness. **It cannot grow without bound:** DataPrep drops any group older than `async_steps` before it reaches the trainer, so the gap is bounded at `async_steps` (+1, because DataPrep's step counter is 0-based and the logged `training_step` is 1-based). Sample run with `async_steps=4`: gap 0–5, median 2.5. A gap pinned at the cap together with non-zero `stale_results_dropped` means generation is slower than training and the pipeline is throwing rollouts away to stay in-spec. |
+| `stale_results_dropped` | Groups discarded for exceeding the staleness cap (each one also enqueues a replacement prompt). Steady-state should be 0. **Bursts** almost always coincide with **resume/restart events** (preemptible jobs): after a resume the engines regenerate the whole in-flight buffer and the first few batches carry stale stamps. Occasional bursts = wasted compute, not corrupted training. *Constant* drops = generation cannot keep up with training at this `async_steps`; either add engines or raise `async_steps` (accepting more staleness). |
 | `real_batch_size_ratio` | Actual vs expected batch size. <1.0 means filtering/dropping shrank the batch — your effective batch (and gradient quality) is smaller than you think. |
 | `unsolved_batch_size_ratio` | Fraction of the kept batch that's unsolved. Drifting toward 0 = tasks getting too easy (curriculum exhausted, little left to learn). Stuck near 1 = tasks too hard (no positive examples to learn from). The sweet spot is in between — that's where group advantages have spread. |
 | `packed_ratio` | Sequences per packed block — efficiency, interacts with length growth. |
-| `time/weight_sync*`, `time/generation_idle_waiting_for_trainer`, `time/trainer_idle_waiting_for_inference` | Where wall-clock goes. **`trainer_idle_waiting_for_inference` spiking = the trainer is starved, generation is the bottleneck** (the normal state for agentic RL). `generation_idle_waiting_for_trainer` spiking = the opposite (rare here). Big idle spikes usually line up with restarts or a slow node. `weight_sync` is the cost of pushing fresh weights to the vLLM engines each step. |
+| `batch/total_prompts`, `batch/filtered_prompts`, `batch/filtered_prompts_zero / _solved / _nonzero`, `batch/no_resampled_prompts` | **Active-sampling health.** `total_prompts` is the number of groups that made it into the trained batch (= `num_unique_prompts_rollout` when `active_sampling` is on). `filtered_prompts` is how many *additional* groups were generated and thrown away as zero-std to get there, split into all-failed (`_zero`), all-solved (`_solved`) and same-non-zero-score (`_nonzero`). Sample run: 8 kept, 5–18 filtered per step → **1.6–3.2× generation overhead** per useful group. `_solved` rising over training is the curriculum graduating (good); `_zero` rising is the task mix getting too hard. `no_resampled_prompts` counts groups excluded for good via `no_resampling_pass_rate`. |
+| `batch/percent_solved_mean`, `batch/percent_solved_hist`, `batch/prompt_lengths`, `batch/response_lengths` | Per-group solve rates and raw length histograms for the *kept* batch. `percent_solved_hist` is the per-prompt solve-rate distribution over the trained groups; with active sampling it is bimodal by construction (only mixed groups survive). |
+| `time/total`, `time/training`, `time/getting_response`, `time/weight_sync*`, `time/saving`, `time/health_check` | Where wall-clock goes. `time/training` is the trainer `step()` including its wait for data; `time/total` adds sync and checkpointing. **`time/getting_response` is not "generation cost per step":** it is the longest (enqueue → reward) latency among the batch's groups, and under async that latency overlaps several training steps, so it is normal for it to exceed `time/total` (sample: ~900–2400 s vs ~400–500 s). `weight_sync` is the cost of pushing fresh weights to the vLLM engines (sample: 7–10 s for 9B with `gather_whole_model`). |
+| `time/trainer_idle_waiting_for_inference`, `time/generation_idle_waiting_for_trainer` | **The two-sided bottleneck detector.** The trainer's wait inside `get_data` vs DataPrep's wait for the trainer to consume a step so it may run ahead again. Sample run: trainer idle ≈ 2 s, generation idle ≈ 0 → balanced, with a 940 s trainer-idle spike on the first step after a resume (the engines were refilling the buffer). Trainer-idle chronically high = generation-bound: add engines, shrink `response_length`, or raise `async_steps`. Generation-idle chronically high = training-bound: `async_steps` is only buying staleness, lower it. |
+| `learner_mfu`, `actor_mfu`, `actor_mbu` | Percent utilization. `learner_mfu` = training FLOPs / (`time/training` × learner peak); sample ≈ 3–4%, low because `time/training` includes the data wait and SP=4/ZeRO-3 communication. `actor_mfu` / `actor_mbu` = generation FLOPs / memory bytes over `time/getting_response` × engine peak; since that denominator is a latency, not busy time, these **under**-report (sample: MFU 0.2–0.4%, MBU 0.4–0.8%). Use them for *relative* comparison between runs, not as absolute efficiency. |
+| `learner_tokens_per_second_step / _overall`, `val/actor_tokens_per_second`, `val/num_step_tokens`, `val/num_total_tokens` | Throughput in tokens. `val/num_step_tokens` is prompt + response tokens in the trained batch; `_overall` divides the running total by total training time and is the number to use for wall-clock projections. |
 
 **Why all this exists:** the async pipeline is the thing that makes agentic RL tractable on a cluster, and it's also the thing most likely to silently degrade your run (stale data, dropped batches, a desynced engine). These metrics are the instrumentation for "is my distributed system actually feeding the optimizer good, fresh data."
 
@@ -332,6 +374,10 @@ The fast-lookup table. "Check" = the panels to correlate; "Lever" = what to chan
 | **Tool failure rate creeping up** | Infra (sandbox OOM/timeout/container death), not the model | `tools/*/failure_rate` vs `tools/*/avg_runtime`, idle times, OOM logs | Fix sandbox infra (memory, concurrency, timeouts); this is not a learning problem |
 | **Throughput dropping over time** | Length growth, slow/preempted node, comms, checkpoint stalls | `tokens/sec`, MFU, `time/*` idle, `sequence_lengths`, `stale_results_dropped` | Expected if lengths grew; else find the slow node / reduce save freq / check network |
 | **`stale_results_dropped` bursts** | Preemption/restart of a preemptible job | `time/*_idle` spikes at same step, `model_step` gap | Usually benign; if constant, retune `async_steps` or get less-preemptible nodes |
+| **`debug/dppo_mask_frac_kept` falling** (DPPO) | Policy moving faster than the rollouts can follow: LR too high, staleness up, or a divergence starting | `kl1`, `debug/vllm_vs_local_logprob_diff_mean`, `model_step` gap, `optim/grad_norm` | Lower LR; lower `async_steps`; if it keeps falling with reward, roll back |
+| **`debug/vllm_vs_local_logprob_diff_mean` step-changes** | A weight sync silently failed or a vLLM/trainer kernel or precision setting diverged | `time/weight_sync` at that step, engine logs, `val/ratio_var` | Check the sync thread logs; confirm `lm_head_fp32` / GDN backend match; restart engines |
+| **`batch/filtered_prompts` ≫ `batch/total_prompts`** | Task mix too easy or too hard for the current policy; you are paying 3–5× generation per useful group | `_solved` vs `_zero` split, `val/avg_group_performance_pre_filter` | Rebalance the task mix; raise `no_resampling_pass_rate` use; raise `num_samples_per_prompt_rollout` |
+| **`tools/env_reset/failure_rate` appears** | Sandbox provisioning failing (registry mirror, podman host, gateway) | `tools/bash/avg_runtime`, Beaker logs, `time/getting_response` | Fix the infra; these zeros are not learning signal |
 | **Reward histogram bimodal, mean misleading** | Task is all-or-nothing | `solve_rate_hist`, `advantages_hist` | Consider partial-credit reward shaping; curriculum; per-difficulty analysis |
 
 ---
@@ -394,40 +440,68 @@ The hard-won meta-lessons:
 
 ## Part 9 — This codebase's exact metric glossary
 
-Quick reference mapping the wandb keys this repo logs to the concepts above. (Sourced from [grpo_fast.py](../../open_instruct/grpo_fast.py) and [data_loader.py](../../open_instruct/data_loader.py).)
+Every wandb key `grpo_fast.py` can emit, grouped by which process produces it. **(conditional)** = only present under the stated flag; **(loss-specific)** = only meaningful for that `--loss_fn`. Verified against the code on `omni_agent` and against run `g55rr33t` (2026-09-18).
 
-**Learning signal**
-- `scores` — mean environment reward (`raw_scores.mean()`, pre length-shaping). **Your primary reward number.**
-- `val/avg_group_performance_pre_filter` / `_post_filter` — group-level solve performance, before/after zero-std & active-sampling filtering. **Often the cleanest learning trend.**
-- `val/solve_rate_hist` — distribution of per-prompt solve rates. Read this, not just the mean.
-- `objective/verifiable_reward`, `objective/verifiable_correct_rate`, `objective/passthrough_*` — the **verifier-function** reward path. **Flat 0.0 when reward comes from the environment instead — not a bug** (Part 5.1).
+### Emitted by the trainer ranks (token-weighted average across ranks)
 
-**Vital signs / stability**
-- `objective/kl0/1/2/3_avg` — four KL-to-reference estimators (linear / quadratic / stable-k3 / importance-weighted). **`kl2` is the preferred headline.** `kl1` is a good drift tracker.
-- `loss/kl_avg` — KL penalty actually in the loss = estimator×`beta`. **0 when `beta=0`** (monitor-only KL).
-- `loss/policy_avg`, `loss/total_avg` — policy-gradient loss; **level is not meaningful** (Part 4).
-- `optim/grad_norm` — stability gauge.
-- `policy/clipfrac_avg` — fraction of tokens clipped; a few % healthy.
-- `val/ratio`, `val/ratio_var` — on-policyness (≈1, ≈0 with `use_vllm_logprobs`).
-- `val/tis_ratio`, `val/tis_clipfrac` — truncated importance sampling (0 when cap=0).
-- `val/advantages_mean/min/max`, `val/advantages_hist` — **mean≈0 is correct**; watch the spread.
-- `lr` — learning rate (may *display* as 0 when small).
+| key | meaning | notes |
+|---|---|---|
+| `loss/policy_avg` | mean policy-gradient surrogate over response tokens | level not meaningful (Part 4) |
+| `loss/total_avg` | the scalar actually back-propagated (policy + `beta`·KL, after the global-token denominator) | |
+| `loss/kl_avg` | `kl{kl_estimator} × beta` | 0 when `beta=0`; **(conditional on `load_ref_policy`)** |
+| `objective/kl0_avg` … `kl3_avg` | four KL-to-reference estimators (linear / quadratic / k3 / importance-weighted) | `kl2` is the headline; **(conditional on `load_ref_policy`)** |
+| `policy/clipfrac_avg` | fraction of tokens where the clipped surrogate was active | **≡ 0 under `dppo` / `cispo` / `tvpo`** |
+| `policy/entropy_avg` | mean next-token entropy on response tokens | **(conditional on `--record_entropy`; incompatible with liger)** |
+| `val/ratio`, `val/ratio_var` | mean per-row ratio and its variance across rows | not per-token (Part 4) |
+| `val/tis_ratio`, `val/tis_clipfrac` | truncated-IS weight mean and cap fraction | 0 when `truncated_importance_sampling_ratio_cap=0` |
+| `debug/tis_mask_frac_kept` | fraction of tokens kept by the TIS / sequence-TIS masks | **(conditional on those masks being on)** |
+| `debug/dppo_mask_frac_kept` | fraction of tokens kept by the DPPO trust-region mask | **(loss-specific: dppo)** |
+| `debug/tvpo_mask_frac_kept`, `actor/ppo_tv` | TVPO kept fraction and mean prompt-level TV | **(loss-specific: tvpo)** |
+| `debug/vllm_vs_local_logprob_diff_mean/max/std`, `debug/vllm_local_reverse_kl` | trainer-vs-vLLM per-token logprob disagreement | always on; the direct mismatch gauge |
+| `optim/grad_norm` | global grad norm after the accumulation group (mean if several) | may be NaN/inf on a bad step |
+| `lr` | scheduler LR | small values display as 0 |
+| `loss/value_avg`, `value/clipfrac_avg`, `value/grad_norm`, `value/returns_mean/std`, `value/predictions_mean/std`, `value/explained_variance` | value head diagnostics | **(conditional on `--use_value_model`)** |
 
-**Agent / environment behavior**
-- `tools/aggregate/*`, `tools/bash/*`, `tools/env_reset/*` — `avg_calls_per_rollout`, `avg_runtime`, `failure_rate`. Split model-error vs infra-error.
-- `val/stop_rate` — proper-finish fraction.
-- `val/non_submitting_completion_fraction` (+`_count`, `_unmasked_*`) — never-submitted fraction; should fall.
-- `val/truncated_completion_fraction` (+`_count`, `_correct_count`, `_length_max/mean`) — budget-wall indicator.
-- `val/sequence_lengths` (+`_min/max/solved/unsolved` and hists) — read solved vs unsolved separately.
+### Emitted by the DataPreparationActor (per step, attached to the batch)
 
-**Async pipeline / efficiency / infra**
-- `model_step_min/max/mean` vs `training_step` / `global_step` — staleness gap.
-- `stale_results_dropped` — dropped stale rollouts (bursts ≈ preemption).
-- `real_batch_size_ratio`, `unsolved_batch_size_ratio`, `packed_ratio`, `val/total_reward_groups` — effective batch composition.
-- `learner_mfu`, `learner_tokens_per_second_*`, `val/actor_tokens_per_second` — throughput.
-- `time/training`, `time/getting_response`, `time/weight_sync*`, `time/saving`, `time/health_check`, `time/total`, `time/trainer_idle_waiting_for_inference`, `time/generation_idle_waiting_for_trainer` — where wall-clock goes; idle metrics show which side is the bottleneck.
+| key | meaning | notes |
+|---|---|---|
+| `scores` | mean raw environment reward over the trained batch | pre length-shaping |
+| `val/avg_group_performance_pre_filter` / `_post_filter` | group-level solve rate including / excluding the zero-std-filtered groups | **primary learning signal** with active sampling |
+| `val/solve_rate_hist`, `batch/percent_solved_hist`, `batch/percent_solved_mean` | per-prompt solve-rate distribution of the kept groups | |
+| `val/advantages_mean/min/max/hist` | centered advantages | mean ≈ 0 by construction |
+| `val/total_reward_groups` | kept groups (= trained rollouts / `num_samples_per_prompt_rollout`) | |
+| `real_batch_size_ratio` | trained rollouts / expected | 1.0 with active sampling |
+| `unsolved_batch_size_ratio` | fraction of trained rollouts with score < max | |
+| `packed_ratio` | packed rows / rollouts | efficiency; drops as responses lengthen |
+| `batch/total_prompts`, `batch/filtered_prompts`, `batch/filtered_prompts_zero/_solved/_nonzero`, `batch/no_resampled_prompts` | active-sampling accounting (Part 5.4) | |
+| `batch/prompt_lengths`, `batch/response_lengths` | raw length histograms | also feed the MFU calculation |
+| `val/sequence_lengths` (+ `_min/_max/_solved/_unsolved`, `_solved_hist/_unsolved_hist`) | response lengths, split by outcome | |
+| `val/stop_rate` | fraction whose *last turn* ended with `stop` | |
+| `val/truncated_completion_count/_fraction/_correct_count/_length_mean/_length_max` | budget-wall stats (`finish_reason != stop` **or** `len ≥ response_length`) | computed pre-masking |
+| `val/non_submitting_completion_count/_fraction`, `_unmasked_count/_unmasked_fraction` | episodes that never reached `done` | `_unmasked_*` only non-zero with `mask_non_submitting_completions_percent` |
+| `model_step_min/max/mean` | weight version of the batch's groups | staleness (Part 5.4) |
+| `stale_results_dropped` | groups dropped for exceeding `async_steps` | |
+| `objective/verifiable_reward`, `objective/verifiable_correct_rate`, `objective/<verifier>_reward`, `objective/<verifier>_correct_rate` | verifier-function path | **flat 0 on env-reward datasets** (`<verifier>` = `passthrough`); not a bug |
+| `val/format_scores` | R1-style format reward | **(conditional on `apply_r1_style_format_reward`)** |
+| `tools/aggregate/avg_calls_per_rollout/failure_rate/avg_runtime`, `tools/<tool>/…` | per-tool call stats | `tools/env_reset/*`, `tools/tool_call_format_error/*` **(conditional)**, see 5.2 |
+| `env/<env_name>/<metric>` | env `get_metrics()` averaged | sandbox: `step_count` only |
+| `concave_length_penalty/x_*`, `penalty_*`, `shaped_score_mean`, `raw_score_mean`, `group_success_penalty_gap_*`, `groups_with_multi_success` | length-penalty shaping diagnostics | **(conditional on `add_concave_length_penalty`)** |
+| `time/getting_response`, `val/actor_tokens_per_second`, `time/generation_idle_waiting_for_trainer` | generation latency / throughput / backpressure wait | Part 5.4 |
 
----
+### Emitted by the main thread / sync thread
+
+| key | meaning | notes |
+|---|---|---|
+| `training_step`, `episode`, `global_step` (= episode), `epoch` | step counters; `epoch = episode / n / len(train_dataset)` | `episode` counts *sampled* rollouts including filtered ones |
+| `val/num_step_tokens`, `val/num_total_tokens` | prompt + response tokens this step / cumulative | |
+| `learner_tokens_per_second_step/_overall`, `learner_mfu`, `actor_mfu`, `actor_mbu` | throughput and utilization (percent) | Part 5.4 for caveats |
+| `time/total`, `time/training`, `time/saving`, `time/health_check`, `time/trainer_idle_waiting_for_inference` | main-thread timers | |
+| `time/weight_sync`, `time/weight_sync_mean/min/max/median` | sync wall-clock and per-trainer-rank spread | arrives one step late (queue) |
+
+### Emitted only when an eval set is configured (`--dataset_mixer_eval_list`, every `local_eval_every` steps)
+
+`eval/scores`, `eval/pass_at_1`, `eval/pass_at_<eval_pass_at_k>`, `eval/pass_at_<2^j>_unbiased`, `eval/sequence_lengths` (+ `_min/_max`), `eval/stop_rate`, `eval/actor_tokens_per_second`, `eval/<reward metric>` for every key the reward function returns, and a `sample_completions` table. The sample run has **none of these**: its eval list is empty, so `local_eval_every=10` does nothing. If you want held-out evals you have to give it a dataset (or use the checkpoint-boundary terminal-bench evals on the `terminal_val_eval` branch).
 
 ## Part 10 — Stack-specific footguns (learned the hard way)
 
@@ -440,7 +514,33 @@ Quick reference mapping the wandb keys this repo logs to the concepts above. (So
 - **Infra failures look like negative reward.** A flaky sandbox (OOM, timeout, container death) returns reward 0 for trajectories the policy didn't actually fail. Watch `tools/*/failure_rate` and runtimes; don't tune the policy to fix an infra bug.
 - **Preemptible jobs** produce `stale_results_dropped` bursts and idle spikes at restarts — usually benign, but they make curves jagged; don't mistake a restart artifact for a learning event.
 - **Truncation is invisible if you only watch reward.** A 25% truncation rate means a quarter of your rollouts never had a chance; check `truncated_fraction` and unsolved lengths vs the cap before concluding the model is "bad at the task."
-- **Eval is the source of truth, reward is the proxy.** Always keep a held-out eval (`local_eval_every`) — it's your reward-hacking and overfitting alarm.
+- **Eval is the source of truth, reward is the proxy.** Always keep a held-out eval (`local_eval_every` *and* a non-empty `--dataset_mixer_eval_list`; the frequency flag alone logs nothing) — it's your reward-hacking and overfitting alarm.
+- **`policy/clipfrac_avg` is exactly 0 under DPPO/CISPO/TVPO.** It is not "no clipping needed"; the metric does not apply. Read `debug/dppo_mask_frac_kept` instead.
+- **Passing `--load_ref_policy false` deletes every KL panel.** Fine if you consciously trade the drift odometer for memory; surprising if you did not.
+- **`time/getting_response` > `time/total` is normal under async.** It is a latency that overlaps several steps, not a per-step cost; `actor_mfu`/`actor_mbu` inherit this and under-report.
+- **The staleness gap is capped, so a "runaway" is impossible.** If you think data is too stale, look at `stale_results_dropped` (how much is being *thrown away* to keep the cap) rather than the gap.
+- **`tools/env_reset/*` only appears on failure.** Its presence is the alarm; its absence is not proof resets are fast.
+- **`env/<env>/step_count` == `tools/bash/avg_calls_per_rollout`** for a bash-only sandbox; they are the same number from two code paths.
+
+---
+
+## Part 11 — What is *not* logged yet (and where you would add it)
+
+Things a Terminal-RL run would benefit from that the current code does not emit. Each names the cheapest insertion point; most are a few lines in `data_loader.py`'s `_data_preparation_loop` (which already has every per-rollout field in hand) or in `populate_sample_loss_stats` on the trainer.
+
+| gap | why it matters | where the data already is |
+|---|---|---|
+| **Entropy on the liger path** | the cleanest collapse indicator is unavailable on every production run | needs a chunked entropy inside `TiledGRPOLMHeadLoss` (logsumexp and the logits are already computed per tile) |
+| **Ratio / mismatch broken down by rollout age** | separates staleness from numerics: `E[|log π − log μ|]` for `model_step = k−1` vs `k−4` tells you whether raising `async_steps` is safe | `data_BT.model_steps` is a per-token tensor already on the trainer; bucket `debug/vllm_vs_local_logprob_diff` by it |
+| **Tool-output vs model-token fraction** | how much of each 32k trajectory is the model's own text vs pasted shell output; drives both context pressure and what `mask_tool_use` is hiding | `sum(mask)` vs `len(response)`; computed today only inside the concave-length-penalty branch |
+| **Tool-call timeout rate, separate from errors** | timeouts are the model's own long-running commands; errors are infra. Today both land in `failure_rate` | `request_info.timeouts` and `tool_errors` are collected per rollout and never aggregated |
+| **Reset attempt count / reset latency** | resets that succeed on retry 3 are invisible; they are the leading indicator of a dying mirror or gateway | `_do_reset` already records phase timings under `SWERL_SANDBOX_TIMING_LOGS`; surface them via `get_metrics()` → `env/…` |
+| **Submit rate by outcome** | "submitted and failed tests" vs "never submitted" vs "truncated" is the failure decomposition Part 5.3 asks for, but only the last two are logged | `rollout_states[i]["done"]` + `raw_scores[i]` |
+| **Per-turn histogram** | `env/…/step_count` is a mean; a bimodal (3 turns vs 64 turns) distribution is a different diagnosis | `step_count` per rollout is in `rollout_states`; pass an array instead of `np.mean` in `_aggregate_env_metrics` |
+| **Solve rate by task family / difficulty** | the task mix saturating (the settled explanation for the 9B plateau) is only visible per task | `batch.indices` + a dataset column; log a small `wandb.Table` every N steps |
+| **Reward for truncated vs non-truncated, per turn budget** | is `per_turn_max_tokens` binding? how often does a single turn hit 8k? | vLLM `finish_reason` per *turn* is available inside `process_request` but only the last is kept |
+| **Queue depths and engine occupancy over time** | `prompt_Q` / `inference_results_Q` sizes and active tasks per engine are the real async health signals | already polled by `ActorManager` for the HTTP dashboard (`--enable_queue_dashboard`, default on); they are just not pushed to wandb |
+| **Per-DP-rank token counts / loss-scale sanity** | uneven packing across ranks was the root cause of the liger loss-normalization bug | `_token_count` is computed per rank and discarded after weighting |
 
 ---
 
