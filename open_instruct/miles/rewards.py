@@ -22,7 +22,10 @@ import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
+from open_instruct import logger_utils
 from open_instruct.miles import general_judge, judge_registry
+
+logger = logger_utils.setup_logger(__name__)
 
 _MATH_FACTORIES = {
     "open_instruct.ground_truth_utils.MathVerifier",
@@ -289,14 +292,21 @@ async def score(sample, registry_path, args=None):
             total += weight * judged
             components.append({"name": name, "score": judged, "weight": weight, "cost": 0.0})
             continue
-        result = await registry[name].async_call(
-            tokens,
-            sample.response,
-            # Verifiers may consume dictionary labels; preserve the original targets.
-            copy.deepcopy(spec["target"]),
-            query=metadata.get("query", sample.prompt),
-            rollout_state=metadata.get("rollout_state"),
-        )
+        try:
+            result = await registry[name].async_call(
+                tokens,
+                sample.response,
+                # Verifiers may consume dictionary labels; preserve the original targets.
+                copy.deepcopy(spec["target"]),
+                query=metadata.get("query", sample.prompt),
+                rollout_state=metadata.get("rollout_state"),
+            )
+        except TimeoutError as exc:
+            # A response that stalls the symbolic grader (unbalanced LaTeX, huge expressions) is
+            # wrong, not fatal: open-instruct's verifiers score a timed-out check 0, so the same
+            # here keeps one pathological sample from ending a training run or an eval pass.
+            logger.warning(f"Verifier {name!r} timed out and scored 0: {exc}")
+            result = SimpleNamespace(score=0.0, cost=0.0, diagnostics={"timed_out": True, "error": str(exc)})
         value = _finite(result.score, "verifier score")
         total += weight * value
         components.append({"name": name, "score": value, "weight": weight, "cost": result.cost})

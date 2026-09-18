@@ -62,7 +62,7 @@ lr_warmup_iters = 0
 min_lr = 0.0
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-4b-base-dapo14k-v1"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-4b-base-dapo14k-v2"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]
