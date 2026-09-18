@@ -64,6 +64,8 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
     doc, root = spec.document, Path(spec.output["root"])
     inf, training, trainer, tracking = doc["inference"], doc["training"], doc["trainer"], doc["tracking"]
     batch = inf["rollout_batch_size"] * inf["samples_per_prompt"]
+    optimizer_steps = training["optimizer_steps_per_rollout"]
+    optimizer = doc["optimizer"]
     values = {
         "train-backend": "megatron",
         "hf-checkpoint": prepared["model"],
@@ -83,7 +85,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "expert-model-parallel-size": 1,
         "expert-tensor-parallel-size": 1,
         "micro-batch-size": 1,
-        "global-batch-size": batch,
+        "global-batch-size": batch // optimizer_steps,
         "rollout-batch-size": inf["rollout_batch_size"],
         "n-samples-per-prompt": inf["samples_per_prompt"],
         "prompt-data": prepared["data"]["prompt_data"],
@@ -92,6 +94,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "metadata-key": "metadata",
         "rollout-max-response-len": inf["max_response_length"],
         "rollout-temperature": inf["temperature"],
+        "rollout-top-p": inf["top_p"],
         "rollout-seed": doc["data"]["seed"],
         "seed": doc["data"]["seed"],
         "sglang-context-length": inf["max_context_length"],
@@ -114,10 +117,12 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "n-samples-per-eval-prompt": inf["eval_samples_per_prompt"],
         "eval-max-response-len": inf["max_response_length"],
         "eval-temperature": inf["eval_temperature"],
+        "eval-top-p": inf["eval_top_p"],
         "optimizer": "adam",
-        "lr": doc["optimizer"]["learning_rate"],
-        "lr-decay-style": "constant",
-        "lr-warmup-iters": 0,
+        "lr": optimizer["learning_rate"],
+        "lr-decay-style": optimizer["lr_decay_style"],
+        "lr-warmup-iters": optimizer["lr_warmup_iters"],
+        "min-lr": optimizer["min_lr"],
         "weight-decay": 0.0,
         "adam-beta1": 0.9,
         "adam-beta2": 0.98,
@@ -135,6 +140,9 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "wandb-group": spec.name,
         "wandb-dir": str(root / "wandb"),
     }
+    if optimizer["lr_decay_style"] != "constant":
+        # Megatron schedules over optimizer iterations, not rollouts.
+        values["lr-decay-iters"] = training["num_rollouts"] * optimizer_steps
     if training["resume"] and (root / "checkpoints" / "latest_checkpointed_iteration.txt").exists():
         # Megatron restores weights, optimizer and RNG from the newest iteration and Miles
         # restores the data cursor from checkpoints/rollout, then continues at the next

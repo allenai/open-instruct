@@ -65,12 +65,11 @@ def test_cpu_preparation_requires_saturn():
     "override",
     [
         'trainer.backend="olmo-core"',
-        "training.resume=true",
         "launch.auto_resume=true",
         "distillation.log_prob_top_k=10",
         "distillation.task_reward_weight=0.5",
         'model.source="Qwen/Qwen3.5-1.7B"',  # no pinned revision and no architecture profile
-        'model.architecture="qwen3-4B"',
+        'model.architecture="qwen2.5-7B"',
         'teacher.revision="main"',
         "trainer.gpus=3",
         "inference.gpus=3 inference.tensor_parallel_size=2",
@@ -216,7 +215,12 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
             "teacher.gpus=2",
             "inference.max_running_requests=64",
             "inference.eval_temperature=0.6",
+            "inference.eval_top_p=0.8",
             "inference.eval_samples_per_prompt=4",
+            "training.optimizer_steps_per_rollout=4",
+            'optimizer.lr_decay_style="cosine"',
+            "optimizer.lr_warmup_iters=10",
+            "optimizer.min_lr=1e-7",
             "distillation.use_rollout_logprobs=true",
             'tracking.wandb_mode="disabled"',
             'model.source="Qwen/Qwen3.5-9B"',
@@ -236,7 +240,15 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
     assert values["--eval-interval"] == "20"
     assert values["--num-rollout"] == "100"
     assert values["--eval-temperature"] == "0.6"
+    assert values["--eval-top-p"] == "0.8"
+    assert values["--rollout-top-p"] == "1.0"
     assert values["--n-samples-per-eval-prompt"] == "4"
+    # 4 prompts x 2 samples per rollout split into 4 optimizer steps of 2 samples.
+    assert values["--global-batch-size"] == "2"
+    assert values["--lr-decay-style"] == "cosine"
+    assert values["--lr-warmup-iters"] == "10"
+    assert values["--min-lr"] == "1e-07"
+    assert values["--lr-decay-iters"] == "400"
     assert values["--sglang-max-running-requests"] == "64"
     assert values["--sglang-max-total-tokens"] == str(2048 * 64)
     assert values["--actor-num-gpus-per-node"] == "4"
@@ -246,6 +258,37 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
     assert "--use-rollout-logprobs" in flags
     assert "--use-wandb" not in flags
     assert "--wandb-mode" not in values
+
+
+def test_default_schedule_is_one_constant_lr_step_per_rollout():
+    values, _ = native(specs.load(CONFIG))
+    assert values["--global-batch-size"] == "8"
+    assert values["--lr-decay-style"] == "constant"
+    assert values["--min-lr"] == "0.0"
+    assert values["--rollout-top-p"] == "1.0"
+    assert "--lr-decay-iters" not in values
+
+
+def test_qwen3_replication_models_resolve_to_upstream_profiles():
+    spec = specs.load(CONFIG, ['model.source="Qwen/Qwen3-4B-Base"', 'teacher.source="Qwen/Qwen3-8B"'])
+    assert spec.document["model"]["architecture"] == "qwen3-4B"
+    assert spec.document["model"]["revision"] == opd_config.REVISIONS["Qwen/Qwen3-4B-Base"]
+    assert spec.document["teacher"]["revision"] == opd_config.REVISIONS["Qwen/Qwen3-8B"]
+
+
+@pytest.mark.parametrize(
+    "override, message",
+    [
+        ("training.optimizer_steps_per_rollout=3", "must divide"),
+        ("inference.eval_top_p=1.5", "inference.eval_top_p"),
+        ('optimizer.lr_decay_style="step"', "optimizer.lr_decay_style"),
+        ("optimizer.min_lr=1e-3", "min_lr must not exceed"),
+        (["inference.top_p=0.9", "distillation.use_rollout_logprobs=true"], "inference.top_p must be 1.0"),
+    ],
+)
+def test_schedule_and_sampling_knobs_are_validated(override, message):
+    with pytest.raises(InputError, match=message):
+        specs.load(CONFIG, override if isinstance(override, list) else [override])
 
 
 def test_online_tracking_requires_a_wandb_secret():

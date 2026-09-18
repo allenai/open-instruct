@@ -12,11 +12,23 @@ REVISIONS = {
     "Qwen/Qwen3.5-2B": "15852e8c16360a2fea060d615a32b45270f8a8fc",
     "Qwen/Qwen3.5-4B": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
     "Qwen/Qwen3.5-9B": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+    # EOPD (arXiv 2603.07079) replication: Qwen3-Base students, Qwen3-8B teacher.
+    "Qwen/Qwen3-1.7B-Base": "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+    "Qwen/Qwen3-4B-Base": "906bfd4b4dc7f14ee4320094d8b41684abff8539",
+    "Qwen/Qwen3-8B": "b968826d9c46dd6066d109eabc6255188de91218",
 }
 # Megatron architecture profiles: Miles ships scripts/models/<profile>.py; profiles
 # under open_instruct/miles/model_profiles/ take precedence at runtime.
-PROFILES = ("qwen3.5-2B", "qwen3.5-4B", "qwen3.5-9B")
-ARCHITECTURES = {"Qwen/Qwen3.5-2B": "qwen3.5-2B", "Qwen/Qwen3.5-4B": "qwen3.5-4B", "Qwen/Qwen3.5-9B": "qwen3.5-9B"}
+PROFILES = ("qwen3.5-2B", "qwen3.5-4B", "qwen3.5-9B", "qwen3-1.7B", "qwen3-4B", "qwen3-8B")
+ARCHITECTURES = {
+    "Qwen/Qwen3.5-2B": "qwen3.5-2B",
+    "Qwen/Qwen3.5-4B": "qwen3.5-4B",
+    "Qwen/Qwen3.5-9B": "qwen3.5-9B",
+    "Qwen/Qwen3-1.7B-Base": "qwen3-1.7B",
+    "Qwen/Qwen3-4B-Base": "qwen3-4B",
+    "Qwen/Qwen3-8B": "qwen3-8B",
+}
+LR_DECAY_STYLES = ("constant", "cosine", "linear")
 WANDB_MODES = ("offline", "online", "disabled")
 DEFAULTS = {
     "model": {"source": "Qwen/Qwen3.5-4B", "revision": "", "architecture": ""},
@@ -35,6 +47,9 @@ DEFAULTS = {
         "save_interval": 1,
         "eval_interval": 0,
         "resume": False,
+        # Optimizer steps per rollout: Miles' global batch is the rollout batch divided by
+        # this, so 4 gives the paper-style "batch 128, mini-batch 32" PPO schedule.
+        "optimizer_steps_per_rollout": 1,
     },
     "trainer": {"backend": "megatron", "gpus": 2, "tensor_parallel_size": 2},
     "inference": {
@@ -46,11 +61,13 @@ DEFAULTS = {
         "max_context_length": 2048,
         "max_running_requests": 8,
         "temperature": 1.0,
+        "top_p": 1.0,
         "eval_temperature": 0.0,
+        "eval_top_p": 1.0,
         "eval_samples_per_prompt": 1,
     },
     "distillation": {"kl_coef": 1.0, "log_prob_top_k": 0, "task_reward_weight": 0.0, "use_rollout_logprobs": False},
-    "optimizer": {"learning_rate": 1e-6},
+    "optimizer": {"learning_rate": 1e-6, "lr_decay_style": "constant", "lr_warmup_iters": 0, "min_lr": 0.0},
     "output": {"root": "", "assets": ""},
     "tracking": {"wandb_mode": "offline", "wandb_project": "open-instruct-opd", "wandb_entity": ""},
 }
@@ -117,7 +134,7 @@ class OPDRunSpec:
         for section, keys in {
             "teacher": ("gpus", "concurrency", "request_timeout", "startup_timeout"),
             "trainer": ("gpus", "tensor_parallel_size"),
-            "training": ("num_rollouts", "save_interval"),
+            "training": ("num_rollouts", "save_interval", "optimizer_steps_per_rollout"),
             "inference": (
                 "gpus",
                 "tensor_parallel_size",
@@ -132,6 +149,22 @@ class OPDRunSpec:
             for key in keys:
                 validation.integer(document[section][key], f"{section}.{key}")
         validation.integer(document["training"]["eval_interval"], "training.eval_interval", minimum=0)
+        validation.integer(document["optimizer"]["lr_warmup_iters"], "optimizer.lr_warmup_iters", minimum=0)
+        validation.number(document["optimizer"]["min_lr"], "optimizer.min_lr")
+        if document["optimizer"]["min_lr"] > document["optimizer"]["learning_rate"]:
+            raise InputError("optimizer.min_lr must not exceed optimizer.learning_rate")
+        validation.choice(document["optimizer"]["lr_decay_style"], "optimizer.lr_decay_style", LR_DECAY_STYLES)
+        inference = document["inference"]
+        collection = inference["rollout_batch_size"] * inference["samples_per_prompt"]
+        if collection % document["training"]["optimizer_steps_per_rollout"]:
+            raise InputError(
+                "training.optimizer_steps_per_rollout must divide inference.rollout_batch_size * "
+                "inference.samples_per_prompt"
+            )
+        for key in ("top_p", "eval_top_p"):
+            validation.number(inference[key], f"inference.{key}", exclusive_min=True, maximum=1.0)
+        if inference["top_p"] != 1.0 and document["distillation"]["use_rollout_logprobs"]:
+            raise InputError("inference.top_p must be 1.0 when the rollout log-probs are the student side")
         for section, key, expected in (
             ("training", "algorithm", "opd"),
             ("trainer", "backend", "megatron"),

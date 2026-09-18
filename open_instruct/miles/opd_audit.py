@@ -49,13 +49,13 @@ def audit_training(root, num_rollouts, coefficient):
     return records
 
 
-def audit_optimizer(root, num_rollouts):
+def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1):
     steps = {}
     for match in re.finditer(r"step \d+: (\{[^\n]+\})", (root / "training.log").read_text()):
         values = ast.literal_eval(match[1])
         if "train/grad_norm" in values:
             steps[int(values["train/step"])] = values
-    if sorted(steps) != list(range(num_rollouts)):
+    if sorted(steps) != list(range(num_rollouts * optimizer_steps_per_rollout)):
         raise ValueError("Missing optimizer step metrics")
     for values in steps.values():
         if not all(math.isfinite(v) for v in values.values() if isinstance(v, (int, float))):
@@ -140,7 +140,7 @@ def main():
     prepared = json.loads((args.root / "prepared.json").read_text())
     count = spec["training"]["num_rollouts"]
     result = {
-        "optimizer": audit_optimizer(args.root, count),
+        "optimizer": audit_optimizer(args.root, count, spec["training"].get("optimizer_steps_per_rollout", 1)),
         "updates": audit_training(args.root, count, spec["distillation"]["kl_coef"]),
         "export": complete_export(args.root, Path(prepared["model"]), count - 1),
     }

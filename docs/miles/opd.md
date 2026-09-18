@@ -105,11 +105,13 @@ not an improvement in task accuracy.
 schema accepts:
 
 - `model.source` / `teacher.source`: a Hugging Face repository with an immutable
-  40-character `revision` (the pinned Qwen3.5-2B, 4B and 9B revisions are filled
-  in when omitted) or a local checkpoint directory (`/weka/...`, `./relative`),
-  which must not set `revision`. `model.architecture` names the Megatron profile
-  (`qwen3.5-2B`, `qwen3.5-4B`, `qwen3.5-9B`); it is inferred for the pinned
-  repositories and required for local learners. Profiles under
+  40-character `revision` (the pinned Qwen3.5-2B, 4B and 9B revisions, and the
+  Qwen3-1.7B-Base, Qwen3-4B-Base and Qwen3-8B revisions used by the EOPD
+  replication, are filled in when omitted) or a local checkpoint directory
+  (`/weka/...`, `./relative`), which must not set `revision`.
+  `model.architecture` names the Megatron profile (`qwen3.5-2B`, `qwen3.5-4B`,
+  `qwen3.5-9B`, `qwen3-1.7B`, `qwen3-4B`, `qwen3-8B`); it is inferred for the
+  pinned repositories and required for local learners. Profiles under
   `open_instruct/miles/model_profiles/` shadow the Miles copies; the 2B profile
   lives there and has not been exercised on GPUs.
 - `[data]`: one registered task with `eval_count` (`gsm8k`, `math`, ...), or
@@ -124,11 +126,23 @@ schema accepts:
   problems, which Miles would otherwise reject.
 - `training.num_rollouts`, `training.save_interval` (HF export cadence) and
   `training.eval_interval` (`0` evaluates before the first update and after the
-  last one, as the prototype did).
+  last one, as the prototype did). `training.optimizer_steps_per_rollout`
+  (default 1) splits each rollout into that many PPO mini-batches: Miles'
+  `--global-batch-size` becomes `rollout_batch_size * samples_per_prompt`
+  divided by it, so `128 x 1` prompts with `4` steps is the paper-style
+  "batch 128, mini-batch 32" schedule. The rollout log-probs stay the PPO anchor
+  (`distillation.use_rollout_logprobs`); the audit expects
+  `num_rollouts * optimizer_steps_per_rollout` optimizer steps.
+- `optimizer.learning_rate`, `optimizer.lr_decay_style` (`constant`, `cosine`,
+  `linear`; anything but `constant` sets `--lr-decay-iters` to the total number
+  of optimizer steps), `optimizer.lr_warmup_iters` and `optimizer.min_lr`.
 - `inference.max_response_length`, `inference.max_context_length`,
   `inference.max_running_requests` (learner SGLang concurrency; the KV budget is
-  `max_context_length` times this), `inference.eval_temperature` and
-  `inference.eval_samples_per_prompt`.
+  `max_context_length` times this), `inference.top_p` (rollout nucleus
+  sampling; must stay `1.0` while the rollout log-probs are the student side),
+  `inference.eval_temperature`, `inference.eval_top_p` and
+  `inference.eval_samples_per_prompt` (the logged `eval/<set>` reward is the mean
+  over every sample, i.e. Avg@k).
 - Topology: `trainer.gpus` (a multiple of `trainer.tensor_parallel_size`),
   `inference.gpus` (a multiple of `inference.tensor_parallel_size`) and
   `teacher.gpus` (the teacher's SGLang tensor parallelism). The task requests
