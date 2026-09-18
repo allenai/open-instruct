@@ -321,11 +321,40 @@ def test_repository_profiles_render_through_the_miles_loader():
     for profile in opd_config.PROFILES:
         directory = opd_runtime.PROFILES if (opd_runtime.PROFILES / f"{profile}.py").exists() else None
         rendered = module.load_model_args(profile, model_script_dir=directory or miles.parents[3] / "scripts/models")
-        assert "--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec" in rendered
+        if profile.startswith("qwen3.5"):
+            assert "--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec" in rendered
+        else:
+            assert "--vocab-size 151936" in rendered
     two_b = module.load_model_args("qwen3.5-2B", model_script_dir=opd_runtime.PROFILES).split()
     assert two_b[two_b.index("--num-layers") + 1] == "24"
     assert "--untie-embeddings-and-output-weights" not in two_b
     assert specs.load(CONFIG, ['model.source="Qwen/Qwen3.5-2B"']).document["model"]["architecture"] == "qwen3.5-2B"
+
+
+def _repository_profile(profile):
+    path = opd_runtime.PROFILES / f"{profile}.py"
+    spec = importlib.util.spec_from_file_location(f"profile_{profile.replace('.', '_').replace('-', '_')}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.model_args().split()
+
+
+@pytest.mark.parametrize(
+    "profile, layers, hidden, ffn, heads",
+    [("qwen3-1.7B", "28", "2048", "6144", "16"), ("qwen3-4B", "36", "2560", "9728", "32")],
+)
+def test_qwen3_profiles_pin_the_unpadded_vocabulary(profile, layers, hidden, ffn, heads):
+    # mbridge scatters the 151936-row HF embedding across TP ranks unpadded; Megatron would
+    # otherwise pad to 152064 under TP2 and the conversion fails on a size mismatch.
+    args = _repository_profile(profile)
+    values = {args[i]: args[i + 1] for i in range(len(args) - 1) if args[i].startswith("--")}
+    assert values["--vocab-size"] == values["--padded-vocab-size"] == "151936"
+    assert int(values["--padded-vocab-size"]) % 128 == 0
+    assert (values["--num-layers"], values["--hidden-size"], values["--ffn-hidden-size"]) == (layers, hidden, ffn)
+    assert values["--num-attention-heads"] == heads and values["--num-query-groups"] == "8"
+    assert values["--rotary-base"] == "1000000" and values["--kv-channels"] == "128"
+    assert "--untie-embeddings-and-output-weights" not in args  # Qwen3-Base 1.7B/4B tie embeddings
+    assert "--qk-layernorm" in args and "--swiglu" in args
 
 
 def test_code_overlay_is_off_by_default(monkeypatch):

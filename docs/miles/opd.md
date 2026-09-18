@@ -179,6 +179,10 @@ schema accepts:
   asset gets an `-eos` suffix and its `generation_config.json` keeps `<|endoftext|>` as a
   second stop id), so rollouts stop where the teacher's answers end instead of running on
   after `<|im_end|>` until `<|endoftext|>`, and the special-token identity check passes.
+- Qwen3 learners use the repository profiles `open_instruct/miles/model_profiles/qwen3-1.7B.py`
+  and `qwen3-4B.py`, which pin `--padded-vocab-size 151936`. Without it Megatron pads the
+  vocabulary to 152064 under TP2 while mbridge 0.15.1 scatters the unpadded HF embedding, and
+  `convert_hf_to_torch_dist.py` fails with `ProcessGroupNCCL::scatter: invalid tensor size`.
 
 ## Qwen prototype limits
 
