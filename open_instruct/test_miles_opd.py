@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import launch, opd_config, opd_launch, opd_prepare, opd_runtime, rewards, specs
+from open_instruct.miles import launch, opd_config, opd_launch, opd_prepare, opd_runtime, options, rewards, specs
 from open_instruct.miles.errors import InputError
 
 CONFIG = Path(__file__).resolve().parents[1] / "configs/miles/opd/qwen35-4b-tiny.toml"
@@ -281,6 +282,68 @@ def test_default_schedule_is_one_constant_lr_step_per_rollout():
     assert values["--weight-decay"] == "0.0"
     assert values["--adam-beta2"] == "0.98"
     assert "--calculate-per-token-loss" not in flags
+
+
+def test_native_passthrough_adds_options_the_schema_does_not_model():
+    spec = specs.load(CONFIG, ["miles.use_tis=true", "miles.tis_clip=2.0", "miles.eps_clip_high=0.28"])
+    assert spec.document["miles"] == {"use_tis": True, "tis_clip": 2.0, "eps_clip_high": 0.28}
+    values, flags = native(spec)
+    assert "--use-tis" in flags
+    assert values["--tis-clip"] == "2.0"
+    assert values["--eps-clip-high"] == "0.28"
+    assert any("eps_clip_high" in warning and "tis_clip" in warning for warning in spec.plan()["warnings"])
+    assert spec.plan()["spec"]["miles"] == spec.document["miles"]
+
+
+def test_native_passthrough_replaces_hard_coded_native_arguments_once():
+    spec = specs.load(
+        CONFIG, ["miles.clip_grad=0.5", "miles.sglang_mem_fraction_static=0.7", "miles.rollout_shuffle=false"]
+    )
+    arguments = opd_runtime.native_arguments(spec, PREPARED, "/assets/ckpt", "http://127.0.0.1:1/generate", [])
+    assert arguments.count("--clip-grad") == 1
+    assert arguments.count("--sglang-mem-fraction-static") == 1
+    assert "--rollout-shuffle" not in arguments
+    values, flags = native(spec)
+    assert values["--clip-grad"] == "0.5"
+    assert values["--sglang-mem-fraction-static"] == "0.7"
+    # Everything the schema owns is still there, once, with the schema's value.
+    assert arguments.count("--weight-decay") == 1
+    assert values["--weight-decay"] == "0.0"
+    assert values["--eval-prompt-data"] == "gsm8k"
+
+
+def test_native_passthrough_accepts_flag_spellings_and_empty_tables():
+    spec = specs.load(CONFIG, ["miles.no_use_checkpoint_lr_scheduler=true"])
+    assert spec.document["miles"] == {"use_checkpoint_lr_scheduler": False}
+    assert "--no-use-checkpoint-lr-scheduler" in native(spec)[1]
+    assert specs.load(CONFIG).document["miles"] == {}
+    assert specs.load(CONFIG).plan()["warnings"] == ["Experimental sampled-token OPD; runtime qualification required."]
+
+
+@pytest.mark.parametrize(
+    ("override", "hint"),
+    [
+        ("miles.weight_decay=0.1", "optimizer.weight_decay"),
+        ("miles.num_rollout=5", "training.num_rollouts"),
+        ("miles.calculate_per_token_loss=true", "training.loss_aggregation"),
+        ("miles.use_rollout_logprobs=true", "distillation.use_rollout_logprobs"),
+        ("miles.opd_kl_coef=0.5", "distillation.kl_coef"),
+        ('miles.opd_type="megatron"', "OPD teacher"),
+        ('miles.save="/elsewhere"', "output.root"),
+        ("miles.rollout_num_gpus=2", "inference.gpus"),
+        ("miles.not_a_miles_option=1", "Unknown MILES option"),
+        ("miles=3", "[miles]"),
+    ],
+)
+def test_native_passthrough_rejects_owned_and_unknown_options(override, hint):
+    with pytest.raises(InputError, match=re.escape(hint)):
+        specs.load(CONFIG, [override])
+
+
+def test_every_owned_native_option_exists_in_the_pinned_parser():
+    index = options.option_index()
+    for name in opd_config.OWNED_NATIVE_OPTIONS:
+        assert name in index and index[name]["dest"] == name, name
 
 
 def test_qwen3_replication_models_resolve_to_upstream_profiles():

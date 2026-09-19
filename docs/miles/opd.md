@@ -235,6 +235,18 @@ schema accepts:
   and `qwen3-4B.py`, which pin `--padded-vocab-size 151936`. Without it Megatron pads the
   vocabulary to 152064 under TP2 while mbridge 0.15.1 scatters the unpadded HF embedding, and
   `convert_hf_to_torch_dist.py` fails with `ProcessGroupNCCL::scatter: invalid tensor size`.
+- `[miles]`: native passthrough for anything the schema does not model. Keys are the
+  pinned parser's option names with underscores (`use_tis = true`, `tis_clip = 2.0`,
+  `eps_clip_high = 0.28`, `clip_grad = 0.5`, `sglang_mem_fraction_static = 0.7`,
+  `rollout_shuffle = false`), the same spelling and validation as the structured format's
+  `[miles]` table (see [native options](native-options.md); `options.json` is the snapshot).
+  An option the wrapper hard-codes is replaced in place, a switch set to `false` disappears,
+  and everything else is appended, so the run file stays the single source of truth. An option
+  the schema or the launcher already owns (`weight_decay`, `num_rollout`, `save`, `opd_type`,
+  `calculate_per_token_loss`, ... the `OWNED_NATIVE_OPTIONS` table in `opd_config.py`) is
+  rejected with the control that sets it. `plan` lists the passed-through names as a warning
+  because nothing here is qualified by the wrapper; `--set miles.use_tis=true` works from the
+  command line.
 
 ## Qwen prototype limits
 

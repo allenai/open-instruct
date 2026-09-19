@@ -14,10 +14,31 @@ import urllib.request
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles import eopd_math, opd_prepare, workflow
+from open_instruct.miles import eopd_math, opd_prepare, options, workflow
 from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def with_native_overrides(arguments, overrides):
+    """Apply the run file's ``[miles]`` passthrough (normalized by ``opd_config``) to the native
+    argument list: an option the wrapper already emits is replaced in place of its single
+    occurrence (a switch turned off simply disappears), anything else is appended."""
+    if not overrides:
+        return list(arguments)
+    index = options.option_index()
+    kept, skipping = [], False
+    for token in arguments:
+        if token.startswith("--"):
+            record = index.get(token[2:].split("=", 1)[0].replace("-", "_"))
+            replaced = record is not None and record["dest"] in overrides
+            skipping = replaced and "=" not in token
+            if replaced:
+                continue
+        elif skipping:
+            continue
+        kept.append(token)
+    return kept + options.encode_options(overrides)
 
 
 def request(url, payload=None, timeout=10):
@@ -195,7 +216,7 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         if tracking["wandb_entity"]:
             args += ["--wandb-team", tracking["wandb_entity"]]
     args += ["--eval-prompt-data", *prepared["data"]["eval_prompt_data"]]
-    return args
+    return with_native_overrides(args, doc["miles"])
 
 
 def execute(spec):

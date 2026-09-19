@@ -5,7 +5,7 @@ import dataclasses
 import re
 from pathlib import Path
 
-from open_instruct.miles import run_data, run_spec, validation
+from open_instruct.miles import options, run_data, run_spec, validation
 from open_instruct.miles.errors import InputError
 
 REVISIONS = {
@@ -32,6 +32,77 @@ LR_DECAY_STYLES = ("constant", "cosine", "linear")
 # Per-response mean (Miles default) or token-mean over the mini-batch (verl default, the EOPD paper).
 LOSS_AGGREGATIONS = ("response", "token")
 WANDB_MODES = ("offline", "online", "disabled")
+# Native Miles options (parser dest names) that the OPD schema or the launcher already sets. A
+# `[miles]` passthrough entry for one of these is rejected with the control that owns it, so a
+# run file never carries two sources of truth for the same argument. Anything else in the pinned
+# parser snapshot (open_instruct/miles/options.json) may be set under `[miles]`: it replaces the
+# wrapper's hard-coded value if there is one and is appended otherwise.
+OWNED_NATIVE_OPTIONS = {
+    "train_backend": "trainer.backend",
+    "hf_checkpoint": "model.source (the prepared learner asset)",
+    "ref_load": "output.assets (the converted learner checkpoint)",
+    "load": "output.root and training.resume",
+    "save": "output.root",
+    "save_hf": "output.root",
+    "dump_details": "output.root",
+    "wandb_dir": "output.root",
+    "save_interval": "training.save_interval",
+    "num_rollout": "training.num_rollouts",
+    "eval_interval": "training.eval_interval",
+    "global_batch_size": "training.optimizer_steps_per_rollout",
+    "calculate_per_token_loss": "training.loss_aggregation",
+    "actor_num_nodes": "trainer.gpus (one node)",
+    "actor_num_gpus_per_node": "trainer.gpus",
+    "num_gpus_per_node": "trainer.gpus and inference.gpus",
+    "rollout_num_gpus": "inference.gpus",
+    "rollout_num_gpus_per_engine": "inference.tensor_parallel_size",
+    "rollout_batch_size": "inference.rollout_batch_size",
+    "n_samples_per_prompt": "inference.samples_per_prompt",
+    "rollout_max_response_len": "inference.max_response_length",
+    "rollout_temperature": "inference.temperature",
+    "rollout_top_p": "inference.top_p",
+    "sglang_context_length": "inference.max_context_length",
+    "sglang_max_running_requests": "inference.max_running_requests",
+    "sglang_max_total_tokens": "inference.max_context_length and inference.max_running_requests",
+    "n_samples_per_eval_prompt": "inference.eval_samples_per_prompt",
+    "eval_max_response_len": "inference.eval_max_response_length",
+    "eval_temperature": "inference.eval_temperature",
+    "eval_top_p": "inference.eval_top_p",
+    "sglang_router_request_timeout_secs": "teacher.request_timeout",
+    "prompt_data": "data.prompt_data / data.tasks",
+    "input_key": "the prepared prompt layout (data)",
+    "label_key": "the prepared prompt layout (data)",
+    "metadata_key": "the prepared prompt layout (data)",
+    "eval_prompt_data": "data.eval_prompt_data / data.tasks",
+    "rollout_seed": "data.seed",
+    "seed": "data.seed",
+    "advantage_estimator": "the OPD route (grpo advantages carry the reverse KL)",
+    "use_opd": "the OPD route",
+    "opd_type": "the OPD teacher hooks (an SGLang teacher server)",
+    "opd_log_prob_top_k": "distillation.log_prob_top_k",
+    "opd_kl_coef": "distillation.kl_coef",
+    "use_rollout_logprobs": "distillation.use_rollout_logprobs",
+    "loss_type": "distillation.eopd",
+    "custom_loss_function_path": "distillation.eopd",
+    "rm_url": "the OPD teacher hooks",
+    "custom_rm_path": "the OPD teacher hooks",
+    "custom_reward_post_process_path": "the OPD teacher hooks",
+    "eval_function_path": "the OPD teacher hooks",
+    "optimizer": "the OPD route (AdamW)",
+    "lr": "optimizer.learning_rate",
+    "lr_decay_style": "optimizer.lr_decay_style",
+    "lr_decay_iters": "optimizer.lr_decay_style",
+    "lr_warmup_iters": "optimizer.lr_warmup_iters",
+    "min_lr": "optimizer.min_lr",
+    "weight_decay": "optimizer.weight_decay",
+    "adam_beta1": "optimizer.adam_beta1",
+    "adam_beta2": "optimizer.adam_beta2",
+    "use_wandb": "tracking.wandb_mode",
+    "wandb_mode": "tracking.wandb_mode",
+    "wandb_team": "tracking.wandb_entity",
+    "wandb_project": "tracking.wandb_project",
+    "wandb_group": "name",
+}
 DEFAULTS = {
     # align_eos_with_teacher: give a base-model learner the teacher's end-of-turn token as its
     # eos (Qwen3-Base stops on <|endoftext|>, Qwen3-8B on <|im_end|>) so rollouts stop where the
@@ -134,7 +205,7 @@ class OPDRunSpec:
     def from_dict(cls, document, *, config_path=None, overrides=None):
         document = copy.deepcopy(document)
         run_spec._apply_overrides(document, overrides)
-        validation.fields(document, "run", set(DEFAULTS) | {"schema_version", "name", "data", "launch"})
+        validation.fields(document, "run", set(DEFAULTS) | {"schema_version", "name", "data", "launch", "miles"})
         if document.get("schema_version") != 1:
             raise InputError("OPD requires schema_version=1")
         name = validation.text(document.get("name"), "name")
@@ -146,6 +217,14 @@ class OPDRunSpec:
             validation.mapping(incoming, section)
             validation.fields(incoming, section, set(defaults))
             document[section] = defaults | incoming
+        # Native passthrough: any pinned-parser option the schema does not model, keyed by dest.
+        document["miles"] = options.normalize_options(document.get("miles", {}))
+        for dest in document["miles"]:
+            if dest in OWNED_NATIVE_OPTIONS:
+                raise InputError(
+                    f"miles.{dest} is set by {OWNED_NATIVE_OPTIONS[dest]}; change that control instead of the "
+                    "native option"
+                )
         for role in ("model", "teacher"):
             _resolve_source(document[role], role, base.parent)
         model = document["model"]
@@ -309,6 +388,10 @@ class OPDRunSpec:
         warnings = ["Experimental sampled-token OPD; runtime qualification required."]
         if not exercised:
             warnings.append("Only the 2 trainer / 1 student / 1 teacher GPU topology has been exercised.")
+        if self.document["miles"]:
+            warnings.append(
+                "[miles] passes native options through unqualified: " + ", ".join(sorted(self.document["miles"]))
+            )
         return {
             "name": self.name,
             "backend": "megatron",
