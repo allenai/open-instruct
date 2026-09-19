@@ -11,9 +11,12 @@ from open_instruct.miles import compiler_cache as cache
 from open_instruct.miles import options as cli_options
 from open_instruct.miles.errors import InputError
 
+ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
+
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
+    filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
     pipeline_observation_interval: float = 0.0
@@ -105,6 +108,7 @@ class CoreConfig:
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise InputError("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
+            "filter_zero_std_groups",
             "compiler_cache",
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
@@ -223,6 +227,25 @@ class RunConfig:
     core: CoreConfig
     miles: dict[str, Any]
 
+    def resolved_miles(self) -> dict[str, Any]:
+        """Resolve the default group filter for plans, native argv and direct CLI callers."""
+        options = cli_options.normalize_options(self.miles)
+        path = options.get("dynamic_sampling_filter_path")
+        if self.core.filter_zero_std_groups:
+            if path not in (None, ZERO_STD_FILTER):
+                raise InputError(
+                    "core.filter_zero_std_groups conflicts with miles.dynamic_sampling_filter_path; "
+                    "disable the built-in filter before selecting a custom filter"
+                )
+            if options.get("n_samples_per_prompt") == 1:
+                raise InputError(
+                    "filter_zero_std_groups requires samples_per_prompt > 1; disable it for single samples"
+                )
+            options["dynamic_sampling_filter_path"] = ZERO_STD_FILTER
+        elif path == ZERO_STD_FILTER:
+            raise InputError("core.filter_zero_std_groups=false conflicts with the explicit zero-std filter path")
+        return options
+
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunConfig":
         return cls.from_dict(validation.read_document(path), overrides)
@@ -267,7 +290,7 @@ class RunConfig:
                 raise InputError("core.packing_max_tokens requires sequence_packing=true")
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise InputError("packing_max_tokens must cover max_sequence_length; samples are never split")
-        options = cli_options.normalize_options(self.miles)
+        options = self.resolved_miles()
         validation.runtime_values(options)
         prompt_limit = options.get("rollout_max_prompt_len")
         context_limit = options.get("rollout_max_context_len")
@@ -413,6 +436,8 @@ class RunConfig:
             raise InputError("engine_drain requires ordinary TP1 engines, not a prefill/decode serving role")
         if options.get("eval_num_gpus", 0) > 0:
             raise InputError("engine_drain currently supports blocking shared-engine evaluation only")
+        if options.get("dynamic_sampling_filter_path") not in (None, ZERO_STD_FILTER):
+            raise InputError("engine_drain supports only the built-in zero-std dynamic sampling filter")
         for name in (
             "custom_generate_function_path",
             "sglang_config",
@@ -420,7 +445,6 @@ class RunConfig:
             "rollout_function_path",
             "eval_function_path",
             "rollout_sample_filter_path",
-            "dynamic_sampling_filter_path",
             "rollout_router_url",
         ):
             if options.get(name):
@@ -466,7 +490,7 @@ class RunConfig:
             "qkv_format": "thd" if self.core.sequence_packing else "bshd",
             "offload_train": False,
             "data_pad_size_multiplier": 1,
-            **cli_options.normalize_options(self.miles),
+            **self.resolved_miles(),
             "olmo_core_config": json.dumps(dataclasses.asdict(self.core), sort_keys=True),
         }
         return cli_options.encode_options(options)
@@ -474,7 +498,7 @@ class RunConfig:
     def plan(self) -> dict[str, Any]:
         """Describe explicit settings; installed-runtime and model checks belong to validate."""
         argv = self.arguments()
-        options = cli_options.normalize_options(self.miles)
+        options = self.resolved_miles()
         world = options.get("actor_num_nodes", 1) * options.get("actor_num_gpus_per_node", 1)
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         return {

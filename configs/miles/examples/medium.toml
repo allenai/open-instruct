@@ -55,6 +55,8 @@ seed = 17
 shuffle = true
 
 [training]
+# Drop constant-reward groups and refill the training batch.
+filter_zero_std_groups = true
 num_rollouts = 200
 skip_eval_before_train = false
 eval_interval = 50

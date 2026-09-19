@@ -271,6 +271,8 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                 put_task.cancel()
             await asyncio.gather(put_task, return_exceptions=True)
             if not put_task.cancelled() and put_task.exception() is None:
+                if put_task.result() is False:
+                    self.data_source.acknowledge_groups([item.prompt_group])
                 self._producing_groups.pop(item.prompt_group[0].group_index, None)
             stop_waiter.cancel()
             with suppress(asyncio.CancelledError):

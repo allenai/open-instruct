@@ -37,6 +37,8 @@ train_count = 32
 eval_count = 8
 
 [training]
+# Tiny mechanics checks may produce only constant rewards; retain those groups.
+filter_zero_std_groups = false
 num_rollouts = 4
 skip_eval_before_train = false
 eval_interval = 2

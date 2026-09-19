@@ -60,6 +60,12 @@ Structured runs default to 8 prompts × 8 responses, global batch equal to the
 collection, 100 collections, microbatch one, LR 1e-6 with constant schedule,
 Adam betas 0.9/0.95 and epsilon 1e-8, weight decay zero, gradient clip 1, PPO clip
 0.2/0.28, no GRPO standard-deviation normalization, KL/entropy coefficients zero.
+Online constant-reward group filtering defaults to true through
+`training.filter_zero_std_groups` (also `core.filter_zero_std_groups`). It uses the
+native MILES dynamic filter and replenishes accepted groups to fill the training
+batch. This is independent of GRPO standard-deviation normalization and offline
+dataset preprocessing. Set it to false for a tiny mechanics check that cannot yet
+produce mixed rewards. See [online filtering](data-and-evaluation.md#online-group-filtering).
 Do not confuse PPO clipping with TIS clipping or reward normalization.
 
 Context defaults to 6144 tokens during structured compilation. max_context_length

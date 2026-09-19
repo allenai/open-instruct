@@ -1,5 +1,6 @@
 {
   "core": {
+    "filter_zero_std_groups": "Default true: reject complete training prompt groups with reward std <= 1e-8 through the native MILES dynamic filter and refill the batch. Requires samples_per_prompt > 1. Set training.filter_zero_std_groups=false for tiny mechanics checks; evaluation is unfiltered. Compatible with offline correctness preprocessing. Custom dynamic filters require disabling this switch and remain unsupported in refresh/engine_drain.",
     "activation_checkpointing": "Recompute blocks during backward to reduce activation memory.",
     "attention_backend": "Core attention implementation: torch, flash_2, flash_3 or flash_4; hardware/model qualification is separate.",
     "checkpoint_compact_storage": "Compact tensor storage before native checkpoint writes.",

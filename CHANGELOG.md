@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Enable MILES online zero-variance reward-group filtering by default, expose `training.filter_zero_std_groups`, support the native filter with refresh/engine-drain publication, and retire filtered async groups from the checkpoint retry ledger; tiny mechanics examples explicitly opt out (PR URL pending).
 - Add optional MILES/Core router auxiliary grouping, token/response averaging, and dispatched/current count controls with unchanged defaults, recomputation-safe metadata, and the matching pinned Core backend patch (PR URL pending).
 - MILES/Core RL native checkpoints now roll: after each commit the newest `core.checkpoint_keep_last` checkpoints (run files default to 1) and every `core.checkpoint_keep_every`-th completed update are kept and the rest are deleted with their MILES cursors, so a long run holds one resumable checkpoint plus its final save instead of accumulating 41–207 GB per save; unset `checkpoint_keep_last` keeps everything as before (PR URL pending).
 - MILES/Core RL fully-async runs now default `rollout_submission_granularity` to `sample` (MILES upstream's own default): a finished sibling frees its producer slot immediately instead of idling until its slowest sibling and rewards finish, so engines stay occupied under long-response workloads; training still consumes whole groups, and `group` remains selectable. Measured dense 32K basket engines ran 9–12 of 24 allowed requests under `group` (PR URL pending).

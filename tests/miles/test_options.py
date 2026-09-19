@@ -141,3 +141,21 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
     assert parsed.max_weight_staleness == 2
     assert parsed.custom_async_data_buffer_path == "open_instruct.miles.async_buffer.HomogeneousPolicyDataBuffer"
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled):
+    # Omit the compiled native filter flag to exercise direct native CLI callers.
+    config = RunConfig(
+        CoreConfig(filter_zero_std_groups=enabled),
+        {"hf_checkpoint": "model", "rollout_batch_size": 1, "n_samples_per_prompt": 4, "global_batch_size": 4},
+    )
+    argv = ["test", *config.arguments()]
+    if "--dynamic-sampling-filter-path" in argv:
+        index = argv.index("--dynamic-sampling-filter-path")
+        del argv[index : index + 2]
+    monkeypatch.setattr(sys, "argv", argv)
+    with contextlib.redirect_stderr(io.StringIO()):
+        parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
+    expected = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std" if enabled else None
+    assert parsed.dynamic_sampling_filter_path == expected

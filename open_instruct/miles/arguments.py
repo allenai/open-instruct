@@ -117,7 +117,9 @@ def load_core_args(extra_args_provider):
     ):
         if "--" + key.replace("_", "-") in supplied:
             fields[key] = getattr(args, key)
-    RunConfig(core, fields).validate()
+    config = RunConfig(core, fields)
+    config.validate()
+    args.dynamic_sampling_filter_path = config.resolved_miles().get("dynamic_sampling_filter_path")
     args.olmo_core = core
     args.compress_ratios = None
     if args.fully_async:

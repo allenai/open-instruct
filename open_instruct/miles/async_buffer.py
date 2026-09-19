@@ -4,7 +4,9 @@ import time
 from copy import copy
 from dataclasses import is_dataclass, replace
 
+from miles.rollout.filter_hub.base_types import call_dynamic_filter
 from miles.rollout.fully_async_data_buffer import DefaultDataBuffer, iter_samples
+from miles.utils.types import Sample
 
 from open_instruct.miles import policy_refresh
 from open_instruct.miles.data import policy_versions
@@ -16,8 +18,23 @@ class MeasuredDataBuffer(DefaultDataBuffer):
         if not hasattr(DefaultDataBuffer, "on_dequeue"):
             raise RuntimeError("Completed-queue metrics require the pinned MILES runtime with on_dequeue support")
         super().__init__(input)
+        # Run the native filter here so the producer can distinguish an intentional
+        # drop from an enqueued group and retire its checkpoint retry ledger entry.
+        self._group_filter = self._dynamic_filter
+        self._dynamic_filter = None
         self._queue_metrics = QueueMetrics()
         self._consumer_wait_seconds = 0.0
+
+    async def put(self, item):
+        """Return False only for a dynamic-filter drop that the producer must acknowledge."""
+        # Preserve upstream abort/retry handling before reward filtering.
+        if not any(sample.status == Sample.Status.ABORTED for sample in iter_samples(item.group)):
+            output = call_dynamic_filter(self._group_filter, self._args, item.group)
+            if not output.keep:
+                self._metric_gatherer.on_dynamic_filter_drop(reason=output.reason)
+                return False
+        await super().put(item)
+        return True
 
     def on_dequeue(self, entry, *, staleness, accepted):
         self._queue_metrics.record(
@@ -68,7 +85,7 @@ class HomogeneousPolicyDataBuffer:
         except ValueError:
             valid = False
         if valid:
-            await self._delegate.put(item)
+            return await self._delegate.put(item)
         else:
             self._rejected += 1
             self._unused(item.prompt_group)
@@ -117,4 +134,4 @@ class RefreshPolicyDataBuffer(HomogeneousPolicyDataBuffer):
                 "weight_versions": [s.weight_versions for s in samples],
             }
         )
-        await self._delegate.put(item)
+        return await self._delegate.put(item)

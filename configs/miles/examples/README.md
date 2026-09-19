@@ -22,7 +22,12 @@ python -m open_instruct.miles run runs/my-run.toml
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test
 mechanics. They are not accuracy baselines. They exercise evaluation, saving and HF export as well as generation and
 training. Resume needs a separate interrupted-run check; a completed run alone
-does not test recovery.
+does not test recovery. Both explicitly disable `training.filter_zero_std_groups`
+because a tiny model may produce only constant rewards. Learning runs default to
+online filtering; `medium` and `large` explicitly enable it. The filter removes
+constant-reward groups and replenishes a full accepted training batch. Offline
+correctness preprocessing remains compatible; see
+[filtering semantics](../../../docs/miles/data-and-evaluation.md#online-group-filtering).
 
 `medium` targets our latent KDA MoE on B300 hardware. Supply an HF policy,
 prepared immutable mixed-task training/held-out JSONL files and verifier registry,

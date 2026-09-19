@@ -60,6 +60,12 @@ Structured runs default to 8 prompts × 8 responses, global batch equal to the
 collection, 100 collections, microbatch one, LR 1e-6 with constant schedule,
 Adam betas 0.9/0.95 and epsilon 1e-8, weight decay zero, gradient clip 1, PPO clip
 0.2/0.28, no GRPO standard-deviation normalization, KL/entropy coefficients zero.
+Online constant-reward group filtering defaults to true through
+`training.filter_zero_std_groups` (also `core.filter_zero_std_groups`). It uses the
+native MILES dynamic filter and replenishes accepted groups to fill the training
+batch. This is independent of GRPO standard-deviation normalization and offline
+dataset preprocessing. Set it to false for a tiny mechanics check that cannot yet
+produce mixed rewards. See [online filtering](data-and-evaluation.md#online-group-filtering).
 Do not confuse PPO clipping with TIS clipping or reward normalization.
 
 Context defaults to 6144 tokens during structured compilation. max_context_length
@@ -211,6 +217,7 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 
 | Field | Type | CoreConfig default | Meaning |
 |---|---|---|---|
+| core.filter_zero_std_groups | &lt;class &#x27;bool&#x27;&gt; | true | Default true: reject complete training prompt groups with reward std &lt;= 1e-8 through the native MILES dynamic filter and refill the batch. Requires samples_per_prompt &gt; 1. Set training.filter_zero_std_groups=false for tiny mechanics checks; evaluation is unfiltered. Compatible with offline correctness preprocessing. Custom dynamic filters require disabling this switch and remain unsupported in refresh/engine_drain. |
 | core.max_train_rollout_logprob_abs_diff | float &#124; None | null | Fail when mean absolute active-token trainer/serving log-probability gap exceeds this value; null disables. Despite the name, this is a mean, not a maximum. |
 | core.diagnostic_interval | &lt;class &#x27;int&#x27;&gt; | 0 | Interval for trainer contract diagnostics; zero disables periodic diagnostics. |
 | core.pipeline_observation_interval | &lt;class &#x27;float&#x27;&gt; | 0.0 | Seconds between read-only async producer/completed-buffer observations; zero disables. Engine metrics are sampled no more frequently than every five seconds when observation is enabled. Missing samples remain explicit. |

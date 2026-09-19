@@ -37,6 +37,20 @@ The [support matrix](feature-parity.md) and [measurements](measurements/index.md
 distinguish short lifecycle checks, learning-path evidence and longer experiments.
 Use those recorded boundaries when choosing a model, topology or recipe.
 
+## Online filtering default
+
+Learning runs enable `training.filter_zero_std_groups=true`: constant-reward prompt
+groups are dropped and generation replenishes the accepted training batch. Offline
+correctness preprocessing can still be applied. The tiny `dev`/`small` mechanics
+examples explicitly disable filtering to permit all-zero-reward checks. See
+[data and evaluation](data-and-evaluation.md#online-group-filtering) for metrics,
+batch semantics and the opt-out.
+
+This default and its refresh/engine-drain support require an application image
+built from the updated source, including async retry-ledger retirement. The older
+images recorded below do not include this change; a new GPU qualification is still
+required. Local source changes are not overlaid onto an existing application image.
+
 ## Current runtime and qualification
 
 For the current example files and router controls, use

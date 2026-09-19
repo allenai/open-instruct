@@ -173,3 +173,30 @@ def test_final_shutdown_accounts_for_completions_blocked_by_full_buffer(tmp_path
         assert records[-1]["shutdown_unqueued"] == fn._shutdown_unqueued_counts
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("filtered", [True, False])
+def test_completed_filter_drop_retires_prompt_ledger_once(filtered):
+    async def scenario():
+        acknowledged = []
+
+        class Buffer:
+            async def put(self, item):
+                return not filtered
+
+        producer = async_rollout.ManagedFullyAsyncRolloutFn.__new__(async_rollout.ManagedFullyAsyncRolloutFn)
+        group = [SimpleNamespace(group_index=7)]
+        producer.args = SimpleNamespace()
+        producer.data_source = SimpleNamespace(acknowledge_groups=acknowledged.extend)
+        producer._output = Buffer()
+        producer._stop_requested = asyncio.Event()
+        producer._producing_groups = {7: group}
+        producer._completed_put_wait_seconds = 0.0
+        producer._completed_put_started = None
+        # True means the completion was handled, whether queued or deliberately dropped.
+        assert await producer._put_or_stop(SimpleNamespace(prompt_group=group)) is True
+        assert acknowledged == ([group] if filtered else [])
+        assert not producer._producing_groups
+        assert producer._completed_put_started is None
+
+    asyncio.run(scenario())
