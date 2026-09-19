@@ -15,9 +15,15 @@ cp configs/miles/examples/small.toml runs/my-run.toml
 # Replace model/output paths and YOUR_USERNAME; select an appropriate tiny model.
 python -m open_instruct.miles plan runs/my-run.toml
 python -m open_instruct.miles validate runs/my-run.toml
-# Set MILES_EXISTING_IMAGE to the compatible immutable runtime image.
+# Tested small barrier/refresh image; see the qualification scope below.
+export MILES_EXISTING_IMAGE=01M2XGZM2N1V4DQVMYHM52KBHZ
 python -m open_instruct.miles run runs/my-run.toml
 ```
+
+The example TOMLs do not pin an image; `MILES_EXISTING_IMAGE` selects it at launch.
+The image above includes online filtering and passed the
+[small barrier/refresh qualification](../../../docs/miles/measurements/online-filtering-20260919.md).
+That check does not qualify every model or topology in these templates.
 
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test
 mechanics. They are not accuracy baselines. They exercise evaluation, saving and HF export as well as generation and

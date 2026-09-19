@@ -122,7 +122,7 @@ cp configs/miles/examples/small.toml runs/my-grpo.toml
 python -m open_instruct.miles plan runs/my-grpo.toml
 python -m open_instruct.miles validate runs/my-grpo.toml
 # After authenticating Beaker and checking resource access:
-export MILES_EXISTING_IMAGE=01M2V3EGGYA2YFMYCAS1X6JSD7
+export MILES_EXISTING_IMAGE=01M2XGZM2N1V4DQVMYHM52KBHZ
 python -m open_instruct.miles run runs/my-grpo.toml
 ```
 

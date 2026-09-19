@@ -54,7 +54,7 @@ exist on the submitting host.
 ## Laptop: choose or build an image
 
 The current [MILES GRPO](grpo.md) uses image
-`01M2V3EGGYA2YFMYCAS1X6JSD7`. Choose a starter from the four maintained examples and verify image compatibility
+`01M2XGZM2N1V4DQVMYHM52KBHZ`. Choose a starter from the four maintained examples and verify image compatibility
 with its backend and serving features. Supply the model/data paths and any secrets
 needed by your run. Beaker resource permissions are required.
 

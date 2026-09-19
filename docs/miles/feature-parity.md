@@ -1,7 +1,7 @@
 # Support and remaining parity gaps
 
 MILES + OLMo-core is the preferred GRPO path. This is the current support summary
-for the project branches, updated September 18, 2026; historical evidence retains its original runtime identity. An image qualification
+for the project branches, updated September 19, 2026; historical evidence retains its original runtime identity. An image qualification
 applies to its recorded model, hardware and configuration; a combination of
 individually tested flags is not automatically qualified.
 
@@ -22,10 +22,14 @@ individually tested flags is not automatically qualified.
 | Compiler caches | Private local Triton caches, verified immutable shared generations, bounded best-effort publication | Other compiler families and CUDA graphs are not persisted by the Ray integration |
 | Long sequences | Actual 16K/32K/64K input serving probes; bounded 16K and 32K RL exercises | Read [length evidence](long-sequences.md): serving success does not establish 64K backward or high-concurrency memory fit |
 
-Use image **`01M2V3EGGYA2YFMYCAS1X6JSD7`**; [MILES GRPO](grpo.md) records its
+Use image **`01M2XGZM2N1V4DQVMYHM52KBHZ`**; [MILES GRPO](grpo.md) records its
 source identity, publication modes and qualification boundaries.
 
 ## Evidence to read first
+
+- [Online filtering with small barrier and refresh runs](measurements/online-filtering-20260919.md):
+  all-zero/all-one groups dropped, accepted batches replenished, four updates each;
+  synthetic rewards establish mechanics, not learning quality.
 
 - [Current router controls and standard examples](measurements/router-controls-20260918.md):
   dev/small lifecycle and retention passed; medium and optional controls remain
