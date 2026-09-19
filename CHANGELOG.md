@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Count cached SFT token statistics with Arrow batches instead of materializing a duplicate tokenized dataset (PR link pending).
 - `mason.py --extra_weka_buckets` mounts additional WEKA buckets at `/weka/<bucket>`, so jobs can reach checkpoints outside `oe-adapt-default` and `oe-training-default` (e.g. `olmo-3p5-checkpoints`) (https://github.com/allenai/open-instruct/pull/1897).
 - Olmo-core SFT runs write a provenance `README.md` into `output_dir` (run name, base model, Beaker/W&B pointers, launch command, optional `--sft.tracking_url`), so checkpoint directories copied around WEKA stay traceable to their run (https://github.com/allenai/open-instruct/pull/1872).
 - Detect olmo-core checkpoints by config contents, and let mason pass a GCS credential to jobs (https://github.com/allenai/open-instruct/pull/1838).
