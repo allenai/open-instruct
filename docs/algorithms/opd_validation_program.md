@@ -623,3 +623,21 @@ lower; it does not affect the per-token statistics above.
   sustainable" → Miles `a3a0d5f9c` adds the `[miles]` passthrough to the OPD run files (63 tests
   pass; `plan` on the arm 2 file with `--set miles.use_tis=true` shows the warning, a
   schema-owned `miles.weight_decay` is rejected).
+
+### 2026-09-19 08:19Z
+- Kevin to bed; asked for continued monitoring, removal of unneeded background tasks, and W&B
+  links. Background state: the old 30-min cron tick was replaced by one that checks both arm 2
+  attempts (Beaker job state every 30 min, Weka progress every hour, relaunch attempt 3 on image
+  `01M2V7V946ZN9N9STPK0H04YWM` only for transient infra deaths, record milestones here, push
+  notification only for a finish or an unfixable failure). Two local waiters
+  (`wait_any_exit.sh` on each attempt) are kept; nothing else was running.
+- W&B, group `allenai-team1/opd` / `eopd-opd-qwen3-4b-base-dapo14k`
+  (https://wandb.ai/allenai-team1/opd/groups/eopd-opd-qwen3-4b-base-dapo14k): attempt 3 run
+  `2zs3yb46` (https://wandb.ai/allenai-team1/opd/runs/2zs3yb46); attempt 2 runs `z9jz1izu`,
+  `y8wz6gh2`, `21ri9lg2` (one per 8h window). Every window restart opens a new run in the group.
+- Truncation in attempt 3 explained (Weka check `01M2W7MCPT3GJPFTWAM8CDFGR4` over 11,136
+  teacher-score records): 9,831 ended with the learner's `<|endoftext|>` and were remapped;
+  1,303 (11.7%) hit the 4,096-token cap with no stop token (nothing to remap; the base model's
+  own rate was 11% at rollout 0); 2 had the stop token land exactly at position 4,096. No
+  response ended with `<|im_end|>` natively. Watch whether the truncated share falls toward
+  the teacher's behaviour or stays flat (repetition loops) through rollout 220.
