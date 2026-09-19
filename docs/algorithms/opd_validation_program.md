@@ -673,3 +673,16 @@ lower; it does not affect the per-token statistics above.
   id with a no-relaunch-into-a-full-disk rule (at most one more relaunch, only if >500G free;
   otherwise stop and notify). Waiter started on the new experiment. A Weka usage job
   (`01M2XFMW9ZFM4R2MJH515B71KN`) measures our run directories so Kevin can choose what to free.
+
+### 2026-09-19 18:45Z
+- Weka usage (`01M2XFMW9ZFM4R2MJH515B71KN`, `df` still 455T/453T/2.4T free): Kevin's
+  `allennlp/deletable_checkpoint/kevinfarhat` holds ~3.7 TB, of which `miles-opd/` is 2,658 GB.
+  Miles OPD keeps every 20-rollout Megatron checkpoint (52.5 GB each for the 4B learner, weights +
+  optimizer) plus a 7.5 GB HF export per save: arm 2 `-v3` 550 GB (9 checkpoints = 472 GB, 9 HF
+  exports = 68 GB, debug 9 GB), arm 2 `-v2` 683 GB, `qwen35-4b-opd-from-verifier-9b-math-v5`
+  764 GB, `qwen35-2b-opd-from-verifier-2b-math-v5` 374 GB. Candidates to free (Kevin's call,
+  nothing deleted): intermediate `checkpoints/iter_*` in finished runs except the last (~1.5 TB),
+  and the older `ab_*_olmocore*` A/B dirs (190 GB each ×3). Our share is <1% of the bucket, so
+  the bucket itself needs team-level cleanup; the relaunch only needs ~120 GB more (2 checkpoints
+  + 2 exports). Relaunch `01M2XFMVGW67B77X9CVH6T2YX3` was scheduled at 18:43Z, not yet started
+  at 2026-09-19 18:45Z; the monitor tick checks it.
