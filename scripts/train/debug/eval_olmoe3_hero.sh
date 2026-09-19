@@ -69,6 +69,7 @@ PYTHONPATH="$OLMO_EVAL_DIR/src${PYTHONPATH:+:$PYTHONPATH}" uv run olmo-eval beak
     -H "$HARNESS" \
     -o provider.kind=vllm \
     -o provider.dtype=bfloat16 \
+    -o provider.kwargs.seed="${EVAL_SEED:-0}" \
     -o provider.num_instances="$NUM_INSTANCES" \
     -o provider.package=wheel \
     -o provider.max_model_len="$MAX_MODEL_LEN" \
