@@ -80,13 +80,27 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-19 05:51Z (details in the latest Log entries).
+Updated 2026-09-19 18:44 (was 05:51Z (details in the latest Log entries).
 
 - Done: step 1 (Qwen3.5 4B Miles replication closed out, both frameworks agree at every matched
   step), step 2b (Open Instruct OPD hardening), step 3 (Qwen3 Miles path: Qwen3-1.7B-Base ←
   Qwen3-8B tiny smoke passes end to end with minibatching, cosine LR, aime24 eval, audit and
   export reload), step 5 (teacher-entropy diagnostic), step 6 code (EOPD in Miles, GPU-validated
   by the tiny EOPD smoke; the A/B itself is part of step 4's compute).
+- **Weka `oe-adapt-default` filled up on 2026-09-19 (453T of 455T, 100%) and both arm 2 runs died
+  writing to it.** Attempt 2 (buggy eos reference) had already completed all 220 rollouts:
+  **final MATH500 Avg@8 0.733** (evals 0/43/87/131/140/175/200/219 =
+  0.2435/0.744/0.764/0.7575/0.731/0.742/0.728/0.733, every response at the 8192 cap); only its
+  post-run audit step failed. Attempt 3 (paper-exact) died at 13:42Z while generating rollout
+  193 (`ENOSPC` on `debug/dashboard_columns/rollout_193.tmp`, then the workflow-state write);
+  evals 43/87/131/175 = **0.778 / 0.780 / 0.7815 / 0.782** and climbing (paper 0.788 at 220),
+  truncation 0.04-0.13, last checkpoint `iter_0000179`. Beaker did not auto-resume (exit code 1
+  is not a preemption). With 2.4T free again at 18:41Z, attempt 3 was relaunched at 2026-09-19 18:44Z from
+  its identical Beaker spec (same image `01M2V7V946ZN9N9STPK0H04YWM`, `training.resume=true`
+  loads `iter_0000179`, ~40 rollouts ≈ 3h + final eval): **experiment
+  `01M2XFMVGW67B77X9CVH6T2YX3`**. Nothing was deleted on Weka. Kevin needs to decide what to
+  free (our own runs keep every 20-rollout Megatron checkpoint plus 9 HF exports per run; sizes
+  in the Log once measured).
 - **Arm 2 attempt 3 `01M2V7VG4H8Y3V1SYTFSX728KT` (paper-exact recipe, eos fix) is healthy** as of
   2026-09-19 05:51Z: started 2026-09-19 01:06Z, rollout 63/220, train truncation 0.09-0.18 (attempt 2 sat
   at 1.00), `teacher-scores.jsonl` `eos_remapped: true` on 7,181 of 8,192 records (the rest are
@@ -641,3 +655,21 @@ lower; it does not affect the per-token statistics above.
   own rate was 11% at rollout 0); 2 had the stop token land exactly at position 4,096. No
   response ended with `<|im_end|>` natively. Watch whether the truncated share falls toward
   the teacher's behaviour or stays flat (repetition loops) through rollout 220.
+
+### 2026-09-19 18:44Z
+- Both waiters fired. Attempt 3 job `01M2V7VG8TSV...` exited 13:44Z code 1; attempt 2's third
+  window `01M2W1CSQ3R0...` exited 10:29Z code 1. Beaker job log for attempt 3 ends in
+  `OSError: [Errno 28] No space left on device` writing `.workflow.json...tmp` under the run
+  root; training.log shows the RolloutManager failing on `debug/dashboard_columns/rollout_193.tmp`
+  (polars) with the same errno, after `iter_0000179` had saved fine at 12:57Z. `df -h`
+  (`01M2XFHVDEKEJT9M3PWDHE0TFP`): 455T size, 453T used, 2.4T available, 100%. Attempt 2 result.json:
+  status failed, error = `opd_audit` returned 1 (training itself finished: rollout 219,
+  `iter_0000219`, `hf-219`, eval 219 = 0.73325). Attempt 3 result: rollout 188 last logged,
+  training was at 192/193, evals 0.247 → 0.778 → 0.780 → 0.7815 → 0.782, truncation last five
+  rollouts 0.125/0.117/0.102/0.133/0.039.
+- Action: relaunched attempt 3 from `beaker experiment spec 01M2V7VG4H8Y3V1SYTFSX728KT`
+  (scratchpad `weka-check/attempt3_spec.yaml`, unchanged) → `01M2XFMVGW67B77X9CVH6T2YX3`.
+  Same image, same root, resume from the latest checkpoint. Monitor tick re-pointed at the new
+  id with a no-relaunch-into-a-full-disk rule (at most one more relaunch, only if >500G free;
+  otherwise stop and notify). Waiter started on the new experiment. A Weka usage job
+  (`01M2XFMW9ZFM4R2MJH515B71KN`) measures our run directories so Kevin can choose what to free.
