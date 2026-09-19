@@ -12,8 +12,13 @@ def count_tokens(dataset: Dataset, input_ids_key: str, labels_key: str, masked_t
         inputs, labels = batch[input_ids_key], batch[labels_key]
         if inputs.null_count or labels.null_count:
             raise ValueError("Token and label sequences must not be null")
-        total_tokens += compute.sum(compute.list_value_length(inputs)).as_py() or 0
+        total_tokens += (
+            compute.call_function("sum", [compute.call_function("list_value_length", [inputs])]).as_py() or 0
+        )
         # Python's original label != mask count includes null scalar labels.
-        trainable = compute.fill_null(compute.not_equal(compute.list_flatten(labels), masked_token_value), True)
-        trainable_tokens += compute.sum(trainable).as_py() or 0
+        trainable = compute.fill_null(
+            compute.call_function("not_equal", [compute.call_function("list_flatten", [labels]), masked_token_value]),
+            True,
+        )
+        trainable_tokens += compute.call_function("sum", [trainable]).as_py() or 0
     return total_tokens, trainable_tokens
