@@ -48,12 +48,20 @@ batch semantics and the opt-out.
 
 This default and its refresh/engine-drain support require an application image
 built from the updated source, including async retry-ledger retirement. The older
-images recorded below do not include this change; a new GPU qualification is still
-required. Local source changes are not overlaid onto an existing application image.
+images preceding the filtering qualification do not include this change. The
+[small filtering qualification](measurements/online-filtering-20260919.md) passed
+with barrier and refresh publication. Local source changes are not overlaid onto
+an existing application image.
 
 ## Current runtime and qualification
 
-For the current example files and router controls, use
+For online filtering, use **`01M2XGZM2N1V4DQVMYHM52KBHZ`**, application source
+`a8f8aca84`. It passed four-update small checks with barrier and refresh publication,
+including all-zero/all-one rejection, full batch replenishment and checkpoint
+cursor audits. See the [qualification record](measurements/online-filtering-20260919.md)
+for the synthetic reward fixture and limits; full-policy qualification remains separate.
+
+The September 18 router-controls runtime was
 **`01M2V3EGGYA2YFMYCAS1X6JSD7`**
 (`robertb/open-instruct-router-controls-dcc77a875`), application source `dcc77a875`
 and Core `ab64c30699d5c3de327830be6f4b2e2277a0edd3`. Dev and small have
