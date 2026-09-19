@@ -80,13 +80,25 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-18 21:47Z (details in the latest Log entries).
+Updated 2026-09-19 05:51Z (details in the latest Log entries).
 
 - Done: step 1 (Qwen3.5 4B Miles replication closed out, both frameworks agree at every matched
   step), step 2b (Open Instruct OPD hardening), step 3 (Qwen3 Miles path: Qwen3-1.7B-Base ←
   Qwen3-8B tiny smoke passes end to end with minibatching, cosine LR, aime24 eval, audit and
   export reload), step 5 (teacher-entropy diagnostic), step 6 code (EOPD in Miles, GPU-validated
   by the tiny EOPD smoke; the A/B itself is part of step 4's compute).
+- **Arm 2 attempt 3 `01M2V7VG4H8Y3V1SYTFSX728KT` (paper-exact recipe, eos fix) is healthy** as of
+  2026-09-19 05:51Z: started 2026-09-19 01:06Z, rollout 63/220, train truncation 0.09-0.18 (attempt 2 sat
+  at 1.00), `teacher-scores.jsonl` `eos_remapped: true` on 7,181 of 8,192 records (the rest are
+  truncated responses), MATH500 Avg@8 0.247 (base) → **0.778 at rollout 43** with mean eval
+  length 929 tokens (attempt 2 needed rollout 88 to reach 0.764 with every response at the 8192
+  cap). Paper target 0.788 at rollout 220; ~4.4 min/rollout → ETA ~2026-09-19 17:30Z plus
+  window restarts. Attempt 2 (`-v2`, buggy reference) is at rollout 213/220 on its third 8h
+  window (`01M2W1CSQ3...`, auto-resume worked at 05:15Z), latest eval rollout 175 = 0.742.
+- Miles run files now take a `[miles]` native passthrough (Miles `a3a0d5f9c`): any pinned-parser
+  option (`use_tis`, `tis_clip`, `eps_clip_high`, `clip_grad`, `sglang_mem_fraction_static`,
+  ...) without wrapper code; schema-owned options are rejected with the owning control. Kevin
+  asked for this ("is it sustainable" to re-integrate every flag; answer: not as it was).
 - Step 4 arm 2 OPD baseline (Qwen3-4B-Base ← Qwen3-8B on DAPO-Math-14k): attempt 1
   `01M2SD1X7WTE4KCKAA4XR7YZQ8` failed at 05:02Z (verifier timeout fatal; fixed in Miles
   `0058e0028`). Attempt 2 `01M2SEQX9NMEZ6K13RJ586FZJ0` (root `-v2`, image
@@ -592,3 +604,22 @@ lower; it does not affect the per-token statistics above.
   campaign once arm 2 lands. Blockers if pursued: wrapper lacks `--opd-type megatron`, and the
   memory footprint does not fit 8x80 GB H100. Attempt 3 job `01M2V7VG8TSV2TZNJ3H538396P` still
   queued at 22:04Z.
+
+### 2026-09-19 05:51Z
+- Status (Weka read `01M2W373F5876E3CGG02EFN75Y`): attempt 3 `-v3` rollout 63/220, truncation
+  0.09-0.18 (rollout 0: 0.11, 10: 0.18, 20: 0.16, 30-40: 0.11, 50: 0.15, 60-63: 0.09-0.11),
+  `rollout/opd_reverse_kl` 2.85 → 0.07, `eos_remapped` true 7,181 / false 1,011, eval 0 =
+  0.247, eval 43 = 0.77825 (mean length 929, median 560). Attempt 2 `-v2` rollout 213/220, all
+  truncated, evals 0/43/87/131/140/175 = 0.2435/0.744/0.764/0.7575/0.731/0.742 (every response at
+  8192). The eos fix is confirmed to do what it was meant to; attempt 3 is on track for the
+  paper's 0.788 and already beats the buggy run at equal rollouts by ~3.4 points.
+- Kevin's questions this session (all answered in conversation, not repeated here): how the
+  trainer-side log-prob anchor works and why the extra forward is worth it; whether rescoring
+  fixes the engine-vs-trainer sampling gap (no: it makes numerator and denominator the same
+  ruler; the residual E_q vs E_p gap is what `--use-tis` corrects; the paper leaves it off, the
+  Miles authors' own 35B example turns it on); whether to replicate the LMSYS "OPD support in
+  Miles" post (assessment 22:27Z: later, on upstream Miles directly); why olmo-miles over plain
+  Miles for Qwen (infra + audits vs. re-exposing flags); and "is re-integrating every flag
+  sustainable" → Miles `a3a0d5f9c` adds the `[miles]` passthrough to the OPD run files (63 tests
+  pass; `plan` on the arm 2 file with `--set miles.use_tis=true` shows the warning, a
+  schema-owned `miles.weight_decay` is rejected).
