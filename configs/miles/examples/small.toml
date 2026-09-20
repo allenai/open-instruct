@@ -102,15 +102,16 @@ row_specialization = "dynamic"
 [core]
 # Keep only the newest committed checkpoint; failed writes never remove the prior save.
 checkpoint_keep_last = 1
-# Router objective defaults; see docs/miles/core.md#router-auxiliary-objectives.
+# RL examples disable router balancing and z-loss; objective controls remain explicit.
+# See docs/miles/core.md#router-auxiliary-objectives to opt back in.
 router_aux_loss_grouping = "pack"
 router_aux_loss_reduction = "token"
 router_z_loss_reduction = "token"
 router_aux_count_source = "dispatch"
 attention_backend = "torch"
 max_train_rollout_logprob_abs_diff = 0.05
-router_aux_loss_weight = 0.01
-router_z_loss_weight = 0.00001
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
 stream_moe_export = true
 weight_sync_mode = "flattened"
 

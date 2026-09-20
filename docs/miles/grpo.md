@@ -37,6 +37,13 @@ The [support matrix](feature-parity.md) and [measurements](measurements/index.md
 distinguish short lifecycle checks, learning-path evidence and longer experiments.
 Use those recorded boundaries when choosing a model, topology or recipe.
 
+## Router auxiliary losses in the examples
+
+The four maintained examples set both router balancing and z-loss coefficients
+to zero. This matches the current RL investigation recipe; low-level API defaults
+remain unchanged. Re-enable either coefficient explicitly for an auxiliary-loss
+experiment. Mixed-workload quality and throughput evidence remains in progress.
+
 ## Online filtering default
 
 Learning runs enable `training.filter_zero_std_groups=true`: constant-reward prompt

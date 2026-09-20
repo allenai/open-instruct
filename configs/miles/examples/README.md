@@ -67,6 +67,12 @@ throughput, recovery and memory use require qualification before production.
 Thirty-two engines plus a one-GPU judge currently need a fifth serving/service
 node, leaving seven allocated GPUs unused. `plan` reports this explicitly.
 
+All four RL examples disable router balancing and z-loss (`router_aux_loss_weight=0.0`
+and `router_z_loss_weight=0.0`). This is the example recipe; low-level CoreConfig
+defaults remain unchanged. The controlled task sweep motivated aux-off, while
+the mixed-workload comparison is still in progress; this is not a claim that
+aux-off is best for every model or workload.
+
 Router grouping, auxiliary averaging and balancing-count source are explicit
 in all four examples and preserve the existing pack/token/token/dispatch defaults.
 See [router objectives](../../../docs/miles/core.md#router-auxiliary-objectives)
