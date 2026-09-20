@@ -755,3 +755,30 @@ lower; it does not affect the per-token statistics above.
   `.../gn93t6ok`.
 - Housekeeping: all crons and waiters removed, no Beaker training experiments running; Weka not
   re-measured since 2026-09-19 18:45Z (nothing deleted).
+
+### 2026-09-20 18:19Z
+- **Kevin: "we are basically matching" (yes, with the LR-0 caveat), "continue with the fix LR",
+  "we can remove intermediate checkpoints", "okay lets do it, you can relaunch the corrected
+  continuation".** Plan: reset `-v3` to `iter_0000179` (drop the LR-0 window's `iter_0000199`,
+  `iter_0000219`, `hf-199`, `hf-219` and their data-cursor files, marker back to `179`), remove
+  every other `checkpoints/iter_*` except the marker's in all finished `miles-opd/runs/*`, then
+  relaunch the unchanged arm 2 run file on the same image with the fixed wrapper code overlaid
+  (`MILES_EXISTING_IMAGE=01M2V7V946ZN9N9STPK0H04YWM MILES_CODE_OVERLAY=1`; the job fetches the
+  pushed HEAD and copies `open_instruct/` over `/opt/core-rl` before training). Miles resumes at
+  rollout 180 with the checkpoint's scheduler step (720 × gbs → LR 1.1e-7 decaying to 0 at 219),
+  reruns rollouts 180-219, evals at 219, then the audit compares fresh `hf-219` vs `hf-199`.
+- Inventory (`01M2YVV0G7SGAMJM0VSNJ1CWDW`, read-only): Weka 455T/453T, 2.2T free; `-v3` has
+  `iter_0000019..219` (11 × 53 GB), `hf-19..219`, `checkpoints/rollout/global_dataset_state_dict_N.pt`
+  for every save incl. 179 (Miles's data cursor, so the resume at 180 draws the right prompts),
+  `workflow.json` status `failed` (audit exit 1), so `run_directory` allows re-entry with
+  `auto_resume`. **Fingerprint problem found and fixed:** `workflow.json` stores
+  `spec_sha256 = fff42816…` computed by the image commit (`1f083baed`, before the `[miles]` table
+  existed), while HEAD's `to_dict()` adds `miles: {}` → `33f62ca1…`, so the relaunch would have been
+  refused as "Run configuration changed". Miles `da3c3c7ad`: `workflow.fingerprint` drops an empty
+  `miles` table (verified: HEAD now reproduces `fff42816…`; test
+  `test_fingerprint_ignores_an_empty_native_passthrough_table`; 65 passed, 1 skipped).
+- **Blocked on Kevin: the deletion job.** The permission classifier refused to submit the Beaker CPU
+  job that deletes checkpoints (`scratchpad/weka-check/spec_cleanup_intermediate.yaml`: the `-v3`
+  reset above plus intermediates in all runs — frees ~1.5 TB). Kevin runs it himself; the relaunch
+  follows once the `-v3` marker reads `179` (a resume from marker `219` would load the LR-0
+  window's checkpoint, and Megatron refuses to save into a non-empty `iter_0000199`).
