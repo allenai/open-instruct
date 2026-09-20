@@ -1,6 +1,7 @@
 """Keep unfinished single-turn generations alive across direct policy publication."""
 
 import asyncio
+import copy
 import time
 import uuid
 
@@ -18,12 +19,13 @@ from miles.utils.http_utils import post
 from open_instruct import logger_utils
 from open_instruct.miles import pipeline_observer, policy_refresh, sibling_timing
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
+from open_instruct.miles.generation_admission import GenerationAdmission
 
 logger = logger_utils.setup_logger(__name__)
 
 
 class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
-    """Publication gates new groups; evaluation and teardown drain owned requests.
+    """Publication gates new groups; lifecycle boundaries park queued generation.
 
     SGLang owns request retraction, state invalidation and continuation. Core's
     actor publishes while source weights are fixed and reopens engines only
@@ -33,6 +35,10 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
     def __init__(self, input):
         super().__init__(input)
         self.state.generate_function = self._generate_response
+        self._generation_admission = GenerationAdmission(
+            self.args.sglang_server_concurrency * self.args.rollout_num_gpus // self.args.rollout_num_gpus_per_engine
+        )
+        self.state.generate_fn_semaphore = self._generation_admission
         self._refreshing = False
         self._boundary_capacity = None
         self._refresh_started = None
@@ -150,25 +156,57 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         return GenerateFnOutput(samples=sample)
 
     async def prepare_publication(self):
-        """Quiesce for eval/export/teardown, allowing only owned completions to drain."""
+        """Park calls not yet admitted; finish only active generation for engine reuse."""
         if self._refreshing:
             raise RuntimeError("Policy refresh did not finish; engines must not be reused")
         self._producer_resumed.clear()
         self._publication_paused = True
+        self._generation_admission.pause()
+        logger.info(
+            "Generation admission paused: active=%d waiting=%d owned_groups=%d",
+            self._generation_admission.active,
+            self._generation_admission.waiting,
+            len(self._producing_groups),
+        )
         if self._output is not None and self._boundary_capacity is None:
             self._boundary_capacity = await self._output.reserve_drain_capacity(len(self._producing_groups))
         if self._worker is not None:
-            await asyncio.wait_for(self._wait_until_idle(), self.args.olmo_core.engine_drain_timeout)
+            await asyncio.wait_for(self._wait_for_generation_idle(), self.args.olmo_core.engine_drain_timeout)
+        pipeline_observer.write_lifecycle(self, "generation_paused")
         return []
+
+    async def _wait_for_generation_idle(self):
+        idle = asyncio.create_task(self._generation_admission.wait_idle())
+        try:
+            while True:
+                done, _ = await asyncio.wait({idle, self._worker}, timeout=30, return_when=asyncio.FIRST_COMPLETED)
+                if self._worker in done:
+                    self._worker.result()
+                    raise RuntimeError("Async producer exited while waiting for generation to pause")
+                if idle in done:
+                    return
+                logger.info(
+                    "Waiting for active generation: active=%d parked=%d",
+                    self._generation_admission.active,
+                    self._generation_admission.waiting,
+                )
+        finally:
+            idle.cancel()
+            await asyncio.gather(idle, return_exceptions=True)
 
     async def finish_publication(self):
         if self._refreshing or self._interrupted():
             raise RuntimeError("Cannot resume generation before successful publication")
+        if self._worker is not None and self._worker.done():
+            self._worker.result()
+            raise RuntimeError("Async producer exited while generation was paused")
         if self._boundary_capacity is not None:
             await self._output.restore_capacity(self._boundary_capacity)
             self._boundary_capacity = None
         self._publication_paused = False
+        self._generation_admission.resume()
         self._resume_if_buffer_allows()
+        pipeline_observer.write_lifecycle(self, "generation_resumed")
 
     def _resume_if_buffer_allows(self):
         if self._publication_paused or self._refreshing or self._stopping:
@@ -195,14 +233,20 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
 
     async def _call_eval(self, input):
         await self.prepare_publication()
-        generator = self.state.generate_function
-        self.state.generate_function = single_turn_generate
+        # Queued training tasks retain their own generator/state. Evaluation
+        # gets independent admission while the training gate remains closed.
+        state = copy.copy(self.state)
+        state.generate_function = single_turn_generate
+        state.generate_fn_semaphore = GenerationAdmission(self._generation_admission.capacity)
         try:
-            results = await run_eval_datasets(self.state, self._eval_prompt_dataset_cache)
-            return RolloutFnEvalOutput(data=results)
-        finally:
-            self.state.generate_function = generator
-            await self.finish_publication()
+            results = await run_eval_datasets(state, self._eval_prompt_dataset_cache)
+        except BaseException:
+            # The pinned evaluator spawns child tasks. Retire its generation and
+            # reward callers before driver teardown; never reopen training here.
+            await state.generate_fn_semaphore.abort()
+            raise
+        await self.finish_publication()
+        return RolloutFnEvalOutput(data=results)
 
     async def shutdown(self):
         if self._shutdown_complete:

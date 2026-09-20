@@ -93,3 +93,35 @@ Evaluation on shared engines, final export and shutdown still have their own
 lifecycle boundaries. Removing the checkpoint drain does not qualify those paths
 for nonblocking operation. The native trainer write is still synchronous with
 training; this change allows inference to continue during it.
+
+
+## Evaluation admission in mixed-policy refresh
+
+With `core.publication_mode="refresh"`, evaluation closes admission to training
+HTTP generation. Samples still waiting for a serving slot stay parked in their
+original groups; only already-admitted generation calls must finish before
+evaluation uses the engines. Evaluation has separate admission and generation
+state. Successful evaluation reopens the training gate without resampling parked
+prompts or changing completed siblings. Reward verification that has already
+started can finish while the generation gate is closed. An evaluation failure
+leaves training paused and propagates to teardown.
+
+Final export and shutdown use the same generation boundary. Shutdown cancels
+unused parked work; checkpoint recovery still regenerates unconsumed prompts
+from the saved ledger as described above. Ordinary weight refresh continues to
+preserve live requests and does not invoke this evaluation drain.
+
+`pipeline_occupancy.jsonl` records `generation_admission_paused`,
+`generation_admission_waiters` and `generation_active_calls` alongside existing
+HTTP occupancy. `pipeline_lifecycle.jsonl` records `generation_paused` and
+`generation_resumed`. Admission waiters include calls parked outside the HTTP
+semaphore; they are not requests already running on SGLang. The drain timeout
+still bounds active calls, including requests already submitted to a server but
+waiting there, so long responses can still delay evaluation.
+
+This behavior requires an application image built with the admission-gate change;
+older immutable images continue to drain all producer-owned generations. For a
+structured run, omit `async.async_max_concurrent_samples` to use the existing
+automatic bound: the larger of one rollout collection and two waves of serving
+slots, rounded to whole prompt groups. Measure trainer wait and serving occupancy
+before increasing that budget: more queued work does not add inference capacity.

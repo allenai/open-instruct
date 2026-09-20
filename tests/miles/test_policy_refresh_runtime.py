@@ -11,11 +11,13 @@ import torch
 from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_function
 from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
+from miles.rollout.inference_rollout import inference_rollout_common
 from miles.utils.types import Sample
 from sglang.srt.observability import req_time_stats
 
 from open_instruct.miles import policy_refresh, refreshing_rollout
 from open_instruct.miles.async_buffer import RefreshPolicyDataBuffer
+from open_instruct.miles.generation_admission import GenerationAdmission
 from open_instruct.miles.refreshing_rollout import RefreshingRolloutFn
 
 
@@ -139,6 +141,9 @@ def producer():
     p._stop_requested = asyncio.Event()
     p._producing_groups = {1: entry(1).group}
     p._worker = None
+    p._generation_admission = GenerationAdmission(2)
+    p.state = SimpleNamespace(generate_function=p._generate_response, generate_fn_semaphore=p._generation_admission)
+    p._eval_prompt_dataset_cache = {}
     return p
 
 
@@ -160,7 +165,7 @@ def test_refresh_does_not_cancel_or_wait_for_live_requests():
     asyncio.run(scenario())
 
 
-def test_lifecycle_drains_saturated_queue_without_new_admission():
+def test_lifecycle_preserves_saturated_queue_without_new_admission():
     async def scenario():
         p = producer()
         await p._output.put(entry(0))
@@ -169,16 +174,19 @@ def test_lifecycle_drains_saturated_queue_without_new_admission():
             await p._output.put(entry(1))
             p._producing_groups.clear()
             p._producer_idle.set()
+            await asyncio.Event().wait()
 
         p._worker = asyncio.create_task(complete())
         await asyncio.wait_for(p.prepare_publication(), 1)
-        assert p._worker.done() and not p._worker.cancelled()
+        assert not p._worker.done()
         assert len(p._output._delegate._buffer) == 2
         await p.finish_publication()
         assert not p._producer_resumed.is_set()
         await p._output.get(current_version=1)
         p._resume_if_buffer_allows()
         assert p._producer_resumed.is_set()
+        p._worker.cancel()
+        await asyncio.gather(p._worker, return_exceptions=True)
 
     asyncio.run(scenario())
 
@@ -439,3 +447,138 @@ def test_pinned_engine_metadata_retains_first_forward_across_retraction():
     summary = refreshing_rollout.sibling_timing.summarize([refreshing_rollout.sibling_timing.sample_record(value)])
     assert summary["engine_initial_wait_mean_seconds"] == 10
     assert summary["engine_execution_mean_seconds"] == 30
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_eval_has_separate_admission_and_never_runs_parked_training(monkeypatch, failure):
+    async def scenario():
+        p = producer()
+        p._generation_admission = GenerationAdmission(1)
+        p.state.generate_fn_semaphore = p._generation_admission
+        original_generator = p.state.generate_function
+        active_started, active_finish = asyncio.Event(), asyncio.Event()
+        training_seen = []
+        specimens = [sample(7), sample(8)]
+        before = [s.to_dict() for s in specimens]
+
+        async def training(s):
+            async with p.state.generate_fn_semaphore:
+                assert p.state.generate_function is original_generator
+                training_seen.append(s)
+                if s is specimens[0]:
+                    active_started.set()
+                    await active_finish.wait()
+
+        async def worker():
+            await asyncio.Event().wait()
+
+        p._worker = asyncio.create_task(worker())
+        running = asyncio.create_task(training(specimens[0]))
+        await active_started.wait()
+        queued = asyncio.create_task(training(specimens[1]))
+        await asyncio.sleep(0)
+
+        async def evaluate(state, cache):
+            assert state is not p.state
+            assert state.generate_function is refreshing_rollout.single_turn_generate
+            assert p._generation_admission.paused
+            assert training_seen == specimens[:1] and not queued.done()
+            async with state.generate_fn_semaphore:
+                await asyncio.sleep(0)
+                assert not queued.done()
+                if failure:
+                    raise RuntimeError("evaluation failed")
+            return {"toy": {"rewards": [1]}}
+
+        monkeypatch.setattr(refreshing_rollout, "run_eval_datasets", evaluate)
+        evaluation = asyncio.create_task(p._call_eval(None))
+        await asyncio.sleep(0)
+        assert not evaluation.done()
+        active_finish.set()
+        await running
+        if failure:
+            with pytest.raises(RuntimeError, match="evaluation failed"):
+                await evaluation
+            assert p._generation_admission.paused and not queued.done()
+            queued.cancel()
+        else:
+            assert (await evaluation).data == {"toy": {"rewards": [1]}}
+            await asyncio.wait_for(queued, 1)
+            assert training_seen == specimens
+        assert [s.to_dict() for s in specimens] == before
+        p._worker.cancel()
+        await asyncio.gather(p._worker, queued, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_pause_surfaces_worker_failure_without_reopening():
+    async def scenario():
+        p = producer()
+
+        async def failed():
+            raise RuntimeError("producer failed")
+
+        p._worker = asyncio.create_task(failed())
+        await asyncio.sleep(0)
+        with pytest.raises(RuntimeError, match="producer failed"):
+            await p.prepare_publication()
+        assert p._generation_admission.paused
+
+    asyncio.run(scenario())
+
+
+def test_pinned_generation_parks_before_generator_and_rewards_can_finish(monkeypatch):
+    async def scenario():
+        p = producer()
+        p._generation_admission = GenerationAdmission(1)
+        p.state.generate_fn_semaphore = p._generation_admission
+        p.state.args = SimpleNamespace(partial_rollout=False, group_rm=False)
+        p.state.aborted = False
+        generation_started, finish_generation = asyncio.Event(), asyncio.Event()
+        reward_started, finish_reward = asyncio.Event(), asyncio.Event()
+        seen = []
+        specimens = [Sample(group_index=7, index=i, metadata={"identity": i}) for i in range(2)]
+
+        async def generate(input):
+            seen.append(input.sample)
+            if input.sample is specimens[0]:
+                generation_started.set()
+                await finish_generation.wait()
+            input.sample.response = "kept"
+            input.sample.response_length = 1
+            input.sample.status = Sample.Status.COMPLETED
+            return SimpleNamespace(samples=input.sample)
+
+        async def reward(args, specimen):
+            if specimen is specimens[0]:
+                reward_started.set()
+                await finish_reward.wait()
+            return 1
+
+        p.state.generate_function = generate
+        monkeypatch.setattr(inference_rollout_common, "async_rm", reward)
+        p._worker = asyncio.create_task(asyncio.Event().wait())
+        running = asyncio.create_task(inference_rollout_common.generate_and_rm(p.state, specimens[0], {}))
+        await generation_started.wait()
+        queued = asyncio.create_task(inference_rollout_common.generate_and_rm(p.state, specimens[1], {}))
+        await asyncio.sleep(0)
+        boundary = asyncio.create_task(p.prepare_publication())
+        await asyncio.sleep(0)
+        finish_generation.set()
+        await reward_started.wait()
+        await asyncio.wait_for(boundary, 1)
+        assert not running.done() and not queued.done()
+        assert seen == specimens[:1]
+        assert specimens[1].response == "" and specimens[1].reward is None
+        finish_reward.set()
+        assert await running is specimens[0]
+        assert not queued.done()
+        await p.finish_publication()
+        assert await asyncio.wait_for(queued, 1) is specimens[1]
+        assert seen == specimens
+        assert [s.metadata for s in specimens] == [{"identity": 0}, {"identity": 1}]
+        p._worker.cancel()
+        await asyncio.gather(p._worker, return_exceptions=True)
+
+    asyncio.run(scenario())

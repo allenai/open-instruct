@@ -51,8 +51,9 @@ def write_lifecycle(producer, event):
 
 def snapshot(producer):
     semaphore = getattr(producer.state, "generate_fn_semaphore", None)
-    free = getattr(semaphore, "_value", None)
-    waiters = getattr(semaphore, "_waiters", None)
+    slots = getattr(semaphore, "_semaphore", semaphore)
+    free = getattr(slots, "_value", None)
+    waiters = getattr(slots, "_waiters", None)
     args = producer.args
     capacity = args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
     output = producer._output
@@ -90,12 +91,15 @@ def snapshot(producer):
         "producer_unfinished_samples": getattr(producer._scheduler, "samples_in_flight", None),
         "completed_queue_groups": len(buffer) if buffer is not None else None,
         "completed_queue_capacity_groups": getattr(delegate, "_capacity", None),
+        "generation_admission_paused": getattr(semaphore, "paused", None),
+        "generation_admission_waiters": getattr(semaphore, "waiting", None),
+        "generation_active_calls": getattr(semaphore, "active", None),
         "http_capacity_requests": capacity,
         "http_active_requests": capacity - free if free is not None else None,
         "http_waiting_requests": sum(not waiter.done() for waiter in waiters)
         if waiters is not None
         else 0
-        if hasattr(semaphore, "_waiters")
+        if hasattr(slots, "_waiters")
         else None,
     }
 
