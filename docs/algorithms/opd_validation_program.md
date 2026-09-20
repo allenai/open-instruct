@@ -782,3 +782,14 @@ lower; it does not affect the per-token statistics above.
   reset above plus intermediates in all runs — frees ~1.5 TB). Kevin runs it himself; the relaunch
   follows once the `-v3` marker reads `179` (a resume from marker `219` would load the LR-0
   window's checkpoint, and Megatron refuses to save into a non-empty `iter_0000199`).
+- **Kevin (~23:05Z): "youre good to remove the checkpoints."** Cleanup job `01M30HHD8KXA8NN7KX306KY403`
+  ran: `-v3` iter/hf/cursor 199 and 219 removed, marker → 179; intermediates removed in `-v2`
+  (kept `iter_0000219`), `-v3` (kept `iter_0000179`), `qwen35-4b-…-v5` and `qwen35-2b-…-v5` (kept
+  `iter_0000099`); 40 checkpoint directories, ~2 TB. `df` still showed 1.2T free right after (the
+  bucket was 2.2T free 11 h earlier, so others are filling it; our continuation needs ~120 GB).
+- **Corrected continuation launched: `01M30HSBNWMTXA31Z4367WY35E`** (same run file and root `-v3`,
+  image `01M2V7V946ZN9N9STPK0H04YWM`, wrapper code overlaid from Miles `da3c3c7ad`, receipt
+  `~/.cache/open-instruct/miles/launches/eopd-opd-qwen3-4b-base-dapo14k-de1aa8cbd4fabef6.json`).
+  Expected: `code overlay: da3c3c7ad…` in the job log, Megatron loads `iter_0000179`, first train
+  step at `train/step` 720 with `lr-pg_0` ≈ 1.1e-7 (not 0), rollouts 180-219, eval 219, audit passes
+  (`hf-219` ≠ `hf-199`). ETA ~3.5 h after start.
