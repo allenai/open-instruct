@@ -29,10 +29,12 @@ def code_overlay():
     origin = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=root, text=True).strip()
     if origin.startswith("git@github.com:"):
         origin = "https://github.com/" + origin[len("git@github.com:") :]
+    # The repository tracks test fixtures with git-lfs; the job has no LFS endpoint and does not
+    # need them, and a failing smudge filter aborts the checkout (exit 128).
     lines = [
         "git init -q /tmp/oi-overlay",
         f"git -C /tmp/oi-overlay fetch -q --depth 1 {shlex.quote(origin)} {revision}",
-        "git -C /tmp/oi-overlay checkout -q FETCH_HEAD",
+        "GIT_LFS_SKIP_SMUDGE=1 git -C /tmp/oi-overlay checkout -q FETCH_HEAD",
         f"echo 'code overlay: {revision}'",
     ]
     lines += [f"cp -r /tmp/oi-overlay/{d}/. /opt/core-rl/{d}/" for d in OVERLAY_DIRS]

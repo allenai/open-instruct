@@ -482,6 +482,7 @@ def test_code_overlay_fetches_head_before_training(monkeypatch):
     command = launch.specification("test-image", spec)["tasks"][0]["arguments"][0]
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     assert "fetch -q --depth 1 https://github.com/" in command
+    assert "GIT_LFS_SKIP_SMUDGE=1 git -C /tmp/oi-overlay checkout -q FETCH_HEAD" in command
     assert revision in command
     for directory in opd_launch.OVERLAY_DIRS:
         assert f"cp -r /tmp/oi-overlay/{directory}/. /opt/core-rl/{directory}/" in command
