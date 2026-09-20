@@ -305,6 +305,8 @@ def test_fingerprint_ignores_an_empty_native_passthrough_table():
     without = {key: value for key, value in document.items() if key != "miles"}
     assert workflow.fingerprint(document) == workflow.fingerprint(without)
     assert workflow.fingerprint({**document, "miles": {"use_tis": True}}) != workflow.fingerprint(document)
+    # Architecture profiles and tokenizer files are hashed as lists.
+    assert workflow.fingerprint(["--num-layers", "36"]) == workflow.fingerprint(["--num-layers", "36"])
 
 
 def test_default_schedule_is_one_constant_lr_step_per_rollout():

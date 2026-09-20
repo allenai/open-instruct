@@ -30,8 +30,10 @@ def write_json(path, document):
 
 def fingerprint(document):
     # An empty [miles] passthrough table changes nothing about the run; leaving it out keeps
-    # run roots written before the table existed (Miles a3a0d5f9c) resumable.
-    document = {key: value for key, value in document.items() if not (key == "miles" and value == {})}
+    # run roots written before the table existed (Miles a3a0d5f9c) resumable. Other callers
+    # hash lists (architecture arguments, tokenizer files), which pass through unchanged.
+    if isinstance(document, dict):
+        document = {key: value for key, value in document.items() if not (key == "miles" and value == {})}
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 
