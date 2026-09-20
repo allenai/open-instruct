@@ -13,7 +13,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import launch, opd_config, opd_launch, opd_prepare, opd_runtime, options, rewards, specs
+from open_instruct.miles import (
+    launch,
+    opd_config,
+    opd_launch,
+    opd_prepare,
+    opd_runtime,
+    options,
+    rewards,
+    specs,
+    workflow,
+)
 from open_instruct.miles.errors import InputError
 
 CONFIG = Path(__file__).resolve().parents[1] / "configs/miles/opd/qwen35-4b-tiny.toml"
@@ -287,6 +297,14 @@ def test_resume_loads_the_latest_checkpoint_and_keeps_the_scheduler_step(tmp_pat
     values, flags = native(specs.load(CONFIG, [f'output.root="{tmp_path}"', "training.resume=false"]))
     assert "--load" not in values
     assert "--use-checkpoint-opt-param-scheduler" not in flags
+
+
+def test_fingerprint_ignores_an_empty_native_passthrough_table():
+    document = specs.load(CONFIG).to_dict()
+    assert document["miles"] == {}
+    without = {key: value for key, value in document.items() if key != "miles"}
+    assert workflow.fingerprint(document) == workflow.fingerprint(without)
+    assert workflow.fingerprint({**document, "miles": {"use_tis": True}}) != workflow.fingerprint(document)
 
 
 def test_default_schedule_is_one_constant_lr_step_per_rollout():
