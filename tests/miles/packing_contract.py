@@ -67,10 +67,15 @@ def rollout(rank, world):
 
 
 def make_worker(root, world, packed, auxiliary, checkpointing, **router_options):
+    ep_degree = router_options.pop("expert_parallel_size", world)
     name = f"ep{world}-pack{int(packed)}-aux{int(auxiliary)}-ac{int(checkpointing)}"
+    if ep_degree != world:
+        name += f"-epdegree{ep_degree}"
+    if router_options.get("expert_balanced_packing", False):
+        name += "-expert-schedule"
     run = RunConfig(
         CoreConfig(
-            expert_parallel_size=world,
+            expert_parallel_size=ep_degree,
             attention_backend="flash_4",
             max_sequence_length=128,
             sequence_packing=packed,

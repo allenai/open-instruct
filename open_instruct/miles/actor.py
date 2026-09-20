@@ -26,6 +26,7 @@ from open_instruct.miles import (
     contract,
     data,
     engine_delivery,
+    expert_schedule,
     models,
     packing,
     performance,
@@ -314,6 +315,24 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         miles_loss.compute_advantages_and_returns(self.args, rollout)
         self._agree(lambda: contract.validate_training_data(rollout))
         for step_batches in self._batch_steps(rollout):
+            expert_metrics = None
+            if self.args.olmo_core.expert_balanced_packing:
+                local_loads = self._agree(lambda batches=step_batches: expert_schedule.local_loads(self.args, batches))
+                expert_metrics = expert_schedule.realized_measurements(
+                    local_loads, self.args.olmo_core.expert_parallel_size
+                )
+                logger.info(
+                    "Core expert balance: %s",
+                    contract.record(
+                        self.args,
+                        {
+                            "event": "expert_balance",
+                            "step": self.clock.completed_steps + 1,
+                            "rollout_id": rollout_id,
+                            **expert_metrics,
+                        },
+                    ),
+                )
             if self.args.olmo_core.sequence_packing:
                 budget = self.args.olmo_core.packing_max_tokens or self.args.olmo_core.max_sequence_length
                 logger.info(
@@ -458,6 +477,13 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                         "packing/samples_per_pack": normalization.samples / normalization.world_size / count,
                         "packing/tokens_per_pack": normalization.model_tokens / normalization.world_size / count,
                         "packing/rank0_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                    }
+                )
+            if expert_metrics is not None:
+                summary.update(
+                    {
+                        "packing/expert_dispatch_skew_mean": expert_metrics["skew_mean"],
+                        "packing/expert_dispatch_skew_max": expert_metrics["skew_max"],
                     }
                 )
             logged = self._agree(

@@ -12,6 +12,7 @@ from open_instruct.miles import options as cli_options
 from open_instruct.miles.errors import InputError
 
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
+EXPERT_SCHEDULE = "open_instruct.miles.expert_schedule.reorder_samples"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,6 +55,8 @@ class CoreConfig:
     use_reduce_scatter: bool = False
     max_sequence_length: int = 8192
     sequence_packing: bool = False
+    expert_balanced_packing: bool = False
+    expert_balance_layer_stride: int = 1
     packing_max_tokens: int | None = None
     max_policy_lag: int = 0
     router_aux_loss_grouping: str = "pack"
@@ -124,6 +127,7 @@ class CoreConfig:
             "checkpoint_constant_memory_planning",
             "scoring_pass_required",
             "sequence_packing",
+            "expert_balanced_packing",
         ):
             validation.boolean(getattr(self, name), f"core.{name}")
         for name in (
@@ -135,7 +139,7 @@ class CoreConfig:
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
                 raise InputError(f"core.{name} must be a positive integer or unset")
-        for name in ("expert_parallel_size", "max_sequence_length"):
+        for name in ("expert_parallel_size", "max_sequence_length", "expert_balance_layer_stride"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise InputError(f"core.{name} must be a positive integer")
@@ -244,6 +248,13 @@ class RunConfig:
             options["dynamic_sampling_filter_path"] = ZERO_STD_FILTER
         elif path == ZERO_STD_FILTER:
             raise InputError("core.filter_zero_std_groups=false conflicts with the explicit zero-std filter path")
+        hook = options.get("rollout_sample_filter_path")
+        if self.core.expert_balanced_packing:
+            if hook not in (None, EXPERT_SCHEDULE):
+                raise InputError("expert_balanced_packing conflicts with miles.rollout_sample_filter_path")
+            options["rollout_sample_filter_path"] = EXPERT_SCHEDULE
+        elif hook == EXPERT_SCHEDULE:
+            raise InputError("The expert schedule hook requires core.expert_balanced_packing=true")
         return options
 
     @classmethod
@@ -344,6 +355,27 @@ class RunConfig:
         if any(type(n) is not int or n < 1 for n in (nodes, gpus)):
             raise InputError("Trainer nodes and GPUs per node must be positive integers")
         world = nodes * gpus
+        if self.core.expert_balanced_packing:
+            if not 1 < self.core.expert_parallel_size < world:
+                raise InputError("expert_balanced_packing requires world > expert_parallel_size > 1")
+            if not self.core.sequence_packing:
+                raise InputError("expert_balanced_packing requires sequence_packing=true")
+            if self.core.router_aux_loss_weight != 0:
+                raise InputError("expert_balanced_packing requires router_aux_loss_weight=0")
+            if not options.get("use_rollout_routing_replay", False):
+                raise InputError("expert_balanced_packing requires use_rollout_routing_replay=true")
+            for name in (
+                "use_dynamic_global_batch_size",
+                "balance_data",
+                "multi_lora",
+                "partial_rollout",
+                "custom_reward_post_process_path",
+                "custom_convert_samples_to_train_data_path",
+            ):
+                if options.get(name):
+                    raise InputError(f"expert_balanced_packing does not support miles.{name}")
+            if self.core.model_config:
+                raise InputError("expert_balanced_packing requires the model layout from the HF configuration")
         if world % self.core.expert_parallel_size:
             raise InputError(
                 f"Trainer world size {world} ({nodes} nodes × {gpus} GPUs) must be divisible by "
@@ -447,6 +479,8 @@ class RunConfig:
             "rollout_sample_filter_path",
             "rollout_router_url",
         ):
+            if name == "rollout_sample_filter_path" and self.core.expert_balanced_packing:
+                continue  # resolved_miles admits only our managed hook.
             if options.get(name):
                 raise InputError(f"engine_drain requires the managed single-turn producer; remove miles.{name}")
 
@@ -482,6 +516,11 @@ class RunConfig:
     def arguments(self) -> list[str]:
         """Compile without importing CUDA, MILES, Core, or downloading models."""
         self.validate()
+        core = dataclasses.asdict(self.core)
+        if not self.core.expert_balanced_packing:
+            # Preserve the pre-feature native argv when scheduling is disabled.
+            core.pop("expert_balanced_packing")
+            core.pop("expert_balance_layer_stride")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,
@@ -491,7 +530,7 @@ class RunConfig:
             "offload_train": False,
             "data_pad_size_multiplier": 1,
             **self.resolved_miles(),
-            "olmo_core_config": json.dumps(dataclasses.asdict(self.core), sort_keys=True),
+            "olmo_core_config": json.dumps(core, sort_keys=True),
         }
         return cli_options.encode_options(options)
 

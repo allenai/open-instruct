@@ -101,6 +101,10 @@ def load_core_args(extra_args_provider):
         "rollout_temperature",
         "rollout_top_p",
         "rollout_top_k",
+        "use_dynamic_global_batch_size",
+        "balance_data",
+        "custom_reward_post_process_path",
+        "custom_convert_samples_to_train_data_path",
     ):
         value = getattr(args, key, None)
         if value is not None:
@@ -120,6 +124,7 @@ def load_core_args(extra_args_provider):
     config = RunConfig(core, fields)
     config.validate()
     args.dynamic_sampling_filter_path = config.resolved_miles().get("dynamic_sampling_filter_path")
+    args.rollout_sample_filter_path = config.resolved_miles().get("rollout_sample_filter_path")
     args.olmo_core = core
     args.compress_ratios = None
     if args.fully_async:

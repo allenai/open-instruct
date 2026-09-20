@@ -89,3 +89,57 @@ The small real-model follow-up is configured in
 `configs/miles/qualification/sequence-packing.toml`: EP2 plus one TP1 SGLang engine,
 three async updates, 8 prompts × 2 responses, replay/recomputation, and a 4096-token
 pack budget. This tests plumbing, not GSM8K learning with its short generation cap.
+
+## Replay-informed expert-aware packing (experimental)
+
+Set `trainer.expert_balanced_packing=true` to reorder complete optimizer batches
+before MILES partitions samples by rank. The first implementation targets
+**multiple complete expert sets**: trainer world size must exceed the expert
+parallel degree, and that degree must exceed one. For example, four trainer GPUs
+with EP2 provide two complete expert sets. Set `router_aux_loss_weight=0`, enable
+sequence packing and rollout routing replay, and use the normal Olmo3MoE HF
+configuration. The z-loss coefficient may remain unchanged.
+
+The producer uses recorded expert IDs to place samples with complementary loads
+in the same EP group's dispatches. It does not change any tokens, expert IDs,
+prompt identities, rewards, policy versions, or optimizer-step membership.
+Candidates use arrival and length-based rows, with greedy expert-group placement.
+Each candidate is scored through the trainer's exact stride partition, consecutive
+packer, and **world-wide** pack-count equalization. Similar lengths do not imply
+matching boundaries. The original order wins ties and is retained unless a
+candidate improves the measured schedule without increasing pack count, mean or
+maximum dispatch skew, maximum destination load, or the absolute-work proxy.
+These guarantees concern the counted layers and are not throughput guarantees.
+
+`trainer.expert_balance_layer_stride=1` counts every routed layer (dense layers
+are excluded). Larger values sample routed layers and reduce histogram work;
+all prediction and trainer metrics then describe only that subset. Histograms
+include the trainer's synthetic final replay row separately for every document.
+The default-off native arguments are unchanged.
+
+The managed producer callback runs before reward normalization. It requires
+original `group_index` and unique sample identities; pinned MILES uses those IDs,
+not post-permutation adjacency, for GRPO normalization. Missing/malformed routes,
+compact/multi-turn rollouts, dynamic global batch sizes, alternative partitioning,
+custom reward/conversion callbacks and conflicting sample filters are rejected.
+Any incomplete trailing optimizer block remains untouched for normal MILES trimming.
+No MILES or OLMo-core source patch is needed.
+
+Producer `expert_schedule` JSON events record before/after predictions and total
+planning time. Trainer `expert_balance` contract events count the actual packs;
+W&B exposes `packing/expert_dispatch_skew_mean` and
+`packing/expert_dispatch_skew_max`. The work proxy sums the busiest destination
+across groups at each pack/layer; it is a count proxy, not predicted wall time.
+
+The dedicated qualification allocates four GPUs and exercises EP2, replay,
+per-sample scores, two policy-only updates, full gradients/Adam state, and
+activation recomputation on/off:
+
+```bash
+MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
+  ./scripts/train/build_image_and_launch.sh --miles \
+  scripts/train/debug/miles_expert_schedule.sh
+```
+
+A passing fixed-input numerical gate does not establish throughput improvement
+or learning quality on a heterogeneous production workload.
