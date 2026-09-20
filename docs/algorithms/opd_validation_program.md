@@ -793,3 +793,9 @@ lower; it does not affect the per-token statistics above.
   Expected: `code overlay: da3c3c7ad…` in the job log, Megatron loads `iter_0000179`, first train
   step at `train/step` 720 with `lr-pg_0` ≈ 1.1e-7 (not 0), rollouts 180-219, eval 219, audit passes
   (`hf-219` ≠ `hf-199`). ETA ~3.5 h after start.
+- `01M30HSBNWMTXA31Z4367WY35E` **died after 4 s (exit 128)** in the overlay's `git checkout`: the
+  repository tracks `open_instruct/test_data/*.jsonl` with git-lfs and the job has no LFS endpoint
+  ("smudge filter lfs failed"). The run root was untouched (the failure precedes
+  `open_instruct.miles train`). Fixed in Miles `9cfa971f4` (`GIT_LFS_SKIP_SMUDGE=1` on the checkout;
+  test updated, 65 passed) — first real exercise of the overlay path. **Relaunched as
+  `01M30J0JGXFNKPV4EHT0KTXY8G`** (~23:30Z), same receipt path, revision `9cfa971f4`.
