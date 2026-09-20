@@ -799,3 +799,10 @@ lower; it does not affect the per-token statistics above.
   `open_instruct.miles train`). Fixed in Miles `9cfa971f4` (`GIT_LFS_SKIP_SMUDGE=1` on the checkout;
   test updated, 65 passed) — first real exercise of the overlay path. **Relaunched as
   `01M30J0JGXFNKPV4EHT0KTXY8G`** (~23:30Z), same receipt path, revision `9cfa971f4`.
+- `01M30J0JGXFNKPV4EHT0KTXY8G` overlaid fine (`code overlay: 9cfa971f4…`), passed `run_directory`
+  (so the stored fingerprint matched), then **died at 23:25Z in `opd_runtime.execute`: my
+  `fingerprint` change assumed a dict, but the runtime also hashes the architecture argument list
+  (and tokenizer files)** — `AttributeError: 'list' object has no attribute 'items'`. Fixed in Miles
+  `20763dfc2` (filter only dict documents; list case in the test; 65 passed). The root's
+  `workflow.json` is back to `failed`, nothing else was touched. **Third launch
+  `01M30JAV4K6F2F7XQYV1HY0R6N` at 23:27Z** (revision `20763dfc2`); same early checks apply.
