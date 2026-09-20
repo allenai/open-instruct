@@ -34,14 +34,14 @@ import pathlib
 import tempfile
 
 import torch
-import torch.distributed.checkpoint.state_dict as dist_cp_sd
 from olmo_core.config import DType
 from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_keys
 from olmo_core.nn.hf import convert_checkpoint_to_hf
 from olmo_core.nn.transformer.config import TransformerConfig
 from olmo_core.utils import prepare_cli_environment
+from torch.distributed.checkpoint import state_dict as dist_cp_sd
 
-from open_instruct import logger_utils
+from open_instruct import export_chat_template, logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -108,6 +108,11 @@ def main() -> None:
     parser.add_argument("-o", "--huggingface-output-dir", required=True)
     parser.add_argument("-c", "--config", required=True, help="Training config json (model + dataset.tokenizer).")
     parser.add_argument("-t", "--tokenizer", default="allenai/olmo-3-tokenizer-instruct-dev")
+    parser.add_argument(
+        "--export-chat-template",
+        type=pathlib.Path,
+        help="Jinja file to install after export; preserves tokenizer files and special tokens.",
+    )
     parser.add_argument("-s", "--max-sequence-length", type=int, default=8192)
     parser.add_argument("--skip-validation", dest="validate", action="store_false")
     # Defaults to CUDA, not CPU: validation runs both implementations, and the
@@ -117,6 +122,7 @@ def main() -> None:
     # a 38%-logit-error conversion through on Olmo-Hybrid-7B. Do not silence it.
     parser.add_argument("--device", type=torch.device, default=torch.device("cuda"))
     args = parser.parse_args()
+    template = export_chat_template.read_export_chat_template(args.export_chat_template)
 
     payload = json.loads(pathlib.Path(args.config).read_text())
     model_config = payload["model"]
@@ -142,6 +148,7 @@ def main() -> None:
         device=args.device,
         validation_device=args.device,
     )
+    export_chat_template.install_export_chat_template(args.huggingface_output_dir, template)
     logger.info("CONVERSION_OK")
 
 

@@ -24,6 +24,9 @@
 #                    with ModuleNotFoundError. Uses /stage/.venv/bin/python
 #                    directly because `uv run` resyncs and reverts the torch
 #                    2.11 companion installs.
+#   convert_rl       convert to hf_stepNNNN-think with the pinned think-dev
+#                    template. Requires EXPORT_TOKENIZER=<training tokenizer dir>.
+#                    EXPORT_CHAT_TEMPLATE can select a replacement Jinja file.
 #   lr_probe         300 steps, 1x8, on the subset. INSTABILITY SCREEN ONLY --
 #                    see the scheduler note below.
 #   train            the real run: STEPS steps, 2x8, full think corpus.
@@ -413,9 +416,24 @@ case "$MODE" in
         --output_dir "$OUTPUT_DIR_ARG"
     ;;
 
-  convert)
+  convert|convert_rl)
     CKPT_ROOT="${CKPT_ROOT:?set CKPT_ROOT to the deletable_checkpoint_states dir}"
     STEP="${STEP:?set STEP, e.g. step1723}"
+    EXPORT_SUFFIX=""
+    if [[ "$MODE" == "convert_rl" ]]; then
+        # Keep the tokenizer actually used during SFT; think-dev supplies only
+        # the template, never its different pre-tokenizer/post-processor.
+        EXPORT_TOKENIZER="${EXPORT_TOKENIZER:?set EXPORT_TOKENIZER to the tokenizer directory used during training}"
+        EXPORT_CHAT_TEMPLATE="${EXPORT_CHAT_TEMPLATE:-scripts/tokenizers/templates/olmo_3_2_think_dev.jinja}"
+        EXPORT_SUFFIX="-think"
+    fi
+    EXPORT_ARGS=(-o "$CKPT_ROOT/hf_$STEP$EXPORT_SUFFIX")
+    if [[ -n "${EXPORT_TOKENIZER:-}" ]]; then
+        EXPORT_ARGS+=(--tokenizer "$EXPORT_TOKENIZER")
+    fi
+    if [[ -n "${EXPORT_CHAT_TEMPLATE:-}" ]]; then
+        EXPORT_ARGS+=(--export-chat-template "$EXPORT_CHAT_TEMPLATE")
+    fi
     # The Olmo 3.5 hero HF export (latent MoE, scalable softmax, per-head QK gains,
     # bundled olmo3moe modeling code) lives on Jacob's olmo-core HF lineage
     # (b1fd2c97, the revision in the base exports' conversion receipts), which
@@ -445,16 +463,16 @@ case "$MODE" in
         $CONVERT_ENV_FLAGS \
         -- /stage/.venv/bin/python "${CONVERT_SCRIPT:-scripts/train/debug/convert_moe_checkpoint_to_hf.py}" \
         -i "$CKPT_ROOT/$STEP" \
-        -o "$CKPT_ROOT/hf_$STEP" \
         -c $CONFIG_NAME \
         -s "$SEQ" \
+        "${EXPORT_ARGS[@]}" \
         --skip-validation \
         --device "$CONVERT_DEVICE"
     ;;
 
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Expected one of: tokenize_subset, tokenize_full, discover_cache, gate, smoke_2node, lr_probe, train, convert" >&2
+    echo "Expected one of: tokenize_subset, tokenize_full, discover_cache, gate, smoke_2node, lr_probe, train, convert, convert_rl" >&2
     exit 1
     ;;
 esac
