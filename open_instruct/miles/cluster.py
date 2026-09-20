@@ -73,6 +73,7 @@ class Supervisor:
         self.logs = []
         self.health = {}
         self.health_failures = {}
+        self.peer_heartbeats = {}
         self.next_health = 0.0
         self.log_offsets = {}
         self.stopping = threading.Event()
@@ -83,13 +84,7 @@ class Supervisor:
         while not self.stopping.is_set():
             try:
                 write(self.root / f"heartbeat-{self.rank}.json", {"time": time.time(), "rank": self.rank})
-                for rank in range(self.count):
-                    path = self.root / f"heartbeat-{rank}.json"
-                    if path.exists():
-                        if time.time() - read(path)["time"] > self.heartbeat_timeout:
-                            raise RuntimeError(f"Replica {rank} heartbeat expired")
-                    elif time.monotonic() - self.started > self.startup_timeout:
-                        raise TimeoutError(f"Replica {rank} did not rendezvous")
+                self.check_peer_heartbeats()
                 for _, process in self.children:
                     if not (self.root / "complete.json").exists() and process.poll() is not None:
                         raise RuntimeError(f"Managed process {process.args[:3]} exited with {process.returncode}")
@@ -100,6 +95,24 @@ class Supervisor:
                 self.failed = error
                 return
             self.stopping.wait(2)
+
+    def check_peer_heartbeats(self):
+        now = time.time()
+        for rank in range(self.count):
+            # A missing directory entry during shared-filesystem publication is
+            # not evidence that an already joined peer never rendezvoused.
+            # Retain its last observed heartbeat, without extending its deadline.
+            try:
+                observed = read(self.root / f"heartbeat-{rank}.json")["time"]
+            except FileNotFoundError:
+                observed = self.peer_heartbeats.get(rank)
+            else:
+                self.peer_heartbeats[rank] = observed
+            if observed is None:
+                if time.monotonic() - self.started > self.startup_timeout:
+                    raise TimeoutError(f"Replica {rank} did not rendezvous")
+            elif now - observed > self.heartbeat_timeout:
+                raise RuntimeError(f"Replica {rank} heartbeat expired")
 
     def probe_health(self):
         for name, url in tuple(self.health.items()):
