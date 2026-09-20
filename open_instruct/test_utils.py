@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -100,43 +101,6 @@ class TestEnsureHfRepoCached(unittest.TestCase):
         mock_snapshot_download.assert_not_called()
 
 
-class TestLaunchLocalVllmEval(unittest.TestCase):
-    @mock.patch("open_instruct.utils.subprocess.run")
-    @mock.patch("open_instruct.utils.shutil.which", return_value="/env/bin/olmo-eval")
-    def test_builds_vllm_command_and_bypasses_proxy_for_local_health_checks(self, _mock_which, mock_run):
-        with mock.patch.dict(os.environ, {"NO_PROXY": "internal.example"}, clear=False):
-            utils.launch_local_vllm_eval(
-                model_path="/models/checkpoint",
-                tasks=["gsm8k", "ifeval"],
-                output_dir="/results/eval",
-                num_gpus=2,
-                max_model_len=2048,
-                limit=3,
-                max_tokens=64,
-                trust_remote_code=True,
-            )
-
-        command = mock_run.call_args.args[0]
-        self.assertEqual(
-            command[:6], ["/env/bin/olmo-eval", "run", "-m", "/models/checkpoint", "--harness", "default"]
-        )
-        self.assertIn("provider.kind=vllm_server", command)
-        self.assertIn("provider.trust_remote_code=true", command)
-        self.assertIn("provider.max_model_len=2048", command)
-        self.assertEqual(command.count("-t"), 2)
-        self.assertEqual(command.count("limit=3"), 2)
-        self.assertEqual(command.count("max_tokens=64"), 2)
-        self.assertEqual(command[-4:], ["--num-gpus", "2", "--output-dir", "/results/eval"])
-        self.assertTrue(mock_run.call_args.kwargs["check"])
-        no_proxy = mock_run.call_args.kwargs["env"]["NO_PROXY"].split(",")
-        self.assertEqual(no_proxy, ["internal.example", "localhost", "127.0.0.1", "0.0.0.0"])
-
-    @mock.patch("open_instruct.utils.shutil.which", return_value=None)
-    def test_fails_loud_when_olmo_eval_is_missing(self, _mock_which):
-        with self.assertRaisesRegex(RuntimeError, "olmo-eval.*not installed"):
-            utils.launch_local_vllm_eval("/models/checkpoint", ["gsm8k"], "/results/eval")
-
-
 class TestGetDeviceMemoryMetrics(unittest.TestCase):
     @mock.patch("open_instruct.utils.torch.cuda")
     def test_uses_selected_accelerator_module(self, mock_cuda):
@@ -180,6 +144,68 @@ class TestNodeLocalEnvVars(unittest.TestCase):
             self.assertIn(var, utils.NODE_LOCAL_ENV_VARS)
 
 
+class TestLoadNpuBackend(unittest.TestCase):
+    """`_load_npu_backend` must only attempt torch_npu on Ascend hosts without CUDA."""
+
+    _ASCEND_ENV_VARS = ("ASCEND_RT_VISIBLE_DEVICES", "ASCEND_HOME_PATH", "ASCEND_HOME_URL")
+
+    def _load(self, *, cuda_available: bool, env: dict, npu_registered: bool = False):
+        sys.modules.pop("torch_npu", None)
+        # A fake torch_npu that fails loudly if imported where it must not be.
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "torch_npu.py").write_text(
+                "raise AssertionError('torch_npu imported where it must not be')"
+            )
+            clean_env = {k: v for k, v in os.environ.items() if k not in self._ASCEND_ENV_VARS}
+            clean_env.update(env)
+            try:
+                with (
+                    mock.patch("open_instruct.utils.torch.cuda.is_available", return_value=cuda_available),
+                    mock.patch.dict(os.environ, clean_env, clear=True),
+                    mock.patch.object(sys, "path", [tmp, *sys.path]),
+                    # Simulate the device backend autoload state: on real NPU
+                    # hosts torch.npu is already registered, which must suppress
+                    # the explicit torch_npu import (torch_npu would raise its
+                    # "Two accelerators" error against its own bridge).
+                    mock.patch.object(
+                        utils.torch,
+                        "npu",
+                        mock.MagicMock(is_available=mock.Mock(return_value=True)) if npu_registered else None,
+                        create=True,
+                    ),
+                ):
+                    utils._load_npu_backend()
+            finally:
+                sys.modules.pop("torch_npu", None)
+
+    def test_skips_import_when_cuda_is_available(self):
+        self._load(cuda_available=True, env={"ASCEND_HOME_PATH": "/usr/local/Ascend/ascend-toolkit"})
+
+    def test_skips_import_without_ascend_environment(self):
+        self._load(cuda_available=False, env={})
+
+    def test_skips_import_on_legacy_ascend_home_url_only(self):
+        # ASCEND_HOME_URL is not an official CANN variable; only
+        # ASCEND_RT_VISIBLE_DEVICES / ASCEND_HOME_PATH gate the import.
+        self._load(cuda_available=False, env={"ASCEND_HOME_URL": "/usr/local/Ascend/ascend-toolkit"})
+
+    def test_skips_import_when_autoload_already_registered_npu(self):
+        # The explicit import would make torch_npu raise "Two accelerators
+        # cannot be used at the same time: npu and npu" against its own
+        # autoload bridge, so registration must short-circuit it.
+        self._load(
+            cuda_available=False, env={"ASCEND_HOME_PATH": "/usr/local/Ascend/ascend-toolkit"}, npu_registered=True
+        )
+
+    def test_attempts_import_with_ascend_environment(self):
+        # A genuinely broken torch_npu (non-ImportError) must surface, not
+        # silently degrade the process to CPU.
+        with pytest.raises(AssertionError, match="torch_npu imported where it must not be"):
+            self._load(cuda_available=False, env={"ASCEND_HOME_PATH": "/usr/local/Ascend/ascend-toolkit"})
+        with pytest.raises(AssertionError, match="torch_npu imported where it must not be"):
+            self._load(cuda_available=False, env={"ASCEND_RT_VISIBLE_DEVICES": "0"})
+
+
 class TestNpuNumaAffinityIndex(unittest.TestCase):
     """Pure index math from open_instruct.npu.numa_affinity."""
 
@@ -207,16 +233,20 @@ class TestNpuNumaAffinityIndex(unittest.TestCase):
 class TestNumaAffinityBinding(unittest.TestCase):
     """Dispatch of RayProcess._set_numa_affinity against a fake libnuma."""
 
-    def _bound_node(self, *, local_rank, rank, numa_nodes=2, env, method):
+    def _bound_node(self, *, local_rank, rank, numa_nodes=2, env, method, accelerator="cuda"):
         libnuma = mock.MagicMock()
         libnuma.numa_num_configured_nodes.return_value = numa_nodes
         bound = []
         libnuma.numa_parse_nodestring.side_effect = lambda raw: bound.append(int(raw.decode("ascii")))
         proc = SimpleNamespace(local_rank=local_rank)
+        # _set_numa_affinity dispatches to this bound sibling on NPU.
+        proc._set_npu_numa_affinity = utils.RayProcess._set_npu_numa_affinity.__get__(proc)
+        # The CUDA body loads libnuma inside utils; the NPU body lives in npu.numa_affinity.
+        cdll_owner = numa_affinity if accelerator == "npu" else utils
         with (
             mock.patch.object(utils, "_SET_AFFINITY", False),
-            mock.patch.object(utils, "get_accelerator_type", return_value="cuda"),
-            mock.patch.object(utils, "CDLL", return_value=libnuma) as cdll,
+            mock.patch.object(utils, "get_accelerator_type", return_value=accelerator),
+            mock.patch.object(cdll_owner, "CDLL", return_value=libnuma) as cdll,
             mock.patch("ctypes.util.find_library", return_value="fake_numa"),
             mock.patch.dict(os.environ, env, clear=False),
         ):
@@ -230,10 +260,7 @@ class TestNumaAffinityBinding(unittest.TestCase):
         # Mixing the physical id into the bind index would try node 6.
         self.assertEqual(
             self._bound_node(
-                local_rank=0,
-                rank=0,
-                env={"CUDA_VISIBLE_DEVICES": "6"},
-                method=utils.RayProcess._set_numa_affinity,
+                local_rank=0, rank=0, env={"CUDA_VISIBLE_DEVICES": "6"}, method=utils.RayProcess._set_numa_affinity
             ),
             [0],
         )
@@ -249,15 +276,16 @@ class TestNumaAffinityBinding(unittest.TestCase):
 
     def test_npu_path_binds_by_physical_device_id(self):
         # ASCEND_RT_VISIBLE_DEVICES=6, 8 host NPUs, 2 NUMA nodes -> node 1.
-        # _set_numa_affinity dispatches to this method on NPU (see the CUDA test
-        # above for the dispatch entry point).
+        # Goes through the same _set_numa_affinity dispatch entry as the CUDA
+        # test above, so the accelerator branch is exercised too.
         with mock.patch("open_instruct.npu.numa_affinity.host_npu_device_count", return_value=8):
             self.assertEqual(
                 self._bound_node(
                     local_rank=0,
                     rank=0,
                     env={"ASCEND_RT_VISIBLE_DEVICES": "6"},
-                    method=utils.RayProcess._set_npu_numa_affinity,
+                    method=utils.RayProcess._set_numa_affinity,
+                    accelerator="npu",
                 ),
                 [1],
             )

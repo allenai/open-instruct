@@ -649,9 +649,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         model.gradient_checkpointing_enable()
 
     # DataLoaders creation:
+    # NPU-only: without FlashAttention, SDPA cannot use the packed varlen path,
+    # so packed batches get an explicit block-diagonal causal mask instead. On
+    # CUDA this stays upstream behavior (packing there expects FlashAttention).
+    use_sdpa_packing_mask = args.packing and attn_implementation == "sdpa" and accelerator.device.type == "npu"
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
-        if attn_implementation == "sdpa" and accelerator.device.type == "npu":
+        if use_sdpa_packing_mask:
             logger.info("Using an explicit block-diagonal causal mask for SDPA packed-sequence isolation.")
     else:
         base_collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
@@ -804,11 +808,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = train_dataloader
         for batch in active_dataloader:
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
-            packed_token_count = batch["cu_seq_lens_q"][-1] if "cu_seq_lens_q" in batch else None
-            # NPU-only: without FlashAttention, SDPA cannot use the packed varlen path,
-            # so build an explicit block-diagonal mask. On CUDA this stays upstream
-            # behavior (packing there expects FlashAttention).
-            if args.packing and attn_implementation == "sdpa" and accelerator.device.type == "npu":
+            packed_token_count = None
+            if use_sdpa_packing_mask:
+                packed_token_count = batch["cu_seq_lens_q"][-1]
                 batch["attention_mask"] = build_block_diagonal_causal_mask(
                     batch.pop("seq_idx"), dtype=next(model.parameters()).dtype
                 )

@@ -127,10 +127,6 @@ def _get_ipc_weight_transfer():
     return IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
 
 
-def _get_device_name() -> str | None:
-    return utils.get_current_device_name()
-
-
 def _get_kv_cache_spec_as_dict(worker) -> dict:
     """Normalize backend-specific mapping subclasses before vLLM serializes them."""
     return dict(worker.get_kv_cache_spec())
@@ -164,7 +160,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
         head_dim=model_config.get_head_size(),
         sliding_window=sliding_window,
         num_sliding_window_layers=num_sliding_window_layers,
-        device_name=_get_device_name(),
+        device_name=utils.get_current_device_name(),
     )
 
 
@@ -710,15 +706,18 @@ class LLMRayActor:
         # stop ray from manipulating *_VISIBLE_DEVICES
         # at the top-level when the distributed_executor_backend is ray.
         if distributed_executor_backend == "ray":
-            os.environ.pop("ASCEND_RT_VISIBLE_DEVICES", None)
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+            os.environ.pop("ASCEND_RT_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
-            resource = utils.get_ray_accelerator_resource()
-            if resource is not None:
-                visible_devices_env = "ASCEND_RT_VISIBLE_DEVICES" if resource == "NPU" else "CUDA_VISIBLE_DEVICES"
-                accelerator_ids = ray.get_runtime_context().get_accelerator_ids().get(resource, [])
-                os.environ[visible_devices_env] = ",".join(str(device_id) for device_id in accelerator_ids)
+            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
+            # when the distributed_executor_backend is not ray and
+            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
+            if utils.get_accelerator_type() == "npu":
+                npu_ids = ray.get_runtime_context().get_accelerator_ids().get("NPU", [])
+                os.environ["ASCEND_RT_VISIBLE_DEVICES"] = ",".join(map(str, npu_ids))
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in ray.get_gpu_ids())
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")

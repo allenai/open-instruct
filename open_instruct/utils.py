@@ -92,16 +92,23 @@ def _load_npu_backend() -> None:
     """Make the Ascend NPU backend visible without breaking CUDA environments.
 
     torch_npu >= 2.5.1 auto-registers the ``npu`` backend while ``import torch``
-    runs, so an explicit ``import torch_npu`` is normally unnecessary. It is
-    only a fallback for installs where auto-registration did not happen, and it
-    must never run while CUDA is the active accelerator: torch_npu raises
-    ``RuntimeError`` at import time ("Two accelerators cannot be used at the
-    same time in PyTorch"), which an ``ImportError`` guard would not swallow.
+    runs (device backend autoload), so an explicit ``import torch_npu`` is
+    normally unnecessary — and harmful when autoload already registered the
+    backend: re-importing torch_npu then raises its "Two accelerators cannot
+    be used at the same time" error against its own bridge. The explicit
+    import below is only a fallback for installs where autoload did not
+    register the backend. Only ``ImportError`` is suppressed (machines without
+    an Ascend stack); a ``torch_npu`` that raises once the Ascend environment
+    variables say it should work indicates a broken install, and silently
+    degrading to CPU would hide that.
     """
     if torch.cuda.is_available():
         return
-    if os.environ.get("ASCEND_RT_VISIBLE_DEVICES") or os.environ.get("ASCEND_HOME_URL"):
-        with contextlib.suppress(ImportError, RuntimeError):
+    npu_module = getattr(torch, "npu", None)
+    if npu_module is not None and npu_module.is_available():
+        return
+    if os.environ.get("ASCEND_RT_VISIBLE_DEVICES") or os.environ.get("ASCEND_HOME_PATH"):
+        with contextlib.suppress(ImportError):
             import torch_npu  # noqa: F401, PLC0415
 
 
@@ -1374,58 +1381,6 @@ python scripts/submit_eval_jobs_old.py \
     print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
 
-def launch_local_vllm_eval(
-    model_path: str,
-    tasks: list[str],
-    output_dir: str,
-    num_gpus: int = 1,
-    max_model_len: int | None = None,
-    limit: int | None = None,
-    max_tokens: int | None = None,
-    trust_remote_code: bool = False,
-) -> None:
-    """Run olmo-eval locally with its vLLM server provider."""
-    olmo_eval = shutil.which("olmo-eval")
-    if olmo_eval is None:
-        raise RuntimeError(
-            "Local evaluation requested, but `olmo-eval` is not installed in the active environment. "
-            "Install the local oe-eval-internal checkout before retrying."
-        )
-
-    command = [
-        olmo_eval,
-        "run",
-        "-m",
-        model_path,
-        "--harness",
-        "default",
-        "-o",
-        "provider.kind=vllm_server",
-        "-o",
-        f"provider.trust_remote_code={str(trust_remote_code).lower()}",
-    ]
-    if max_model_len is not None:
-        command.extend(["-o", f"provider.max_model_len={max_model_len}"])
-    for task in tasks:
-        command.extend(["-t", task])
-        if limit is not None:
-            command.extend(["-o", f"limit={limit}"])
-        if max_tokens is not None:
-            command.extend(["-o", f"max_tokens={max_tokens}"])
-    command.extend(["--num-gpus", str(num_gpus), "--output-dir", output_dir])
-
-    env = os.environ.copy()
-    for variable in ("NO_PROXY", "no_proxy"):
-        entries = [entry for entry in env.get(variable, "").split(",") if entry]
-        for local_address in ("localhost", "127.0.0.1", "0.0.0.0"):
-            if local_address not in entries:
-                entries.append(local_address)
-        env[variable] = ",".join(entries)
-
-    logger.info("Launching local vLLM evaluation: %s", " ".join(command))
-    subprocess.run(command, check=True, env=env)
-
-
 def wandb_url_to_run_path(url: str) -> str:
     """
     Convert a wandb URL to a wandb run path.
@@ -1785,48 +1740,12 @@ class RayProcess:
         if _SET_AFFINITY:
             return
 
-        from open_instruct.npu.numa_affinity import (  # noqa: PLC0415
-            host_npu_device_count,
-            npu_numa_node_index,
-            parse_visible_devices,
-        )
+        from open_instruct.npu.numa_affinity import bind_npu_numa_affinity  # noqa: PLC0415
 
-        visible_devices = parse_visible_devices(os.environ.get("ASCEND_RT_VISIBLE_DEVICES", str(rank)))
-        host_device_count = host_npu_device_count()
-        if host_device_count == 0:
-            logger.debug("Skipping NPU NUMA affinity: no /dev/davinci* devices to derive host topology")
-            return
-
-        from ctypes.util import find_library  # noqa: PLC0415
-
-        class bitmask_t(Structure):
-            _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
-
-        LIBNUMA = CDLL(find_library("numa"))
-        LIBNUMA.numa_parse_nodestring.argtypes = [c_char_p]
-        LIBNUMA.numa_parse_nodestring.restype = POINTER(bitmask_t)
-        LIBNUMA.numa_run_on_node_mask.argtypes = [POINTER(bitmask_t)]
-        LIBNUMA.numa_run_on_node_mask.restype = c_int
-        LIBNUMA.numa_set_membind.argtypes = [POINTER(bitmask_t)]
-        LIBNUMA.numa_set_membind.restype = c_void_p
-        LIBNUMA.numa_num_configured_nodes.argtypes = []
-        LIBNUMA.numa_num_configured_nodes.restype = c_int
-
-        def numa_bind(nid: int):
-            bitmask = LIBNUMA.numa_parse_nodestring(bytes(str(nid), "ascii"))
-            LIBNUMA.numa_run_on_node_mask(bitmask)
-            LIBNUMA.numa_set_membind(bitmask)
-
-        numa_nodes = LIBNUMA.numa_num_configured_nodes()
-        numa_bind(
-            npu_numa_node_index(
-                local_rank=rank,
-                visible_devices=visible_devices,
-                host_device_count=host_device_count,
-                numa_nodes=numa_nodes,
-            )
-        )
-        _SET_AFFINITY = True
+        if bind_npu_numa_affinity(rank):
+            _SET_AFFINITY = True
+        else:
+            logger.debug("Skipping NPU NUMA affinity: host NPU topology or libnuma unavailable")
 
     def offload_to_cpu(self, model, pin_memory=True, non_blocking=True):
         """This function guaratees the memory are all released (only torch context cache <100M will remain)."""

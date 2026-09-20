@@ -32,8 +32,9 @@ try:
         NPUIPCTrainerSendWeightsArgs,
         NPUIPCWeightTransferEngine,
     )
-# RuntimeError mirrors `_load_npu_backend`: Ascend packages can raise it at import
-# time when another accelerator is active.
+# RuntimeError: vllm_ascend raises at import time when another accelerator is
+# active. The sentinel-None + call-time-raise pattern below keeps this module
+# importable on machines without the Ascend stack (GPU hosts, CI).
 except (ImportError, RuntimeError):
     HCCLTrainerSendWeightsArgs = None
     HCCLWeightTransferEngine = None

@@ -20,6 +20,8 @@ from the physical device id and the host device count.
 """
 
 import glob
+import os
+from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 
 
 def parse_visible_devices(env_value: str) -> list[int]:
@@ -44,3 +46,50 @@ def npu_numa_node_index(local_rank: int, visible_devices: list[int], host_device
     devices_per_numa_node = max(host_device_count // max(numa_nodes, 1), 1)
     node_index = physical_device_id // devices_per_numa_node
     return min(node_index, max(numa_nodes - 1, 0))
+
+
+def bind_npu_numa_affinity(local_rank: int) -> bool:
+    """Bind the current process to the NUMA node holding its NPU.
+
+    Returns True when a binding was made, False when the host topology cannot
+    be derived (no ``/dev/davinci*`` devices or no libnuma); in the False case
+    affinity is left untouched so the caller can retry later.
+    """
+    visible_devices = parse_visible_devices(os.environ.get("ASCEND_RT_VISIBLE_DEVICES", str(local_rank)))
+    host_device_count = host_npu_device_count()
+    if host_device_count == 0:
+        return False
+
+    from ctypes.util import find_library  # noqa: PLC0415
+
+    libnuma_name = find_library("numa")
+    if libnuma_name is None:
+        return False
+
+    class bitmask_t(Structure):
+        _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
+
+    libnuma = CDLL(libnuma_name)
+    libnuma.numa_parse_nodestring.argtypes = [c_char_p]
+    libnuma.numa_parse_nodestring.restype = POINTER(bitmask_t)
+    libnuma.numa_run_on_node_mask.argtypes = [POINTER(bitmask_t)]
+    libnuma.numa_run_on_node_mask.restype = c_int
+    libnuma.numa_set_membind.argtypes = [POINTER(bitmask_t)]
+    libnuma.numa_set_membind.restype = c_void_p
+    libnuma.numa_num_configured_nodes.argtypes = []
+    libnuma.numa_num_configured_nodes.restype = c_int
+
+    def numa_bind(node_index: int):
+        bitmask = libnuma.numa_parse_nodestring(bytes(str(node_index), "ascii"))
+        libnuma.numa_run_on_node_mask(bitmask)
+        libnuma.numa_set_membind(bitmask)
+
+    numa_bind(
+        npu_numa_node_index(
+            local_rank=local_rank,
+            visible_devices=visible_devices,
+            host_device_count=host_device_count,
+            numa_nodes=libnuma.numa_num_configured_nodes(),
+        )
+    )
+    return True
