@@ -93,6 +93,11 @@ def decode_tests(tests: Any) -> list:
 # -------------------------------------------------------------
 
 
+# Wall-clock allowance for creating a worker process, kept separate from max_execution_time so that
+# the latter bounds only the user code being graded.
+_PROCESS_STARTUP_TIMEOUT = 30.0
+
+
 def run_tests_against_program_helper_2(func: str, tests: list[str], shared_results) -> None:
     """Run all tests against the program and store results in shared array"""
     # Apply reliability guard in the child process
@@ -120,10 +125,15 @@ def run_tests_against_program_helper_2(func: str, tests: list[str], shared_resul
         partial_undo_reliability_guard()
 
 
-def run_individual_test_helper(func: str, test: str, result_array, index: int, runtimes_array) -> None:
+def run_individual_test_helper(func: str, test: str, result_array, index: int, runtimes_array, ready=None) -> None:
     """Run a single test and store result in shared array at given index"""
     # Apply reliability guard in the child process
     reliability_guard()
+
+    # Signal the parent that interpreter startup is done, so its timeout clock covers only the
+    # user code below. On spawn platforms startup alone can exceed max_execution_time.
+    if ready is not None:
+        ready.set()
 
     try:
         execution_context = {}
@@ -154,7 +164,8 @@ def get_successful_tests_fast(
         program: a string representation of the python program you want to run
         tests: a list of assert statements which are considered to be the test cases
         max_execution_time: the number of second each individual test can run before
-            it is considered failed and terminated
+            it is considered failed and terminated. This bounds the graded code only;
+            the cost of creating the worker process is allowed for separately.
 
     Return:
         a tuple of (results, runtimes). results is a list of 0/1 indicating
@@ -177,10 +188,16 @@ def get_successful_tests_fast(
 
     # Run each test in its own process
     for idx, test in enumerate(tests):
+        ready = multiprocessing.Event()
         p = multiprocessing.Process(
-            target=run_individual_test_helper, args=(program, test, shared_test_results, idx, shared_runtimes)
+            target=run_individual_test_helper, args=(program, test, shared_test_results, idx, shared_runtimes, ready)
         )
         p.start()
+        # Don't count interpreter startup against the test's budget. Under the "spawn" start method
+        # (the default on macOS and Windows) a child costs ~0.2s to create, which is a large share
+        # of a sub-second max_execution_time and would fail correct code before it ever ran. The
+        # stdio variant below allows for the same cost with its flat +5.0s.
+        ready.wait(timeout=_PROCESS_STARTUP_TIMEOUT)
         p.join(timeout=max_execution_time)
         if p.is_alive():
             p.kill()
