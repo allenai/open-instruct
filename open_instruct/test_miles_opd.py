@@ -271,6 +271,24 @@ def test_relaxed_training_and_topology_settings_reach_native_arguments():
     assert "--wandb-mode" not in values
 
 
+def test_resume_loads_the_latest_checkpoint_and_keeps_the_scheduler_step(tmp_path):
+    overrides = [f'output.root="{tmp_path}"', "training.resume=true"]
+    values, flags = native(specs.load(CONFIG, overrides))
+    assert "--load" not in values
+    assert "--use-checkpoint-opt-param-scheduler" not in flags
+    checkpoints = tmp_path / "checkpoints"
+    checkpoints.mkdir()
+    (checkpoints / "latest_checkpointed_iteration.txt").write_text("179\n")
+    values, flags = native(specs.load(CONFIG, overrides))
+    assert values["--load"] == str(checkpoints)
+    # Megatron restores the scheduler's step count from the checkpoint; without this switch
+    # Miles steps it again by the checkpoint iteration and a late resume trains at LR 0.
+    assert "--use-checkpoint-opt-param-scheduler" in flags
+    values, flags = native(specs.load(CONFIG, [f'output.root="{tmp_path}"', "training.resume=false"]))
+    assert "--load" not in values
+    assert "--use-checkpoint-opt-param-scheduler" not in flags
+
+
 def test_default_schedule_is_one_constant_lr_step_per_rollout():
     values, flags = native(specs.load(CONFIG))
     assert values["--global-batch-size"] == "8"

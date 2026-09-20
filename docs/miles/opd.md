@@ -254,7 +254,14 @@ schema accepts:
   re-queues a preempted job, the workflow re-enters the same `output.root`, and the
   learner passes `--load output.root/checkpoints` whenever
   `latest_checkpointed_iteration.txt` exists there (weights, optimizer, RNG and the
-  data cursor from `checkpoints/rollout`; training continues at the next rollout).
+  data cursor from `checkpoints/rollout`; training continues at the next rollout) together
+  with `--use-checkpoint-opt-param-scheduler`. Megatron already restores the LR scheduler's
+  step count from the checkpoint and Miles steps it again by the checkpoint iteration unless
+  that switch is set, so without it every resume jumps a cosine schedule ahead by one
+  optimizer step per completed rollout (a resume at rollout 179 of a 220-rollout run trained
+  at LR 0; constant schedules hide the bug). With the switch the scheduler also takes its
+  max/min LR, warmup, decay length and style from the checkpoint, so a resumed run cannot
+  change `[optimizer]` mid-run.
   Beaker caps `launch.min_runtime` at 8h, so runs longer than that need this.
   W&B starts a new run per attempt inside the same group.
 - The student rollout router runs with `--router-disable-circuit-breaker`. Its default

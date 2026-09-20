@@ -174,9 +174,22 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         # restores the data cursor from checkpoints/rollout, then continues at the next
         # rollout id. A first launch has no marker and starts from the converted learner.
         values["load"] = str(root / "checkpoints")
+        # Megatron's load_checkpoint restores the LR scheduler's step count from the
+        # checkpoint; Miles then steps it again by `iteration * global_batch_size` unless
+        # this switch is set (miles/backends/megatron_utils/model.py,
+        # initialize_model_and_optimizer). Without it every resume jumps the cosine
+        # schedule ahead by one optimizer step per completed rollout and a late resume
+        # trains at LR 0 (arm 2 attempts 2 and 3, 2026-09-19/20). The switch also makes
+        # the scheduler take max_lr/min_lr/decay from the checkpoint, so a run file may
+        # not change the LR schedule across a resume. Defined by Megatron's dataclass
+        # config, so it is not in options.json and cannot come through [miles].
+        resume_switches = ["--use-checkpoint-opt-param-scheduler"]
+    else:
+        resume_switches = []
     args = list(architecture)
     for key, value in values.items():
         args += [f"--{key}", str(value)]
+    args += resume_switches
     args += [
         "--use-opd",
         "--rollout-shuffle",
