@@ -236,7 +236,13 @@ def test_enabled_hook_and_disabled_native_arguments():
     assert "--rollout-sample-filter-path" not in argv
     encoded = json.loads(argv[argv.index("--olmo-core-config") + 1])
     expected = dataclasses.asdict(disabled.core)
-    del expected["expert_balanced_packing"], expected["expert_balance_layer_stride"]
+    for name in (
+        "expert_balanced_packing",
+        "expert_balance_layer_stride",
+        "expert_balance_search_proposals",
+        "expert_balance_search_seconds",
+    ):
+        del expected[name]
     assert encoded == expected
     with pytest.raises(ValueError, match="requires core.expert"):
         RunConfig(disabled.core, {**config.miles, "rollout_sample_filter_path": EXPERT_SCHEDULE}).validate()

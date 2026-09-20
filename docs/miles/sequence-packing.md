@@ -103,13 +103,47 @@ configuration. The z-loss coefficient may remain unchanged.
 The producer uses recorded expert IDs to place samples with complementary loads
 in the same EP group's dispatches. It does not change any tokens, expert IDs,
 prompt identities, rewards, policy versions, or optimizer-step membership.
-Candidates use arrival and length-based rows, with greedy expert-group placement.
-Each candidate is scored through the trainer's exact stride partition, consecutive
-packer, and **world-wide** pack-count equalization. Similar lengths do not imply
-matching boundaries. The original order wins ties and is retained unless a
-candidate improves the measured schedule without increasing pack count, mean or
-maximum dispatch skew, maximum destination load, or the absolute-work proxy.
-These guarantees concern the counted layers and are not throughput guarantees.
+Candidates start with arrival and length-based greedy placement, then a bounded
+swap search starts from arrival order. Three quarters of proposals target heavy
+contributors to currently overloaded destinations and complementary samples;
+the remainder explore random swaps. Half of the targeted proposals favor nearby
+lengths, but similar lengths are **not** assumed to preserve pack membership.
+Each proposed swap repacks its affected columns. If the world-wide pack count
+changes, all columns are re-equalized. When final position membership is exactly
+unchanged, only the affected dispatch counts need updating.
+
+Search minimizes the sum of three arrival-normalized stage-work proxies:
+
+- Expert work: sum over packs/layers of the largest destination load across all
+  expert replicas.
+- Token-linear attention work: sum over packs of the largest rank's total tokens.
+- Quadratic attention work: sum over packs of the largest rank's sum of squared
+  **document** lengths, not the square of concatenated pack length.
+
+The equal search weights are a heuristic, not calibrated kernel times. On an
+exact-objective plateau, a strictly better log-sum-exp surrogate can advance the
+search. The returned candidate is tracked separately and cannot worsen either
+attention proxy, expert work, pack count, mean/maximum within-replica dispatch
+skew, or maximum destination load relative to the retained greedy/arrival
+baseline. Search states may temporarily violate that final guard. Rejection
+counts by metric expose this distinction. These are aggregate count guarantees
+for the selected layers, not per-pack guarantees or throughput predictions.
+
+`trainer.expert_balance_search_proposals=1024` bounds proposal attempts per
+optimizer block; zero retains only greedy placement. The default
+`trainer.expert_balance_search_seconds=0.25` allowance is divided across complete
+blocks in a collection. Histogram construction, greedy scoring and logging are
+outside that allowance; an in-progress proposal may finish after the deadline.
+Search also stops after 256 attempts without an accepted move or when all work
+lower bounds are reached. The bounds relax packing/indivisible-sample constraints
+and do not certify an optimal partition except when attained.
+
+A stable seed is derived from the block's original sample IDs. A fixed attempt
+budget is reproducible; a deadline can truncate at a machine-dependent point.
+Logs retain the seed, completed attempts, selected local-index permutation,
+acceptance counts, scoring paths, bounds and stop reason. The current managed
+hook still runs synchronously at collection drain; this pass does not introduce
+an asynchronous planning actor or pre-arrival histogram transport.
 
 `trainer.expert_balance_layer_stride=1` counts every routed layer (dense layers
 are excluded). Larger values sample routed layers and reduce histogram work;
@@ -143,3 +177,24 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
 
 A passing fixed-input numerical gate does not establish throughput improvement
 or learning quality on a heterogeneous production workload.
+
+
+The CPU benchmark accepts a routing-panel JSON file with per-document expert
+histograms (no GPU or new generation required):
+
+```bash
+python -m scripts.miles.benchmark_expert_search PANEL.json OUTPUT.json
+```
+
+It compares greedy-only and bounded search on task/general panels, verifies each
+returned result with a full rescore, and records the input checksum. Panel
+histograms need not reproduce a live rollout's final synthetic replay rows;
+these are offline scheduling measurements on the supplied counts.
+
+Related work: [ReLibra](https://arxiv.org/html/2605.08639v1) uses incremental
+swap search and an LSE surrogate for expert placement, followed by sample-locality
+optimization. [ForeMoE](https://arxiv.org/html/2606.11867v1) schedules expert
+placement/replication using foreseen routing. [RoutePack](https://arxiv.org/html/2608.12146v1)
+explicitly couples attention work with expert-aware packing. This implementation
+keeps expert placement and routing fixed; it does not claim novelty for replay-aware
+packing, calibrated communication costs, or their reported speedups.

@@ -9,7 +9,7 @@ from pathlib import Path
 COMMAND = """set -euo pipefail
 cd /opt/core-rl
 export WANDB_MODE=disabled TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=2 NCCL_CUMEM_ENABLE=1
-python -m pytest -q tests/miles/test_expert_schedule_runtime.py tests/miles/test_expert_schedule_distributed.py tests/miles/test_packing_loss.py tests/miles/test_options.py
+python -m pytest -q open_instruct/test_miles_expert_search.py tests/miles/test_expert_schedule_runtime.py tests/miles/test_expert_schedule_distributed.py tests/miles/test_packing_loss.py tests/miles/test_options.py
 python tests/miles/packing_contract.py bootstrap /output/expert-schedule
 for mode in plain recompute; do
   extra=()

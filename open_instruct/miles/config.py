@@ -57,6 +57,8 @@ class CoreConfig:
     sequence_packing: bool = False
     expert_balanced_packing: bool = False
     expert_balance_layer_stride: int = 1
+    expert_balance_search_proposals: int = 1024
+    expert_balance_search_seconds: float = 0.25
     packing_max_tokens: int | None = None
     max_policy_lag: int = 0
     router_aux_loss_grouping: str = "pack"
@@ -143,6 +145,8 @@ class CoreConfig:
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise InputError(f"core.{name} must be a positive integer")
+        validation.integer(self.expert_balance_search_proposals, "core.expert_balance_search_proposals", minimum=0)
+        validation.number(self.expert_balance_search_seconds, "core.expert_balance_search_seconds")
         if self.packing_max_tokens is not None:
             validation.integer(self.packing_max_tokens, "core.packing_max_tokens", minimum=1)
         if type(self.max_policy_lag) is not int or self.max_policy_lag < 0:
@@ -521,6 +525,8 @@ class RunConfig:
             # Preserve the pre-feature native argv when scheduling is disabled.
             core.pop("expert_balanced_packing")
             core.pop("expert_balance_layer_stride")
+            core.pop("expert_balance_search_proposals")
+            core.pop("expert_balance_search_seconds")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,

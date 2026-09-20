@@ -44,7 +44,7 @@ def exercise(rank, rendezvous, output):
         batches = [packing.combine(data.sample_batches(raw, 12), ids) for ids in packing.equalize(plan, int(count))]
         measured = expert_schedule.realized_measurements(expert_schedule.local_loads(args, batches), 2)
         expected = expert_schedule.measure(order, [6] * 16, histograms(original), world=4, ep_degree=2, max_tokens=12)
-        assert measured == expected
+        assert measured == {k: expected[k] for k in measured}
         json.loads(contract.record(args, {"event": "expert_balance", **measured}))
         norm = contract.step_normalization(batches, 16)
         assert norm.samples == 16 and norm.model_tokens == 96 and norm.active_tokens == 32
@@ -54,9 +54,8 @@ def exercise(rank, rendezvous, output):
         counts = np.stack([np.array([[2 * n, 0]]) for n in lengths])
         local = torch.tensor(np.stack([counts[pack].sum(axis=0) for pack in membership[rank]]))
         measured = expert_schedule.realized_measurements(local, 2)
-        assert measured == expert_schedule.measure(
-            list(range(16)), lengths, counts, world=4, ep_degree=2, max_tokens=12
-        )
+        expected = expert_schedule.measure(list(range(16)), lengths, counts, world=4, ep_degree=2, max_tokens=12)
+        assert measured == {k: expected[k] for k in measured}
     finally:
         dist.destroy_process_group()
 

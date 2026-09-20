@@ -4,6 +4,7 @@ Only complete optimizer blocks are permuted. Candidate bands are a heuristic;
 acceptance always uses the Core packer, including world-wide pack equalization.
 """
 
+import hashlib
 import json
 import time
 from functools import lru_cache
@@ -14,7 +15,7 @@ import torch
 from torch import distributed as dist
 
 from open_instruct import logger_utils
-from open_instruct.miles import packing
+from open_instruct.miles import expert_search, packing
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -103,12 +104,12 @@ def dispatch_loads(order, lengths, histograms, *, world, ep_degree, max_tokens):
     return local.reshape(world // ep_degree, ep_degree, *local.shape[1:]).sum(axis=1)
 
 
-def measurements(loads):
+def measurements(loads, attention=None):
     """JSON-safe dispatch skew and an absolute-work proxy, not predicted seconds."""
     peaks = loads.max(axis=-1)
     means = loads.mean(axis=-1)
     ratios = peaks.sum(axis=-1) / means.sum(axis=-1)
-    return {
+    result = {
         "packs_per_rank": int(loads.shape[1]),
         "dispatches": int(loads.shape[0] * loads.shape[1]),
         "skew_mean": float(ratios.mean()),
@@ -117,9 +118,15 @@ def measurements(loads):
         "critical_work_proxy": int(peaks.max(axis=0).sum()),
     }
 
+    if attention is not None:
+        linear, quadratic = attention.max(axis=0).sum(axis=0)
+        result.update(attention_token_work=int(linear), attention_pair_work=int(quadratic))
+    return result
+
 
 def measure(order, lengths, histograms, **kwargs):
-    return measurements(dispatch_loads(order, lengths, histograms, **kwargs))
+    state = expert_search.Partition(order, lengths, np.asarray(histograms), **kwargs)
+    return measurements(state.loads, state.attention)
 
 
 def _candidate(lengths, histograms, *, world, ep_degree, max_tokens, sort_lengths):
@@ -161,8 +168,19 @@ def _candidate(lengths, histograms, *, world, ep_degree, max_tokens, sort_length
     return order
 
 
-def plan_order(lengths, histograms, *, world, ep_degree, max_tokens):
-    """Deterministic placement with exact scoring and conservative identity fallback."""
+def plan_order(
+    lengths,
+    histograms,
+    *,
+    world,
+    ep_degree,
+    max_tokens,
+    seed=0,
+    max_proposals=1024,
+    search_seconds=0.25,
+    statistics=None,
+):
+    """Seeded bounded search with exact scoring and conservative identity fallback."""
     settings = dict(world=world, ep_degree=ep_degree, max_tokens=max_tokens)
     identity = list(range(len(lengths)))
     before = measure(identity, lengths, histograms, **settings)
@@ -174,9 +192,54 @@ def plan_order(lengths, histograms, *, world, ep_degree, max_tokens):
         candidate = _candidate(lengths, histograms, **settings, sort_lengths=sort_lengths)
         score = measure(candidate, lengths, histograms, **settings)
         # Do not buy better normalized skew with more packs or greater peak work.
-        guarded = ("packs_per_rank", "critical_work_proxy", "skew_mean", "skew_max", "max_slot_assignments")
+        guarded = (
+            "packs_per_rank",
+            "critical_work_proxy",
+            "skew_mean",
+            "skew_max",
+            "max_slot_assignments",
+            "attention_token_work",
+            "attention_pair_work",
+        )
         if all(score[key] <= after[key] for key in guarded) and any(score[key] < after[key] for key in guarded):
             best, after = candidate, score
+    # Keep the already-qualified greedy result even if the bounded search cannot
+    # improve it. Search starts from arrival, where useful pack structure exists.
+    stats = statistics if statistics is not None else {}
+    started = time.perf_counter()
+    stats.update(seed=int(seed), guard_rejections=0)
+
+    anchor = after.copy()
+    normalizers = np.array([before[k] for k in ("critical_work_proxy", "attention_token_work", "attention_pair_work")])
+
+    def ranking(score):
+        work = np.array([score[k] for k in ("critical_work_proxy", "attention_token_work", "attention_pair_work")])
+        return float((work / normalizers).sum()), score["critical_work_proxy"], score["skew_mean"]
+
+    stats["guard_rejections_by_metric"] = dict.fromkeys(guarded, 0)
+
+    def consider(candidate):
+        nonlocal best, after
+        score = measurements(candidate.loads, candidate.attention)
+        failures = [key for key in guarded if score[key] > anchor[key]]
+        if failures:
+            stats["guard_rejections"] += 1
+            for key in failures:
+                stats["guard_rejections_by_metric"][key] += 1
+            return
+        if ranking(score) < ranking(after):
+            best, after = candidate.order.tolist(), score
+
+    state = expert_search.Partition(identity, lengths, histograms, **settings)
+    expert_search.improve(
+        state,
+        seed=seed,
+        max_proposals=max_proposals,
+        deadline=started + search_seconds,
+        consider=consider,
+        statistics=stats,
+    )
+    stats.update(search_seconds=time.perf_counter() - started, order=best)
     return best, before, after
 
 
@@ -226,14 +289,32 @@ def reorder_samples(args, groups):
             )
             for s, n in zip(block, lengths, strict=True)
         ]
+        seed = int.from_bytes(
+            hashlib.blake2b(json.dumps([s.index for s in block]).encode(), digest_size=8).digest(), "little"
+        )
+        statistics = {}
         order, before, after = plan_order(
-            lengths, histograms, world=world, ep_degree=core.expert_parallel_size, max_tokens=budget
+            lengths,
+            histograms,
+            world=world,
+            ep_degree=core.expert_parallel_size,
+            max_tokens=budget,
+            seed=seed,
+            max_proposals=core.expert_balance_search_proposals,
+            search_seconds=core.expert_balance_search_seconds / max(1, complete // size),
+            statistics=statistics,
         )
         if sorted(order) != list(range(size)):
             raise ValueError("Expert schedule changed optimizer-step membership")
         reordered[start : start + size] = [block[i] for i in order]
         records.append(
-            {"block": start // size, "before": before, "after": after, "reordered": order != list(range(size))}
+            {
+                "block": start // size,
+                "before": before,
+                "after": after,
+                "reordered": order != list(range(size)),
+                "search": statistics,
+            }
         )
     # Only mutate after every block validates; preserve any tail that MILES trims.
     offset = 0
