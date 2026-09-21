@@ -32,6 +32,9 @@ LR_DECAY_STYLES = ("constant", "cosine", "linear")
 # Per-response mean (Miles default) or token-mean over the mini-batch (verl default, the EOPD paper).
 LOSS_AGGREGATIONS = ("response", "token")
 WANDB_MODES = ("offline", "online", "disabled")
+ASYNC_ROLLOUT = "open_instruct.miles.opd_async.OPDAsyncRollout"
+ASYNC_SOURCE = "open_instruct.miles.opd_async.OPDAsyncDataSource"
+ASYNC_BUFFER = "open_instruct.miles.async_buffer.MeasuredDataBuffer"
 # Native Miles options (parser dest names) that the OPD schema or the launcher already sets. A
 # `[miles]` passthrough entry for one of these is rejected with the control that owns it, so a
 # run file never carries two sources of truth for the same argument. Anything else in the pinned
@@ -229,6 +232,34 @@ class OPDRunSpec:
                     f"miles.{dest} is set by {OWNED_NATIVE_OPTIONS[dest]}; change that control instead of the "
                     "native option"
                 )
+        native = document["miles"]
+        if native.get("fully_async", False):
+            validation.integer(native.get("max_weight_staleness"), "miles.max_weight_staleness", minimum=1)
+            if document["training"]["optimizer_steps_per_rollout"] != 1:
+                raise InputError("Async OPD requires one optimizer step per rollout")
+            if native.get("update_weights_interval", 1) != 1:
+                raise InputError(
+                    "Async OPD requires miles.update_weights_interval=1 for optimizer-step age accounting"
+                )
+            if not document["distillation"]["use_rollout_logprobs"]:
+                raise InputError("Async OPD currently requires distillation.use_rollout_logprobs=true")
+            if native.get("use_tis", False):
+                raise InputError("Async OPD preserves rollout log probabilities and cannot enable use_tis")
+            for key in ("colocate", "offload_train", "offload_rollout", "partial_rollout"):
+                if native.get(key, False):
+                    raise InputError(f"Async OPD does not support miles.{key}")
+            for key, value in (("data_source_path", ASYNC_SOURCE), ("custom_async_data_buffer_path", ASYNC_BUFFER)):
+                if key in native and native[key] != value:
+                    raise InputError(f"Async OPD requires miles.{key}={value!r}")
+                native[key] = value
+            if native.get("pause_generation_mode", "in_place") == "abort":
+                raise InputError("Async OPD cannot abort generations during weight publication")
+            if "async_max_concurrent_samples" in native:
+                validation.integer(native["async_max_concurrent_samples"], "miles.async_max_concurrent_samples")
+            factor = native.get("async_data_buffer_capacity_factor", 2.0)
+            validation.number(factor, "miles.async_data_buffer_capacity_factor", exclusive_min=True)
+            if int(factor * document["inference"]["rollout_batch_size"]) < 1:
+                raise InputError("Async OPD completed buffer must hold at least one group")
         for role in ("model", "teacher"):
             _resolve_source(document[role], role, base.parent)
         model = document["model"]

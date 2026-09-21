@@ -138,7 +138,6 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "custom-rm-path": "open_instruct.miles.opd_hooks.reward",
         "custom-reward-post-process-path": "open_instruct.miles.opd_hooks.post_process",
         "rm-url": teacher_url,
-        "eval-function-path": "open_instruct.miles.opd_hooks.evaluate",
         "eval-interval": training["eval_interval"] or training["num_rollouts"],
         "n-samples-per-eval-prompt": inf["eval_samples_per_prompt"],
         "eval-max-response-len": inf["eval_max_response_length"] or inf["max_response_length"],
@@ -166,6 +165,8 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "wandb-group": spec.name,
         "wandb-dir": str(root / "wandb"),
     }
+    if not doc["miles"].get("fully_async", False):
+        values["eval-function-path"] = "open_instruct.miles.opd_hooks.evaluate"
     if optimizer["lr_decay_style"] != "constant":
         # Megatron schedules over optimizer iterations, not rollouts.
         values["lr-decay-iters"] = training["num_rollouts"] * optimizer_steps
@@ -256,7 +257,7 @@ def execute(spec):
         environment.update(
             {
                 "PYTHONPATH": "/src/Megatron-LM:" + environment.get("PYTHONPATH", ""),
-                "MILES_USE_LEGACY_ROLLOUT_V1": "1",
+                "MILES_USE_LEGACY_ROLLOUT_V1": "0" if spec.document["miles"].get("fully_async") else "1",
                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
                 "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
                 "OI_OPD_OUTPUT": str(root),
@@ -288,6 +289,11 @@ def execute(spec):
                     "/opt/core-rl/tests/miles/test_opd_hooks.py",
                     "/opt/core-rl/tests/miles/test_opd_audit.py",
                     "/opt/core-rl/tests/miles/test_opd_attention.py",
+                    *(
+                        ["/opt/core-rl/tests/miles/test_opd_async.py"]
+                        if spec.document["miles"].get("fully_async")
+                        else []
+                    ),
                 ],
                 env=environment,
                 stdout=stream,

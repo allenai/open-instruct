@@ -10,7 +10,7 @@ from pathlib import Path
 from open_instruct.miles.errors import InputError
 
 # Directories the application image layer copies from the repository (runtime/miles/Dockerfile).
-OVERLAY_DIRS = ("open_instruct", "scripts/miles", "configs/miles")
+OVERLAY_DIRS = ("open_instruct", "scripts/miles", "configs/miles", "tests/miles")
 
 
 def code_overlay():

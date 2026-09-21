@@ -65,6 +65,45 @@ def test_opd_dispatch_and_gpu_isolation():
     assert spec.document["model"]["architecture"] == "qwen3.5-4B"
 
 
+def test_async_opd_selects_safe_eval_and_measured_restartable_queue():
+    spec = specs.load(
+        CONFIG, ["miles.fully_async=true", "miles.max_weight_staleness=3", "distillation.use_rollout_logprobs=true"]
+    )
+    values, flags = native(spec)
+    assert "--fully-async" in flags
+    assert "--eval-function-path" not in values
+    assert values["--custom-async-data-buffer-path"] == opd_config.ASYNC_BUFFER
+    assert values["--data-source-path"] == opd_config.ASYNC_SOURCE
+    assert "--use-rollout-logprobs" in flags and "--use-tis" not in flags
+    assert specs.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
+
+
+@pytest.mark.parametrize(
+    "override, message",
+    [
+        ("miles.max_weight_staleness=0", "max_weight_staleness"),
+        ("miles.update_weights_interval=2", "update_weights_interval"),
+        ("training.optimizer_steps_per_rollout=2", "one optimizer step"),
+        ("distillation.use_rollout_logprobs=false", "use_rollout_logprobs"),
+        ("miles.use_tis=true", "use_tis"),
+        ("miles.colocate=true", "colocate"),
+        ('miles.pause_generation_mode="abort"', "abort"),
+        ("miles.async_data_buffer_capacity_factor=0.01", "at least one group"),
+    ],
+)
+def test_async_opd_rejects_unqualified_semantics(override, message):
+    with pytest.raises(InputError, match=message):
+        specs.load(
+            CONFIG,
+            [
+                "miles.fully_async=true",
+                "miles.max_weight_staleness=3",
+                "distillation.use_rollout_logprobs=true",
+                override,
+            ],
+        )
+
+
 def test_cpu_preparation_requires_saturn():
     with pytest.raises(InputError, match="ai2/saturn"):
         specs.load(CONFIG, ['training.phase="prepare"'])
