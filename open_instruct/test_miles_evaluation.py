@@ -267,6 +267,13 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
         raise RuntimeError("independent evaluator submission failed")
 
     monkeypatch.setattr(evaluation, "submit", blocked_submit)
+
+    async def train_step(rollout_id, batch):
+        target = evaluation.snapshot(run.output["root"], (rollout_id + 1) * 2)
+        target.mkdir(parents=True)
+        (target / ".complete").touch()
+
+    learner.train.side_effect = train_step
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0),
         background_evaluation=evaluation.runtime(run, run.compile().miles),
@@ -281,7 +288,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
         num_rollout=2,
         rollout_batch_size=8,
         n_samples_per_prompt=8,
-        global_batch_size=64,
+        global_batch_size=32,
         hf_checkpoint="initial",
         save_trigger_sentinel=None,
         save_interval=None,
@@ -294,6 +301,8 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
         assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
         assert result["completed_rollout_ids"] == [0, 1]
         assert learner.train.await_count == 2
+        skipped = list((Path(run.output["root"]) / "evaluation").glob("update-00000004-*.json"))
+        assert skipped and json.loads(skipped[0].read_text())["status"] == "skipped_busy"
         shared.assert_not_called()
     finally:
         release.set()
@@ -312,3 +321,14 @@ def test_eval_snapshots_are_outside_checkpoint_cleanup(tmp_path):
     (frozen / "model.safetensors").write_bytes(b"immutable")
     assert checkpoint.prune(from_checkpoint_root, 2, keep_last=1, keep_every=None) == [1]
     assert (frozen / "model.safetensors").read_bytes() == b"immutable"
+
+
+def test_incomplete_snapshot_never_submitted(run, monkeypatch):
+    network = Mock()
+    monkeypatch.setattr(evaluation.subprocess, "run", network)
+    manager = coordinator(run)
+    manager.dispatch(6, evaluation.snapshot(run.output["root"], 6))
+    manager.worker.join(2)
+    network.assert_not_called()
+    receipt = next((Path(run.output["root"]) / "evaluation").glob("update-*.json"))
+    assert json.loads(receipt.read_text())["status"] == "submission_failed"

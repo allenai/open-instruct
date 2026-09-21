@@ -145,3 +145,6 @@ or task correctness. Use generation tasks for the initial tiny MoE check. A
 successful mechanics check is not evidence of model quality. Follow the normal
 committed-image MILES wrapper for training qualification. Use ignored `runs/`
 configs and fresh output paths; leave existing experiments unchanged.
+
+Current evidence and outstanding GPU/W&B checks are recorded in the
+[September 20 prequalification](measurements/background-evaluation-20260920.md).

@@ -208,7 +208,7 @@ def specification(receipt):
 
 
 def submit(receipt, path):
-    """One attempt with a hard CLI deadline. Timeout means ambiguous submission."""
+    """One attempt with a hard process deadline. Timeout means ambiguous submission."""
     spec_path = path.with_suffix(".beaker.json")
     try:
         if receipt["update"] and not (Path(receipt["checkpoint"]) / ".complete").is_file():
@@ -233,7 +233,7 @@ def submit(receipt, path):
         experiment = response[0] if isinstance(response, list) else response
         receipt.update(status="submitted", experiment_id=experiment["id"])
     except Exception as error:
-        # Do not persist CLI stdout/stderr: tools may echo credential values.
+        # Do not persist child stdout/stderr: tools may echo credential values.
         receipt.update(
             status="submission_failed",
             error=type(error).__name__,

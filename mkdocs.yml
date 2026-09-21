@@ -102,6 +102,7 @@ nav:
     - Topology: miles/topology.md
     - Long sequences: miles/long-sequences.md
     - Data and evaluation: miles/data-and-evaluation.md
+    - Background evaluation: miles/background-evaluation.md
     - Managed judges: miles/managed-judges.md
     - Operations: miles/operations.md
     - Architecture: miles/architecture.md
