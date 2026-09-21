@@ -234,6 +234,45 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def initialize_promoted_token_embeddings(model: torch.nn.Module, tokenizer) -> int:
+    """Seed the embedding (and output) rows of reserved-slot-promoted tokens from their pieces.
+
+    A promoted token takes over a slot the pretraining data never emitted, so its row holds
+    whatever initialization and weight decay left there. Seeding it with the mean of the rows
+    for the ids the string used to tokenize into (`<th`, `ink`, `>` for `<think>`) starts it
+    somewhere the model already associates with the tag, so a short SFT budget measures the
+    tokenization change rather than the cost of learning an embedding from scratch.
+
+    A no-op when the tokenizer promoted nothing. Returns the number of rows written.
+    """
+    promoted = getattr(tokenizer, "promoted_reserved_slot_tokens", [])
+    if not promoted:
+        return 0
+
+    input_embeddings = model.get_input_embeddings()
+    output_embeddings = model.get_output_embeddings()
+    # Tied weights are the same tensor; writing it twice would average in the row we just wrote.
+    matrices = [input_embeddings.weight]
+    if output_embeddings is not None and output_embeddings.weight is not input_embeddings.weight:
+        matrices.append(output_embeddings.weight)
+
+    with torch.no_grad():
+        for token in promoted:
+            for weight in matrices:
+                if token.token_id >= weight.shape[0] or max(token.source_ids) >= weight.shape[0]:
+                    raise ValueError(
+                        f"Cannot initialize {token.content!r} (slot {token.token_id}, pieces "
+                        f"{list(token.source_ids)}): the embedding matrix has only {weight.shape[0]} rows."
+                    )
+                source = weight[list(token.source_ids)].to(torch.float32).mean(dim=0)
+                weight[token.token_id] = source.to(weight.dtype)
+    logger.info(
+        f"Initialized {len(promoted)} promoted token embedding(s) from their pieces: "
+        f"{[(t.content, t.token_id) for t in promoted]}"
+    )
+    return len(promoted)
+
+
 def maybe_load_checkpoint(
     model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
 ) -> None:
