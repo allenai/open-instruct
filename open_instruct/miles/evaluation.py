@@ -239,8 +239,20 @@ def submit(receipt, path):
             error=type(error).__name__,
             diagnostic="Submission failed or timed out; inspect Beaker before manual resubmission. No automatic retry.",
         )
+        if isinstance(error, subprocess.CalledProcessError):
+            receipt["exit_code"] = error.returncode
+            try:
+                # Only the controlled child emits this redacted JSON diagnostic.
+                detail = json.loads((error.stderr or "").splitlines()[-1])
+                if isinstance(detail, dict) and set(detail) == {"error", "message"}:
+                    receipt["submission_error"] = detail
+            except (ValueError, IndexError):
+                pass
         logger.warning(
-            "BACKGROUND EVALUATION GAP at update %s: %s; receipt %s", receipt["update"], type(error).__name__, path
+            "BACKGROUND EVALUATION GAP at update %s: %s; receipt %s",
+            receipt["update"],
+            receipt.get("submission_error", type(error).__name__),
+            path,
         )
     state.atomic_json(path, receipt)
 

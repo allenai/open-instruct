@@ -42,6 +42,7 @@ def command(receipt, output):
         "provider.kind": "vllm_server",
         "provider.base_url": "http://127.0.0.1:30000/v1",
         "provider.tokenizer": checkpoint,
+        "provider.trust_remote_code": True,
         "provider.max_concurrency": 8,
     }.items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
@@ -155,6 +156,7 @@ def run_evaluation(receipt):
             "sglang.launch_server",
             "--model-path",
             checkpoint,
+            "--trust-remote-code",
             "--tokenizer-path",
             checkpoint,
             "--host",

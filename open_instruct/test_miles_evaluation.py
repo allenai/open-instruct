@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from open_instruct.miles import checkpoint, evaluation, evaluation_runner
+from open_instruct.miles import checkpoint, evaluation, evaluation_runner, evaluation_submit
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
@@ -332,3 +332,28 @@ def test_incomplete_snapshot_never_submitted(run, monkeypatch):
     network.assert_not_called()
     receipt = next((Path(run.output["root"]) / "evaluation").glob("update-*.json"))
     assert json.loads(receipt.read_text())["status"] == "submission_failed"
+
+
+def test_submitter_reads_nested_beaker_workload_id(monkeypatch, capsys):
+    client = SimpleNamespace(
+        experiment=SimpleNamespace(
+            create=Mock(return_value=SimpleNamespace(experiment=SimpleNamespace(id="accepted-experiment")))
+        )
+    )
+    monkeypatch.setattr(evaluation_submit, "Beaker", SimpleNamespace(from_env=lambda **kwargs: nullcontext(client)))
+    monkeypatch.setattr(evaluation_submit.signal, "alarm", Mock())
+    monkeypatch.setattr(sys, "argv", ["submit", "spec.json", "ai2/workspace", "unique-name", "30"])
+    evaluation_submit.main()
+    assert json.loads(capsys.readouterr().out) == {"id": "accepted-experiment"}
+    client.experiment.create.assert_called_once_with(spec="spec.json", name="unique-name")
+    evaluation_submit.signal.alarm.assert_called_once_with(30)
+
+
+def test_submission_diagnostics_redact_credentials(monkeypatch):
+    monkeypatch.setenv("BEAKER_TOKEN", "sensitive-test-token")
+    monkeypatch.setenv("WANDB_API_KEY", "sensitive-test-key")
+    result = evaluation_submit.diagnostic(
+        ValueError("rejected sensitive-test-token sensitive-test-key Bearer unknown-credential")
+    )
+    assert result["error"] == "ValueError"
+    assert result["message"] == "rejected [REDACTED] [REDACTED] Bearer [REDACTED]"
