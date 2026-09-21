@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Exploratory gradient noise scale](critical-batch-20260921.md) | Noise-dominated retained-group gradients; corrected uncertainty limits and implications for batch-size experiments |
 | [Online group filtering: small qualification](online-filtering-20260919.md) | Four-update barrier and refresh checks; all-zero/all-one rejection, batch replenishment and checkpoint-cursor audit |
 | [Router controls and standard-example qualification](router-controls-20260918.md) | September 18 image identity; completed dev/small checks and remaining qualification scope |
 | [Dense GSM8K full test: Core versus original after 200 updates](gsm8k-dense-test-20260916.md) | Same-checkpoint framework comparison on 1,319 questions; original +48, Core −16, paired p=6e-7 |
