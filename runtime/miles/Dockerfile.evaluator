@@ -7,6 +7,9 @@ RUN git clone https://github.com/allenai/olmo-eval.git /opt/olmo-eval \
     && git -C /opt/olmo-eval checkout --detach ${OLMO_EVAL_REVISION} \
     && test "$(git -C /opt/olmo-eval rev-parse HEAD)" = "${OLMO_EVAL_REVISION}"
 RUN cd /opt/olmo-eval \
-    && UV_PROJECT_ENVIRONMENT=/opt/evaluator-venv uv sync --frozen --no-default-groups --extra clients --extra hf
+    && UV_PROJECT_ENVIRONMENT=/opt/evaluator-venv uv sync --frozen --no-default-groups --extra clients --extra hf --extra beaker
 # Keep `python` pointing to serving's interpreter; only olmo-eval uses this venv.
 RUN ln -s /opt/evaluator-venv/bin/olmo-eval /usr/local/bin/olmo-eval
+
+# CLI dry-run does not import provider dependencies; check the actual adapter.
+RUN /opt/evaluator-venv/bin/python -c "from olmo_eval.inference.providers import vllm_server"
