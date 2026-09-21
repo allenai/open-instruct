@@ -7,6 +7,12 @@ set -euo pipefail
 BUILT_IMAGE="${1:?built image required}"
 ARM="${2:?aligned or legacy required}"
 MODE="${3:-train}"
+# H008 anchor-lr5e-5 uses 34521; its seed2 companion uses 34522. SEED (33333) is
+# a tokenization cache key and must never move -- vary the data order only.
+# Set before the case block: train_full puts the seed in the output dir.
+DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
+# Local, never inherited: an exported RUN_TAG must not rename another mode.
+RUN_TAG=""
 case "$ARM" in
     aligned) IMAGE="$BUILT_IMAGE" ;;
     legacy) IMAGE=01M2KSSB3FCYJ8PNB7B672N9SP ;;
@@ -33,7 +39,7 @@ case "$MODE" in
         # mid-run comparison against the H008 anchor. 2 x 207 GB; convert and
         # delete each as it lands.
         export KEEP_LAST_N=2
-        RUN_TAG=train-full
+        RUN_TAG="train-full-s${DATA_LOADER_SEED}"
         MODE=train
         ;;
     gate)
@@ -57,13 +63,11 @@ case "$MODE" in
     *) echo "Expected train, gate or convert" >&2; exit 1 ;;
 esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
-# H008 anchor-lr5e-5 uses 34521; its seed2 companion uses 34522. SEED (33333) is
-# a tokenization cache key and must never move -- vary the data order only.
-export DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
+export DATA_LOADER_SEED
 export CLUSTER=ai2/holmes WORKSPACE=ai2/olmo-instruct PREEMPTIBLE=0
 export PRIORITY="${PRIORITY:-normal}" MAX_RETRIES=0
 export KEEP_LAST_N="${KEEP_LAST_N:-1}"
-export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}}-s${DATA_LOADER_SEED}-20260918}"
+export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
 export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${RUN_TAG:-${MODE}}-20260918}"
 # Caller accounts for all queued/running jobs against 32 urgent + 32 normal.
 # Explicit interpreter avoids local sync of the separately pinned MoE runtime.
