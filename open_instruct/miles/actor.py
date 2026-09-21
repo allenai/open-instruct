@@ -35,6 +35,7 @@ from open_instruct.miles import (
     policy_refresh,
     publication,
     replay_diagnostics,
+    router_load,
     router_objective,
     scheduler,
 )
@@ -410,6 +411,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                     difference, agreement, profile = self._score_contract(rollout, rollout_id, "training_forward")
             gradient_stats = self._agree(probe.gradients) if probe is not None else None
             aux_metrics = self._agree(lambda: contract.auxiliary_metrics(self.model))
+            local_router_load = self._agree(lambda: router_load.snapshot(self.model))
+            router_metrics = router_load.collect(local_router_load, self.args.olmo_core.expert_parallel_size)
             self.train_module.optim_step()
             try:
                 contract.validate_step_transition(self.clock, self.optimizer, step_batches[0]["tokens"].device)
@@ -483,6 +486,22 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                         "packing/tokens_per_pack": normalization.model_tokens / normalization.world_size / count,
                         "packing/rank0_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
                     }
+                )
+            if router_metrics is not None:
+                summary.update(router_metrics["summary"])
+                logger.info(
+                    "Core router load: %s",
+                    contract.record(
+                        self.args,
+                        {
+                            "event": "router_load",
+                            "step": self.clock.completed_steps,
+                            "rollout_id": rollout_id,
+                            "scope": "optimizer_update_training_dispatch",
+                            "routing_replay": bool(self.args.use_rollout_routing_replay),
+                            **router_metrics,
+                        },
+                    ),
                 )
             if expert_metrics is not None:
                 summary.update(

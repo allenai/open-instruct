@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Log update-level MILES/Core MoE dispatch imbalance, maximum expert load and unused layer/expert counts globally and within expert replicas, including when router auxiliary losses are disabled (PR URL pending).
 - Add opt-in best-effort MILES/Core background olmo-eval jobs with immutable HF snapshots, durable submission receipts, retained evaluation outputs and shared-run W&B publishing with consistent chart axes (PR URL pending).
 - Enable MILES online zero-variance reward-group filtering by default, expose `training.filter_zero_std_groups`, support the native filter with refresh/engine-drain publication, and retire filtered async groups from the checkpoint retry ledger; tiny mechanics examples explicitly opt out (PR URL pending).
 - Add optional MILES/Core router auxiliary grouping, token/response averaging, and dispatched/current count controls with unchanged defaults, recomputation-safe metadata, and the matching pinned Core backend patch (PR URL pending).

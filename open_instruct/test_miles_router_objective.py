@@ -9,7 +9,7 @@ from olmo_core import config as core_config
 from olmo_core.nn.moe.v2 import router as core_router
 from torch.utils import checkpoint
 
-from open_instruct.miles import router_objective
+from open_instruct.miles import contract, router_load, router_objective
 from open_instruct.miles.config import CoreConfig
 
 
@@ -305,3 +305,32 @@ def test_native_router_combined_controls_match_loss_and_gradient_reference(
 def test_current_counts_reject_dense_model():
     with pytest.raises(ValueError, match="MoE"):
         router_objective.install(torch.nn.Linear(2, 2), CoreConfig(router_aux_count_source="current"))
+
+
+@pytest.mark.parametrize("aux_enabled", [False, True])
+def test_native_dispatch_counters_exclude_scoring_and_recomputation(aux_enabled):
+    model = torch.nn.Module()
+    model.routed_experts_router = core_router.MoERouterConfigV2(
+        d_model=3,
+        num_experts=3,
+        top_k=1,
+        dtype=core_config.DType.float32,
+        lb_loss_weight=0.1 if aux_enabled else None,
+        z_loss_weight=0.02 if aux_enabled else None,
+    ).build()
+    router = model.routed_experts_router
+    logits = torch.zeros(1, 4, 3, requires_grad=True)
+    counts = torch.tensor([3, 1, 0])
+    info = (logits.softmax(-1), logits, counts, counts.unsqueeze(0), 4.0)
+    contract.auxiliary_metrics(model, reset=True)
+    with torch.no_grad():
+        router.compute_aux_loss(*info)
+    for _ in range(2):
+        router.compute_aux_loss(*info)
+        router.compute_aux_loss(*info, accumulate_metrics=False)
+    result = router_load.collect(router_load.snapshot(model), ep_degree=1)
+    assert result["layers"]["routed_experts_router"]["assignments"] == 8
+    assert result["summary"]["moe/max_expert_load"] == 6
+    assert result["summary"]["moe/dead_experts"] == 1
+    contract.auxiliary_metrics(model, reset=True)
+    assert router.batch_size_per_expert.count_nonzero() == 0

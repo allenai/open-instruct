@@ -47,6 +47,28 @@ Inspect `refresh_scores` for mixed-response counts and historical-prefix versus
 latest-forward gaps/TIS clipping; those gaps include actual policy age.
 See [implementation contracts](core.md) for exact semantics and evidence limits.
 
+Core MoE runs report router load every optimizer update, including with auxiliary
+losses and expert-aware packing disabled. W&B keys under `train/moe/` include
+`max_expert_load` (largest assignment count for any layer/expert), `dead_experts`
+(total layer/expert pairs receiving zero assignments this update),
+`dead_experts_max_per_layer`, `load_cv_mean`, `load_cv_max`, and
+`max_mean_load_ratio`. CV is population standard deviation divided by mean load;
+zero means uniform. The maximum/mean ratio is one for uniform nonempty layers.
+Both normalized metrics are defined as zero for an empty layer.
+
+Counts are aggregated over the complete optimizer batch before each layer's
+statistics are computed. `replica_load_cv_max`, `replica_max_mean_load_ratio`,
+and `replica_dead_experts_max_per_layer` also expose the worst layer within any
+complete expert replica, since pooling replicas can hide local imbalance.
+The `router_load` contract/log event includes each layer's global statistics and
+assignment total. These are training **dispatch counts**, not gate-weight mass
+or a separate evaluation of current router preferences: replayed expert choices
+are counted when replay is enabled. All model tokens, including prompts and the
+per-document tail row, count. “Dead” means unused in this update, not permanently
+inactive. These update totals do not measure worst individual microbatch load.
+The implementation reuses Core's forward counters, excludes scoring and backward
+recomputation, and gathers only small layer/expert histograms.
+
 ## Failure triage
 
 | Symptom | Next check |
