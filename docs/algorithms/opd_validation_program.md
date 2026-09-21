@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 03:37Z (was 2026-09-21 03:35Z; details in the latest Log entries).
+Updated 2026-09-21 03:45Z (was 2026-09-21 03:37Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -119,6 +119,11 @@ Updated 2026-09-21 03:37Z (was 2026-09-21 03:35Z; details in the latest Log entr
   18.33 / 12.08 Avg@8. Code: OI `e1920cc74` (`open_instruct/qwen25_math_harness.py`,
   `scripts/eopd/qwen25_math_harness_eval.py`). One 1-GPU job, ~1-2 h; Kevin: "just this once
   with the final checkpoint". In-run eval stays the instrument for the OPD-vs-EOPD curves.
+- **Weka `oe-adapt-default` is at 100 % again: 1.7T free at 03:40Z, down from 3.1T at 00:08Z**
+  (other users' writes; our two new arms are bounded to ~2 Megatron saves each by
+  `keep_checkpoints = 2`, verified installed on both roots). If it reaches 0 the running arms die
+  as attempt 3 did on 09-19. Our own reclaimable space, needing Kevin's OK: `-v3/checkpoints/
+  iter_0000179` and `iter_0000199` (superseded by `iter_0000219` + `hf-219`; ~60G each).
 - **Calibration point for reading the curves:** rollouts 175, 180 (both attempt-3 windows) and
   219 of `-v3` and the continuation's resume eval all evaluate the *same* `iter_0000179` weights
   (the LR-0 bug froze the model), and they read 0.782 / 0.78075 / 0.78475 / 0.78625. So ±0.5
@@ -1104,3 +1109,19 @@ lower; it does not affect the per-token statistics above.
   `ai2/ceres` (241 / 52 free H100 slots) ahead of saturn/holmes: **`01M310Q0CXW3AXR5BMTD6YE95D`**.
   Same approved compute, one 1-GPU job. Watcher re-pointed at it (plus the checkpoint-listing
   job `01M310MBVZJCZ7BVE4RBFMS735`).
+
+### 2026-09-21 03:45Z
+
+- **`keep_checkpoints` check (read-only CPU job `01M310MBVZJCZ7BVE4RBFMS735`, 03:40Z):** arm 1 root
+  `-v2/checkpoints/` holds `iter_0000019`, `iter_0000039` (45G together), `latest_checkpointed_iteration.txt`
+  = 39, exports `hf-19`, `hf-39`; the Megatron argument dump in `training.log` shows
+  `custom_megatron_post_save_hook_path = open_instruct.miles.opd_retention.post_save` on both
+  new roots. Two completed saves = the keep count, so nothing should have been pruned yet; the
+  first removal (`iter_0000019`) is due at the rollout-59 save (~04:50Z) and will be re-checked
+  then. EOPD root `-v1` has no `checkpoints/` yet (first save at rollout 19, ~04:40Z).
+- **Weka `oe-adapt-default` at 100 %, 1.7T free** (455T / 454T used), down from 3.1T at 00:08Z.
+  Our footprint is bounded (~2 × 22G for arm 1, ~2 × 60G for the 4B EOPD arm, plus ~4-8G per
+  HF export), but the bucket is filling from elsewhere at ~0.4T/h. Recorded under "Where we
+  are" with the one thing we could free ourselves (`-v3` `iter_0000179` / `iter_0000199`,
+  Kevin's call).
+- Watcher re-armed: harness eval `01M310Q0CXW3AXR5BMTD6YE95D` exit, arm 1 eval 87, any job exit.
