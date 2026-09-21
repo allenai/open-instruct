@@ -45,7 +45,7 @@ def parse(value, launch):
     if set(value) - allowed:
         raise InputError(f"Unknown evaluation fields: {sorted(set(value) - allowed)}")
     mode = value.setdefault("mode", "shared")
-    if mode not in {"shared", "background"}:
+    if mode not in ("shared", "background"):
         raise InputError("evaluation.mode must be shared or background")
     if mode == "shared":
         if set(value) != {"mode"}:
@@ -66,9 +66,9 @@ def parse(value, launch):
     for key in ("initial", "final"):
         if type(value[key]) is not bool:
             raise InputError(f"evaluation.{key} must be boolean")
-    if not re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", value.get("image", "")):
+    if not isinstance(value.get("image"), str) or not re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", value["image"]):
         raise InputError("evaluation.image must be an immutable Beaker image ID")
-    if not re.fullmatch(r"[0-9a-f]{40}", value.get("revision", "")):
+    if not isinstance(value.get("revision"), str) or not re.fullmatch(r"[0-9a-f]{40}", value["revision"]):
         raise InputError("evaluation.revision must pin the full olmo-eval Git commit")
     for key in ("cluster", "workspace", "budget", "timeout"):
         if not isinstance(value[key], str) or not value[key].strip():
@@ -221,7 +221,8 @@ def submit(receipt, path):
                 "open_instruct.miles.evaluation_submit",
                 str(spec_path),
                 receipt["evaluation"]["workspace"],
-                f"miles-eval-{receipt['update']}-{path.stem[-12:]}",
+                f"miles-eval-{hashlib.sha256(receipt['evaluation']['root'].encode()).hexdigest()[:10]}-{receipt['update']}-{receipt['group_id']}",
+                str(receipt["evaluation"]["submit_timeout"]),
             ],
             capture_output=True,
             text=True,
