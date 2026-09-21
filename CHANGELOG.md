@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add opt-in best-effort MILES/Core background olmo-eval jobs with immutable HF snapshots, durable submission receipts, and shared-run W&B checkpoint-axis publishing (PR URL pending).
+- Add opt-in best-effort MILES/Core background olmo-eval jobs with immutable HF snapshots, durable submission receipts and retained evaluation outputs; the candidate shared-run W&B publisher is blocked pending lifecycle qualification (PR URL pending).
 - Enable MILES online zero-variance reward-group filtering by default, expose `training.filter_zero_std_groups`, support the native filter with refresh/engine-drain publication, and retire filtered async groups from the checkpoint retry ledger; tiny mechanics examples explicitly opt out (PR URL pending).
 - Add optional MILES/Core router auxiliary grouping, token/response averaging, and dispatched/current count controls with unchanged defaults, recomputation-safe metadata, and the matching pinned Core backend patch (PR URL pending).
 - MILES/Core RL native checkpoints now roll: after each commit the newest `core.checkpoint_keep_last` checkpoints (run files default to 1) and every `core.checkpoint_keep_every`-th completed update are kept and the rest are deleted with their MILES cursors, so a long run holds one resumable checkpoint plus its final save instead of accumulating 41–207 GB per save; unset `checkpoint_keep_last` keeps everything as before (PR URL pending).

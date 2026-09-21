@@ -167,6 +167,7 @@ def test_submission_timeout_and_failure_are_durable(run, monkeypatch, error):
 
 
 def test_publisher_uses_secondary_and_checkpoint_axis(tmp_path, monkeypatch):
+    monkeypatch.setattr(evaluation_runner, "require_safe_shared_writer", lambda: None)
     (tmp_path / "metrics.json").write_text(
         json.dumps({"tasks": [{"task": "gsm8k", "metrics": {"accuracy": {"exact": 0.5}}}]})
     )
@@ -191,6 +192,7 @@ def test_publisher_uses_secondary_and_checkpoint_axis(tmp_path, monkeypatch):
 
 
 def test_offline_and_failed_upload_preserve_results(tmp_path, monkeypatch):
+    monkeypatch.setattr(evaluation_runner, "require_safe_shared_writer", lambda: None)
     original = '{"tasks":[]}'
     (tmp_path / "metrics.json").write_text(original)
     receipt = {"training": {"wandb": {"mode": "offline"}}}
@@ -357,3 +359,16 @@ def test_submission_diagnostics_redact_credentials(monkeypatch):
     )
     assert result["error"] == "ValueError"
     assert result["message"] == "rejected [REDACTED] [REDACTED] Bearer [REDACTED]"
+
+
+def test_unqualified_publisher_never_attaches_or_changes_run_state(tmp_path, monkeypatch):
+    sdk = Mock()
+    monkeypatch.setattr(evaluation_runner.importlib, "import_module", sdk)
+    receipt = {"training": {"wandb": {"mode": "online", "id": "main", "entity": "team", "project": "p"}}}
+    (tmp_path / "scores.json").write_text('{"eval/test": 1}')
+    assert not evaluation_runner.try_publish(receipt, tmp_path)
+    sdk.assert_not_called()
+    assert json.loads((tmp_path / "publication.json").read_text())["status"] == "blocked"
+    assert (tmp_path / "scores.json").read_text() == '{"eval/test": 1}'
+    with pytest.raises(RuntimeError, match="lifecycle qualification failed"):
+        evaluation_runner.require_safe_shared_writer()

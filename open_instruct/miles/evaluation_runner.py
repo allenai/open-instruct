@@ -19,6 +19,10 @@ from urllib import error as urlerror
 from urllib import request
 
 
+class PublicationBlocked(RuntimeError):
+    """The candidate writer failed its live run-lifecycle qualification."""
+
+
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +82,18 @@ def scores(output):
     return values
 
 
+def require_safe_shared_writer():
+    # Live qualification with W&B 0.30.0 reopened finished runs and replaced
+    # their metric definitions despite the documented secondary-writer flags.
+    # Keep the candidate publisher disabled until that lifecycle contract is
+    # supported. Restoring state after upload would race the training writer.
+    raise PublicationBlocked(
+        "W&B shared-writer lifecycle qualification failed: late uploads reopen finished runs "
+        "and replace metric definitions. Results retained; publication is blocked. "
+        "See docs/miles/measurements/background-evaluation-20260920.md"
+    )
+
+
 def publish(receipt, output, *, wandb_run=None):
     tracking = dict(receipt["training"]["wandb"])
     if wandb_run:
@@ -90,6 +106,7 @@ def publish(receipt, output, *, wandb_run=None):
         return
     if not all(tracking.get(key) for key in ("id", "entity", "project")):
         raise ValueError("Publishing requires the exact training entity/project/run ID")
+    require_safe_shared_writer()
     values = scores(output)
     wandb = importlib.import_module("wandb")
     # Check existence before attaching: a typo must not create a different run.
@@ -125,9 +142,13 @@ def try_publish(receipt, output, **kwargs):
     try:
         publish(receipt, output, **kwargs)
     except Exception as error:
-        write_json(Path(output) / "publication.json", {"status": "failed", "error": type(error).__name__})
+        diagnostic = {"status": "failed", "error": type(error).__name__}
+        if isinstance(error, PublicationBlocked):
+            diagnostic.update(status="blocked", reason=str(error))
+        write_json(Path(output) / "publication.json", diagnostic)
         print(
-            f"WARNING: W&B publishing failed ({type(error).__name__}); evaluation results retained at {output}",
+            f"WARNING: W&B publishing failed ({diagnostic.get('reason', type(error).__name__)}); "
+            f"evaluation results retained at {output}",
             file=sys.stderr,
         )
         return False
