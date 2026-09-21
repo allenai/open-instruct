@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 03:40Z (was 2026-09-21 03:30Z; details in the latest Log entries).
+Updated 2026-09-21 03:35Z (was 2026-09-21 03:30Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -1061,7 +1061,7 @@ lower; it does not affect the per-token statistics above.
   background tasks"): it exits on the first of harness-job exit, EOPD first train step, arm 1
   eval 43, or any job exit, and is re-armed after each event.
 
-### 2026-09-21 03:40Z
+### 2026-09-21 03:35Z
 
 - **Arm 2 EOPD is training.** First four optimizer steps (rollout 0) on W&B `tqou539j`:
   `lr-pg_0` 2.99999e-6 → 2.99996e-6 (cosine over 880 steps, as in the OPD arm), `train/loss`
