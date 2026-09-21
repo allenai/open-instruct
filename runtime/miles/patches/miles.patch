@@ -1110,6 +1110,44 @@ index c421525851be1e1a2c5ee6f6217ad2484add5148..364265373ddfde821616ad95c31d1673
  
  
  class TensorboardBackend(TrackingBackend):
+diff --git a/miles/utils/tracking_utils/wandb_utils.py b/miles/utils/tracking_utils/wandb_utils.py
+index 9395c3e129046a2738a1edf699d8fcad81d42c9e..78dad69772950b4c8b3cf0d91302df3095c6f7da 100644
+--- a/miles/utils/tracking_utils/wandb_utils.py
++++ b/miles/utils/tracking_utils/wandb_utils.py
+@@ -7,6 +7,8 @@ from wandb.sdk.lib.runid import generate_id
+ 
+ from miles.utils.env_report import decode_env_report
+ 
++from open_instruct.miles import evaluation_runner
++
+ logger = logging.getLogger(__name__)
+ 
+ 
+@@ -80,7 +82,7 @@ def init_wandb_primary(args):
+ 
+     wandb.init(**init_kwargs)
+ 
+-    _init_wandb_common()
++    _init_wandb_common(args)
+ 
+     # Set wandb_run_id in args for easy access throughout the training process
+     args.wandb_run_id = wandb.run.id
+@@ -155,10 +157,13 @@ def init_wandb_secondary(args, router_addr=None):
+ 
+     wandb.init(**init_kwargs)
+ 
+-    _init_wandb_common()
++    _init_wandb_common(args)
+ 
+ 
+-def _init_wandb_common():
++def _init_wandb_common(args):
++    if getattr(args, "background_evaluation", None):
++        evaluation_runner.define_metrics(wandb.run)
++        return
+     wandb.define_metric("train/step")
+     wandb.define_metric("train/*", step_metric="train/step")
+     wandb.define_metric("rollout/step")
 diff --git a/miles_plugins/megatron_bridge/__init__.py b/miles_plugins/megatron_bridge/__init__.py
 index 6521214011dbe9dc2d939f33fa2e650ab7d1cb49..4d90a39aa647313511b99f0b5b3d2324de51235f 100644
 --- a/miles_plugins/megatron_bridge/__init__.py

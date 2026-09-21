@@ -55,19 +55,18 @@ history grew from eight to ten rows; all four training-update rows remained.
 The exact score metric uses `eval/checkpoint_update` as its chart axis. Public
 training configuration (978 fields), name and group were unchanged.
 
-**The W&B lifecycle requirement did not pass.** A late shared-mode secondary
-writer reopened the already-finished run as `running`, despite
-`x_primary=False` and `x_update_finish_state=False`. Its metric-definition
-metadata also replaced the prior nine definitions with the evaluator's two.
-A separate [SDK 0.30.0 reproduction](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/xtx2mz3u)
-independently confirmed the same problem with the latest available SDK. Do not treat the current
-publisher/image as fully qualified for the requested state-preserving behavior.
-No evaluator was allowed to mark an active training run finished, and no
-post-publication state-restoration workaround has been added. The local publisher
-is now blocked before attaching to W&B and writes a durable `publication.json`
-reason. Evaluation and result capture continue independently. This is an
-incomplete acceptance result, pending a supported publication mechanism or an
-explicitly revised lifecycle requirement.
+The first publisher correctly uploaded scores, but late shared-mode attachment
+reopened the finished run as `running`, despite `x_primary=False` and
+`x_update_finish_state=False`. The user subsequently accepted this dashboard
+status change: it does not restart or interfere with training. Evaluators still
+do not mark the main run finished on exit or rewrite its public configuration.
+
+The first publisher also replaced the nine native metric definitions with its
+two evaluation definitions. This was a separate chart issue. The implementation
+now uses one common metric schema in every background-mode MILES writer and
+evaluator, retaining training/rollout axes and using `eval/checkpoint_update`
+for the `eval/*` wildcard. The initial publication block has been removed.
+Final shared-schema qualification is being recorded below.
 
 Credentials were inherited from the training allocation in
 `ai2/open-instruct-dev`: `robertb_BEAKER_TOKEN` for submission and

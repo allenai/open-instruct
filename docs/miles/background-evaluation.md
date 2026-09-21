@@ -1,10 +1,5 @@
 # Best-effort background olmo-eval
 
-**Publication is currently blocked:** live qualification showed that W&B shared
-writers reopen finished runs and replace metric definitions. Snapshots, external
-evaluation and retained results work; the requested W&B lifecycle contract has
-not passed. See the [qualification record](measurements/background-evaluation-20260920.md).
-
 Opt in with `evaluation.mode="background"`. Training captures frozen HF weights,
 then one driver submits independent Beaker jobs in a daemon worker. Evaluation
 never borrows, drains or pauses rollout engines, and shutdown never joins the
@@ -93,23 +88,23 @@ A failed W&B upload writes `publication.json` and preserves these files.
 
 ## W&B publication
 
-The candidate publisher uses W&B's documented
+The publisher attaches to the exact main training run using W&B's documented
 [shared-mode secondary writer](https://docs.wandb.ai/models/track/log/distributed-training)
-with `x_primary=False` and `x_update_finish_state=False`, the exact training run
-identity, and an explicit `eval/checkpoint_update` axis without an internal
-`step`. Live testing produced the correct curves and preserved training history
-and public configuration, but reopened the finished run and replaced its metric
-definitions. SDK 0.30.0 reproduces this behavior.
+with `x_primary=False` and `x_update_finish_state=False`. Late uploads may change
+the dashboard status from `finished` to `running`; this accepted status change
+does not restart training. The evaluator flushes its writer without declaring
+an active training run finished. It does not restore or rewrite lifecycle state.
 
-Publication is therefore blocked **before attaching**, for both automatic and
-manual online publication. The evaluator saves scores, predictions, requests,
-configuration and provenance, and writes `publication.json` with status `blocked`
-and the reason. It does not restore run state after logging, which would race a
-training writer. A supported state-preserving publication mechanism remains a
-release blocker; do not use the earlier qualification image to bypass this gate.
+All MILES writers in background mode and every evaluator declare the same metric
+schema: native training/rollout axes are retained, and `eval/*` uses the explicit
+`eval/checkpoint_update` axis. This matters because W&B replaces metric-definition
+metadata per writer. A common wildcard covers different task groups without
+one evaluator erasing another group's axes. No internal W&B `step` is supplied,
+so results can arrive out of checkpoint order. The publisher sends no training
+configuration, name or group updates.
 
-Offline training still records publication as `deferred`. After training is
-synced and the lifecycle blocker is resolved, the manual interface is:
+For offline training, sync the training run first, then publish to that existing
+run with the manual command. The same command repairs a failed online upload:
 
 ```bash
 python -m open_instruct.miles.evaluation_runner publish RECEIPT.json \
@@ -117,9 +112,10 @@ python -m open_instruct.miles.evaluation_runner publish RECEIPT.json \
   --wandb-run ENTITY/PROJECT/RUN_ID
 ```
 
-The command currently fails safely with the same durable blocker. Results are
-retained for later publication. Repeating publication once enabled can append
-duplicate points; inspect `publication.json` first.
+Uploads can change the dashboard status as described above. Failed uploads leave
+`publication.json` and retain scores, predictions, requests, configuration and
+provenance. Repeating publication can append duplicate points; inspect
+`publication.json` first.
 
 ## Manual resubmission and cleanup
 
@@ -160,5 +156,5 @@ successful mechanics check is not evidence of model quality. Follow the normal
 committed-image MILES wrapper for training qualification. Use ignored `runs/`
 configs and fresh output paths; leave existing experiments unchanged.
 
-Live GPU results and the W&B lifecycle blocker are recorded in the
+Live GPU results and W&B publication semantics are recorded in the
 [September 21 qualification](measurements/background-evaluation-20260920.md).

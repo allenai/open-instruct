@@ -19,10 +19,6 @@ from urllib import error as urlerror
 from urllib import request
 
 
-class PublicationBlocked(RuntimeError):
-    """The candidate writer failed its live run-lifecycle qualification."""
-
-
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,16 +78,23 @@ def scores(output):
     return values
 
 
-def require_safe_shared_writer():
-    # Live qualification with W&B 0.30.0 reopened finished runs and replaced
-    # their metric definitions despite the documented secondary-writer flags.
-    # Keep the candidate publisher disabled until that lifecycle contract is
-    # supported. Restoring state after upload would race the training writer.
-    raise PublicationBlocked(
-        "W&B shared-writer lifecycle qualification failed: late uploads reopen finished runs "
-        "and replace metric definitions. Results retained; publication is blocked. "
-        "See docs/miles/measurements/background-evaluation-20260920.md"
-    )
+def define_metrics(run):
+    """Every MILES writer declares the same axes; W&B replaces this metadata.
+
+    Include the native training/rollout groups, and use one wildcard for all
+    background tasks so concurrent task groups cannot erase each other's axes.
+    """
+    for step in ("train/step", "rollout/step", "eval/step", "eval/checkpoint_update"):
+        run.define_metric(step)
+    for prefix, step in {
+        "train": "train/step",
+        "rollout": "rollout/step",
+        "multi_turn": "rollout/step",
+        "passrate": "rollout/step",
+        "perf": "rollout/step",
+        "eval": "eval/checkpoint_update",
+    }.items():
+        run.define_metric(f"{prefix}/*", step_metric=step, step_sync=prefix != "eval")
 
 
 def publish(receipt, output, *, wandb_run=None):
@@ -106,7 +109,6 @@ def publish(receipt, output, *, wandb_run=None):
         return
     if not all(tracking.get(key) for key in ("id", "entity", "project")):
         raise ValueError("Publishing requires the exact training entity/project/run ID")
-    require_safe_shared_writer()
     values = scores(output)
     wandb = importlib.import_module("wandb")
     # Check existence before attaching: a typo must not create a different run.
@@ -124,14 +126,11 @@ def publish(receipt, output, *, wandb_run=None):
         ),
     )
     try:
-        run.define_metric("eval/checkpoint_update")
-        # Define exact names so other MILES writers' eval/* wildcard cannot change the axis.
-        for key in values:
-            run.define_metric(key, step_metric="eval/checkpoint_update", step_sync=False)
+        define_metrics(run)
         run.log({"eval/checkpoint_update": receipt["update"], **values})
     finally:
-        # Flush this secondary writer only. x_update_finish_state=False preserves
-        # the primary run's running/finished/failed state, including late uploads.
+        # Flush this writer without declaring the training run finished. A late
+        # attachment can change the dashboard status back to running (accepted).
         run.finish()
     write_json(
         Path(output) / "publication.json", {"status": "published", "run": tracking, "update": receipt["update"]}
@@ -143,8 +142,6 @@ def try_publish(receipt, output, **kwargs):
         publish(receipt, output, **kwargs)
     except Exception as error:
         diagnostic = {"status": "failed", "error": type(error).__name__}
-        if isinstance(error, PublicationBlocked):
-            diagnostic.update(status="blocked", reason=str(error))
         write_json(Path(output) / "publication.json", diagnostic)
         print(
             f"WARNING: W&B publishing failed ({diagnostic.get('reason', type(error).__name__)}); "
