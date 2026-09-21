@@ -4,7 +4,47 @@ This is a tiny Olmo MoE mechanics qualification, not model-quality evidence or a
 qualification of other architectures, tasks, tensor-parallel sizes or clusters.
 Existing experiments and maintained example configurations were not changed.
 
-## Pinned artifacts
+## Consistent chart schema follow-up
+
+The status-only reopening behavior was accepted by the user. Publication is
+now enabled, and every MILES writer in background mode declares the same ten
+metric definitions as the evaluator. This preserves native training and rollout
+axes while assigning all `eval/*` scores to `eval/checkpoint_update`.
+
+- Application source: `e9fde68d2`; trainer image `01M32D2NFAGYNWQK1MSFYNN1BW`.
+- Evaluator image/revision remain `01M31EGDWC2D57T1ZC2S19241V` and
+  `55461d9bf09c6ff7027d7a977f4ae45b8a07bbcf`.
+- [Live W&B writer contract](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/z7h715td):
+  one evaluator published while the primary was active, then another published
+  late. Training rows, both evaluation points, public configuration and all ten
+  metric definitions were retained. Different task groups use the common
+  `eval/*` wildcard, so their axes do not depend on which writer finishes last.
+- The built trainer image passed an import/contract check: background writers
+  declare ten consistent definitions; default shared-engine runs retain their
+  original nine definitions.
+- [Final MoE run](https://beaker.org/ex/01M32D37XG76QMZRPTFJXV67XT),
+  [W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/7596x9ru):
+  exit 0, four optimizer updates completed. Ignored config `small-v5.toml` uses
+  the same fixture below, with a fresh output root ending `-v5`. Training exited
+  at 16:42:30 UTC, before the evaluator started at 16:42:53.
+- [Final update-2 evaluator](https://beaker.org/ex/01M32DHERDHSJ6Z4DW6KRVM2N8):
+  exit 0, two predictions retained, GSM8K exact-match accuracy 0.0. It published
+  after training finished. W&B history grew from eight to nine rows; all four
+  training steps, all ten metric definitions, the name/group and all 978 public
+  configuration fields were preserved. The score uses the checkpoint-update
+  axis. The dashboard status changed to `running`, as accepted above.
+- [Final deliberate failure](https://beaker.org/ex/01M32DHNHV2B5A3QJSB176S1NQ):
+  exit 1 for the invalid task; diagnostics and the update-4 snapshot retained.
+- The final GSM8K submission received `BeakerExperimentConflict`. Its receipt
+  records `submission_failed` and the diagnostic. It was not automatically
+  retried, and the dashboard has no update-4 point for this run. This is an
+  expected best-effort gap; the earlier run below exercised both milestones.
+
+The final implementation passes the bounded mechanics qualification with the
+accepted W&B status semantics. The evaluator does not finish the training run,
+wait on training, restore lifecycle state, retry missed points or delete snapshots.
+
+## Initial GPU qualification artifacts
 
 - Implementation branch: `robertb/miles-background-evaluation`, isolated from
   unrelated development changes; live application source `16fcaf63d`.
@@ -66,7 +106,7 @@ two evaluation definitions. This was a separate chart issue. The implementation
 now uses one common metric schema in every background-mode MILES writer and
 evaluator, retaining training/rollout axes and using `eval/checkpoint_update`
 for the `eval/*` wildcard. The initial publication block has been removed.
-Final shared-schema qualification is being recorded below.
+The consistent-schema follow-up is recorded above.
 
 Credentials were inherited from the training allocation in
 `ai2/open-instruct-dev`: `robertb_BEAKER_TOKEN` for submission and

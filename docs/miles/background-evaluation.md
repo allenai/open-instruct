@@ -149,6 +149,11 @@ private SGLang server. It does not launch vLLM. The runner checks the olmo-eval
 revision before starting. Build dependencies at image construction, never during
 an evaluation job. Publish the image to Beaker and configure its immutable ID.
 
+The tiny Olmo MoE qualification uses trainer image
+`01M32D2NFAGYNWQK1MSFYNN1BW`, evaluator image `01M31EGDWC2D57T1ZC2S19241V`, and
+olmo-eval revision `55461d9bf09c6ff7027d7a977f4ae45b8a07bbcf`. The updated trainer
+image is required for the common chart schema across all training writers.
+
 Compatibility must be qualified for the exported architecture, serving backend,
 task and image; an OpenAI-compatible endpoint alone does not prove loglikelihood
 or task correctness. Use generation tasks for the initial tiny MoE check. A
