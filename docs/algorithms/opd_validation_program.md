@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 18:48Z (was 2026-09-21 17:12Z; details in the latest Log entries).
+Updated 2026-09-21 18:47Z (was 2026-09-21 17:12Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -1239,7 +1239,7 @@ lower; it does not affect the per-token statistics above.
   re-armed watcher hit a wandb SSL/auth failure at 17:10Z (local network), so it now polls Beaker
   only (`--arm1-eval 9999`) and fires on the EOPD job exit.
 
-### 2026-09-21 18:48Z
+### 2026-09-21 18:47Z
 
 - **Arm 2 EOPD complete: `01M30P1BP5N6SJVSRJMNMQHN7A` exited 0 at 18:46Z** (16.1 h on one node,
   single window; ~6.5 min/rollout incl. evals). Audit passed: 220/220 updates with max advantage
