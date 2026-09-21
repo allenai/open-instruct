@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 04:50Z (was 2026-09-21 04:45Z; details in the latest Log entries).
+Updated 2026-09-21 04:54Z (was 2026-09-21 04:50Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -108,9 +108,11 @@ Updated 2026-09-21 04:50Z (was 2026-09-21 04:45Z; details in the latest Log entr
   ~5.7: the gated FKL term adds gradient), clip fraction ≤ 1.3 %. Rollout 0 took 160 s to
   sample, 140 s to train; the 47 min before it was the four-set pre-eval. Evals at
   43/87/131/175/219 vs the OPD arm. Both new arms run with
-  `training.keep_checkpoints = 2` (Miles `14080e06c`); the first pruning happens at the second
-  save (rollout 39) and should be checked on Weka then. wandb's API works from Kevin's laptop,
-  so metrics are pulled locally.
+  `training.keep_checkpoints = 2` (Miles `14080e06c`). **Pruning verified 04:52Z (read-only
+  CPU job `01M314X2YZ7XNSN5CTCDG4VYE2`): arm 1's hook removed `iter_0000019` after the rollout-59
+  save, leaving `iter_0000039` + `iter_0000059` (45G) and the `hf-19/39/59` exports; the EOPD
+  arm has its first save `iter_0000019` (53G) + `hf-19`.** wandb's API works from Kevin's
+  laptop, so metrics are pulled locally.
 - **Paper-grader result for the arm 2 OPD export `hf-219` (harness job `01M3119ZR9TQPFG8S8MMQJVDFN`,
   done 04:32Z; Qwen2.5-Math harness `a45202bd`, App. C sampling, 8 samples):**
 
@@ -139,9 +141,9 @@ Updated 2026-09-21 04:50Z (was 2026-09-21 04:45Z; details in the latest Log entr
   45.40 → 46.24 and MATH500 79.45 → 79.70.** So the whole Minerva gap is answer-formatting
   under the harness's grader, not model capability; the strict 29.78 stays the reported number
   because it is what the paper's protocol produces, and the caveat travels with it.
-- **Weka `oe-adapt-default` is at 100 % again: 1.7T free at 03:40Z, down from 3.1T at 00:08Z**
-  (other users' writes; our two new arms are bounded to ~2 Megatron saves each by
-  `keep_checkpoints = 2`, verified installed on both roots). If it reaches 0 the running arms die
+- **Weka `oe-adapt-default` is at 100 %: 1.7T free at 04:52Z (unchanged since 03:40Z; 3.1T at
+  00:08Z)** (other users' writes; our two new arms are bounded to 2 Megatron saves each by
+  `keep_checkpoints = 2`, pruning now observed on arm 1). If it reaches 0 the running arms die
   as attempt 3 did on 09-19. Our own reclaimable space, needing Kevin's OK: `-v3/checkpoints/
   iter_0000179` and `iter_0000199` (superseded by `iter_0000219` + `hf-219`; ~60G each).
 - **Calibration point for reading the curves:** rollouts 175, 180 (both attempt-3 windows) and
@@ -1186,3 +1188,15 @@ lower; it does not affect the per-token statistics above.
   multiprocessing spawn on macOS and hangs; use a `SIGALRM` guard around `timeout=False`
   instead (what the bound above did). On Linux the pebble fork path in
   `open_instruct/qwen25_math_harness.py` is the right tool.
+
+### 2026-09-21 04:54Z
+
+- **`keep_checkpoints = 2` pruning observed (read-only CPU job `01M314X2YZ7XNSN5CTCDG4VYE2`,
+  04:52Z).** Arm 1 `training.log`: `Removed checkpoint .../iter_0000019 after saving rollout 59
+  (keeping the newest 2)` at 04:22Z; `checkpoints/` now holds `iter_0000039` and `iter_0000059`
+  (45G total), `latest_checkpointed_iteration.txt` = 59, HF exports `hf-19`, `hf-39`, `hf-59`
+  kept (exports are not pruned, by design). EOPD arm: first save `iter_0000019` (53G) and
+  `hf-19`, hook installed. Weka 1.7T free, flat since 03:40Z.
+- Progress at 04:51Z: arm 1 at optimizer step 275 (rollout 68 of 176, LR 2.0e-6, grad norm 1.7);
+  EOPD arm at step 87 (rollout 21 of 220, LR 2.9e-6, grad norm 0.96). Next events: arm 1 eval 87
+  (~06:50Z), EOPD eval 43 (~07:40Z at ~6.5 min/rollout).
