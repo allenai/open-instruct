@@ -100,8 +100,9 @@ wandb_group = "core-workflow-basic"
 row_specialization = "dynamic"
 
 [core]
-# Keep only the newest committed checkpoint; failed writes never remove the prior save.
-checkpoint_keep_last = 1
+# Keep the two newest committed checkpoints so an interrupted save still leaves a
+# complete earlier one to resume from; failed writes never remove a prior save.
+checkpoint_keep_last = 2
 # RL examples disable router balancing and z-loss; objective controls remain explicit.
 # See docs/miles/core.md#router-auxiliary-objectives to opt back in.
 router_aux_loss_grouping = "pack"
