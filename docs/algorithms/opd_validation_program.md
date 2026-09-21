@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 03:45Z (was 2026-09-21 03:35Z; details in the latest Log entries).
+Updated 2026-09-21 03:37Z (was 2026-09-21 03:35Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -1080,7 +1080,7 @@ lower; it does not affect the per-token statistics above.
 - Nothing else changed: arm 1 approaching its rollout-43 eval (~04:15Z), harness eval still
   queued. Watcher re-armed (harness exit, arm 1 eval 43, any job exit).
 
-### 2026-09-21 03:45Z
+### 2026-09-21 03:37Z
 
 - **Arm 1 eval at rollout 43 (03:36Z, W&B `7csinhqe`): MATH500 Avg@8 0.66325**, AMC23 0.3406,
   AIME24 0.0917, AIME25 0.0667. Base was 0.1472 / 0.0844 / 0.0125 / 0.0125. MATH500 truncation
@@ -1095,6 +1095,6 @@ lower; it does not affect the per-token statistics above.
   the rollout-39 save nothing should have been pruned yet (two completed saves = the keep
   count); the first removal is due at the rollout-59 save (~04:50Z). The Beaker log for arm 1 is
   blank past startup, so a read-only CPU job lists both new roots' `checkpoints/` on Weka
-  (launched 03:45Z; result in the next entry).
+  (launched 03:37Z as `01M310MBVZJCZ7BVE4RBFMS735`; result in the next entry).
 - Harness eval `01M30Y52ZMSHZAJ5G2TGW1VYW2` still pending at 03:40Z (46 min for one GPU on
   saturn / holmes). Watcher re-armed for harness exit, arm 1 eval 87, any job exit.
