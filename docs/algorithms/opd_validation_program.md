@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 04:54Z (was 2026-09-21 04:50Z; details in the latest Log entries).
+Updated 2026-09-21 04:53Z (was 2026-09-21 04:50Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -1189,7 +1189,7 @@ lower; it does not affect the per-token statistics above.
   instead (what the bound above did). On Linux the pebble fork path in
   `open_instruct/qwen25_math_harness.py` is the right tool.
 
-### 2026-09-21 04:54Z
+### 2026-09-21 04:53Z
 
 - **`keep_checkpoints = 2` pruning observed (read-only CPU job `01M314X2YZ7XNSN5CTCDG4VYE2`,
   04:52Z).** Arm 1 `training.log`: `Removed checkpoint .../iter_0000019 after saving rollout 59
