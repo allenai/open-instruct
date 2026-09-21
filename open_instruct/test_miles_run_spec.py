@@ -36,6 +36,38 @@ def test_async_defaults_are_real_tis_and_eight_by_eight(tmp_path):
     assert "--use-rollout-logprobs" not in config.arguments()
 
 
+@pytest.mark.parametrize("expert_packing", [False, True])
+@pytest.mark.parametrize("balance_data", [None, False, True])
+def test_expert_packing_and_native_length_balancing_are_mutually_exclusive(tmp_path, expert_packing, balance_data):
+    miles = {"use_rollout_routing_replay": True, "use_miles_router": True}
+    if balance_data is not None:
+        miles["balance_data"] = balance_data
+
+    def compile_config():
+        return spec(
+            tmp_path,
+            trainer={
+                "gpus": 4,
+                "expert_parallel_size": 2,
+                "sequence_packing": True,
+                "expert_balanced_packing": expert_packing,
+                "router_aux_loss_weight": 0.0,
+            },
+            inference={"placement_mode": "disaggregated", "gpus": 1},
+            miles=miles,
+        ).compile()
+
+    if expert_packing and balance_data:
+        with pytest.raises(
+            ValueError, match=r"expert_balanced_packing and miles\.balance_data are mutually exclusive"
+        ):
+            compile_config()
+    else:
+        config = compile_config()
+        assert config.core.expert_balanced_packing is expert_packing
+        assert bool(config.miles.get("balance_data", False)) is bool(balance_data)
+
+
 def test_colocation_and_launch_defaults(tmp_path):
     run = spec(tmp_path)
     config = run.compile()

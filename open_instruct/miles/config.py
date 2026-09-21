@@ -368,9 +368,14 @@ class RunConfig:
                 raise InputError("expert_balanced_packing requires router_aux_loss_weight=0")
             if not options.get("use_rollout_routing_replay", False):
                 raise InputError("expert_balanced_packing requires use_rollout_routing_replay=true")
+            if options.get("balance_data", False):
+                raise InputError(
+                    "core.expert_balanced_packing and miles.balance_data are mutually exclusive: "
+                    "the expert packing planner requires stride partitioning, but balance_data changes "
+                    "sample-to-rank assignment. Enable only one."
+                )
             for name in (
                 "use_dynamic_global_batch_size",
-                "balance_data",
                 "multi_lora",
                 "partial_rollout",
                 "custom_reward_post_process_path",

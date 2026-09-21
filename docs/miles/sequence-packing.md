@@ -92,6 +92,17 @@ pack budget. This tests plumbing, not GSM8K learning with its short generation c
 
 ## Replay-informed expert-aware packing (experimental)
 
+**Experimental, opt-in, and disabled by default.** The planner has passed
+correctness qualification on the tested configurations. Net throughput benefit
+and effects on learning across workloads and topologies remain unestablished;
+planning overhead can offset the trainer-time savings. Measure total planning and
+training time on your workload before enabling it for a production run.
+
+The implementation is already incorporated into the project working branch
+`robertb/miles-olmo-core`, including bounded swap search. All maintained examples
+leave it disabled. This option is separate from ordinary sequence packing, which
+can remain enabled while expert-aware scheduling is off.
+
 Set `trainer.expert_balanced_packing=true` to reorder complete optimizer batches
 before MILES partitions samples by rank. The first implementation targets
 **multiple complete expert sets**: trainer world size must exceed the expert
@@ -99,6 +110,9 @@ parallel degree, and that degree must exceed one. For example, four trainer GPUs
 with EP2 provide two complete expert sets. Set `router_aux_loss_weight=0`, enable
 sequence packing and rollout routing replay, and use the normal Olmo3MoE HF
 configuration. The z-loss coefficient may remain unchanged.
+`miles.balance_data=true` is rejected with expert-aware packing: MILES length
+balancing changes the stride partition that the expert planner assumes. Enable
+only one of these two planners.
 
 The producer uses recorded expert IDs to place samples with complementary loads
 in the same EP group's dispatches. It does not change any tokens, expert IDs,
@@ -177,6 +191,29 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
 
 A passing fixed-input numerical gate does not establish throughput improvement
 or learning quality on a heterogeneous production workload.
+
+### Observed scope: September 2026
+
+The [four-GPU EP2 numerical qualification](https://beaker.org/ex/01M2YQ3QAHHT34W6C0XK5XNFWX)
+passed score, replay, gradient and Adam-state comparisons on fixed inputs, within
+the existing numerical tolerances. These are correctness checks, not performance
+or learning guarantees.
+
+The completed 100-update mixed-workload comparison used eight trainer GPUs
+(DP4/EP2), seven policy engines, one judge, and both router auxiliaries disabled:
+[packing off](https://beaker.org/ex/01M2ZVH6TQVS037NPD2CWKWXBH) versus
+[packing on](https://beaker.org/ex/01M308PE9GNF05CHHETTCBZMRP). All 100 treatment
+updates matched predicted dispatch counts on all eight ranks, and periodic
+standalone/training scoring checks passed. Held-out results showed no consistent
+learning advantage or regression; one trajectory per arm and small evaluation
+panels do not establish equivalence.
+
+During updates 61–100, timed trainer work was 18.50 minutes off versus 15.10
+minutes on, while treatment planning took another 3.08 minutes. Generation
+dominated elapsed time. The control resumed at update 40 and treatment ran fresh,
+with independent asynchronous samples, so these timings are descriptive rather
+than a matched-input causal estimate. Keep this feature off by default until its
+net benefit is measured for the intended topology, batch and workload.
 
 
 The CPU benchmark accepts a routing-panel JSON file with per-document expert

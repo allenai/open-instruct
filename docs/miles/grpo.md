@@ -44,6 +44,15 @@ to zero. This matches the current RL investigation recipe; low-level API default
 remain unchanged. Re-enable either coefficient explicitly for an auxiliary-loss
 experiment. Mixed-workload quality and throughput evidence remains in progress.
 
+## Experimental expert-aware packing
+
+Replay-informed expert-aware packing is **experimental and disabled by default**
+in all maintained examples. Opt in with `trainer.expert_balanced_packing=true`
+only on a supported topology. Correctness qualification has passed for the tested
+configurations; planning overhead can offset training savings, and a learning
+benefit has not been established. See [requirements, controls and measured
+scope](sequence-packing.md#replay-informed-expert-aware-packing-experimental).
+
 ## Online filtering default
 
 Learning runs enable `training.filter_zero_std_groups=true`: constant-reward prompt
