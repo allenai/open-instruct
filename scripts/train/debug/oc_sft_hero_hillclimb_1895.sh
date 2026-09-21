@@ -65,7 +65,16 @@ esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
 export DATA_LOADER_SEED
 export CLUSTER=ai2/holmes WORKSPACE=ai2/olmo-instruct PREEMPTIBLE=0
-export PRIORITY="${PRIORITY:-normal}" MAX_RETRIES=0
+export PRIORITY="${PRIORITY:-normal}"
+# A 2x8 job needs EVERY replica ready within 10 min or Beaker cancels the group
+# ("timed out after waiting 10m0s for synchronized replica start") -- which killed
+# 01M332MXC7PKM3WWCHCW5WW4QM at 23:07 UTC on 2026-09-21 before step 1, replica 1
+# having scheduled but never readied. Retries are the fix for that, but a retry
+# RESTARTS the command, and olmo-core only resumes when RESUME_FROM is set -- so a
+# mid-run retry silently trains from step 0 again. Default stays 0 for that reason;
+# override to 1 when the run has not started yet and a start-time failure is the
+# risk being managed, then watch the step counter on the retry.
+export MAX_RETRIES="${MAX_RETRIES:-0}"
 export KEEP_LAST_N="${KEEP_LAST_N:-1}"
 export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
 export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${RUN_TAG:-${MODE}}-20260918}"
