@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 04:52Z (was 2026-09-21 04:45Z; details in the latest Log entries).
+Updated 2026-09-21 04:50Z (was 2026-09-21 04:45Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -133,7 +133,7 @@ Updated 2026-09-21 04:52Z (was 2026-09-21 04:45Z; details in the latest Log entr
   Minerva ground truths (identical in the harness's bundled file and in `math-ai/minervamath`,
   272/272 problems matched by text) are in `e` notation. Whether the paper's model answered in a
   grader-friendly form or their pipeline differed is not knowable from the paper. **Sizing the
-  artifact (Log 04:52Z): re-grading the same samples after rewriting `a\times10^{b}` → `aeb`,
+  artifact (Log 04:50Z): re-grading the same samples after rewriting `a\times10^{b}` → `aeb`,
   dropping a single `lhs=` prefix and `\,`/`\pm`, Minerva Avg@8 goes 29.78 → 41.91 (paper
   40.08; 264 of the 1528 misses recover), while the same rewrite moves OlympiadBench only
   45.40 → 46.24 and MATH500 79.45 → 79.70.** So the whole Minerva gap is answer-formatting
@@ -1171,7 +1171,7 @@ lower; it does not affect the per-token statistics above.
   `lhs=`) is running locally to bound the artifact; it does **not** replace the strict number.
 - Watcher re-armed for arm 1 eval 87 and any training-job exit (harness job removed).
 
-### 2026-09-21 04:52Z
+### 2026-09-21 04:50Z
 
 - **Minerva gap sized: it is entirely grader notation.** Lenient re-grade of the harness output
   (`graded.jsonl`, rewrite `a\times10^{b}` → `aeb`, strip a single `lhs=`, `\,`, `\pm`, then the
