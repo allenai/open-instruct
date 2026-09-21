@@ -55,7 +55,8 @@ not inherit its Beaker token. Outputs and snapshots must be on a WEKA mount
 accessible to both jobs. Inherit the main run's W&B entity, project and actual run
 ID; never configure a separate evaluation run.
 
-Generation overrides map to olmo-eval task `sampling_params`; scoring maps to
+Generation overrides map to olmo-eval's flat per-task sampling overrides
+(for example `-o max_tokens=2048`, not a nested `sampling_params` table); scoring maps to
 olmo-eval task overrides (such as `limit`, scorer settings, or formatting).
 Tasks with the same generation settings share a job; distinct settings form
 separate jobs at that update. One HF snapshot serves all groups. A coincident

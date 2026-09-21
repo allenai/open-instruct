@@ -49,7 +49,7 @@ def command(receipt, output):
     for task in receipt["tasks"]:
         args.extend(["--task", task["task"]])
         for key, value in task["generation"].items():
-            args.extend(["-o", f"sampling_params.{key}={value if isinstance(value, str) else json.dumps(value)}"])
+            args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
         for key, value in task["scoring"].items():
             args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     return [*args, "--output-dir", str(output), "--save-predictions", "--save-requests"]

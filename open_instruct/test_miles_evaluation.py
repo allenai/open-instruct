@@ -208,7 +208,7 @@ def test_evaluator_command_keeps_task_overrides(run):
     tasks[0]["scoring"] = {"limit": 2}
     args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": tasks}, "/output")
     assert args[args.index("--model") + 1] == "/frozen/hf"
-    assert "sampling_params.max_tokens=32" in args
+    assert "max_tokens=32" in args
     assert "limit=2" in args
     assert "--save-predictions" in args
 
