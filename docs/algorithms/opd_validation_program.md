@@ -897,3 +897,15 @@ lower; it does not affect the per-token statistics above.
   (W&B runs created after launch only; the first smoke poller matched the 09-18 run of the same
   name, fixed), job-exit waiter on the continuation. Four 8-GPU holmes nodes in use for the
   program (continuation, arm 1, arm 2 EOPD; the smoke node is released).
+
+### 2026-09-21 01:10Z
+
+- **Arm 1 `01M30N24RT0JCCGAXPPG0X4F08` is training** (W&B run `7csinhqe`, group
+  `eopd-opd-qwen3-1.7b-base-math_0f5c0485`): pre-training MATH500 Avg@8 0.1472 for the untrained
+  Qwen3-1.7B-Base (aime24 0.0125, aime25 0.0125, amc23 0.084; 39 % of eval responses hit the
+  8192 cap), first rollout 128 prompts with mean response 776 tokens and 5.5 % truncation at
+  4096, then 4 optimizer steps at `lr-pg_0` 3.0e-6 (cosine over 704 steps; 2.99998e-6 → 2.99987e-6),
+  grad norms 8-11, reverse KL 0.77 → 0.47 inside the first rollout. Nothing unexpected; the
+  paper's OPD baseline reaches 67.8 after 176 rollouts. Evals at rollouts 43 / 87 / 131 / 175.
+- Arm 2 EOPD `01M30P1BP5N6SJVSRJMNMQHN7A` is still queued for a holmes node at 01:10Z
+  (submitted 00:32Z); its watcher waits up to 4 h for the first train step.
