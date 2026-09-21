@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 03:45Z (was 2026-09-21 03:37Z; details in the latest Log entries).
+Updated 2026-09-21 03:43Z (was 2026-09-21 03:37Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -1110,7 +1110,7 @@ lower; it does not affect the per-token statistics above.
   Same approved compute, one 1-GPU job. Watcher re-pointed at it (plus the checkpoint-listing
   job `01M310MBVZJCZ7BVE4RBFMS735`).
 
-### 2026-09-21 03:45Z
+### 2026-09-21 03:43Z
 
 - **`keep_checkpoints` check (read-only CPU job `01M310MBVZJCZ7BVE4RBFMS735`, 03:40Z):** arm 1 root
   `-v2/checkpoints/` holds `iter_0000019`, `iter_0000039` (45G together), `latest_checkpointed_iteration.txt`
