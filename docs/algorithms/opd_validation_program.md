@@ -80,7 +80,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 02:45Z (was 2026-09-21 02:15Z; details in the latest Log entries).
+Updated 2026-09-21 02:38Z (was 2026-09-21 02:15Z; details in the latest Log entries).
 
 - **Status at 2026-09-21 02:15Z (wrapper code overlaid on image `01M2V7V946ZN9N9STPK0H04YWM`):**
   (1) **Arm 2 OPD baseline is complete and clean: the corrected continuation
@@ -971,7 +971,7 @@ lower; it does not affect the per-token statistics above.
   rollout is, why 4 PPO mini-batch steps per rollout, why evals land on ids 43/87/…) after
   Kevin's questions; no code or run-file changes.
 
-### 2026-09-21 02:45Z
+### 2026-09-21 02:38Z
 
 - **Arm 2 OPD baseline finished cleanly.** Continuation `01M30JAV4K6F2F7XQYV1HY0R6N` exited 0 at
   02:36:20Z (job started 23:34Z, 3 h for rollouts 180-219, the 219 eval, save and audit).
