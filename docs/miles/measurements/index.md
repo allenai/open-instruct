@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Router investigation: findings worth keeping](router-findings-20260921.md) | Completed aux-off sweep, routing dose response, causal padding correction, rejected hypotheses, and archived research provenance |
 | [Exploratory gradient noise scale](critical-batch-20260921.md) | Noise-dominated retained-group gradients; corrected uncertainty limits and implications for batch-size experiments |
 | [Online group filtering: small qualification](online-filtering-20260919.md) | Four-update barrier and refresh checks; all-zero/all-one rejection, batch replenishment and checkpoint-cursor audit |
 | [Router controls and standard-example qualification](router-controls-20260918.md) | September 18 image identity; completed dev/small checks and remaining qualification scope |
