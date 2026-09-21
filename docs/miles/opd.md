@@ -99,7 +99,8 @@ fail the run. GSM8K correctness
 is measured separately for evaluation. Thinking is disabled in the prepared
 chat templates. This prototype does not train the vision tower.
 
-The run retains native Megatron checkpoints and HF exports on WEKA. The final
+The run retains native Megatron checkpoints and HF exports on WEKA (set
+`training.keep_checkpoints` to keep only the newest N Megatron saves). The final
 HF export includes the trained language weights and, for Qwen3.5, the unchanged
 base vision/MTP weights. An audit checks teacher-derived advantages, finite nonzero
 gradients, weight changes, and (for Qwen3.5) FP32 `A_log` tensors; a plain language
@@ -184,7 +185,11 @@ schema accepts:
   `num_rollouts * optimizer_steps_per_rollout` optimizer steps.
   `training.loss_aggregation` (`response`, the Miles default per-response mean, or `token`,
   verl's `token-mean` over the mini-batch via `--calculate-per-token-loss`; the EOPD
-  replication specs use `token`).
+  replication specs use `token`). `training.keep_checkpoints` (default `0`, keep all):
+  after each save Miles's post-save hook (`open_instruct.miles.opd_retention.post_save`)
+  removes the oldest completed `checkpoints/iter_*` directories beyond the newest N; the HF
+  exports and the data cursors stay, and the setting is not part of the run fingerprint, so
+  it may be changed on a resume. A 4B save is ~50 GB of weights and optimizer state.
 - `optimizer.learning_rate`, `optimizer.lr_decay_style` (`constant`, `cosine`,
   `linear`; anything but `constant` sets `--lr-decay-iters` to the total number
   of optimizer steps), `optimizer.lr_warmup_iters` and `optimizer.min_lr`;

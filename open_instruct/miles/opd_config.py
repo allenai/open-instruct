@@ -47,6 +47,7 @@ OWNED_NATIVE_OPTIONS = {
     "dump_details": "output.root",
     "wandb_dir": "output.root",
     "save_interval": "training.save_interval",
+    "custom_megatron_post_save_hook_path": "training.keep_checkpoints",
     "num_rollout": "training.num_rollouts",
     "eval_interval": "training.eval_interval",
     "global_batch_size": "training.optimizer_steps_per_rollout",
@@ -127,6 +128,9 @@ DEFAULTS = {
         # this, so 4 gives the paper-style "batch 128, mini-batch 32" PPO schedule.
         "optimizer_steps_per_rollout": 1,
         "loss_aggregation": "response",
+        # Megatron checkpoints to retain (0 keeps every save). Each 4B save is ~50 GB of
+        # optimizer state; a resume only needs the newest. HF exports and data cursors stay.
+        "keep_checkpoints": 0,
     },
     "trainer": {"backend": "megatron", "gpus": 2, "tensor_parallel_size": 2},
     "inference": {
@@ -257,6 +261,7 @@ class OPDRunSpec:
             for key in keys:
                 validation.integer(document[section][key], f"{section}.{key}")
         validation.integer(document["training"]["eval_interval"], "training.eval_interval", minimum=0)
+        validation.integer(document["training"]["keep_checkpoints"], "training.keep_checkpoints", minimum=0)
         validation.integer(
             document["inference"]["eval_max_response_length"], "inference.eval_max_response_length", minimum=0
         )

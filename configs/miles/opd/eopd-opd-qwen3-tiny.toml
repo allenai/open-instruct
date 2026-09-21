@@ -3,7 +3,9 @@
 # optimizer steps (global batch 2), cosine LR, sampled evaluation (4 samples, top-p 1.0,
 # 512 tokens) on the 30 AIME24 prompts. Exercises the upstream qwen3-1.7B Megatron profile,
 # the Qwen3 HF conversion, SGLang teacher scoring, the multi-step schedule and the audit
-# (num_rollouts x optimizer_steps_per_rollout optimizer steps) on one 8-GPU node.
+# (num_rollouts x optimizer_steps_per_rollout optimizer steps) on one 8-GPU node. Since
+# 2026-09-21 it runs the paper-fidelity path of the full arms (trainer-side student
+# log-probs, token-mean loss); root v8 was the rollout-log-prob variant.
 schema_version = 1
 name = "eopd-opd-qwen3-tiny"
 
@@ -24,6 +26,7 @@ num_rollouts = 3
 save_interval = 3
 eval_interval = 3
 optimizer_steps_per_rollout = 4
+loss_aggregation = "token"
 
 [trainer]
 backend = "megatron"
@@ -46,7 +49,7 @@ eval_samples_per_prompt = 4
 
 [distillation]
 kl_coef = 1.0
-use_rollout_logprobs = true
+use_rollout_logprobs = false
 
 [optimizer]
 learning_rate = 3e-6
@@ -55,7 +58,7 @@ lr_warmup_iters = 0
 min_lr = 0.0
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-tiny-v8"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-tiny-v9"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]

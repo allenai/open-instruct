@@ -29,11 +29,15 @@ def write_json(path, document):
 
 
 def fingerprint(document):
-    # An empty [miles] passthrough table changes nothing about the run; leaving it out keeps
-    # run roots written before the table existed (Miles a3a0d5f9c) resumable. Other callers
-    # hash lists (architecture arguments, tokenizer files), which pass through unchanged.
+    # The run identity excludes settings that change nothing about what is trained: an empty
+    # [miles] passthrough table (run roots written before the table existed, Miles a3a0d5f9c,
+    # stay resumable) and checkpoint retention (training.keep_checkpoints only decides how many
+    # Megatron saves stay on disk, so it may be tightened on a resume). Other callers hash lists
+    # (architecture arguments, tokenizer files), which pass through unchanged.
     if isinstance(document, dict):
         document = {key: value for key, value in document.items() if not (key == "miles" and value == {})}
+        if isinstance(document.get("training"), dict) and "keep_checkpoints" in document["training"]:
+            document["training"] = {k: v for k, v in document["training"].items() if k != "keep_checkpoints"}
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 

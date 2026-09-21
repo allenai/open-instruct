@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles import eopd_math, opd_prepare, options, workflow
+from open_instruct.miles import eopd_math, opd_prepare, opd_retention, options, workflow
 from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
@@ -169,6 +169,10 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
     if optimizer["lr_decay_style"] != "constant":
         # Megatron schedules over optimizer iterations, not rollouts.
         values["lr-decay-iters"] = training["num_rollouts"] * optimizer_steps
+    if training["keep_checkpoints"]:
+        # training.keep_checkpoints: Miles calls the hook on rank 0 after each save and its HF
+        # export; it retains the newest OI_OPD_KEEP_CHECKPOINTS Megatron saves (opd_retention).
+        values["custom-megatron-post-save-hook-path"] = opd_retention.POST_SAVE_HOOK
     if training["resume"] and (root / "checkpoints" / "latest_checkpointed_iteration.txt").exists():
         # Megatron restores weights, optimizer and RNG from the newest iteration and Miles
         # restores the data cursor from checkpoints/rollout, then continues at the next
@@ -258,6 +262,7 @@ def execute(spec):
                 "OI_OPD_OUTPUT": str(root),
                 "OI_OPD_REWARD_CONFIG": prepared["data"]["reward_config"],
                 "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
+                opd_retention.KEEP_ENV: str(spec.document["training"]["keep_checkpoints"]),
                 "CONVERT_KEEP_PP1": "1",
                 **eopd_settings(spec).environment(),
                 **(

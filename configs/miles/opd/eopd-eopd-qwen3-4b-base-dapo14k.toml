@@ -1,26 +1,20 @@
-# EOPD (arXiv 2603.07079) plain-OPD baseline, setting 1: Qwen3-1.7B-Base student distilled
-# from Qwen3-8B on the MATH training set. Paper Appendix A: batch 128 prompts x 1 sample, PPO
-# mini-batch 32 (4 optimizer steps per rollout), LR 3e-6 cosine, 4096-token responses,
-# rollout temperature 1.0, 3 epochs (7,500 prompts -> 176 rollouts), kl_coef 1.0, PPO clip
-# 0.2 (Miles default). Training top-p 1.0 (Table 9, Qwen). Evaluation matches the paper
-# (Sec. 5.1 and App. C): temperature 1.0, top-p 0.8, 8192 tokens, 8 samples per prompt (eval/<set>
-# = Avg@8) on
-# MATH-500, AIME24, AIME25 and AMC23 in-run; the full six-benchmark Avg@8 / Pass@8 table is
-# produced post hoc from the HF exports. Paper OPD-baseline target: MATH-500 Avg@8 67.76,
-# Pass@8 84.80. One 8-GPU node: 4 trainer TP2 / 3 student SGLang / 1 teacher SGLang.
-# Matched to the authors' verl code (github.com/WLS04/EOPD): the student side of the advantage
-# is the trainer's pre-update log-prob (use_rollout_logprobs = false), the loss is token-mean
-# (loss_aggregation = "token"), AdamW weight decay 0.01 with betas 0.9/0.999 (verl defaults),
-# training prompts carry their preprocessing suffix "Let's think step by step and output the
-# final answer within \boxed{}." (eopd-math-v2-train) while evaluation keeps App. C's
-# "Please reason step by step, ..." (eopd-math-v1), and a terminal <|endoftext|> is scored as
-# the teacher's <|im_end|> (their _replace_eos_token_for_teacher).
+# EOPD (arXiv 2603.07079), setting 2, the paper's method: Qwen3-4B-Base student distilled
+# from Qwen3-8B on DAPO-Math-14k with the entropy-gated forward-KL term on top of sampled-token
+# OPD. Identical to eopd-opd-qwen3-4b-base-dapo14k.toml (the matched OPD baseline: batch 128
+# prompts x 1 sample, PPO mini-batch 32, LR 3e-6 cosine, 4096-token responses, T 1.0, 2 epochs
+# = 220 rollouts, kl_coef 1.0, token-mean loss, verl AdamW, trainer-side student log-probs,
+# eos remap) except distillation.eopd: alpha 1.0, tau 0.8, k 16 (paper Sec. 4 / App. A; the
+# authors' README launch config says k 32). Gate = 1[H(renormalised teacher top-k) > tau], FKL
+# over the teacher's top-k with the student at its full-vocabulary probability (Eq. 9-10).
+# Paper deltas over the OPD baseline at 4B: +1.80 Avg@8 / +5.05 Pass@8 averaged over six
+# benchmarks; MATH-500 OPD baseline 78.81 Avg@8 (ours 78.475, run root -v3).
+# One 8-GPU node: 4 trainer TP2 / 3 student SGLang / 1 teacher SGLang.
 # Data: scripts/miles/prepare_eopd_math_prompts.py (see docs/miles/opd.md).
 schema_version = 1
-name = "eopd-opd-qwen3-1.7b-base-math"
+name = "eopd-eopd-qwen3-4b-base-dapo14k"
 
 [model]
-source = "Qwen/Qwen3-1.7B-Base"
+source = "Qwen/Qwen3-4B-Base"
 align_eos_with_teacher = true
 
 [teacher]
@@ -33,7 +27,7 @@ startup_timeout = 1800
 [training]
 resume = true
 algorithm = "opd"
-num_rollouts = 176
+num_rollouts = 220
 save_interval = 20
 eval_interval = 44
 optimizer_steps_per_rollout = 4
@@ -63,6 +57,10 @@ eval_samples_per_prompt = 8
 [distillation]
 kl_coef = 1.0
 use_rollout_logprobs = false
+eopd = true
+eopd_alpha = 1.0
+eopd_tau = 0.8
+eopd_top_k = 16
 
 [optimizer]
 learning_rate = 3e-6
@@ -74,12 +72,12 @@ adam_beta1 = 0.9
 adam_beta2 = 0.999
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-opd-qwen3-1.7b-base-math-v2"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-eopd-qwen3-4b-base-dapo14k-v1"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]
 seed = 42
-prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v2-train/math_train.jsonl"
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v2-train/dapo_math_14k.jsonl"
 eval_prompt_data = [
   "math_500", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/math_500.jsonl",
   "aime24", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/eopd-math-v1/aime24.jsonl",

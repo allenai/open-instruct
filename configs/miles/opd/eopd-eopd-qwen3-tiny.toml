@@ -2,6 +2,8 @@
 # schedule and evaluation) with distillation.eopd on, so the teacher top-k request, the
 # metadata path into the Megatron train step, the custom loss (upstream policy loss plus
 # alpha * 1[H > tau] * FKL over the teacher top-16) and the EOPD audit are exercised on one node.
+# Root v1 passed on the rollout-log-prob path (2026-09-18); v2 is the paper-fidelity path the
+# full arms use (trainer-side student log-probs, token-mean loss) with EOPD on top.
 schema_version = 1
 name = "eopd-eopd-qwen3-tiny"
 
@@ -22,6 +24,7 @@ num_rollouts = 3
 save_interval = 3
 eval_interval = 3
 optimizer_steps_per_rollout = 4
+loss_aggregation = "token"
 
 [trainer]
 backend = "megatron"
@@ -44,7 +47,7 @@ eval_samples_per_prompt = 4
 
 [distillation]
 kl_coef = 1.0
-use_rollout_logprobs = true
+use_rollout_logprobs = false
 eopd = true
 eopd_alpha = 1.0
 eopd_tau = 0.8
@@ -57,7 +60,7 @@ lr_warmup_iters = 0
 min_lr = 0.0
 
 [output]
-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-eopd-qwen3-tiny-v1"
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/runs/eopd-eopd-qwen3-tiny-v2"
 assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets"
 
 [data]

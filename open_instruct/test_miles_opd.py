@@ -18,6 +18,7 @@ from open_instruct.miles import (
     opd_config,
     opd_launch,
     opd_prepare,
+    opd_retention,
     opd_runtime,
     options,
     rewards,
@@ -561,3 +562,37 @@ def test_eopd_tiny_smoke_config_mirrors_the_opd_tiny_run():
     for section in ("model", "teacher", "training", "trainer", "inference", "optimizer", "data"):
         assert eopd[section] == opd[section], section
     assert eopd["output"]["root"] != opd["output"]["root"]
+
+
+def test_keep_checkpoints_installs_the_post_save_hook_without_changing_the_run_identity():
+    values, _ = native(specs.load(CONFIG))
+    assert "--custom-megatron-post-save-hook-path" not in values
+    spec = specs.load(CONFIG, ["training.keep_checkpoints=2"])
+    values, _ = native(spec)
+    assert values["--custom-megatron-post-save-hook-path"] == opd_retention.POST_SAVE_HOOK
+    # Retention decides what stays on disk, not what is trained: an existing run root still
+    # resumes after the knob is added or tightened.
+    assert workflow.fingerprint(spec.to_dict()) == workflow.fingerprint(specs.load(CONFIG).to_dict())
+    with pytest.raises(InputError, match="nonnegative integer"):
+        specs.load(CONFIG, ["training.keep_checkpoints=-1"])
+
+
+def test_prune_checkpoints_keeps_the_newest_completed_iterations(tmp_path, monkeypatch):
+    save_root = tmp_path / "checkpoints"
+    for iteration in (19, 39, 59, 79, 99):
+        (save_root / f"iter_{iteration:07d}").mkdir(parents=True)
+        (save_root / f"iter_{iteration:07d}" / "model.pt").write_bytes(b"x")
+    (save_root / "rollout").mkdir()
+    # Without the marker nothing is known to be complete.
+    assert opd_retention.prune_checkpoints(save_root, 2) == []
+    (save_root / "latest_checkpointed_iteration.txt").write_text("79\n")
+    removed = opd_retention.prune_checkpoints(save_root, 2)
+    assert [path.name for path in removed] == ["iter_0000019", "iter_0000039"]
+    # iter_0000099 is newer than the marker (a save in progress) and is never touched.
+    assert sorted(path.name for path in save_root.glob("iter_*")) == ["iter_0000059", "iter_0000079", "iter_0000099"]
+    assert opd_retention.prune_checkpoints(save_root, 0) == []
+    assert opd_retention.prune_checkpoints(save_root, 2) == []
+    monkeypatch.setenv(opd_retention.KEEP_ENV, "1")
+    opd_retention.post_save(None, 79, str(save_root / "iter_0000079"), None)
+    assert sorted(path.name for path in save_root.glob("iter_*")) == ["iter_0000079", "iter_0000099"]
+    assert (save_root / "rollout").is_dir()
