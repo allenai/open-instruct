@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `--reserved_slot_tokens`, which makes a multi-token tag a single token by renaming unused `<|extra_id_N|>` vocabulary entries in place. `<think>` is `<th` `ink` `>` in the Olmo vocabularies and the BPE merges that `>` forward (`>\n`, `>\n\n` and `></` are each one token), so a generation prompt ending in `<think>` cannot produce the first token of a turn whose reasoning starts on the next line (27% of Dolci-Think traces) or whose think block is empty (every Instruct turn under the olmo35 template). Renaming a reserved slot rather than appending leaves `vocab_size` and olmo-core's `padded_vocab_size()` unchanged, so no checkpoint is resized; `finetune.py` seeds each promoted row with the mean of its pieces. Unset by default, which keeps existing dataset cache keys (PR_URL).
 - `mason.py --extra_weka_buckets` mounts additional WEKA buckets at `/weka/<bucket>`, so jobs can reach checkpoints outside `oe-adapt-default` and `oe-training-default` (e.g. `olmo-3p5-checkpoints`) (https://github.com/allenai/open-instruct/pull/1897).
 - Olmo-core SFT runs write a provenance `README.md` into `output_dir` (run name, base model, Beaker/W&B pointers, launch command, optional `--sft.tracking_url`), so checkpoint directories copied around WEKA stay traceable to their run (https://github.com/allenai/open-instruct/pull/1872).
 - Detect olmo-core checkpoints by config contents, and let mason pass a GCS credential to jobs (https://github.com/allenai/open-instruct/pull/1838).
