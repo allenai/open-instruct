@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from open_instruct import logger_utils
+from open_instruct.miles import evaluation
 from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
@@ -212,8 +213,9 @@ def parse_runtime(config):
     return args
 
 
-def train_config(config, *, export_hf=None):
+def train_config(config, *, export_hf=None, background_evaluation=None):
     args = parse_runtime(config)
+    args.background_evaluation = background_evaluation
     os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
     driver = importlib.import_module("open_instruct.miles.driver")
     return asyncio.run(driver.train(args, export_hf=export_hf))
@@ -294,7 +296,15 @@ def execute(spec):
         write_json(root / "resolved-plan.json", config.plan())
         state.update(status="training", training_started_unix=time.time())
         write_json(root / "workflow.json", state)
-        result = train_config(config, export_hf=spec.output["hf_dir"] if spec.output["export_hf"] else None)
+        result = train_config(
+            config,
+            export_hf=spec.output["hf_dir"] if spec.output["export_hf"] else None,
+            **(
+                {"background_evaluation": evaluation.runtime(spec, config.miles)}
+                if spec.evaluation["mode"] == "background"
+                else {}
+            ),
+        )
         # A deliberate debug exit is successful execution, not a completed run.
         completed = result.get("completed_rollout_ids") if result else None
         complete = completed is None or (

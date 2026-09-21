@@ -69,6 +69,10 @@ def specification(image, spec, *, hostnames=None):
             )
 
     check_mounts(spec.to_dict())
+    if spec.evaluation["mode"] == "background" and not any(
+        Path(spec.output["root"]).is_relative_to(mount["mount_path"]) for mount in mounts
+    ):
+        raise InputError("Background evaluation requires output.root on shared launch.weka_mounts")
     sensitive = [
         name
         for name in spec.launch["env"]
@@ -168,7 +172,9 @@ def collect_results(root, destination):
         # Checkpoint tensor trees and HF descriptors can contain tens of
         # thousands of files. Retain their parent completion manifests only.
         dirs[:] = sorted(
-            name for name in dirs if name not in {"hf", "export-hf", "model"} and not name.startswith(".")
+            name
+            for name in dirs
+            if name not in {"hf", "export-hf", "eval-snapshots", "model"} and not name.startswith(".")
         )
         for name in sorted(files):
             path = Path(directory) / name

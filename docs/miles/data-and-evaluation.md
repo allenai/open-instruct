@@ -140,3 +140,9 @@ ordinary incorrect answers. Set `OI_MILES_MATH_TIMEOUT_POLICY=raise` for strict
 qualification. Configuration errors, unexpected worker failures and cancellation
 still propagate. A timeout-zero is an ungraded sample, not evidence of a wrong
 mathematical answer; include the timeout rate when interpreting benchmark scores.
+
+## Independent background evaluation
+
+For best-effort external olmo-eval jobs and checkpoint-axis W&B curves, see
+[background evaluation](background-evaluation.md). Selecting this mode replaces
+shared-engine evaluation; failed or skipped jobs leave gaps without blocking training.

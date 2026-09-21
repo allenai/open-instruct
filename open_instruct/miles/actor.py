@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from open_instruct.miles import (
     contract,
     data,
     engine_delivery,
+    evaluation,
     expert_schedule,
     models,
     packing,
@@ -423,6 +425,9 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 raise
             self.clock.optimizer_step(True)
             self.lr_scheduler.step()
+            background = getattr(self.args, "background_evaluation", None)
+            if background and evaluation.groups(background, self.clock.completed_steps, background["total_updates"]):
+                self.capture_evaluation_snapshot(rollout_id, background)
             update_stats = self._agree(probe.updates) if probe is not None else None
             logger.info(
                 "Core step contract: %s",
@@ -671,19 +676,41 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             ray.get(pending)
         updater._model_update_groups = None
 
+    def capture_evaluation_snapshot(self, rollout_id, config):
+        target = evaluation.snapshot(config["root"], self.clock.completed_steps)
+        # All ranks make the same decision; a failed collective/export propagates.
+        exists = [target.exists() if dist.get_rank() == 0 else None]
+        dist.broadcast_object_list(exists, src=0)
+        if not exists[0]:
+            self.export_hf(rollout_id, str(target))
+            if dist.get_rank() == 0:
+                logger.info(
+                    "Background evaluation snapshot complete: update=%s path=%s", self.clock.completed_steps, target
+                )
+        elif dist.get_rank() == 0 and not (target / HF_EXPORT_COMPLETE_MARKER).is_file():
+            logger.warning("BACKGROUND EVALUATION GAP: incomplete snapshot retained at %s", target)
+
     def export_hf(self, rollout_id, path):
         state = models.export_state(self.train_module, self.hf_config)
-        if dist.get_rank() == 0:
+
+        def write_snapshot():
+            if dist.get_rank() != 0:
+                return
             target = Path(path)
             target.mkdir(parents=True, exist_ok=False)
             models.save_hf_config(self.hf_config, target)
             AutoTokenizer.from_pretrained(self.args.hf_checkpoint).save_pretrained(target)
+            for name in ("chat_template.jinja", "generation_config.json"):
+                source = Path(self.args.hf_checkpoint) / name
+                if source.is_file():
+                    shutil.copyfile(source, target / name)
             safetensors_torch.save_file(
                 {name: value.detach().cpu().contiguous().clone() for name, value in state.items()},
                 target / "model.safetensors",
             )
             (target / HF_EXPORT_COMPLETE_MARKER).touch()
-        dist.barrier()
+
+        self._agree(write_snapshot)
 
     def sleep(self, tags=None):
         raise NotImplementedError("Core trainer offload is not qualified; use --no-offload-train")

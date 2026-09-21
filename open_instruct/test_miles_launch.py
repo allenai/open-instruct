@@ -65,10 +65,17 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     assert task["context"]["minRuntime"] == "1h"
 
 
-def test_multinode_auto_resume_requires_qualification(tmp_path):
-    run = spec(tmp_path, inference={"placement_mode": "disaggregated", "gpus": 2}, launch={"gpus_per_replica": 3})
-    with pytest.raises(ValueError, match="auto_resume=false"):
-        launch.specification(IMAGE_ID, run)
+def test_multinode_explicit_hostname_pools(tmp_path):
+    run = spec(
+        tmp_path,
+        trainer={"gpus": 2},
+        inference={"placement_mode": "disaggregated", "gpus": 2},
+        launch={"gpus_per_replica": 3},
+    )
+    tasks = launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b"])["tasks"]
+    assert len(tasks) == 2
+    assert tasks[0]["constraints"]["hostname"] == ["host-a"]
+    assert tasks[1]["constraints"]["hostname"] == ["host-b"]
 
 
 @pytest.mark.parametrize("section", ["data", "conversion", "compiler_cache", "miles"])

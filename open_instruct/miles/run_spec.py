@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles import async_capacity, judging, options, run_data, topology, validation
+from open_instruct.miles import async_capacity, evaluation, judging, options, run_data, topology, validation
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.errors import InputError
 
@@ -166,6 +166,7 @@ class RunSpec:
     core: dict[str, Any]
     miles: dict[str, Any]
     judges: dict[str, Any]
+    evaluation: dict[str, Any]
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -193,6 +194,7 @@ class RunSpec:
             "judges",
             "rubrics",
             "judging",
+            "evaluation",
         }
         if set(document) & {"validation", "conversion_validation"}:
             raise InputError(
@@ -252,6 +254,7 @@ class RunSpec:
             _table(document, "core", CORE_FIELDS),
             _table(document, "miles"),
             judging.parse(document),
+            evaluation.parse(_table(document, "evaluation"), launch),
         )
         result.compile()
         return result
@@ -267,6 +270,7 @@ class RunSpec:
             "launch": self.launch,
             "conversion": self.conversion,
             "compiler_cache": self.compiler_cache,
+            **({"evaluation": self.evaluation} if self.evaluation["mode"] == "background" else {}),
             **self.sections,
             "core": self.core,
             "miles": self.miles,
@@ -694,22 +698,41 @@ class RunSpec:
             if target in origins and values[target.split(".")[0]][key] != value:
                 raise InputError(f"{target} conflicts with workflow preparation; set model/data fields instead")
             values[target.split(".")[0]][key] = value
-        eval_data = prepared.get("eval_prompt_data", self.data.get("eval_prompt_data"))
-        if eval_data is None and (
-            "tasks" not in self.data or any(task.get("eval_count") for task in self.data["tasks"])
-        ):
-            eval_data = ["heldout", str(root / "prepared" / "data" / "eval.jsonl")]
-        if eval_data:
-            put("miles.eval_prompt_data", eval_data, "data.eval_prompt_data")
-            miles.setdefault("eval_interval", 20)
-            miles.setdefault("skip_eval_before_train", False)
-            miles.setdefault("eval_temperature", 0.0)
-            miles.setdefault("n_samples_per_eval_prompt", 1)
-            miles.setdefault("eval_max_response_len", response)
-        elif miles.get("eval_interval") is not None:
-            raise InputError(
-                "eval_interval requires prepared held-out data; set data.tasks[].eval_count or data.eval_prompt_data, or remove eval_interval."
-            )
+        if self.evaluation["mode"] == "background":
+            conflicts = [
+                key
+                for key in origins
+                if key.startswith("miles.eval_")
+                or key in {"miles.skip_eval_before_train", "miles.n_samples_per_eval_prompt"}
+            ]
+            if (
+                conflicts
+                or self.data.get("eval_prompt_data")
+                or any(task.get("eval_count") for task in self.data.get("tasks", []))
+            ):
+                raise InputError(
+                    f"background evaluation conflicts with shared-engine evaluation: {conflicts or 'data held-out evaluation'}"
+                )
+            miles.pop("eval_prompt_data", None)
+            miles.pop("eval_interval", None)
+            miles["skip_eval_before_train"] = True
+        else:
+            eval_data = prepared.get("eval_prompt_data", self.data.get("eval_prompt_data"))
+            if eval_data is None and (
+                "tasks" not in self.data or any(task.get("eval_count") for task in self.data["tasks"])
+            ):
+                eval_data = ["heldout", str(root / "prepared" / "data" / "eval.jsonl")]
+            if eval_data:
+                put("miles.eval_prompt_data", eval_data, "data.eval_prompt_data")
+                miles.setdefault("eval_interval", 20)
+                miles.setdefault("skip_eval_before_train", False)
+                miles.setdefault("eval_temperature", 0.0)
+                miles.setdefault("n_samples_per_eval_prompt", 1)
+                miles.setdefault("eval_max_response_len", response)
+            elif miles.get("eval_interval") is not None:
+                raise InputError(
+                    "eval_interval requires prepared held-out data; set data.tasks[].eval_count or data.eval_prompt_data, or remove eval_interval."
+                )
         if "miles.wandb_mode" in origins and "miles.use_wandb" not in origins:
             miles["use_wandb"] = miles.get("wandb_mode") != "disabled"
         for key in PATH_OPTIONS:
@@ -739,6 +762,7 @@ class RunSpec:
             "launch": self.launch,
             "compiler_cache": self.compiler_cache,
             "runtime": runtime,
+            "evaluation": evaluation.plan(self, self.compile().miles),
             **self.judges,
             "allocation": topology.plan(self),
             "runtime_validated": False,

@@ -3,14 +3,17 @@
 import asyncio
 import os
 
+import wandb
 from miles.ray import placement_group
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
 from miles.utils.data import remove_rollout_data_refs
+from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles import evaluation as background_eval
 from open_instruct.miles import startup_cache, throughput
 from open_instruct.miles.rolling_publication import RollingPublication
 from open_instruct.miles.timing import evaluation_stage, stage
@@ -83,8 +86,35 @@ async def train(args, *, export_hf=None):
             rolling = RollingPublication(args, learner, manager)
             with stage(args, "engine_drain_startup"):
                 await rolling.initialize()
-        evaluation = EvalDispatcher(args, learner, manager)
-        if args.eval_interval is not None and not args.skip_eval_before_train:
+        background = getattr(args, "background_evaluation", None)
+        evaluation = None if background else EvalDispatcher(args, learner, manager)
+        coordinator = None
+        if background:
+            tracking = {
+                "id": getattr(args, "wandb_run_id", None),
+                "entity": args.wandb_team,
+                "project": args.wandb_project,
+                "mode": args.wandb_mode,
+            }
+            if args.use_wandb and wandb.run is not None:
+                tracking.update(
+                    id=wandb.run.id,
+                    entity=wandb.run.entity,
+                    project=wandb.run.project,
+                    mode="offline" if wandb.run.settings.mode in {"offline", "dryrun"} else "online",
+                )
+            coordinator = background_eval.Coordinator(
+                background,
+                {
+                    "name": background["name"],
+                    "root": background["root"],
+                    "wandb": tracking,
+                    "beaker_experiment_id": os.environ.get("BEAKER_EXPERIMENT_ID"),
+                },
+            )
+            if args.start_rollout_id == 0 and background["initial"]:
+                coordinator.dispatch(0, args.hf_checkpoint)
+        if evaluation is not None and args.eval_interval is not None and not args.skip_eval_before_train:
             with evaluation_stage(args, args.start_rollout_id, initial=True):
                 await evaluation.dispatch(
                     args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
@@ -100,6 +130,12 @@ async def train(args, *, export_hf=None):
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
+                if coordinator is not None:
+                    per_collection = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
+                    for update in range(rollout_id * per_collection + 1, (rollout_id + 1) * per_collection + 1):
+                        target = background_eval.snapshot(background["root"], update)
+                        if (target / HF_EXPORT_COMPLETE_MARKER).is_file():
+                            coordinator.dispatch(update, target)
                 if rolling is not None:
                     await rolling.optimizer_step_completed()
             finally:
@@ -131,7 +167,9 @@ async def train(args, *, export_hf=None):
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)
-            if should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout):
+            if evaluation is not None and should_run_periodic_action(
+                rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout
+            ):
                 with evaluation_stage(args, rollout_id):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if (
@@ -139,7 +177,8 @@ async def train(args, *, export_hf=None):
                 and rollout_id - args.start_rollout_id + 1 >= args.debug_exit_after_rollout
             ):
                 break
-        await evaluation.drain()
+        if evaluation is not None:
+            await evaluation.drain()
         # A deliberate debug stop leaves a resumable workflow, not a final export.
         # Otherwise the first process creates the final directory and the resumed
         # process cannot export its newer weights there (the exporter is exclusive).

@@ -1,0 +1,12 @@
+# Build on a qualified MILES image to retain Olmo MoE SGLang architecture support.
+# The independent CPU eval environment avoids changing serving's torch/transformers.
+ARG SERVING_IMAGE
+FROM ${SERVING_IMAGE}
+ARG OLMO_EVAL_REVISION=55461d9bf09c6ff7027d7a977f4ae45b8a07bbcf
+RUN git clone https://github.com/allenai/olmo-eval.git /opt/olmo-eval \
+    && git -C /opt/olmo-eval checkout --detach ${OLMO_EVAL_REVISION} \
+    && test "$(git -C /opt/olmo-eval rev-parse HEAD)" = "${OLMO_EVAL_REVISION}"
+RUN cd /opt/olmo-eval \
+    && UV_PROJECT_ENVIRONMENT=/opt/evaluator-venv uv sync --frozen --no-default-groups --extra clients --extra hf
+# Keep `python` pointing to serving's interpreter; only olmo-eval uses this venv.
+RUN ln -s /opt/evaluator-venv/bin/olmo-eval /usr/local/bin/olmo-eval

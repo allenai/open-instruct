@@ -10,6 +10,8 @@ RUN python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sour
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 
 FROM runtime-base AS application
+# The background evaluator submitter runs in an isolated, deadline-bounded process.
+RUN uv pip install --system beaker-py==2.5.7
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 COPY open_instruct /opt/core-rl/open_instruct

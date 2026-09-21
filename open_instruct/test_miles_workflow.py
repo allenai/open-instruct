@@ -19,6 +19,7 @@ class Spec:
         self.output = {"root": str(root), "export_hf": True, "hf_dir": str(root / "export")}
         self.launch = {"auto_resume": True}
         self.data = {"tasks": [{"task": "multiplication", "train_count": 1}]}
+        self.evaluation = {"mode": "shared"}
         self.judges = {"judging": {"bindings": {}}}
 
     def to_dict(self):
@@ -59,6 +60,8 @@ def test_template_directory_never_writes_through_source_links(spec, tmp_path, mo
     before = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
 
     class Tokenizer:
+        chat_template = "replacement template"
+
         def save_pretrained(self, staging):
             (staging / "tokenizer.json").write_text("replacement vocab")
             (staging / "tokenizer_config.json").write_text("replacement config")
@@ -181,6 +184,8 @@ def test_template_directory_removes_stale_standalone_template(spec, tmp_path, mo
     spec.model["hf_template"] = str(template)
 
     class Tokenizer:
+        chat_template = "replacement template"
+
         def save_pretrained(self, staging):
             (staging / "tokenizer_config.json").write_text('{"chat_template":"replacement"}')
 
