@@ -712,7 +712,7 @@ class TestChatTemplateResolution(unittest.TestCase):
         self.assertEqual(none_template, default_template)
         self.assertNotEqual(default_template, open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_chat"])
 
-    @mock.patch("open_instruct.dataset_transformation.AutoTokenizer.from_pretrained")
+    @mock.patch("open_instruct.tokenizer_utils.AutoTokenizer.from_pretrained")
     def test_tokenizer_default_and_none_do_not_require_add_bos_for_olmo_gpt_neox(self, from_pretrained):
         for chat_template_name in (None, "tokenizer_default"):
             with self.subTest(chat_template_name=chat_template_name):
