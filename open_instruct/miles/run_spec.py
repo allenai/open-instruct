@@ -348,6 +348,7 @@ class RunSpec:
             "priority",
             "min_runtime",
             "auto_resume",
+            "max_retries",
             "shared_memory",
             "gpus_per_replica",
             "weka_mounts",
@@ -365,6 +366,7 @@ class RunSpec:
             priority="urgent",
             min_runtime="1h",
             auto_resume=True,
+            max_retries=-1,
             shared_memory="200 GiB",
             timeout="3h",
         )
@@ -380,6 +382,11 @@ class RunSpec:
         if launch["priority"] not in ("low", "normal", "high", "urgent"):
             raise InputError("launch.priority must be low, normal, high or urgent")
         _boolean(launch["auto_resume"], "launch.auto_resume")
+        if type(launch["max_retries"]) is not int or launch["max_retries"] < -1:
+            raise InputError(
+                "launch.max_retries must be -1 for no cap, or the number of automatic restarts to allow; "
+                f"got {launch['max_retries']!r}."
+            )
         if "gpus_per_replica" in launch:
             _positive(launch["gpus_per_replica"], "launch.gpus_per_replica")
         for key in ("env", "secrets"):

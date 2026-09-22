@@ -47,8 +47,34 @@ def recovery_configuration_matches(root, previous, document):
     recorded = json.loads(path.read_text())
     if fingerprint(recorded) != previous["spec_sha256"]:
         return False
-    recorded.setdefault("launch", {})["auto_resume"] = document["launch"]["auto_resume"]
+    for key in ("auto_resume", "max_retries"):
+        if key in document["launch"]:
+            recorded.setdefault("launch", {})[key] = document["launch"][key]
     return recorded == document
+
+
+def record_attempt(root, limit):
+    """Append this start to the run's attempt ledger, refusing once the cap is reached.
+
+    Beaker restarts a preempted task without limit, so a run that is preempted before it
+    can save advances nothing and restarts forever. Each restart is a fresh process with
+    no memory of the last, so the ledger on the shared filesystem is the only thing that
+    can count them.
+
+    `limit` counts *retries*, so the first start is never refused and -1 disables the cap.
+    It counts every restart, including ones that made progress; a cap on unproductive
+    restarts alone would need the checkpoint state, which is not resolved this early.
+    """
+    path = Path(root) / "attempts.json"
+    attempts = json.loads(path.read_text()) if path.is_file() else []
+    if limit >= 0 and len(attempts) > limit:
+        raise InputError(
+            f"Run reached launch.max_retries={limit} after {len(attempts)} starts: {root}. "
+            "Raise launch.max_retries to allow more, or choose a new output.root."
+        )
+    attempts.append(dict(attempt=len(attempts), started_unix=time.time()))
+    write_json(path, attempts)
+    return attempts
 
 
 def model_identity(source):
@@ -246,7 +272,10 @@ def run_directory(spec):
                     f"Run already exists and launch.auto_resume is false: {root}. "
                     "Set launch.auto_resume=true to resume, or choose a new output.root."
                 )
-        state = dict(spec_sha256=identity, status="preparing", started_unix=time.time())
+        # Runs recorded before this field existed carry no cap, and resuming one must not
+        # depend on the field being present in the older specification.
+        attempts = record_attempt(root, spec.launch.get("max_retries", -1))
+        state = dict(spec_sha256=identity, status="preparing", started_unix=time.time(), attempt=len(attempts) - 1)
         write_json(root / "run-spec.json", document)
         write_json(root / "plan.json", spec.plan())
         write_json(path, state)

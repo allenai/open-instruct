@@ -188,6 +188,10 @@ def test_repeatable_toml_overrides_before_compilation(tmp_path):
         ({"inference": {"max_response_length": 6144, "max_context_length": 6144}}, "smaller"),
         ({"trainer": {"gpus": True}}, "expects int"),
         ({"launch": {"priority": "urgent", "auto_resume": "true"}}, "boolean"),
+        ({"launch": {"max_retries": -2}}, "max_retries"),
+        ({"launch": {"max_retries": "3"}}, "max_retries"),
+        ({"launch": {"max_retries": 1.5}}, "max_retries"),
+        ({"launch": {"max_retries": True}}, "max_retries"),
         ({"miles": {"unknown_option": 1}}, "Unknown MILES option"),
     ],
 )
@@ -311,3 +315,10 @@ def test_checkpoint_retention_defaults_to_one_and_accepts_milestones(tmp_path):
     assert (config.core.checkpoint_keep_last, config.core.checkpoint_keep_every) == (3, 50)
     with pytest.raises(ValueError, match="checkpoint_keep_every"):
         spec(tmp_path, core={"checkpoint_keep_every": 0}).compile()
+
+
+def test_max_retries_defaults_to_no_cap(tmp_path):
+    """Nothing changes for runs that do not set it, which is every existing configuration."""
+    assert spec(tmp_path).launch["max_retries"] == -1
+    assert spec(tmp_path, launch={"max_retries": 0}).launch["max_retries"] == 0
+    assert spec(tmp_path, launch={"max_retries": 5}).launch["max_retries"] == 5

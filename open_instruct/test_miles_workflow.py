@@ -17,7 +17,7 @@ class Spec:
             self.model["hf_template"] = str(template)
         self.conversion = {"hf_output": str(root / "prepared" / "hf")}
         self.output = {"root": str(root), "export_hf": True, "hf_dir": str(root / "export")}
-        self.launch = {"auto_resume": True}
+        self.launch = {"auto_resume": True, "max_retries": -1}
         self.data = {"tasks": [{"task": "multiplication", "train_count": 1}]}
         self.evaluation = {"mode": "shared"}
         self.judges = {"judging": {"bindings": {}}}
@@ -261,3 +261,62 @@ def test_native_converter_uses_saved_geometry_without_forward_claim(spec, tmp_pa
     assert calls[0][-1]["dtype"] == "bfloat16"
     assert calls[0][-1]["device"] == "cpu"
     assert calls[0][-1]["validate"] is False
+
+
+def test_attempt_ledger_counts_every_start(spec):
+    for expected in range(3):
+        with workflow.run_directory(spec) as (root, state):
+            assert state["attempt"] == expected
+        ledger = json.loads((Path(root) / "attempts.json").read_text())
+        assert [entry["attempt"] for entry in ledger] == list(range(expected + 1))
+        assert all(entry["started_unix"] > 0 for entry in ledger)
+
+
+def test_max_retries_stops_a_run_that_keeps_restarting(spec):
+    """Beaker restarts a preempted task without limit; this is the only thing that counts."""
+    spec.launch["max_retries"] = 2
+    for _ in range(3):
+        with workflow.run_directory(spec):
+            pass
+    with pytest.raises(InputError, match="max_retries=2 after 3 starts"), workflow.run_directory(spec):
+        pytest.fail("a fourth start must be refused")
+
+
+def test_max_retries_zero_allows_the_first_start_and_no_retry(spec):
+    spec.launch["max_retries"] = 0
+    with workflow.run_directory(spec):
+        pass
+    with pytest.raises(InputError, match="max_retries=0 after 1 starts"), workflow.run_directory(spec):
+        pytest.fail("a retry must be refused when none are allowed")
+
+
+def test_the_default_cap_never_refuses_a_restart(spec):
+    assert spec.launch["max_retries"] == -1
+    for _ in range(5):
+        with workflow.run_directory(spec):
+            pass
+    assert len(json.loads((Path(spec.output["root"]) / "attempts.json").read_text())) == 5
+
+
+def test_raising_the_cap_lets_a_stopped_run_continue(spec):
+    spec.launch["max_retries"] = 0
+    with workflow.run_directory(spec):
+        pass
+    with pytest.raises(InputError, match="max_retries"), workflow.run_directory(spec):
+        pytest.fail("refused as configured")
+    spec.launch["max_retries"] = 3
+    with workflow.run_directory(spec) as (_, state):
+        assert state["attempt"] == 1
+
+
+def test_a_run_recorded_before_the_cap_existed_still_resumes(spec):
+    """Older runs recorded no max_retries; adding the field must not block their resume."""
+    with workflow.run_directory(spec):
+        pass
+    root = Path(spec.output["root"])
+    recorded = json.loads((root / "run-spec.json").read_text())
+    recorded["launch"].pop("max_retries")
+    (root / "run-spec.json").write_text(json.dumps(recorded))
+    previous = json.loads((root / "workflow.json").read_text())
+    previous["spec_sha256"] = workflow.fingerprint(recorded)
+    assert workflow.recovery_configuration_matches(root, previous, spec.to_dict())

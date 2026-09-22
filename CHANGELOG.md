@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `launch.max_retries`, a cap on how many times a MILES run may start, default -1 for no cap; every start appends to `attempts.json` under the run root and a run that exceeds the cap refuses to start instead of consuming the allocation again. Beaker's `autoResume` restarts a preempted task without limit and its own retry budget applies only to failed tasks, so neither bounds repeated preemption before a save (PR URL pending).
 - Document replay-informed expert packing as experimental and disabled by default; explicitly reject combining it with MILES length-balanced partitioning (PR URL pending).
 - Log update-level MILES/Core MoE dispatch imbalance, maximum expert load and unused layer/expert counts globally and within expert replicas, including when router auxiliary losses are disabled (PR URL pending).
 - Add opt-in best-effort MILES/Core background olmo-eval jobs with immutable HF snapshots, durable submission receipts, retained evaluation outputs and shared-run W&B publishing with consistent chart axes (PR URL pending).
