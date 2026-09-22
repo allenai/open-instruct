@@ -1494,3 +1494,7 @@ lower; it does not affect the per-token statistics above.
 ### 2026-09-22T18:04:52Z
 
 - Original async training attempt remains running with 86 optimizer updates confirmed. All matched evaluations through update 80 remain complete; the update-90 checkpoint is not ready yet. W&B diagnostics refreshed, no error/restart or new submission. Continue to updates 90/100, final audit and fresh export reload.
+
+### 2026-09-22T18:30:51Z
+
+- Original async training attempt remains running, 89 optimizer updates confirmed. Refreshed W&B history/diagnostics; no failure or restart. Matched evaluations through update 80 are complete. The next action remains verifying the completed update-90 export before submitting its matched evaluation; no new job submitted at this check.
