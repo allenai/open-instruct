@@ -101,79 +101,93 @@ strictly on-policy by construction". The first half is true, the second is not:
 - Consequence: the sync-vs-async comparison exists only in Open Instruct so far. A Miles async
   arm is part of the throughput plan below (GRPO first).
 
-## 3. Results so far (details and links on the tables page)
+## 3. Results so far
 
-Every result below is tagged with the stack it ran in and the rollout mode. "Sync" means every
-batch is sampled from the current weights (Open Instruct `--synchronous_rollouts`, `async_steps 1`,
-no in-flight updates; Miles default barrier mode). "Async" means Open Instruct `async_steps 4`
-with in-flight weight updates. No Miles run in this program was async.
+Five findings. Each says where it ran (stack), how rollouts were sampled (sync = every batch from
+the current weights; async = Open Instruct `async_steps 4` with in-flight updates), then the
+numbers. Full tables and links: <https://claude.ai/artifact/GotcfjHj91rF6ECQa3Xqpn>. Run ids are
+collected at the end of this section.
 
-| Result | Stack | Rollout mode | Policy loss | Student log-prob side | Topology |
-|---|---|---|---|---|---|
-| Canonical Qwen3.5 OPD runs (2B `v171addf`, 4B `rdcupvki`) and their verifier-DPPO teachers | Open Instruct | **Async** (`async_steps 4`, in-flight) | DPPO, TV, δ 0.1 | vLLM rollout log-probs | 4 nodes (16 learners + 16 vLLM) |
-| Sync reruns (2B `rg1a2gel`, 4B `zz3q6skv` + `8nlm6azd`) | Open Instruct | **Sync** | DPPO, TV, δ 0.1 | vLLM rollout log-probs | 4 nodes |
-| Fixed-batches rerun (`01M2SPXTBP04X0HD7FPDTKN3WZ`) | Open Instruct | **Async** with prompt-set batching | DPPO, TV, δ 0.1 | vLLM rollout log-probs | 4 nodes |
-| Miles replication of the Qwen3.5 2B / 4B runs (phase 2) | Miles (Megatron) | **Sync** (barrier) | PPO-clip 0.2 | SGLang rollout log-probs (`use_rollout_logprobs = true`) | 1 node: 4 trainer TP2 / 2 student / 2 teacher SGLang (later 3 / 1) |
-| Paper OPD baselines, arms 1 and 2 | Miles (Megatron) | **Sync** (barrier), 4 PPO mini-batch steps per rollout | PPO-clip 0.2 (matches the paper's verl) | Trainer pre-update log-probs (`use_rollout_logprobs = false`, matches verl) | 1 node: 4 trainer TP2 / 3 student / 1 teacher SGLang |
-| EOPD arm 2 | Miles (Megatron) | **Sync** (barrier), 4 mini-batch steps | PPO-clip 0.2 + gated FKL (α 1.0, τ 0.8, k 16) | Trainer pre-update | same as the OPD arm |
-| Teacher-entropy diagnostic (step 5) | Open Instruct script on vLLM, no training | n/a (offline scoring of 256 rollouts) | n/a | n/a | 1 node |
-| Paper-grader harness evals | Open Instruct script (`qwen25_math_harness_eval.py`) on the Miles hf exports | n/a | n/a | n/a | 1 GPU each |
+### 3.1 Async sampling broke the 2B OPD run; sync fixed it
 
-Open Instruct never ran the paper arms (Qwen3-Base students, Qwen3-8B teacher) and Miles never ran
-the Qwen3.5 arms asynchronously, so the two comparisons that exist are: sync vs async **inside
-Open Instruct**, and Open Instruct sync vs Miles sync **on the Qwen3.5 recipe**. The paper
-replication and EOPD are **Miles-only, sync-only**.
+Open Instruct only. Qwen3.5, DAPO math, DPPO loss, 4 nodes, greedy post-hoc eval.
 
-**Sync vs async: Open Instruct only (Qwen3.5, DAPO math, DPPO loss, 4 nodes, greedy post-hoc
-eval).** Canonical runs were async (`async_steps=4` with in-flight updates); the reruns were sync. The 2B ← verifier-2B canonical run (W&B `v171addf`)
-collapsed (in-loop eval 0.065 at step 20, 0.007 at step 100); the strictly-on-policy rerun
-(`rg1a2gel`, Beaker `01M2JXTZPDXTZDR217DKGAW48W`) holds 0.44–0.50 from step 10 on. The 4B ←
-verifier-9B pair (`rdcupvki` async vs `zz3q6skv` + `8nlm6azd` sync) is unchanged within noise.
-Mechanism: async batches are length-sorted by completion order and 16–18k of 25.6k episodes are
-dropped as stale; pure-OPD advantages are per-token and not group-centered, so batch composition
-steers the update. Cost: sync is 2.1× (2B: 2.15 vs 1.01 min/step) to 4× (4B: ~2.6 vs 0.65
-min/step) wall clock on 4 nodes. The fixed-batches rerun (`01M2SPXTBP04X0HD7FPDTKN3WZ`) is the
-partial isolation of composition vs staleness; a 2 h staleness-only isolation is still unrun.
+| Arm | Async (canonical) | Sync (rerun) | Verdict |
+|---|---|---|---|
+| 2B ← verifier-2B, LR 1e-6 | collapses: 0.065 at step 20, 0.007 at step 100 | stable 0.44–0.50 from step 10 | async is the bug |
+| 4B ← verifier-9B, LR 5e-7 | ≈ sync within noise | ≈ async within noise | no effect at 4B |
+| Wall clock per step | 2B 1.01 min, 4B 0.65 min | 2B 2.15 min, 4B ~2.6 min | sync costs 2–4× |
 
-**Open Instruct vs Miles: both sync (same Qwen3.5 recipe; Miles = Megatron + separate SGLang
-teacher, PPO clip instead of DPPO TV, one 8-GPU node; Open Instruct = the 4-node sync reruns
-above, not the async canonical runs).** Greedy post-hoc eval of the Miles hf exports matched the
-Open Instruct sync runs at every checked checkpoint (2B steps 10–100, 4B steps 10–20; 18/18 then 20/20 within
-noise). Miles 2B `01M2NJB3HF380VQ1554FZPSKN7`, 4B `01M2NJB63SB0E636G6JPJ63KZ2`, audit
-`01M2S39293NTSRJQGYWB2Y183R`. Pace: Miles 2B ~14 min/rollout, 4B ~17 min/rollout at 128×2, 16k
-responses on 8 GPUs (136 GPU-min per 4B step) vs Open Instruct sync 2.6 min/step on 32 GPUs
-(83 GPU-min) and async 0.65 min/step (21 GPU-min). These are not matched-topology numbers;
-section 7 is about making them so.
+Why: async batches are length-sorted by completion order and 16–18k of 25.6k episodes are dropped
+as stale. Pure-OPD advantages are per-token and not group-centered, so batch composition steers
+the update. Still open: a 2 h staleness-only isolation run.
 
-**Paper OPD baselines (EOPD paper arXiv 2603.07079, Table 2): Miles only, sync, PPO-clip, 4
-mini-batch steps per rollout, trainer-side student log-probs (the paper's verl setup). Not run in
-Open Instruct.**
+### 3.2 Open Instruct and Miles agree
 
-| Arm | Job | In-run MATH500 Avg@8 | Paper | Paper-grader six-benchmark Avg@8 / Pass@8 (ours vs paper) |
+Same Qwen3.5 recipe, both sync. Open Instruct = the 4-node sync reruns above (DPPO loss, vLLM
+log-probs). Miles = Megatron trainer + separate SGLang teacher, PPO-clip loss, one 8-GPU node.
+
+| Checkpoints compared | Match | Verdict |
+|---|---|---|
+| 2B steps 10–100, 4B steps 10–20 (greedy post-hoc eval) | 20 / 20 within noise | the OPD math is right in both; Open Instruct's flaws are pipeline-level |
+
+Cost is not matched topology: Miles 136 GPU-min per 4B step (1 node) vs Open Instruct sync 83
+(4 nodes) vs async 21. Section 7 makes this comparison fair.
+
+### 3.3 The paper's OPD baselines replicate
+
+Miles only, sync, PPO-clip, 4 PPO mini-batch steps per rollout, trainer-side student log-probs
+(the paper's verl setup). Not run in Open Instruct. Grader = the paper's Qwen2.5-Math harness,
+Avg@8 / Pass@8 over six benchmarks.
+
+| Arm | MATH500 Avg@8 (ours / paper) | Six-benchmark Avg@8 (ours / paper) | Six-benchmark Pass@8 (ours / paper) |
+|---|---|---|---|
+| 2: Qwen3-4B-Base ← Qwen3-8B, DAPO-14k | 79.45 / 78.81 | 41.88 / 41.45 | 60.29 / 56.71 |
+| 1: Qwen3-1.7B-Base ← Qwen3-8B, MATH | 68.12 / 67.76 | 29.98 / 30.22 | 49.89 / 48.35 |
+
+Only Minerva is below the paper (29.78 vs 40.08) and that is a grader artifact: the harness
+rejects LaTeX scientific notation; the same samples re-grade to 41.91.
+
+### 3.4 EOPD does not replicate (one seed each)
+
+Miles only, sync, same setup as arm 2 plus the gated forward-KL term (α 1.0, τ 0.8, k 16).
+
+| Metric (six-benchmark mean) | OPD | EOPD | Δ ours | Δ paper |
 |---|---|---|---|---|
-| 2: Qwen3-4B-Base ← Qwen3-8B, DAPO-14k, 220 rollouts | `01M30JAV4K6F2F7XQYV1HY0R6N` (W&B `c4four8o`, continuation of `2zs3yb46`) | 78.05 | 78.81 | 41.88 / 60.29 vs 41.45 / 56.71 |
-| 1: Qwen3-1.7B-Base ← Qwen3-8B, MATH, 176 rollouts | `01M30N24RT0JCCGAXPPG0X4F08` (W&B `7csinhqe`) | 66.7 | 67.76 | 29.98 / 49.89 vs 30.22 / 48.35 |
+| Avg@8 | 41.88 | 41.84 | −0.04 | +1.80 |
+| Pass@8 | 60.29 | 60.59 | +0.30 | +5.05 |
 
-Both replicate. Minerva is the one outlier (29.78 vs 40.08) and is a grader artifact: the
-harness's `math_equal` rejects LaTeX scientific notation; re-grading the same samples leniently
-gives 41.91.
+In-run MATH500 Avg@8 was within ±0.5 of OPD at all five evals. Every specified setting matches
+the paper; known deviations: top-16 proxy entropy gate, SGLang bf16 teacher log-probs vs verl's
+in-trainer reference, k 16 vs the README's 32, 8×H100 vs 4×A100, single seeds. Honest statement:
+no evidence for the claimed gain, not a disproof. A second seed of both arms would settle it.
 
-**EOPD vs OPD (arm 2, single seed each): Miles only, sync; same loss, topology and log-prob side
-as the OPD arm plus the gated FKL term. Not run in Open Instruct.** EOPD `01M30P1BP5N6SJVSRJMNMQHN7A` (W&B `tqou539j`;
-α 1.0, τ 0.8, k 16, `eopd-eopd-qwen3-4b-base-dapo14k.toml`). In-run MATH500 Avg@8 within ±0.5 of
-OPD at all five evals. Under the paper's grader: six-benchmark Avg@8 41.84 vs 41.88 (−0.04),
-Pass@8 60.59 vs 60.29 (+0.30); paper claims +1.80 / +5.05. **EOPD does not replicate on one seed
-each.** Recipe audit: every specified setting matches; known deviations are the top-16 proxy
-entropy gate, SGLang bf16 teacher log-probs vs verl's in-trainer reference worker, k 16 vs the
-README's 32, 8×H100 vs 4×A100, and single seeds on both sides. Harness jobs: OPD
-`01M3119ZR9TQPFG8S8MMQJVDFN`, EOPD `01M32MXFB7R8M00VSR9EKBDE0A`, arm 1
-`01M32NNHA27J7W1ZT282CQWCV1`.
+### 3.5 Teacher entropy: EOPD is not degenerate here
 
-**Teacher entropy (step 5): offline Open Instruct script over vLLM rollouts, no training, no
-sync/async distinction.** On untrained student rollouts, 31 % of tokens exceed τ 0.8 for the
-paper pair (Qwen3-8B on Qwen3-4B-Base; top-16 mass 0.91) but only 11 % for our verifier-9B on
-Qwen3.5-4B (top-16 mass 0.9994). During EOPD training the gate fraction ran 0.27–0.33, so EOPD
-was not degenerate to OPD; see the tracker's "Step 5 results".
+Offline Open Instruct script over vLLM rollouts, no training.
+
+| Pair | Tokens with H > 0.8 | Teacher top-16 mass |
+|---|---|---|
+| Qwen3-8B on Qwen3-4B-Base (paper pair) | 31 % | 0.91 |
+| Verifier-9B on Qwen3.5-4B (ours) | 11 % | 0.9994 |
+
+During EOPD training the gate fired on 27–33 % of tokens.
+
+### Run ids
+
+- Open Instruct async canonical: W&B `v171addf` (2B), `rdcupvki` (4B); Beaker
+  `01M1WQ2DRFJF2C1019HMZ02318`, `01M22AHC3VMFDQVBFJCQHPPZ6G`.
+- Open Instruct sync reruns: W&B `rg1a2gel` (2B, Beaker `01M2JXTZPDXTZDR217DKGAW48W`),
+  `zz3q6skv` + `8nlm6azd` (4B, Beaker `01M2JXV53B6Z12BFNH3V74FVB6` + resume). Fixed-batches
+  async rerun `01M2SPXTBP04X0HD7FPDTKN3WZ`.
+- Miles Qwen3.5 replication: Beaker `01M2NJB3HF380VQ1554FZPSKN7` (2B), `01M2NJB63SB0E636G6JPJ63KZ2`
+  (4B), audit `01M2S39293NTSRJQGYWB2Y183R`.
+- Miles paper arms: arm 2 OPD `01M30JAV4K6F2F7XQYV1HY0R6N` (W&B `c4four8o`, continuation of
+  `2zs3yb46`); arm 1 OPD `01M30N24RT0JCCGAXPPG0X4F08` (W&B `7csinhqe`); arm 2 EOPD
+  `01M30P1BP5N6SJVSRJMNMQHN7A` (W&B `tqou539j`).
+- Paper-grader harness evals: OPD hf-219 `01M3119ZR9TQPFG8S8MMQJVDFN`, EOPD hf-219
+  `01M32MXFB7R8M00VSR9EKBDE0A`, arm 1 hf-175 `01M32NNHA27J7W1ZT282CQWCV1`.
+- Teacher entropy: `01M2RZXXTT0GBCQSJCFKYAA76C` (paper pair), `01M2S08RST44V0RFTGRFRSS72Y` (ours).
 
 ## 4. Standing constraints (carry these over verbatim)
 
