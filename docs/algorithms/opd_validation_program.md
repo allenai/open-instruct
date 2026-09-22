@@ -1470,3 +1470,12 @@ lower; it does not affect the per-token statistics above.
 ### 2026-09-22T17:12:32Z
 
 - Latest full-run check confirms 80 optimizer updates and update-80 in-run evaluation (DAPO 53.125%, MATH-500 81.8%). Original training job is still running. All seven new matched evaluation jobs are recorded with their latest attempt and scheduler events in campaign.json; retain queued jobs without relaunch. Updates 90/100 remain gated on completed exports.
+
+### 2026-09-22T17:29:53Z
+
+- Full async training remains on the original running job with 82 optimizer updates confirmed. Matched evaluations through update 40 completed with exit 0; updates 50/60/70/80 are running. No queued evaluation remains at this check, no repair or duplicate submission needed. Updates 90/100 remain pending completed exports.
+- New matched async/sync scores (percent; DAPO, MATH-500, AIME, BRUMO):
+  - Update 20: dapo 47.6562/48.8281, math500 80.8000/80.0000, aime2025 16.6667/30.0000, brumo2025 30.0000/40.0000.
+  - Update 30: dapo 49.6094/49.2188, math500 82.2000/81.4000, aime2025 30.0000/30.0000, brumo2025 40.0000/33.3333.
+  - Update 40: dapo 50.3906/49.8047, math500 80.2000/80.2000, aime2025 23.3333/33.3333, brumo2025 30.0000/33.3333.
+- Raw Beaker logs, W&B summaries/history and exact per-dataset deltas retained in scratch; `matched-learning-comparison.json` now contains four checkpoint pairs. These early pairs do not establish the final 100-update learning gap.
