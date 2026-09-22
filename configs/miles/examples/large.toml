@@ -1,7 +1,9 @@
 # LARGE: PROVISIONAL production layout, not qualified; do not submit unchanged.
 # 16 trainers (2 nodes x 8, EP8 with DP2), 32 TP1 engines, and one judge GPU.
 # Current whole-node launcher allocates 7 x 8 = 56 GPUs: 49 used, 7 idle on the judge node.
-# Inherited medium settings are placeholders pending workload/topology qualification.
+# Training settings are placeholders pending workload/topology qualification.
+# Evaluations run on separate Beaker GPUs; snapshot export still occupies the trainer.
+# Use a trainer image containing background evaluation and qualify the full-model evaluator.
 schema_version = 1
 name = "large"
 
@@ -40,16 +42,11 @@ NCCL_SOCKET_IFNAME = "ib"
 NCCL_IB_HCA = "^=mlx5_bond_0"
 
 [launch.secrets]
+BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN" # Required to submit background evaluation jobs.
 # WANDB_API_KEY = "YOUR_USERNAME_WANDB_API_KEY" # Required for online tracking.
 
 [data]
 prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/train.jsonl"
-eval_prompt_data = [
-  "math", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-math.jsonl",
-  "ifeval", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-ifeval.jsonl",
-  "code", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-code.jsonl",
-  "general", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-general.jsonl",
-]
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/verifiers.json"
 seed = 17
 shuffle = true
@@ -58,10 +55,36 @@ shuffle = true
 # Drop constant-reward groups and refill the training batch.
 filter_zero_std_groups = true
 num_rollouts = 200
-skip_eval_before_train = false
-eval_interval = 50
 save_checkpoints = true
 save_interval = 5
+
+# Independent starter benchmarks; these do not reuse mixed-workload held-out JSONL.
+# Replace/extend tasks for production coverage (including code/general and their services).
+[evaluation]
+mode = "background"
+interval = 50
+initial = true
+final = true
+# Published tiny-MoE mechanics image; full-policy/task qualification is still required.
+image = "01M31EGDWC2D57T1ZC2S19241V"
+revision = "55461d9bf09c6ff7027d7a977f4ae45b8a07bbcf"
+gpus = 1 # Additional allocation per task group, outside the 56-GPU training layout.
+cluster = "ai2/holmes"
+submit_timeout = 30
+timeout = "3h"
+server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--context-length", "34816"]
+
+[[evaluation.tasks]]
+task = "gsm8k"
+# Independent 8K evaluation budget; training still uses 32K responses.
+# Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "ifeval_ood" # IFBench; this pinned olmo-eval has no task named "ifeval".
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128 }
 
 [trainer]
 gpus = 8
@@ -114,6 +137,8 @@ eps_clip = 0.2
 eps_clip_high = 0.28
 
 [tracking]
+# For automatic eval charts, set online and supply WANDB_API_KEY above.
+# Offline results are retained; sync training, then publish evaluation manually.
 wandb_mode = "offline"
 wandb_team = "ai2-llm"
 wandb_project = "olmo-rl-comparison"
@@ -148,8 +173,6 @@ scoring_check_interval = 20
 diagnostic_interval = 0
 
 [miles]
-eval_temperature = 0.0
-n_samples_per_eval_prompt = 1
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 use_miles_router = true

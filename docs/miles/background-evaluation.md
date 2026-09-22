@@ -8,7 +8,11 @@ submitter drops new milestones, failures are not retried, and preemption can
 interrupt submission. Snapshot export is a synchronous trainer collective;
 checkpoint/collective failures still fail training.
 
-Existing shared-engine evaluation remains the default. Remove explicit shared
+The [large example](../../configs/miles/examples/large.toml) opts into background
+evaluation with the published image, separate one-GPU jobs and starter GSM8K/IFBench
+tasks. Dev, small and medium retain shared-engine evaluation, which also remains
+the low-level default. The large template is provisional, not full-model
+qualification. Remove explicit shared
 settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
 `n_samples_per_eval_prompt`, `data.eval_prompt_data`, positive task `eval_count`)
 when selecting background mode. Evaluation tasks are independent of training
@@ -34,7 +38,7 @@ generation = { temperature = 0.0, max_tokens = 2048 }
 scoring = { limit = 128 }
 
 [[evaluation.tasks]]
-task = "ifeval"
+task = "ifeval_ood" # IFBench; the pinned revision has no plain "ifeval" task.
 interval = 100
 scoring = { limit = 128 }
 
