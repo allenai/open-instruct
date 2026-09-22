@@ -1434,3 +1434,7 @@ lower; it does not affect the per-token statistics above.
 - Recovered exact W&B scores for all ten sync checkpoint evaluations. The handoff summary table was approximate (and update-10 DAPO differed beyond rounding); preserve it as historical, use `sync-greedy-baseline-exact.json` with direct run IDs/scores for comparisons. `matched-learning-comparison.json` records the completed pair.
 - Read-only export verification `01M34ZEZKCWT5MVD6AWF14XHSN` / job `01M34ZEZKTVCY31P66E4KC8WS2` submitted at 16:33:55Z; queued on Saturn, scheduler says all 27 eligible nodes lack slots. It will report .complete, model index and referenced shard existence for all saved exports. Do not duplicate; launch pending update-20 through update-70 matched evaluations after this gate passes.
 - Across 68 matched ordinary update IDs, async/sync mean wait 498.1/558.9 s, mean interval 560.3/622.2 s, wait fraction 88.9/89.8%. Retained all W&B history/queue metrics; maximum consumed age 2.
+
+### 2026-09-22T16:54:21Z
+
+- Async training remains on its original running job, with 80 optimizer updates confirmed and the update-80 evaluation pending. Full W&B history refreshed. Export verification job `01M34ZEZKTVCY31P66E4KC8WS2` remains queued; fresh scheduler events report all 27 eligible Saturn nodes lack available slots. Retained the existing reader and submitted no duplicate evaluations; next action is to collect its export-completion evidence and launch the remaining matched checkpoints.
