@@ -1527,3 +1527,9 @@ lower; it does not affect the per-token statistics above.
 ### 2026-09-22T20:39:48Z
 
 - All100 optimizer updates remain confirmed; original training job is active, with final eval/audit/reload not yet verified (`train/step=99`, `eval/step=89`). Existing hf-89 reader remains queued; scheduler still reports all27 eligible Saturn nodes lack slots. No concrete failure or duplicate launch. Await final training artifacts and matched90/100 evaluation readiness.
+
+### 2026-09-22T20:52:24Z
+
+- Full async job exited0 at20:50:54Z after100updates, final in-run scores DAPO49.21875%, MATH50082.8%, AIME16.6667%, BRUMO43.3333%. Direct audit/reload artifact review and matched90/100 evaluations remain pending.
+- All87 matched ordinary updates: async/sync mean step552.409/619.297s, trainer wait490.072/555.112s, wait fraction88.715/89.636%. Observed batch maximum policy age:0 on1batch,1 on4batches,2 on95batches (configured cap3).
+- Beaker start-to-exit: async20.206h, sync25.590h including two preemptions and restart queue gaps; summed allocated running time async20.206h vs sync23.841h. These end-to-end figures include startup, save/eval and job finalization, and are not a clean isolated scheduling speedup. Detailed timings retained in scratch/timing-status-100updates.json.
