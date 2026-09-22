@@ -1490,3 +1490,7 @@ lower; it does not affect the per-token statistics above.
   - Update 80: dapo 51.1719/45.8984, math500 80.0000/81.2000, aime2025 36.6667/23.3333, brumo2025 30.0000/33.3333.
 - No matched-checkpoint collapse through update 80. At 80, DAPO async-minus-sync is +5.2734 pp, MATH-500 −1.2 pp; retain all datasets and await 100 before the final Open Instruct disparity comparison. Raw logs/summaries/history and eight-pair comparison retained.
 - Across 72 matched ordinary updates: async/sync mean trainer wait 498.5/558.2 s, update interval 560.7/621.5 s, wait fraction 88.9/89.8%. Startup/eval/save costs excluded from this ordinary-step summary.
+
+### 2026-09-22T18:04:52Z
+
+- Original async training attempt remains running with 86 optimizer updates confirmed. All matched evaluations through update 80 remain complete; the update-90 checkpoint is not ready yet. W&B diagnostics refreshed, no error/restart or new submission. Continue to updates 90/100, final audit and fresh export reload.
