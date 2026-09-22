@@ -1414,3 +1414,8 @@ lower; it does not affect the per-token statistics above.
 - Full async arm remains on its original running job `01M338D7WFQS5DC21WT6F4P0Z0`; W&B confirms five optimizer updates (train/step 0–4). Each batch delivered 256 responses, maximum consumed ages 0/1/2/2/2, no completed-queue sample drops. First ten-update export/evaluation remains pending; no matched post-hoc evaluation launched yet.
 - Preliminary matched ordinary update IDs 2–4 only: async/sync mean trainer wait 455.6/546.0 s, training 61.2/61.8 s, update interval 516.8/607.9 s, weighted wait fraction 88.2/89.8%. This excludes the first two startup updates and is too early for steady-state throughput or learning conclusions. Raw W&B history, length/age/drop metrics and `early-matched-timings.json` retained in scratch.
 - At Kevin’s request, saved the overlaid DAPO/MATH-500 W&B view [2B MILES — Async vs Sync](https://wandb.ai/allenai-team1/opd/workspace?nw=tnq7qdevap), including current async and all three sync attempt segments on eval/step.
+
+### 2026-09-22T02:26:25Z
+
+- Async `01M338D7FBJYJX6YWJ0NX5RA03` remains on its original running job with eight optimizer updates confirmed (train/step 0–7); no restart, no completed-queue drops, maximum consumed age 2. First ten-update checkpoint and post-start evaluation remain pending.
+- Matched ordinary rollout IDs 2–7 (six observations) give async/sync mean trainer wait 456.6/550.8 s, mean update interval 518.1/612.8 s, weighted wait fraction 88.1/89.9%. Still preliminary; raw history and queue/length/age diagnostics retained. No evaluation launch or repair needed at this check.
