@@ -258,5 +258,6 @@ ownership, semaphore, retry and lifecycle semantics.
 
 The examples use urgent Holmes placement in `ai2/open-instruct-dev`, one-hour
 minimum runtime and explicit GPU allocation. CPU-only jobs needing WEKA belong
-on Saturn. Multi-node auto-resume remains disabled until that restart topology
-is separately qualified.
+on Saturn. Multi-node auto-resume is qualified for the restart path in
+[multi-node resume](measurements/multinode-resume-20260922.md); forced preemption, and restarts of runs
+carrying a managed judge, are not.

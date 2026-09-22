@@ -36,7 +36,7 @@ allocation launcher could avoid those unused GPUs. Increasing inference capacity
 is already expressible with `inference.gpus`; engines must fit within a node and
 tensor parallelism must divide the node capacity. Multi-node colocation, separate
 evaluation GPU pools, cross-node serving TP and automatic coordinated restart
-remain unsupported. Set `launch.auto_resume=false` for multi-node/managed runs.
+remain unsupported. Restarting a run that carries a managed judge is not qualified: the [multi-node resume qualification](measurements/multinode-resume-20260922.md) covers a two-replica trainer and engine with no judge in the allocation.
 
 At submission, the launcher snapshots the cluster inventory and partitions its
 hostnames into disjoint scheduling pools, one per task. This is necessary because

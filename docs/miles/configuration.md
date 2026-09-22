@@ -135,7 +135,7 @@ flags, choices and source help see the [native appendix](native-options.md).
 | judges.NAME.timeout | Positive seconds per judge request, default 120. |
 | judging.bindings.VERIFIER.judge | Required name of a declared judge. |
 | judging.bindings.VERIFIER.rubric | Required name of a declared rubric. |
-| launch.auto_resume | Boolean, default true; Beaker restart policy. Multi-node/managed jobs require false. |
+| launch.auto_resume | Boolean, default true; Beaker restart policy. A restart into the same output root resumes from the newest native checkpoint. Restarting a run that carries a managed judge is not qualified. |
 | launch.budget | Beaker budget string; default ai2/oe-other. |
 | launch.cluster | Cluster string; default ai2/holmes for GPU runs. CPU-only WEKA work requires ai2/saturn. |
 | launch.coordination | Multi-node coordination timeouts table. |

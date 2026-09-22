@@ -54,7 +54,7 @@ checkpoint loaded from another run's root.
 `launch.auto_resume=true` permits supported Beaker retries. Workflow preparation
 is reused only for the same recorded specification; the latest completed native
 checkpoint is loaded when present, otherwise training restarts from the input.
-Multi-node/managed configurations currently require auto_resume=false. Manual
+Multi-node configurations may keep auto_resume=true; a restart into the same output root adopts the newest completed checkpoint and continues the rollout cursor, qualified in [multi-node resume](measurements/multinode-resume-20260922.md). Forced preemption, and restarts of runs carrying a managed judge, remain unqualified. Manual
 relaunch with the same unchanged specification/output root can adopt a completed
 checkpoint after failure; a completed run root cannot be overwritten. Do not
 change the recipe in-place and call it a resume.

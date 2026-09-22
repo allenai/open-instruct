@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Multi-node automatic resume](multinode-resume-20260922.md) | Two replicas interrupted and restarted into the same run directory; rollout cursor continues, no update repeated or skipped |
 | [Lessons from retired integration branches](retired-branch-lessons-20260921.md) | Checkpoint lifecycle, architecture preservation, packing/replay contracts, evaluation discipline, and local archive provenance |
 | [Router investigation: findings worth keeping](router-findings-20260921.md) | Completed aux-off sweep, routing dose response, causal padding correction, rejected hypotheses, and archived research provenance |
 | [Exploratory gradient noise scale](critical-batch-20260921.md) | Noise-dominated retained-group gradients; corrected uncertainty limits and implications for batch-size experiments |
