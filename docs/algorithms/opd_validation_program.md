@@ -1538,3 +1538,8 @@ lower; it does not affect the per-token statistics above.
 
 - Retrieved completed full-run artifacts: audit confirms100updates, max advantage error0,280tensors changed from base and253from hf89,18FP32 A_log tensors. Fresh hf99 SGLang reload generated32tokens; workflow complete.
 - Submitted matched update100 evaluation [01M35EDH2S76TKJB12J7W6BNRK](https://beaker.org/ex/01M35EDH2S76TKJB12J7W6BNRK), W&B `f40f7d14`, after checking campaign, receipt and Beaker for duplicates. Same immutable historical sync harness image/settings; readiness established by final audit and fresh reload. Update90 remains prepared awaiting existing CPU reader; no duplicate submitted.
+
+### 2026-09-22T20:59:00Z
+
+- Publication-semantics clarification from exact pinned MILES source plus applied runtime patch: `train_async.py` assembles the next batch before each publication; distributed updater pauses with `retract`, transfers weights, then calls `update_weight_version`. Our pinned `miles.patch` changes that call to `abort_all_requests=True` before generation resumes. Thus unfinished requests are aborted/filtered rather than continued under mixed weights. Configured retract alone was an incomplete description of the effective behavior. Completed buffered responses remain eligible under the age budget.
+- All100training batches report mixed-version ratio0. Mean consumed sample age is1.19203125updates; per-batch maximum is2 in95batches,1 in4,0 in1. Configured max age3 is a ceiling, not OI `async_steps=3` nor a target lag. Upstream aborted-group filtering is nonzero and must not be confused with zero completed-queue stale drops. This is a material distinction when comparing MILES stability to OI async; preserve in final comparison.
