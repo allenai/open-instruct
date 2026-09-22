@@ -2,7 +2,7 @@
 
 **Status:** phase 1 (recording) implemented on `robertb/miles-inference-records`
 after review, and exercised on a two-GPU fixture; see [light exercise](#light-exercise-2026-09-21).
-Phase 2 (summaries) is implemented. Phases 3–5 are proposals. The user guide is
+Phases 2 (summaries) and 3 (selection) are implemented. Phases 4–5 are proposals. The user guide is
 [inference records](../inference-records.md).
 
 ## Problem
@@ -137,12 +137,15 @@ than unknown) and 32K throughput with recording on and off.
    - Evidence is counted per independent unit (run, attempt).
    - The per-domain token account: passed, consumed, expired, filtered by
      reward value, truncated.
-3. **Selection, frozen and materialized:**
-   - `plan` resolves `[data.selection]` against a snapshot of the store into a
-     manifest. The manifest lists the exact selected and excluded prompt IDs,
-     the record shards and byte ranges it read, and the resolved outcome of any
-     randomized readmission.
-   - Launch and resume reuse that manifest unchanged, and its hash enters the plan.
+3. **Selection, frozen and materialized** (implemented as `records select` plus a
+   `[selection]` table pinned by SHA-256, applied as prompts stream in):
+   - `records select` resolves the rule against the store into a table. The table
+     lists the exact excluded and readmitted prompts, every store file it read
+     with its size and SHA-256, and the resolved readmissions.
+   - The run pins the table's SHA-256 in `[selection]`, so the plan fixes the
+     table before launch.
+   - The data source skips excluded prompts as they stream in; prepared data is
+     unchanged, and resume applies the same table.
    - Defaults are conservative:
      - only `start_checkpoint` scope unless explicitly widened;
      - a minimum of 16 valid observations from at least two independent attempts;

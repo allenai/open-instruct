@@ -11,10 +11,10 @@ the online filter passed it or not, and whether training later consumed it. They
 live in a shared store that later runs and analyses read. Recording never changes
 admission, filtering or training.
 
-This covers phases 1 and 2 of the [inference records plan](plans/inference-records-20260921.md):
-recording, and [summaries](#summarize-a-store). Prompt selection comes later. The
-starter configurations leave recording off until a reliability qualification is
-recorded.
+This covers phases 1–3 of the [inference records plan](plans/inference-records-20260921.md):
+recording, [summaries](#summarize-a-store) and [prompt selection](#select-prompts).
+The starter configurations leave recording off until a reliability qualification
+is recorded.
 
 Recording requires a fully async run (`[async] fully_async = true`), because it
 lives in the completed-group buffer. `validate` rejects `records.enabled` in a
@@ -196,6 +196,74 @@ cover:
 - incomplete final lines from a stopped writer;
 - record files without a manifest;
 - dispositions without a group row.
+
+## Select prompts
+
+Selection skips prompts whose recorded evidence shows a constant reward. It has
+two steps.
+
+**1. Build a frozen exclusion table from a store:**
+
+```bash
+python -m open_instruct.miles records select /weka/.../inference-records \
+  --skip all_zero --output /weka/.../selection/all-zero-v1.json
+```
+
+The command prints the table's SHA-256. The table records:
+
+- the lineage and protocol its evidence came from;
+- the rule parameters;
+- the input snapshot (every store file's size and SHA-256);
+- per-domain counts;
+- the exact excluded and readmitted prompts.
+
+Readmission is resolved when the table is built, so the table never changes
+afterwards.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--skip` | required | `all_zero`, `all_full` (reward equals `--full-reward`, default 1.0), or `zero_variance` (any constant value); repeatable |
+| `--lineage`, `--protocol` | the only one present | Required when the store holds several |
+| `--scope` | `start_checkpoint` | Adding `run_version` or `mixed` marks the table `approximate_policy`: later versions belong to one run's trajectory |
+| `--min-observations` | 16 | Valid responses required |
+| `--min-units` | 2 | Independent attempts required. With deterministic inference, attempts sharing a rollout seed count once |
+| `--confidence`, `--max-deviation-rate` | 0.95, 0.2 | Exclude only if the one-sided upper confidence bound on the rate of any other reward is below the rate. With zero deviations in n draws the bound is `1 - 0.05^(1/n)`: 0.17 at n = 16, 0.09 at n = 32 |
+| `--readmit-fraction`, `--seed` | 0.05, 0 | Deterministic share of qualifying prompts kept anyway, so the evidence can be refreshed |
+
+Only responses with `validity.valid = true` count. At a true success rate of
+10%, 16 draws show no success 19% of the time, so the default bound still
+excludes some solvable prompts. Raise `--min-observations` when that matters.
+
+**2. Pin the table in the run:**
+
+```toml
+[selection]
+table = "/weka/.../selection/all-zero-v1.json"
+sha256 = "<digest printed by records select>"
+```
+
+At startup the data source checks three things and fails the run on any mismatch:
+
+- the file's SHA-256 against the pinned digest;
+- the table's lineage against this run's starting checkpoint;
+- the table's protocol digest against this run's protocol, computed with the
+  recorder's own code.
+
+Evidence gathered at another temperature, response cap, template or verifier
+registry is therefore never applied.
+
+**How skipping works:**
+
+- The data source computes each streamed prompt's `input_key` exactly as the
+  recorder does, and skips excluded prompts before generation. It keeps pulling
+  until it has the requested number of groups.
+- Prepared data and its order are unchanged.
+- Skipped prompts never enter the restart ledger, and the saved cursor moves past
+  them. A resumed run skips the same prompts.
+- A table that excludes a full dataset's worth of consecutive prompts fails the run.
+- Skips are logged by domain.
+- When recording is also on, the record manifest carries `selection_sha256`,
+  since those records describe a filtered prompt stream.
 
 ## Reading records
 

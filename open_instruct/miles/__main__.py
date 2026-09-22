@@ -1,6 +1,8 @@
 """Run with python -m open_instruct.miles {plan,validate,train,run,status} CONFIG.toml.
 
-Inference-record tools use their own arguments: python -m open_instruct.miles records summarize STORE --output DIR.
+Inference-record tools use their own arguments:
+python -m open_instruct.miles records summarize STORE --output DIR
+python -m open_instruct.miles records select STORE --skip all_zero --output TABLE.json
 """
 
 import argparse
@@ -9,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from open_instruct.miles import record_summary, validation
+from open_instruct.miles import record_selection, record_summary, validation
 from open_instruct.miles.config import RunConfig
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
@@ -17,7 +19,10 @@ from open_instruct.miles.run_spec import RunSpec
 
 def main() -> None:
     if sys.argv[1:2] == ["records"]:
-        record_summary.main(sys.argv[2:])
+        if sys.argv[2:3] == ["select"]:
+            record_selection.main(sys.argv[3:])
+        else:
+            record_summary.main(sys.argv[2:])
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "validate", "train", "run", "status"))

@@ -169,6 +169,8 @@ flags, choices and source help see the [native appendix](native-options.md).
 | rubrics.NAME.profile | Required supported open-instruct/general-* profile; see managed judges guide. |
 | rubrics.NAME.temperature | Nonnegative sampling temperature, default 1.0. |
 | schema_version | Required integer 1. |
+| selection.sha256 | SHA-256 printed by `records select`; maps to core.selection_sha256 and freezes the table in the plan. |
+| selection.table | Exclusion table path from `records select`; maps to core.selection_table. Requires selection.sha256. |
 
 ## Structured aliases
 
@@ -276,6 +278,8 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.records_root | str &#124; None | null | Absolute shared store for inference records; null disables recording. Every scored training group (passed, filtered or aborted) and its later consumption or expiry is appended as JSONL under &lt;root&gt;/&lt;lineage&gt;/&lt;run&gt;/ by a bounded background writer. See the inference records guide. |
 | core.records_responses | &lt;class &#x27;str&#x27;&gt; | &quot;off&quot; | Response text in inference records: off (default) keeps outcomes only, all stores every response, sample stores whole groups selected deterministically at records_response_sample_rate. |
 | core.records_response_sample_rate | float &#124; None | null | Fraction of groups, in (0, 1], whose response text is stored when records_responses=sample; must be null otherwise. |
+| core.selection_table | str &#124; None | null | Absolute path of a frozen exclusion table from `records select`; null disables selection. The data source skips its excluded prompts as they stream in. |
+| core.selection_sha256 | str &#124; None | null | Pinned SHA-256 of core.selection_table; the run fails at startup if the file, its lineage or its protocol does not match. |
 
 ## Unsupported olmo-miles controls
 

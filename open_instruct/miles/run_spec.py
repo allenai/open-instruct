@@ -16,7 +16,7 @@ from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.errors import InputError
 
 RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "tracking", "runtime")
-WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache", "records"}
+WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache", "records", "selection"}
 CORE_FIELDS = {field.name for field in dataclasses.fields(CoreConfig)}
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -168,6 +168,7 @@ class RunSpec:
     judges: dict[str, Any]
     evaluation: dict[str, Any]
     records: dict[str, Any] = dataclasses.field(default_factory=dict)
+    selection: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -245,6 +246,11 @@ class RunSpec:
         records = cls._records(
             _table(document, "records", {"enabled", "root", "responses", "response_sample_rate"}), base
         )
+        selection = _table(document, "selection", {"table", "sha256"})
+        if selection:
+            if set(selection) != {"table", "sha256"}:
+                raise InputError("[selection] needs both table and sha256; `records select` prints the digest")
+            selection["table"] = _path(selection["table"], base, "selection.table")
         result = cls(
             name,
             path,
@@ -260,6 +266,7 @@ class RunSpec:
             judging.parse(document),
             evaluation.parse(_table(document, "evaluation"), launch),
             records,
+            selection,
         )
         result.compile()
         return result
@@ -276,6 +283,7 @@ class RunSpec:
             "conversion": self.conversion,
             "compiler_cache": self.compiler_cache,
             **({"records": self.records} if self.records else {}),
+            **({"selection": self.selection} if self.selection else {}),
             **({"evaluation": self.evaluation} if self.evaluation["mode"] == "background" else {}),
             **self.sections,
             "core": self.core,
@@ -291,6 +299,7 @@ class RunSpec:
                     "reward_config",
                     "compiler_cache_root",
                     "records_root",
+                    "selection_table",
                 }:
                     payload[section][key] = _path(value, self.config_path.parent, f"{section}.{key}")
         return payload
@@ -538,7 +547,7 @@ class RunSpec:
                 else:
                     put(f"miles.{key}", value, origin)
         for key, value in self.core.items():
-            if key in ("model_config", "reward_config", "compiler_cache_root", "records_root"):
+            if key in ("model_config", "reward_config", "compiler_cache_root", "records_root", "selection_table"):
                 value = _path(value, base, f"core.{key}")
             put(f"core.{key}", value, f"core.{key}")
         for key, value in options.normalize_options(self.miles).items():
@@ -559,6 +568,9 @@ class RunSpec:
             }.items():
                 if key in self.records:
                     put(f"core.{field}", self.records[key], f"records.{key}")
+        for key in ("table", "sha256"):
+            if key in self.selection:
+                put(f"core.selection_{key}", self.selection[key], f"selection.{key}")
         core, miles = values["core"], values["miles"]
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
@@ -796,6 +808,7 @@ class RunSpec:
             "launch": self.launch,
             "compiler_cache": self.compiler_cache,
             "records": self.records,
+            "selection": self.selection,
             "runtime": runtime,
             "evaluation": evaluation.plan(self, self.compile().miles),
             **self.judges,

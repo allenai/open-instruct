@@ -239,6 +239,8 @@ class Recorder:
             "rollout_seed": getattr(args, "rollout_seed", None),
             "prompt_data": getattr(args, "prompt_data", None),
             "records": {"responses": self.responses, "response_sample_rate": self.rate, "queue_limit": QUEUE_LIMIT},
+            # Records from a run with prompt selection describe a filtered prompt stream.
+            "selection_sha256": getattr(core, "selection_sha256", None),
         }
         self._writer = threading.Thread(target=self._write, name="inference-records", daemon=True)
         self._writer.start()

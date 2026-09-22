@@ -29,6 +29,7 @@ from miles.rollout.data_source import RolloutDataSourceWithBuffer
 from miles.utils.types import Sample
 
 from open_instruct import logger_utils
+from open_instruct.miles import record_selection
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -55,6 +56,8 @@ class DashboardDrainingRolloutDataSource:
         self._recovery_groups: list[Any] | None = None
         self._fully_async = bool(getattr(args, "fully_async", False))
         self._collect_dashboard = bool(getattr(args, "use_miles_dashboard", False))
+        core = getattr(args, "olmo_core", None)
+        self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attributes not implemented by this lifecycle adapter."""
@@ -63,7 +66,14 @@ class DashboardDrainingRolloutDataSource:
     def get_samples(self, num_samples: int) -> Any:
         """Return samples from the underlying MILES data source."""
         with self._cursor_lock:
-            groups = self._delegate.get_samples(num_samples)
+            if self._selection is None:
+                groups = self._delegate.get_samples(num_samples)
+            else:
+                # Skipped prompts never enter the restart ledger; the saved cursor moves past
+                # them, and the frozen table skips the same prompts again after a resume.
+                dataset = getattr(self._delegate, "dataset", None)
+                limit = len(dataset) if dataset is not None else 1_000_000
+                groups = record_selection.take(self._delegate.get_samples, num_samples, self._selection.keep, limit)
             if self._recovery_groups is not None:
                 self._recovery_groups.extend(copy.deepcopy(groups))
             if self._fully_async:

@@ -81,6 +81,9 @@ class CoreConfig:
     records_root: str | None = None
     records_responses: str = "off"
     records_response_sample_rate: float | None = None
+    # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
+    selection_table: str | None = None
+    selection_sha256: str | None = None
 
     def __post_init__(self):
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -101,6 +104,12 @@ class CoreConfig:
             if not Path(self.records_root).is_absolute():
                 raise InputError("core.records_root must be an absolute path or unset")
         validation.choice(self.records_responses, "core.records_responses", RECORD_RESPONSE_MODES)
+        if self.selection_table is not None:
+            validation.text(self.selection_table, "core.selection_table")
+            if not Path(self.selection_table).is_absolute():
+                raise InputError("core.selection_table must be an absolute path or unset")
+        if self.selection_sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", str(self.selection_sha256)):
+            raise InputError("core.selection_sha256 must be a lowercase 64-character SHA-256 hex digest")
         if self.records_response_sample_rate is not None:
             validation.number(
                 self.records_response_sample_rate, "core.records_response_sample_rate", maximum=1, exclusive_min=True
@@ -314,6 +323,8 @@ class RunConfig:
             if key in self.miles:
                 raise InputError(f"miles.{key} is managed by the Core backend")
         cli_options.encode_options(self.miles)
+        if (self.core.selection_table is None) != (self.core.selection_sha256 is None):
+            raise InputError("core.selection_table and core.selection_sha256 must be set together")
         if (self.core.records_responses == "sample") != (self.core.records_response_sample_rate is not None):
             raise InputError(
                 'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
