@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-22 00:32Z (details in the latest Log entry).
+Updated 2026-09-22 19:53Z (was 2026-09-22 00:32Z; details in the latest Log entries).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification `01M335TSWA8MTK1YAEZF0CXJEE` passed, including audit/export reload. The matched 100-update arm `01M338D7FBJYJX6YWJ0NX5RA03` is submitted with automatic resume. See the latest Log entry.
 
@@ -1507,3 +1507,7 @@ lower; it does not affect the per-token statistics above.
 ### 2026-09-22T19:39:14Z
 
 - Original training job has 95 optimizer updates confirmed. Existing hf-89 readiness job remains queued; fresh scheduler events still report all 27 eligible Saturn nodes lack free slots. Prepared update90 evaluation remains gated; no duplicate/replacement or repair. W&B history and queue diagnostics refreshed.
+
+### 2026-09-22T19:53:43Z
+
+- Results page (artifact GotcfjHj91rF6ECQa3Xqpn) restructured for presentation, Version 7: an "At a glance" table (finding, stack, rollout mode, policy loss, result) followed by five findings, each with stack/mode tags, a one-paragraph verdict and one headline table; the previous per-section tables (4B/2B background, six flaws, training curves, per-benchmark harness tables, Minerva breakdown, attempts, EOPD internals, recipe audit, harness jobs, run-id tables) fold out under `<details>`. Text fixes: stale "harness running / pending" cells now read done. Content unchanged otherwise. Source and build script copied to `~/repos/opd-campaign-scratch/tables/` (`build_page.py` rebuilds from `opd_results_tables.v5.bak.html`).
