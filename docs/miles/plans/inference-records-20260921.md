@@ -116,7 +116,36 @@ ran source `a0723ea9e` on image `01M33JY20G7573M3K0KT1T1RAW`.
 | Writer | 0 dropped and 0 failed; at most 3 rows pending at any metric report |
 | Truncation | All responses hit the 256-token cap, as expected from a tiny random model |
 
-This exercises mechanics only. The production qualification for the starter
+### Real verifier, summaries and selection
+
+1. **Real GSM8K verifier.**
+   [01M33QYAAN23QD3M1B16M5GRCN](https://beaker.org/ex/01M33QYAAN23QD3M1B16M5GRCN)
+   ran source `250767ccd` with the filter off.
+   - All 72 responses have validity `completed`, the adapter status for a
+     verifier without its own diagnostics.
+   - The 16 consumed groups match `rollout_flow.jsonl` exactly.
+   - `records summarize` ran inside the image over the store's two runs
+     ([audit](https://beaker.org/ex/01M33RGADPN5NQD0QQRRVGGGST)). Its token
+     account sums exactly: 96 groups × 2 responses × 256 tokens.
+2. **Selection tests and table.**
+   [01M33SPAE7GEWAV2D37MGFV383](https://beaker.org/ex/01M33SPAE7GEWAV2D37MGFV383),
+   on image `01M33SN7VP0DRQBC69RYZ3FC36` from source `a561a4024`:
+   - 52 tests passed inside the pinned image, including the real MILES data
+     source's skip, ledger and resume test.
+   - `records select` built a deliberately relaxed mechanics table from the
+     real-verifier run: 2 observations, 1 attempt, bound limit 1.0. It excluded
+     all 24 all-zero prompts that had starting-checkpoint evidence.
+3. **Selected run.**
+   [01M33SRPJZSY5ZAX810RW0ECH4](https://beaker.org/ex/01M33SRPJZSY5ZAX810RW0ECH4)
+   pinned that table.
+   - It logged more than 101 skips as the tiny dataset cycled.
+   - Its records hold 36 groups over only the 8 remaining prompts, with 0 groups
+     for an excluded key
+     ([audit](https://beaker.org/ex/01M33TA4FZM01FXEGAXCWVEPH8)).
+   - The manifest carries the table digest, the protocol matches the table, and
+     the consumed responses match `rollout_flow.jsonl`.
+
+These exercise mechanics only. The production qualification for the starter
 default is still owed: it needs a real verifier registry (validity states other
 than unknown) and 32K throughput with recording on and off.
 
