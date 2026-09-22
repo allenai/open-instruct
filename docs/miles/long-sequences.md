@@ -29,6 +29,10 @@ splits an individual sample to make it fit.
 
 ## Set capacity independently of optimizer batch size
 
+Size engine admission and its pools from GPU memory with the procedure in
+[admission sizing](throughput-profiles.md#size-engine-admission-from-memory). The
+table below explains what each control does as length grows.
+
 | Control | What to change or watch as length grows |
 |---|---|
 | `trainer.micro_batch_size` | Keep at one on the currently supported Core path. |

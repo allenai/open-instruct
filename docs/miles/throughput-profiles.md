@@ -45,7 +45,76 @@ Use the four [maintained starters](../../configs/miles/examples/README.md).
 The measurements below describe historical 4K experiments. Their labels such as
 “small” and “large” are historical campaign names, not the current starter sizes.
 Do not transfer the 4K no-recomputation setting to 32K packs without measuring
-memory. The maintained medium uses recomputation and candidate admission 16.
+memory. The maintained medium and large use recomputation and engine admission 64,
+sized as described below.
+
+## Size engine admission from memory
+
+Engine admission is the number of requests each SGLang engine decodes at once. Four
+settings express it and must move together: `sglang_server_concurrency` (HTTP
+slots per engine), `sglang_max_running_requests` (the engine's batch limit),
+`sglang_cuda_graph_max_bs_decode` (the largest batch replayed from a CUDA graph)
+and the two memory pools below. Decode throughput grows with batch size until the
+GPU saturates, so an admission set below what memory allows leaves throughput
+unused whenever training waits for batches.
+
+For the 18.5B-total KDA/latent MoE served on one GPU per engine:
+
+| Pool | Size per unit | Source |
+|---|---|---|
+| Weights | 34.5 GiB | `Load weight end ... mem usage=34.52 GB` |
+| Full-attention KV cache | 16 KiB per token: 2 (K, V) × 4 attention layers × 8 KV heads × 128 dims × 2 bytes | `KV Cache is allocated ... #tokens: 786432, K size: 6.00 GB, V size: 6.00 GB` |
+| KDA recurrent state | About 32 MiB per slot (16 KDA layers × 16 heads × 128 × 256, FP32) | Pool allocation minus KV: 45 GiB for 1,024 slots and 786,432 tokens |
+
+SGLang reports these values in GiB although its logs print “GB”. The sources are
+engine logs from the September 20 mixed 32K runs on Holmes B300, where each engine
+saw 266.9 GiB and kept 187.3 GiB free after all pools and graphs were allocated.
+
+To choose admission `R` for context length `C` (`inference.max_context_length`):
+
+1. Set `sglang_server_concurrency`, `sglang_max_running_requests` and
+   `sglang_cuda_graph_max_bs_decode` to `R`.
+2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
+   request at full context, so KV capacity never forces a retraction.
+3. Keep `sglang_max_mamba_cache_size` above `5 × R` with the KDA radix cache (the
+   validator enforces this), or at least `R` with radix caching off.
+4. Check that weights + `R × C × 16 KiB` + slots × 32 MiB fits within
+   `sglang_mem_fraction_static` × visible GPU memory. At 0.7 on a B300 the budget
+   is about 187 GiB.
+5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to
+   `max(collection, 2 × engines × R)` samples, which keeps every engine refilled
+   without a long upstream queue.
+
+Worked budget at `C = 34,816` with 1,024 state slots (32 GiB):
+
+| `R` | KV pool | Weights + KV + state | Fits in 187 GiB? |
+|---|---|---|---|
+| 16 | 8.5 GiB | 75 GiB | Yes |
+| 32 | 17 GiB | 84 GiB | Yes |
+| 64 | 34 GiB | 101 GiB | Yes: maintained medium and large |
+| 128 | 68 GiB | 135 GiB | Yes, but see the router limit below |
+
+On B300, memory stops binding well before the other limits. The 4K live refresh
+runs at 128 and 256 concurrency failed after 8 and 6 updates with MILES-router `ReadError`/503
+transport errors, without evidence of an out-of-memory failure
+([packed capacity results](measurements/packed-capacity-results-20260914.md)).
+Keep `R ≤ 64` until that failure is understood. On a smaller GPU, run the same
+arithmetic before lowering anything: an 80 GiB GPU at static fraction 0.7 leaves
+about 21 GiB after weights, so reduce `R` or the state-slot count to fit that.
+
+After launch, confirm the setting from the engine metrics:
+
+- `#running-req` should sit near `R` while the trainer waits for batches.
+- `token usage` should stay below 1, with few retractions.
+- Per-engine generation throughput should rise over the admission-16 baseline of
+  about 1,730 tokens/s.
+
+If requests run at the cap with KV usage far below one half while training waits,
+admission is too low. That is what the September 20 run showed at `R = 16`: 15.6
+of 16 running, 24% KV usage, and training waiting for batches for 78% of the
+workflow. The throughput gain from 16 to 64 at 32K has not yet been measured live. The fixed-policy single-engine benchmark, with
+2,048-token responses, rose from 4,749 to 6,171 tokens/s between 32 and 64
+concurrent sequences and was still rising at 512.
 
 ## Settings in the historical 4K measurements
 

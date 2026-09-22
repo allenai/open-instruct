@@ -18,9 +18,10 @@ preparation, launch, or diagnostics rather than training arguments. Native parse
 acceptance does not establish backend support or GPU qualification.
 
 Start with the [colocated dev/test and disaggregated training profiles](../../configs/miles/README.md).
-The full-SFT starter now exposes 64 concurrent requests and sizes its graph and
-cache limits together. Maintained full-SFT examples now use 8 × 8; async uses
-trainer-scored old logprobs plus TIS and buffer factor two. The combined
+The medium and large starters expose 64 concurrent requests per engine and size
+decode graphs, KV tokens and KDA state slots with them; see
+[admission sizing](throughput-profiles.md#size-engine-admission-from-memory).
+Async uses trainer-scored old logprobs plus TIS and a completed-buffer factor of one. The combined
 config-driven exercise passed four updates with independently audited samples; previous measured configs remain frozen.
 
 ## Editing and inspecting a run

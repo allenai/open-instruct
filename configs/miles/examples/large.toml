@@ -106,16 +106,18 @@ samples_per_prompt = 4
 global_batch_size = 256
 max_response_length = 32768
 max_context_length = 34816
-# Candidate long-context admission: measure KV occupancy/retractions before increasing.
-sglang_server_concurrency = 16
-sglang_max_running_requests = 16
-sglang_max_total_tokens = 786432
+# Admission sized from B300 memory; see docs/miles/throughput-profiles.md#size-engine-admission-from-memory.
+# The pool holds 64 full 34,816-token contexts (16 KiB/token, 34 GiB), so KV never forces retraction.
+# 1024 KDA state slots (~32 MiB each) exceed the 5 x 64 radix minimum; ~165 GiB stays free per engine.
+sglang_server_concurrency = 64
+sglang_max_running_requests = 64
+sglang_max_total_tokens = 2228224
 sglang_max_mamba_cache_size = 1024
 sglang_mem_fraction_static = 0.7
 radix_cache = true
 mamba_radix_cache_strategy = "extra_buffer"
 sglang_cuda_graph_backend_decode = "full"
-sglang_cuda_graph_max_bs_decode = 32
+sglang_cuda_graph_max_bs_decode = 64
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
