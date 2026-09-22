@@ -50,7 +50,10 @@
     "router_aux_loss_grouping": "pack retains native Core local-forward balancing; sequence computes counts and mean scores within each original response document while preserving physical packing. Experimental; requires MoE, TP=CP=1, no global balancing and no model compilation.",
     "router_aux_loss_reduction": "token weights each document by its full model-token count; response averages document token means equally over all responses in the optimizer update.",
     "router_z_loss_reduction": "token preserves native global model-token normalization; response averages per-document z-loss token means equally. Independent of balancing grouping and weighting.",
-    "router_aux_count_source": "Balancing histogram source: dispatch (default, includes replay) or current (fresh trainer top-k). Current changes balancing only; replay dispatch, selected weights and z-loss are unchanged. Supported for local, plain-softmax MoE routing."
+    "router_aux_count_source": "Balancing histogram source: dispatch (default, includes replay) or current (fresh trainer top-k). Current changes balancing only; replay dispatch, selected weights and z-loss are unchanged. Supported for local, plain-softmax MoE routing.",
+    "records_root": "Absolute shared store for inference records; null disables recording. Every scored training group (passed, filtered or aborted) and its later consumption or expiry is appended as JSONL under <root>/<lineage>/<run>/ by a bounded background writer. See the inference records guide.",
+    "records_responses": "Response text in inference records: off (default) keeps outcomes only, all stores every response, sample stores whole groups selected deterministically at records_response_sample_rate.",
+    "records_response_sample_rate": "Fraction of groups, in (0, 1], whose response text is stored when records_responses=sample; must be null otherwise."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",
@@ -235,6 +238,10 @@
     "rubrics.NAME.profile": "Required supported open-instruct/general-* profile; see managed judges guide.",
     "rubrics.NAME.temperature": "Nonnegative sampling temperature, default 1.0.",
     "schema_version": "Required integer 1.",
-    "judges.NAME.context_extension": "Optional explicit context extension recipe; qwen3-yarn-128k enables the validated Qwen3 YaRN settings for a 128K judge context."
+    "judges.NAME.context_extension": "Optional explicit context extension recipe; qwen3-yarn-128k enables the validated Qwen3 YaRN settings for a 128K judge context.",
+    "records.enabled": "Boolean, default false; when true, records every scored training group and its disposition to records.root. Recording never changes admission, filtering or training.",
+    "records.root": "Shared absolute store path; required when records.enabled=true; maps to core.records_root. Share one store across runs so later runs can select prompts from earlier outcomes.",
+    "records.responses": "off (default), all or sample; maps to core.records_responses.",
+    "records.response_sample_rate": "Fraction of groups in (0, 1] whose text is stored with responses=sample; maps to core.records_response_sample_rate."
   }
 }

@@ -16,7 +16,7 @@ from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.errors import InputError
 
 RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "tracking", "runtime")
-WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache"}
+WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache", "records"}
 CORE_FIELDS = {field.name for field in dataclasses.fields(CoreConfig)}
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -167,6 +167,7 @@ class RunSpec:
     miles: dict[str, Any]
     judges: dict[str, Any]
     evaluation: dict[str, Any]
+    records: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -241,6 +242,9 @@ class RunSpec:
                 _boolean(cache[key], f"compiler_cache.{key}")
         if "shared_root" in cache:
             cache["shared_root"] = _path(cache["shared_root"], base, "compiler_cache.shared_root")
+        records = cls._records(
+            _table(document, "records", {"enabled", "root", "responses", "response_sample_rate"}), base
+        )
         result = cls(
             name,
             path,
@@ -255,6 +259,7 @@ class RunSpec:
             _table(document, "miles"),
             judging.parse(document),
             evaluation.parse(_table(document, "evaluation"), launch),
+            records,
         )
         result.compile()
         return result
@@ -270,6 +275,7 @@ class RunSpec:
             "launch": self.launch,
             "conversion": self.conversion,
             "compiler_cache": self.compiler_cache,
+            **({"records": self.records} if self.records else {}),
             **({"evaluation": self.evaluation} if self.evaluation["mode"] == "background" else {}),
             **self.sections,
             "core": self.core,
@@ -284,9 +290,22 @@ class RunSpec:
                     "model_config",
                     "reward_config",
                     "compiler_cache_root",
+                    "records_root",
                 }:
                     payload[section][key] = _path(value, self.config_path.parent, f"{section}.{key}")
         return payload
+
+    @staticmethod
+    def _records(records, base):
+        """Recording is opt-in and needs an explicit shared store; other fields are validated by CoreConfig."""
+        if not records:
+            return {}
+        records["enabled"] = _boolean(records.get("enabled", False), "records.enabled")
+        if "root" in records:
+            records["root"] = _path(records["root"], base, "records.root")
+        elif records["enabled"]:
+            raise InputError("records.root is required when records.enabled = true; use a shared absolute store path")
+        return records
 
     @staticmethod
     def _data(data, base):
@@ -519,7 +538,7 @@ class RunSpec:
                 else:
                     put(f"miles.{key}", value, origin)
         for key, value in self.core.items():
-            if key in ("model_config", "reward_config", "compiler_cache_root"):
+            if key in ("model_config", "reward_config", "compiler_cache_root", "records_root"):
                 value = _path(value, base, f"core.{key}")
             put(f"core.{key}", value, f"core.{key}")
         for key, value in options.normalize_options(self.miles).items():
@@ -532,6 +551,14 @@ class RunSpec:
         }.items():
             if key in self.compiler_cache:
                 put(f"core.{field}", self.compiler_cache[key], f"compiler_cache.{key}")
+        if self.records.get("enabled"):
+            for key, field in {
+                "root": "records_root",
+                "responses": "records_responses",
+                "response_sample_rate": "records_response_sample_rate",
+            }.items():
+                if key in self.records:
+                    put(f"core.{field}", self.records[key], f"records.{key}")
         core, miles = values["core"], values["miles"]
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
@@ -768,6 +795,7 @@ class RunSpec:
             "output": self.output,
             "launch": self.launch,
             "compiler_cache": self.compiler_cache,
+            "records": self.records,
             "runtime": runtime,
             "evaluation": evaluation.plan(self, self.compile().miles),
             **self.judges,

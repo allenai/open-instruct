@@ -42,6 +42,7 @@ switching to a deprecated backend.
 | [Long sequences](long-sequences.md) | Choosing prompt/response budgets, admission, memory controls and interpreting length qualification |
 | [Packing](sequence-packing.md) | Understanding document isolation, loss semantics and qualification |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
+| [Inference records](inference-records.md) | Recording every scored group's outcome by prompt and checkpoint for later selection and analysis |
 | [Run-control semantics](run-controls.md) | Comparing Core controls with olmo-miles/Megatron terminology |
 | [Router auxiliary objectives](core.md#router-auxiliary-objectives) | Selecting grouping, averaging, count source and coefficients |
 | [Implementation contracts](core.md) | Reviewing detailed trainer, replay and publication checks |

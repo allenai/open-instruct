@@ -8,7 +8,7 @@ from miles.rollout.filter_hub.base_types import call_dynamic_filter
 from miles.rollout.fully_async_data_buffer import DefaultDataBuffer, iter_samples
 from miles.utils.types import Sample
 
-from open_instruct.miles import policy_refresh
+from open_instruct.miles import inference_records, policy_refresh
 from open_instruct.miles.data import policy_versions
 from open_instruct.miles.queue_metrics import QueueMetrics
 
@@ -24,12 +24,22 @@ class MeasuredDataBuffer(DefaultDataBuffer):
         self._dynamic_filter = None
         self._queue_metrics = QueueMetrics()
         self._consumer_wait_seconds = 0.0
+        core = getattr(self._args, "olmo_core", None)
+        self._records = inference_records.Recorder(self._args) if getattr(core, "records_root", None) else None
 
     async def put(self, item):
         """Return False only for a dynamic-filter drop that the producer must acknowledge."""
+        samples = list(iter_samples(item.group))
         # Preserve upstream abort/retry handling before reward filtering.
-        if not any(sample.status == Sample.Status.ABORTED for sample in iter_samples(item.group)):
+        if any(sample.status == Sample.Status.ABORTED for sample in samples):
+            if self._records is not None:
+                self._records.record_group(samples, decision="aborted")
+        else:
             output = call_dynamic_filter(self._group_filter, self._args, item.group)
+            if self._records is not None:
+                self._records.record_group(
+                    samples, decision="passed" if output.keep else "filtered", reason=output.reason
+                )
             if not output.keep:
                 self._metric_gatherer.on_dynamic_filter_drop(reason=output.reason)
                 return False
@@ -37,6 +47,8 @@ class MeasuredDataBuffer(DefaultDataBuffer):
         return True
 
     def on_dequeue(self, entry, *, staleness, accepted):
+        if self._records is not None:
+            self._records.record_disposition(list(iter_samples(entry.group)), accepted=accepted, staleness=staleness)
         self._queue_metrics.record(
             [sample.response_length for sample in iter_samples(entry.group)], age=staleness, accepted=accepted
         )
@@ -53,6 +65,7 @@ class MeasuredDataBuffer(DefaultDataBuffer):
         return {
             **super().get_metrics(),
             **self._queue_metrics.collect(),
+            **(self._records.metrics() if self._records is not None else {}),
             "rollout/fully_async/completed_queue/consumer_wait_seconds": waited,
         }
 

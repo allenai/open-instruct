@@ -13,6 +13,7 @@ from open_instruct.miles.errors import InputError
 
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 EXPERT_SCHEDULE = "open_instruct.miles.expert_schedule.reorder_samples"
+RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,6 +77,10 @@ class CoreConfig:
     # Publication layout for routed experts: per-expert HF slices, or one stacked
     # tensor per layer and projection in the serving engine's fused layout.
     expert_publication: str = "per_expert"
+    # Append every scored training group, kept or filtered, to this shared store.
+    records_root: str | None = None
+    records_responses: str = "off"
+    records_response_sample_rate: float | None = None
 
     def __post_init__(self):
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -91,6 +96,15 @@ class CoreConfig:
                 cache.validate_shared_root(Path(self.compiler_cache_root))
             except ValueError as error:
                 raise InputError(f"core.compiler_cache_root: {error}") from error
+        if self.records_root is not None:
+            validation.text(self.records_root, "core.records_root")
+            if not Path(self.records_root).is_absolute():
+                raise InputError("core.records_root must be an absolute path or unset")
+        validation.choice(self.records_responses, "core.records_responses", RECORD_RESPONSE_MODES)
+        if self.records_response_sample_rate is not None:
+            validation.number(
+                self.records_response_sample_rate, "core.records_response_sample_rate", maximum=1, exclusive_min=True
+            )
         validation.choice(
             self.attention_backend, "core.attention_backend", ("torch", "flash_2", "flash_3", "flash_4", "te")
         )
@@ -300,6 +314,10 @@ class RunConfig:
             if key in self.miles:
                 raise InputError(f"miles.{key} is managed by the Core backend")
         cli_options.encode_options(self.miles)
+        if (self.core.records_responses == "sample") != (self.core.records_response_sample_rate is not None):
+            raise InputError(
+                'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
+            )
         if self.core.packing_max_tokens is not None:
             if not self.core.sequence_packing:
                 raise InputError("core.packing_max_tokens requires sequence_packing=true")

@@ -161,6 +161,10 @@ flags, choices and source help see the [native appendix](native-options.md).
 | output.export_hf | Boolean, default false. Export final HF weights after training. |
 | output.hf_dir | Final HF export path; default output.root/export-hf. |
 | output.root | Required fresh run directory. Resume requires matching recorded specification; completed runs cannot be overwritten. |
+| records.enabled | Boolean, default false; when true, records every scored training group and its disposition to records.root. Recording never changes admission, filtering or training. |
+| records.response_sample_rate | Fraction of groups in (0, 1] whose text is stored with responses=sample; maps to core.records_response_sample_rate. |
+| records.responses | off (default), all or sample; maps to core.records_responses. |
+| records.root | Shared absolute store path; required when records.enabled=true; maps to core.records_root. Share one store across runs so later runs can select prompts from earlier outcomes. |
 | rubrics.NAME.max_response_tokens | Positive judge output reservation, default 2048; smaller than judge context. |
 | rubrics.NAME.profile | Required supported open-instruct/general-* profile; see managed judges guide. |
 | rubrics.NAME.temperature | Nonnegative sampling temperature, default 1.0. |
@@ -269,6 +273,9 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.scoring_check_interval | &lt;class &#x27;int&#x27;&gt; | 50 | Periodic standalone-versus-training score check; startup/resume also checks the first update. |
 | core.scoring_check_tolerance | &lt;class &#x27;float&#x27;&gt; | 0.001 | Allowed absolute difference for the standalone/training scoring check. |
 | core.expert_publication | &lt;class &#x27;str&#x27;&gt; | &quot;per_expert&quot; | per_expert exports separate HF expert slices; fused publishes stacked serving tensors. Disk HF export remains per-expert. |
+| core.records_root | str &#124; None | null | Absolute shared store for inference records; null disables recording. Every scored training group (passed, filtered or aborted) and its later consumption or expiry is appended as JSONL under &lt;root&gt;/&lt;lineage&gt;/&lt;run&gt;/ by a bounded background writer. See the inference records guide. |
+| core.records_responses | &lt;class &#x27;str&#x27;&gt; | &quot;off&quot; | Response text in inference records: off (default) keeps outcomes only, all stores every response, sample stores whole groups selected deterministically at records_response_sample_rate. |
+| core.records_response_sample_rate | float &#124; None | null | Fraction of groups, in (0, 1], whose response text is stored when records_responses=sample; must be null otherwise. |
 
 ## Unsupported olmo-miles controls
 

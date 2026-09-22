@@ -108,6 +108,7 @@ nav:
     - Architecture: miles/architecture.md
     - Packing: miles/sequence-packing.md
     - Compiler cache: miles/compiler-cache.md
+    - Inference records: miles/inference-records.md
     - Measurements: miles/measurements/index.md
     - Historical plans: miles/plans/index.md
   - Deprecated GRPO:
