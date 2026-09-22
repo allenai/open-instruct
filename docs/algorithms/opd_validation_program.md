@@ -1438,3 +1438,35 @@ lower; it does not affect the per-token statistics above.
 ### 2026-09-22T16:54:21Z
 
 - Async training remains on its original running job, with 80 optimizer updates confirmed and the update-80 evaluation pending. Full W&B history refreshed. Export verification job `01M34ZEZKTVCY31P66E4KC8WS2` remains queued; fresh scheduler events report all 27 eligible Saturn nodes lack available slots. Retained the existing reader and submitted no duplicate evaluations; next action is to collect its export-completion evidence and launch the remaining matched checkpoints.
+
+### 2026-09-22T17:11:45Z
+
+- Submitted matched greedy evaluation after 20 async updates: [01M351M82P18HEBXTNT5AB1P2P](https://beaker.org/ex/01M351M82P18HEBXTNT5AB1P2P), W&B `7a9f897a`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:11:46Z
+
+- Submitted matched greedy evaluation after 30 async updates: [01M351M92ND391V9XT254PH66F](https://beaker.org/ex/01M351M92ND391V9XT254PH66F), W&B `c33cc375`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:11:46Z
+
+- Submitted matched greedy evaluation after 40 async updates: [01M351M9V5FHXYF7AEMKP2RQZ9](https://beaker.org/ex/01M351M9V5FHXYF7AEMKP2RQZ9), W&B `daea26fe`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:11:47Z
+
+- Submitted matched greedy evaluation after 50 async updates: [01M351MAM6C7JW8C397624R4JV](https://beaker.org/ex/01M351MAM6C7JW8C397624R4JV), W&B `0ae7773e`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:11:48Z
+
+- Submitted matched greedy evaluation after 60 async updates: [01M351MBDWPQM9NXCDX35TWBEW](https://beaker.org/ex/01M351MBDWPQM9NXCDX35TWBEW), W&B `6eaffb15`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:11:49Z
+
+- Submitted matched greedy evaluation after 70 async updates: [01M351MCDG2W4TT0DWJK5MHKFP](https://beaker.org/ex/01M351MCDG2W4TT0DWJK5MHKFP), W&B `10c45c99`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:11:50Z
+
+- Submitted matched greedy evaluation after 80 async updates: [01M351MD6REF34TCZ7WQKX9N5M](https://beaker.org/ex/01M351MD6REF34TCZ7WQKX9N5M), W&B `ca7d0c1c`. Reader `01M34ZEZKCWT5MVD6AWF14XHSN` verified export .complete, model index and all eight referenced shards; campaign/receipts/Beaker found no duplicate. Same immutable image, patch, data, base tokenizer/vLLM model, learner weight sync, seed 42 and greedy 16K harness as the completed hf-9 evaluation. Fresh output/state and run identity; no training configuration change.
+
+### 2026-09-22T17:12:32Z
+
+- Latest full-run check confirms 80 optimizer updates and update-80 in-run evaluation (DAPO 53.125%, MATH-500 81.8%). Original training job is still running. All seven new matched evaluation jobs are recorded with their latest attempt and scheduler events in campaign.json; retain queued jobs without relaunch. Updates 90/100 remain gated on completed exports.
