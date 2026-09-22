@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-21 23:48Z (details in the latest Log entry).
+Updated 2026-09-22 00:01Z (details in the latest Log entry).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification submitted as `01M335TSWA8MTK1YAEZF0CXJEE`; the matched 100-update run follows only after audit/export qualification passes. See the latest Log entry.
 
@@ -1391,3 +1391,9 @@ lower; it does not affect the per-token statistics above.
 - Qualification submitted: [Beaker](https://beaker.org/ex/01M335TSWA8MTK1YAEZF0CXJEE), image `01M2V7V946ZN9N9STPK0H04YWM` plus committed code overlay, root `qwen35-2b-opd-from-verifier-2b-math-async-smoke-v1`; four updates, 4×2 responses, 512-token cap, evaluation/checkpoint transitions. Full learning arm is gated on runtime tests, successful updates, OPD audit and fresh export reload.
 - Local validation: config plan/validate pass, changed-file Ruff clean, 94 CPU tests pass with one dependency skip (the shared-memory EOPD test required an unsandboxed retry). Native-image tests cannot import on the CPU-only Mac because Transformer Engine requires libcuda; they are mandatory preflight in the qualification GPU job.
 - Recovered sync `run/training.log` from result dataset `01M2QF9GDANQKN5NPP8760WRKX` (all 100 rollout IDs, including retry duplicates). Preliminary ordinary-step mean: trainer wait 555.1 s, training 64.4 s, step 619.5 s, wait fraction 89.6%. Retain last occurrence per rollout; exclude startup/resume warmup and periodic eval/save boundaries. Async queue wait overlaps training and must not be mislabeled trainer idle. Raw extraction and summary live in `opd-campaign-scratch/miles-async2b/`; the Miles measurement note documents the metric map and caveats.
+
+### 2026-09-22 00:01Z
+
+- Async qualification `01M335TSWA8MTK1YAEZF0CXJEE` started on Holmes at 2026-09-21 23:53:39Z with overlay `4d47a7832`. All **24 native runtime tests passed**, including CUDA packed-attention forward/backward and async OPD queue/evaluation/restart tests. Read-only diagnostic `01M336CTV9Z20NGGNQWTRKRG7X` found teacher weights loading at 23:57Z. Four updates, final audit and export reload remain pending; the full 100-update arm has not launched.
+- Kevin explicitly approved recurring follow-up through completion, including necessary repairs/resumes and matched evaluations. The active 15-minute task heartbeat is `monitor-2b-miles-async-opd-comparison`. It gates the full launch on qualification success, checks receipts to prevent duplicate jobs, and will compare learning and trainer waits to the existing sync baseline.
+- Sync wait extraction now identifies all three W&B attempts (`ph29y4dm`, `scvg13ui`, `v0g9hlg0`; starts at rollouts 0/40/70) before excluding startup/resume warmup. Across 87 ordinary unique updates: mean wait 555.1 s, training 64.2 s, step 619.3 s, wait fraction 89.6%. Reusable extraction: `opd-campaign-scratch/miles-async2b/compare_timings.py`; campaign state: `campaign.json` in that directory.
