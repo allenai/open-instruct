@@ -1,7 +1,8 @@
 # Plan: inference records (2026-09-21)
 
 **Status:** phase 1 (recording) implemented on `robertb/miles-inference-records`
-after review. Phases 2–5 are proposals. The user guide is
+after review, and exercised on a two-GPU fixture; see [light exercise](#light-exercise-2026-09-21).
+Phases 2–5 are proposals. The user guide is
 [inference records](../inference-records.md).
 
 ## Problem
@@ -88,6 +89,36 @@ evolve once the evidence exists. The records support:
    - Shutdown flushes for at most 30 seconds.
    - Qualification covers a blocked store as well as normal throughput.
 6. **Selection must be conservative, with correlation made explicit.** See phase 3.
+
+## Light exercise (2026-09-21)
+
+[Experiment 01M33JYBPXMRVNVJ6T9JSXT5S3](https://beaker.org/ex/01M33JYBPXMRVNVJ6T9JSXT5S3)
+ran source `a0723ea9e` on image `01M33JY20G7573M3K0KT1T1RAW`.
+
+- **Fixture:** the two-GPU synthetic-reward fixture from 2026-09-19: tiny
+  model, refresh publication, fully async, 4 updates of 4 groups × 2
+  responses, zero-variance filter on.
+- **Recording settings:** response text sampled at 0.5 into a separate test store.
+- **Outcome:** exit 0 after 6.5 minutes. A read-only audit job
+  ([01M33KQT787R1SK4Q9A5Y3593K](https://beaker.org/ex/01M33KQT787R1SK4Q9A5Y3593K))
+  reconciled the records with the run's own accounting:
+
+| Check | Result |
+|---|---|
+| Rows | 1 manifest; 60 group rows and 17 disposition rows; unique observation IDs; no dispositions without a group or for a non-passed group |
+| Filter decisions | 20 passed, 40 filtered (20 all-zero, 20 all-one). The 34 drops logged by the filter metric through the last update report are included; the rest were produced during the final drain. |
+| Dispositions | 16 consumed = 4 updates × 4 groups; 1 expired, matching the run's `stale_groups_filtered = 1`; 3 passed groups left at shutdown |
+| Consumption | 32 consumed responses, whose lengths match `rollout_flow.jsonl` exactly |
+| Identity | 32 task keys = 32 training prompts, revisited across the run |
+| Policy scope | 80 `start_checkpoint`, 16 `run_version`, 24 `mixed` responses |
+| Validity | 120 `unknown`, as intended: the fixture's custom reward bypasses the verifier adapter |
+| Text sampling | 28 of 60 groups carry text; presence always matches the flag |
+| Writer | 0 dropped and 0 failed; at most 3 rows pending at any metric report |
+| Truncation | All responses hit the 256-token cap, as expected from a tiny random model |
+
+This exercises mechanics only. The production qualification for the starter
+default is still owed: it needs a real verifier registry (validity states other
+than unknown) and 32K throughput with recording on and off.
 
 ## Phases
 
