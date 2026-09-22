@@ -32,6 +32,7 @@ import hashlib
 import os
 import pathlib
 import re
+import shlex
 from typing import Any
 
 import torch
@@ -186,6 +187,12 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # Part of the cache hash.
         if args.training.over_length_strategy != dataset_transformation.DEFAULT_OVER_LENGTH_STRATEGY:
             cache_args.append(f"--over_length_strategy {args.training.over_length_strategy}")
+        # Also part of the cache hash, and the values contain shell metacharacters: an
+        # unquoted `<think>` would be a redirection, and a command that dropped the flag
+        # would tokenize to a different hash than the one this job is looking for.
+        if tc.reserved_slot_tokens:
+            quoted = " ".join(shlex.quote(token) for token in tc.reserved_slot_tokens)
+            cache_args.append(f"--reserved_slot_tokens {quoted}")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
@@ -402,6 +409,13 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # state (SFT starts a fresh optimizer) as well as the trainer state (step counter,
         # LR schedule position, data order).
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False, load_optim_state=False)
+
+    # Last point at which the base weights are settled: the HF path loaded them before the
+    # trainer was built, the olmo-core path just above, and the trainer is configured with
+    # LoadStrategy.never so fit() loads nothing of its own. Skipped when resuming, since those
+    # rows have been trained since they were seeded.
+    if not resumed:
+        olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
 
     logger.info("Starting training...")
     trainer.fit()
