@@ -25,8 +25,8 @@
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
-MODEL=hamishivi/Qwen3.5-9B
-TOKENIZER=hamishivi/Qwen3.5-9B
+MODEL=/weka/oe-adapt-default/pradeepd/checkpoints/hamish_qwen35_9b_tmax_glm52_all_sft_composite
+TOKENIZER=/weka/oe-adapt-default/pradeepd/checkpoints/hamish_qwen35_9b_tmax_glm52_all_sft_composite
 
 # Loss exclusion on/off is baked into the experiment name and description so the
 # two variants are distinguishable in wandb and Beaker (and get separate
@@ -38,7 +38,7 @@ if [ "$MASK_INFRA_FAILED" = "true" ]; then
 else
     MASK_LABEL="no_mask_infra"
 fi
-EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_dppo_repro_4node_64k_opensandbox_${MASK_LABEL}}"
+EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_glm52_sft_dppo_4node_64k_opensandbox_${MASK_LABEL}}"
 # For the B300 cluster:
 #   BEAKER_CLUSTER=ai2/holmes BEAKER_WORKSPACE=ai2/oe-agents-holmes $0 <image>
 # with an image built via `build_image_and_launch.sh --cuda-version 13`; the
@@ -52,7 +52,7 @@ BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/oe-agents-holmes}"
 uv run python mason.py \
        --cluster "$BEAKER_CLUSTER" \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; OpenSandbox spot sandboxes; ${MASK_LABEL})" \
+       --description "tmax-15k DPPO Qwen35 9b GLM 5.2 SFT (4-node; 64k; OpenSandbox spot sandboxes; ${MASK_LABEL})" \
        --pure_docker_mode \
        --workspace "$BEAKER_WORKSPACE" \
        --priority "${BEAKER_PRIORITY:-high}" \
@@ -120,7 +120,7 @@ uv run python mason.py \
     --save_trainer_logprobs true \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "opensandbox", "task_data_hf_repo": "allenai/tmax-15k-open-instruct", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 1024 \
+    --pool_size 800 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \

@@ -3238,10 +3238,13 @@ def main(
     hf_cache = os.environ.get("HF_HUB_CACHE", os.path.expanduser("~/.cache/huggingface/hub"))
     barrier_file = os.path.join(hf_cache, f".model_download_done_{os.environ.get('BEAKER_JOB_ID', 'local')}")
     if rank == 0:
-        logger.info(f"Pre-downloading model {model_config.model_name_or_path}...")
-        snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+        if os.path.isdir(model_config.model_name_or_path):
+            logger.info(f"Model {model_config.model_name_or_path} is a local directory; skipping pre-download.")
+        else:
+            logger.info(f"Pre-downloading model {model_config.model_name_or_path}...")
+            snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+            logger.info("Model pre-download complete.")
         open(barrier_file, "w").close()
-        logger.info("Model pre-download complete.")
     else:
         while not os.path.exists(barrier_file):
             time.sleep(1)
