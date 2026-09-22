@@ -325,6 +325,11 @@ class RunConfig:
                 raise InputError("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
         validation.runtime_values(options)
+        if self.core.records_root is not None and not options.get("fully_async", False):
+            # The completed buffer that records groups exists only in fully async runs.
+            raise InputError(
+                "core.records_root (records.enabled) requires fully_async=true; synchronous runs record nothing"
+            )
         prompt_limit = options.get("rollout_max_prompt_len")
         context_limit = options.get("rollout_max_context_len")
         if prompt_limit is not None and context_limit is not None and prompt_limit >= context_limit:

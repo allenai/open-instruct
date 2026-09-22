@@ -161,7 +161,7 @@ flags, choices and source help see the [native appendix](native-options.md).
 | output.export_hf | Boolean, default false. Export final HF weights after training. |
 | output.hf_dir | Final HF export path; default output.root/export-hf. |
 | output.root | Required fresh run directory. Resume requires matching recorded specification; completed runs cannot be overwritten. |
-| records.enabled | Boolean, default false; when true, records every scored training group and its disposition to records.root. Recording never changes admission, filtering or training. |
+| records.enabled | Boolean, default false; when true, records every scored training group and its disposition to records.root. Requires fully_async=true. Recording never changes admission, filtering or training. |
 | records.response_sample_rate | Fraction of groups in (0, 1] whose text is stored with responses=sample; maps to core.records_response_sample_rate. |
 | records.responses | off (default), all or sample; maps to core.records_responses. |
 | records.root | Shared absolute store path; required when records.enabled=true; maps to core.records_root. Share one store across runs so later runs can select prompts from earlier outcomes. |

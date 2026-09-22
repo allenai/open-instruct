@@ -97,6 +97,16 @@ def test_task_key_includes_full_context_and_targets():
     assert first["query_sha256"] == other_system["query_sha256"]
 
 
+def test_input_key_separates_tasks_that_share_prompt_tokens(tmp_path):
+    records = inference_records.Recorder(make_args(tmp_path))
+    records.record_group([sample(0, 1.0, target="42")], decision="passed")
+    records.record_group([sample(0, 1.0, target="41")], decision="passed")
+    drain(records)
+    first, second = rows(next((tmp_path / "records").glob("*/*")))
+    assert first["prompt_token_sha256"] == second["prompt_token_sha256"]
+    assert first["input_key"] != second["input_key"]
+
+
 @pytest.mark.parametrize(
     ("diagnostics", "verifiers", "components", "valid"),
     [
@@ -290,12 +300,22 @@ def document(tmp_path, **sections):
 def test_sample_rate_is_required_only_for_sampled_responses(tmp_path, records):
     section = {"enabled": True, "root": "/weka/store", **records}
     with pytest.raises(InputError, match="required with, and only with"):
-        RunSpec.from_dict(document(tmp_path, records=section), config_path=tmp_path / "run.toml")
+        RunSpec.from_dict(document(tmp_path, records=section, **ASYNC), config_path=tmp_path / "run.toml")
+
+
+ASYNC = {"async": {"fully_async": True}}
+
+
+def test_recording_requires_fully_async(tmp_path):
+    with pytest.raises(InputError, match="requires fully_async=true"):
+        RunSpec.from_dict(
+            document(tmp_path, records={"enabled": True, "root": "/weka/store"}), config_path=tmp_path / "run.toml"
+        )
 
 
 def test_records_section_compiles_to_core_and_round_trips(tmp_path):
     section = {"enabled": True, "root": "store", "responses": "sample", "response_sample_rate": 0.25}
-    spec = RunSpec.from_dict(document(tmp_path, records=section), config_path=tmp_path / "run.toml")
+    spec = RunSpec.from_dict(document(tmp_path, records=section, **ASYNC), config_path=tmp_path / "run.toml")
     core = spec.compile().core
     assert core.records_root == str(tmp_path / "store")
     assert (core.records_responses, core.records_response_sample_rate) == ("sample", 0.25)

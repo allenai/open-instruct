@@ -2,7 +2,7 @@
 
 **Status:** phase 1 (recording) implemented on `robertb/miles-inference-records`
 after review, and exercised on a two-GPU fixture; see [light exercise](#light-exercise-2026-09-21).
-Phases 2–5 are proposals. The user guide is
+Phase 2 (summaries) is implemented. Phases 3–5 are proposals. The user guide is
 [inference records](../inference-records.md).
 
 ## Problem
@@ -129,7 +129,7 @@ than unknown) and 32K throughput with recording on and off.
      Buffer tests run against pinned MILES.
    - Qualification: a light run with rows reconciled against the filter's drop
      counts and consumed batches.
-2. **Summaries:** `records summarize` builds the per-prompt table per
+2. **Summaries** (implemented): `records summarize` builds the per-prompt table per
    `input_key` and policy scope.
    - Reward distributions: count, mean, variance and value histogram for
      fractional rewards, not binary "successes".

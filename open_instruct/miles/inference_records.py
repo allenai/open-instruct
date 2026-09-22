@@ -278,8 +278,9 @@ class Recorder:
                 "observation_id": observation,
                 "recorded_unix": time.time(),
                 **identity,
+                # Exact input and task under one protocol: the pooling unit for evidence.
                 "input_key": sha256(
-                    {"tokens": token_sha256 or identity["task_key"], "protocol": self.protocol_sha256}
+                    {"task": identity["task_key"], "tokens": token_sha256, "protocol": self.protocol_sha256}
                 ),
                 "prompt_token_sha256": token_sha256,
                 "prepared_sample_id": metadata.get("prepared_sample_id"),

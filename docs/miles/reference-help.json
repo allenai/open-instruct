@@ -239,7 +239,7 @@
     "rubrics.NAME.temperature": "Nonnegative sampling temperature, default 1.0.",
     "schema_version": "Required integer 1.",
     "judges.NAME.context_extension": "Optional explicit context extension recipe; qwen3-yarn-128k enables the validated Qwen3 YaRN settings for a 128K judge context.",
-    "records.enabled": "Boolean, default false; when true, records every scored training group and its disposition to records.root. Recording never changes admission, filtering or training.",
+    "records.enabled": "Boolean, default false; when true, records every scored training group and its disposition to records.root. Requires fully_async=true. Recording never changes admission, filtering or training.",
     "records.root": "Shared absolute store path; required when records.enabled=true; maps to core.records_root. Share one store across runs so later runs can select prompts from earlier outcomes.",
     "records.responses": "off (default), all or sample; maps to core.records_responses.",
     "records.response_sample_rate": "Fraction of groups in (0, 1] whose text is stored with responses=sample; maps to core.records_response_sample_rate."

@@ -11,9 +11,14 @@ the online filter passed it or not, and whether training later consumed it. They
 live in a shared store that later runs and analyses read. Recording never changes
 admission, filtering or training.
 
-This is phase 1 of the [inference records plan](plans/inference-records-20260921.md):
-recording. Summaries and prompt selection come later. The starter configurations
-leave recording off until a reliability qualification is recorded.
+This covers phases 1 and 2 of the [inference records plan](plans/inference-records-20260921.md):
+recording, and [summaries](#summarize-a-store). Prompt selection comes later. The
+starter configurations leave recording off until a reliability qualification is
+recorded.
+
+Recording requires a fully async run (`[async] fully_async = true`), because it
+lives in the completed-group buffer. `validate` rejects `records.enabled` in a
+synchronous run.
 
 ## Enable recording
 
@@ -83,7 +88,7 @@ Each line is either a `group` row or a `disposition` row.
 |---|---|
 | `observation_id` | Unique per scored group; links disposition rows. |
 | `task_key`, `task_key_basis` | SHA-256 of the full rendered input, which includes every system and conversation turn, plus verifier targets. Exact under the recorded chat template. |
-| `input_key` | `task_key` or the prompt-token hash, combined with the protocol digest. **Pool observations only within one `input_key`.** |
+| `input_key` | `task_key`, the prompt-token hash and the protocol digest together. **Pool observations only within one `input_key`.** |
 | `query_sha256` | Hash of the final user message only; a grouping hint, never an identity. |
 | `prompt_token_sha256`, `prepared_sample_id`, `source_dataset`, `source_row` | Token-level and positional identity. Positional IDs change if a dataset is prepared again. |
 | `verifiers` | Verifier names, which identify the domain. |
@@ -149,6 +154,48 @@ starting checkpoint as version 0.
   - Shutdown flushes the queue for at most 30 seconds.
 - Metrics: `rollout/records/queued_total`, `written_total`, `dropped_total`,
   `failed_total` and `pending`.
+
+## Summarize a store
+
+```bash
+python -m open_instruct.miles records summarize /weka/.../inference-records --output /tmp/records-summary
+```
+
+`STORE` is the records root or one lineage directory. The command reads only
+complete JSON lines. It writes three files.
+
+**`prompts.jsonl`** has one row per `input_key` and `policy_scope`:
+
+- Group counts by outcome: `all_zero`, `constant`, `mixed` or `unscored`,
+  classified from the rewards regardless of the filter's decision.
+- Filter decisions, validity counts and truncated responses.
+- `valid_reward`: count, mean, sample variance, min, max and an exact-value
+  histogram over responses with `validity.valid = true` only. Fractional rewards
+  keep their distribution.
+- `unknown_validity_reward`: the same statistics for unknown-validity responses,
+  kept separate and never pooled with valid evidence.
+- `independent_units`:
+  - for `start_checkpoint` rows, the number of distinct attempts, since they
+    are independent draws from the same policy;
+  - for other scopes, the number of distinct runs, since observations within
+    one trajectory are correlated.
+
+**`tokens.json`** gives, per domain (verifier names) and disposition, the groups,
+responses, tokens, truncated responses and truncated tokens. Dispositions are:
+
+- `consumed`: given to training.
+- `expired`: past the policy-lag limit.
+- `unused`: passed the filter but was still queued at shutdown.
+- `filtered:<reason>`: dropped by the filter.
+- `aborted`.
+
+**`summary.json`** holds the input snapshot (every manifest and record file with
+its size and SHA-256), the lineages, protocols, counts and warnings. Warnings
+cover:
+
+- incomplete final lines from a stopped writer;
+- record files without a manifest;
+- dispositions without a group row.
 
 ## Reading records
 
