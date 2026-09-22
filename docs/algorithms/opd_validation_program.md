@@ -1503,3 +1503,7 @@ lower; it does not affect the per-token statistics above.
 
 - Original async training attempt remains running; 94 optimizer updates confirmed. Update-90 in-run evaluation: DAPO 53.125%, MATH-500 82.4%. Matched evaluations through update80 remain complete.
 - Submitted read-only hf-89 export verification `01M359Q4J8B5JHJ6R1JYHXDQKQ` at 19:33:08Z; latest job `01M359Q4JQXQHFFC6DVXW2QSX0` queued because all 27 eligible Saturn nodes lack slots. Prepared the matched update-90 evaluation spec/identity in scratch, but did not submit before readiness confirmation. Keep this reader; check its result and launch receipts before proceeding. Final training audit, fresh reload and update100 evaluation remain pending.
+
+### 2026-09-22T19:39:14Z
+
+- Original training job has 95 optimizer updates confirmed. Existing hf-89 readiness job remains queued; fresh scheduler events still report all 27 eligible Saturn nodes lack free slots. Prepared update90 evaluation remains gated; no duplicate/replacement or repair. W&B history and queue diagnostics refreshed.
