@@ -25,6 +25,9 @@ linked metadata in a sibling export does not modify the source. It does not
 load model weights, reserialize the tokenizer, or contact Hugging Face. Exports
 with additional named templates are rejected to avoid leaving another active
 template behind.
+The Jinja template is compiled before any files are changed, using Transformers'
+compiler so `{% generation %}` blocks remain supported. Syntax validation does
+not guarantee that every conversation shape can be rendered.
 
 ## New MoE conversion
 
@@ -35,9 +38,12 @@ containing `tokenizer.json`, not a Hub ID. NumPy dataset conversion saves this a
 `<numpy-cache-directory>/tokenizer/`; use the cache actually used by the SFT run.
 Do not substitute the think-dev tokenizer: its pre-tokenizer and post-processor differ.
 
-The converter snapshots the reference `tokenizer.json` before conversion and
-requires JSON equality with the exported file before installing the template or
-reporting success. This catches both backend reconstruction by Transformers and
+The converter compiles the template and snapshots the reference `tokenizer.json`
+and loaded special-token roles and IDs before conversion. It requires JSON equality
+and identical special-token mappings after conversion, before installing the
+template or reporting success. The metadata check catches changes such as an EOS
+override in `tokenizer_config.json` even when `tokenizer.json` is unchanged.
+The backend check catches both reconstruction by Transformers and
 OLMo-core preferring `$CKPT_ROOT/tokenizer` over the explicit tokenizer argument.
 A mismatch fails the conversion qualification; it does not repair segmentation
 or remove the written weights. Resolve the tokenizer mismatch before using that

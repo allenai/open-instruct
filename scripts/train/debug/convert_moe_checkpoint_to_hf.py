@@ -124,6 +124,7 @@ def main() -> None:
     args = parser.parse_args()
     template = export_chat_template.read_export_chat_template(args.export_chat_template)
     reference_tokenizer = None
+    reference_special_tokens = None
     if template is not None:
         tokenizer_file = pathlib.Path(args.tokenizer) / "tokenizer.json"
         if not tokenizer_file.is_file():
@@ -135,6 +136,7 @@ def main() -> None:
         reference_tokenizer = json.loads(tokenizer_file.read_text(encoding="utf-8"))
         if not isinstance(reference_tokenizer, dict):
             parser.error(f"Expected a JSON object in {tokenizer_file}")
+        reference_special_tokens = export_chat_template.read_special_token_state(args.tokenizer)
 
     payload = json.loads(pathlib.Path(args.config).read_text())
     model_config = payload["model"]
@@ -168,6 +170,12 @@ def main() -> None:
             raise RuntimeError(
                 "Exported tokenizer.json differs from the saved training tokenizer. "
                 "Check OLMo-core's checkpoint-local tokenizer precedence and Transformers serialization. "
+                "The export is not qualified for RL; the chat template was not installed."
+            )
+        if export_chat_template.read_special_token_state(args.huggingface_output_dir) != reference_special_tokens:
+            raise RuntimeError(
+                "Exported special tokens or IDs differ from the saved training tokenizer. "
+                "Check tokenizer_config.json and special_tokens_map.json overrides, including EOS and PAD. "
                 "The export is not qualified for RL; the chat template was not installed."
             )
     export_chat_template.install_export_chat_template(args.huggingface_output_dir, template)

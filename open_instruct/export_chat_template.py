@@ -9,6 +9,9 @@ import json
 import pathlib
 import tempfile
 
+from transformers import AutoTokenizer
+from transformers.utils import chat_template_utils
+
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
@@ -21,7 +24,19 @@ def read_export_chat_template(path: str | pathlib.Path | None) -> str | None:
     template = pathlib.Path(path).read_text(encoding="utf-8")
     if not template.strip():
         raise ValueError(f"Export chat template is empty: {path}")
+    # Match apply_chat_template's environment, including generation blocks.
+    # This Transformers-internal compiler is also exercised by our render tests.
+    chat_template_utils._compile_jinja_template(template)
     return template
+
+
+def read_special_token_state(tokenizer_dir: str | pathlib.Path) -> dict:
+    """Snapshot loaded special-token roles and IDs, including metadata overrides."""
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, local_files_only=True, trust_remote_code=False)
+    return {
+        name: (tokens, tokenizer.convert_tokens_to_ids(tokens))
+        for name, tokens in tokenizer.special_tokens_map.items()
+    }
 
 
 def _replace_text(path: pathlib.Path, text: str) -> None:
@@ -49,6 +64,7 @@ def install_export_chat_template(checkpoint_dir: str | pathlib.Path, template: s
         return
     if not template.strip():
         raise ValueError("Export chat template is empty")
+    chat_template_utils._compile_jinja_template(template)
     checkpoint_dir = pathlib.Path(checkpoint_dir)
     config_path = checkpoint_dir / "tokenizer_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))

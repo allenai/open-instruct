@@ -11,6 +11,7 @@ import types
 from unittest import mock
 
 import pytest
+from jinja2 import TemplateSyntaxError
 from tokenizers import Tokenizer, models, pre_tokenizers, processors
 from torch.distributed.checkpoint import state_dict as dist_cp_sd
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
@@ -145,6 +146,32 @@ def test_empty_template_rejected(checkpoint, tmp_path):
     assert snapshot(checkpoint) == before
 
 
+def test_invalid_template_rejected_before_writes(checkpoint, tmp_path):
+    path = tmp_path / "invalid.jinja"
+    path.write_text("{% if %} ")
+    before = snapshot(checkpoint)
+    with pytest.raises(TemplateSyntaxError):
+        export_chat_template.read_export_chat_template(path)
+    with pytest.raises(TemplateSyntaxError):
+        export_chat_template.install_export_chat_template(checkpoint, path.read_text())
+    assert snapshot(checkpoint) == before
+
+
+def test_generation_block_template_supported(checkpoint, tmp_path):
+    path = tmp_path / "generation.jinja"
+    path.write_text("{% generation %}{{ messages[0]['content'] }}{{ eos_token }}{% endgeneration %}")
+    export_chat_template.install_export_chat_template(checkpoint, export_chat_template.read_export_chat_template(path))
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
+    assert tokenizer.apply_chat_template([{"role": "user", "content": "hello"}], tokenize=False) == "hello<eos>"
+
+
+def test_special_token_snapshot_includes_roles_and_ids(checkpoint):
+    state = export_chat_template.read_special_token_state(checkpoint)
+    assert state["bos_token"] == ("<bos>", 3)
+    assert state["eos_token"] == ("<eos>", 1)
+    assert state["pad_token"] == ("<pad>", 2)
+
+
 def test_existing_export_cli(checkpoint):
     subprocess.run(
         [
@@ -162,7 +189,10 @@ def test_existing_export_cli(checkpoint):
     assert AutoTokenizer.from_pretrained(checkpoint).chat_template == TEMPLATE_PATH.read_text()
 
 
-@pytest.mark.parametrize("override", [False, True, "missing", "hub-tokenizer", "backend-mismatch"])
+@pytest.mark.parametrize(
+    "override",
+    [False, True, "missing", "invalid", "hub-tokenizer", "backend-mismatch", "eos_token", "pad_token", "bos_token"],
+)
 def test_converter_integration(checkpoint, tmp_path, override):
     # The heavyweight converter is mocked; exercise the real CLI and post-export
     # code against an actual tokenizer without importing GPU-only OLMo-core.
@@ -185,6 +215,10 @@ def test_converter_integration(checkpoint, tmp_path, override):
     argv = [str(CONVERTER), "-i", "/unused", "-o", str(checkpoint), "-c", str(config), "-t", str(checkpoint)]
     if override:
         argv += ["--export-chat-template", str(tmp_path / "missing.jinja" if override == "missing" else TEMPLATE_PATH)]
+    if override == "invalid":
+        invalid = tmp_path / "invalid.jinja"
+        invalid.write_text("{% if %} ")
+        argv[-1] = str(invalid)
     if override == "hub-tokenizer":
         argv[argv.index("-t") + 1] = "allenai/olmo-3-tokenizer-instruct-dev"
     before = snapshot(checkpoint)
@@ -205,12 +239,26 @@ def test_converter_integration(checkpoint, tmp_path, override):
 
     if override == "backend-mismatch":
         convert.side_effect = rebuild_backend
+
+    def change_special_token(**kwargs):
+        config_path = checkpoint / "tokenizer_config.json"
+        metadata = json.loads(config_path.read_text())
+        metadata[override] = "<pad>" if override != "pad_token" else "<eos>"
+        config_path.write_text(json.dumps(metadata))
+
+    special_mismatch = override in ("eos_token", "pad_token", "bos_token")
+    if special_mismatch:
+        convert.side_effect = change_special_token
     with (
         mock.patch.object(sys, "argv", argv),
         mock.patch.dict(namespace["main"].__globals__, load_ddp_main_params=mock.Mock(return_value=None)),
     ):
         if override == "missing":
             with pytest.raises(FileNotFoundError):
+                namespace["main"]()
+            convert.assert_not_called()
+        elif override == "invalid":
+            with pytest.raises(TemplateSyntaxError):
                 namespace["main"]()
             convert.assert_not_called()
         elif override == "hub-tokenizer":
@@ -221,6 +269,11 @@ def test_converter_integration(checkpoint, tmp_path, override):
             with pytest.raises(RuntimeError, match="differs from the saved training tokenizer"):
                 namespace["main"]()
             convert.assert_called_once()
+        elif special_mismatch:
+            with pytest.raises(RuntimeError, match="special tokens or IDs differ"):
+                namespace["main"]()
+            convert.assert_called_once()
+            assert (checkpoint / "tokenizer.json").read_bytes() == before["tokenizer.json"]
         else:
             namespace["main"]()
             convert.assert_called_once()
@@ -228,7 +281,7 @@ def test_converter_integration(checkpoint, tmp_path, override):
     if override is True:
         assert AutoTokenizer.from_pretrained(checkpoint).chat_template == TEMPLATE_PATH.read_text()
         assert (checkpoint / "tokenizer.json").read_bytes() == before["tokenizer.json"]
-    elif override == "backend-mismatch":
+    elif override == "backend-mismatch" or special_mismatch:
         assert (checkpoint / "chat_template.jinja").read_bytes() == before["chat_template.jinja"]
     else:
         assert snapshot(checkpoint) == before
