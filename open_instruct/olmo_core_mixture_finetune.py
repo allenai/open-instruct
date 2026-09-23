@@ -223,7 +223,17 @@ def main(args: MultimodalSFTArguments) -> None:
     trainer = trainer_config.build(train_module, data_loader)
     config_saver = trainer.callbacks["config_saver"]
     assert isinstance(config_saver, ConfigSaverCallback)
-    config_saver.config = dataclasses.asdict(args)
+    # `model` must be the serialized olmo-core MultimodalLMConfig, and `model_id` the HF
+    # repo it was bootstrapped from: olmo-eval's `olmo_core_vlm` provider identifies a
+    # checkpoint by `config.json["model"]["_CLASS_"]` and takes its tokenizer from
+    # `config.json["model_id"]`. Saving only `dataclasses.asdict(args)` here — whose
+    # `model` is open-instruct's MultimodalModelConfig — leaves the checkpoint
+    # unevaluatable ("config.json 'model' is not a MultimodalLMConfig").
+    config_saver.config = {
+        "model": model_config.as_config_dict(),
+        "model_id": args.model.base_hf_model_id,
+        "open_instruct": dataclasses.asdict(args),
+    }
     trainer.fit()
     teardown_training_environment()
 
