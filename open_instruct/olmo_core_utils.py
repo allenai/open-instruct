@@ -372,8 +372,12 @@ class PromotedRowStepCheck(train_callbacks.Callback):
                 f"Promoted rows after step {self.step}, matrix {index}: distance to seed {to_seed.tolist()}, "
                 f"to pre-seed value {to_before.tolist()}"
             )
-            if bool((to_before < to_seed).any()):
-                raise RuntimeError(f"Promoted rows reverted toward their pre-seed values after step {self.step}")
+            # Strict and finite: a tie or a NaN is not evidence that the step trained from the seed.
+            ok = torch.isfinite(to_seed) & torch.isfinite(to_before) & (to_seed < to_before)
+            if not bool(ok.all()):
+                raise RuntimeError(
+                    f"Promoted rows not strictly closer to their seed than to their pre-seed values after step {self.step}"
+                )
 
 
 def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:

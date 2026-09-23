@@ -14,12 +14,14 @@ DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
 # EXPERIMENT=h015 gives each arm, mode and data seed its own run name, output dir and
 # convert source; the h010 defaults put control and seed2 in one existing dir.
 EXPERIMENT="${EXPERIMENT:-h010}"
+BUDGET="${BUDGET:-}"
 H015_ROOT=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895
 # Local, never inherited: an exported RUN_TAG must not rename another mode.
 RUN_TAG=""
 # The arm alone decides THINK_TOKENS (a tokenization cache key): an inherited value must
-# never turn an aligned control into a think run. EXPECTED_NUMPY_CACHE makes the job die
-# before any GPU work if its arguments resolve to a different cache than the arm's.
+# never turn an aligned control into a think run. EXPECTED_NUMPY_CACHE makes a job built
+# from this branch die before tokenizing if its arguments resolve to a different cache than
+# the arm's; the immutable legacy image predates the check and ignores it.
 case "$ARM" in
     aligned) IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE=062b8a3d20-6068a350 ;;
     legacy) IMAGE=01M2KSSB3FCYJ8PNB7B672N9SP; THINK_TOKENS=0; ARM_CACHE=15bfc110a1-6068a350 ;;
@@ -56,6 +58,7 @@ case "$MODE" in
         # delete each as it lands.
         export KEEP_LAST_N=2
         RUN_TAG="train-full-s${DATA_LOADER_SEED}"
+        BUDGET=full
         MODE=train
         ;;
     tokenize)
@@ -72,7 +75,8 @@ case "$MODE" in
         export JOB_TIMEOUT=2h CONVERT_GPUS=1 CONVERT_DEVICE=cuda CONVERT_CLUSTER=ai2/holmes
         export CONVERT_PYTHONPATH=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-anchor/olmo-core-b1fd2c97/src
         if [[ "$EXPERIMENT" == "h015" ]]; then
-            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/h015-${ARM}-train-s${DATA_LOADER_SEED}}"
+            # BUDGET=full converts the train_full dir of the same arm and seed.
+            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/h015-${ARM}-train${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}}"
         else
             export CKPT_ROOT="${CKPT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-train-20260918}"
         fi
@@ -116,8 +120,9 @@ export PRIORITY="${PRIORITY:-normal}"
 export MAX_RETRIES="${MAX_RETRIES:-0}"
 export KEEP_LAST_N="${KEEP_LAST_N:-1}"
 if [[ "$EXPERIMENT" == "h015" ]]; then
-    export RUN_NAME="${RUN_NAME:-hero-sft-h015-${ARM}-${MODE}-s${DATA_LOADER_SEED}}"
-    export OUTPUT_DIR="${OUTPUT_DIR:-$H015_ROOT/h015-${ARM}-${MODE}-s${DATA_LOADER_SEED}}"
+    H015_TAG="${ARM}-${MODE}${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}"
+    export RUN_NAME="${RUN_NAME:-hero-sft-h015-$H015_TAG}"
+    export OUTPUT_DIR="${OUTPUT_DIR:-$H015_ROOT/h015-$H015_TAG}"
 fi
 export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
 export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${RUN_TAG:-${MODE}}-20260918}"

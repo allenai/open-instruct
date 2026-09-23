@@ -229,7 +229,21 @@ class TestPromotedRowStepCheck(unittest.TestCase):
         train_module, check, pre_seed = self._seeded_check()
         for weight, original in zip(check.matrices, pre_seed):
             weight.data[3] = original[3] + 1e-3
-        with self.assertRaisesRegex(RuntimeError, "reverted"):
+        with self.assertRaisesRegex(RuntimeError, "not strictly closer"):
+            check.post_step()
+
+    def test_a_tie_raises(self):
+        # Halfway between seed and pre-seed value: equidistant, so not evidence either way.
+        train_module, check, pre_seed = self._seeded_check()
+        for weight, original, seeded in zip(check.matrices, pre_seed, check.seeded):
+            weight.data[3] = (original[3] + seeded[0]) / 2
+        with self.assertRaisesRegex(RuntimeError, "not strictly closer"):
+            check.post_step()
+
+    def test_a_non_finite_row_raises(self):
+        train_module, check, _ = self._seeded_check()
+        check.matrices[0].data[3] = float("nan")
+        with self.assertRaisesRegex(RuntimeError, "not strictly closer"):
             check.post_step()
 
     def test_nothing_promoted_builds_no_check(self):
