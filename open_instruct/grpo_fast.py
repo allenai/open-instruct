@@ -181,10 +181,16 @@ WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
-def _build_vlm_name_mapper(model_name: str):
+def _build_vlm_name_mapper(model_name: str, model_type: str | None = None):
     """Sometimes we have different weight names btw vLLM and HF, so we build
-    a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF."""
-    if any(qwen_version in model_name.lower() for qwen_version in ("qwen3.5", "qwen3.6")):
+    a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF.
+
+    Checks the config's model_type (qwen3_5, qwen3_5_text, qwen3_5_moe; Qwen3.6 reuses
+    these) so local checkpoint paths that don't contain "qwen3.5" in their name are
+    still detected."""
+    if (model_type or "").startswith("qwen3_5") or any(
+        qwen_version in model_name.lower() for qwen_version in ("qwen3.5", "qwen3.6")
+    ):
         return lambda name: f"language_model.{name}"
     return None
 
@@ -711,7 +717,7 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+            name_mapper=_build_vlm_name_mapper(self._model_name_or_path, self.model.module.config.model_type),
         )
 
     def update_ref_policy(self):
