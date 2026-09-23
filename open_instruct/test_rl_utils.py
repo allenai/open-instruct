@@ -2,15 +2,18 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 import numpy as np
 import torch
 import transformers
 from parameterized import parameterized
 
-from open_instruct import rl_utils, value_model_utils
+from open_instruct import data_types, model_utils, rl_utils, value_model_utils
 
 PACK_LENGTH = 40
 PROMPT_MAX_LEN = 20
@@ -184,6 +187,52 @@ class TestRLUtils(unittest.TestCase):
         self.assertIsNotNone(packed.model_steps)
         torch.testing.assert_close(packed.model_steps[0], torch.tensor([3, 3, 3, 3, 3, 3]))
         torch.testing.assert_close(packed.model_steps[1], torch.tensor([4, 4, 4, 4]))
+
+    def test_save_rollouts_to_disk_unaffected_by_in_place_filtering(self):
+        """The data loader filters result's lists right after scheduling the async save
+        (when masking infra-failed/truncated rollouts); the save must still see all samples."""
+        n = 4
+        batch = model_utils.Batch(
+            queries=[[1, 2]] * n,
+            ground_truths=[[3]] * n,
+            datasets=["d"] * n,
+            raw_queries=None,
+            decoded_responses=None,
+            indices=None,
+            scores=[1.0, 0.0, 1.0, 0.0],
+        )
+        result = data_types.GenerationResult(
+            responses=[[10 + i] for i in range(n)],
+            finish_reasons=["stop"] * n,
+            masks=[[1]] * n,
+            request_info=data_types.RequestInfo(
+                num_calls=[0] * n,
+                timeouts=[0] * n,
+                tool_errors=[""] * n,
+                tool_outputs=[""] * n,
+                tool_runtimes=[0.0] * n,
+                tool_calleds=[False] * n,
+            ),
+            index=None,
+            prompt_id=None,
+            logprobs=[[-0.1]] * n,
+        )
+        executor = ThreadPoolExecutor(max_workers=1)
+        release = threading.Event()
+        executor.submit(release.wait)
+        with mock.patch.object(rl_utils, "_rollout_executor", executor):
+            rl_utils.save_rollouts_to_disk(self.temp_dir, "test", 0, batch, result, np.zeros(n), n, 0)
+            # Mimic DataPreparationActor dropping a rollout before the save thread runs.
+            keep = [0, 2, 3]
+            result.responses = [result.responses[i] for i in keep]
+            result.finish_reasons = [result.finish_reasons[i] for i in keep]
+            result.logprobs = [result.logprobs[i] for i in keep]
+            release.set()
+            executor.shutdown(wait=True)
+
+        with open(os.path.join(self.temp_dir, "test_rollouts_000000.jsonl")) as f:
+            records = [json.loads(line) for line in f]
+        self.assertEqual([r["response_tokens"] for r in records], [[10], [11], [12], [13]])
 
     def test_save_trainer_logprobs_includes_token_metadata(self):
         trainer_logprobs = [torch.tensor([[0.1, 0.2, 0.3, 0.4]])]

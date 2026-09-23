@@ -4,7 +4,7 @@ import json
 import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from enum import Enum
 from typing import Generic, TypeVar
 
@@ -401,8 +401,20 @@ def save_rollouts_to_disk(
         total_samples_written: Total samples written so far, used for sharding.
     """
     shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
+    # Shallow-copy result: the caller filters it in place right after this call
+    # (e.g. result.responses = [...] when masking infra-failed/truncated rollouts),
+    # which would otherwise shrink its lists under the background thread and
+    # misalign them with batch.
     future = _rollout_executor.submit(
-        _save_rollouts, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
+        _save_rollouts,
+        save_path,
+        run_name,
+        step,
+        batch,
+        replace(result),
+        advantages,
+        num_samples_per_prompt,
+        shard_idx,
     )
     future.add_done_callback(_log_rollout_save_failure)
 
