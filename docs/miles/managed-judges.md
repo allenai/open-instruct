@@ -21,13 +21,16 @@ runtime. The example disables checkpoint saves and export to bound the exercise.
 
 `launch.gpus_per_replica` is the physical GPU allocation per replica. For a run
 that fits on one node, only the requested GPUs are allocated. Larger disaggregated
-runs reserve trainer nodes first, followed by as many rollout nodes as needed.
+runs place trainer ranks first, fill spare GPUs on the final trainer node with
+whole rollout engines, then add as many rollout nodes as needed. These engines
+use separate GPUs from the trainer; this is disaggregated placement.
 Managed judges fill spare space on the final rollout node, then additional nodes.
 All replicas have the same allocation size; the plan reports any unused GPUs.
 
 | Request | Allocation at 8 GPUs/replica |
 | --- | --- |
 | 8 trainer + 7 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
+| 4 trainer + 11 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 8 trainer + 23 rollout + 1 judge | 4 nodes, 32 GPUs, no unused GPUs |
 | 8 trainer + 8 rollout + 1 judge | 3 nodes, 24 GPUs, 7 unused GPUs |
 

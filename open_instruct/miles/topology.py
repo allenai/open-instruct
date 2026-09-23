@@ -50,6 +50,13 @@ def plan(spec):
             for _ in range(trainer_nodes)
         ]
         remaining = rollout
+        # MILES assigns trainers first in the sorted GPU order, then engines.
+        # Fill only the final trainer node so engines cannot split trainer ranks
+        # across earlier nodes. Keep each engine wholly within one node.
+        shared = min(remaining, ((capacity - trainer_per_node) // tp) * tp)
+        nodes[-1]["rollout_gpus"] = shared
+        nodes[-1]["ray_gpus"] += shared
+        remaining -= shared
         while remaining:
             count = min(capacity, remaining)
             nodes.append({"trainer_gpus": 0, "rollout_gpus": count, "ray_gpus": count, "judges": {}})

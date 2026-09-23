@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Fill spare GPUs on the final MILES trainer node with disaggregated rollout engines, preserving trainer rank order and separate judge devices so smaller trainers can use a two-node allocation efficiently (PR URL pending).
 - Preserve live decoding across Core refresh publication, restore IPC pipeline restrictions, and readmit quarantined MILES engines after confirmed weight updates; validate startup hooks and tolerate empty generation calls in metrics (PR URL pending).
 - Migrate the MILES/Core adapter to the main-based private runtime: separate worker/inference/rollout ownership, preserve serving-child compiler-cache setup, coordinate engine drain with controller update windows, and retain native token-level policy-version spans (PR URL pending).
 - Pin MILES directly to an identical source tree in `allenai/miles`; remove the final vendored runtime patch and image-build patch application (PR URL pending).
