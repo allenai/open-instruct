@@ -32,7 +32,7 @@ def document(
         + "git -C /opt/core-rl/sources/miles apply --check /opt/core-rl/scripts/miles/diagnostics/policy-refresh-runtime.patch\n"
         + "git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/policy-refresh-runtime.patch\n"
     )
-    for index, task in enumerate(spec["tasks"]):
+    for task in spec["tasks"]:
         node_overlay = overlay
         if stage == "prepare":
             task["resources"].update(cpuCount=24, memory="96 GiB")
@@ -50,8 +50,8 @@ def document(
                 task["timeout"] = "1h"
                 task["envVars"] = [entry for entry in task["envVars"] if entry["name"] != "LD_LIBRARY_PATH"]
         else:
-            target = Path(run.output["root"]) / f"checkpoints/gpu_usage_node{index}.jsonl"
-            node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))} &\n"
+            prefix = shlex.quote(str(Path(run.output["root"]) / "checkpoints/gpu_usage_node"))
+            node_overlay += f'python -m scripts.miles.sample_gpu_usage {prefix}"${{BEAKER_REPLICA_RANK:-0}}.jsonl" &\n'
             # Runtime IP sorting determines which replica owns the trainer. Both
             # reserve enough host RAM for its native optimizer checkpoint staging.
             task["resources"].update(cpuCount=48, memory="704 GiB", sharedMemory="200 GiB")

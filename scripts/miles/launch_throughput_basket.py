@@ -109,19 +109,19 @@ git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/p
                 task["datasets"].append(dict(mountPath="/qualification-source", source=dict(beaker=source)))
                 node_overlay = overlay
                 if case not in ("dev", "tiny"):
-                    target = root / f"checkpoints/gpu_usage_node{index}.jsonl"
+                    prefix = shlex.quote(str(root / "checkpoints/gpu_usage_node"))
                     observe = (
                         " --triton-cache-parent /tmp --interval 15"
                         if basket.CASES[case].get("observe_compiler_cache")
                         else ""
                     )
-                    node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))}{observe} &\n"
+                    node_overlay += f'python -m scripts.miles.sample_gpu_usage {prefix}"${{BEAKER_REPLICA_RANK:-0}}.jsonl"{observe} &\n'
                 task["arguments"][0] = task["arguments"][0].replace(
                     "cd /opt/core-rl\n", "cd /opt/core-rl\n" + node_overlay, 1
                 )
                 if index == 0:
                     task["arguments"][0] += (
-                        "\npython -m scripts.miles.throughput_basket "
+                        '\nif [ "${BEAKER_REPLICA_RANK:-0}" = 0 ]; then\npython -m scripts.miles.throughput_basket '
                         + shlex.quote(str(root))
                         + (
                             " --warmup 1"
@@ -130,7 +130,7 @@ git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/p
                             if case == "bridge-8t8i"
                             else " --warmup 6"
                         )
-                        + "\n"
+                        + "\nfi\n"
                     )
                 # Roles are assigned by runtime IP order, not Beaker replica index.
                 # Any replica may become the trainer and needs its host-memory reservation.

@@ -89,7 +89,8 @@ def test_example_plans_and_launch_render_without_gpu_or_network(path):
     spec = run_spec.RunSpec.load(path)
     plan = spec.plan()
     tasks = launch.specification("test-image", spec, hostnames=[f"host-{i}" for i in range(32)])["tasks"]
-    assert len(tasks) == plan["allocation"]["replicas"]
+    assert len(tasks) == 1
+    assert tasks[0].get("replicas", 1) == plan["allocation"]["replicas"]
     assert all(task["resources"]["gpuCount"] > 0 for task in tasks)
     result = subprocess.run(
         [sys.executable, "-m", "open_instruct.miles", "validate", str(path)], cwd=ROOT, capture_output=True, text=True

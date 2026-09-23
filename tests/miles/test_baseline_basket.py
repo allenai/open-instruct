@@ -148,7 +148,9 @@ def test_judge_gpu_probe_does_not_inherit_cpu_cuda_compat_override():
 def test_recovery_campaign_propagates_preemption_to_all_replicas(name):
     run = RunSpec.load(ROOT / "configs/miles/examples/medium.toml")
     rendered = launch_baseline_basket.document("IMAGE", run, "train", "SOURCE", "DIGEST", hostnames=["a", "b"])
-    assert len(rendered["tasks"]) == 2
+    assert len(rendered["tasks"]) == 1
+    assert rendered["tasks"][0]["replicas"] == 2
+    assert rendered["tasks"][0]["leaderSelection"] is True
     for task in rendered["tasks"]:
         assert task["context"]["autoResume"] is True
         assert task["propagatePreemption"] is True

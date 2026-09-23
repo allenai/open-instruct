@@ -75,15 +75,16 @@ def test_task_replication_and_secret_free_ownership(document):
     tasks = launch.specification("image", RunSpec.from_dict(document), hostnames=["host-a", "host-b", "host-c"])[
         "tasks"
     ]
-    assert len(tasks) == 2
-    assert tasks[0]["constraints"]["hostname"] == ["host-a", "host-c"]
-    assert tasks[1]["constraints"]["hostname"] == ["host-b"]
-    for rank, task in enumerate(tasks):
+    assert len(tasks) == 1
+    assert tasks[0]["constraints"]["hostname"] == ["host-a", "host-b", "host-c"]
+    assert tasks[0]["replicas"] == 2
+    assert tasks[0]["leaderSelection"] is True
+    for task in tasks:
         assert "cluster" not in task["constraints"]
         assert task["resources"]["gpuCount"] == 8
         assert all(task[key] for key in ("hostNetworking", "propagateFailure", "propagatePreemption"))
         assert "open_instruct.miles.cluster" in task["arguments"][0]
-        assert {"name": "OI_MILES_REPLICA_RANK", "value": str(rank)} in task["envVars"]
+        assert not any("REPLICA_" in v["name"] for v in task["envVars"])
         assert not any("BEAKER_TOKEN" in v["name"] for v in task["envVars"])
 
 

@@ -65,17 +65,46 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     assert task["context"]["minRuntime"] == "1h"
 
 
-def test_multinode_explicit_hostname_pools(tmp_path):
+def test_multinode_native_replica_group(tmp_path, monkeypatch):
+    def no_inventory(*args, **kwargs):
+        raise AssertionError("Rendering a native replica group must not query free nodes")
+
+    monkeypatch.setattr(launch.subprocess, "check_output", no_inventory)
+    run = spec(
+        tmp_path,
+        trainer={"gpus": 4},
+        inference={"placement_mode": "disaggregated", "gpus": 12},
+        launch={"gpus_per_replica": 8, "min_runtime": "4h"},
+    )
+    tasks = launch.specification(IMAGE_ID, run)["tasks"]
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task["replicas"] == 2
+    assert task["replicas"] * task["resources"]["gpuCount"] == 16
+    assert all(
+        task[key] is True for key in ("leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption")
+    )
+    assert task["synchronizedStartTimeout"] == "60m"
+    assert task["context"]["minRuntime"] == "4h"
+    assert task["constraints"] == {"cluster": ["ai2/holmes"]}
+    assert not any("REPLICA_" in entry["name"] for entry in task["envVars"])
+    filtered = launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b", "host-c"])
+    assert len(filtered["tasks"]) == 1
+    assert filtered["tasks"][0]["constraints"] == {"hostname": ["host-a", "host-b", "host-c"]}
+    for hosts in (["host-a"], ["host-a", "host-a"]):
+        with pytest.raises(ValueError, match="distinct physical hostnames"):
+            launch.specification(IMAGE_ID, run, hostnames=hosts)
+
+
+def test_multinode_partial_allocations_rejected(tmp_path):
     run = spec(
         tmp_path,
         trainer={"gpus": 2},
         inference={"placement_mode": "disaggregated", "gpus": 2},
         launch={"gpus_per_replica": 3},
     )
-    tasks = launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b"])["tasks"]
-    assert len(tasks) == 2
-    assert tasks[0]["constraints"]["hostname"] == ["host-a"]
-    assert tasks[1]["constraints"]["hostname"] == ["host-b"]
+    with pytest.raises(ValueError, match="full eight-GPU nodes"):
+        launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b"])
 
 
 @pytest.mark.parametrize("section", ["data", "conversion", "compiler_cache", "miles"])
@@ -240,7 +269,8 @@ def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
     assert calls == [(IMAGE_ID, run.to_dict())]
 
 
-def test_status_requires_every_replica_and_ignores_older_attempts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native", [False, True])
+def test_status_requires_every_replica_and_ignores_older_attempts(tmp_path, monkeypatch, native):
     monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
     run = spec(tmp_path)
     workflow.write_json(
@@ -251,12 +281,19 @@ def test_status_requires_every_replica_and_ignores_older_attempts(tmp_path, monk
         {"id": "old", "name": "replica-0", "status": {"created": "0", "exitCode": 143}},
         {"id": "new", "name": "replica-0", "status": {"created": "1", "exitCode": 0}},
     ]
+    if native:
+        for job in jobs:
+            job.update(name="training", execution={"task": "task", "replicaRank": 0})
     monkeypatch.setattr(launch.subprocess, "check_output", lambda *args, **kwargs: json.dumps([{"jobs": jobs}]))
     assert launch.status(run)["state"] == "pending"
     jobs.append({"id": "other", "name": "replica-1", "status": {"created": "2", "started": "3"}})
+    if native:
+        jobs[-1].update(name="training", execution={"task": "task", "replicaRank": 1})
     assert launch.status(run)["state"] == "running"
     jobs[-1]["status"]["exitCode"] = 0
     result = launch.status(run)
     assert result["state"] == "complete" and {job["id"] for job in result["current_jobs"]} == {"new", "other"}
+    if native:
+        assert {job["execution"]["replicaRank"] for job in result["current_jobs"]} == {0, 1}
     jobs[-1]["status"]["exitCode"] = 1
     assert launch.status(run)["state"] == "failed"

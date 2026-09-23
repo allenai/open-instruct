@@ -1,7 +1,6 @@
 """Beaker submission and receipts for committed researcher run files."""
 
 import base64
-import copy
 import json
 import os
 import shlex
@@ -25,10 +24,10 @@ def receipt_path(spec):
 
 
 def cluster_hostnames(spec):
-    """Partition a live cluster inventory into disjoint scheduling pools.
+    """Return the cluster inventory, with currently available nodes first.
 
-    Prefer spreading currently available nodes across pools. This is an inventory
-    snapshot, not a resource reservation; Beaker remains the scheduler.
+    This is an inventory snapshot for optional host filtering, not a resource
+    reservation; Beaker remains the scheduler.
     """
     response = json.loads(
         subprocess.check_output(["beaker", "cluster", "get", spec.launch["cluster"], "--format", "json"], text=True)
@@ -135,30 +134,31 @@ def specification(image, spec, *, hostnames=None):
     # host networking; bridge networking can strand local GCS clients.
     if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]:
         task["hostNetworking"] = True
-    tasks = [task]
     if layout["replicas"] > 1:
-        hostnames = cluster_hostnames(spec) if hostnames is None else hostnames
-        if len(hostnames) < layout["replicas"] or len(set(hostnames)) != len(hostnames):
-            raise InputError("Multi-node launch requires enough distinct physical hostnames")
-        tasks = []
-        # Beaker replicas may share a node. Explicit tasks with disjoint hostname
-        # pools guarantee distinct physical nodes even for partial-node trials.
-        for rank in range(layout["replicas"]):
-            replica = copy.deepcopy(task)
-            replica["name"] += f"-replica-{rank}"
-            # The API makes cluster and hostname constraints mutually exclusive.
-            # Every hostname above was resolved from the requested cluster.
-            replica["constraints"] = {"hostname": hostnames[rank :: layout["replicas"]]}
-            replica.update(hostNetworking=True, propagateFailure=True, propagatePreemption=True)
-            replica["envVars"].extend(
-                [
-                    {"name": "OI_MILES_REPLICA_RANK", "value": str(rank)},
-                    {"name": "OI_MILES_REPLICA_COUNT", "value": str(layout["replicas"])},
-                ]
+        # The supported multi-node hardware has eight GPUs per physical node.
+        # Partial allocations could put two replicas on one host, which the
+        # physical-IP placement contract cannot represent.
+        if allocated != 8:
+            raise InputError(
+                "Multi-node Beaker launches require full eight-GPU nodes: set launch.gpus_per_replica=8. "
+                "Partial-node replica placement is unsupported."
             )
-            tasks.append(replica)
+        task.update(
+            replicas=layout["replicas"],
+            leaderSelection=True,
+            hostNetworking=True,
+            propagateFailure=True,
+            propagatePreemption=True,
+            synchronizedStartTimeout="60m",
+        )
+    if hostnames is not None:
+        if len(hostnames) < layout["replicas"] or len(set(hostnames)) != len(hostnames):
+            raise InputError("Launch requires enough distinct physical hostnames")
+        # One shared allowlist preserves native replica-group scheduling.
+        # Beaker makes cluster and hostname constraints mutually exclusive.
+        task["constraints"] = {"hostname": hostnames}
     return dict(
-        version="v2", budget=spec.launch["budget"], description=f"MILES/Core researcher run: {spec.name}", tasks=tasks
+        version="v2", budget=spec.launch["budget"], description=f"MILES/Core researcher run: {spec.name}", tasks=[task]
     )
 
 
@@ -239,6 +239,7 @@ def submit(image, spec):
                 "task": task["name"],
                 "hostnames": task["constraints"].get("hostname", []),
                 "gpus": task["resources"]["gpuCount"],
+                "replicas": task.get("replicas", 1),
             }
             for task in document["tasks"]
         ],
@@ -272,10 +273,12 @@ def status(spec):
     if not jobs:
         jobs = [job for task in experiment.get("tasks", []) for job in task.get("jobs", [])]
     jobs.sort(key=lambda job: (job.get("status", {}).get("created", job.get("created", "")), job.get("id", "")))
-    latest_by_task = {}
+    latest_by_replica = {}
     for job in jobs:
-        latest_by_task[job.get("execution", {}).get("task") or job.get("name") or "main"] = job
-    current = list(latest_by_task.values())
+        execution = job.get("execution", {})
+        key = (execution.get("task") or job.get("name") or "main", execution.get("replicaRank", 0))
+        latest_by_replica[key] = job
+    current = list(latest_by_replica.values())
     expected = receipt.get("allocation", {}).get("replicas", 1)
     codes = [job.get("status", {}).get("exitCode") for job in current]
     if any(code is not None and code != 0 for code in codes):
@@ -289,9 +292,13 @@ def status(spec):
     else:
         state = "pending"
     current = [
-        {key: job[key] for key in ("id", "name", "status", "node", "requests") if key in job} for job in current
+        {key: job[key] for key in ("id", "name", "execution", "status", "node", "requests") if key in job}
+        for job in current
     ]
-    jobs = [{key: job[key] for key in ("id", "name", "status", "node", "requests") if key in job} for job in jobs]
+    jobs = [
+        {key: job[key] for key in ("id", "name", "execution", "status", "node", "requests") if key in job}
+        for job in jobs
+    ]
     return dict(
         receipt=str(target),
         experiment_id=receipt["experiment_id"],

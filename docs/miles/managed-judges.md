@@ -2,7 +2,7 @@
 
 Distributed disaggregated runs require a Beaker replica group on distinct physical
 nodes. Trainer GPU count, rollout GPU count and judge GPU count are independent.
-See the [scheduling contract and current launcher defect](launching.md#distributed-scheduling-contract)
+See the [scheduling contract](launching.md#distributed-scheduling-contract)
 before submitting a multi-node run.
 The initial two-node exercise and later four-update combined async exercise are
 recorded below; short execution gates do not establish mixture learning quality.
@@ -43,12 +43,10 @@ tensor parallelism must divide the node capacity. Multi-node colocation, separat
 evaluation GPU pools, cross-node serving TP and automatic coordinated restart
 remain unsupported. Restarting a run that carries a managed judge is not qualified: the [multi-node resume qualification](measurements/multinode-resume-20260922.md) covers a two-replica trainer and engine with no judge in the allocation.
 
-The launcher at `f301a8b97` partitions cluster hostnames into disjoint pools and
-submits a separate task for each node. This forces distinct hosts but loses
-native group scheduling: one task can run while another remains queued. This is
-a launcher defect, not a supported scheduling recipe. Partial-node placement
-must preserve both distinct hosts and the native replica group; full-node GPU
-requests ensure separation when matched to the selected hardware's GPU count.
+The launcher submits one task with native replicas, leader selection and
+synchronized start. Multi-node launches require full eight-GPU nodes; partial-node
+allocations are rejected because replicas could share a physical host. Optional
+hostname filtering uses one shared allowlist for the entire replica group.
 
 Before Ray starts, replicas exchange addresses on WEKA and sort them numerically
 as MILES sorts placement bundles. Beaker replica zero is not assumed to own the

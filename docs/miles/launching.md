@@ -148,17 +148,18 @@ scheduling. After submission, retain `beaker experiment spec EXPERIMENT_ID` with
 the run evidence and check that Beaker received the intended group.
 
 Distinct-host placement is an additional requirement of the MILES bootstrap.
-Partial-node replicas may share a physical host; separate tasks with disjoint
-hostname pools are not an acceptable replacement for group scheduling. Requesting
-all GPUs on each node ensures separation when the selected nodes have that GPU
-count. Verify the physical-node assumptions for other layouts before launching.
+Multi-node launches currently require `launch.gpus_per_replica=8` and eight-GPU
+physical nodes. Partial-node replicas may share a host and are rejected by the
+launcher. Separate tasks with disjoint hostname pools are not an acceptable
+replacement for group scheduling. Other physical node sizes need explicit
+placement support before launching.
 
-**Known launcher defect identified September 23:** the launcher at `f301a8b97`
-renders independent tasks with disjoint hostname pools. That violates this
-contract and caused the 40-update attempt to time out waiting for its second
-node before any training. Correct the launcher and its spec regression tests
-before another distributed submission; extending rendezvous timeouts or polling
-for idle nodes does not repair the missing group.
+The launcher at `f301a8b97` used independent tasks with disjoint hostname pools;
+the September 23 40-update attempt timed out waiting for its second node before
+any training. The current launcher uses native replica groups, with regression
+tests for the scheduling fields and per-replica status. Keep the submitted spec
+as evidence when checking older launchers; extending rendezvous timeouts or
+polling for idle nodes does not repair a missing group.
 
 ## From a Beaker session
 
