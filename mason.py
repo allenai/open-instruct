@@ -404,7 +404,8 @@ def quote_literal_args(command: list[str]) -> list[str]:
     The rest of the command is passed through untouched, since launch scripts rely on `&&`, `cd` and `$VARS`.
     Unquoted, `<think>` is a redirection and `{"a": 1}` loses its double quotes.
     """
-    return [shlex.quote(arg) if "{" in arg or TAG_ARG_PATTERN.search(arg) else arg for arg in command]
+    # `</` alone is kept from the original rule, so a closing-tag prefix such as `</tool_call` stays literal.
+    return [shlex.quote(arg) if "{" in arg or "</" in arg or TAG_ARG_PATTERN.search(arg) else arg for arg in command]
 
 
 def make_internal_command(command: list[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
