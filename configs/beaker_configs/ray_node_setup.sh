@@ -13,15 +13,37 @@ echo PATH=$PATH
 
 # python3 -c "import os, ray; print(os.path.dirname(ray.__file__))"
 
-BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
+BEAKER_LEADER_REPLICA_IP=""
+if [ -n "${BEAKER_LEADER_REPLICA_HOSTNAME:-}" ]; then
+    BEAKER_LEADER_REPLICA_IP=$(getent ahostsv4 "$BEAKER_LEADER_REPLICA_HOSTNAME" | awk 'NR == 1 {print $1}')
+    if [ -z "$BEAKER_LEADER_REPLICA_IP" ]; then
+        echo "[ray_node_setup] Could not resolve Beaker leader $BEAKER_LEADER_REPLICA_HOSTNAME" >&2
+        return 1 2>/dev/null || exit 1
+    fi
+fi
+
+# Beaker may assign the leader hostname to a replica other than rank 0. Ray's
+# head and the address used by workers must refer to the same replica.
+RAY_IS_LEADER=false
+if [ -n "$BEAKER_LEADER_REPLICA_IP" ]; then
+    if hostname -I | tr ' ' '\n' | grep -Fxq "$BEAKER_LEADER_REPLICA_IP"; then
+        RAY_IS_LEADER=true
+    fi
+elif [ "${BEAKER_REPLICA_RANK:-}" = "0" ]; then
+    RAY_IS_LEADER=true
+fi
 
 RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
 ray stop --force
 
-if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
+if [ "$RAY_IS_LEADER" = true ]; then
     echo "Starting Ray head node"
-    ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
+    if [ -n "$BEAKER_LEADER_REPLICA_IP" ]; then
+        ray start --head --node-ip-address="$BEAKER_LEADER_REPLICA_IP" --port="$RAY_NODE_PORT" --dashboard-host=0.0.0.0
+    else
+        ray start --head --port="$RAY_NODE_PORT" --dashboard-host=0.0.0.0
+    fi
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
