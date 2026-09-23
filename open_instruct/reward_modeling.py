@@ -229,7 +229,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 config=all_configs,
                 name=args.run_name,
                 save_code=True,
-                tags=[args.exp_name] + get_wandb_tags(),
+                tags=get_wandb_tags(extra_tags=[args.exp_name]),
             )
         writer = SummaryWriter(f"runs/{args.run_name}")
         hyperparams_table = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
