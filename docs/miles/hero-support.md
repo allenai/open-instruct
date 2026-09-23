@@ -4,6 +4,13 @@ Hero conversion support is incorporated in the project branch. Full hero RL is
 **not qualified**: the full-checkpoint probability gate below failed. The earlier
 KDA/latent SFT model is a separate, exercised baseline; see the [support matrix](feature-parity.md).
 
+The [September 23 corrected-tokenizer SFT audit](measurements/hero-sft-20260923.md)
+locates paired 4T EMO/non-EMO pretraining lineages and their full SFT configs.
+Both SFT checkpoints disable EMO and pass exact architecture/weight conversion
+checks. H100 and B300 inference match the sampled greedy tokens but fail the
+unchanged probability gate; neither checkpoint is qualified for RL training. These are separate checkpoints
+from the historical base-model qualification below.
+
 ## Architecture and source lineage
 
 The non-EMO small hero has 16 blocks (14 KDA and two full-attention blocks),
