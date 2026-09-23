@@ -76,7 +76,7 @@ recomputation, and gathers only small layer/expert histograms.
 |---|---|
 | Configuration rejected | Error field/context, TOML types, conflicting aliases; rerun with --debug |
 | Queued job | `beaker job events JOB_ID`; use the scheduler's reason and latest attempt |
-| One node running, another queued; rendezvous timeout | `beaker experiment spec EXPERIMENT_ID`: verify one task with the intended `replicas` and `leaderSelection: true`, then inspect events for every replica |
+| One node running, another queued; rendezvous timeout | `beaker experiment get EXPERIMENT_ID --format json`: check shared `execution.replicaGroupID`, expected ranks and `execution.spec.leaderSelection`, then inspect events for every replica |
 | Import/model failure | Selected image provenance, lock, architecture/tokenizer descriptor |
 | Out of memory | Trainer resident state, optimizer initialization, pack/context budget, actual KV/recurrent pools and graph capture |
 | Engine unavailable | Per-engine logs, health/recovery events, published policy version and Ray actor state |

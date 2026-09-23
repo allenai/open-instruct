@@ -52,8 +52,12 @@ contains the old CLI and reproduction instructions.
   Preserve these settings when changing launchers or porting a working recipe.
 - Inspect the **rendered Beaker spec before submission**, not just the TOML or
   GPU plan: replica group, GPUs per replica and total, minimum runtime, cluster,
-  mounts and immutable image. After submission, verify it with
-  `beaker experiment spec EXPERIMENT_ID`. See the
+  mounts and immutable image. After submission, retain
+  `beaker experiment spec EXPERIMENT_ID` and verify the job metadata from
+  `beaker experiment get EXPERIMENT_ID --format json`: replicas must share
+  `execution.replicaGroupID`, cover the expected `execution.replicaRank` values,
+  and have `execution.spec.leaderSelection=true`. Exported spec YAML expands
+  replicas into separate task entries; task count there does not prove grouping. See the
   [spec inspection procedure](docs/miles/launching.md#distributed-scheduling-contract).
 - Distinct physical nodes and group scheduling are separate requirements.
   Partial-node replicas may share a host. Do not force separation by splitting a

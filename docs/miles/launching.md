@@ -145,7 +145,21 @@ PY
 Verify the replica group, `replicas * resources.gpuCount`, context, placement,
 mounts and immutable image. `plan` and `validate` alone do not verify Beaker
 scheduling. After submission, retain `beaker experiment spec EXPERIMENT_ID` with
-the run evidence and check that Beaker received the intended group.
+the run evidence. Its YAML expands replicas into separate task entries and omits
+the group fields; do not infer grouping from the exported task count. Verify
+the latest jobs' metadata instead:
+
+```bash
+beaker experiment get EXPERIMENT_ID --format json | jq '.[0].jobs[] | {
+  id, status,
+  group: .execution.replicaGroupID,
+  rank: .execution.replicaRank,
+  leaderSelection: .execution.spec.leaderSelection
+}'
+```
+
+All current replicas must share a nonempty group ID, cover ranks `0..N-1`, and
+have leader selection enabled. Inspect scheduler events for each current job.
 
 Distinct-host placement is an additional requirement of the MILES bootstrap.
 Multi-node launches currently require `launch.gpus_per_replica=8` and eight-GPU
