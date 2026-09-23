@@ -37,6 +37,7 @@ The merged single stage (image mixture + open-instruct text mix):
 """
 
 import dataclasses
+import datetime
 import os
 
 import torch
@@ -66,6 +67,15 @@ logger = logger_utils.setup_logger(__name__)
 
 _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 
+# On resume, MixtureDataLoader rebuilds its position by replaying every batch already
+# consumed in the current epoch — decoding and preprocessing each image, then discarding
+# it. Each rank replays its own slice, so ranks finish at different times, and the first
+# one to finish sits in the first collective (a 1-element all-reduce) until the slowest
+# arrives. Replay from late in an epoch takes 3h+ and the rank spread routinely exceeds
+# OLMo-core's 15-minute default, at which point the NCCL watchdog aborts the job with
+# `Watchdog caught collective operation timeout ... OpType=ALLREDUCE, NumelIn=1`.
+_RESUME_REPLAY_TIMEOUT_HOURS = 4
+
 
 @dataclasses.dataclass
 class MultimodalSFTArguments:
@@ -77,6 +87,25 @@ class MultimodalSFTArguments:
     checkpoint: olmo_core_utils.CheckpointConfig
 
 
+def _assert_has_checkpoint(path: str) -> None:
+    """Fail fast when a checkpoint path holds no checkpoint.
+
+    ``load_path`` accepts either an OLMo-core run directory (whose latest ``stepN``
+    is used) or a single ``stepN`` directory. Neither olmo-core nor the trainer
+    errors when the path resolves to nothing, so an empty directory silently
+    becomes a from-scratch run on uninitialized weights.
+    """
+    if os.path.basename(os.path.normpath(path)).startswith("step"):
+        if os.path.isdir(path):
+            return
+    elif os.path.isdir(path) and any(entry.startswith("step") for entry in os.listdir(path)):
+        return
+    raise FileNotFoundError(
+        f"resume_from_checkpoint={path!r} contains no 'stepN' checkpoint directory. "
+        f"Training would silently start from scratch with uninitialized weights."
+    )
+
+
 def main(args: MultimodalSFTArguments) -> None:
     if not os.path.isdir(paths.MOLMO_DATA_DIR):
         raise FileNotFoundError(
@@ -85,7 +114,9 @@ def main(args: MultimodalSFTArguments) -> None:
             f"MOLMO_DATA_DIR in the launch environment (mason.py --env MOLMO_DATA_DIR=...)."
         )
 
-    _, world_size, _ = olmo_core_utils.setup_distributed_env(args.tracking.seed)
+    _, world_size, _ = olmo_core_utils.setup_distributed_env(
+        args.tracking.seed, timeout=datetime.timedelta(hours=_RESUME_REPLAY_TIMEOUT_HOURS)
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model.tokenizer_name_or_path or args.model.base_hf_model_id,
@@ -177,6 +208,10 @@ def main(args: MultimodalSFTArguments) -> None:
     # - Stage-1 init: the trainer loads model weights (only) from load_path, unless a
     #   checkpoint already exists in save_folder (preemption resume).
     if args.checkpoint.resume_from_checkpoint:
+        # A resume path with no checkpoint in it is silent corruption: the trainer
+        # loads nothing, and a model built for `load_path` init was only `to_empty()`d,
+        # so training proceeds on uninitialized weights (CE = ln(vocab_size)).
+        _assert_has_checkpoint(args.checkpoint.resume_from_checkpoint)
         trainer_config.load_path = args.checkpoint.resume_from_checkpoint
     elif defer_load:
         trainer_config.load_path = args.model.model_name_or_path
@@ -188,7 +223,17 @@ def main(args: MultimodalSFTArguments) -> None:
     trainer = trainer_config.build(train_module, data_loader)
     config_saver = trainer.callbacks["config_saver"]
     assert isinstance(config_saver, ConfigSaverCallback)
-    config_saver.config = dataclasses.asdict(args)
+    # `model` must be the serialized olmo-core MultimodalLMConfig, and `model_id` the HF
+    # repo it was bootstrapped from: olmo-eval's `olmo_core_vlm` provider identifies a
+    # checkpoint by `config.json["model"]["_CLASS_"]` and takes its tokenizer from
+    # `config.json["model_id"]`. Saving only `dataclasses.asdict(args)` here — whose
+    # `model` is open-instruct's MultimodalModelConfig — leaves the checkpoint
+    # unevaluatable ("config.json 'model' is not a MultimodalLMConfig").
+    config_saver.config = {
+        "model": model_config.as_config_dict(),
+        "model_id": args.model.base_hf_model_id,
+        "open_instruct": dataclasses.asdict(args),
+    }
     trainer.fit()
     teardown_training_environment()
 
