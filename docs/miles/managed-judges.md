@@ -1,7 +1,9 @@
 # Multi-node runs and named GPU judges
 
-The researcher launcher now compiles disaggregated runs into coordinated Beaker
-tasks on distinct physical nodes. Trainer GPU count, rollout GPU count and judge GPU count are independent.
+Distributed disaggregated runs require a Beaker replica group on distinct physical
+nodes. Trainer GPU count, rollout GPU count and judge GPU count are independent.
+See the [scheduling contract and current launcher defect](launching.md#distributed-scheduling-contract)
+before submitting a multi-node run.
 The initial two-node exercise and later four-update combined async exercise are
 recorded below; short execution gates do not establish mixture learning quality.
 
@@ -41,11 +43,12 @@ tensor parallelism must divide the node capacity. Multi-node colocation, separat
 evaluation GPU pools, cross-node serving TP and automatic coordinated restart
 remain unsupported. Restarting a run that carries a managed judge is not qualified: the [multi-node resume qualification](measurements/multinode-resume-20260922.md) covers a two-replica trainer and engine with no judge in the allocation.
 
-At submission, the launcher snapshots the cluster inventory and partitions its
-hostnames into disjoint scheduling pools, one per task. This is necessary because
-Beaker replicas may share a physical node when each requests only part of a node.
-The receipt records the pools; the scheduler still chooses a host within each
-pool. Available hosts are spread across pools to reduce unnecessary queueing.
+The launcher at `f301a8b97` partitions cluster hostnames into disjoint pools and
+submits a separate task for each node. This forces distinct hosts but loses
+native group scheduling: one task can run while another remains queued. This is
+a launcher defect, not a supported scheduling recipe. Partial-node placement
+must preserve both distinct hosts and the native replica group; full-node GPU
+requests ensure separation when matched to the selected hardware's GPU count.
 
 Before Ray starts, replicas exchange addresses on WEKA and sort them numerically
 as MILES sorts placement bundles. Beaker replica zero is not assumed to own the

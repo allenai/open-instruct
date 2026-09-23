@@ -3,8 +3,9 @@
 ## Establish completion
 
 Use `python -m open_instruct.miles status run.toml`, then inspect all current
-Beaker task attempts. A zero exit status, completed workflow state, expected
-update/eval/checkpoint counts and retained audit evidence together establish what
+Beaker attempts, taking the latest for each task and replica rank. A zero exit
+status, completed workflow state, expected update/eval/checkpoint counts and
+retained audit evidence together establish what
 finished. A run appearing in W&B or generating responses does not prove updates,
 weight publication or clean shutdown succeeded.
 
@@ -75,12 +76,22 @@ recomputation, and gathers only small layer/expert histograms.
 |---|---|
 | Configuration rejected | Error field/context, TOML types, conflicting aliases; rerun with --debug |
 | Queued job | `beaker job events JOB_ID`; use the scheduler's reason and latest attempt |
+| One node running, another queued; rendezvous timeout | `beaker experiment spec EXPERIMENT_ID`: verify one task with the intended `replicas` and `leaderSelection: true`, then inspect events for every replica |
 | Import/model failure | Selected image provenance, lock, architecture/tokenizer descriptor |
 | Out of memory | Trainer resident state, optimizer initialization, pack/context budget, actual KV/recurrent pools and graph capture |
 | Engine unavailable | Per-engine logs, health/recovery events, published policy version and Ray actor state |
 | Policy agreement/replay failure | Exact checkpoint/template, token alignment, precision, replay fields and version provenance |
 | Save/resume failure | Completed-checkpoint marker, original run specification, output-root ownership and disk capacity |
 | Slow shutdown | Compiler-cache phase records and cancellation result; do not attribute all delay to archive compression |
+
+For distributed startup failures, first check the
+[scheduling contract](launching.md#distributed-scheduling-contract). Positive
+minimum runtimes on separate tasks do not make a replica group. A free-GPU
+snapshot does not establish why a group waits or whether Beaker can preempt
+eligible work. Do not substitute idle-node polling or a longer application
+rendezvous timeout for correcting an incorrectly submitted group. If the group
+is correct, use events and logs to distinguish quota/capacity, image startup,
+and node failures.
 
 Do not bypass contract failures merely to finish a run. A healthy HTTP process is
 not proof that it has the current weights. The runtime's health/recovery support

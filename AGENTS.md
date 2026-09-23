@@ -17,7 +17,9 @@ Follow this workflow without requiring the user to supply a special agent prompt
    selected inputs or tracking mode. Example model/data paths are placeholders.
    Do not install the local CUDA training stack just to submit a job.
 4. Run `plan` and `validate`. When the user requests a run, launch through the MILES
-   committed-image wrapper and follow completion using the operations guide.
+   committed-image wrapper. Before submission, inspect the rendered Beaker spec
+   against the distributed scheduling requirements below; `plan` and `validate`
+   alone do not check them. Follow completion using the operations guide.
    Report the configuration, image, experiment link and validation outcomes.
 
 `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` are **deprecated**.
@@ -32,6 +34,41 @@ MILES has its own Core adapter and uses SGLang. The deprecated Core/vLLM path in
 `grpo.py` is separate, even though both use OLMo-core. Dated measurements/plans
 are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/legacy_grpo.md)
 contains the old CLI and reproduction instructions.
+
+# Beaker scheduling and distributed launches
+
+- A distributed run whose nodes must run together must use **one Beaker task
+  with `replicas: N` and `leaderSelection: true`**. Beaker schedules that replica
+  group as a unit. Multiple independent tasks in one experiment do not provide
+  this guarantee, even with identical priorities, minimum runtimes, failure
+  propagation, or an application-level rendezvous.
+- Set a positive `context.minRuntime` appropriate to the run. It selects allocated
+  scheduling and protects against preemption for that window; it does not group
+  independent tasks or guarantee immediate capacity. `timeout` is a separate
+  execution limit.
+- Distributed MILES tasks also require `hostNetworking: true`,
+  `propagateFailure: true`, `propagatePreemption: true`, and an explicit
+  `synchronizedStartTimeout`. Use Beaker's replica rank/count environment variables.
+  Preserve these settings when changing launchers or porting a working recipe.
+- Inspect the **rendered Beaker spec before submission**, not just the TOML or
+  GPU plan: replica group, GPUs per replica and total, minimum runtime, cluster,
+  mounts and immutable image. After submission, verify it with
+  `beaker experiment spec EXPERIMENT_ID`. See the
+  [spec inspection procedure](docs/miles/launching.md#distributed-scheduling-contract).
+- Distinct physical nodes and group scheduling are separate requirements.
+  Partial-node replicas may share a host. Do not force separation by splitting a
+  distributed run into independent tasks with disjoint hostname pools. Preserve
+  native group scheduling and verify placement; report an unsupported topology
+  if both requirements cannot be met.
+- When changing a distributed launcher, regression tests must assert one task,
+  the expected replica count, leader selection, synchronized start, propagation
+  settings, and total GPU allocation. Tests that only count jobs or successful
+  runs on an idle cluster do not establish group scheduling.
+- If one node starts while another remains queued, inspect the submitted replica
+  group and each job's scheduler events before diagnosing capacity or increasing
+  rendezvous timeouts. Do not add client-side polling for simultaneously idle
+  nodes as a substitute for Beaker's scheduler; it can place eligible allocated
+  work through preemption. Follow the latest attempt for **each task and replica**.
 
 # Bash commands
 - `uv run pytest`: Run the tests.
@@ -71,7 +108,7 @@ contains the old CLI and reproduction instructions.
 - When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
 - When a Beaker job stays queued or pending, run `beaker job events <job-id>` before diagnosing why — it prints the scheduler's own reason; don't infer one from cluster documentation. If that reason is the workspace slot limit, it applies to every cluster at once: wait or request fewer GPUs rather than relaunching elsewhere.
-- A Beaker experiment can hold several jobs when a preempted one is retried. Read status from the most recently created job, not `jobs[0]`, or a successful retry looks like a failure.
+- A Beaker experiment can hold several jobs when a preempted one is retried. Read the most recently created attempt for each task and replica rank, not `jobs[0]` or one latest job for the entire experiment, or a successful retry looks like a failure and missing replicas can be overlooked.
 - Experiment launch scripts that call `mason.py` must include `--no_auto_dataset_cache` (before the `--` separator) because vllm is not installed locally on macOS. Without this flag, mason.py tries to cache the dataset locally which fails on the `import vllm` in `data_loader.py`.
 - The `oe-eval-internal` directory is required in the Docker image for experiments that use `--try_launch_beaker_eval_jobs_on_weka`. If it's missing (e.g. in a fresh clone or worktree), clone it with: `git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal`.
 - When updating PR bodies with experiment results, use the "Runs:" format (numbered list with Beaker links):

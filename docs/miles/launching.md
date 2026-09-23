@@ -94,6 +94,72 @@ Both modes require a clean, committed checkout and delegate through
 before building, including mount coverage. It does not implement olmo-miles'
 `--skip-local-gate` option or its image-preflight contract.
 
+## Distributed scheduling contract
+
+A distributed run must be submitted as **one task with `replicas: N` and
+`leaderSelection: true`**. Beaker treats that replica group as a scheduling unit.
+Putting N independent tasks in the same experiment does not give them this
+guarantee. Shared WEKA rendezvous and failure propagation coordinate processes;
+they do not create a scheduler replica group.
+
+For example, the scheduling fields for two eight-GPU replicas are:
+
+```yaml
+tasks:
+  - name: distributed-run
+    replicas: 2
+    leaderSelection: true
+    hostNetworking: true
+    propagateFailure: true
+    propagatePreemption: true
+    synchronizedStartTimeout: 60m
+    resources:
+      gpuCount: 8
+    context:
+      priority: urgent
+      minRuntime: 4h
+    timeout: 6h
+```
+
+This is a scheduling excerpt, not a complete submission. It requests 16 GPUs
+as a group. A positive `minRuntime` selects allocated scheduling and provides a
+preemption-protected window; it neither groups independent tasks nor promises an
+immediate start. `timeout` bounds execution. Synchronized start bounds the wait
+for replica startup and is separate from application rendezvous. Beaker supplies
+`BEAKER_REPLICA_RANK` and `BEAKER_REPLICA_COUNT` to the replicas.
+
+Before building/submitting, render the actual launcher output using the submission
+environment and inspect it against this contract:
+
+```bash
+python - <<'PY'
+import json
+from open_instruct.miles import launch, run_spec
+
+spec = run_spec.RunSpec.load("runs/my-grpo.toml")
+document = launch.specification("IMMUTABLE_IMAGE_ID", spec)
+print(json.dumps(document, indent=2))
+PY
+```
+
+Verify the replica group, `replicas * resources.gpuCount`, context, placement,
+mounts and immutable image. `plan` and `validate` alone do not verify Beaker
+scheduling. After submission, retain `beaker experiment spec EXPERIMENT_ID` with
+the run evidence and check that Beaker received the intended group.
+
+Distinct-host placement is an additional requirement of the MILES bootstrap.
+Partial-node replicas may share a physical host; separate tasks with disjoint
+hostname pools are not an acceptable replacement for group scheduling. Requesting
+all GPUs on each node ensures separation when the selected nodes have that GPU
+count. Verify the physical-node assumptions for other layouts before launching.
+
+**Known launcher defect identified September 23:** the launcher at `f301a8b97`
+renders independent tasks with disjoint hostname pools. That violates this
+contract and caused the 40-update attempt to time out waiting for its second
+node before any training. Correct the launcher and its spec regression tests
+before another distributed submission; extending rendezvous timeouts or polling
+for idle nodes does not repair the missing group.
+
 ## From a Beaker session
 
 To **submit a new allocation**, use the same existing-image procedure above.
@@ -146,7 +212,7 @@ beaker job logs JOB_ID
 
 `status` uses receipts in `~/.cache/open-instruct/miles/launches`; override with
 `MILES_LAUNCH_RECEIPTS`. Keep that directory when switching submitter hosts.
-Inspect the latest attempt for **each task**, not the first job of a retried
+Inspect the latest attempt for **each task and replica rank**, not the first job of a retried
 experiment. Scheduler events explain pending jobs. Small reports/logs are copied
 to Beaker results; checkpoints and rollout tensors remain on WEKA. See
 [operations](operations.md) for completion, recovery and artifact interpretation.

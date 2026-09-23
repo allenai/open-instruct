@@ -22,8 +22,10 @@ change those parallelism limits.
 Core keeps the trainer resident. The tiny colocated example is a development
 check; full-model optimizer/engine coexistence has not been qualified by it.
 Multi-node jobs fill spare GPUs on the final trainer node with whole inference
-engines, keeping trainer ranks first in GPU order. Jobs use explicit tasks with disjoint hostname pools; judge GPUs
-belong to their own fixed-weight service. Plan reports unused slots. Consult
+engines, keeping trainer ranks first in GPU order. Distributed launches require
+a native Beaker replica group; see the [scheduling contract and current launcher
+defect](launching.md#distributed-scheduling-contract). Judge GPUs belong to their
+own fixed-weight service. Plan reports unused slots. Consult
 [managed judges](managed-judges.md) for current placement restrictions.
 
 ## Publication and recipe selection
