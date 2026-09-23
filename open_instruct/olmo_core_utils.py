@@ -24,7 +24,7 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
-from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig
+from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig, assign_full_tensor_to_dtensor
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -342,9 +342,35 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
         matrices.append(model.lm_head.w_out.weight)
     for weight in matrices:
         model_utils.seed_embedding_rows(weight, rows)
+    sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
 
     logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
     return len(rows)
+
+
+def sync_optimizer_main_params(optimizer, params: list[torch.Tensor]) -> None:
+    """Make an OLMoDDPOptimizer's main copies of `params` match the params after an in-place edit.
+
+    That optimizer (MoE v2 models) owns the weights: each `step()` writes its `<name>.main`
+    states back over the model. For bf16 params those are separate fp32 copies filled when the
+    base checkpoint loaded, so an edit to the model alone is undone on step 1; for fp32 params
+    they are views of the params and this copy is a no-op. Other optimizers read the params
+    themselves and need nothing. Afterwards every param is checked against its main copy, so a
+    run whose seeding did not reach the optimizer dies at startup instead of training on it.
+    """
+    states = getattr(optimizer, "states", None)
+    if states is None:
+        return
+    targets = {id(param) for param in params}
+    synced = 0
+    for group in optimizer.param_groups:
+        for name, param in group["named_params"].items():
+            if id(param) in targets:
+                assign_full_tensor_to_dtensor(dst=states[f"{name}.main"], src=param.data.float().reshape(-1))
+                synced += 1
+    if synced != len(targets):
+        raise RuntimeError(f"Found optimizer main params for {synced} of {len(targets)} seeded matrices")
+    optimizer._check_model_param_main_param_the_same()
 
 
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:

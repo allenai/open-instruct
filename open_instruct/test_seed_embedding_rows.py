@@ -15,7 +15,7 @@ import unittest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.distributed.tensor import Shard, distribute_tensor, init_device_mesh
+from torch.distributed.tensor import Replicate, Shard, distribute_tensor, init_device_mesh
 
 from open_instruct import dataset_transformation, model_utils, olmo_core_utils
 
@@ -148,6 +148,62 @@ class TestOlmoCoreSeeding(unittest.TestCase):
         original = train_module.model.embeddings.weight.clone()
         self.assertEqual(olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer([])), 0)
         torch.testing.assert_close(train_module.model.embeddings.weight, original)
+
+
+class _StubDDPOptimizer:
+    """An OLMoDDPOptimizer's bf16 layout: fp32 main copies that are separate from the params."""
+
+    def __init__(self, named_params, mesh):
+        self.param_groups = [{"named_params": named_params}]
+        self.states = {
+            f"{name}.main": distribute_tensor(param.detach().float().reshape(-1).clone(), mesh, [Replicate()])
+            for name, param in named_params.items()
+        }
+        self.checked = False
+
+    def _check_model_param_main_param_the_same(self):
+        for name, param in self.param_groups[0]["named_params"].items():
+            torch.testing.assert_close(self.states[f"{name}.main"].full_tensor(), param.float().reshape(-1))
+        self.checked = True
+
+
+class TestOptimizerMainParamSync(unittest.TestCase):
+    ROWS = [(3, (0, 1))]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.init_dir = tempfile.TemporaryDirectory()
+        init_file = os.path.join(cls.init_dir.name, "init")
+        dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=0, world_size=1)
+        cls.mesh = init_device_mesh("cpu", (1,))
+
+    @classmethod
+    def tearDownClass(cls):
+        dist.destroy_process_group()
+        cls.init_dir.cleanup()
+
+    def _train_module(self, include_head: bool):
+        train_module = _StubTrainModule(tie_word_embeddings=False)
+        named = {"embeddings.weight": train_module.model.embeddings.weight}
+        if include_head:
+            named["lm_head.w_out.weight"] = train_module.model.lm_head.w_out.weight
+        train_module.optim = _StubDDPOptimizer(named, self.mesh)
+        return train_module
+
+    def test_separate_main_copies_receive_the_seed(self):
+        # Without the sync, step() would copy these stale mains back over the seeded rows.
+        train_module = self._train_module(include_head=True)
+        olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
+        expected = reference_matrix()[[0, 1]].mean(dim=0)
+        for name in ("embeddings.weight", "lm_head.w_out.weight"):
+            main = train_module.optim.states[f"{name}.main"].full_tensor().reshape(reference_matrix().shape)
+            torch.testing.assert_close(main[3], expected)
+        self.assertTrue(train_module.optim.checked)
+
+    def test_a_seeded_matrix_the_optimizer_does_not_own_raises(self):
+        train_module = self._train_module(include_head=False)
+        with self.assertRaisesRegex(RuntimeError, "1 of 2 seeded matrices"):
+            olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
 
 
 if __name__ == "__main__":

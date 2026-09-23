@@ -142,6 +142,13 @@ if [[ "$MODEL" =~ ^/weka/([^/]+)/ ]]; then
 fi
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
 CHAT_TEMPLATE=olmo123
+# H015: THINK_TOKENS=1 makes <think> and </think> single tokens by renaming reserved
+# <|extra_id_N|> slots (#1911). It is part of the tokenization cache key, so every mode
+# that names the cache passes it identically. An array, so the tags stay literal words.
+RESERVED_SLOT_FLAGS=()
+if [[ "${THINK_TOKENS:-0}" == "1" ]]; then
+    RESERVED_SLOT_FLAGS=(--reserved_slot_tokens "<think>" "</think>")
+fi
 # 32768 is the cache's native tokenisation length (no re-tokenize) and cuts
 # mid-trace truncation to 1.95%; 16384 would show the LC base the same data as
 # the midtrain base.
@@ -251,6 +258,7 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
+        "${RESERVED_SLOT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
         --mixer_list $MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
@@ -282,6 +290,7 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
+        "${RESERVED_SLOT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
         --mixer_list allenai/Dolci-Think-SFT 1.0 \
         --local_cache_dir $LOCAL_CACHE_DIR \
@@ -385,6 +394,7 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
+        "${RESERVED_SLOT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps $GRAD_ACCUM \

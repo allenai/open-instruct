@@ -16,7 +16,9 @@ RUN_TAG=""
 case "$ARM" in
     aligned) IMAGE="$BUILT_IMAGE" ;;
     legacy) IMAGE=01M2KSSB3FCYJ8PNB7B672N9SP ;;
-    *) echo "Unknown arm: $ARM" >&2; exit 1 ;;
+    # H015: aligned plus single-token <think>/</think> in reserved slots (#1911).
+    think) IMAGE="$BUILT_IMAGE"; export THINK_TOKENS=1 ;;
+    *) echo "Unknown arm: $ARM (expected aligned, legacy or think)" >&2; exit 1 ;;
 esac
 case "$MODE" in
     train)
@@ -42,6 +44,10 @@ case "$MODE" in
         RUN_TAG="train-full-s${DATA_LOADER_SEED}"
         MODE=train
         ;;
+    tokenize)
+        # CPU-only; builds the arm's own numpy cache (THINK_TOKENS changes its key).
+        MODE=tokenize_full
+        ;;
     gate)
         export STEPS=30 NPROC=8 CKPT_STEPS=1000000 EPHEMERAL_STEPS=-1
         export JOB_TIMEOUT=45m
@@ -55,12 +61,16 @@ case "$MODE" in
         export STEP="${STEP:-step3072}"
         if [[ "$ARM" == "legacy" ]]; then
             CACHE=15bfc110a1-6068a350
+        elif [[ "$ARM" == "think" ]]; then
+            # Its hash is known only once the tokenize job has run; the tokenizer saved
+            # there carries the promoted slots, and the export must ship that one.
+            CACHE="${CACHE:?set CACHE to the think arm numpy cache dir name}"
         else
             CACHE=062b8a3d20-6068a350
         fi
         export CONVERT_TOKENIZER="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE/tokenizer"
         ;;
-    *) echo "Expected train, gate or convert" >&2; exit 1 ;;
+    *) echo "Expected train, train_full, tokenize, gate or convert" >&2; exit 1 ;;
 esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
 export DATA_LOADER_SEED
