@@ -420,7 +420,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # LoadStrategy.never so fit() loads nothing of its own. Skipped when resuming, since those
     # rows have been trained since they were seeded.
     if not resumed:
+        row_check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, tc.tokenizer)
         olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
+        if row_check is not None:
+            row_check.record_seeded()
+            trainer.add_callback("promoted_row_step_check", row_check)
 
     logger.info("Starting training...")
     trainer.fit()

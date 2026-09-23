@@ -206,5 +206,36 @@ class TestOptimizerMainParamSync(unittest.TestCase):
             olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
 
 
+class TestPromotedRowStepCheck(unittest.TestCase):
+    ROWS = [(3, (0, 1))]
+
+    def _seeded_check(self):
+        train_module = _StubTrainModule(tie_word_embeddings=False)
+        check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, _StubTokenizer(self.ROWS))
+        pre_seed = [w.clone() for w in (train_module.model.embeddings.weight, train_module.model.lm_head.w_out.weight)]
+        olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
+        check.record_seeded()
+        check.trainer = types.SimpleNamespace(global_step=1)
+        return train_module, check, pre_seed
+
+    def test_a_step_that_trains_from_the_seed_passes(self):
+        train_module, check, _ = self._seeded_check()
+        for weight in check.matrices:
+            weight.data[3] += 1e-3
+        check.post_step()
+
+    def test_a_step_that_reverts_the_seed_raises(self):
+        # What a stale master copy does: step() writes the pre-seed row back, plus an update.
+        train_module, check, pre_seed = self._seeded_check()
+        for weight, original in zip(check.matrices, pre_seed):
+            weight.data[3] = original[3] + 1e-3
+        with self.assertRaisesRegex(RuntimeError, "reverted"):
+            check.post_step()
+
+    def test_nothing_promoted_builds_no_check(self):
+        train_module = _StubTrainModule(tie_word_embeddings=False)
+        self.assertIsNone(olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, _StubTokenizer([])))
+
+
 if __name__ == "__main__":
     unittest.main()

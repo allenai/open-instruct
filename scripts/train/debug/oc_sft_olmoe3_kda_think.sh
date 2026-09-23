@@ -252,6 +252,7 @@ case "$MODE" in
         --gpus 0 \
         --non_resumable \
         --no_auto_dataset_cache \
+        ${EXPECTED_NUMPY_CACHE:+--env EXPECTED_NUMPY_CACHE=$EXPECTED_NUMPY_CACHE} \
         $EXTRA_BUCKET_FLAGS \
         -- uv run python open_instruct/olmo_core_finetune.py \
         --model_name_or_path "$MODEL" \

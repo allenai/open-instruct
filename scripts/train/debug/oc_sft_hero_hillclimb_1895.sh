@@ -11,6 +11,10 @@ MODE="${3:-train}"
 # a tokenization cache key and must never move -- vary the data order only.
 # Set before the case block: train_full puts the seed in the output dir.
 DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
+# EXPERIMENT=h015 gives each arm, mode and data seed its own run name, output dir and
+# convert source; the h010 defaults put control and seed2 in one existing dir.
+EXPERIMENT="${EXPERIMENT:-h010}"
+H015_ROOT=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895
 # Local, never inherited: an exported RUN_TAG must not rename another mode.
 RUN_TAG=""
 # The arm alone decides THINK_TOKENS (a tokenization cache key): an inherited value must
@@ -21,7 +25,13 @@ case "$ARM" in
     legacy) IMAGE=01M2KSSB3FCYJ8PNB7B672N9SP; THINK_TOKENS=0; ARM_CACHE=15bfc110a1-6068a350 ;;
     # H015: aligned plus single-token <think>/</think> in reserved slots (#1911). Its cache
     # hash is known only once the tokenize job has run; pass it as THINK_CACHE.
-    think) IMAGE="$BUILT_IMAGE"; THINK_TOKENS=1; ARM_CACHE="${THINK_CACHE:-}" ;;
+    think)
+        IMAGE="$BUILT_IMAGE"; THINK_TOKENS=1; ARM_CACHE="${THINK_CACHE:-}"
+        case "$ARM_CACHE" in
+            062b8a3d20-6068a350|15bfc110a1-6068a350)
+                echo "THINK_CACHE=$ARM_CACHE is a flag-off cache; the think arm needs its own" >&2; exit 1 ;;
+        esac
+        ;;
     *) echo "Unknown arm: $ARM (expected aligned, legacy or think)" >&2; exit 1 ;;
 esac
 case "$MODE" in
@@ -53,7 +63,7 @@ case "$MODE" in
         MODE=tokenize_full
         ;;
     gate)
-        export STEPS=30 NPROC=8 CKPT_STEPS=1000000 EPHEMERAL_STEPS=-1
+        export STEPS=30 NNODES=1 NPROC=8 CKPT_STEPS=1000000 EPHEMERAL_STEPS=-1
         export JOB_TIMEOUT=45m
         ;;
     convert)
@@ -61,7 +71,11 @@ case "$MODE" in
         IMAGE="$BUILT_IMAGE"
         export JOB_TIMEOUT=2h CONVERT_GPUS=1 CONVERT_DEVICE=cuda CONVERT_CLUSTER=ai2/holmes
         export CONVERT_PYTHONPATH=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-anchor/olmo-core-b1fd2c97/src
-        export CKPT_ROOT="${CKPT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-train-20260918}"
+        if [[ "$EXPERIMENT" == "h015" ]]; then
+            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/h015-${ARM}-train-s${DATA_LOADER_SEED}}"
+        else
+            export CKPT_ROOT="${CKPT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-train-20260918}"
+        fi
         export STEP="${STEP:-step3072}"
         if [[ "$ARM" == "legacy" ]]; then
             CACHE=15bfc110a1-6068a350
@@ -78,8 +92,13 @@ case "$MODE" in
 esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
 export THINK_TOKENS
-if [[ "$MODE" == "train" || "$MODE" == "gate" ]]; then
-    export EXPECTED_NUMPY_CACHE="${ARM_CACHE:?set THINK_CACHE to the think arm numpy cache dir name}"
+# Train and gate must name their cache. Tokenize names it when it is already known, which
+# makes a flag-off tokenize job a CPU preflight: the production hash either resolves to the
+# arm's cache (and exits "nothing to do") or raises -- before any GPU is reserved.
+if [[ -n "$ARM_CACHE" ]]; then
+    export EXPECTED_NUMPY_CACHE="$ARM_CACHE"
+elif [[ "$MODE" == "train" || "$MODE" == "gate" ]]; then
+    echo "set THINK_CACHE to the think arm numpy cache dir name" >&2; exit 1
 else
     unset EXPECTED_NUMPY_CACHE
 fi
@@ -96,6 +115,10 @@ export PRIORITY="${PRIORITY:-normal}"
 # risk being managed, then watch the step counter on the retry.
 export MAX_RETRIES="${MAX_RETRIES:-0}"
 export KEEP_LAST_N="${KEEP_LAST_N:-1}"
+if [[ "$EXPERIMENT" == "h015" ]]; then
+    export RUN_NAME="${RUN_NAME:-hero-sft-h015-${ARM}-${MODE}-s${DATA_LOADER_SEED}}"
+    export OUTPUT_DIR="${OUTPUT_DIR:-$H015_ROOT/h015-${ARM}-${MODE}-s${DATA_LOADER_SEED}}"
+fi
 export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
 export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${RUN_TAG:-${MODE}}-20260918}"
 # Caller accounts for all queued/running jobs against 32 urgent + 32 normal.

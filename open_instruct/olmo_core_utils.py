@@ -37,6 +37,7 @@ from olmo_core.train.train_module.transformer.config import (
     TransformerContextParallelConfig,
     TransformerDataParallelConfig,
 )
+from torch.distributed.tensor import DTensor
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -317,6 +318,64 @@ def load_hf_weights_into_olmo_core(
         load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
 
 
+def promoted_token_matrices(model) -> list[torch.Tensor]:
+    """The weight matrices whose promoted rows are seeded: the embedding, and the head if untied."""
+    matrices = [model.embeddings.weight]
+    # The olmo2/olmo3 presets leave tie_word_embeddings False, so the head is a second matrix
+    # that needs the same seed. The qwen3 presets tie it, where writing the one parameter twice
+    # would feed the row just written back in as one of its own sources.
+    if not model.tie_word_embeddings and model.lm_head is not None:
+        matrices.append(model.lm_head.w_out.weight)
+    return matrices
+
+
+def _rows(weight: torch.Tensor, ids: list[int]) -> torch.Tensor:
+    data = weight.data.full_tensor() if isinstance(weight.data, DTensor) else weight.data
+    return data[ids].detach().float().cpu().clone()
+
+
+class PromotedRowStepCheck(train_callbacks.Callback):
+    """After the first optimizer step, check the seeded rows were trained from, not reverted.
+
+    An optimizer that keeps its own master weights overwrites the model on every step, so a
+    seed that never reached them is undone on step 1 -- and the startup equality check alone
+    cannot show what a real step does. Each promoted row must end step 1 closer to its seeded
+    value than to its pre-seed one; the distances are logged either way, and a revert raises.
+    """
+
+    def __init__(self, matrices: list[torch.Tensor], ids: list[int]):
+        super().__init__()
+        self.matrices, self.ids = matrices, ids
+        self.before = [_rows(weight, ids) for weight in matrices]
+        self.seeded: list[torch.Tensor] | None = None
+        self.done = False
+
+    @classmethod
+    def before_seeding(cls, train_module, tokenizer) -> "PromotedRowStepCheck | None":
+        rows = model_utils.promoted_token_rows(tokenizer)
+        if not rows:
+            return None
+        return cls(promoted_token_matrices(train_module.model), [target for target, _ in rows])
+
+    def record_seeded(self) -> None:
+        self.seeded = [_rows(weight, self.ids) for weight in self.matrices]
+
+    def post_step(self) -> None:
+        if self.done or self.seeded is None:
+            return
+        self.done = True
+        for index, (weight, before, seeded) in enumerate(zip(self.matrices, self.before, self.seeded)):
+            now = _rows(weight, self.ids)
+            to_seed = (now - seeded).norm(dim=-1)
+            to_before = (now - before).norm(dim=-1)
+            logger.info(
+                f"Promoted rows after step {self.step}, matrix {index}: distance to seed {to_seed.tolist()}, "
+                f"to pre-seed value {to_before.tolist()}"
+            )
+            if bool((to_before < to_seed).any()):
+                raise RuntimeError(f"Promoted rows reverted toward their pre-seed values after step {self.step}")
+
+
 def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
     """Seed the rows of reserved-slot-promoted tokens on the olmo-core path.
 
@@ -333,13 +392,7 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
     if not rows:
         return 0
 
-    model = train_module.model
-    matrices = [model.embeddings.weight]
-    # The olmo2/olmo3 presets leave tie_word_embeddings False, so the head is a second matrix
-    # that needs the same seed. The qwen3 presets tie it, where writing the one parameter twice
-    # would feed the row just written back in as one of its own sources.
-    if not model.tie_word_embeddings and model.lm_head is not None:
-        matrices.append(model.lm_head.w_out.weight)
+    matrices = promoted_token_matrices(train_module.model)
     for weight in matrices:
         model_utils.seed_embedding_rows(weight, rows)
     sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
