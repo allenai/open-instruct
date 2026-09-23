@@ -93,7 +93,8 @@ def serve(args):
         random_seed=20260923,
         disable_radix_cache=True,
         disable_overlap_schedule=True,
-        cuda_graph_backend_decode="disabled",
+        cuda_graph_backend_decode="full" if args.mode == "default_graphs" else "disabled",
+        cuda_graph_bs_decode=[1, 2, 4],
         cuda_graph_backend_prefill="disabled",
         context_length=4096,
         max_total_tokens=16384,
@@ -247,7 +248,12 @@ def score(args):
     olmo3.load_olmo3_moe_hf_state(model, config, state)
     del state
     model.eval()
-    report = {"model": args.model, "gpu": torch.cuda.get_device_name(), "comparisons": {}}
+    report = {
+        "model": args.model,
+        "gpu": torch.cuda.get_device_name(),
+        "comparisons": {},
+        "config": json.loads((Path(args.model) / "config.json").read_text()),
+    }
     for path in args.serving_reports:
         serving = json.loads(path.read_text())
         if serving["samples_sha256"] != hashlib.sha256(args.samples.read_bytes()).hexdigest():
@@ -314,7 +320,7 @@ def main():
     parser.add_argument("--data", type=Path)
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--per-domain", type=int, default=4)
-    parser.add_argument("--mode", choices=["default", "core"], default="default")
+    parser.add_argument("--mode", choices=["default", "core", "default_graphs"], default="default")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--tokens", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=2)
