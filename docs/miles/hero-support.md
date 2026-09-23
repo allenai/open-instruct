@@ -11,6 +11,12 @@ checks. H100 and B300 inference match the sampled greedy tokens but fail the
 unchanged probability gate; neither checkpoint is qualified for RL training. These are separate checkpoints
 from the historical base-model qualification below.
 
+The [SFT numerical isolation](measurements/hero-numerics-20260923.md) finds exact
+HF/SGLang routing on identical inputs across all tested layers and prefixes.
+Routed-expert, full-attention and smaller RMSNorm arithmetic differences explain
+the observed forward mismatch; diagnostic HF substitutions remove it. Production
+arithmetic and the failed qualification gate remain unchanged.
+
 ## Architecture and source lineage
 
 The non-EMO small hero has 16 blocks (14 KDA and two full-attention blocks),
