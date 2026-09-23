@@ -137,6 +137,9 @@ async def train(args, *, export_hf=None):
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
+                # Persist newly compiled kernels even when model checkpointing is
+                # disabled. This schedules bounded background CPU work, not a save.
+                startup_cache.publish_progress(args, rollout_id)
                 if coordinator is not None:
                     per_collection = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
                     for update in range(rollout_id * per_collection + 1, (rollout_id + 1) * per_collection + 1):
@@ -168,9 +171,6 @@ async def train(args, *, export_hf=None):
                     await learner.finalize_checkpoint(rollout_id)
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
-                # Warm compiler caches now exist; publish them in the background
-                # so a later preemption does not discard this process's warmup.
-                startup_cache.publish_progress(args, rollout_id)
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)

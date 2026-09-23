@@ -79,6 +79,124 @@ def test_fingerprint_tracks_compile_inputs_but_not_weights_outputs():
         cache.fingerprint(**args)
 
 
+@pytest.mark.parametrize(
+    "group,changes",
+    [
+        ("core", {"checkpoint_keep_last": 2, "checkpoint_keep_every": 20}),
+        (
+            "core",
+            {
+                "checkpoint_thread_count": 4,
+                "checkpoint_process_count": 2,
+                "checkpoint_profile": True,
+                "checkpoint_compact_storage": False,
+                "checkpoint_dedup_save_to_lowest_rank": True,
+                "checkpoint_constant_memory_planning": False,
+            },
+        ),
+        (
+            "core",
+            {
+                "diagnostic_interval": 5,
+                "pipeline_observation_interval": 2,
+                "replay_diagnostics": True,
+                "max_train_rollout_logprob_abs_diff": 0.01,
+            },
+        ),
+        ("core", {"engine_drain_timeout": 900, "engine_update_timeout": 300, "refresh_request_timeout": 3600}),
+        ("core", {"scoring_check_interval": 10, "scoring_check_tolerance": 0.01}),
+        (
+            "core",
+            {
+                "records_root": "/new/records",
+                "records_responses": "sample",
+                "records_response_sample_rate": 0.1,
+                "selection_table": "/new/table",
+                "selection_sha256": "new",
+            },
+        ),
+        (
+            "core",
+            {
+                "compiler_cache_diagnostics": True,
+                "compiler_cache_root": "/new/tmp-7d",
+                "compiler_cache_max_storage_bytes": 1024,
+                "compiler_cache_publish_interval_seconds": 60,
+            },
+        ),
+        (
+            "miles",
+            {
+                "sglang_port": 12345,
+                "sglang_host": "127.0.0.1",
+                "sglang_watchdog_timeout": 900,
+                "sglang_dist_timeout": 600,
+                "sglang_download_dir": "/new/downloads",
+            },
+        ),
+        (
+            "miles",
+            {
+                "sglang_log_level": "debug",
+                "sglang_log_requests": True,
+                "sglang_enable_metrics": True,
+                "sglang_collect_traces": True,
+                "sglang_otlp_traces_endpoint": "http://localhost:4317",
+            },
+        ),
+    ],
+)
+def test_operational_changes_reuse_published_cache(tmp_path, group, changes):
+    args = identity()
+    key = cache.fingerprint(**args)[0]
+    source = private(tmp_path, "compiled")
+    write(source / "triton", "kernel.so")
+    cache.publish(tmp_path / "shared", source, key, "triton")
+    args["run_config"][group].update(changes)
+    new_key = cache.fingerprint(**args)[0]
+    assert new_key == key
+    restored = private(tmp_path, "restored")
+    assert cache.restore(tmp_path / "shared", restored, new_key, "triton")["status"] == "hit"
+
+
+@pytest.mark.parametrize(
+    "group,key,value",
+    [
+        ("core", "expert_parallel_size", 4),
+        ("core", "row_specialization", "dynamic"),
+        ("core", "packing_max_tokens", 32768),
+        ("core", "compile_model", True),
+        ("core", "attention_backend", "flash_4"),
+        ("core", "scoring_pass_required", True),
+        ("core", "router_aux_loss_weight", 0.1),
+        ("core", "future_kernel_option", True),
+        ("miles", "sglang_attention_backend", "triton"),
+        ("miles", "sglang_dtype", "bfloat16"),
+        ("miles", "sglang_cuda_graph_max_bs_decode", 64),
+        ("miles", "sglang_future_kernel_option", True),
+    ],
+)
+def test_compile_and_unknown_options_still_invalidate(group, key, value):
+    args = identity()
+    before = cache.fingerprint(**args)[0]
+    args["run_config"][group][key] = value
+    assert cache.fingerprint(**args)[0] != before
+
+
+def test_compiler_environment_ignores_ephemeral_directories_but_keeps_options():
+    env = {
+        "SGLANG_DG_CACHE_DIR": "/tmp/engine-a",
+        "TILELANG_TMP_DIR": "/tmp/tile-a",
+        "SGLANG_DG_CACHE_DIR_PER_PROCESS": "1",
+        "TILELANG_DISABLE_CACHE": "0",
+    }
+    first = wrapper.compiler_environment(env)
+    env.update(SGLANG_DG_CACHE_DIR="/tmp/engine-b", TILELANG_TMP_DIR="/tmp/tile-b")
+    assert wrapper.compiler_environment(env) == first
+    env["SGLANG_DG_CACHE_DIR_PER_PROCESS"] = "0"
+    assert wrapper.compiler_environment(env) != first
+
+
 def test_source_identity_hashes_dirty_code_and_rejects_symlink(tmp_path):
     source = write(tmp_path, "module.py", b"value = 1\n")
     first = cache.source_identity(tmp_path)
@@ -468,3 +586,114 @@ def test_publication_stages_tree_locally_and_upload_failure_keeps_current(tmp_pa
     assert result["files"] == 2 and result["archive_bytes"] > 0
     assert {"lock_wait", "merge", "archive_local", "upload", "pointer", "complete"} <= {e["phase"] for e in events}
     assert result["phase_seconds"]["upload"] >= 0
+
+
+def test_storage_cap_counts_previous_runs_and_preserves_last_good_generation(tmp_path):
+    shared = tmp_path / "shared"
+    first = private(tmp_path, "first-run")
+    write(first / "triton", "old.so", os.urandom(4096))
+    cap = 8000
+    result = cache.publish(shared, first, KEY, "triton", max_storage_bytes=cap)
+    assert result["status"] == "published"
+    base = cache.artifact_root(shared, KEY, "triton")
+    old_pointer = (base / "CURRENT").read_bytes()
+    before = cache.storage_bytes(base.parent)
+    assert before < cap
+    second = private(tmp_path, "second-run")
+    write(second / "triton", "new.so", os.urandom(1024))
+    refused = cache.publish(shared, second, KEY, "triton", max_storage_bytes=cap)
+    assert refused["status"] == "storage_limit"
+    assert refused["storage_bytes"] == before
+    assert before + refused["required_bytes"] > cap
+    assert cache.storage_bytes(base.parent) == before
+    assert (base / "CURRENT").read_bytes() == old_pointer
+    restored = private(tmp_path, "still-readable")
+    assert cache.restore(shared, restored, KEY, "triton")["status"] == "hit"
+    assert (restored / "triton" / "old.so").read_bytes() == (first / "triton" / "old.so").read_bytes()
+    # Another fresh run does not acquire another allowance for the same key.
+    third = private(tmp_path, "third-run")
+    write(third / "triton", "another.so", os.urandom(1024))
+    assert cache.publish(shared, third, KEY, "triton", max_storage_bytes=cap)["status"] == "storage_limit"
+    # Distinct compile identities have independent budgets.
+    assert cache.publish(shared, third, "b" * 64, "triton", max_storage_bytes=cap)["status"] == "published"
+
+
+def test_concurrent_families_share_one_key_storage_budget(tmp_path):
+    shared = tmp_path / "shared"
+    families = ["tilelang", "fa4"]
+    roots = [private(tmp_path, family) for family in families]
+    for root, family in zip(roots, families, strict=True):
+        write(root / family, "object.so", os.urandom(4096))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda item: cache.publish(shared, item[0], KEY, item[1], max_storage_bytes=8000),
+                zip(roots, families, strict=True),
+            )
+        )
+    assert sorted(r["status"] for r in results) == ["published", "storage_limit"]
+    key_root = cache.artifact_root(shared, KEY, "triton").parent
+    assert cache.storage_bytes(key_root) <= 8000
+    assert len(list(key_root.rglob("cache.tar.gz"))) == 1
+
+
+def test_cap_counts_old_generations_and_interrupted_uploads(tmp_path):
+    shared = tmp_path / "shared"
+    root = private(tmp_path, "local")
+    write(root / "triton", "a.so", b"a")
+    cache.publish(shared, root, KEY, "triton")
+    write(root / "triton", "b.so", b"b")
+    cache.publish(shared, root, KEY, "triton")
+    key_root = cache.artifact_root(shared, KEY, "triton").parent
+    assert len(list(key_root.rglob("cache.tar.gz"))) == 2
+    used = cache.storage_bytes(key_root)
+    write(key_root, "fa4/generations/.publish-interrupted/cache.tar.gz", b"x" * 1000)
+    assert cache.storage_bytes(key_root) == used + 1000
+    result = cache.publish(shared, root, KEY, "triton", max_storage_bytes=used + 1000)
+    assert result["status"] == "storage_limit"
+    assert result["storage_bytes"] == used + 1000
+
+
+@pytest.mark.parametrize("limit", [-1, True, 1.5, None])
+def test_invalid_storage_limit_cannot_publish(tmp_path, limit):
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        cache.publish(tmp_path / "shared", tmp_path / "local", KEY, "triton", max_storage_bytes=limit)
+
+
+def test_generation_recency_updates_without_mutating_archive_or_manifest(tmp_path):
+    shared = tmp_path / "shared"
+    source = private(tmp_path, "source")
+    write(source / "triton", "kernel.so")
+    first = cache.publish(shared, source, KEY, "triton")
+    assert first["recency_recorded"] is True
+    base = cache.artifact_root(shared, KEY, "triton")
+    generation = base / "generations" / first["generation"]
+    frozen = {name: (generation / name).read_bytes() for name in ("manifest.json", "cache.tar.gz")}
+    marker = generation / ".last_used"
+    assert marker.stat().st_size == 0
+    os.utime(marker, (1, 1))
+    target = private(tmp_path, "restored")
+    result = cache.restore(shared, target, KEY, "triton")
+    assert result["status"] == "hit" and result["recency_recorded"] is True
+    assert marker.stat().st_mtime > 1
+    assert {name: (generation / name).read_bytes() for name in frozen} == frozen
+    os.utime(marker, (1, 1))
+    result = cache.publish(shared, source, KEY, "triton")
+    assert result["status"] == "unchanged" and result["recency_recorded"] is True
+    assert marker.stat().st_mtime > 1
+
+
+def test_recency_write_failure_does_not_prevent_cache_hit(tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    source = private(tmp_path, "source")
+    write(source / "triton", "kernel.so")
+    cache.publish(shared, source, KEY, "triton")
+
+    def readonly(*args, **kwargs):
+        raise PermissionError("read-only cache")
+
+    monkeypatch.setattr(cache.os, "utime", readonly)
+    target = private(tmp_path, "restored")
+    result = cache.restore(shared, target, KEY, "triton")
+    assert result["status"] == "hit" and result["recency_recorded"] is False
+    assert (target / "triton" / "kernel.so").is_file()

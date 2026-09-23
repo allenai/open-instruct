@@ -35,6 +35,8 @@ class CoreConfig:
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
+    compiler_cache_max_storage_bytes: int = cache.DEFAULT_MAX_STORAGE_BYTES
+    compiler_cache_publish_interval_seconds: float = 600.0
     checkpoint_profile: bool = False
     checkpoint_thread_count: int | None = None
     checkpoint_process_count: int | None = None
@@ -92,6 +94,12 @@ class CoreConfig:
             validation.number(getattr(self, name), f"core.{name}")
             if getattr(self, name) <= 0:
                 raise InputError(f"core.{name} must be positive")
+        validation.integer(self.compiler_cache_max_storage_bytes, "core.compiler_cache_max_storage_bytes", minimum=0)
+        validation.number(
+            self.compiler_cache_publish_interval_seconds,
+            "core.compiler_cache_publish_interval_seconds",
+            exclusive_min=True,
+        )
         if self.compiler_cache_root is not None:
             if not isinstance(self.compiler_cache_root, str) or not self.compiler_cache_root:
                 raise InputError("core.compiler_cache_root must be a nonempty absolute path or unset")

@@ -30,10 +30,10 @@ ENV = "OI_CORE_STARTUP_CACHE"
 # One budget for all workers; no per-rank multiplication at shutdown.
 PUBLICATION_TIMEOUT_SECONDS = 240
 PUBLISHERS_PER_NODE = 2
-# Publish warm caches after the first committed checkpoint of each process and
-# then every N later checkpoints, so a preempted run still leaves a reusable
+# Publish after the first completed training collection of each process and
+# then rate-limit checks for new artifacts, so a preempted run leaves a reusable
 # generation. Publication keeps the worker's mutable local cache in place.
-PROGRESS_PUBLICATION_INTERVAL = 10
+DEFAULT_PUBLISH_INTERVAL_SECONDS = 600.0
 _PROGRESS: dict[str, dict[str, Any]] = {}
 DEFAULT_SHARED = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 
@@ -105,6 +105,8 @@ def prepare(args):
         run_config={"core": core, "miles": miles},
         restore=args.olmo_core.compiler_cache_restore,
         observe=args.olmo_core.compiler_cache_diagnostics,
+        max_storage_bytes=args.olmo_core.compiler_cache_max_storage_bytes,
+        publish_interval_seconds=args.olmo_core.compiler_cache_publish_interval_seconds,
     )
     logger.info("Core compiler cache: Triton enabled; worker reports in %s", report_dir)
 
@@ -219,6 +221,7 @@ def setup_worker():
         host=socket.gethostname(),
         node_id=os.environ.get("MILES_WORKER_NODE_ID") or ray.get_runtime_context().get_node_id(),
         shared=policy["shared"],
+        max_storage_bytes=policy.get("max_storage_bytes", cache.DEFAULT_MAX_STORAGE_BYTES),
     )
     try:
         hardware = probes.toolchain(dict(os.environ))
@@ -258,7 +261,14 @@ def setup_worker():
         )
         os.environ["OI_CORE_CACHE_OBSERVE_ROOT"] = str(local)
         os.environ["PYTHONPATH"] = str(hook) + os.pathsep + os.environ.get("PYTHONPATH", "")
-    logger.info("Core compiler cache worker %s: %s", policy["slot"], report["restore"])
+    logger.info(
+        "Core compiler cache worker %s: fingerprint=%s restored_files=%s diagnostics=%s %s",
+        policy["slot"],
+        report.get("fingerprint"),
+        report.get("restored_files", 0),
+        policy["observe"],
+        report["restore"],
+    )
 
 
 def publish_worker(report, *, retain_local=False):
@@ -272,6 +282,17 @@ def publish_worker(report, *, retain_local=False):
         raise ValueError("Unexpected worker cache directory")
     result = dict(slot=report["slot"], restore=report["restore"], setup_seconds=report["setup_seconds"])
     try:
+        state_path = local / "publication-state.json"
+        previous = json.loads(state_path.read_text()) if state_path.exists() else {}
+        if previous.get("capped"):
+            result["publish"] = previous["publish"]
+            if not retain_local:
+                shutil.rmtree(local)
+            return result
+        signature = cache.metadata_signature(local / "triton")
+        if retain_local and signature == previous.get("signature"):
+            result["publish"] = {"family": "triton", "status": "unchanged", "reason": "local_artifacts_unchanged"}
+            return result
         logger.info("Core compiler cache publication started: slot=%s local=%s", report["slot"], local)
         # Publication validates/hashes the snapshot; counting here need not hash it again.
         result["files_after"] = sum(path.is_file() for path in (local / "triton").rglob("*"))
@@ -286,8 +307,24 @@ def publish_worker(report, *, retain_local=False):
             logger.info("Core compiler cache publication: slot=%s %s", report["slot"], json.dumps(event))
 
         result["publish"] = cache.publish(
-            Path(report["shared"]), local, report["fingerprint"], "triton", progress=progress
+            Path(report["shared"]),
+            local,
+            report["fingerprint"],
+            "triton",
+            progress=progress,
+            max_storage_bytes=report.get("max_storage_bytes", cache.DEFAULT_MAX_STORAGE_BYTES),
         )
+        status = result["publish"]["status"]
+        if status in {"published", "unchanged", "empty", "storage_limit"}:
+            state_path.write_bytes(
+                cache.encoded(
+                    {"signature": signature, "capped": status == "storage_limit", "publish": result["publish"]}
+                )
+            )
+        if status == "storage_limit":
+            logger.warning(
+                "Core compiler cache publication stopped for slot=%s: %s", report["slot"], result["publish"]
+            )
     except Exception as error:
         result["publish"] = {"status": "rejected", "reason": f"{type(error).__name__}: {error}"}
     else:
@@ -378,23 +415,28 @@ def _save_report(args, name, report):
         logger.warning("Core compiler cache report could not be saved: %s: %s", type(error).__name__, error)
 
 
-def progress_due(checkpoints_seen, published, *, interval=PROGRESS_PUBLICATION_INTERVAL):
-    """First committed checkpoint of this process, then every ``interval`` checkpoints."""
-    if published == 0:
-        return True
-    return checkpoints_seen % interval == 0
+def progress_due(last_attempt, now, *, interval=DEFAULT_PUBLISH_INTERVAL_SECONDS):
+    """First completed collection, then elapsed time rather than request counts."""
+    return last_attempt is None or now - last_attempt >= interval
 
 
 async def _publish_progress(args, policy, state, rollout_id):
     started = time.monotonic()
-    report = {"rollout_id": rollout_id, "checkpoints_seen": state["checkpoints_seen"], "workers": []}
+    report = {"rollout_id": rollout_id, "collections_seen": state["collections_seen"], "workers": []}
     try:
         workers, others = _worker_reports(policy["report_dir"])
         report["workers"].extend(others)
-        report["workers"].extend(await _publish_all(workers, retain_local=True))
+        report["workers"].extend(
+            await _publish_all(
+                [worker for worker in workers if worker["slot"] not in state["capped_slots"]], retain_local=True
+            )
+        )
     except Exception as error:
         report["publication_error"] = f"{type(error).__name__}: {error}"
         logger.warning("Core compiler cache progress publication unavailable: %s", report["publication_error"])
+    state["capped_slots"].update(
+        worker["slot"] for worker in report["workers"] if worker.get("publish", {}).get("status") == "storage_limit"
+    )
     report["seconds"] = time.monotonic() - started
     state["published"] += 1
     state["history"].append(report)
@@ -405,25 +447,37 @@ async def _publish_progress(args, policy, state, rollout_id):
 
 
 def publish_progress(args, rollout_id):
-    """Schedule a bounded background publication after a committed checkpoint.
+    """Schedule a bounded background publication after a completed training collection.
 
     Training is not blocked: the publication runs as an asyncio task using the
     same per-node Ray tasks as the final publication, with workers still live.
-    At most one progress publication is in flight; a checkpoint that arrives
+    At most one progress publication is in flight; a collection that completes
     while one is running is simply counted. Failures never fail the run.
     """
     policy = getattr(args, "olmo_core_startup_cache", None)
     if not policy:
         return None
     state = _PROGRESS.setdefault(
-        policy["report_dir"], {"checkpoints_seen": 0, "published": 0, "task": None, "history": []}
+        policy["report_dir"],
+        {
+            "collections_seen": 0,
+            "published": 0,
+            "task": None,
+            "history": [],
+            "last_attempt": None,
+            "capped_slots": set(),
+        },
     )
-    state["checkpoints_seen"] += 1
+    state["collections_seen"] += 1
     task = state["task"]
     if task is not None and not task.done():
         return None
-    if not progress_due(state["checkpoints_seen"], state["published"]):
+    now = time.monotonic()
+    if not progress_due(
+        state["last_attempt"], now, interval=policy.get("publish_interval_seconds", DEFAULT_PUBLISH_INTERVAL_SECONDS)
+    ):
         return None
+    state["last_attempt"] = now
     state["task"] = asyncio.create_task(_publish_progress(args, policy, state, rollout_id))
     return state["task"]
 

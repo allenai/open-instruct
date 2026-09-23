@@ -237,7 +237,17 @@ class RunSpec:
         data = cls._data(_table(document, "data", required=True), base)
         run_data.validate_data(data)
         launch = cls._launch(_table(document, "launch"), base)
-        cache = _table(document, "compiler_cache", {"enabled", "shared_root", "restore", "diagnostics"})
+        cache = _table(
+            document,
+            "compiler_cache",
+            {"enabled", "shared_root", "restore", "diagnostics", "max_storage_bytes", "publish_interval_seconds"},
+        )
+        if "max_storage_bytes" in cache:
+            validation.integer(cache["max_storage_bytes"], "compiler_cache.max_storage_bytes", minimum=0)
+        if "publish_interval_seconds" in cache:
+            validation.number(
+                cache["publish_interval_seconds"], "compiler_cache.publish_interval_seconds", exclusive_min=True
+            )
         for key in ("enabled", "restore", "diagnostics"):
             if key in cache:
                 _boolean(cache[key], f"compiler_cache.{key}")
@@ -557,6 +567,8 @@ class RunSpec:
             "shared_root": "compiler_cache_root",
             "restore": "compiler_cache_restore",
             "diagnostics": "compiler_cache_diagnostics",
+            "max_storage_bytes": "compiler_cache_max_storage_bytes",
+            "publish_interval_seconds": "compiler_cache_publish_interval_seconds",
         }.items():
             if key in self.compiler_cache:
                 put(f"core.{field}", self.compiler_cache[key], f"compiler_cache.{key}")

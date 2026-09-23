@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Publish MILES compiler caches independently of model checkpoints with change detection, a ten-minute minimum interval, and an 8 GiB storage cap per key shared across runs/families; record generation recency without eviction, exclude operational settings from identity, and document diagnostics and coverage (PR URL pending).
 - Submit distributed MILES runs as native Beaker replica groups with synchronized start and failure/preemption propagation; require full eight-GPU nodes and track the latest attempt for each replica (PR URL pending).
 - Fill spare GPUs on the final MILES trainer node with disaggregated rollout engines, preserving trainer rank order and separate judge devices so smaller trainers can use a two-node allocation efficiently (PR URL pending).
 - Preserve live decoding across Core refresh publication, restore IPC pipeline restrictions, and readmit quarantined MILES engines after confirmed weight updates; validate startup hooks and tolerate empty generation calls in metrics (PR URL pending).

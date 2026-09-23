@@ -13,6 +13,7 @@ import time
 from pathlib import Path, PurePosixPath
 
 SCHEMA = 1
+DEFAULT_MAX_STORAGE_BYTES = 8 * 1024**3
 FAMILIES = {
     "triton": "TRITON_CACHE_DIR",
     "tilelang": "TILELANG_CACHE_DIR",
@@ -35,6 +36,58 @@ NON_COMPILE_MILES = {
     "wandb_group",
     "wandb_entity",
     "wandb_run_name",
+}
+
+# Explicit exclusions: new/unknown settings continue to invalidate by default.
+# Keep this catalogue aligned with docs/miles/compiler-cache.md.
+NON_COMPILE_CORE = {
+    "compiler_cache",
+    "compiler_cache_root",
+    "compiler_cache_restore",
+    "compiler_cache_diagnostics",
+    "compiler_cache_max_storage_bytes",
+    "compiler_cache_publish_interval_seconds",
+    "checkpoint_profile",
+    "checkpoint_thread_count",
+    "checkpoint_process_count",
+    "checkpoint_compact_storage",
+    "checkpoint_dedup_save_to_lowest_rank",
+    "checkpoint_constant_memory_planning",
+    "checkpoint_keep_last",
+    "checkpoint_keep_every",
+    "diagnostic_interval",
+    "pipeline_observation_interval",
+    "replay_diagnostics",
+    "max_train_rollout_logprob_abs_diff",
+    "engine_drain_timeout",
+    "engine_update_timeout",
+    "refresh_request_timeout",
+    "scoring_check_interval",
+    "scoring_check_tolerance",
+    "records_root",
+    "records_responses",
+    "records_response_sample_rate",
+    "selection_table",
+    "selection_sha256",
+    "reward_config",
+}
+NON_COMPILE_MILES |= {
+    "sglang_host",
+    "sglang_port",
+    "sglang_log_level",
+    "sglang_log_level_http",
+    "sglang_log_requests",
+    "sglang_log_requests_level",
+    "sglang_log_requests_format",
+    "sglang_show_time_cost",
+    "sglang_enable_metrics",
+    "sglang_enable_metrics_for_all_schedulers",
+    "sglang_collect_traces",
+    "sglang_otlp_traces_endpoint",
+    "sglang_watchdog_timeout",
+    "sglang_dist_timeout",
+    "sglang_download_dir",
+    "sglang_file_storage_path",
 }
 
 
@@ -79,7 +132,8 @@ def fingerprint(*, image, runtime_lock, sources, model_config, run_config, toolc
         raise ValueError("External Core model-config files are not qualified by this wrapper")
     for key in NON_COMPILE_MILES:
         settings.get("miles", {}).pop(key, None)
-    settings.get("core", {}).pop("reward_config", None)
+    for key in NON_COMPILE_CORE:
+        settings.get("core", {}).pop(key, None)
     identity = {
         "schema_version": SCHEMA,
         "backend": "open-instruct-miles-olmo-core",
@@ -278,6 +332,25 @@ def extract_verified(base, key, family, destination, generation=None):
     }
 
 
+def record_use(base, generation):
+    """Best-effort recency for future generation-level eviction, not per kernel.
+
+    A zero-byte marker keeps usage metadata out of immutable manifests/archives
+    and does not consume the payload budget. It is not an eviction/TTL policy.
+    """
+    marker = base / "generations" / generation / ".last_used"
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            os.utime(fd, None)
+        finally:
+            os.close(fd)
+        return True
+    except OSError:
+        # Read-only caches must remain usable even if recency cannot be recorded.
+        return False
+
+
 def restore(shared, local, key, family):
     started = time.monotonic()
     destination = local / family
@@ -288,18 +361,56 @@ def restore(shared, local, key, family):
             stage = Path(directory)
             evidence = extract_verified(artifact_root(shared, key, family), key, family, stage)
             if evidence is None:
-                return {"family": family, "status": "miss", "seconds": time.monotonic() - started}
+                return {
+                    "family": family,
+                    "status": "miss",
+                    "reason": "no_published_generation",
+                    "seconds": time.monotonic() - started,
+                }
             relocated = relocate_triton(stage, destination) if family == "triton" else 0
             evidence["relocated_groups"] = relocated
             destination.rmdir()
             os.replace(stage, destination)
+        evidence["recency_recorded"] = record_use(artifact_root(shared, key, family), evidence["generation"])
         return {"family": family, "status": "hit", "seconds": time.monotonic() - started, **evidence}
     except (OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         return {"family": family, "status": "rejected", "seconds": time.monotonic() - started, "reason": str(error)}
 
 
-def publish(shared, local, key, family, *, progress=None):
-    """Run only after the entire local child process tree has stopped writing."""
+def storage_bytes(root):
+    """Logical file bytes, including old generations and interrupted uploads."""
+    total = 0
+    for path in root.rglob("*"):
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Cache storage contains a link or special file")
+        total += info.st_size
+    return total
+
+
+def metadata_signature(root):
+    """Cheap change detection; publication still verifies actual file contents."""
+    files = {}
+    for path in sorted(root.rglob("*")):
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Cache contains a link or special file")
+        files[path.relative_to(root).as_posix()] = (info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    return digest(files)
+
+
+def publish(shared, local, key, family, *, progress=None, max_storage_bytes=DEFAULT_MAX_STORAGE_BYTES):
+    """Publish a verified snapshot, bounded across all families of this key.
+
+    Live Triton writers are allowed: snapshot validation rejects concurrent changes.
+    Other families require their own writer synchronization before publication.
+    """
+    if type(max_storage_bytes) is not int or max_storage_bytes < 0:
+        raise ValueError("max_storage_bytes must be a nonnegative integer")
     started = time.monotonic()
     phases = {}
     phase = "prepare"
@@ -315,9 +426,27 @@ def publish(shared, local, key, family, *, progress=None):
 
     base = artifact_root(shared, key, family)
     base.mkdir(parents=True, exist_ok=True)
-    with (base / ".publish.lock").open("a+b") as lock:
+    # One lock for the entire key: concurrent runs and different families share
+    # the same allowance. Never budget from a run-local upload counter.
+    key_root = base.parent
+    with (key_root / ".publish.lock").open("a+b") as lock:
         mark("lock_wait")
         fcntl.flock(lock, fcntl.LOCK_EX)
+        used_bytes = storage_bytes(key_root)
+
+        def limited(required_bytes=0):
+            return {
+                "family": family,
+                "status": "storage_limit",
+                "reason": "cache_key_storage_cap",
+                "storage_bytes": used_bytes,
+                "required_bytes": required_bytes,
+                "max_storage_bytes": max_storage_bytes,
+                "seconds": time.monotonic() - started,
+            }
+
+        if used_bytes >= max_storage_bytes:
+            return limited()
         mark("merge")
         with tempfile.TemporaryDirectory(prefix=".merge-", dir=local) as directory:
             stage = Path(directory)
@@ -364,6 +493,11 @@ def publish(shared, local, key, family, *, progress=None):
                         "created_unix": time.time(),
                     }
                     (prepared / "manifest.json").write_bytes(encoded(manifest))
+                    # Account for the archive, manifest, and temporary CURRENT
+                    # pointer before writing any new payload to shared storage.
+                    required_bytes = storage_bytes(prepared) + len(generation) + 1
+                    if used_bytes + required_bytes > max_storage_bytes:
+                        return limited(required_bytes)
                     mark("upload")
                     # Only two bulk files cross the shared filesystem. All tree
                     # extraction, relocation, hashing and compression stay local.
@@ -372,6 +506,8 @@ def publish(shared, local, key, family, *, progress=None):
                         shutil.copy2(archive, upload / archive.name)
                         shutil.copy2(prepared / "manifest.json", upload / "manifest.json")
                         os.rename(upload, target)
+            if storage_bytes(key_root) + len(generation) + 1 > max_storage_bytes:
+                return limited(len(generation) + 1)
             mark("pointer")
             current = base / "CURRENT"
             old = current.read_text().strip() if current.exists() else None
@@ -379,6 +515,7 @@ def publish(shared, local, key, family, *, progress=None):
                 stream.write(generation + "\n")
                 pointer = Path(stream.name)
             os.replace(pointer, current)
+            recency_recorded = record_use(base, generation)
             mark("complete")
             return {
                 "family": family,
@@ -387,6 +524,9 @@ def publish(shared, local, key, family, *, progress=None):
                 "local_bytes": sum(item["size"] for item in files.values()),
                 "files": len(files),
                 "archive_bytes": (target / "cache.tar.gz").stat().st_size,
+                "storage_bytes": storage_bytes(key_root),
+                "max_storage_bytes": max_storage_bytes,
+                "recency_recorded": recency_recorded,
                 "phase_seconds": phases,
                 "seconds": time.monotonic() - started,
             }
