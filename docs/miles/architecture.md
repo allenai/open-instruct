@@ -22,7 +22,14 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 ## Runtime sources and images
 
 `runtime/miles/runtime.lock.json` and its checksum-verified patches reconstruct
-the runtime. Working branches help development, but the lock/image determines a
+the runtime. `olmo-sglang` is pinned directly to its merged main commit
+`72f194a35045f02cc7d87980819bd0e4652cc931`; it no longer needs a local patch
+or the source copy embedded in the binary base. OLMo-core is also pinned directly,
+to `e505356353aa7ce1f6ff83e24d6eb945f463714e` on `robertb/miles-rl-main`.
+That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
+and carries the MILES adapter plus inherited HF interchange support. Only MILES
+still uses a patch. Builds fetch exact commits, not moving branch tips.
+Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
 require a qualified new binary base. The Dockerfile separates a `runtime-base`
 stage (locked dependency sources and verifier packages) from `application`
@@ -33,9 +40,16 @@ binary base in the lock is unchanged; the prepared layer is not interchangeable
 with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
 
 ```bash
-python scripts/miles/prepare_runtime.py runtime/miles/sources
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
+
+The build needs read access to the private `allenai/olmo-sglang` repository.
+`build_image.py` uses `GH_TOKEN`, `GITHUB_TOKEN`, or the active `gh auth login`
+credential, passed through a temporary BuildKit secret. It is not stored in image
+layers or Git URLs. For standalone source preparation, pass
+`--github-token-file PATH` or use `--cache olmo-sglang=/path/to/clone`.
+Existing published images retain their original sources; rebuild before using
+this pin.
 
 prepare_runtime refuses to replace existing source directories. Its --cache
 arguments can use local clones as fetch sources; they do not select uncommitted

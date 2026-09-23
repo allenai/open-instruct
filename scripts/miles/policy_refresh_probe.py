@@ -357,7 +357,7 @@ def main():
         )
         fixture = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fixture)
-        fixture.build_checkpoint(model, profile="hero-hybrid-moe", max_position_embeddings=6144)
+        fixture.build_checkpoint(model, profile="scaled-attention-hybrid-moe", max_position_embeddings=6144)
     tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
     env = dict(
         os.environ, SGLANG_EXTERNAL_MODEL_PACKAGE="olmo_sglang.models", POLICY_REFRESH_TRACE=str(root / "trace")

@@ -6,7 +6,9 @@ RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifi
 RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
 ENV OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps
 COPY scripts/miles/prepare_runtime.py /opt/core-rl/build/scripts/miles/prepare_runtime.py
-RUN python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources
+RUN --mount=type=secret,id=github_token,required=true \
+    python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources \
+    --github-token-file /run/secrets/github_token
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 
 FROM runtime-base AS application

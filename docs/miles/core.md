@@ -21,12 +21,20 @@ and checkpoint boundaries. A policy version advances only after a successful
 optimizer step. The async producer attaches behavior versions to samples; the
 trainer checks their age again when consuming the batch.
 
-The original Core adapter used Jacob's `jacobm/moe-v2-core-gdn2` branch. Its current
-base is `codex/small-hero-hf-20260909` revision
-`b1fd2c9746e88baeb20e372bdca340d788d0f7e5`, with checksum-verified adapter patches.
-That lineage retains the earlier KDA/latent model. Use the
-[runtime lock and build procedure](architecture.md#runtime-sources-and-images),
-not a sibling checkout or an old branch name, to reproduce the runtime.
+The Core adapter lives on OLMo-core's `robertb/miles-rl-main` branch, based on
+Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
+at `ad28862b5`. The runtime pins `e505356353aa7ce1f6ff83e24d6eb945f463714e`
+directly; image builds fetch that commit without applying a Core patch.
+The port retains custom objectives, routing replay/count controls, bounded
+checkpoint planning and streaming HF interchange, including the inherited
+per-head attention and hybrid configuration export support.
+
+Local checks cover model/configuration roundtrips, checkpoint planning, adapter
+contracts and a single-GPU hybrid-MoE scoring/backward/optimizer step. Multi-GPU EP,
+Blackwell-only paths and full-policy runs still need qualification on this new
+base. Earlier measurement reports describe their original source and image pins.
+Use the [runtime lock and build procedure](architecture.md#runtime-sources-and-images)
+to reproduce the current source.
 
 ## Samples, scoring and objectives
 
@@ -264,8 +272,8 @@ routing, routing biases, expert groups, or uniform/random assignment overrides.
 Unsupported native routing combinations fail during model construction. Router
 objective controls require the Core MoE backend.
 
-The source integration updates the checksum-pinned Core patch in
-`runtime/miles/runtime.lock.json` to include development commit `ab64c3069`.
+The Core commit pinned in `runtime/miles/runtime.lock.json` includes the router
+controls originally introduced at `ab64c3069`.
 Build a new application/runtime image from this checkout to use the combined
 controls; the earlier image in the GRPO guide does not contain them. Selecting
 current counts with an older Core dependency fails explicitly. This source merge
@@ -274,7 +282,7 @@ does not promote a new default image.
 `open_instruct/test_miles_router_objective.py` checks losses and gradients against
 an independent reference for every grouping/averaging/count-source combination,
 with and without activation recomputation. It also checks unchanged replay
-outputs and policy gradients. The pinned Core patch includes native count-source
+outputs and policy gradients. The pinned Core source includes native count-source
 regressions. `tests/miles/router_objective_contract.py` supplies GPU training and
 repacking checks; its `--count-source` option selects either count source. CPU
 checks do not establish distributed GPU qualification for every combination.
