@@ -17,6 +17,13 @@ Routed-expert, full-attention and smaller RMSNorm arithmetic differences explain
 the observed forward mismatch; diagnostic HF substitutions remove it. Production
 arithmetic and the failed qualification gate remain unchanged.
 
+The [direct Core/HF fidelity investigation](measurements/hero-core-fidelity-20260923.md)
+finds exact agreement between the HF Core-layout reference, current Core scoring,
+and Core gradient-enabled forward for both SFT checkpoints on the tested inputs.
+Ordinary HF execution differs, despite faithful exported tensors. Partial serving
+rounding/norm changes improve some cases but do not qualify the checkpoints;
+Core's actual training policy is the recommended serving comparison target.
+
 ## Architecture and source lineage
 
 The non-EMO small hero has 16 blocks (14 KDA and two full-attention blocks),
