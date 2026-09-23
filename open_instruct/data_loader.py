@@ -1799,6 +1799,10 @@ class DataPreparationActor:
                     f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
                 )
                 time.sleep(0.1)
+            if fixed_batches:
+                # Consumption can advance while the data actor waits here, with no
+                # inference result arriving to trigger the refill callback below.
+                self._queue_due_fixed_batches()
             if self.config.synchronous_rollouts and step > self.training_step:
                 # The initial batch was queued above against the starting weights. Every later
                 # batch waits until the sync that published the weights trained on the previous
