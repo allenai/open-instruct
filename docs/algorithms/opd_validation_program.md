@@ -1548,3 +1548,8 @@ lower; it does not affect the per-token statistics above.
 
 - Matched update100 evaluation `01M35EDH2S76TKJB12J7W6BNRK` completed exit0 at2026-09-23T00:22:29Z. Async/sync percent: DAPO52.9296875/48.828125 (+4.1015625pp), MATH50080.6/79.8 (+0.8pp), AIME33.3333/26.6667, BRUMO40/23.3333. No final-checkpoint collapse. Raw logs and W&B summary/history retained.
 - Existing hf89 reader completed exit0, confirms .complete, index and8shards. Duplicate checks clear; submitted final missing matched update90 [01M3602SS9YR4J0JFGVCZ7AYW1](https://beaker.org/ex/01M3602SS9YR4J0JFGVCZ7AYW1), W&B8d4116d0. Continue to its result and final diagnostics/report before stopping monitor.
+
+### 2026-09-23T02:07:13Z
+
+- Final missing matched90 evaluation is running (started02:05:22Z). No failure or duplicate submission.
+- Full native-log timing extraction confirms100updates and87paired ordinary updates, exactly matching W&B timing. Async delivered25,600responses /274,277,904response tokens; mean response length10,713.98tokens, mean truncation24%, mixed-version ratio0. Completed-queue stale-drop sample/token totals are0; upstream aborted filtering remains nonzero and must be reported separately. Raw bins and diagnostic summaries retained in full-rollout-diagnostics.json. Aborted token waste and token totals jointly by age/length are not provided by these metrics; avoid claiming zero total generation waste.
