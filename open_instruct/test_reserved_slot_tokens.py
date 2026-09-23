@@ -294,7 +294,7 @@ class TestInitializePromotedTokenEmbeddings(unittest.TestCase):
 
     def test_raises_when_the_slot_is_outside_the_embedding_matrix(self):
         model = TinyModel(vocab_size=4)
-        with self.assertRaisesRegex(ValueError, "embedding matrix has only 4 rows"):
+        with self.assertRaisesRegex(ValueError, "the matrix has only 4 rows"):
             model_utils.initialize_promoted_token_embeddings(model, self.tokenizer)
 
 
