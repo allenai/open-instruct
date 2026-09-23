@@ -36,7 +36,7 @@ uv run python mason.py \
         --response_length 4096 \
         --pack_length 20480 \
         --model_name_or_path allenai/Olmo-Hybrid-Instruct-DPO-7B \
-        --chat_template_name olmo123 \
+        --chat_template_name tokenizer_default \
         --trust_remote_code \
         --vllm_enforce_eager \
 	--inflight_updates True \
