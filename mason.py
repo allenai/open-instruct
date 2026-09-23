@@ -393,9 +393,9 @@ def get_datasets(
     return res
 
 
-# A tag-like argument such as `<think>`, `</answer>` or `<|im_end|>`. A bare redirection (`>`, `2>&1`,
-# `<input.txt`) has no closing `>` after its `<` and so does not match.
-TAG_ARG_PATTERN = re.compile(r"<[^<>\s]*>")
+# A tag-like argument such as `<think>`, `</answer>`, `<|im_end|>` or `<tool name="search">`. A bare
+# redirection (`>`, `2>&1`, `<input.txt`) has no closing `>` after its `<` and so does not match.
+TAG_ARG_PATTERN = re.compile(r"<[^<>]*>")
 
 
 def quote_literal_args(command: list[str]) -> list[str]:

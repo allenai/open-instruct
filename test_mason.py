@@ -101,6 +101,7 @@ class TestQuoteLiteralArgs(unittest.TestCase):
             ("json", ["--dataset_mixer", '{"a": 1.0}'], ["--dataset_mixer", "'{\"a\": 1.0}'"]),
             ("json_with_tag", ['{"stop": "<think>"}'], ['\'{"stop": "<think>"}\'']),
             ("single_quote", ["<it's>"], ["'<it'\"'\"'s>'"]),
+            ("tag_with_attributes", ['<tool name="search">'], ["'<tool name=\"search\">'"]),
             (
                 "redirections",
                 ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
@@ -117,7 +118,7 @@ class TestQuoteLiteralArgs(unittest.TestCase):
         self.assertEqual(mason.quote_literal_args(command), expected)
 
     def test_quoted_args_reach_bash_verbatim(self):
-        args = ["<think>", "</think>", "<|im_end|>", '{"a": "b"}', "<it's>"]
+        args = ["<think>", "</think>", "<|im_end|>", '{"a": "b"}', "<it's>", '<tool name="search">']
         joined = "printf '%s\\n' " + " ".join(mason.quote_literal_args(args))
         result = subprocess.run(["/bin/bash", "-c", joined], capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout.splitlines(), args)
