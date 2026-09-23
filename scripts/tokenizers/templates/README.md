@@ -30,16 +30,29 @@ template behind.
 
 `scripts/train/debug/convert_moe_checkpoint_to_hf.py` accepts
 `--export-chat-template PATH`. Omit it to retain the existing conversion behavior.
-Keep `--tokenizer` pointed at the tokenizer used for training, never the think-dev
-repository: its pre-tokenizer and post-processor differ. The template override
-does not fix or change the converter's tokenizer serialization behavior.
+With an override, `--tokenizer` must point to a saved training tokenizer directory
+containing `tokenizer.json`, not a Hub ID. NumPy dataset conversion saves this at
+`<numpy-cache-directory>/tokenizer/`; use the cache actually used by the SFT run.
+Do not substitute the think-dev tokenizer: its pre-tokenizer and post-processor differ.
+
+The converter snapshots the reference `tokenizer.json` before conversion and
+requires JSON equality with the exported file before installing the template or
+reporting success. This catches both backend reconstruction by Transformers and
+OLMo-core preferring `$CKPT_ROOT/tokenizer` over the explicit tokenizer argument.
+A mismatch fails the conversion qualification; it does not repair segmentation
+or remove the written weights. Resolve the tokenizer mismatch before using that
+export for RL. Model/logit parity remains a separate check.
 
 The `oc_sft_olmoe3_kda_think.sh` launcher has a `convert_rl` mode that writes
 `$CKPT_ROOT/hf_$STEP-think` and selects this pinned template. It requires
 `EXPORT_TOKENIZER` to name the saved training tokenizer directory. Its image must
 contain this change. `EXPORT_CHAT_TEMPLATE` can select another in-image or mounted
 Jinja file. Both variables also work with ordinary `convert`, whose defaults and
-output directory are unchanged. Launches use the normal image-build/launch workflow
+output directory are unchanged. The launcher prints the destination, tokenizer,
+template, and timeout before submission so inherited environment overrides are visible.
+`CONVERT_TIMEOUT` defaults to an explicitly supplied `JOB_TIMEOUT`, otherwise `2h`,
+independently of the gate's `45m` default. Set a longer timeout for CPU conversions,
+which can exceed two hours. Launches use the normal image-build/launch workflow
 and require the usual per-launch compute approval.
 
 For RL, load the tokenizer from the resulting export and leave

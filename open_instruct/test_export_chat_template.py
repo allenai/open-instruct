@@ -12,6 +12,7 @@ from unittest import mock
 
 import pytest
 from tokenizers import Tokenizer, models, pre_tokenizers, processors
+from torch.distributed.checkpoint import state_dict as dist_cp_sd
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 from open_instruct import export_chat_template
@@ -123,6 +124,16 @@ def test_named_templates_rejected(checkpoint):
     assert snapshot(checkpoint) == before
 
 
+@pytest.mark.parametrize("embedded", [{"default": OLD_TEMPLATE}, [{"name": "default", "template": OLD_TEMPLATE}]])
+def test_embedded_named_templates_rejected(checkpoint, embedded):
+    config_path = checkpoint / "tokenizer_config.json"
+    config_path.write_text(json.dumps(json.loads(config_path.read_text()) | {"chat_template": embedded}))
+    before = snapshot(checkpoint)
+    with pytest.raises(ValueError, match="embedded named templates"):
+        export_chat_template.install_export_chat_template(checkpoint, TEMPLATE_PATH.read_text())
+    assert snapshot(checkpoint) == before
+
+
 def test_empty_template_rejected(checkpoint, tmp_path):
     path = tmp_path / "empty.jinja"
     path.write_text(" \n")
@@ -151,7 +162,7 @@ def test_existing_export_cli(checkpoint):
     assert AutoTokenizer.from_pretrained(checkpoint).chat_template == TEMPLATE_PATH.read_text()
 
 
-@pytest.mark.parametrize("override", [False, True, "missing"])
+@pytest.mark.parametrize("override", [False, True, "missing", "hub-tokenizer", "backend-mismatch"])
 def test_converter_integration(checkpoint, tmp_path, override):
     # The heavyweight converter is mocked; exercise the real CLI and post-export
     # code against an actual tokenizer without importing GPU-only OLMo-core.
@@ -166,13 +177,34 @@ def test_converter_integration(checkpoint, tmp_path, override):
     }
     with mock.patch.dict(sys.modules, modules):
         namespace = runpy.run_path(str(CONVERTER))
+    # Imported before patching sys.modules, so restoring it cannot evict torch
+    # distributed modules and cause duplicate registrations in later tests.
+    assert namespace["dist_cp_sd"] is dist_cp_sd
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"model": {}, "dataset": {"tokenizer": {}}}))
     argv = [str(CONVERTER), "-i", "/unused", "-o", str(checkpoint), "-c", str(config), "-t", str(checkpoint)]
     if override:
         argv += ["--export-chat-template", str(tmp_path / "missing.jinja" if override == "missing" else TEMPLATE_PATH)]
+    if override == "hub-tokenizer":
+        argv[argv.index("-t") + 1] = "allenai/olmo-3-tokenizer-instruct-dev"
     before = snapshot(checkpoint)
     convert = modules["olmo_core.nn.hf"].convert_checkpoint_to_hf
+
+    def rebuild_backend(**kwargs):
+        # Model the dependency loading another tokenizer or reconstructing its
+        # backend. The reference must have been snapshotted before this write.
+        tokenizer_path = checkpoint / "tokenizer.json"
+        backend = json.loads(tokenizer_path.read_text())
+        backend["pre_tokenizer"] = {
+            "type": "ByteLevel",
+            "add_prefix_space": False,
+            "trim_offsets": True,
+            "use_regex": True,
+        }
+        tokenizer_path.write_text(json.dumps(backend))
+
+    if override == "backend-mismatch":
+        convert.side_effect = rebuild_backend
     with (
         mock.patch.object(sys, "argv", argv),
         mock.patch.dict(namespace["main"].__globals__, load_ddp_main_params=mock.Mock(return_value=None)),
@@ -181,6 +213,14 @@ def test_converter_integration(checkpoint, tmp_path, override):
             with pytest.raises(FileNotFoundError):
                 namespace["main"]()
             convert.assert_not_called()
+        elif override == "hub-tokenizer":
+            with pytest.raises(SystemExit, match="2"):
+                namespace["main"]()
+            convert.assert_not_called()
+        elif override == "backend-mismatch":
+            with pytest.raises(RuntimeError, match="differs from the saved training tokenizer"):
+                namespace["main"]()
+            convert.assert_called_once()
         else:
             namespace["main"]()
             convert.assert_called_once()
@@ -188,27 +228,47 @@ def test_converter_integration(checkpoint, tmp_path, override):
     if override is True:
         assert AutoTokenizer.from_pretrained(checkpoint).chat_template == TEMPLATE_PATH.read_text()
         assert (checkpoint / "tokenizer.json").read_bytes() == before["tokenizer.json"]
+    elif override == "backend-mismatch":
+        assert (checkpoint / "chat_template.jinja").read_bytes() == before["chat_template.jinja"]
     else:
         assert snapshot(checkpoint) == before
 
 
-@pytest.mark.parametrize("mode", ["convert", "convert_rl"])
-def test_launcher_selects_template_only_for_rl(tmp_path, mode):
+@pytest.mark.parametrize("mode", ["convert", "convert_rl", "convert_override"])
+@pytest.mark.parametrize(
+    "timeouts, expected",
+    [({}, "2h"), ({"JOB_TIMEOUT": "3h"}, "3h"), ({"JOB_TIMEOUT": "3h", "CONVERT_TIMEOUT": "4h"}, "4h")],
+)
+def test_launcher_selects_template_only_for_rl(tmp_path, mode, timeouts, expected):
     # Substitute a local argv recorder for Python; never invoke mason/Beaker.
     recorder = tmp_path / "record"
     recorder.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$ARGV_OUTPUT"\n')
     recorder.chmod(0o755)
     output = tmp_path / "args"
     env = {key: value for key, value in os.environ.items() if not key.startswith(("EXPORT_", "CONVERT_"))}
+    env.pop("JOB_TIMEOUT", None)
+    env.update(timeouts)
     env.update(PY=str(recorder), CKPT_ROOT="/checkpoint", STEP="step42", ARGV_OUTPUT=str(output))
-    if mode == "convert_rl":
+    if mode != "convert":
         env["EXPORT_TOKENIZER"] = "/training/tokenizer"
-    subprocess.run(["bash", str(LAUNCHER), "unused-image", mode], env=env, cwd=ROOT, check=True, capture_output=True)
+    if mode == "convert_override":
+        env["EXPORT_CHAT_TEMPLATE"] = str(TEMPLATE_PATH.relative_to(ROOT))
+    result = subprocess.run(
+        ["bash", str(LAUNCHER), "unused-image", "convert" if mode == "convert_override" else mode],
+        env=env,
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     args = output.read_text().splitlines()
+    assert args[args.index("--timeout") + 1] == expected
     assert args[args.index("-o") + 1] == "/checkpoint/hf_step42" + ("-think" if mode == "convert_rl" else "")
-    if mode == "convert_rl":
+    if mode != "convert":
         assert args[args.index("--export-chat-template") + 1] == str(TEMPLATE_PATH.relative_to(ROOT))
         assert args[args.index("--tokenizer") + 1] == "/training/tokenizer"
+        assert f"template: {TEMPLATE_PATH.relative_to(ROOT)}" in result.stdout
     else:
         assert "--export-chat-template" not in args
         assert "--tokenizer" not in args
+        assert "template: unchanged" in result.stdout

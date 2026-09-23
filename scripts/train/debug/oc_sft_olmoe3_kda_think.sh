@@ -189,6 +189,8 @@ PY="${PY:-uv run python}"
 # no --timeout, no lifetime cap at all -- so a hang holds 8 B300s and cannot be
 # preempted. Always cap probe jobs. mason: "--timeout ... If not specified, no
 # timeout is set."
+# Capture an explicit JOB_TIMEOUT before applying the short training-gate default.
+CONVERT_TIMEOUT="${CONVERT_TIMEOUT:-${JOB_TIMEOUT:-2h}}"
 JOB_TIMEOUT="${JOB_TIMEOUT:-45m}"
 # mason's --max_retries defaults to 0. Multi-node jobs need EVERY replica up
 # within 10 min ("timed out after waiting 10m0s for synchronized replica start"),
@@ -434,6 +436,8 @@ case "$MODE" in
     if [[ -n "${EXPORT_CHAT_TEMPLATE:-}" ]]; then
         EXPORT_ARGS+=(--export-chat-template "$EXPORT_CHAT_TEMPLATE")
     fi
+    echo "Export directory: $CKPT_ROOT/hf_$STEP$EXPORT_SUFFIX"
+    echo "Export tokenizer: ${EXPORT_TOKENIZER:-converter default} | template: ${EXPORT_CHAT_TEMPLATE:-unchanged} | timeout: $CONVERT_TIMEOUT"
     # The Olmo 3.5 hero HF export (latent MoE, scalable softmax, per-head QK gains,
     # bundled olmo3moe modeling code) lives on Jacob's olmo-core HF lineage
     # (b1fd2c97, the revision in the base exports' conversion receipts), which
@@ -454,7 +458,7 @@ case "$MODE" in
         --description "HF-convert KDA MoE think $STEP at seq $SEQ" \
         --pure_docker_mode \
         $PREEMPTIBLE_FLAG \
-        --timeout "${JOB_TIMEOUT:-2h}" \
+        --timeout "$CONVERT_TIMEOUT" \
         --num_nodes 1 \
         --gpus "$CONVERT_GPUS" \
         --non_resumable \

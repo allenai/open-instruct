@@ -54,6 +54,8 @@ def install_export_chat_template(checkpoint_dir: str | pathlib.Path, template: s
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(config, dict):
         raise ValueError(f"Expected a JSON object in {config_path}")
+    if config.get("chat_template") is not None and not isinstance(config["chat_template"], str):
+        raise ValueError("Template-only export requires a single template; found embedded named templates")
     if any((checkpoint_dir / "additional_chat_templates").glob("*.jinja")):
         raise ValueError("Template-only export requires a single template; found additional_chat_templates/*.jinja")
 

@@ -111,7 +111,7 @@ def main() -> None:
     parser.add_argument(
         "--export-chat-template",
         type=pathlib.Path,
-        help="Jinja file to install after export; preserves tokenizer files and special tokens.",
+        help="Jinja file to install after export; requires --tokenizer to be a saved training tokenizer directory.",
     )
     parser.add_argument("-s", "--max-sequence-length", type=int, default=8192)
     parser.add_argument("--skip-validation", dest="validate", action="store_false")
@@ -123,6 +123,18 @@ def main() -> None:
     parser.add_argument("--device", type=torch.device, default=torch.device("cuda"))
     args = parser.parse_args()
     template = export_chat_template.read_export_chat_template(args.export_chat_template)
+    reference_tokenizer = None
+    if template is not None:
+        tokenizer_file = pathlib.Path(args.tokenizer) / "tokenizer.json"
+        if not tokenizer_file.is_file():
+            parser.error(
+                "--export-chat-template requires --tokenizer to name a saved directory containing tokenizer.json"
+            )
+        # Snapshot before conversion: OLMo-core may prefer a checkpoint-local
+        # tokenizer over tokenizer_id, or Transformers may rebuild its backend.
+        reference_tokenizer = json.loads(tokenizer_file.read_text(encoding="utf-8"))
+        if not isinstance(reference_tokenizer, dict):
+            parser.error(f"Expected a JSON object in {tokenizer_file}")
 
     payload = json.loads(pathlib.Path(args.config).read_text())
     model_config = payload["model"]
@@ -148,6 +160,16 @@ def main() -> None:
         device=args.device,
         validation_device=args.device,
     )
+    if reference_tokenizer is not None:
+        exported_tokenizer = json.loads(
+            (pathlib.Path(args.huggingface_output_dir) / "tokenizer.json").read_text(encoding="utf-8")
+        )
+        if exported_tokenizer != reference_tokenizer:
+            raise RuntimeError(
+                "Exported tokenizer.json differs from the saved training tokenizer. "
+                "Check OLMo-core's checkpoint-local tokenizer precedence and Transformers serialization. "
+                "The export is not qualified for RL; the chat template was not installed."
+            )
     export_chat_template.install_export_chat_template(args.huggingface_output_dir, template)
     logger.info("CONVERSION_OK")
 
