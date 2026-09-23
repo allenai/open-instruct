@@ -1,10 +1,8 @@
-"""Runtime source reconstruction works for both direct pins and patched sources."""
+"""Runtime source preparation fetches immutable commits without modifying them."""
 
 import base64
-import hashlib
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -26,38 +24,22 @@ def source_repo(tmp_path):
 
 
 @pytest.mark.parametrize("use_cache", [False, True])
-@pytest.mark.parametrize("patched", [False, True])
-def test_reconstruct_sources(tmp_path, source_repo, use_cache, patched):
+def test_prepare_sources(tmp_path, source_repo, use_cache):
     repo, source = source_repo
-    if patched:
-        (repo / "source.txt").write_text("updated\n")
-        patch = tmp_path / "runtime/miles/change.patch"
-        patch.parent.mkdir(parents=True)
-        delta = subprocess.check_output(["git", "diff", "--binary", "--full-index", "HEAD"], cwd=repo)
-        patch.write_bytes(delta)
-        source.update(patch="change.patch", patch_sha256=hashlib.sha256(delta).hexdigest())
+    # A changed branch tip and dirty checkout must not change the selected source.
+    (repo / "source.txt").write_text("newer commit\n")
+    prepare_runtime.run("git", "commit", "-am", "Advance branch", cwd=repo)
+    (repo / "source.txt").write_text("uncommitted\n")
     target = tmp_path / "prepared"
-    prepare_runtime.prepare_source("example", source, target, root=tmp_path, cache=repo if use_cache else None)
+    prepare_runtime.prepare_source("example", source, target, cache=repo if use_cache else None)
     shutil.rmtree(repo)
-    assert (target / "source.txt").read_text() == ("updated\n" if patched else "original\n")
+    assert (target / "source.txt").read_text() == "original\n"
     assert prepare_runtime.run("git", "rev-parse", "HEAD", cwd=target) == source["revision"]
     assert prepare_runtime.run("git", "show", "HEAD:source.txt", cwd=target) == "original"
     assert not (target / ".git/objects/info/alternates").exists()
-    assert bool(prepare_runtime.run("git", "diff", "--cached", cwd=target)) == patched
+    assert prepare_runtime.run("git", "status", "--porcelain", cwd=target) == ""
     with pytest.raises(FileExistsError):
-        prepare_runtime.prepare_source("example", source, target, root=tmp_path)
-
-
-def test_bad_patch_checksum_fails_before_fetch(tmp_path, source_repo):
-    _, source = source_repo
-    patch = tmp_path / "runtime/miles/change.patch"
-    patch.parent.mkdir(parents=True)
-    patch.write_text("not a valid patch")
-    source.update(patch="change.patch", patch_sha256="incorrect")
-    target = tmp_path / "prepared"
-    with pytest.raises(ValueError, match="Patch checksum mismatch"):
-        prepare_runtime.prepare_source("example", source, target, root=tmp_path)
-    assert not target.exists()
+        prepare_runtime.prepare_source("example", source, target)
 
 
 def test_private_fetch_credentials_are_ephemeral(tmp_path, source_repo, monkeypatch):
@@ -77,7 +59,7 @@ def test_private_fetch_credentials_are_ephemeral(tmp_path, source_repo, monkeypa
 
     monkeypatch.setattr(prepare_runtime, "run", record)
     target = tmp_path / "prepared"
-    prepare_runtime.prepare_source("example", source, target, root=tmp_path, token_file=token_file)
+    prepare_runtime.prepare_source("example", source, target, token_file=token_file)
     fetch_args, fetch_kwargs = next(call for call in calls if call[0][:2] == ("git", "fetch"))
     env = fetch_kwargs["env"]
     encoded = base64.b64encode(b"x-access-token:test-token").decode()

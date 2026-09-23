@@ -21,14 +21,17 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 
 ## Runtime sources and images
 
-`runtime/miles/runtime.lock.json` and its checksum-verified patches reconstruct
-the runtime. `olmo-sglang` is pinned directly to its merged main commit
-`72f194a35045f02cc7d87980819bd0e4652cc931`; it no longer needs a local patch
-or the source copy embedded in the binary base. OLMo-core is also pinned directly,
+`runtime/miles/runtime.lock.json` pins every runtime source to an exact Git commit;
+image builds fetch those commits without applying patches. `olmo-sglang` uses its
+merged main commit `72f194a35045f02cc7d87980819bd0e4652cc931`. OLMo-core is pinned
 to `e505356353aa7ce1f6ff83e24d6eb945f463714e` on `robertb/miles-rl-main`.
 That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
-and carries the MILES adapter plus inherited HF interchange support. Only MILES
-still uses a patch. Builds fetch exact commits, not moving branch tips.
+and carries the MILES adapter plus inherited HF interchange support. MILES uses
+`da91ac5c414be8db38a2f5aa6bae74a2a57d7662` on
+[`allenai/miles:robertb/open-instruct-runtime`](https://github.com/allenai/miles/tree/robertb/open-instruct-runtime).
+Its source tree is identical to the previous base-plus-patch runtime, including
+the Open Instruct background-evaluation metrics integration. Builds fetch exact
+commits, not moving branch tips.
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
 require a qualified new binary base. The Dockerfile separates a `runtime-base`
@@ -43,7 +46,7 @@ with that pin. Image metadata records the application Git revision. Reusing an i
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
 
-The build needs read access to the private `allenai/olmo-sglang` repository.
+The build needs read access to the private `allenai/miles` and `allenai/olmo-sglang` repositories.
 `build_image.py` uses `GH_TOKEN`, `GITHUB_TOKEN`, or the active `gh auth login`
 credential, passed through a temporary BuildKit secret. It is not stored in image
 layers or Git URLs. For standalone source preparation, pass

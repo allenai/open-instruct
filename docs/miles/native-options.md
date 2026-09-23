@@ -7,7 +7,7 @@ For normal runs start with the [configuration guide](configuration.md). Native f
 - [MILES options](native-training-options.md): 980 actions.
 - [SGLang options](native-serving-options.md): 487 actions.
 
-Help and raw defaults were captured from the actual parser in immutable Docker image `sha256:04cb8ab46bc955e08f4af331a65854de589be5e7166ed8c939a3064f4bcf8911`. The capture verified all action definitions against options.json; schema SHA-256: `d019f274561efd967577d4c2dde0008fdade19c5a1b9491a08997150b5ab017b`. This certifies the parser snapshot, not the image as a recommended training release.
+Help and raw defaults were captured from the actual parser in immutable Docker image `sha256:2f20fb3bc0031ebee085f7b90df6a1d5999d177dce98ab4c81c1f56cae89b001`. The capture verified all action definitions against options.json; schema SHA-256: `9d9084414a59a2b97eb6000bf571d66c4967c8a8420f777a1abc20df414adff1`. This certifies the parser snapshot, not the image as a recommended training release.
 
 Refresh inside the matching pinned runtime, from a writable checkout:
 

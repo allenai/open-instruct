@@ -1,4 +1,4 @@
-"""Materialize pinned runtime sources, verifying optional patches before applying them.
+"""Materialize runtime sources at their pinned Git commits.
 
 Use --cache NAME=/existing/repo to reproduce from a local Git object cache.
 No packages are installed or existing checkouts modified.
@@ -6,7 +6,6 @@ No packages are installed or existing checkouts modified.
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 import subprocess
@@ -40,10 +39,7 @@ def fetch_environment(token_file):
     return env
 
 
-def prepare_source(name, source, target, *, root, cache=None, token_file=None):
-    patch = root / "runtime/miles" / source["patch"] if "patch" in source else None
-    if patch is not None and hashlib.sha256(patch.read_bytes()).hexdigest() != source["patch_sha256"]:
-        raise ValueError(f"Patch checksum mismatch for {name}")
+def prepare_source(name, source, target, *, cache=None, token_file=None):
     if target.exists():
         raise FileExistsError(f"Refusing to replace existing source tree: {target}")
     if cache is not None:
@@ -59,14 +55,7 @@ def prepare_source(name, source, target, *, root, cache=None, token_file=None):
         run("git", "checkout", "--detach", "FETCH_HEAD", cwd=target)
     if run("git", "rev-parse", "HEAD", cwd=target) != source["revision"]:
         raise ValueError(f"Source revision mismatch for {name}")
-    if patch is not None:
-        run("git", "apply", "--check", str(patch), cwd=target)
-        run("git", "apply", "--index", str(patch), cwd=target)
-        actual = subprocess.check_output(["git", "diff", "--cached", "--binary", "--full-index", "HEAD"], cwd=target)
-        if hashlib.sha256(actual).hexdigest() != source["patch_sha256"]:
-            raise ValueError(f"Reconstructed source delta differs from the locked patch for {name}")
-    suffix = f" + {source['patch_sha256']}" if patch is not None else ""
-    print(f"Prepared {name} at {source['revision']}{suffix}")
+    print(f"Prepared {name} at {source['revision']}")
 
 
 def main():
@@ -81,12 +70,7 @@ def main():
     options.destination.mkdir(parents=True, exist_ok=True)
     for name, source in lock["sources"].items():
         prepare_source(
-            name,
-            source,
-            options.destination / name,
-            root=root,
-            cache=caches.get(name),
-            token_file=options.github_token_file,
+            name, source, options.destination / name, cache=caches.get(name), token_file=options.github_token_file
         )
     (options.destination / "runtime.lock.json").write_text(json.dumps(lock, indent=2) + "\n")
 
