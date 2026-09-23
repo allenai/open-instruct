@@ -385,6 +385,7 @@ case "$MODE" in
         --no_auto_dataset_cache \
         $EXTRA_BUCKET_FLAGS \
         --env OLMO_SHARED_FS=1 \
+        ${EXPECTED_NUMPY_CACHE:+--env EXPECTED_NUMPY_CACHE=$EXPECTED_NUMPY_CACHE} \
         -- torchrun \
         --nnodes=$NNODES \
         $RDZV_FLAGS \

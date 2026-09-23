@@ -13,11 +13,15 @@ MODE="${3:-train}"
 DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
 # Local, never inherited: an exported RUN_TAG must not rename another mode.
 RUN_TAG=""
+# The arm alone decides THINK_TOKENS (a tokenization cache key): an inherited value must
+# never turn an aligned control into a think run. EXPECTED_NUMPY_CACHE makes the job die
+# before any GPU work if its arguments resolve to a different cache than the arm's.
 case "$ARM" in
-    aligned) IMAGE="$BUILT_IMAGE" ;;
-    legacy) IMAGE=01M2KSSB3FCYJ8PNB7B672N9SP ;;
-    # H015: aligned plus single-token <think>/</think> in reserved slots (#1911).
-    think) IMAGE="$BUILT_IMAGE"; export THINK_TOKENS=1 ;;
+    aligned) IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE=062b8a3d20-6068a350 ;;
+    legacy) IMAGE=01M2KSSB3FCYJ8PNB7B672N9SP; THINK_TOKENS=0; ARM_CACHE=15bfc110a1-6068a350 ;;
+    # H015: aligned plus single-token <think>/</think> in reserved slots (#1911). Its cache
+    # hash is known only once the tokenize job has run; pass it as THINK_CACHE.
+    think) IMAGE="$BUILT_IMAGE"; THINK_TOKENS=1; ARM_CACHE="${THINK_CACHE:-}" ;;
     *) echo "Unknown arm: $ARM (expected aligned, legacy or think)" >&2; exit 1 ;;
 esac
 case "$MODE" in
@@ -62,9 +66,9 @@ case "$MODE" in
         if [[ "$ARM" == "legacy" ]]; then
             CACHE=15bfc110a1-6068a350
         elif [[ "$ARM" == "think" ]]; then
-            # Its hash is known only once the tokenize job has run; the tokenizer saved
-            # there carries the promoted slots, and the export must ship that one.
-            CACHE="${CACHE:?set CACHE to the think arm numpy cache dir name}"
+            # The tokenizer saved in the think cache carries the promoted slots, and the
+            # export must ship that one.
+            CACHE="${THINK_CACHE:?set THINK_CACHE to the think arm numpy cache dir name}"
         else
             CACHE=062b8a3d20-6068a350
         fi
@@ -73,6 +77,12 @@ case "$MODE" in
     *) echo "Expected train, train_full, tokenize, gate or convert" >&2; exit 1 ;;
 esac
 export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
+export THINK_TOKENS
+if [[ "$MODE" == "train" || "$MODE" == "gate" ]]; then
+    export EXPECTED_NUMPY_CACHE="${ARM_CACHE:?set THINK_CACHE to the think arm numpy cache dir name}"
+else
+    unset EXPECTED_NUMPY_CACHE
+fi
 export DATA_LOADER_SEED
 export CLUSTER=ai2/holmes WORKSPACE=ai2/olmo-instruct PREEMPTIBLE=0
 export PRIORITY="${PRIORITY:-normal}"

@@ -371,6 +371,7 @@ def sync_optimizer_main_params(optimizer, params: list[torch.Tensor]) -> None:
     if synced != len(targets):
         raise RuntimeError(f"Found optimizer main params for {synced} of {len(targets)} seeded matrices")
     optimizer._check_model_param_main_param_the_same()
+    logger.info(f"Synced {synced} optimizer main param(s) with the seeded rows; every param matches its main")
 
 
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:

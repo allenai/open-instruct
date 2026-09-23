@@ -158,6 +158,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
     seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
     numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
+    # A launch that must reuse one specific cache names it, and dies here -- before tokenizing,
+    # distributed init or a GPU -- if its arguments resolve to any other (H015).
+    expected_cache = os.environ.get("EXPECTED_NUMPY_CACHE")
+    if expected_cache and os.path.basename(numpy_dir) != expected_cache:
+        raise RuntimeError(f"Resolved numpy cache {numpy_dir}, but EXPECTED_NUMPY_CACHE={expected_cache}")
 
     if args.dataset.cache_dataset_only:
         pre_init_rank = int(os.environ.get("RANK", 0))
