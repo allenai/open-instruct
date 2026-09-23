@@ -123,7 +123,7 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
             "response_lengths": lengths,
             "collection_wait_seconds": rollout_time,
             "mixed_responses": sum(
-                len(set(policy_versions.versions(sample.weight_versions) if sample.weight_versions else [])) > 1
+                len(set(policy_versions.versions(sample.weight_versions or [], allow_empty=True))) > 1
                 for sample in samples
             ),
             "queue_metrics": rollout_extra_metrics or {},

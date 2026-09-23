@@ -174,7 +174,7 @@ def policy_scope(versions, fresh_run):
 def response_record(sample, text, fresh_run):
     metadata = sample.metadata or {}
     versions = sorted(
-        {str(value) for value in policy_versions.versions(sample.weight_versions)}
+        {str(value) for value in policy_versions.versions(sample.weight_versions, allow_empty=True)}
         if sample.weight_versions
         else set(),
         key=_version_order,

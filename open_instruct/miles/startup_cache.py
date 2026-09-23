@@ -132,6 +132,9 @@ def worker_runtime_env(args, slot, env_vars):
 
 def configure_specs(args, specs):
     """Attach process startup to the trainer and the actual serving child."""
+    for prefix in ("trainer-", "inference-engine-"):
+        if not any(spec.name.startswith(prefix) for spec in specs):
+            raise ValueError(f"Missing {prefix} worker specifications for Core startup hooks")
     return [_configure_spec(args, spec) for spec in specs]
 
 

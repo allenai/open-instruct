@@ -111,6 +111,11 @@ class RollingPublication:
             return result
 
     async def _finish_window(self, info):
+        # Overlapping deliveries share one window: health checks must remain
+        # paused until every engine has finished loading. Call quiesce() before
+        # any controller operation that needs its lock (evaluation/offload/etc.).
+        # A failed update is terminal; abort releases the lock but must not
+        # resume health checks or admit an engine with incomplete weights.
         released = False
         try:
             while True:

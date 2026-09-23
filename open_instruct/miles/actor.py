@@ -614,7 +614,9 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             async_utils.wait_futures(
                 [
                     async_utils.submit(
-                        engine.update_weight_version(str(self.clock.completed_steps), abort_all_requests=True)
+                        # Publication preserves live decoding; barrier admission/drain
+                        # is owned by the producer, and refresh must keep its prefixes.
+                        engine.update_weight_version(str(self.clock.completed_steps), abort_all_requests=False)
                     )
                     for engine in engines
                 ]

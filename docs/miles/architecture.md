@@ -27,7 +27,7 @@ merged main commit `72f194a35045f02cc7d87980819bd0e4652cc931`. OLMo-core is pinn
 to `e505356353aa7ce1f6ff83e24d6eb945f463714e` on `robertb/miles-rl-main`.
 That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
 and carries the MILES adapter plus inherited HF interchange support. MILES uses
-`571560bb4d22259cd1373dc6a2bfa1fb7551d651` on
+`cd0cbe5cc08de85128ed2b56db0c76e6681ef50b` on
 [`allenai/miles:main`](https://github.com/allenai/miles/tree/main).
 This integrates the Open Instruct runtime changes on upstream
 `e89b45f7f85a0e76fba6a99474b1dd9b67a3c20e`. Worker launch, inference lifecycle,

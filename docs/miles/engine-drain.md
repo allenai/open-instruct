@@ -166,6 +166,17 @@ on-policy training. Compare time to the first useful current-version batch,
 consumed-version distribution, useful trained tokens and rejected completed work,
 rather than optimizing generation occupancy in isolation.
 
+## Controller update windows
+
+The current upstream-based integration holds the inference controller's update
+lock and pauses its health checks across overlapping independent deliveries.
+Continuous publication can keep that window open until `quiesce()` finishes the
+pending work. Any new evaluation, offload, or diagnostic operation that needs the
+controller lock must first quiesce the publisher. Delivery failures are terminal:
+the lock is released for teardown, but health checks remain paused so incomplete
+weights are never treated as a recovered engine. This is a current scheduling
+limitation, not a qualification of indefinite nonblocking controller operations.
+
 ## Mixed-policy refresh is a separate mode
 
 The current runtime also implements `core.publication_mode="refresh"`, with
