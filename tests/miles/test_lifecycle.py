@@ -3,12 +3,32 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from open_instruct.miles import actor, driver
 from open_instruct.miles.config import CoreConfig
 from open_instruct.miles.engine_drain import Engine, EngineDrain, WeightSnapshot
+
+
+def install_components(monkeypatch, manager):
+    async def create_components(args):
+        inference = SimpleNamespace(
+            check_weights=manager.check_weights.remote if hasattr(manager, "check_weights") else AsyncMock(),
+            prepare_rollout=AsyncMock(),
+            dispose=AsyncMock(),
+        )
+        manager.get = getattr(manager, "generate", SimpleNamespace(remote=AsyncMock()))
+        manager.set_weight_version = SimpleNamespace(remote=AsyncMock())
+        return inference, manager, 1
+
+    monkeypatch.setattr(driver.placement_group, "create_rollout_components", create_components)
+    monkeypatch.setattr(
+        driver.wiring,
+        "launch_worker_manager",
+        lambda *a, **k: SimpleNamespace(dispose=SimpleNamespace(remote=AsyncMock())),
+    )
 
 
 @pytest.mark.parametrize("early_stop", [False, True])
@@ -32,7 +52,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         core_publication_boundary=SimpleNamespace(remote=lambda paused: event(f"paused-{paused}")),
     )
     learner = SimpleNamespace(
-        _broadcast=lambda method: event(method),
+        execute_workers=lambda method: event(method),
         dispose=lambda: event("trainer-disposed"),
         update_weights=lambda rollout_id: event("published"),
         train=lambda rollout_id, batch: event("trained"),
@@ -43,7 +63,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         return learner, None
 
     monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
-    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    install_components(monkeypatch, manager)
     monkeypatch.setattr(driver.placement_group, "create_training_models", create)
     monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
     monkeypatch.setattr(driver, "init_tracking", lambda args: None)
@@ -117,16 +137,13 @@ def test_transport_destruction_starts_on_both_peers_before_wait(monkeypatch):
         _model_update_groups="group",
         _group_name="miles",
         rollout_engines=[
-            SimpleNamespace(
-                destroy_weights_update_group=SimpleNamespace(
-                    remote=lambda name: events.append("engine-request") or "pending"
-                )
-            )
+            SimpleNamespace(destroy_weights_update_group=lambda name: events.append("engine-request") or "pending")
         ],
     )
     worker = SimpleNamespace(weight_updater=updater)
     monkeypatch.setattr(actor.dist, "destroy_process_group", lambda group: events.append("trainer-destroy"))
-    monkeypatch.setattr(actor.ray, "get", lambda refs: events.append("engine-wait"))
+    monkeypatch.setattr(actor.async_utils, "submit", lambda value: value)
+    monkeypatch.setattr(actor.async_utils, "wait_futures", lambda refs: events.append("engine-wait"))
     actor.OLMoCoreTrainRayActor.close_weight_transport(worker)
     assert events == ["engine-request", "trainer-destroy", "engine-wait"]
     assert updater._model_update_groups is None
@@ -158,7 +175,7 @@ def test_failed_periodic_comparison_aborts_before_resume_or_next_generation(monk
         core_publication_boundary=SimpleNamespace(remote=lambda paused: event(f"paused-{paused}")),
     )
     learner = SimpleNamespace(
-        _broadcast=lambda method: event(method),
+        execute_workers=lambda method: event(method),
         dispose=lambda: event("trainer-disposed"),
         update_weights=lambda rollout_id: event("published"),
         train=lambda rollout_id, batch: event("trained"),
@@ -168,7 +185,7 @@ def test_failed_periodic_comparison_aborts_before_resume_or_next_generation(monk
         return learner, None
 
     monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
-    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    install_components(monkeypatch, manager)
     monkeypatch.setattr(driver.placement_group, "create_training_models", create)
     monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
     monkeypatch.setattr(driver, "init_tracking", lambda args: None)
@@ -261,7 +278,7 @@ def test_rolling_checkpoint_does_not_wait_for_groups_waiting_for_one_step_lag(mo
         core_publication_boundary=SimpleNamespace(remote=lambda paused: event(f"paused-{paused}")),
     )
     learner = SimpleNamespace(
-        _broadcast=lambda method: event(method),
+        execute_workers=lambda method: event(method),
         dispose=lambda: event("trainer-disposed"),
         update_weights=lambda rollout_id: event("initial-published"),
         train=lambda rollout_id, batch: event("trained"),
@@ -274,7 +291,7 @@ def test_rolling_checkpoint_does_not_wait_for_groups_waiting_for_one_step_lag(mo
 
     monkeypatch.setattr(driver, "RollingPublication", Publisher)
     monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
-    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    install_components(monkeypatch, manager)
     monkeypatch.setattr(driver.placement_group, "create_training_models", create)
     monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
     monkeypatch.setattr(driver, "init_tracking", lambda args: None)
@@ -314,14 +331,14 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
     manager = SimpleNamespace(
         core_publication_boundary=SimpleNamespace(remote=done), dispose=SimpleNamespace(remote=done)
     )
-    learner = SimpleNamespace(update_weights=done, _broadcast=done, dispose=done)
+    learner = SimpleNamespace(update_weights=done, execute_workers=done, dispose=done)
 
     async def create(*args):
         return learner, None
 
     monkeypatch.setattr(driver.asyncio, "wait_for", wait_for)
     monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
-    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    install_components(monkeypatch, manager)
     monkeypatch.setattr(driver.placement_group, "create_training_models", create)
     monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
     monkeypatch.setattr(driver, "init_tracking", lambda args: None)
@@ -338,13 +355,15 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
         save=str(tmp_path),
     )
     asyncio.run(driver.train(args))
-    assert deadlines == [180, 1080, 60, 120, 60]
+    assert deadlines == [180, 1080, 60, 120, 60, 60, 120]
     timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
-    assert [r["stage"] for r in timings[-4:]] == [
+    assert [r["stage"] for r in timings[-6:]] == [
         "final_generation_drain",
         "close_weight_transport",
         "rollout_dispose",
         "trainer_dispose",
+        "inference_dispose",
+        "worker_dispose",
     ]
     assert all(r["passed"] for r in timings)
 
@@ -396,10 +415,10 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
     )
     learner = SimpleNamespace(
         train=lambda *a: event("trained"),
-        update_weights=lambda *a: event("published"),
+        update_weights=lambda *a, **k: event("published"),
         save_model=save_model,
         finalize_checkpoint=lambda *a: event("committed"),
-        _broadcast=lambda method: event(method),
+        execute_workers=lambda method: event(method),
         dispose=lambda: event("trainer-disposed"),
     )
 
@@ -407,7 +426,7 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
         return learner, None
 
     monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
-    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    install_components(monkeypatch, manager)
     monkeypatch.setattr(driver.placement_group, "create_training_models", create)
     monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
     monkeypatch.setattr(driver, "init_tracking", lambda args: None)

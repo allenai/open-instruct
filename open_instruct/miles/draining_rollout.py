@@ -16,7 +16,7 @@ from miles.rollout.inference_rollout.inference_rollout_eval import run_eval_data
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import pipeline_observer
+from open_instruct.miles import pipeline_observer, policy_versions
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
 from open_instruct.miles.engine_drain import Engine, EngineDrain
 
@@ -161,11 +161,9 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
             )
             raise RuntimeError("engine-drain request did not complete; partial-policy continuation is unsupported")
         await update_sample_from_response(input.args, sample, payload, output)
-        if sample.weight_versions != [str(assignment.version)] and sample.weight_versions != [assignment.version]:
+        if set(policy_versions.versions(sample.weight_versions)) != {assignment.version}:
             raise ValueError(f"engine returned unexpected behavior versions: {sample.weight_versions}")
-        self.controller.decoded(
-            assignment, request, version=int(sample.weight_versions[0]), tokens=sample.response_length
-        )
+        self.controller.decoded(assignment, request, version=assignment.version, tokens=sample.response_length)
         sample.metadata = {
             **(sample.metadata or {}),
             "engine_drain": {

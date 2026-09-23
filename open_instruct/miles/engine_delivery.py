@@ -15,7 +15,7 @@ import numpy as np
 import ray
 import torch
 from miles.backends.fsdp_utils import update_weight_utils
-from miles.utils import distributed_utils
+from miles.utils import async_utils, distributed_utils
 from torch import distributed as dist
 
 from open_instruct.miles import models
@@ -107,7 +107,9 @@ class EngineDelivery:
         with socket.socket() as sock:
             sock.bind(("", 0))
             port = sock.getsockname()[1]
-        pending = self.engine.init_weights_update_group.remote(address, port, 1, 2, self.group_name, backend="nccl")
+        pending = async_utils.submit(
+            self.engine.init_weights_update_group(address, port, 1, 2, self.group_name, backend="nccl")
+        )
         self.group = distributed_utils.init_process_group(
             backend="nccl",
             init_method=f"tcp://{address}:{port}",
@@ -116,10 +118,10 @@ class EngineDelivery:
             group_name=self.group_name,
             timeout=timedelta(seconds=self.timeout),
         )
-        ray.get(pending, timeout=self.timeout)
+        pending.result(timeout=self.timeout)
 
     def _call(self, method, *args, **kwargs):
-        result = ray.get(getattr(self.engine, method).remote(*args, **kwargs), timeout=self.timeout)
+        result = async_utils.submit(getattr(self.engine, method)(*args, **kwargs)).result(timeout=self.timeout)
         if isinstance(result, dict) and result.get("success") is False:
             raise RuntimeError(f"engine rejected {method}: {result}")
         return result
@@ -147,14 +149,15 @@ class EngineDelivery:
                 load_format="flattened_bucket",
                 flush_cache=False,
             )
-            pending = self.engine._make_request.remote("update_weights_from_distributed", payload)
+            pending = async_utils.submit(self.engine._make_request("update_weights_from_distributed", payload))
             dist.broadcast(flat, 0, group=self.group, async_op=True).wait()
-            result = ray.get(pending, timeout=self.timeout)
+            result = pending.result(timeout=self.timeout)
             if not isinstance(result, dict) or result.get("success") is not True:
                 raise RuntimeError(f"engine rejected snapshot bucket: {result}")
             transferred += flat.numel()
             del flat, array
         self._call("end_weight_update")
+        self._call("update_weight_version", str(snapshot.version), abort_all_requests=False)
         self._call("flush_cache")
         version = int(self._call("get_weight_version"))
         if version != snapshot.version or transferred != snapshot.nbytes:
@@ -168,7 +171,7 @@ class EngineDelivery:
 
     def close(self):
         if self.group is not None:
-            pending = self.engine.destroy_weights_update_group.remote(self.group_name)
+            pending = async_utils.submit(self.engine.destroy_weights_update_group(self.group_name))
             dist.destroy_process_group(self.group)
             self.group = None
-            ray.get(pending, timeout=self.timeout)
+            pending.result(timeout=self.timeout)

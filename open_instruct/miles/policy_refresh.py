@@ -8,6 +8,9 @@ import math
 from numbers import Integral
 
 import torch
+from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
+
+from open_instruct.miles import policy_versions
 
 
 def version_number(value):
@@ -69,7 +72,12 @@ def record_response(sample, meta):
     # Keep server observations distinct from inferred publication boundaries:
     # memory-pressure retractions can occur without a policy change.
     serving = {key: meta[key] for key in ("num_retractions", "e2e_latency", "cached_tokens") if key in meta}
-    sample.weight_versions = [str(span["version"]) for span in spans]
+    offset = len(sample.tokens) - sample.response_length
+    sample.weight_versions = [
+        WeightVersionsPerCall(
+            [WeightVersionSpan(str(span["version"]), offset + span["start"], offset + span["end"]) for span in spans]
+        )
+    ]
     sample.train_metadata = {**(sample.train_metadata or {}), "policy_refresh": provenance}
     sample.metadata = {**(sample.metadata or {}), "policy_refresh": provenance, "refresh_serving": serving}
     return provenance
@@ -83,13 +91,21 @@ def validate_batch(batch):
     if metadata is None or versions is None or len(metadata) != len(lengths) or len(versions) != len(lengths):
         raise ValueError("Policy refresh training batch lost token-version metadata")
     result = []
-    for item, length, sample_versions in zip(metadata, lengths, versions, strict=True):
+    for index, (item, length, sample_versions) in enumerate(zip(metadata, lengths, versions, strict=True)):
         record = item.get("policy_refresh") if isinstance(item, dict) else None
         if not isinstance(record, dict):
             raise ValueError("Policy refresh training sample has no provenance")
         spans = validate_spans(record.get("spans"), length, replay_version=record.get("replay_version"))
-        if [version_number(v) for v in sample_versions] != [s["version"] for s in spans]:
+        if policy_versions.versions(sample_versions) != [s["version"] for s in spans]:
             raise ValueError("Policy refresh span versions disagree with the staleness ledger")
+        if not all(isinstance(value, (int, str)) for value in sample_versions):
+            native = policy_versions.spans(sample_versions)
+            offset = batch["total_lengths"][index] - length if "total_lengths" in batch else native[0]["abs_start"]
+            relative = [
+                dict(version=s["version"], start=s["abs_start"] - offset, end=s["abs_end"] - offset) for s in native
+            ]
+            if relative != spans:
+                raise ValueError("Policy refresh token spans disagree with the staleness ledger")
         result.append(spans)
     return result
 

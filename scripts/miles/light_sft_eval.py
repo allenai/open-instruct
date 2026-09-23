@@ -11,6 +11,8 @@ from miles.rollout.inference_rollout.inference_rollout_common import InferenceRo
 from miles.utils.eval_config import EvalDatasetConfig
 from scripts.miles.prepare_gsm8k_parity import digest, json_bytes, write_immutable
 
+from open_instruct.miles import policy_versions
+
 
 def independent_score(response, label):
     """Independent implementation of historical last-signed-number exact match."""
@@ -33,7 +35,7 @@ def summarize(samples, prompts, proofs, step):
                 f"prompt_tokens={len(ids)} expected_tokens={proof['prompt_tokens']} "
                 f"actual_sha256={digest(json_bytes(ids))} expected_sha256={proof['token_ids_sha256']}"
             )
-        versions = sample.weight_versions
+        versions = policy_versions.versions(sample.weight_versions)
         if not versions or any(str(version) != str(step) for version in versions):
             raise ValueError("Full-test samples do not use the required published policy")
         if sample.status.name not in ("COMPLETED", "TRUNCATED") or not 0 < sample.response_length <= 512:
@@ -118,7 +120,7 @@ class HistoricalEvaluation:
                     "id": sample.metadata["prepared_sample_id"],
                     "response": sample.response,
                     "tokens": sample.tokens,
-                    "weight_versions": sample.weight_versions,
+                    "weight_versions": policy_versions.versions(sample.weight_versions),
                     "reward": reward,
                 }
                 for sample, reward in zip(native_rows["samples"], native_rows["rewards"], strict=True)

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
-from miles.utils.types import Sample
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
 from open_instruct.miles.data_source import DashboardDrainingRolloutDataSource
@@ -92,13 +92,21 @@ def test_async_buffer_homogeneity_and_optimizer_step_lag_budget():
             max_weight_staleness=2,
             async_data_buffer_capacity_factor=2,
             dynamic_sampling_filter_path=None,
+            reward_key=None,
         )
         buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, rejected.append))
         assert args.max_weight_staleness == 2
         assert buffer._delegate._args.max_weight_staleness == 1
 
         def entry(versions):
-            group = [Sample(weight_versions=[version], status=Sample.Status.COMPLETED) for version in versions]
+            group = [
+                Sample(
+                    weight_versions=[WeightVersionsPerCall([WeightVersionSpan(str(version), 1, 2)])],
+                    reward=1.0,
+                    status=Sample.Status.COMPLETED,
+                )
+                for version in versions
+            ]
             return DataBufferInput(prompt_group=group, group=group)
 
         mixed = entry([1, 2])
@@ -124,9 +132,19 @@ def test_async_buffer_accepts_homogeneous_multisegment_trajectories():
             max_weight_staleness=1,
             async_data_buffer_capacity_factor=1,
             dynamic_sampling_filter_path=None,
+            reward_key=None,
         )
         buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, lambda _: pytest.fail("rejected")))
-        trajectories = [[Sample(weight_versions=[3], status=Sample.Status.COMPLETED)] for _ in range(2)]
+        trajectories = [
+            [
+                Sample(
+                    weight_versions=[WeightVersionsPerCall([WeightVersionSpan("3", 1, 2)])],
+                    reward=1.0,
+                    status=Sample.Status.COMPLETED,
+                )
+            ]
+            for _ in range(2)
+        ]
         item = DataBufferInput(prompt_group=[trajectory[0] for trajectory in trajectories], group=trajectories)
         await buffer.put(item)
         assert await asyncio.wait_for(buffer.get(current_version=3), 1) is item
@@ -140,7 +158,9 @@ def test_live_cursor_snapshot_is_atomic_and_resume_regenerates_only_unconsumed_g
     source.acknowledge_groups([consumed])
     completed[0].response_length = 2
     completed[0].tokens = [1, 2, 3]
-    completed[0].weight_versions = [0, 1]
+    completed[0].weight_versions = [
+        WeightVersionsPerCall([WeightVersionSpan("0", 1, 2), WeightVersionSpan("1", 2, 3)])
+    ]
     writing, release, admission_attempted = threading.Event(), threading.Event(), threading.Event()
     original_save = torch.save
 

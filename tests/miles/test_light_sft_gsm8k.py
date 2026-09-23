@@ -115,7 +115,7 @@ def test_full_test_independent_scoring_and_version_checks():
         response_length=1,
         response="Answer: 18",
         reward=1.0,
-        weight_versions=["200"],
+        weight_versions=[[dict(version="200", abs_start=3, abs_end=4)]],
         status=SimpleNamespace(name="COMPLETED"),
     )
     report = light_sft_eval.summarize([sample], rows, proofs, 200)

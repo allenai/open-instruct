@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts.miles import audit_workflow
 
-from open_instruct.miles import general_judge, workflow
+from open_instruct.miles import general_judge, policy_versions, workflow
 
 require = audit_workflow.require
 
@@ -61,7 +61,7 @@ def audit(root):
             digest = hashlib.sha256((json.dumps(prompt, sort_keys=True) + "\n").encode()).hexdigest()
             require(digest == row["metadata"]["run_prompt_token_ids_sha256"], "Tokenizer/template mismatch")
             require(0 < length <= miles["rollout_max_response_len"], "Invalid response length")
-            versions = {int(v) for v in sample["weight_versions"]}
+            versions = set(policy_versions.versions(sample["weight_versions"]))
             require(
                 len(versions) == 1 and 0 <= clock - next(iter(versions)) <= (1 if split == "train" else 0),
                 "Policy version mismatch",

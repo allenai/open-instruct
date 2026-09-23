@@ -14,6 +14,8 @@ from scripts.miles import analyze_engine_drain, audit_workflow
 from scripts.miles.checkpoint_weights import SafeTensorState
 from scripts.miles.core_checkpoint_stream import CoreCheckpointState
 
+from open_instruct.miles import policy_versions
+
 
 def audit(root):
     root = Path(root)
@@ -47,7 +49,7 @@ def audit(root):
             raise ValueError("Retained rollout does not contain one complete optimizer batch")
         groups = defaultdict(list)
         for sample in samples:
-            versions = {int(v) for v in sample["weight_versions"]}
+            versions = set(policy_versions.versions(sample["weight_versions"]))
             if len(versions) != 1 or not 0 <= step - 1 - next(iter(versions)) <= core["max_policy_lag"]:
                 raise ValueError("Retained sample behavior version is invalid")
             length = sample["response_length"]
@@ -76,7 +78,10 @@ def audit(root):
                 active_tokens += length if mask is None else sum(mask)
             rewards.append(float(sample["reward"]))
         for group in groups.values():
-            if len(group) != miles["n_samples_per_prompt"] or len({tuple(s["weight_versions"]) for s in group}) != 1:
+            if (
+                len(group) != miles["n_samples_per_prompt"]
+                or len({tuple(sorted(set(policy_versions.versions(s["weight_versions"])))) for s in group}) != 1
+            ):
                 raise ValueError("Incomplete or mixed-policy GRPO group")
             mixed_reward_groups += len({float(s["reward"]) for s in group}) > 1
     if not mixed_reward_groups:

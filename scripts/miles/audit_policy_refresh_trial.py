@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from open_instruct.miles import policy_refresh, replay_diagnostics
+from open_instruct.miles import policy_refresh, policy_versions, replay_diagnostics
 
 
 def records(path):
@@ -33,7 +33,7 @@ def audit(root, *, updates=5, mode="refresh", require_mixed=True):
                 raise ValueError("Missing, misaligned or nonfinite original rollout probabilities")
             metadata = sample.get("train_metadata")
             if mode == "barrier":
-                versions = sample["weight_versions"]
+                versions = sorted(set(policy_versions.versions(sample["weight_versions"])))
                 if len(versions) != 1:
                     raise ValueError("Barrier baseline unexpectedly contains mixed-version responses")
                 version = policy_refresh.version_number(versions[0])

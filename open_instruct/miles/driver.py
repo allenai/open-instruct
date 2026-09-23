@@ -2,9 +2,10 @@
 
 import asyncio
 import os
+from functools import partial
 
 import wandb
-from miles.ray import placement_group
+from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
 from miles.utils.data import remove_rollout_data_refs
@@ -27,10 +28,13 @@ async def train(args, *, export_hf=None):
     with stage(args, "startup_cache_prepare"):
         startup_cache.prepare(args)
     with stage(args, "placement"):
-        groups = placement_group.create_placement_groups(args)
+        worker_manager = wiring.launch_worker_manager(
+            args, transform_specs=partial(startup_cache.configure_specs, args)
+        )
     object_store.init_instance(args, contribute_segment=False)
     init_tracking(args)
     manager = None
+    inference = None
     learner = None
     failure = None
     completed = []
@@ -38,17 +42,18 @@ async def train(args, *, export_hf=None):
     refresh = args.olmo_core.publication_mode == "refresh"
     try:
         with stage(args, "serving_startup"):
-            manager, rollouts_per_epoch = placement_group.create_rollout_manager(args, groups["rollout"])
+            inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
         with stage(args, "trainer_startup"):
-            learner, _ = await placement_group.create_training_models(args, groups, manager)
+            learner, _ = await placement_group.create_training_models(args, inference, manager)
 
         async def publish(rollout_id=None):
             if args.fully_async:
                 await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
-                await manager.onload_weights.remote()
+                await inference.onload_weights()
             await asyncio.wait_for(
-                learner.update_weights(rollout_id), timeout=args.olmo_core.engine_update_timeout if refresh else None
+                placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                timeout=args.olmo_core.engine_update_timeout if refresh else None,
             )
             interval = args.olmo_core.diagnostic_interval
             fresh_initial = rollout_id is None and args.start_rollout_id == 0
@@ -59,31 +64,31 @@ async def train(args, *, export_hf=None):
                     # cannot validate trained/restored weights. Instead measure
                     # an exact current-state publication round trip, including
                     # reset so an omitted tensor cannot pass as unchanged.
-                    await manager.check_weights.remote(action="snapshot", selector=args.check_weight_update_selector)
-                    await manager.check_weights.remote(
+                    await inference.check_weights(action="snapshot", selector=args.check_weight_update_selector)
+                    await inference.check_weights(
                         action="reset_tensors",
                         selector=args.check_weight_update_selector,
                         skip_list=args.check_weight_update_skip_list,
                     )
                     await asyncio.wait_for(
-                        learner.update_weights(rollout_id),
+                        placement_group.update_weights(learner, manager, rollout_id=rollout_id),
                         timeout=args.olmo_core.engine_update_timeout if refresh else None,
                     )
-                await manager.check_weights.remote(
+                await inference.check_weights(
                     action="compare",
                     allow_quant_error=args.check_weight_update_allow_quant_error,
                     selector=args.check_weight_update_selector,
                     skip_list=args.check_weight_update_skip_list,
                 )
             if args.offload_rollout:
-                await manager.onload_kv.remote()
+                await inference.onload_kv()
             if args.fully_async:
                 await manager.core_publication_boundary.remote(False, **({"refresh": True} if refresh else {}))
 
         with stage(args, "initial_publication"):
             await publish()
         if args.olmo_core.publication_mode == "engine_drain":
-            rolling = RollingPublication(args, learner, manager)
+            rolling = RollingPublication(args, learner, manager, inference)
             with stage(args, "engine_drain_startup"):
                 await rolling.initialize()
         background = getattr(args, "background_evaluation", None)
@@ -123,9 +128,11 @@ async def train(args, *, export_hf=None):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
             with stage(args, "generation_wait", rollout_id):
-                batch = await manager.generate.remote(rollout_id)
+                if rolling is None:
+                    await inference.prepare_rollout(rollout_id)
+                batch = await manager.get.remote(rollout_id)
             if args.offload_rollout:
-                await manager.offload.remote()
+                await inference.offload()
             try:
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
@@ -212,9 +219,11 @@ async def train(args, *, export_hf=None):
                 ),
                 "final_generation_drain",
             ),
-            (learner, lambda: learner._broadcast("close_weight_transport"), 60, "close_weight_transport"),
+            (learner, lambda: learner.execute_workers("close_weight_transport"), 60, "close_weight_transport"),
             (manager, lambda: manager.dispose.remote(), 120, "rollout_dispose"),
             (learner, lambda: learner.dispose(), 60, "trainer_dispose"),
+            (inference, lambda: inference.dispose(), 60, "inference_dispose"),
+            (worker_manager, lambda: worker_manager.dispose.remote(), 120, "worker_dispose"),
         ):
             if component is None:
                 continue

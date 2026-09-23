@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from scripts.miles import audit_workflow, prepare_colleague_exercises
 from torch.distributed.checkpoint import metadata as checkpoint_metadata
 
-from open_instruct.miles import general_judge, rewards, run_data, workflow
+from open_instruct.miles import general_judge, policy_versions, rewards, run_data, workflow
 
 require = audit_workflow.require
 
@@ -31,7 +31,7 @@ def verify_sample(sample, row, *, version, max_lag, response_cap):
     expected = row["metadata"]["run_prompt_token_ids_sha256"]
     actual = hashlib.sha256((json.dumps(prompt_tokens, sort_keys=True) + "\n").encode()).hexdigest()
     require(actual == expected, "Prompt token identity changed")
-    versions = {int(v) for v in sample["weight_versions"]}
+    versions = set(policy_versions.versions(sample["weight_versions"]))
     require(len(versions) == 1 and 0 <= version - next(iter(versions)) <= max_lag, "Invalid behavior policy")
     components = metadata["reward_components"]
     targets = metadata["verifiers"]

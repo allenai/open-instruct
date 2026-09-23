@@ -9,7 +9,7 @@ import pytest
 import torch
 from miles.rollout.data_source import RolloutDataSource
 from miles.utils.data import Dataset
-from miles.utils.types import Sample
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 from scripts.miles import mixture_trials as trial
 
 from open_instruct.miles import mixture
@@ -116,7 +116,9 @@ def capture(sample, *, correct, version):
     sample.reward = float(correct)
     sample.status = Sample.Status.COMPLETED
     sample.rollout_log_probs = [-0.5]
-    sample.weight_versions = [str(version)]
+    sample.weight_versions = [
+        WeightVersionsPerCall([WeightVersionSpan(str(version), len(sample.tokens) - 1, len(sample.tokens))])
+    ]
     return sample.to_dict()
 
 

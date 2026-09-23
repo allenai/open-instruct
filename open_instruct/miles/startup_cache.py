@@ -10,6 +10,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import tempfile
@@ -129,6 +130,48 @@ def worker_runtime_env(args, slot, env_vars):
     return setup_hook.export_setup_func_module(runtime_env, hook)
 
 
+def configure_specs(args, specs):
+    """Attach process startup to the trainer and the actual serving child."""
+    return [_configure_spec(args, spec) for spec in specs]
+
+
+def _configure_spec(args, spec):
+    # Closures keep credentials/config values out of the worker spec's repr.
+    if spec.name.startswith("trainer-"):
+        return spec.model_copy(update={"runtime_env": lambda context: _trainer_runtime_env(args, spec, context)})
+    if spec.name.startswith("inference-engine-"):
+        return spec.model_copy(
+            update={
+                "env_var": lambda context: _serving_environment(args, spec, context),
+                "launch_command": lambda context: _serving_command(spec, context),
+            }
+        )
+    return spec
+
+
+def _trainer_runtime_env(args, spec, context):
+    slot = f"{spec.name}-{context.cell_index}-{context.worker_in_cell_index}"
+    return worker_runtime_env(args, slot, spec.env_var(context))
+
+
+def _serving_environment(args, spec, context):
+    env = dict(spec.env_var(context))
+    env["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
+    if policy := getattr(args, "olmo_core_startup_cache", None):
+        slot = f"{spec.name}-{context.cell_index}-{context.worker_in_cell_index}"
+        env[ENV] = json.dumps({**policy, "slot": slot})
+    return env
+
+
+def _serving_command(spec, context):
+    command = shlex.split(spec.launch_command(context))
+    module_index = command.index("-m") + 1
+    if command[module_index] != "sglang.launch_server":
+        raise ValueError("Expected a SGLang module launch for the serving startup hook")
+    command[module_index] = "open_instruct.miles.serving"
+    return shlex.join(command)
+
+
 def observe_triton(local):
     """Qualification-only compiler activity; no changes to kernel choices."""
     module = importlib.import_module("triton.runtime.cache")
@@ -171,7 +214,7 @@ def setup_worker():
         local=str(local),
         pid=os.getpid(),
         host=socket.gethostname(),
-        node_id=ray.get_runtime_context().get_node_id(),
+        node_id=os.environ.get("MILES_WORKER_NODE_ID") or ray.get_runtime_context().get_node_id(),
         shared=policy["shared"],
     )
     try:

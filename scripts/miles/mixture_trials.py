@@ -22,7 +22,7 @@ from scripts.miles import datasource_trials
 from transformers import AutoTokenizer
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles import mixture
+from open_instruct.miles import mixture, policy_versions
 from open_instruct.miles.driver import train
 from open_instruct.miles.rewards import registered_reward
 
@@ -113,7 +113,7 @@ async def audit_samples(root, name, samples, expected_rows, *, version, cap):
         scores = sample.get("rollout_log_probs")
         if scores is None or len(scores) != length or not all(math.isfinite(value) for value in scores):
             raise ValueError(f"{name}: invalid behavior log probabilities")
-        if not sample.get("weight_versions") or {str(value) for value in sample["weight_versions"]} != {str(version)}:
+        if not sample.get("weight_versions") or set(policy_versions.versions(sample["weight_versions"])) != {version}:
             raise ValueError(f"{name}: missing or stale policy version")
         if sample.get("status") not in ("completed", "truncated") or sample.get("remove_sample", False):
             raise ValueError(f"{name}: unsuccessful response")

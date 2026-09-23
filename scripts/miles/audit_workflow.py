@@ -15,6 +15,8 @@ from collections import Counter
 from pathlib import Path
 from statistics import mean
 
+from open_instruct.miles import policy_versions
+
 
 def digest(path):
     value = hashlib.sha256()
@@ -237,7 +239,7 @@ def audit_samples(
         require(group not in groups or groups[group] == key, "Merged prompt identities")
         groups[group] = key
         counts[group] += 1
-        raw = sample.get("weight_versions")
+        raw = policy_versions.versions(sample["weight_versions"]) if sample.get("weight_versions") else []
         require(isinstance(raw, list) and raw, "Missing behavior policy version")
         require(
             all(

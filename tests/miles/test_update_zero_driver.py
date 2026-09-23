@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -26,6 +27,7 @@ def driver(monkeypatch):
         module = modules[name] = ModuleType(name)
         monkeypatch.setitem(sys.modules, name, module)
     modules["miles.ray"].placement_group = SimpleNamespace()
+    modules["miles.ray"].wiring = SimpleNamespace()
     modules["miles.utils"].arguments = SimpleNamespace()
     modules["miles.utils"].object_store = SimpleNamespace()
     modules["miles.utils.tracking_utils.tracking"].finish_tracking = lambda: None
@@ -66,14 +68,19 @@ def protocol(driver, tmp_path, monkeypatch, *, fail=None, cleanup_fail=False):
 
         return call
 
-    engine = SimpleNamespace(
-        get_topology_info=Remote(record("topology", {"url": "http://engine"})),
-        get_server_info=Remote(record("settings", {})),
-    )
+    engine = SimpleNamespace(server_url="http://engine", get_server_info=AsyncMock(side_effect=record("settings", {})))
     manager = SimpleNamespace(
-        get_updatable_engines_and_lock=Remote(record("engines", SimpleNamespace(rollout_engines=[engine]))),
         check_weights=Remote(lambda action, **kwargs: record(action, {"valid": True})()),
         dispose=Remote(record("manager.dispose")),
+    )
+
+    inference = SimpleNamespace(
+        start_update_weights=AsyncMock(
+            side_effect=record("engines", SimpleNamespace(rollout_engines=[engine], engine_gpu_counts=[1]))
+        ),
+        abort_update_weights=AsyncMock(),
+        check_weights=AsyncMock(side_effect=lambda action, **kwargs: record(action, {"valid": True})()),
+        dispose=AsyncMock(),
     )
 
     class Learner:
@@ -86,16 +93,18 @@ def protocol(driver, tmp_path, monkeypatch, *, fail=None, cleanup_fail=False):
         async def train(self):
             pytest.fail("A zero-update diagnostic must never train")
 
-    def create_rollout(*unused):
+    async def create_rollout(*unused):
         assert args.check_weight_update_equal is False
-        return record("manager.init", (manager, None))()
+        return record("manager.init", (inference, manager, None))()
 
     async def create_training(*unused):
         assert args.check_weight_update_equal is True
         return record("learner.init", (Learner(), None))()
 
-    driver.placement_group.create_placement_groups = record("groups", {"rollout": None})
-    driver.placement_group.create_rollout_manager = create_rollout
+    driver.wiring.launch_worker_manager = record(
+        "groups", SimpleNamespace(dispose=SimpleNamespace(remote=AsyncMock()))
+    )
+    driver.placement_group.create_rollout_components = create_rollout
     driver.placement_group.create_training_models = create_training
     driver.object_store.init_instance = record("store")
     driver.init_tracking = record("tracking.init")
@@ -116,7 +125,6 @@ def test_zero_update_protocol_order(driver, tmp_path, monkeypatch):
         "tracking.init",
         "manager.init",
         "engines",
-        "topology",
         "settings",
         "hf",
         "snapshot",
@@ -209,7 +217,6 @@ def test_matched_hf_mode_never_initializes_or_resets_trainer(driver, tmp_path, m
         "tracking.init",
         "manager.init",
         "engines",
-        "topology",
         "settings",
         "hf",
         "manager.dispose",

@@ -2,11 +2,12 @@
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import numpy as np
 import torch
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
-from miles.utils.types import Sample
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles import actor, draining_rollout, engine_delivery
 from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
@@ -67,12 +68,19 @@ def buffer_args():
         max_weight_staleness=2,
         async_data_buffer_capacity_factor=1,
         dynamic_sampling_filter_path=None,
+        reward_key=None,
     )
 
 
 def entry(index, version=0):
     samples = [
-        Sample(index=index * 2 + i, group_index=index, weight_versions=[str(version)], status=Sample.Status.COMPLETED)
+        Sample(
+            index=index * 2 + i,
+            group_index=index,
+            weight_versions=[WeightVersionsPerCall([WeightVersionSpan(str(version), 1, 2)])],
+            reward=1.0,
+            status=Sample.Status.COMPLETED,
+        )
         for i in range(2)
     ]
     return DataBufferInput(prompt_group=samples, group=samples)
@@ -234,7 +242,7 @@ def test_direct_request_checks_execution_version_and_releases_before_reward(monk
         assert calls[0][0] == "http://reserved-engine/generate"
         assert calls[0][1]["rid"] == assignment.requests[0]
         assert calls[0][2] == 1
-        assert sample.weight_versions == ["0"]
+        assert {span.version for span in sample.all_weight_version_spans} == {"0"}
         assert sample.rollout_log_probs == [-0.5]
         assert not producer.controller.engines["a"].requests
         assert producer.controller.status()["groups_in_flight"] == 1
@@ -260,7 +268,13 @@ def test_consuming_clock_advances_before_snapshot_capacity_wait():
             return [WeightSnapshot(1, (), 0, 0)]
 
         manager = SimpleNamespace(core_engine_drain=SimpleNamespace(remote=control))
-        publisher = RollingPublication(None, SimpleNamespace(_broadcast=broadcast), manager)
+        inference = SimpleNamespace(
+            start_update_weights=AsyncMock(return_value=SimpleNamespace(snapshot_cell_id_to_hashes={})),
+            end_update_weights=AsyncMock(),
+            abort_update_weights=AsyncMock(),
+            prepare_rollout=AsyncMock(),
+        )
+        publisher = RollingPublication(None, SimpleNamespace(execute_workers=broadcast), manager, inference)
         publisher.version = 0
         await publisher.optimizer_step_completed()
         pending = asyncio.create_task(publisher.publish())
@@ -268,7 +282,9 @@ def test_consuming_clock_advances_before_snapshot_capacity_wait():
         assert calls == [("step", {"version": 1}), ("capacity", {})]
         capacity.set()
         await pending
-        assert [name for name, _ in calls] == ["step", "capacity", "capture_weight_snapshot", "publish"]
+        await publisher._window_task
+        assert [name for name, _ in calls] == ["step", "capacity", "capture_weight_snapshot", "publish", "barrier"]
+        inference.end_update_weights.assert_awaited_once()
 
     asyncio.run(run())
 

@@ -4,6 +4,8 @@ from typing import Any
 
 import torch
 
+from open_instruct.miles import policy_versions as provenance
+
 
 def sample_batches(data: dict[str, Any], max_length: int) -> list[dict[str, Any]]:
     count = len(data["tokens"])
@@ -34,17 +36,7 @@ def policy_versions(batch: dict[str, Any]) -> list[int]:
         or any(not isinstance(sample, (list, tuple)) or not sample for sample in values)
     ):
         raise ValueError("Every sample must carry its behavior policy version")
-    versions = []
-    for sample in values:
-        for value in sample:
-            if isinstance(value, bool) or not isinstance(value, (int, str)):
-                raise ValueError("Invalid policy version")
-            if isinstance(value, str) and (not value.isascii() or not value.isdigit()):
-                raise ValueError("Invalid serialized policy version")
-            if int(value) < 0:
-                raise ValueError("Invalid negative policy version")
-            versions.append(int(value))
-    return versions
+    return [version for sample in values for version in provenance.versions(sample)]
 
 
 def router_routes(model, batch):

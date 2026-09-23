@@ -16,6 +16,7 @@ from miles.utils import arguments
 from scripts.miles import analyze_gsm8k_parity as evidence
 from scripts.miles import gsm8k_parity, prepare_gsm8k_parity
 
+from open_instruct.miles import policy_versions
 from open_instruct.miles.driver import train
 
 UPDATES = 4
@@ -69,7 +70,7 @@ def batch_membership(
             raise ValueError("Repeated prompt or merged prompt group")
         groups[group] = key
         counts[key] += 1
-        raw_versions = sample.get("weight_versions")
+        raw_versions = policy_versions.versions(sample["weight_versions"]) if sample.get("weight_versions") else []
         if not raw_versions or any(str(v) not in {str(i) for i in range(updates + 1)} for v in raw_versions):
             raise ValueError("Missing or malformed policy version")
         sample_versions = {int(v) for v in raw_versions}

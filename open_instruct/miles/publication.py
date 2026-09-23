@@ -2,8 +2,8 @@
 
 import time
 
-import ray
 from miles.backends.fsdp_utils import update_weight_utils
+from miles.utils import async_utils
 from torch import distributed as dist
 
 
@@ -48,11 +48,12 @@ class FlattenedDistributedUpdater(update_weight_utils.UpdateWeightFromDistribute
         # This is the same HTTP request contract used by olmo-miles direct export.
         started = time.perf_counter()
         pending = [
-            engine._make_request.remote("update_weights_from_distributed", payload) for engine in self.rollout_engines
+            async_utils.submit(engine._make_request("update_weights_from_distributed", payload))
+            for engine in self.rollout_engines
         ]
         dist.broadcast(flat, 0, group=self._model_update_groups, async_op=True).wait()
         broadcast_done = time.perf_counter()
-        results = ray.get(pending)
+        results = async_utils.wait_futures(pending)
         finished = time.perf_counter()
         self.last_bucket_timing = {
             "tensors": len(names),

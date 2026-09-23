@@ -32,7 +32,13 @@ def test_no_code_samples_means_no_metrics():
 
 def test_timing_metrics_and_consumption_identity_reach_tracking_and_flow(tmp_path):
     samples = [
-        SimpleNamespace(group_index=0, index=i, metadata={}, response_length=4, weight_versions=["0"])
+        SimpleNamespace(
+            group_index=0,
+            index=i,
+            metadata={},
+            response_length=4,
+            weight_versions=[[dict(version="0", abs_start=1, abs_end=3), dict(version="1", abs_start=3, abs_end=5)]],
+        )
         for i in range(2)
     ]
     records = sibling_timing.start_group(samples)
@@ -44,6 +50,7 @@ def test_timing_metrics_and_consumption_identity_reach_tracking_and_flow(tmp_pat
     flow = json.loads((tmp_path / "rollout_flow.jsonl").read_text())
     assert flow["sibling_group_attempts"] == [records[0]["group_attempt"]]
     assert flow["queue_metrics"] == metrics
+    assert flow["mixed_responses"] == 2
 
 
 def test_service_failure_zeros_are_reported_separately():

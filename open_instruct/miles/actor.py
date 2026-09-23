@@ -9,11 +9,12 @@ from pathlib import Path
 import ray
 import torch
 from miles.backends.fsdp_utils import update_weight_utils
+from miles.backends.megatron_utils.ft.types import TrainStepOutcome, TrainStepOutput
 from miles.backends.training_utils import data as miles_data
 from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
 from miles.ray.train_actor import TrainRayActor
-from miles.utils import distributed_utils
+from miles.utils import async_utils, distributed_utils
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from safetensors import torch as safetensors_torch
@@ -308,6 +309,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 self._train_steps(rollout, rollout_id, local_batch, decision, checked, difference, agreement, profile)
             self.clock.next_rollout_id = rollout_id + 1
         self._heartbeat.bump()
+        return TrainStepOutput(outcome=TrainStepOutcome.NORMAL)
 
     def _train_steps(self, rollout, rollout_id, local_batch, decision, checked, difference, agreement, profile):
         # Without the standalone pass, old log-probabilities come from the training
@@ -559,17 +561,17 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         torch.cuda.synchronize()
         started = time.perf_counter()
         updater = self.weight_updater
-        if info.has_new_engines:
+        if getattr(self, "_engine_snapshot", None) != info.snapshot_cell_id_to_hashes:
             updater.connect_rollout_engines(
                 info.rollout_engines,
-                info.rollout_engine_lock,
                 engine_gpu_counts=info.engine_gpu_counts,
                 engine_gpu_offsets=info.engine_gpu_offsets,
             )
+            self._engine_snapshot = dict(info.snapshot_cell_id_to_hashes)
         engines = info.rollout_engines
         if dist.get_rank() == 0:
-            ray.get([engine.pause_generation.remote() for engine in engines])
-            ray.get([engine.begin_weight_update.remote() for engine in engines])
+            async_utils.wait_futures([async_utils.submit(engine.pause_generation()) for engine in engines])
+            async_utils.wait_futures([async_utils.submit(engine.begin_weight_update()) for engine in engines])
         dist.barrier()
         pause_done = time.perf_counter()
         transfer_seconds, tensor_count, byte_count, bucket_count = 0.0, 0, 0, 0
@@ -607,11 +609,17 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         export_done = time.perf_counter()
         dist.barrier()
         if dist.get_rank() == 0:
-            ray.get([engine.flush_cache.remote() for engine in engines])
-            ray.get([engine.end_weight_update.remote() for engine in engines])
-            ray.get(self.rollout_manager.set_weight_version.remote(self.clock.completed_steps))
-            ray.get(self.rollout_manager.clear_updatable_has_new_engines.remote())
-            ray.get([engine.continue_generation.remote() for engine in engines])
+            async_utils.wait_futures([async_utils.submit(engine.flush_cache()) for engine in engines])
+            async_utils.wait_futures([async_utils.submit(engine.end_weight_update()) for engine in engines])
+            async_utils.wait_futures(
+                [
+                    async_utils.submit(
+                        engine.update_weight_version(str(self.clock.completed_steps), abort_all_requests=True)
+                    )
+                    for engine in engines
+                ]
+            )
+            async_utils.wait_futures([async_utils.submit(engine.continue_generation()) for engine in engines])
         dist.barrier()
         repeated_version = self.clock.published_step == self.clock.completed_steps
         self.clock.published()
@@ -651,6 +659,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 with path.open("a") as output:
                     output.write(json.dumps(timings) + "\n")
 
+        return self.clock.completed_steps
+
     def capture_weight_snapshot(self):
         if self.args.olmo_core.publication_mode != "engine_drain":
             raise ValueError("snapshot capture requires core.publication_mode=engine_drain")
@@ -687,12 +697,13 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         if group is None:
             return
         pending = [
-            engine.destroy_weights_update_group.remote(updater._group_name) for engine in updater.rollout_engines
+            async_utils.submit(engine.destroy_weights_update_group(updater._group_name))
+            for engine in updater.rollout_engines
         ]
         try:
             dist.destroy_process_group(group)
         finally:
-            ray.get(pending)
+            async_utils.wait_futures(pending)
         updater._model_update_groups = None
 
     def capture_evaluation_snapshot(self, rollout_id, config):

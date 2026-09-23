@@ -12,7 +12,7 @@ from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_funct
 from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.rollout.inference_rollout import inference_rollout_common
-from miles.utils.types import Sample
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 from sglang.srt.observability import req_time_stats
 
 from open_instruct.miles import policy_refresh, refreshing_rollout
@@ -27,6 +27,7 @@ def sample(group=0, versions=(0, 1)):
         tokens=[9, 10, 11, 12],
         response_length=3,
         rollout_log_probs=[-0.8, -1.2, -0.6],
+        reward=1.0,
         status=Sample.Status.COMPLETED,
     )
     policy_refresh.record_response(
@@ -51,6 +52,7 @@ def args():
         max_weight_staleness=1,
         async_data_buffer_capacity_factor=1,
         dynamic_sampling_filter_path=None,
+        reward_key=None,
         olmo_core=SimpleNamespace(engine_drain_timeout=1),
     )
 
@@ -63,7 +65,9 @@ def entry(index=0, versions=(0, 1)):
 def test_behavior_scores_and_routes_are_unchanged_and_provenance_serializes():
     value = sample()
     assert value.rollout_log_probs == [-0.8, -1.2, -0.6]
-    assert value.weight_versions == ["0", "1"]
+    assert value.weight_versions == [
+        WeightVersionsPerCall([WeightVersionSpan("0", 1, 3), WeightVersionSpan("1", 3, 4)])
+    ]
     assert value.oldest_weight_version == 0
     assert value.train_metadata["policy_refresh"] == value.metadata["policy_refresh"]
     restored = Sample.from_dict(value.to_dict())

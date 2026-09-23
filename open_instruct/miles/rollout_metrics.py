@@ -14,7 +14,7 @@ from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
-from open_instruct.miles import sibling_timing
+from open_instruct.miles import policy_versions, sibling_timing
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -122,7 +122,10 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
             "response_tokens": sum(lengths),
             "response_lengths": lengths,
             "collection_wait_seconds": rollout_time,
-            "mixed_responses": sum(len(set(sample.weight_versions or [])) > 1 for sample in samples),
+            "mixed_responses": sum(
+                len(set(policy_versions.versions(sample.weight_versions) if sample.weight_versions else [])) > 1
+                for sample in samples
+            ),
             "queue_metrics": rollout_extra_metrics or {},
             "sibling_group_attempts": sorted(
                 {

@@ -8,7 +8,7 @@ import torch
 from miles.backends.training_utils.loss_hub import advantages
 from miles.ray.rollout import rollout_data_conversion, train_data_conversion
 from miles.utils import arguments
-from miles.utils.types import Sample
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles import arguments as core_arguments
 from open_instruct.miles import expert_schedule
@@ -27,6 +27,9 @@ def test_hook_through_real_reward_normalization_and_partition(tmp_path):
     args.balance_data = False
     args.multi_lora = False
     original = sample_groups(36, Sample)
+    for group in original:
+        for sample in group:
+            sample.weight_versions = [WeightVersionsPerCall([WeightVersionSpan(sample.weight_versions[0], 4, 6)])]
     planned = deepcopy(original)
     expert_schedule.reorder_samples(args, planned)
     results = []

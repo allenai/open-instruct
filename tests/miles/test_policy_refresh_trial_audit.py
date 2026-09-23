@@ -24,7 +24,9 @@ def fixture(root):
                 tokens=[1, 2, 3, 4],
                 response_length=3,
                 rollout_log_probs=[-0.5, -0.8, -0.2],
-                weight_versions=[str(s["version"]) for s in spans],
+                weight_versions=[
+                    [dict(version=str(s["version"]), abs_start=1 + s["start"], abs_end=1 + s["end"]) for s in spans]
+                ],
                 group_index=update * 4 + i // 4,
                 train_metadata=dict(policy_refresh=provenance),
                 metadata=dict(policy_refresh=provenance),

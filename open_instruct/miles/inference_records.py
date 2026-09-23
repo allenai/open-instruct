@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles import workflow
+from open_instruct.miles import policy_versions, workflow
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -173,7 +173,12 @@ def policy_scope(versions, fresh_run):
 
 def response_record(sample, text, fresh_run):
     metadata = sample.metadata or {}
-    versions = sorted({str(value) for value in sample.weight_versions or []}, key=_version_order)
+    versions = sorted(
+        {str(value) for value in policy_versions.versions(sample.weight_versions)}
+        if sample.weight_versions
+        else set(),
+        key=_version_order,
+    )
     status = getattr(sample.status, "value", str(sample.status))
     record = {
         "index": sample.index,

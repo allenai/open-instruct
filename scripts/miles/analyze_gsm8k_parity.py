@@ -20,6 +20,7 @@ import torch
 from matplotlib import pyplot as plt
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
+from open_instruct.miles import policy_versions
 
 UPDATES = 100
 EVAL_STEPS = (0, 20, 40, 60, 80, 100)
@@ -94,7 +95,7 @@ def audit_dump(path, prepared_rows, *, version, multiplicity, response_cap=4096,
             errors.append(f"{prefix}: prompt or label differs from prepared data")
         if sample["metadata"].get("verifiers") != row["metadata"].get("verifiers"):
             errors.append(f"{prefix}: verifier specification differs from prepared data")
-        versions = sample.get("weight_versions")
+        versions = policy_versions.versions(sample["weight_versions"]) if sample.get("weight_versions") else []
         expected_version = version[key] if isinstance(version, dict) else version
         if not versions or any(str(value) != str(expected_version) for value in versions):
             errors.append(f"{prefix}: missing or unexpected policy version (expected {expected_version})")

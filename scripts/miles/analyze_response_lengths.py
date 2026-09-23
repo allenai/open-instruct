@@ -11,6 +11,8 @@ from statistics import mean, median
 
 import torch
 
+from open_instruct.miles import policy_versions
+
 UPDATES = 100
 EVAL_STEPS = (0, 20, 40, 60, 80, 100)
 
@@ -68,7 +70,7 @@ def validate_sample(sample, prepared, proof, *, version, rollout, cap=4096):
     assert key == prepared["metadata"]["prepared_sample_id"], "Prompt membership mismatch"
     assert sample["prompt"] == prepared["input"] and sample["label"] == prepared["label"], "Prompt/label changed"
     assert sample["metadata"].get("verifiers") == prepared["metadata"].get("verifiers"), "Verifier changed"
-    versions = sample["weight_versions"]
+    versions = policy_versions.versions(sample["weight_versions"])
     assert versions and all(str(value) == str(version) for value in versions), "Policy version mismatch"
     size = sample["response_length"]
     assert type(size) is int and 0 < size <= cap and size < len(sample["tokens"]), "Invalid response length"

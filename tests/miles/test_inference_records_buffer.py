@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
-from miles.utils.types import Sample
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
 from open_instruct.miles.config import ZERO_STD_FILTER, CoreConfig
@@ -39,7 +39,7 @@ def test_buffer_records_every_scored_group_and_keeps_filter_semantics(tmp_path):
                     group_index=len(rewards) * 10 + index,
                     index=index,
                     reward=reward,
-                    weight_versions=["1"],
+                    weight_versions=[WeightVersionsPerCall([WeightVersionSpan("1", 1, 2)])],
                     status=status,
                     metadata={"query": "q", "verifiers": [{"name": "math", "target": "1"}]},
                 )

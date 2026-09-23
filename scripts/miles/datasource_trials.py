@@ -34,7 +34,7 @@ from transformers import AutoTokenizer
 
 from open_instruct.ground_truth_utils import IFEvalVerifier, IFEvalVerifierOld, MathVerifier
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
-from open_instruct.miles import rewards
+from open_instruct.miles import policy_versions, rewards
 from open_instruct.miles.driver import train
 from open_instruct.miles.rewards import registered_reward
 
@@ -251,7 +251,7 @@ async def audit_samples(root, name, samples, rows, version, response_cap, verifi
         row = expected[sample["prompt"]]
         if sample["label"] != row["label"] or sample["metadata"]["verifiers"] != row["metadata"]["verifiers"]:
             raise ValueError(f"{name}: changed verifier target")
-        if not sample["weight_versions"] or set(sample["weight_versions"]) != {str(version)}:
+        if not sample["weight_versions"] or set(policy_versions.versions(sample["weight_versions"])) != {version}:
             raise ValueError(f"{name}: stale or missing policy version")
         logprobs = sample["rollout_log_probs"]
         if len(logprobs) != sample["response_length"] or not all(math.isfinite(p) for p in logprobs):

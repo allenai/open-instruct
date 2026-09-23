@@ -1,7 +1,7 @@
 """Check the flattened wire contract independently of CUDA placement."""
 
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import torch
@@ -14,11 +14,10 @@ def test_flattened_broadcast_preserves_mixed_dtypes_and_order(monkeypatch):
     updater._is_src_rank = True
     updater._group_name = "test"
     updater._model_update_groups = object()
-    remote = Mock(return_value={"success": True})
-    updater.rollout_engines = [SimpleNamespace(_make_request=SimpleNamespace(remote=remote))]
+    remote = AsyncMock(return_value={"success": True})
+    updater.rollout_engines = [SimpleNamespace(_make_request=remote)]
     broadcast = Mock(return_value=SimpleNamespace(wait=lambda: None))
     monkeypatch.setattr(publication.dist, "broadcast", broadcast)
-    monkeypatch.setattr(publication.ray, "get", lambda values: values)
     # Non-contiguous expert transpose and mixed dtype exercise the byte contract.
     tensors = [
         ("expert", torch.arange(12, dtype=torch.bfloat16).reshape(3, 4).T),

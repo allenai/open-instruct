@@ -1,5 +1,5 @@
 {
-  "image": "sha256:2f20fb3bc0031ebee085f7b90df6a1d5999d177dce98ab4c81c1f56cae89b001",
+  "image": "sha256:4f5afc59a4fd7ece108cf78ab4064075751add67428a103d6c5c43d6375d0aff",
   "options": [
     {
       "default": null,
@@ -300,6 +300,14 @@
       "help": null
     },
     {
+      "default": null,
+      "dest": "run_uuid",
+      "flags": [
+        "--run-uuid"
+      ],
+      "help": "Machine-readable identifier for this launch: exactly 16 lowercase hex characters, auto-generated when unset. Unlike the human-readable run names, two runs never share one, so anything stamped with it can be traced back to the launch that produced it."
+    },
+    {
       "default": 1,
       "dest": "actor_num_nodes",
       "flags": [
@@ -381,6 +389,15 @@
       "help": "Whether to offload the training actor to CPU while the rollout engines generate. Defaults to true when --colocate is set; an explicit --no-offload-train is respected."
     },
     {
+      "default": true,
+      "dest": "clear_quantized_weight_workspaces_on_offload",
+      "flags": [
+        "--clear-quantized-weight-workspaces-on-offload",
+        "--no-clear-quantized-weight-workspaces-on-offload"
+      ],
+      "help": "Drop TransformerEngine's cached quantized weights before offloading the training actor. They are rebuilt on the next forward, so backing them up to pinned host memory is pure overhead. Ignored when TransformerEngine is not in use or CUDA graphs are enabled."
+    },
+    {
       "default": null,
       "dest": "offload_rollout",
       "flags": [
@@ -414,7 +431,7 @@
       "flags": [
         "--stream-optimizer-state-to-disk"
       ],
-      "help": "Stream the fp32 main params and Adam moments through per-bucket files on node-local NVMe during optimizer.step(), bounding GPU residency to one bucket. For when the optimizer state does not fit the GPU *while the step runs*: --offload-train-target=disk cannot help there, because pause/resume happen at phase boundaries and everything is resident again by the time Adam launches. Bit-identical to keeping the state on GPU, at the cost of disk traffic every step. Distinct from --offload-optimizer-states and --optimizer-cpu-offload, and mutually exclusive with both."
+      "help": "Hold optimizer state in files on node-local NVMe, for when it does not fit the GPU *while the step runs*; --offload-train-target=disk cannot help there.\nadam: streams fp32 main params and moments through per-bucket files, one bucket resident at a time. Requires the distributed optimizer, excludes --offload-optimizer-states and --optimizer-cpu-offload.\ndist_muon: the disk backend for --chunked-optimizer-state-offload, so pass that plus a non-zero --optimizer-state-offload-fraction. --optimizer-cpu-offload is Adam-only. This bounds host residency, not the GPU restore window -- for that set --optimizer-state-offload-chunk-size-mb, which Megatron warns about at 0."
     },
     {
       "default": "fp32",
@@ -430,7 +447,7 @@
       "flags": [
         "--offload-train-disk-dir"
       ],
-      "help": "Node-local directory for the disk-offload files, used by both --offload-train-target=disk and --stream-optimizer-state-to-disk (each under its own subdirectory). Should be fast local NVMe (e.g. /scratch); a tmpfs mount, which /tmp is on many systems, keeps the data in RAM and defeats both. Files are per-process and overwritten in place every step (bounded size); defaults to $SCRATCH/miles_train_offload_<uid>."
+      "help": "Node-local directory for the disk-offload files, used by both --offload-train-target=disk and --stream-optimizer-state-to-disk (each under its own subdirectory). Should be fast local NVMe (e.g. /scratch); a tmpfs mount, which /tmp is on many systems, keeps the data in RAM and defeats both. Files are per-process and overwritten in place every step (bounded size); defaults to $SCRATCH/miles_train_offload_<uid>. Muon's optimizer-state buffers are unlinked once mapped, so their footprint shows in df but not du."
     },
     {
       "default": 256,
@@ -439,6 +456,14 @@
         "--offload-train-disk-chunk-mb"
       ],
       "help": "Chunk size (MiB) for the GPU<->disk transfers, i.e. the pinned host staging buffer, which bounds host memory regardless of how much is moved. Used by both --offload-train-target=disk and --stream-optimizer-state-to-disk, and each allocates its own, so enabling both costs 2x this per rank."
+    },
+    {
+      "default": "cpu",
+      "dest": "colocate_memory_peak_device",
+      "flags": [
+        "--colocate-memory-peak-device"
+      ],
+      "help": "Which device absorbs the trainer<->rollout handoff overlap. 'cpu' (default): each side offloads before the other onloads, so the engine's weight mirror and the trainer's backup briefly coexist in host memory. 'gpu': onload the other side first, so both sides briefly coexist in GPU memory instead and the two host copies never overlap. Use 'gpu' when host RAM is the tighter budget than the handoff headroom on the GPU."
     },
     {
       "default": "nccl",
@@ -958,7 +983,7 @@
       "flags": [
         "--pin-rollout-manager-to-head"
       ],
-      "help": "Pin the RolloutManager (and its co-located router process) to the Ray head node. Useful in K8s where the head pod has a stable Service address so that external agent environments can reliably reach the router."
+      "help": "Pin the RolloutExecutor (and the co-located router process) to the Ray head node. Useful in K8s where the head pod has a stable Service address so that external agent environments can reliably reach the router."
     },
     {
       "default": false,
@@ -982,7 +1007,7 @@
       "flags": [
         "--update-weight-transfer-mode"
       ],
-      "help": "The method to transfer weights to remote rollout engines during update weight. 'broadcast' = NCCL broadcast; 'p2p' = mooncake RDMA write; 'rdt' = Ray Direct Transport (NIXL RDMA pull, requires sglang use_ray=True). 'disk-delta' diffs each sync against a CPU snapshot of the previous one and publishes only the changed bytes to --update-weight-disk-dir; each engine's /pull_weights applies them into a host-local checkpoint that the engine reloads from."
+      "help": "The method to transfer weights to remote rollout engines during update weight. 'disk-delta' diffs each sync against a CPU snapshot of the previous one and publishes only the changed bytes to --update-weight-disk-dir; each engine's /pull_weights applies them into a host-local checkpoint that the engine reloads from."
     },
     {
       "default": null,
@@ -1062,7 +1087,7 @@
       "flags": [
         "--rollout-health-check-interval"
       ],
-      "help": "Interval in seconds between rollout engine /health_generate checks during generate/eval."
+      "help": "Interval in seconds between rollout-health-check health checks."
     },
     {
       "default": 30.0,
@@ -1070,31 +1095,48 @@
       "flags": [
         "--rollout-health-check-timeout"
       ],
-      "help": "Timeout in seconds to wait for a rollout engine /health_generate response before killing it."
+      "help": "Timeout in seconds for a single rollout-health-check health check RPC."
     },
     {
-      "default": 0,
+      "default": 0.0,
       "dest": "rollout_health_check_first_wait",
       "flags": [
         "--rollout-health-check-first-wait"
       ],
-      "help": "Initial grace period (in seconds) before starting health checks. This allows time for model compilation and initialization. Increase this value significantly when using deepgemm."
+      "help": "Initial grace period (seconds) before starting rollout-health-check health checks, re-armed on every resume. This allows time for model compilation and initialization; increase it significantly when using deepgemm."
     },
     {
-      "default": 0,
-      "dest": "control_server_port",
+      "default": 1,
+      "dest": "rollout_health_check_failure_threshold",
       "flags": [
-        "--control-server-port"
+        "--rollout-health-check-failure-threshold"
       ],
-      "help": "Port for HTTP control server. 0 = disabled."
+      "help": "Number of consecutive failed rollout-health-check checks before reporting unhealthy. Debounces transient RPC blips so a single hiccup does not recycle a live cell."
     },
     {
-      "default": false,
+      "default": "127.0.0.1",
+      "dest": "api_server_host",
+      "flags": [
+        "--api-server-host"
+      ],
+      "help": "Host the HTTP api server binds to. The default only serves the local mini fault-tolerance controller; set 0.0.0.0 to accept remote controllers."
+    },
+    {
+      "default": null,
+      "dest": "api_server_port",
+      "flags": [
+        "--api-server-port"
+      ],
+      "help": "Port for HTTP api server. 0 = disabled. Left unset it is 18080 under --use-fault-tolerance and 0 otherwise, because the mini fault-tolerance controller drives cells over this port."
+    },
+    {
+      "default": null,
       "dest": "mini_ft_controller_enable",
       "flags": [
-        "--mini-ft-controller-enable"
+        "--mini-ft-controller-enable",
+        "--no-mini-ft-controller-enable"
       ],
-      "help": "Enable the mini fault-tolerance controller that auto-heals Fatal cells."
+      "help": "Enable the mini fault-tolerance controller that auto-heals Fatal cells. Left unset it follows --ft-components and --api-server-port, which is what makes --use-fault-tolerance heal on its own."
     },
     {
       "default": 10.0,
@@ -1134,7 +1176,7 @@
       "flags": [
         "--trainer-heartbeat-checker-first-wait"
       ],
-      "help": "Initial grace period (seconds) before starting trainer-heartbeat-checker health checks."
+      "help": "Initial grace period (seconds) before starting trainer-heartbeat-checker health checks, re-armed on every resume. This allows time for model compilation and initialization; increase it significantly when using deepgemm."
     },
     {
       "default": 3,
@@ -1270,7 +1312,7 @@
       "flags": [
         "--rollout-batch-size"
       ],
-      "help": "The number of prompts in each rollout step. The total data returned should be rollout_batch_size * n_samples_per_prompt. "
+      "help": "The number of prompts in each rollout step. The total data returned should be rollout_batch_size * n_samples_per_prompt. Required for the train entry. "
     },
     {
       "default": 1,
@@ -2126,7 +2168,7 @@
       "flags": [
         "--lora-base-cpu-backup"
       ],
-      "help": "LoRA + colocate: keep SGLang-side CPU mirror of base weights and skip per-step base sync. Trades host RAM for faster onload/offload. Ignored unless --colocate and LoRA are both on."
+      "help": "LoRA + colocate: keep SGLang-side CPU mirror of base weights and skip per-step base sync. Trades host RAM for faster onload/offload. Ignored unless --colocate and LoRA are both on. Also needs 'weight' in --offload-rollout-level: SGLang populates the mirror during release_weights_occupation, so with the weights never released the mirror is never built and the flag does nothing."
     },
     {
       "default": false,
@@ -2151,78 +2193,6 @@
         "--multi-lora-n-adapters"
       ],
       "help": "Maximum number of concurrent adapter slots for multi-LoRA. Set to 0 to disable multi-LoRA (default: 0)"
-    },
-    {
-      "default": [],
-      "dest": "multi_lora_adapters",
-      "flags": [
-        "--multi-lora-adapter"
-      ],
-      "help": null
-    },
-    {
-      "default": 5.0,
-      "dest": "multi_lora_idle_poll_s",
-      "flags": [
-        "--multi-lora-idle-poll-s"
-      ],
-      "help": "When no adapter is RUNNING, the trainer polls for new registrations every this many seconds (default: 5.0)"
-    },
-    {
-      "default": null,
-      "dest": "multi_lora_http_server_path",
-      "flags": [
-        "--multi-lora-http-server-path"
-      ],
-      "help": "Dotted path to a MultiLoRAHTTPServer subclass to use for the multi-LoRA controller's HTTP server (default: MultiLoRAHTTPServer)"
-    },
-    {
-      "default": null,
-      "dest": "multi_lora_backend_path",
-      "flags": [
-        "--multi-lora-backend-path"
-      ],
-      "help": "Dotted path to a MultiLoRABackend subclass for the multi-LoRA controller, e.g. to add custom adapter validation via validate_adapter (default: MultiLoRABackend)"
-    },
-    {
-      "default": 8068,
-      "dest": "multi_lora_api_port",
-      "flags": [
-        "--multi-lora-api-port"
-      ],
-      "help": "Port for the multi-LoRA controller's control-plane API, served from the head node (default: 8068)"
-    },
-    {
-      "default": true,
-      "dest": "multi_lora_service_mode",
-      "flags": [
-        "--multi-lora-disable-service-mode"
-      ],
-      "help": "Disable service mode. By default, the trainer waits indefinitely for new adapters. With this flag, it exits after all adapters have been processed."
-    },
-    {
-      "default": null,
-      "dest": "multi_lora_max_adapter_global_batch_size",
-      "flags": [
-        "--multi-lora-max-adapter-global-batch-size"
-      ],
-      "help": "Registration-time upper bound on an adapter's samples per optimizer step (rollout_batch_size x n_samples_per_prompt). Defaults to 4x --global-batch-size."
-    },
-    {
-      "default": 0.5,
-      "dest": "multi_lora_max_coalesce_wait_s",
-      "flags": [
-        "--multi-lora-max-coalesce-wait-s"
-      ],
-      "help": "Maximum time ready groups wait for the batch to fill toward --global-batch-size before training starts on what is ready (default: 0.5)."
-    },
-    {
-      "default": 30.0,
-      "dest": "multi_lora_max_empty_wait_s",
-      "flags": [
-        "--multi-lora-max-empty-wait-s"
-      ],
-      "help": "How long a generate call waits for the first poppable group before failing with an empty-batch timeout (default: 30)."
     },
     {
       "default": false,
@@ -3398,7 +3368,7 @@
       "flags": [
         "--debug-train-only"
       ],
-      "help": "Whether to only run the training without sglang servers. This is useful for debugging the rollout generation function."
+      "help": "Whether to run training without rollout generation. Rollout engines are skipped; a snapshot-eval fleet (--eval-num-gpus) still starts when configured."
     },
     {
       "default": null,
@@ -3592,7 +3562,7 @@
       "flags": [
         "--ci-ft-test-actions"
       ],
-      "help": "JSON array of fault injection actions. Each action: {\"at_rollout\": N, \"action\": \"stop_cell_at_end\"|\"start_cell_at_end\"|\"crash_before_allreduce\", \"cell_index\": I, \"rank\": 0, \"attempt\": 0}. cell_index -1 means last cell."
+      "help": "JSON array of fault injection actions. Each action: {\"at_rollout\": N, \"action\": \"stop_cell_at_end\"|\"start_cell_at_end\"|\"crash_before_allreduce\", \"cell_id\": \"trainer-actor-2\", \"rank\": 0, \"attempt\": 0}. cell_id is the full cell id (spec name plus cell index) of the target cell."
     },
     {
       "default": null,
@@ -4145,14 +4115,6 @@
         "--sglang-dist-timeout"
       ],
       "help": "Set timeout for torch.distributed initialization."
-    },
-    {
-      "default": null,
-      "dest": "sglang_gated_launch_port",
-      "flags": [
-        "--sglang-gated-launch-port"
-      ],
-      "help": "The port of the gated launch control server. When set, every rank blocks right after the distributed environment is initialized, before any sizable GPU allocation, until `POST /gate/activate` is sent to this port on the host of the first rank. This lets an external orchestrator defer the memory hungry part of startup to a safe window. Defaults to None, which disables the gate."
     },
     {
       "default": 1,
@@ -8023,14 +7985,6 @@
     },
     {
       "default": "==SUPPRESS==",
-      "dest": "eval_sglang_gated_launch_port",
-      "flags": [
-        "--eval-sglang-gated-launch-port"
-      ],
-      "help": "The port of the gated launch control server. When set, every rank blocks right after the distributed environment is initialized, before any sizable GPU allocation, until `POST /gate/activate` is sent to this port on the host of the first rank. This lets an external orchestrator defer the memory hungry part of startup to a safe window. Defaults to None, which disables the gate."
-    },
-    {
-      "default": "==SUPPRESS==",
       "dest": "eval_sglang_dcp_size",
       "flags": [
         "--eval-sglang-dcp-size",
@@ -11542,12 +11496,20 @@
       "help": "Start a standalone session server for TITO/session support. Requires --hf-checkpoint. A named --tito-model resolves its registered template; --tito-model=default uses the checkpoint-native or explicit --chat-template-path template. Bare flag (or 'v1') selects the append-only linear v1 server; '--use-session-server v2' selects the tree-serving v2 (multi-lineage trajectories, always-branch)."
     },
     {
+      "default": 32,
+      "dest": "session_server_workers",
+      "flags": [
+        "--session-server-workers"
+      ],
+      "help": "Number of session server instances."
+    },
+    {
       "default": null,
       "dest": "session_server_ip",
       "flags": [
         "--session-server-ip"
       ],
-      "help": "IP address of the standalone session server. Defaults to sglang-router-ip."
+      "help": "Address the session servers bind to, e.g. 0.0.0.0 to accept traffic from outside the cluster. Peers still reach them on the address their worker was placed on. Defaults to that placed address."
     },
     {
       "default": null,
@@ -11555,15 +11517,7 @@
       "flags": [
         "--session-server-port"
       ],
-      "help": "Starting port for standalone session servers. Auto-allocated if not set."
-    },
-    {
-      "default": 32,
-      "dest": "session_server_workers",
-      "flags": [
-        "--session-server-workers"
-      ],
-      "help": "Number of standalone session servers to launch on consecutive ports."
+      "help": "Base port for the session servers, so a network policy can whitelist a known range. Instance i listens on this port plus i. Defaults to a dynamically allocated port."
     },
     {
       "default": "default",
@@ -11798,6 +11752,14 @@
       "help": null
     },
     {
+      "default": 0.0,
+      "dest": "ci_tito_special_token_count_threshold",
+      "flags": [
+        "--ci-tito-special-token-count-threshold"
+      ],
+      "help": "Max TITO special_token_count mismatch rate tolerated under --ci-test; other hard types stay at 0."
+    },
+    {
       "default": false,
       "dest": "ci_disable_kl_checker",
       "flags": [
@@ -11839,6 +11801,14 @@
     },
     {
       "default": null,
+      "dest": "ci_metric_checker_expect_num",
+      "flags": [
+        "--ci-metric-checker-expect-num"
+      ],
+      "help": "Require exactly this many eval checks, all meeting the CI threshold."
+    },
+    {
+      "default": null,
       "dest": "ci_save_grad_norm",
       "flags": [
         "--ci-save-grad-norm"
@@ -11868,6 +11838,14 @@
         "--ci-check-model-hash"
       ],
       "help": null
+    },
+    {
+      "default": "megatron",
+      "dest": "dsv4_impl",
+      "flags": [
+        "--dsv4-impl"
+      ],
+      "help": "Which DeepSeek-V4 attention implementation to train with. 'miles' is the plugin path (BSHD, sparse context parallelism, tilelang kernels, miles' hyper-connections) and is the only one that supports tensor parallelism. 'megatron' is Megatron's native dsv4_hybrid path (THD, cuDNN or unfused kernels, native hyper-connections). The two read the same HuggingFace checkpoint but their torch_dist checkpoints are not interchangeable."
     },
     {
       "default": false,
@@ -11926,5 +11904,5 @@
       "help": null
     }
   ],
-  "schema_sha256": "9d9084414a59a2b97eb6000bf571d66c4967c8a8420f777a1abc20df414adff1"
+  "schema_sha256": "493a795ae0823e3e2feeeaea980a7e0f3467b26ea239efb05678e92618069078"
 }

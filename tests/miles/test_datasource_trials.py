@@ -73,7 +73,7 @@ def fixture_run(root, task="math"):
                         tokens=[1, 2],
                         response_length=1,
                         rollout_log_probs=[-0.5],
-                        weight_versions=[str(version)],
+                        weight_versions=[[dict(version=str(version), abs_start=1, abs_end=2)]],
                     )
                 )
         torch.save({"samples": samples}, root / f"rollouts/{name}.pt")

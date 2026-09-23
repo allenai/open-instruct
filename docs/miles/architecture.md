@@ -27,11 +27,13 @@ merged main commit `72f194a35045f02cc7d87980819bd0e4652cc931`. OLMo-core is pinn
 to `e505356353aa7ce1f6ff83e24d6eb945f463714e` on `robertb/miles-rl-main`.
 That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
 and carries the MILES adapter plus inherited HF interchange support. MILES uses
-`da91ac5c414be8db38a2f5aa6bae74a2a57d7662` on
-[`allenai/miles:robertb/open-instruct-runtime`](https://github.com/allenai/miles/tree/robertb/open-instruct-runtime).
-Its source tree is identical to the previous base-plus-patch runtime, including
-the Open Instruct background-evaluation metrics integration. Builds fetch exact
-commits, not moving branch tips.
+`571560bb4d22259cd1373dc6a2bfa1fb7551d651` on
+[`allenai/miles:main`](https://github.com/allenai/miles/tree/main).
+This integrates the Open Instruct runtime changes on upstream
+`e89b45f7f85a0e76fba6a99474b1dd9b67a3c20e`. Worker launch, inference lifecycle,
+and rollout execution follow the upstream ownership boundaries. Builds fetch exact
+commits, not moving branch tips. See the [migration checks](measurements/miles-upstream-20260922.md)
+for validation and dependency limits.
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
 require a qualified new binary base. The Dockerfile separates a `runtime-base`

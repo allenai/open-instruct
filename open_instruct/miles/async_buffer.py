@@ -4,8 +4,9 @@ import time
 from copy import copy
 from dataclasses import is_dataclass, replace
 
-from miles.rollout.filter_hub.base_types import call_dynamic_filter
-from miles.rollout.fully_async_data_buffer import DefaultDataBuffer, iter_samples
+from miles.rollout.filter_hub.base_types import call_dynamic_filter, iter_samples
+from miles.rollout.filter_hub.common_filters import apply_missing_reward_filter
+from miles.rollout.fully_async_data_buffer import DefaultDataBuffer
 from miles.utils.types import Sample
 
 from open_instruct.miles import inference_records, policy_refresh
@@ -35,7 +36,9 @@ class MeasuredDataBuffer(DefaultDataBuffer):
             if self._records is not None:
                 self._records.record_group(samples, decision="aborted")
         else:
-            output = call_dynamic_filter(self._group_filter, self._args, item.group)
+            output = apply_missing_reward_filter(self._args, item.group)
+            if output.keep:
+                output = call_dynamic_filter(self._group_filter, self._args, item.group)
             if self._records is not None:
                 self._records.record_group(
                     samples, decision="passed" if output.keep else "filtered", reason=output.reason

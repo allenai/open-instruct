@@ -13,6 +13,8 @@ import traceback
 from pathlib import Path
 from unittest import mock
 
+from miles.utils.workers.ray_worker_manager import RayWorkerManager
+
 from open_instruct.miles import driver, workflow
 from open_instruct.miles.rolling_publication import RollingPublication
 from open_instruct.miles.run_spec import RunSpec
@@ -44,16 +46,25 @@ def main():
     injected = {}
 
     class RetireEngine(RollingPublication):
+        async def _initialize(self, info):
+            await super()._initialize(info)
+            target_url = info.rollout_engines[-1].server_url
+            self._failure_cell = next(
+                cell_id
+                for server in self.inference.servers.values()
+                for cell_id, cell in server.server_cells.items()
+                if cell.api_client.server_url == target_url
+            )
+
         async def publish(self):
             result = await super().publish()
             if not injected:
-                info = await self.manager.get_updatable_engines_and_lock.remote()
-                target = str(len(info.rollout_engines) - 1)
+                target = str(len(self.deliveries) - 1)
                 injected.update(engine=target, version=self.version, time=time.time())
                 (output / "injection.json").write_text(json.dumps(injected, indent=2) + "\n")
                 # Stop the real server through its owned lifecycle handle. Do not
                 # kill unrelated PIDs or change the healthy peer's admission.
-                await asyncio.wait_for(info.rollout_engines[-1].shutdown.remote(), 60)
+                await asyncio.wait_for(RayWorkerManager.get_handle().stop_cells.remote([self._failure_cell]), 60)
             return result
 
     failed = False

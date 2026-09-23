@@ -17,6 +17,7 @@ from miles.utils import arguments
 from transformers import AutoTokenizer
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
+from open_instruct.miles import policy_versions
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.driver import train
 
@@ -213,7 +214,7 @@ def audit(root):
         for sample in samples:
             labels = expected["eval" if name.startswith("eval") else "train"]
             assert sample["prompt"] in labels and sample["label"] == labels[sample["prompt"]]
-            assert set(sample["weight_versions"]) == {str(version)}
+            assert set(policy_versions.versions(sample["weight_versions"])) == {version}
             assert len(sample["rollout_log_probs"]) == sample["response_length"]
             assert torch.isfinite(torch.tensor(sample["rollout_log_probs"])).all()
             score = verifier([], sample["response"], sample["label"]).score

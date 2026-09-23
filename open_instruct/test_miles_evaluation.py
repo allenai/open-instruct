@@ -223,18 +223,22 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
         return value
 
     manager = SimpleNamespace(
-        generate=SimpleNamespace(remote=AsyncMock(return_value={})), dispose=SimpleNamespace(remote=AsyncMock())
+        get=SimpleNamespace(remote=AsyncMock(return_value={})), dispose=SimpleNamespace(remote=AsyncMock())
     )
     learner = SimpleNamespace(
-        update_weights=AsyncMock(), train=AsyncMock(), dispose=AsyncMock(), _broadcast=AsyncMock()
+        update_weights=AsyncMock(), train=AsyncMock(), dispose=AsyncMock(), execute_workers=AsyncMock()
     )
+    inference = SimpleNamespace(prepare_rollout=AsyncMock(), dispose=AsyncMock())
+    workers = SimpleNamespace(dispose=SimpleNamespace(remote=AsyncMock()))
     placement = SimpleNamespace(
-        create_placement_groups=lambda args: {"rollout": None},
-        create_rollout_manager=lambda *args: (manager, 1),
+        create_rollout_components=AsyncMock(return_value=(inference, manager, 1)),
         create_training_models=AsyncMock(return_value=(learner, None)),
+        update_weights=AsyncMock(),
     )
     module("miles")
-    module("miles.ray", placement_group=placement)
+    module(
+        "miles.ray", placement_group=placement, wiring=SimpleNamespace(launch_worker_manager=lambda *a, **kw: workers)
+    )
     module("miles.ray.rollout")
     shared = Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
     module("miles.ray.rollout.eval_dispatch", EvalDispatcher=shared)

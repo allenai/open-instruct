@@ -17,12 +17,15 @@ import importlib
 import json
 import os
 import sys
+from functools import partial
 from pathlib import Path
 
 import ray
-from miles.ray import placement_group
+from miles.ray import placement_group, wiring
 from miles.utils import arguments, object_store
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
+
+from open_instruct.miles import startup_cache
 
 BUCKET_SIZES = {
     "256MiB": 256 * 1024**2,
@@ -144,19 +147,19 @@ async def profile(args, output):
     if not args.check_weight_update_equal:
         raise ValueError("The full serving-weight comparison must remain enabled")
     write_json(output / "resolved-arguments.json", vars(args))
-    groups = placement_group.create_placement_groups(args)
-    manager = learner = None
+    workers = wiring.launch_worker_manager(args, transform_specs=partial(startup_cache.configure_specs, args))
+    inference = manager = learner = None
     try:
         object_store.init_instance(args, contribute_segment=False)
         init_tracking(args)
-        manager, _ = placement_group.create_rollout_manager(args, groups["rollout"])
-        learner, critic = await placement_group.create_training_models(args, groups, manager)
+        inference, manager, _ = await placement_group.create_rollout_components(args)
+        learner, critic = await placement_group.create_training_models(args, inference, manager)
         if critic is not None:
             raise ValueError("Unexpected critic")
         # Ordinary initial publication (cold caches), checked against the engine's
         # startup snapshot of the HF checkpoint, then the sweep on unchanged weights.
         await learner.update_weights()
-        comparison = await manager.check_weights.remote(
+        comparison = await inference.check_weights(
             action="compare",
             allow_quant_error=False,
             selector=args.check_weight_update_selector,
@@ -165,11 +168,11 @@ async def profile(args, output):
         write_json(output / "initial-weight-comparison.json", comparison)
         schedule = []
         for label, size in BUCKET_SIZES.items():
-            await learner._broadcast("configure_publication", size)
+            await learner.execute_workers("configure_publication", buffer_bytes=size)
             for repeat in range(REPEATS):
                 await learner.update_weights()
                 schedule.append({"label": label, "buffer_bytes": size, "repeat": repeat})
-        comparison = await manager.check_weights.remote(
+        comparison = await inference.check_weights(
             action="compare",
             allow_quant_error=False,
             selector=args.check_weight_update_selector,
@@ -195,7 +198,7 @@ async def profile(args, output):
             # Retire the trainer-to-engine NCCL group collectively before either side
             # is disposed, as the training driver does; disposal otherwise hangs.
             try:
-                await asyncio.wait_for(learner._broadcast("close_weight_transport"), timeout=60)
+                await asyncio.wait_for(learner.execute_workers("close_weight_transport"), timeout=60)
             except Exception as error:
                 cleanup_errors.append(error)
             try:
@@ -207,6 +210,15 @@ async def profile(args, output):
                 await asyncio.wait_for(manager.dispose.remote(), timeout=180)
             except Exception as error:
                 cleanup_errors.append(error)
+        for component, operation in (
+            (inference, lambda: inference.dispose()),
+            (workers, lambda: workers.dispose.remote()),
+        ):
+            if component is not None:
+                try:
+                    await asyncio.wait_for(operation(), timeout=180)
+                except Exception as error:
+                    cleanup_errors.append(error)
         try:
             finish_tracking()
         except Exception as error:

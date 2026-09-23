@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Migrate the MILES/Core adapter to the main-based private runtime: separate worker/inference/rollout ownership, preserve serving-child compiler-cache setup, coordinate engine drain with controller update windows, and retain native token-level policy-version spans (PR URL pending).
 - Pin MILES directly to an identical source tree in `allenai/miles`; remove the final vendored runtime patch and image-build patch application (PR URL pending).
 - Build MILES against a directly pinned OLMo-core commit on `robertb/miles-rl-main`, ported onto the main-based production MoE integration; remove the Core patch and preserve inherited HF attention/configuration interchange (PR URL pending).
 - Pin MILES serving to merged olmo-sglang main, remove the vendored serving patch and embedded-source reconstruction, and update serving tools and authenticated image builds (PR URL pending).

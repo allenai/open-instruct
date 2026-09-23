@@ -2,6 +2,7 @@
 
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import torch
@@ -57,12 +58,11 @@ def test_flattened_updater_records_the_broadcast_and_engine_split(monkeypatch):
     updater._is_src_rank = True
     updater._group_name = "g"
     updater._model_update_groups = object()
-    engine = SimpleNamespace(_make_request=SimpleNamespace(remote=lambda *a, **k: "ref"))
+    engine = SimpleNamespace(_make_request=AsyncMock(return_value={"success": True}))
     updater.rollout_engines = [engine]
     clock = iter([10.0, 10.4, 10.9])
     monkeypatch.setattr(publication.time, "perf_counter", lambda: next(clock))
     monkeypatch.setattr(publication.dist, "broadcast", lambda *a, **k: SimpleNamespace(wait=lambda: None))
-    monkeypatch.setattr(publication.ray, "get", lambda refs: [{"success": True} for _ in refs])
     named = [("a", torch.zeros(4, dtype=torch.bfloat16)), ("b", torch.ones(2, 3, dtype=torch.bfloat16))]
     updater.update_bucket_weights(named, weight_version=3)
     assert updater.last_bucket_timing == {
@@ -78,9 +78,10 @@ def test_flattened_updater_reports_engine_rejection(monkeypatch):
     updater._is_src_rank = True
     updater._group_name = "g"
     updater._model_update_groups = object()
-    updater.rollout_engines = [SimpleNamespace(_make_request=SimpleNamespace(remote=lambda *a, **k: "ref"))]
+    updater.rollout_engines = [
+        SimpleNamespace(_make_request=AsyncMock(return_value={"success": False, "message": "bad"}))
+    ]
     monkeypatch.setattr(publication.dist, "broadcast", lambda *a, **k: SimpleNamespace(wait=lambda: None))
-    monkeypatch.setattr(publication.ray, "get", lambda refs: [{"success": False, "message": "bad"}])
     with pytest.raises(RuntimeError, match="rejected"):
         updater.update_bucket_weights([("a", torch.zeros(4, dtype=torch.bfloat16))])
 

@@ -317,7 +317,11 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                     error = None if task.cancelled() else task.exception()
                     if error is not None and self._requeue_transport_failure(group_index, error):
                         continue
-                    completions.append(task.result())
+                    completions.append(
+                        self._collect_group_result(task, self._producing_groups[group_index])
+                        if task.cancelled()
+                        else task.result()
+                    )
                     self._consecutive_transport_failures = 0
                 self._ready_completion_counts.update(
                     (id(completion), pipeline_observer.completion_counts([completion])) for completion in completions

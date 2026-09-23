@@ -7,6 +7,8 @@ import json
 import re
 from pathlib import Path
 
+from open_instruct.miles import policy_versions
+
 BACKENDS = ("core", "megatron")
 STEPS = (0, 20, 40, 60, 80, 100)
 
@@ -75,7 +77,7 @@ def verify_generations(data, audits, prepared_bytes, *, expected_count=128, step
             require(sample["status"] in ("completed", "truncated"), f"{key}/{identity}: unsupported status")
             require((sample["status"] == "truncated") == proof["truncated"], f"{key}/{identity}: truncation mismatch")
             require(
-                sample["weight_versions"] in ([entry["policy_version"]], [str(entry["policy_version"])]),
+                set(policy_versions.versions(sample["weight_versions"])) == {int(entry["policy_version"])},
                 f"{key}/{identity}: policy version mismatch",
             )
             token_hash = sample["prompt_tokens_sha256"]
