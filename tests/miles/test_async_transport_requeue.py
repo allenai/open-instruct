@@ -5,8 +5,46 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from miles.router.config import MilesRouterConfig
+from miles.router.router import MilesRouter
 
 from open_instruct.miles import async_rollout
+
+
+async def _router_transport_failure():
+    """Exercise the pinned router's real HTTP error translation, not a fake 503."""
+    router = MilesRouter(
+        MilesRouterConfig(
+            host="127.0.0.1",
+            port=8000,
+            max_connections=4,
+            timeout=10,
+            health_check_interval=1,
+            health_check_failure_threshold=3,
+        )
+    )
+    await router.client.aclose()
+
+    async def disconnected(request):
+        raise httpx.ReadError("injected engine disconnect", request=request)
+
+    router.client = httpx.AsyncClient(transport=httpx.MockTransport(disconnected))
+    router.worker_request_counts["http://engine"] = 0
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=router.app), base_url="http://router"
+        ) as client:
+            response = await client.post("/generate", json={"rid": "test-request"})
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Rollout worker unavailable"}
+        assert router.worker_request_counts["http://engine"] == 0
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            return error
+        pytest.fail("Expected a router transport failure")
+    finally:
+        await router.close()
 
 
 class _Source:
@@ -63,7 +101,8 @@ def test_consecutive_transport_failures_are_bounded():
     assert fn._requeue_transport_failure(15, httpx.RemoteProtocolError("closed")) is True
 
 
-def test_worker_loop_requeues_transport_failures_and_delivers_the_rest(monkeypatch):
+@pytest.mark.parametrize("through_router", [False, True])
+def test_worker_loop_requeues_transport_failures_and_delivers_the_rest(monkeypatch, through_router):
     """Drive the real worker loop: one group loses its transport, the next two complete."""
 
     async def observe(*a, **k):
@@ -108,6 +147,8 @@ def test_worker_loop_requeues_transport_failures_and_delivers_the_rest(monkeypat
         async def generate(group):
             await asyncio.sleep(0)
             if group[0].group_index == 1:
+                if through_router:
+                    raise await _router_transport_failure()
                 raise httpx.ReadError("connection reset by router")
             return SimpleNamespace(prompt_group=group, group=[])
 
@@ -128,3 +169,32 @@ def test_worker_loop_requeues_transport_failures_and_delivers_the_rest(monkeypat
         assert fn._task_groups == {}
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "status,detail,path",
+    [
+        (500, "Rollout worker unavailable", "/generate"),
+        (503, "Unknown engine failure", "/generate"),
+        (503, "No healthy workers", "/generate"),
+        (400, "Invalid request", "/generate"),
+        (503, "Rollout worker unavailable", "/reward"),
+    ],
+)
+def test_unrecognized_http_failures_are_not_reclassified(status, detail, path):
+    request = httpx.Request("POST", "http://router" + path)
+    response = httpx.Response(status, request=request, json={"detail": detail})
+    error = httpx.HTTPStatusError("unavailable", request=request, response=response)
+    fn = _producer()
+    assert fn._requeue_transport_failure(7, error) is False
+    assert fn.data_source.requeued == []
+
+
+def test_router_transport_failure_uses_the_same_bounded_group_retry_budget():
+    error = asyncio.run(_router_transport_failure())
+    fn = _producer()
+    fn._producing_groups = {i: object() for i in range(20)}
+    for i in range(async_rollout.TRANSPORT_FAILURE_BUDGET):
+        assert fn._requeue_transport_failure(i, error) is True
+    with pytest.raises(RuntimeError, match="consecutive async requests lost their HTTP transport"):
+        fn._requeue_transport_failure(async_rollout.TRANSPORT_FAILURE_BUDGET, error)

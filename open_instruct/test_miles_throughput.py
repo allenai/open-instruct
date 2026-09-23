@@ -227,12 +227,16 @@ def test_pipeline_observer_does_not_consume_or_reset_queue(tmp_path):
             state=SimpleNamespace(generate_fn_semaphore=semaphore),
             _output=SimpleNamespace(_delegate=SimpleNamespace(_buffer=buffer, _capacity=4)),
             _producing_groups={1: []},
+            _transport_requeues=3,
+            _consecutive_transport_failures=1,
             _active_tasks={waiting},
             _scheduler=SimpleNamespace(),
             _producer_resumed=asyncio.Event(),
         )
         observation = pipeline_observer.snapshot(producer)
         assert observation["completed_queue_groups"] == 2
+        assert observation["transport_requeued_groups"] == 3
+        assert observation["consecutive_transport_failures"] == 1
         assert observation["http_active_requests"] == observation["http_waiting_requests"] == 1
         assert observation["producer_unfinished_samples"] is None
         assert len(buffer) == 2 and semaphore.locked() and not waiting.done()

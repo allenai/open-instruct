@@ -104,7 +104,8 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         if timing is not None:
             timing["request_id"] = payload["rid"]
         # With the qualified MILES router the complete response metadata survives.
-        # Ambiguous failures must not transparently resample under newer weights.
+        # Do not retry a request in place. On recognized transport loss, the
+        # producer discards the whole group and requeues its pristine prompts.
         url = f"http://{input.args.sglang_router_ip}:{input.args.sglang_router_port}/generate"
         timeout = self.args.olmo_core.refresh_request_timeout
         started = time.monotonic()
@@ -124,7 +125,7 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
             logger.exception(
                 "Policy refresh HTTP failure: request=%s group=%s sample=%s url=%s elapsed_seconds=%.3f "
                 "error=%s status=%s attempts=1 delivery=unknown; correlate request with miles_router logs. "
-                "No automatic resampling; propagating failure to the producer.",
+                "No HTTP-level retry; passing failure to the producer for bounded group recovery.",
                 payload["rid"],
                 sample.group_index,
                 sample.index,

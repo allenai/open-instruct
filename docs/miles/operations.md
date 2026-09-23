@@ -70,6 +70,29 @@ inactive. These update totals do not measure worst individual microbatch load.
 The implementation reuses Core's forward counters, excludes scoring and backward
 recomputation, and gathers only small layer/expert histograms.
 
+## Rollout transport recovery
+
+Refresh sends each generation request once. If a connection fails directly, or
+MILES returns its specific `503 {"detail": "Rollout worker unavailable"}` response
+for a failed backend `/generate` transport, the producer discards the affected
+prompt group and requeues its pristine prompts. The pinned group generator
+cancels and joins sibling sample tasks before returning the error. Completed
+responses from the failed group are not reused; regenerated responses carry their
+own current behavior-version metadata. Other active groups continue normally.
+
+The existing budget permits eight consecutive group transport failures; the
+ninth fails the run. A completed group resets that streak. Unknown HTTP errors,
+invalid samples/provenance and generation deadlines remain fatal. This is not a
+generic retry policy for all 5xx responses, and does not hide a persistently
+unavailable service. Server-side work whose HTTP connection was lost may already
+have executed; no exactly-once generation guarantee is implied.
+
+`pipeline_occupancy.jsonl` includes `transport_requeued_groups` and
+`consecutive_transport_failures`; warning logs identify the affected group and
+exception. A router backend disconnect was previously transformed into an
+`HTTPStatusError` that bypassed the direct-transport retry predicate. Both sides
+of that mismatch predated the September 22 upstream migration.
+
 ## Failure triage
 
 | Symptom | Next check |

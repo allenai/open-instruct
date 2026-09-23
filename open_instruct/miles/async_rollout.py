@@ -41,6 +41,25 @@ TRANSPORT_FAILURE_BUDGET = 8
 _PUBLICATION_JOIN_RETRY_SECONDS = 180.0
 
 
+def generation_transport_failed(error: BaseException) -> bool:
+    """Recognize direct transport loss and the pinned MILES router's equivalent.
+
+    The router turns backend RequestError into this specific 503 response. Do
+    not treat arbitrary HTTP errors (including unrelated 503s) as recoverable.
+    No request is retried in place; the producer discards/requeues the whole group.
+    """
+    if isinstance(error, httpx.TransportError):
+        return True
+    if not isinstance(error, httpx.HTTPStatusError) or error.response.status_code != 503:
+        return False
+    if error.request.method != "POST" or error.request.url.path != "/generate":
+        return False
+    try:
+        return error.response.json() == {"detail": "Rollout worker unavailable"}
+    except ValueError:
+        return False
+
+
 class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
     """Track, quiesce, and close all background generation tasks.
 
@@ -152,11 +171,12 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         A lost connection (reset, closed stream, refused connect) leaves delivery
         unknown, so the partial group is never reused; its pristine prompts go
         back to the ledger exactly as after a preemption, and a fresh group is
-        sampled under the current weights. Anything other than a transport error,
+        sampled under the current weights. Router-wrapped transport errors use the
+        same path. Anything other than a recognized transport error,
         or more than ``TRANSPORT_FAILURE_BUDGET`` failures in a row, still fails
         the run: a dead router is not a transient.
         """
-        if not isinstance(error, httpx.TransportError) or group_index is None:
+        if not generation_transport_failed(error) or group_index is None:
             return False
         self._consecutive_transport_failures += 1
         self._transport_requeues += 1
@@ -175,7 +195,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         if self._consecutive_transport_failures > TRANSPORT_FAILURE_BUDGET:
             raise RuntimeError(
                 f"{self._consecutive_transport_failures} consecutive async requests lost their HTTP transport; "
-                "the serving router is not reachable"
+                "the generation transport remains unavailable"
             ) from error
         return True
 
