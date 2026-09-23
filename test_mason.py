@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from argparse import Namespace
 
@@ -89,6 +90,37 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
     def test_build_command_without_args(self, name, command, args_to_remove, expected):
         result = mason.build_command_without_args(command, args_to_remove)
         self.assertEqual(result, expected)
+
+
+class TestQuoteLiteralArgs(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("opening_tag", ["--reserved_slot_tokens", "<think>"], ["--reserved_slot_tokens", "'<think>'"]),
+            ("closing_tag", ["--stop_strings", "</answer>"], ["--stop_strings", "'</answer>'"]),
+            ("pipe_tag", ["--stop_strings", "<|im_end|>"], ["--stop_strings", "'<|im_end|>'"]),
+            ("json", ["--dataset_mixer", '{"a": 1.0}'], ["--dataset_mixer", "'{\"a\": 1.0}'"]),
+            ("json_with_tag", ['{"stop": "<think>"}'], ['\'{"stop": "<think>"}\'']),
+            ("single_quote", ["<it's>"], ["'<it'\"'\"'s>'"]),
+            (
+                "redirections",
+                ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
+                ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
+            ),
+            (
+                "shell_syntax",
+                ["cd", "/stage", "&&", "echo", "$BEAKER_JOB_ID"],
+                ["cd", "/stage", "&&", "echo", "$BEAKER_JOB_ID"],
+            ),
+        ]
+    )
+    def test_quote_literal_args(self, name, command, expected):
+        self.assertEqual(mason.quote_literal_args(command), expected)
+
+    def test_quoted_args_reach_bash_verbatim(self):
+        args = ["<think>", "</think>", "<|im_end|>", '{"a": "b"}', "<it's>"]
+        joined = "printf '%s\\n' " + " ".join(mason.quote_literal_args(args))
+        result = subprocess.run(["/bin/bash", "-c", joined], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), args)
 
 
 class TestExperimentSpec(unittest.TestCase):
