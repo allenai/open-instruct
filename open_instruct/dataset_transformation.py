@@ -900,10 +900,22 @@ def promote_tokens_into_reserved_slots(tokenizer: PreTrainedTokenizer, tokens: S
     default for vLLM detokenization, and the verifiers in `ground_truth_utils` split decoded
     rollouts on a literal `</think>`.
 
-    Tokens that are already single tokens are skipped, so this is idempotent. Returns what it
-    promoted, lowest slot id first.
+    Strings already registered as added tokens -- promoted earlier, or native to the tokenizer --
+    are skipped, so this is idempotent. A string that is one *ordinary* BPE token raises: it can
+    still merge with what follows it (`>` is one token, and so is `>\n`), and renaming a slot
+    would leave its trained id in use. Returns what it promoted, lowest slot id first.
     """
-    pending = [token for token in tokens if len(tokenizer.encode(token, add_special_tokens=False)) != 1]
+    added = set(tokenizer.get_added_vocab())
+    pending = []
+    for token in tokens:
+        if token in added:
+            continue
+        if len(tokenizer.encode(token, add_special_tokens=False)) == 1:
+            raise ValueError(
+                f"{token!r} is already one ordinary BPE token, which can still merge with what follows it; "
+                "--reserved_slot_tokens only makes multi-token strings atomic"
+            )
+        pending.append(token)
     if not pending:
         return []
     source_ids = {token: tuple(tokenizer.encode(token, add_special_tokens=False)) for token in pending}

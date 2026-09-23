@@ -635,14 +635,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         embedding_size = embeddings.weight.shape[0]
 
     # Tokens promoted into reserved vocabulary slots inherit an untrained row; seed it from the
-    # pieces the string used to tokenize into before training reads it. Only the embedding
-    # matrices are gathered, and with modifier_rank so the write survives under ZeRO-3.
-    embedding_params = [embeddings.weight]
-    output_embeddings = model.get_output_embeddings()
-    if output_embeddings is not None and output_embeddings.weight is not embeddings.weight:
-        embedding_params.append(output_embeddings.weight)
-    with deepspeed.zero.GatheredParameters(embedding_params, modifier_rank=0):
-        model_utils.initialize_promoted_token_embeddings(model, tokenizer)
+    # pieces the string used to tokenize into before training reads it. Gathers nothing unless
+    # the flag promoted something. A resume's load_state below overwrites these rows, as it must.
+    model_utils.initialize_promoted_token_embeddings_under_zero(model, tokenizer)
 
     if args.use_lora:
         if args.use_qlora:

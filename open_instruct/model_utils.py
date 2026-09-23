@@ -303,6 +303,24 @@ def initialize_promoted_token_embeddings(model: torch.nn.Module, tokenizer) -> i
     return len(rows)
 
 
+def initialize_promoted_token_embeddings_under_zero(model: torch.nn.Module, tokenizer) -> int:
+    """`initialize_promoted_token_embeddings` inside a ZeRO-3 gather of just the matrices it writes.
+
+    Returns before gathering when nothing was promoted: entering the gather materializes the full
+    embedding (and an untied head) on every rank, a cost a run without the flag must not pay.
+    `modifier_rank=0` so the write survives the re-partition on exit.
+    """
+    if not promoted_token_rows(tokenizer):
+        return 0
+    input_embeddings = model.get_input_embeddings()
+    output_embeddings = model.get_output_embeddings()
+    params = [input_embeddings.weight]
+    if output_embeddings is not None and output_embeddings.weight is not input_embeddings.weight:
+        params.append(output_embeddings.weight)
+    with deepspeed.zero.GatheredParameters(params, modifier_rank=0):
+        return initialize_promoted_token_embeddings(model, tokenizer)
+
+
 def maybe_load_checkpoint(
     model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
 ) -> None:

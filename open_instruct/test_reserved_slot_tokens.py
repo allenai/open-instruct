@@ -137,6 +137,11 @@ class TestPromoteTokensIntoReservedSlots(unittest.TestCase):
         self.promote()
         self.assertTrue(is_token_prefix(self.tokenizer, GENERATION_PROMPT, continuation))
 
+    def test_a_single_ordinary_bpe_token_raises(self):
+        # `>` is one token, yet `>\n` is another: promotion could not stop the merge.
+        with self.assertRaisesRegex(ValueError, "already one ordinary BPE token"):
+            self.promote([">"])
+
     def test_promotion_is_idempotent(self):
         first = self.promote()
         second = self.promote()

@@ -11,6 +11,7 @@ import os
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -148,6 +149,32 @@ class TestOlmoCoreSeeding(unittest.TestCase):
         original = train_module.model.embeddings.weight.clone()
         self.assertEqual(olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer([])), 0)
         torch.testing.assert_close(train_module.model.embeddings.weight, original)
+
+
+class TestZeroGatherOnlyWhenPromoted(unittest.TestCase):
+    def _model(self):
+        embed, head = torch.nn.Embedding(10, 4), torch.nn.Linear(4, 10, bias=False)
+        embed.weight.data.copy_(reference_matrix())
+        head.weight.data.copy_(reference_matrix())
+        return types.SimpleNamespace(get_input_embeddings=lambda: embed, get_output_embeddings=lambda: head)
+
+    def test_nothing_promoted_gathers_nothing(self):
+        with mock.patch.object(model_utils.deepspeed.zero, "GatheredParameters") as gathered:
+            self.assertEqual(
+                model_utils.initialize_promoted_token_embeddings_under_zero(self._model(), _StubTokenizer([])), 0
+            )
+        gathered.assert_not_called()
+
+    def test_promoted_rows_gather_both_matrices_once(self):
+        model = self._model()
+        with mock.patch.object(model_utils.deepspeed.zero, "GatheredParameters") as gathered:
+            written = model_utils.initialize_promoted_token_embeddings_under_zero(model, _StubTokenizer([(3, (0, 1))]))
+        self.assertEqual(written, 1)
+        gathered.assert_called_once()
+        params = gathered.call_args.args[0]
+        self.assertIs(params[0], model.get_input_embeddings().weight)
+        self.assertIs(params[1], model.get_output_embeddings().weight)
+        self.assertEqual(gathered.call_args.kwargs, {"modifier_rank": 0})
 
 
 if __name__ == "__main__":
