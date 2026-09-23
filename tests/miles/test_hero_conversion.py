@@ -12,7 +12,13 @@ from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
 from safetensors.torch import save_file
-from scripts.miles.validate_hero_conversion import check_architecture, cpu_conversion_config, validate
+from scripts.miles.validate_hero_conversion import (
+    check_architecture,
+    cpu_conversion_config,
+    load_native_parameters,
+    validate,
+    validate_native_parameter_sources,
+)
 
 
 @pytest.mark.parametrize("width,experts", [(32, 4), (48, 8)])
@@ -129,3 +135,28 @@ def test_cpu_conversion_changes_only_execution_settings():
     assert converted["blocks"][0] == {"use_cute_kernel": False, "head_dim": 128}
     assert converted["blocks"][1] == {**original["blocks"][1], "backend": "torch", "use_flash": False}
     assert len(overrides) == 3
+
+
+@pytest.mark.parametrize("prefix", ["", "module."])
+def test_public_reader_loads_only_selected_master_weights(tmp_path, prefix):
+    model = torch.nn.Linear(3, 2, dtype=torch.bfloat16)
+    weight = torch.linspace(-1, 1, 6)
+    bias = torch.tensor([0.25, -0.5])
+    save_state_dict(
+        tmp_path / "checkpoint",
+        {
+            f"{prefix}weight.main": weight,
+            f"{prefix}bias.main": bias,
+            "unused_optimizer_moment": torch.full((7,), float("nan")),
+        },
+    )
+    load_native_parameters(model, tmp_path / "checkpoint", tmp_path / "work")
+    torch.testing.assert_close(model.weight, weight.reshape(2, 3).bfloat16(), rtol=0, atol=0)
+    torch.testing.assert_close(model.bias, bias.bfloat16(), rtol=0, atol=0)
+
+
+def test_rejects_wrong_master_shape_before_loading(tmp_path):
+    model = torch.nn.Linear(3, 2)
+    save_state_dict(tmp_path / "checkpoint", {"weight.main": torch.zeros(2, 3), "bias.main": torch.zeros(2)})
+    with pytest.raises(ValueError, match="Native parameter shape mismatch"):
+        validate_native_parameter_sources(model, tmp_path / "checkpoint")

@@ -14,15 +14,12 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import torch
 from olmo_core.config import DType
-from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_model_and_optim_state
+from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_model_and_optim_state, load_state_dict
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.config import get_hf_config
-from olmo_core.nn.hf.convert_checkpoint import (
-    _load_ddp_optimizer_model_state,
-    _normalize_legacy_latent_moe_config,
-    load_config,
-)
+from olmo_core.nn.hf.convert_checkpoint import _normalize_legacy_latent_moe_config, load_config
 from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.transformer.config import TransformerConfig
@@ -93,13 +90,11 @@ def check_architecture(actual, expected):
         raise ValueError(f"Architecture mismatch: {differences}")
 
 
-def validate_native_parameter_sources(model, checkpoint):
-    """Reject ambiguous DDP master/model copies before allocating model storage."""
-    keys = set(get_checkpoint_metadata(checkpoint).state_dict_metadata)
-    if not any(key.endswith(".main") for key in keys):
-        return {"layout": "conventional_model"}
+def native_parameter_sources(model, metadata):
+    """Resolve optimizer-owned weights without reading optimizer moments."""
+    keys = set(metadata.state_dict_metadata)
     selected = {}
-    for name, _ in model.named_parameters():
+    for name, parameter in model.named_parameters():
         candidates = (
             f"model.{name}",
             f"model.module.{name}",
@@ -113,13 +108,48 @@ def validate_native_parameter_sources(model, checkpoint):
             raise ValueError(f"Ambiguous native parameter copies for {name}: {matches}")
         if not matches:
             raise ValueError(f"Missing native parameter source: {name}")
-        selected[name] = matches[0]
+        key = matches[0]
+        shape = tuple(metadata.state_dict_metadata[key].size)
+        expected = (parameter.numel(),) if key.endswith(".main") else tuple(parameter.shape)
+        if shape != expected:
+            raise ValueError(f"Native parameter shape mismatch for {name}: {shape} != {expected}")
+        selected[name] = key
+    return selected
+
+
+def validate_native_parameter_sources(model, checkpoint):
+    """Reject ambiguous DDP master/model copies before allocating model storage."""
+    metadata = get_checkpoint_metadata(checkpoint)
+    if not any(key.endswith(".main") for key in metadata.state_dict_metadata):
+        return {"layout": "conventional_model"}
+    selected = native_parameter_sources(model, metadata)
     return {
         "layout": "ddp_optimizer",
         "parameters": len(selected),
         "master_parameter_sources": sum(key.endswith(".main") for key in selected.values()),
         "selected_parameter_keys_sha256": hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest(),
     }
+
+
+def load_native_parameters(model, checkpoint, work_dir):
+    """Load flattened DDP masters with Core's public partial-state reader."""
+    metadata = get_checkpoint_metadata(checkpoint)
+    if not any(key.endswith(".main") for key in metadata.state_dict_metadata):
+        load_model_and_optim_state(checkpoint, model, work_dir=work_dir)
+        return
+    selected = native_parameter_sources(model, metadata)
+    state = {
+        key: torch.empty(
+            metadata.state_dict_metadata[key].size,
+            dtype=metadata.state_dict_metadata[key].properties.dtype,
+            device="cpu",
+        )
+        for key in selected.values()
+    }
+    load_state_dict(checkpoint, state, work_dir=work_dir)
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            parameter.copy_(state.pop(selected[name]).reshape(parameter.shape))
 
 
 def cpu_conversion_config(saved):
@@ -164,9 +194,7 @@ def validate(native_path, hf_path):
     parameter_sources = validate_native_parameter_sources(model, checkpoint)
     model.to_empty(device="cpu")
     with TemporaryDirectory(prefix="hero-model-load-") as work:
-        loaded = _load_ddp_optimizer_model_state(checkpoint, model, work_dir=work, return_state_dict=False)
-        if loaded is None:
-            load_model_and_optim_state(checkpoint, model, work_dir=work)
+        load_native_parameters(model, checkpoint, work)
     with SafeTensorState(hf_path) as reference:
         native_result = compare_stream(
             olmo3.iter_olmo3_moe_hf_state(model, hf),
