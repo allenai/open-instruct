@@ -7,6 +7,20 @@ from transformers import DefaultDataCollator
 from open_instruct import tensor_utils
 
 
+def build_block_diagonal_causal_mask(sequence_ids: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """Build an additive causal mask that isolates sequences in a flattened batch."""
+    if sequence_ids.ndim != 2:
+        raise ValueError(f"Expected sequence_ids to have shape [batch, sequence], got {sequence_ids.shape}")
+
+    sequence_length = sequence_ids.shape[-1]
+    positions = torch.arange(sequence_length, device=sequence_ids.device)
+    causal = positions[:, None] >= positions[None, :]
+    same_sequence = sequence_ids[:, :, None] == sequence_ids[:, None, :]
+    allowed = same_sequence & causal.unsqueeze(0)
+    mask = torch.full(allowed.shape, torch.finfo(dtype).min, dtype=dtype, device=sequence_ids.device)
+    return mask.masked_fill(allowed, 0).unsqueeze(1)
+
+
 def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     shifted_labels = torch.full_like(labels, -100)
     shifted_labels[:, :-1] = labels[:, 1:]

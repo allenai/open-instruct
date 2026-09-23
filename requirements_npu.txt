@@ -1,0 +1,24 @@
+# NPU-only dependency pins for Ascend training environments.
+#
+# Only packages whose versions must match the vLLM-Ascend stack or provably
+# break on it are listed; everything else (transformers, datasets, ...)
+# installs normally from pyproject.toml. See docs/get_started/npu.md for the
+# validated environment (Python 3.12, CANN 9.1.0-beta.3, Ascend 910B3).
+#
+# The two commands below use --no-deps because the default dependency set
+# resolves CUDA-flavored vllm wheels, which would overwrite the NPU
+# vllm/torch stack. Install the remaining pyproject dependencies first,
+# then (after sourcing CANN):
+#   python -m pip install --no-deps -r requirements_npu.txt
+#   python -m pip install --no-deps -e .
+
+# Ascend adapter stack. vllm must match vllm-ascend's requirement exactly.
+torch==2.10.0
+torch_npu==2.10.0.post2
+vllm==0.22.1
+vllm-ascend==0.22.1rc1
+
+# torch_npu 2.10.0.post2 CANN op execution fails under numpy>=2 (aclnnMatmul
+# returns EZ9999 "SpaceRegistry is nullptr" at kernel init); verified working
+# on numpy 1.26.4.
+numpy<2

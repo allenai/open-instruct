@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+import contextlib
 import os
 
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
@@ -85,6 +86,120 @@ INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
 logger = logger_utils.setup_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
+
+
+def _load_npu_backend() -> None:
+    """Make the Ascend NPU backend visible without breaking CUDA environments.
+
+    torch_npu >= 2.5.1 auto-registers the ``npu`` backend while ``import torch``
+    runs (device backend autoload), so an explicit ``import torch_npu`` is
+    normally unnecessary — and harmful when autoload already registered the
+    backend: re-importing torch_npu then raises its "Two accelerators cannot
+    be used at the same time" error against its own bridge. The explicit
+    import below is only a fallback for installs where autoload did not
+    register the backend. Only ``ImportError`` is suppressed (machines without
+    an Ascend stack); a ``torch_npu`` that raises once the Ascend environment
+    variables say it should work indicates a broken install, and silently
+    degrading to CPU would hide that.
+    """
+    if torch.cuda.is_available():
+        return
+    npu_module = getattr(torch, "npu", None)
+    if npu_module is not None and npu_module.is_available():
+        return
+    if os.environ.get("ASCEND_RT_VISIBLE_DEVICES") or os.environ.get("ASCEND_HOME_PATH"):
+        with contextlib.suppress(ImportError):
+            import torch_npu  # noqa: F401, PLC0415
+
+
+def get_accelerator_module(device: torch.device):
+    # Not torch.get_device_module(): that helper is functools.cache'd, which
+    # would pin whatever module object is visible on first call and leak mocks
+    # across tests / runtime re-configurations.
+    return getattr(torch, device.type, None)
+
+
+def get_accelerator_type() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    _load_npu_backend()
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        return "npu"
+    return "cpu"
+
+
+# Environment variables whose values are node-local. Ray's ``runtime_env``
+# broadcasts ``env_vars`` to every node in the cluster, so per-node/per-worker
+# values must stay out of the broadcast: Ray re-assigns the accelerator
+# visibility variables per actor, and VLLM_HOST_IP must differ on every node
+# for multi-node vLLM inference (a broadcast head-node value makes every worker
+# node's vLLM engine advertise the head's IP and hangs cross-node rendezvous).
+NODE_LOCAL_ENV_VARS = frozenset(
+    {"ASCEND_RT_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "VLLM_HOST_IP"}
+)
+
+
+def get_distributed_backend() -> str:
+    return {"npu": "hccl", "cuda": "nccl"}.get(get_accelerator_type(), "gloo")
+
+
+def get_ray_accelerator_resource() -> str | None:
+    return {"npu": "NPU", "cuda": "GPU"}.get(get_accelerator_type())
+
+
+def get_ray_accelerator_options(amount: float) -> dict[str, Any]:
+    resource = get_ray_accelerator_resource()
+    if resource == "NPU":
+        return {"resources": {"NPU": amount}}
+    if resource == "GPU":
+        return {"num_gpus": amount}
+    return {}
+
+
+def set_accelerator_device(device_index: int) -> torch.device:
+    device_type = get_accelerator_type()
+    device = torch.device(f"{device_type}:{device_index}" if device_type != "cpu" else "cpu")
+    device_module = get_accelerator_module(device)
+    if device_module is not None and hasattr(device_module, "set_device"):
+        device_module.set_device(device_index)
+    return device
+
+
+def empty_accelerator_cache(device: torch.device | None = None) -> None:
+    device = device or torch.device(get_accelerator_type())
+    device_module = get_accelerator_module(device)
+    if device_module is not None and hasattr(device_module, "empty_cache"):
+        device_module.empty_cache()
+
+
+def synchronize_accelerator(device: torch.device | None = None) -> None:
+    device = device or torch.device(get_accelerator_type())
+    device_module = get_accelerator_module(device)
+    if device_module is not None and hasattr(device_module, "synchronize"):
+        device_module.synchronize()
+
+
+def get_current_device_name() -> str | None:
+    device_type = get_accelerator_type()
+    if device_type == "cpu":
+        return None
+    device_module = get_accelerator_module(torch.device(device_type))
+    return get_device_name(device_module.get_device_name(0))
+
+
+def get_device_memory_metrics(device: torch.device) -> dict[str, float]:
+    """Return peak memory metrics for CUDA and NPU accelerators."""
+    device_module = get_accelerator_module(device)
+    if device_module is None or not all(
+        hasattr(device_module, name) for name in ("current_device", "max_memory_reserved", "max_memory_allocated")
+    ):
+        return {}
+
+    device_index = device.index if device.index is not None else device_module.current_device()
+    return {
+        "reserved_mem_GiB": device_module.max_memory_reserved(device=device_index) / 2**30,
+        "allocated_mem_GiB": device_module.max_memory_allocated(device=device_index) / 2**30,
+    }
 
 
 def import_class_from_string(import_path: str) -> type:
@@ -1558,8 +1673,8 @@ class RayProcess:
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["RANK"] = str(self.rank)
-        # NOTE: Ray will automatically set the CUDA_VISIBLE_DEVICES
-        # environment variable for each actor, so always set device to 0
+        # Ray maps each accelerator actor to logical device 0 through the
+        # backend-specific visible-devices variable.
         # os.environ["LOCAL_RANK"] = str(self._local_rank)
         os.environ["LOCAL_RANK"] = "0"
         random.seed(self.rank)
@@ -1576,9 +1691,13 @@ class RayProcess:
         return self.master_addr, self.master_port
 
     def empty_cache(self) -> None:
-        torch.cuda.empty_cache()
+        empty_accelerator_cache()
 
     def _set_numa_affinity(self, rank):
+        if get_accelerator_type() == "npu":
+            self._set_npu_numa_affinity(rank)
+            return
+
         def local_rank_to_real_gpu_id(local_rank):
             cuda_visible_devices = [
                 int(x) for x in os.environ.get("CUDA_VISIBLE_DEVICES", "0,1,2,3,4,5,6,7").split(",")
@@ -1616,9 +1735,23 @@ class RayProcess:
         numa_bind(self.local_rank // num_gpu_pre_numa_node)
         _SET_AFFINITY = True
 
+    def _set_npu_numa_affinity(self, rank):
+        global _SET_AFFINITY
+        if _SET_AFFINITY:
+            return
+
+        from open_instruct.npu.numa_affinity import bind_npu_numa_affinity  # noqa: PLC0415
+
+        if bind_npu_numa_affinity(rank):
+            _SET_AFFINITY = True
+        else:
+            logger.debug("Skipping NPU NUMA affinity: host NPU topology or libnuma unavailable")
+
     def offload_to_cpu(self, model, pin_memory=True, non_blocking=True):
         """This function guaratees the memory are all released (only torch context cache <100M will remain)."""
-        self._set_numa_affinity(torch.distributed.get_rank() % torch.cuda.device_count())
+        device_module = get_accelerator_module(torch.device(get_accelerator_type()))
+        device_count = device_module.device_count() if device_module is not None else 1
+        self._set_numa_affinity(torch.distributed.get_rank() % device_count)
 
         if model.zero_optimization_stage() == 3:
             model.optimizer.offload_states(
@@ -1633,7 +1766,7 @@ class RayProcess:
                 pin_memory=pin_memory,
                 non_blocking=non_blocking,
             )
-            torch.cuda.synchronize()
+            synchronize_accelerator()
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
@@ -1642,7 +1775,7 @@ class RayProcess:
         # NOTE: this function reloads the weights, ensuring the calculation
         if model.zero_optimization_stage() == 3:
             model.reload_states(non_blocking=non_blocking)
-            torch.cuda.synchronize()
+            synchronize_accelerator()
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
@@ -1818,6 +1951,8 @@ GPU_SPECS = {
     # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
     # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
     "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified
+    # Atlas 900 A2 publishes 25.6 PFLOPS FP16 and 4096 GB HBM across 64 devices.
+    "ascend910b": {"flops": 400e12, "memory_size": 64e9, "memory_bandwidth": 1.6e12},
 }
 
 # Conventions for FLOPs calculations (fixed; not switches)
@@ -1856,8 +1991,8 @@ class ModelDims:
 
         self.num_params = self.num_params or self._calculate_num_params()
 
-        if self.device_name is None and torch.cuda.is_available():
-            self.device_name = get_device_name(torch.cuda.get_device_name(0))
+        if self.device_name is None:
+            self.device_name = get_current_device_name()
 
         assert self.head_dim > 0, "head_dim must be positive"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
@@ -1956,7 +2091,7 @@ class ModelDims:
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
             num_linear_attn_layers=num_linear_attn_layers,
-            device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+            device_name=get_current_device_name(),
             **linear_attn_kwargs,
         )
 
@@ -2598,7 +2733,10 @@ def check_calculation(
     if percentage <= 100:
         return
 
-    full_device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    device_type = get_accelerator_type()
+    device_module = get_accelerator_module(torch.device(device_type))
+    # `torch.cpu` has no `get_device_name`; fall back like upstream does for CPU-only hosts.
+    full_device_name = device_module.get_device_name(0) if hasattr(device_module, "get_device_name") else "CPU"
 
     avg_prompt_length = sum(prompt_lengths) / len(prompt_lengths)
     avg_response_length = sum(response_lengths) / len(response_lengths) if response_lengths else 0
