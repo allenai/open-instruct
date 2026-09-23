@@ -241,7 +241,7 @@ case "$MODE" in
         DESC="Tokenize Dolci-Think-SFT full (seq $SEQ, olmo123) for the KDA MoE think baseline"
     fi
     $PY mason.py \
-        --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
+        --cluster ${TOKENIZE_CLUSTERS:-ai2/saturn ai2/neptune ai2/ceres ai2/jupiter} \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
         --image "$BEAKER_IMAGE" \

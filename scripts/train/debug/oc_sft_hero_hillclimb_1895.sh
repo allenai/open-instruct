@@ -62,7 +62,10 @@ case "$MODE" in
         MODE=train
         ;;
     tokenize)
-        # CPU-only; builds the arm's own numpy cache (THINK_TOKENS changes its key).
+        # CPU-only; builds the arm's own numpy cache (THINK_TOKENS changes its key). Not
+        # ceres: this caller is non-preemptible (minRuntime set), and ceres rejects that from
+        # ai2/olmo-instruct, which has no allocation there.
+        export TOKENIZE_CLUSTERS="${TOKENIZE_CLUSTERS:-ai2/saturn ai2/neptune ai2/jupiter}"
         MODE=tokenize_full
         ;;
     gate)
