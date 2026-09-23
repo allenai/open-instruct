@@ -1543,3 +1543,8 @@ lower; it does not affect the per-token statistics above.
 
 - Publication-semantics clarification from exact pinned MILES source plus applied runtime patch: `train_async.py` assembles the next batch before each publication; distributed updater pauses with `retract`, transfers weights, then calls `update_weight_version`. Our pinned `miles.patch` changes that call to `abort_all_requests=True` before generation resumes. Thus unfinished requests are aborted/filtered rather than continued under mixed weights. Configured retract alone was an incomplete description of the effective behavior. Completed buffered responses remain eligible under the age budget.
 - All100training batches report mixed-version ratio0. Mean consumed sample age is1.19203125updates; per-batch maximum is2 in95batches,1 in4,0 in1. Configured max age3 is a ceiling, not OI `async_steps=3` nor a target lag. Upstream aborted-group filtering is nonzero and must not be confused with zero completed-queue stale drops. This is a material distinction when comparing MILES stability to OI async; preserve in final comparison.
+
+### 2026-09-23T02:03:59Z
+
+- Matched update100 evaluation `01M35EDH2S76TKJB12J7W6BNRK` completed exit0 at2026-09-23T00:22:29Z. Async/sync percent: DAPO52.9296875/48.828125 (+4.1015625pp), MATH50080.6/79.8 (+0.8pp), AIME33.3333/26.6667, BRUMO40/23.3333. No final-checkpoint collapse. Raw logs and W&B summary/history retained.
+- Existing hf89 reader completed exit0, confirms .complete, index and8shards. Duplicate checks clear; submitted final missing matched update90 [01M3602SS9YR4J0JFGVCZ7AYW1](https://beaker.org/ex/01M3602SS9YR4J0JFGVCZ7AYW1), W&B8d4116d0. Continue to its result and final diagnostics/report before stopping monitor.
