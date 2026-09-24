@@ -9,6 +9,31 @@ import torch
 from open_instruct.miles import publication
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("fails", [False, True])
+def test_publication_diagnostics_retire_watchdog(monkeypatch, enabled, fails):
+    monkeypatch.setenv("OI_MILES_PUBLICATION_DIAGNOSTICS", "1" if enabled else "0")
+    start = Mock()
+    cancel = Mock()
+    monkeypatch.setattr(publication.faulthandler, "dump_traceback_later", start)
+    monkeypatch.setattr(publication.faulthandler, "cancel_dump_traceback_later", cancel)
+
+    @publication.diagnose_update
+    def update(value):
+        if fails:
+            raise RuntimeError("publication failed")
+        return value
+
+    if fails:
+        with pytest.raises(RuntimeError, match="publication failed"):
+            update(7)
+    else:
+        assert update(7) == 7
+    assert start.call_count == cancel.call_count == int(enabled)
+    if enabled:
+        start.assert_called_once_with(60, repeat=True)
+
+
 def test_flattened_broadcast_preserves_mixed_dtypes_and_order(monkeypatch):
     updater = publication.FlattenedDistributedUpdater.__new__(publication.FlattenedDistributedUpdater)
     updater._is_src_rank = True

@@ -130,6 +130,14 @@ behavior.
 
 ## Failure triage
 
+For a publication stall, set `launch.env.OI_MILES_PUBLICATION_DIAGNOSTICS="1"`
+on a fresh run using an image containing this instrumentation. Trainer actors
+log connection, export, bucket synchronization, broadcast and engine-load progress,
+and dump their Python thread stacks every 60 seconds while `update_weights` is
+active. This adds no CUDA synchronization and does not change publication deadlines.
+The watchdog is canceled when the call returns or raises. These logs distinguish
+where publication stopped; a driver timeout alone does not identify the cause.
+
 | Symptom | Next check |
 |---|---|
 | Configuration rejected | Error field/context, TOML types, conflicting aliases; rerun with --debug |

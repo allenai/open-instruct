@@ -557,10 +557,12 @@ class OLMoCoreTrainRayActor(TrainRayActor):
     def finalize_checkpoint(self, rollout_id):
         self._agree(lambda: checkpoint.finalize(self, rollout_id))
 
+    @publication.diagnose_update
     def update_weights(self, info):
         torch.cuda.synchronize()
         started = time.perf_counter()
         updater = self.weight_updater
+        publication.trace("connect_start", rank=dist.get_rank())
         if getattr(self, "_engine_snapshot", None) != info.snapshot_cell_id_to_hashes:
             updater.connect_rollout_engines(
                 info.rollout_engines,
@@ -568,24 +570,30 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 engine_gpu_offsets=info.engine_gpu_offsets,
             )
             self._engine_snapshot = dict(info.snapshot_cell_id_to_hashes)
+        publication.trace("connect_complete", rank=dist.get_rank())
         engines = info.rollout_engines
         if dist.get_rank() == 0:
             async_utils.wait_futures([async_utils.submit(engine.pause_generation()) for engine in engines])
             async_utils.wait_futures([async_utils.submit(engine.begin_weight_update()) for engine in engines])
+        publication.trace("pause_barrier_start", rank=dist.get_rank())
         dist.barrier()
+        publication.trace("export_start", rank=dist.get_rank())
         pause_done = time.perf_counter()
         transfer_seconds, tensor_count, byte_count, bucket_count = 0.0, 0, 0, 0
         bucket_details = []
 
         def send(bucket):
             nonlocal transfer_seconds, bucket_count
+            publication.trace("bucket_sync_start", rank=dist.get_rank(), bucket=bucket_count)
             torch.cuda.synchronize()
+            publication.trace("bucket_send_start", rank=dist.get_rank(), bucket=bucket_count)
             before = time.perf_counter()
             updater.update_bucket_weights(bucket, weight_version=self.clock.completed_steps)
             torch.cuda.synchronize()
             elapsed = time.perf_counter() - before
             transfer_seconds += elapsed
             bucket_count += 1
+            publication.trace("bucket_complete", rank=dist.get_rank(), bucket=bucket_count, seconds=elapsed)
             detail = getattr(updater, "last_bucket_timing", None)
             if detail is not None:
                 bucket_details.append({**detail, "seconds": elapsed})
@@ -607,6 +615,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         if bucket:
             send(bucket)
         export_done = time.perf_counter()
+        publication.trace("export_complete", rank=dist.get_rank(), buckets=bucket_count)
         dist.barrier()
         if dist.get_rank() == 0:
             async_utils.wait_futures([async_utils.submit(engine.flush_cache()) for engine in engines])

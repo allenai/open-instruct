@@ -1,10 +1,43 @@
 """Core publication using the flattened NCCL protocol qualified by olmo-miles."""
 
+import faulthandler
+import functools
+import os
 import time
 
 from miles.backends.fsdp_utils import update_weight_utils
 from miles.utils import async_utils
 from torch import distributed as dist
+
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
+
+
+def trace(phase, **details):
+    """Opt-in host progress markers; do not add CUDA synchronization."""
+    if os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") == "1":
+        logger.info("Core publication progress: phase=%s details=%s", phase, details)
+
+
+def diagnose_update(function):
+    """Dump actor thread stacks while a publication remains in progress."""
+
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        if os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") != "1":
+            return function(*args, **kwargs)
+        # Ray's driver deadline can otherwise kill an actor before the NCCL
+        # watchdog reports the collective or host operation it is waiting on.
+        faulthandler.dump_traceback_later(60, repeat=True)
+        trace("update_start")
+        try:
+            return function(*args, **kwargs)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            trace("update_exit")
+
+    return wrapped
 
 
 class FlattenedDistributedUpdater(update_weight_utils.UpdateWeightFromDistributed):
@@ -30,6 +63,7 @@ class FlattenedDistributedUpdater(update_weight_utils.UpdateWeightFromDistribute
             raise ValueError("Empty tensor in a weight bucket")
         if len({tensor.device for _, tensor in named_tensors}) != 1:
             raise ValueError("Weight bucket must reside on one device")
+        trace("flatten_start", tensors=len(names), first=names[0], last=names[-1])
         bucket = update_weight_utils.FlattenedTensorBucket(named_tensors=named_tensors)
         flat = bucket.get_flattened_tensor()
         expected = sum(tensor.nbytes for _, tensor in named_tensors)
@@ -51,10 +85,13 @@ class FlattenedDistributedUpdater(update_weight_utils.UpdateWeightFromDistribute
             async_utils.submit(engine._make_request("update_weights_from_distributed", payload))
             for engine in self.rollout_engines
         ]
+        trace("broadcast_start", bytes=expected, engines=len(pending))
         dist.broadcast(flat, 0, group=self._model_update_groups, async_op=True).wait()
         broadcast_done = time.perf_counter()
+        trace("broadcast_complete", seconds=broadcast_done - started)
         results = async_utils.wait_futures(pending)
         finished = time.perf_counter()
+        trace("engine_load_complete", seconds=finished - broadcast_done)
         self.last_bucket_timing = {
             "tensors": len(names),
             "bytes": expected,
