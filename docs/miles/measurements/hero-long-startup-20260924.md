@@ -52,6 +52,18 @@ roots under `/weka/oe-training-default/robertb/open-instruct/runs/`.
 
 ## Publication timing remains unresolved
 
+The inference engines first load the HF checkpoint from storage and complete
+serving startup. The trainer then independently loads that checkpoint and builds
+the Core training representation. Before admitting training rollouts, the driver
+publishes the trainer's current weights through the same transport used after
+updates. Thus the initial publication updates already-populated engines; it is
+not their initial checkpoint load. This also makes restored trainer state
+authoritative when resuming. This run enables `check_weight_update_equal`, so a
+fresh run compares the published weights against the initial serving snapshot
+before proceeding. The failed attempt did not complete publication or reach
+that comparison. See `open_instruct/miles/driver.py:train` and
+`open_instruct/miles/models.py:build_train_module`.
+
 All timestamps in this table are UTC on September 24:
 
 | Initial attempt event | Time |
