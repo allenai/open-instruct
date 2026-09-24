@@ -31,6 +31,7 @@ switching to a deprecated backend.
 | [Configuration reference](configuration.md) | Looking up fields, defaults, aliases, restrictions and overrides |
 | [Native option appendix](native-options.md) | Looking up an advanced MILES/SGLang flag or its original help |
 | [Models and checkpoints](models-and-checkpoints.md) | Selecting a supported checkpoint, converting, saving, resuming or exporting |
+| [Core-compatible serving](core-compatible-serving.md) | Opting into Core-like BF16 inference arithmetic and comparing its numerical and throughput cost |
 | [Throughput starting profiles](throughput-profiles.md) | Choosing a measured trainer/inference allocation and understanding queues, waste and warmup |
 | [Async queues and discard metrics](async-pipeline.md) | Sizing producer and completed buffers, tracing waits, and measuring discarded work |
 | [Topology and capacity](topology.md) | Choosing GPU placement, async scheduling, batch geometry and serving capacity |

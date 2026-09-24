@@ -99,6 +99,7 @@ nav:
     - Configuration: miles/configuration.md
     - Native options: miles/native-options.md
     - Models and checkpoints: miles/models-and-checkpoints.md
+    - Core-compatible serving: miles/core-compatible-serving.md
     - Topology: miles/topology.md
     - Long sequences: miles/long-sequences.md
     - Data and evaluation: miles/data-and-evaluation.md

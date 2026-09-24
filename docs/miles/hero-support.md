@@ -24,6 +24,11 @@ Ordinary HF execution differs, despite faithful exported tensors. Partial servin
 rounding/norm changes improve some cases but do not qualify the checkpoints;
 Core's actual training policy is the recommended serving comparison target.
 
+An experimental [Core-compatible serving mode](core-compatible-serving.md) is
+available through `OLMO_SGLANG_CORE_COMPAT=1`. It is off by default and requires
+TP1 BF16 serving with CUDA graphs disabled. This option does not by itself qualify
+full hero RL or change the historical gate results below.
+
 ## Architecture and source lineage
 
 The non-EMO small hero has 16 blocks (14 KDA and two full-attention blocks),
