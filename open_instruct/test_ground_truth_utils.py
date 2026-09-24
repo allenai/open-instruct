@@ -12,6 +12,8 @@ from parameterized import parameterized
 
 from open_instruct import ground_truth_utils
 from open_instruct.ground_truth_utils import (
+    CodeVerifier,
+    CodeVerifierConfig,
     F1Verifier,
     GSM8KVerifier,
     LMJudgeVerifier,
@@ -239,6 +241,45 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestCodeVerifierPerfPenalty(unittest.TestCase):
+    """The perf-penalty multiplier must not drive the reward below zero."""
+
+    @staticmethod
+    def _verifier():
+        config = CodeVerifierConfig(
+            code_api_url="http://unused.invalid",
+            code_max_execution_time=1.0,
+            code_pass_rate_reward_threshold=0.0,
+            code_apply_perf_penalty=True,
+        )
+        return CodeVerifier(config)
+
+    def _run(self, results, runtimes):
+        verifier = self._verifier()
+        canned = {"results": results, "runtimes": runtimes}
+        with patch("open_instruct.ground_truth_utils.asyncio.to_thread", AsyncMock(return_value=canned)):
+            code = "```python\ndef f():\n    return 1\n```"
+            return asyncio.run(verifier.async_call([], code, ["assert f() == 1"]))
+
+    def test_passing_test_over_time_limit_does_not_go_negative(self):
+        # A test reported as passing but whose runtime exceeded max_execution_time
+        # (1.0s) would give a negative multiplier without the clamp.
+        result = self._run([1], [1.5])
+        self.assertGreaterEqual(result.score, 0.0)
+        self.assertEqual(result.score, 0.0)
+
+    def test_mixed_over_and_under_limit_stays_nonnegative(self):
+        result = self._run([1, 1], [0.5, 2.0])
+        self.assertGreaterEqual(result.score, 0.0)
+        # Only the under-limit test contributes: max(0,(1-0.5)/1)=0.5, max(0,(1-2)/1)=0 -> (0.5+0)/2
+        self.assertAlmostEqual(result.score, 0.25)
+
+    def test_normal_runtimes_unchanged(self):
+        # Both under the limit: multipliers 0.9 and 0.8 -> (0.9+0.8)/2 = 0.85
+        result = self._run([1, 1], [0.1, 0.2])
+        self.assertAlmostEqual(result.score, 0.85)
 
 
 if __name__ == "__main__":
