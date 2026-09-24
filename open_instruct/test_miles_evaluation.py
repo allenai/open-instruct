@@ -200,6 +200,31 @@ def test_offline_and_failed_upload_preserve_results(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "publication.json").read_text())["status"] == "failed"
 
 
+def test_empty_provider_outputs_reject_apparently_successful_metrics(tmp_path):
+    (tmp_path / "metrics.json").write_text(
+        json.dumps({"tasks": [{"task": "ifeval_ood", "metrics": {"accuracy": {"exact": 0.0}}, "instances_failed": 0}]})
+    )
+    (tmp_path / "ifeval_ood-abc-predictions.jsonl").write_text(json.dumps({"doc_id": 0, "model_output": []}) + "\n")
+    with pytest.raises(ValueError, match="Missing model outputs"):
+        evaluation_runner.scores(tmp_path)
+
+
+def test_prediction_validation_accepts_a_returned_empty_completion(tmp_path):
+    # A real EOS-only completion is distinct from the provider returning no outputs.
+    (tmp_path / "gsm8k-abc-predictions.jsonl").write_text(
+        json.dumps({"doc_id": 0, "model_output": [{"text": ""}]}) + "\n"
+    )
+    evaluation_runner.validate_predictions(tmp_path)
+
+
+def test_prediction_validation_requires_nonempty_artifacts(tmp_path):
+    with pytest.raises(ValueError, match="No evaluation predictions"):
+        evaluation_runner.validate_predictions(tmp_path)
+    (tmp_path / "gsm8k-abc-predictions.jsonl").touch()
+    with pytest.raises(ValueError, match="Empty evaluation predictions"):
+        evaluation_runner.validate_predictions(tmp_path)
+
+
 def test_evaluator_command_keeps_task_overrides(run):
     config = run.evaluation
     tasks = copy.deepcopy(config["tasks"])

@@ -55,11 +55,29 @@ def command(receipt, output):
     return [*args, "--output-dir", str(output), "--save-predictions", "--save-requests"]
 
 
+def validate_predictions(output):
+    """Reject provider failures that the harness can encode as empty output lists."""
+    paths = list(Path(output).rglob("*-predictions.jsonl"))
+    if not paths:
+        raise ValueError("No evaluation predictions found")
+    for path in paths:
+        count = 0
+        with path.open() as stream:
+            for count, line in enumerate(stream, 1):
+                row = json.loads(line)
+                if not row.get("model_output"):
+                    raise ValueError(f"Missing model outputs in {path.name} row {count}; inspect evaluator logs")
+        if count == 0:
+            raise ValueError(f"Empty evaluation predictions: {path.name}")
+
+
 def scores(output):
     """Read the pinned olmo-eval metrics schema, without treating failures as zero."""
     files = list(Path(output).rglob("metrics.json"))
     if not files:
         raise ValueError("No olmo-eval metrics.json found")
+    if any(Path(output).rglob("*-predictions.jsonl")):
+        validate_predictions(output)
     values = {}
     for path in files:
         payload = json.loads(path.read_text())
@@ -204,6 +222,7 @@ def run_evaluation(receipt):
         write_json(output / "command.json", args)
         with (output / "olmo-eval.log").open("w") as log:
             subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=True)
+        validate_predictions(output)
         aggregate = scores(output)
         write_json(output / "scores.json", aggregate)
         write_json(output / "evaluation.json", {"status": "complete"})

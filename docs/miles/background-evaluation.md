@@ -90,6 +90,11 @@ copied to the evaluator's Beaker results: aggregate `scores.json`, olmo-eval
 `metrics.json`, predictions/requests, logs, command/configuration and provenance.
 A failed W&B upload writes `publication.json` and preserves these files.
 
+The runner rejects missing prediction files and empty `model_output` lists before
+declaring evaluation complete. Some evaluator provider failures can otherwise
+appear as zero scores with no failed-instance count. A returned EOS-only completion
+is distinct from a missing provider response and remains a valid scored output.
+
 ## W&B publication
 
 The publisher attaches to the exact main training run using W&B's documented
