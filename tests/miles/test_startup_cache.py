@@ -40,8 +40,22 @@ def test_explicit_worker_environment_preserves_existing_flags_and_separates_role
     assert train["worker_process_setup_hook"].endswith(".setup_worker")
     assert train["env_vars"][WORKER_PROCESS_SETUP_HOOK_ENV_VAR] == train["worker_process_setup_hook"]
     assert json.loads(train["env_vars"][startup.ENV])["slot"] != json.loads(serve["env_vars"][startup.ENV])["slot"]
+    assert train["env_vars"]["HF_MODULES_CACHE"] != serve["env_vars"]["HF_MODULES_CACHE"]
     args.olmo_core_startup_cache = None
-    assert startup.worker_runtime_env(args, "unused", {"X": "1"}) == {"env_vars": {"X": "1"}}
+    uncached = startup.worker_runtime_env(args, "unused", {"X": "1"})
+    assert uncached["env_vars"]["X"] == "1"
+    assert uncached["env_vars"]["HF_MODULES_CACHE"].startswith("/tmp/miles-hf-modules-")
+
+
+def test_serving_module_cache_is_private_even_without_compiler_cache():
+    args = SimpleNamespace(olmo_core_startup_cache=None)
+    original = {"HF_HOME": "/tmp/shared-models", "HF_MODULES_CACHE": "/tmp/old-shared-modules"}
+    spec = SimpleNamespace(env_var=lambda context: original)
+    first = startup._serving_environment(args, spec, None)
+    second = startup._serving_environment(args, spec, None)
+    assert first["HF_MODULES_CACHE"] != second["HF_MODULES_CACHE"]
+    assert first["HF_HOME"] == second["HF_HOME"] == original["HF_HOME"]
+    assert original["HF_MODULES_CACHE"] == "/tmp/old-shared-modules"
 
 
 def test_worker_restore_publish_and_rank_isolation(tmp_path, monkeypatch):

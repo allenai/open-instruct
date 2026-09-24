@@ -114,6 +114,7 @@ def prepare(args):
 def worker_runtime_env(args, slot, env_vars):
     """Explicit per-actor environment, independent of Ray cluster inheritance."""
     env_vars = dict(env_vars)
+    env_vars["HF_MODULES_CACHE"] = _private_hf_modules_cache()
     if "OI_MILES_JUDGE_REGISTRY" in os.environ:
         env_vars["OI_MILES_JUDGE_REGISTRY"] = os.environ["OI_MILES_JUDGE_REGISTRY"]
     policy = getattr(args, "olmo_core_startup_cache", None)
@@ -161,11 +162,19 @@ def _trainer_runtime_env(args, spec, context):
 
 def _serving_environment(args, spec, context):
     env = dict(spec.env_var(context))
+    env["HF_MODULES_CACHE"] = _private_hf_modules_cache()
     env["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
     if policy := getattr(args, "olmo_core_startup_cache", None):
         slot = f"{spec.name}-{context.cell_index}-{context.worker_in_cell_index}"
         env[ENV] = json.dumps({**policy, "slot": slot})
     return env
+
+
+def _private_hf_modules_cache():
+    # Transformers copies local checkpoint Python modules without an interprocess
+    # lock. Workers sharing HF_HOME can otherwise import a partially copied file.
+    # Only the small code cache is private; model/download caches remain shared.
+    return f"/tmp/miles-hf-modules-{uuid.uuid4().hex}"
 
 
 def _serving_command(spec, context):

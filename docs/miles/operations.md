@@ -130,6 +130,14 @@ behavior.
 
 ## Failure triage
 
+Trainer workers and serving engines use private `HF_MODULES_CACHE` directories
+under `/tmp`, independently of compiler-cache settings. Model/download caches
+remain shared. The serving parent loads the configuration and tokenizer before
+spawning SGLang children, so they read completed copies of checkpoint Python
+modules. Transformers' local custom-code cache copies are not atomic across
+processes; sharing a cold module cache can expose a partially written module
+during concurrent startup.
+
 For a publication stall, set `launch.env.OI_MILES_PUBLICATION_DIAGNOSTICS="1"`
 on a fresh run using an image containing this instrumentation. Trainer actors
 log connection, export, bucket synchronization, broadcast and engine-load progress,
