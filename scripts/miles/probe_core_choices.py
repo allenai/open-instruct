@@ -40,7 +40,11 @@ def serving_record(result, ids, prompt_length, *, forced):
         "output_ids": ids[start:],
         "logprobs": [v[0] for v in values[start:]],
         "top2": tops[start:],
-        "argmax_ids": [max(v, key=lambda x: x[0])[1] for v in tops[start:]],
+        # A top-k list does not preserve argmax tie-breaking. For generation,
+        # use the actual greedy token; forced scores retain the reported top-1
+        # representative and must treat equal top probabilities as ambiguous.
+        "argmax_ids": [max(v, key=lambda x: x[0])[1] for v in tops[start:]] if forced else ids,
+        "top2_tied": [v[0][0] == v[1][0] for v in tops[start:]],
     }
 
 

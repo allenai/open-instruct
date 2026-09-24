@@ -53,6 +53,194 @@ For an explicit opt-out, add:
 OLMO_SGLANG_CORE_COMPAT = "0"
 ```
 
+## Optimized serving versus a strict parity check
+
+**Use automatic fused rounding for normal RL rollouts on the qualified hero
+profile.** It restores the intended rounding and normalization while retaining
+fast kernels and decode graphs. Read the model's startup log to confirm that
+`auto` resolved to `rounding`; an unset flag alone does not establish which path
+ran. Keep Core as the training/scoring policy and monitor probability differences
+on the actual rollout tokens.
+
+A strict parity investigation has a different execution contract:
+
+| Path | What to compare | What agreement establishes |
+| --- | --- | --- |
+| Core versus HF conversion reference | Identical exported weights and token IDs; BF16 forward weights, FP32 router math; `OLMO_HF_MOE_CORE_REFERENCE=1`, matched Torch/SDPA attention (math SDPA for the strict converter), no cache, same sequence and batch shapes | A controlled conversion/forward oracle; the earlier short controls were exact |
+| Core versus SGLang `full` | Same full prefixes, Core Torch attention, TP1/EP1, disabled serving graphs | Closest available serving reference; earlier long-prefix selected scores differed by only about 3.5e-7 mean / 1.9e-6 maximum |
+| Core versus SGLang automatic `rounding` | Actual cached rollout scores and token choices, rescored by Core on those same prefixes | The practical training/serving discrepancy with the recommended fast implementation |
+
+The **pure parity path is the first row**, with every operator/backend and shape
+held fixed and the outputs checked explicitly. Neither flag alone promises
+bitwise equality on every workload. Use the
+[Core/HF fidelity diagnostic](../../scripts/miles/hero_core_fidelity.py) and its
+[recorded source/attention controls](measurements/hero-core-fidelity-20260923.md)
+when validating an export. `OLMO_HF_MOE_CORE_REFERENCE=1` does not alter SGLang,
+and enabling SGLang `full` does not turn cached generation into the same
+computation as a full-prefix Core forward.
+
+Use SGLang `full` to isolate a numerical discrepancy, not as the default RL
+recipe. On the earlier batch-four workload it cost approximately 6.5 times the
+generation time and only modestly improved cached-generation probability errors.
+The optimized mode recovered the arithmetic changes without the tensor-control
+slowdown. No measured learning-quality benefit yet justifies the full mode's
+cost.
+
+## Interpreting token and probability agreement
+
+Compare **Core versus SGLang within each checkpoint**. EMO and non-EMO have
+different weights and are not expected to produce identical answers. Their
+shared architecture does not imply the same sensitivity to arithmetic changes;
+the EMO-specific excess error has not been causally isolated.
+
+The existing 0.05 mean absolute log-probability gate is a bounded mechanics
+criterion, not a requirement that every token be close or that greedy choices
+match. The [paired four-update smoke](measurements/hero-rl-smoke-20260924.md)
+passed that mean criterion for both checkpoints, but its worst individual
+probability gaps were 0.734 nats (EMO) and 1.199 nats (non-EMO). It did not capture
+Core's argmax choices. A small average alone does not make those tails harmless.
+
+A greedy disagreement means the two systems prefer different next tokens on an
+identical prefix. Inspect the top-two margin: a near tie can flip with a tiny
+probability change, whereas a large margin calls for closer investigation.
+Once independently generated responses diverge, later prefixes differ too;
+response equality is a different question from same-prefix forward parity.
+Conversely, matching argmax tokens does not imply matching policy probabilities
+or identical stochastic samples. Do not infer full-distribution KL from selected
+token probabilities or just the top two alternatives.
+
+Core full-sequence teacher forcing and Core prefix-at-a-time forwards also use
+different matrix shapes. Retain both when diagnosing serving differences:
+causal prefixes match semantically, while finite-precision execution can still
+differ. A cached serving/full-sequence scoring discrepancy is not, by itself,
+evidence of a cache implementation bug.
+
+## Same-prefix greedy probe — September 24, 2026
+
+The [bounded inference run](https://beaker.org/ex/01M391832GK9QPG5XS39SBFX07)
+completed successfully on one H100 80GB. Each checkpoint/mode generated 64 greedy
+tokens for each of four frozen real RL prompts (math, code, instruction following,
+general; prompt lengths 161, 167, 156 and 113), one request at a time. Each prompt
+received an equal-length warm-up. Timing excludes model loading, warm-up and Core
+scoring; it includes returning selected-token and top-two probabilities. This is
+256 measured generated positions per row, not an answer-quality evaluation.
+
+**Neither serving mode gives 100% cached-generation agreement with Core.** Here
+Core recomputes each same prefix separately without a cache; agreement compares
+its argmax with the token SGLang actually generated. Probability differences are
+absolute natural-log differences for that generated token.
+
+| Checkpoint | Serving mode | Same next token | Mean log-prob difference | Max difference | Warm tok/s | Seconds / 256 tokens |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| EMO SFT | Automatic fused rounding | 251/256 (98.05%) | 0.025563 | 0.380364 | 258.9 | 0.989 |
+| EMO SFT | Full reference | 253/256 (98.83%) | 0.020367 | 0.644444 | 34.7 | 7.383 |
+| Non-EMO SFT | Automatic fused rounding | 252/256 (98.44%) | 0.019451 | 0.186106 | 264.3 | 0.969 |
+| Non-EMO SFT | Full reference | 255/256 (99.61%) | 0.015440 | 0.208349 | 34.9 | 7.325 |
+
+All four means are below 0.05, but that does not establish identical decisions.
+The full reference costs 7.47×/7.56× the generation time here. These are short,
+single-request estimates, not replacements for the longer batched benchmark
+below. Modes can generate different continuations, so their cached error columns
+do not isolate arithmetic on a common trajectory.
+
+The optimized EMO disagreements all select Core's second-ranked token; Core's
+preferred token leads by 0.125–0.375 nats. Non-EMO has three second-choice
+selections with margins 0.0625–0.125 and one exact tie under Core. Full reference
+has two strict EMO disagreements and one Core tie, plus one strict non-EMO
+disagreement. Its largest EMO disagreement selects a token ranked fifth under
+Core, 1.125 nats behind Core's favorite. Thus the remaining differences are
+**not all tie-breaking**, and the slower mode does not uniformly eliminate tails.
+Whether they matter to RL learning remains unmeasured.
+
+On the optimized trajectories, the first Core/SGLang token-choice disagreement
+occurs at response position 17 for both checkpoints (EMO math; a Core tie on
+non-EMO instruction following), counting from one. The first strict non-EMO
+disagreement is at position 38 on the code prompt.
+The four-prompt probe does not independently generate complete Core responses:
+Core keeps receiving the retained SGLang prefix after a disagreement. Across
+serving modes themselves, two of four 64-token continuations match exactly for
+each checkpoint; the other two begin diverging at positions 30/62 for EMO and
+17/38 for non-EMO. Those are within-checkpoint comparisons.
+
+### Full-sequence control
+
+Both serving modes also rescore the **same optimized continuations** as complete
+input sequences. Compare these input-token probabilities with one complete
+Core forward, with matching sequence lengths:
+
+| Checkpoint | Optimized mean difference | Full-reference mean difference | Full-reference maximum |
+| --- | ---: | ---: | ---: |
+| EMO SFT | 0.019569 | 4.20e-7 | 1.32e-6 |
+| Non-EMO SFT | 0.017857 | 4.10e-7 | 1.08e-6 |
+
+This near-exact full-sequence result is the useful numerical baseline. It does
+not describe cached generation. Even Core changes its argmax at 1/256 EMO and
+2/256 non-EMO positions when switching from full-sequence scoring to separate
+prefix forwards on this cohort. Comparing full-reference input scoring with
+those separate Core prefixes gives means 0.012154 and 0.008261. This demonstrates
+shape-dependent arithmetic; it does not isolate every remaining cached-decoding
+kernel difference.
+
+For continuity with earlier teacher-forced rollout measurements, cached scores
+versus **full-sequence** Core give means 0.022699/0.020174 (EMO optimized/full)
+and 0.019286/0.016229 (non-EMO optimized/full), with actual greedy-token agreement
+252/253 and 254/255 out of 256 respectively. Keep this scorer definition distinct
+from the prefix-at-a-time table above.
+
+### Artifacts and reproduction
+
+The [machine-readable summary](measurements/core-token-choices-20260924.json)
+retains disagreement token IDs and positions, top-two probabilities, Core ranks
+and margins, engine settings, source pins and timings. Raw artifacts are Beaker
+result dataset `01M391832WNY710ATQJ8QTT5MM`: `samples.json`, both modes' serving
+JSON, both Core scorer outputs, checkpoint config/source digests and logs.
+The two checkpoints are the corrected-tokenizer 4T Dolci Think step5402 exports
+in the [checkpoint audit](measurements/hero-sft-20260923.md).
+
+Runtime image `01M38YYQFVP5EBXRG9D83RW3CQ` contains application `d5b60f2ebbd2`,
+Core `e505356`, olmo-sglang `5514bf5` and SGLang `3145136`. The job overlaid only
+committed diagnostic `37c7ef386`; it did not replace runtime model code.
+[`probe_core_choices.py`](../../scripts/miles/probe_core_choices.py) runs serving
+and scoring in separate processes, with BF16 weights, TP1/EP1, Triton attention,
+no radix reuse or overlap, eager prefill, and full decode graphs only for `auto`.
+Core uses its Torch attention backend. No training or weight update occurs.
+
+The original diagnostic's `CHOICES` log lines used the first reported top-two
+entry, which can differ from the actual greedy token on exact ties. The summary
+recomputes cached agreement from retained `output_ids`; do not use those raw
+log counts as generated-token agreement. The current diagnostic fixes this
+reporting issue. Forced-score choice fields still denote a reported top-one
+representative, with ties ambiguous; the full-sequence table above reports
+probabilities rather than claiming a separately generated token sequence.
+
+To regenerate the summary:
+
+```bash
+beaker dataset fetch 01M391832WNY710ATQJ8QTT5MM -o runs/core-choices/results
+python scripts/miles/summarize_core_choices.py \
+  runs/core-choices/results runs/core-choices/summary.json \
+  --experiment 01M391832GK9QPG5XS39SBFX07 \
+  --result-dataset 01M391832WNY710ATQJ8QTT5MM
+```
+
+The local RTX 4090 was usable: a BF16 CUDA operation passed outside the agent
+sandbox. After CUDA initialization it had 23.02 GiB free, while hero BF16
+weights alone require approximately 23.28 GiB, before activations and serving
+caches. That memory constraint, not an absent GPU, motivated the H100 run.
+
+### Historical Open Instruct comparison
+
+The older `grpo.py` Core/vLLM trainer records mean, maximum and standard deviation
+of absolute trainer/rollout log-probability gaps through
+[`compute_vllm_local_debug_metrics`](../../open_instruct/grpo_utils.py).
+A verified numerical baseline for that particular backend pair was not recovered
+in this investigation. The retained [dense Olmo 3 framework comparison](measurements/gsm8k-dense-test-20260916.md)
+reports approximately 0.01 mean gaps for both **HF/DeepSpeed + vLLM** and
+**MILES/Core + SGLang**; it is not a Core/vLLM result or a matched hero comparison.
+The old metric uses the current trainer forward against stored rollout scores,
+so asynchronous policy lag or intervening updates can contribute. An unchanged-
+weight, same-prefix comparison is needed to isolate numerical drift.
+
 ## Why this default
 
 Fused rounding restores Core's BF16 SiLU and down-projection boundaries, followed

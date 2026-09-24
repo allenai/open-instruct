@@ -38,3 +38,10 @@ def test_equal_chosen_probabilities_do_not_imply_same_argmax():
     report = probe.comparison(actual, core)
     assert report["argmax_disagreements"] == [1]
     assert report["logprobs"]["max_abs"] == 0
+
+
+def test_cached_greedy_uses_actual_token_when_topk_order_breaks_ties_differently():
+    result = {"meta_info": {"output_token_logprobs": [[-0.7, 10]], "output_top_logprobs": [[[-0.7, 20], [-0.7, 10]]]}}
+    record = probe.serving_record(result, [10], 2, forced=False)
+    assert record["argmax_ids"] == [10]
+    assert record["top2_tied"] == [True]
