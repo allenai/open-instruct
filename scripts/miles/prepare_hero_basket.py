@@ -14,14 +14,33 @@ from scripts.miles import prepare_baseline_basket, prepare_olmo3_basket
 from open_instruct.miles import run_data, workflow
 from open_instruct.miles.run_spec import RunSpec
 
+BASELINE_PROVENANCE = (
+    Path(__file__).resolve().parents[2] / "docs/miles/measurements/full-sft-basket-20260914/preparation.json"
+)
+
 
 def prompt_map(tokenizer, inputs):
     path = prepare_baseline_basket.MANIFEST
     manifest = run_data._read_json_object(path, inputs)
     options = manifest["miles"]
-    descriptor = options["chat_template"]
-    template = run_data._read(path.parent / descriptor["path"], inputs)
-    if run_data._sha(template) != descriptor["sha256"]:
+    descriptor = options.get("chat_template")
+    original_tokenizer = tokenizer
+    if descriptor is None:
+        # The original adoption workflow used its policy tokenizer when the
+        # manifest omitted a template. Reconstruct that historical rendering,
+        # not a rendering under the new hero's template or special tokens.
+        baseline = run_data._read_json_object(BASELINE_PROVENANCE, inputs)
+        source = Path(baseline["model"]["source"])
+        original_tokenizer = run_data._tokenizer(source)
+        template = original_tokenizer.chat_template.encode()
+        expected = baseline["template_sha256"]
+        for name in ("tokenizer_config.json", "chat_template.jinja"):
+            if (source / name).is_file():
+                run_data._read(source / name, inputs)
+    else:
+        template = run_data._read(path.parent / descriptor["path"], inputs)
+        expected = descriptor["sha256"]
+    if run_data._sha(template) != expected:
         raise ValueError("Original chat template hash mismatch")
     mapping = {}
     for artifact in manifest["artifacts"].values():
@@ -33,7 +52,7 @@ def prompt_map(tokenizer, inputs):
             raise ValueError("Canonical source count mismatch")
         for row in rows:
             messages = run_data._messages({"messages": row[options["input_key"]]}, strip_answer=False)
-            old = run_data._render(messages, tokenizer, template.decode())
+            old = run_data._render(messages, original_tokenizer, template.decode())
             new = run_data._render(messages, tokenizer, tokenizer.chat_template)
             if old in mapping and mapping[old] != new:
                 raise ValueError("Ambiguous canonical messages for frozen prompt")

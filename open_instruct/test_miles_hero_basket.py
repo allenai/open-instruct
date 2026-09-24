@@ -47,3 +47,35 @@ def test_hero_prompt_map_rejects_changed_sources(manifest, name):
     (path.parent / name).write_text("changed")
     with pytest.raises(ValueError, match="hash mismatch"):
         prepare_hero_basket.prompt_map(Tokenizer(), {})
+
+
+@pytest.mark.parametrize("omitted", (False, True))
+@pytest.mark.parametrize("changed", (False, True))
+def test_missing_manifest_template_uses_verified_original_policy(manifest, monkeypatch, omitted, changed):
+    path, messages = manifest
+    payload = json.loads(path.read_text())
+    if omitted:
+        payload["miles"].pop("chat_template")
+    else:
+        payload["miles"]["chat_template"] = None
+    path.write_text(json.dumps(payload))
+    original = Tokenizer()
+    original.chat_template = "changed" if changed else "original"
+    source = path.parent / "original-policy"
+    provenance = path.parent / "preparation.json"
+    provenance.write_text(
+        json.dumps({"model": {"source": str(source)}, "template_sha256": run_data._sha(b"original")})
+    )
+    monkeypatch.setattr(prepare_hero_basket, "BASELINE_PROVENANCE", provenance)
+
+    def load_tokenizer(actual):
+        assert actual == source
+        return original
+
+    monkeypatch.setattr(run_data, "_tokenizer", load_tokenizer)
+    if changed:
+        with pytest.raises(ValueError, match="template hash mismatch"):
+            prepare_hero_basket.prompt_map(Tokenizer(), {})
+    else:
+        result = prepare_hero_basket.prompt_map(Tokenizer(), {})
+        assert result == {"original" + json.dumps(messages): "hero" + json.dumps(messages)}
