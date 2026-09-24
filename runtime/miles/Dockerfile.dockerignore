@@ -34,4 +34,3 @@ scripts/miles/learning_probe_screen.py
 scripts/miles/core_checkpoint_stream.py
 scripts/miles/gsm8k_test_eval.py
 scripts/miles/original_baseline.py
-scripts/miles/prepare_judge_exercise.py

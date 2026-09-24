@@ -216,6 +216,7 @@ structured run, omit `async.async_max_concurrent_samples` to use the existing
 automatic bound: the larger of one rollout collection and two waves of serving
 slots, rounded to whole prompt groups. Measure trainer wait and serving occupancy
 before increasing that budget: more queued work does not add inference capacity.
+
 ## Bounded wall-clock runs
 
 Set `core.max_run_seconds` to a positive number to finish at a completed collection
