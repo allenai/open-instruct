@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Hero long-run startup investigation](hero-long-startup-20260924.md) | Publication timeout, partial Python-module cache reproduction and fix, evaluator execution fixes; long-run qualification pending |
 | [Hero SFT end-to-end MILES smoke](hero-rl-smoke-20260924.md) | Paired H100 four-update barrier checks, automatic fused rounding, nonzero gradients and exact publication |
 | [Multi-node automatic resume](multinode-resume-20260922.md) | Two replicas interrupted and restarted into the same run directory; rollout cursor continues, no update repeated or skipped |
 | [Lessons from retired integration branches](retired-branch-lessons-20260921.md) | Checkpoint lifecycle, architecture preservation, packing/replay contracts, evaluation discipline, and local archive provenance |
