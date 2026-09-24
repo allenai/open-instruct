@@ -49,6 +49,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
@@ -61,6 +62,7 @@ from datasets import Dataset, concatenate_datasets, load_dataset
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
+from tokenizers import Tokenizer
 from transformers import GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
@@ -859,6 +861,112 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     return tokenizer
 
 
+# ----------------------------------------------------------------------------
+# Reserved-slot token promotion
+
+RESERVED_SLOT_RE = re.compile(r"<\|extra_id_\d+\|>")
+"""Vocabulary entries the Olmo tokenizers set aside unused, for later use."""
+
+
+@dataclass(frozen=True)
+class PromotedToken:
+    """A string made into a single token by taking over an unused reserved vocabulary slot."""
+
+    content: str
+    token_id: int
+    source_ids: tuple[int, ...]
+    """The ids `content` tokenized into before promotion, to initialize its embedding row from."""
+
+
+def promote_tokens_into_reserved_slots(tokenizer: PreTrainedTokenizer, tokens: Sequence[str]) -> list[PromotedToken]:
+    """Make each of `tokens` a single token by renaming an unused reserved slot in place.
+
+    A multi-token tag is unreachable at inference whenever its last piece merges with the text
+    that follows it. `<think>` is `<th` `ink` `>`, and the Olmo BPE merges that `>` with what
+    comes next: a newline gives `>Ċ`, a blank line gives `>ĊĊ`, and `></` is one token. A
+    generation prompt ending in `<think>` therefore leaves the model in a state it was never
+    trained to continue from for any turn whose reasoning starts on the next line, or whose
+    think block is empty -- 27% of Dolci-Think traces and every Instruct turn under the olmo35
+    template. Promotion removes the merge: an added token is split out before BPE runs, under
+    either pre-tokenizer the same vocabulary may be loaded with
+    (https://github.com/allenai/open-instruct/issues/1896).
+
+    Renaming a reserved slot rather than appending keeps `vocab_size` and olmo-core's
+    `padded_vocab_size()` unchanged, so no checkpoint is resized and no embedding matrix changes
+    shape. This follows the precedent of `<functions>`/`<function_calls>`, which hold
+    `<|extra_id_1|>`..`<|extra_id_4|>`'s ids in `olmo-3-tokenizer-instruct-dev`.
+
+    The promoted tokens are deliberately *not* marked special: `skip_special_tokens=True` is the
+    default for vLLM detokenization, and the verifiers in `ground_truth_utils` split decoded
+    rollouts on a literal `</think>`.
+
+    Strings already registered as added tokens -- promoted earlier, or native to the tokenizer --
+    are skipped, so this is idempotent. A string that is one *ordinary* BPE token raises: it can
+    still merge with what follows it (`>` is one token, and so is `>\n`), and renaming a slot
+    would leave its trained id in use. Returns what it promoted, lowest slot id first.
+    """
+    added = set(tokenizer.get_added_vocab())
+    pending = []
+    for token in tokens:
+        if token in added:
+            continue
+        if len(tokenizer.encode(token, add_special_tokens=False)) == 1:
+            raise ValueError(
+                f"{token!r} is already one ordinary BPE token, which can still merge with what follows it; "
+                "--reserved_slot_tokens only makes multi-token strings atomic"
+            )
+        pending.append(token)
+    if not pending:
+        return []
+    source_ids = {token: tuple(tokenizer.encode(token, add_special_tokens=False)) for token in pending}
+
+    spec = json.loads(tokenizer.backend_tokenizer.to_str())
+    vocab = spec["model"]["vocab"]
+    # A slot already referenced by the chat template is load-bearing, whatever it is named.
+    # str() because a tokenizer may carry a dict of named templates rather than one string.
+    template = str(tokenizer.chat_template or "")
+    in_use = set(tokenizer.all_special_tokens) | set(RESERVED_SLOT_RE.findall(template))
+    free = [
+        entry
+        for entry in sorted(spec["added_tokens"], key=lambda entry: entry["id"])
+        if RESERVED_SLOT_RE.fullmatch(entry["content"]) and entry["content"] not in in_use
+    ]
+    if len(free) < len(pending):
+        raise ValueError(
+            f"Cannot promote {pending} in {tokenizer.name_or_path}: it has {len(free)} unused reserved "
+            f"slots but {len(pending)} are needed. Appending to the vocabulary instead would change "
+            "vocab_size, which resizes every checkpoint's embedding matrix and breaks the equality "
+            "olmo-core's padded_vocab_size() reload path depends on."
+        )
+
+    vocab_size_before, length_before = tokenizer.vocab_size, len(tokenizer)
+    promoted = []
+    for entry, content in zip(free, pending):
+        # The reserved token is usually in the BPE vocab as well as in added_tokens; rename it
+        # there too so the two agree on which id the slot holds.
+        slot_id = vocab.pop(entry["content"], None)
+        if slot_id is not None:
+            vocab[content] = slot_id
+        entry.update(content=content, special=False, normalized=False, lstrip=False, rstrip=False, single_word=False)
+        promoted.append(PromotedToken(content=content, token_id=entry["id"], source_ids=source_ids[content]))
+    tokenizer._tokenizer = Tokenizer.from_str(json.dumps(spec))
+
+    if (tokenizer.vocab_size, len(tokenizer)) != (vocab_size_before, length_before):
+        raise RuntimeError(
+            f"Promoting {pending} changed the vocabulary size from "
+            f"{(vocab_size_before, length_before)} to {(tokenizer.vocab_size, len(tokenizer))}; it must "
+            "only rename slots in place."
+        )
+    for token in promoted:
+        encoded = tokenizer.encode(token.content, add_special_tokens=False)
+        if encoded != [token.token_id]:
+            raise RuntimeError(
+                f"Promoted {token.content!r} into slot {token.token_id} but it still encodes to {encoded}."
+            )
+    logger.info(f"Promoted into reserved vocabulary slots: {[(t.content, t.token_id) for t in promoted]}")
+    return promoted
+
+
 GET_TOKENIZER_FN = {
     "get_tokenizer_simple_v1": get_tokenizer_simple_v1,
     "get_tokenizer_tulu_v1": get_tokenizer_tulu_v1,  # old version, see https://github.com/allenai/open-instruct/pull/570
@@ -883,6 +991,12 @@ class TokenizerConfig:
     )
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
+    reserved_slot_tokens: list[str] | None = None
+    """Strings to make single tokens by renaming unused `<|extra_id_N|>` reserved vocabulary
+    entries in place, e.g. `--reserved_slot_tokens '<think>' '</think>'`. Leaving this unset
+    keeps the historical tokenization, and keeps the dataset cache key unchanged. See
+    `promote_tokens_into_reserved_slots` for why a multi-token tag is a training/inference
+    mismatch: https://github.com/allenai/open-instruct/issues/1869"""
 
     # for tracking purposes
     tokenizer_files_hash: list[str] | None = None
@@ -907,6 +1021,12 @@ class TokenizerConfig:
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
         tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        # After the getter, so the chat template is set and can be scanned for slots it uses.
+        tokenizer.promoted_reserved_slot_tokens = (
+            promote_tokens_into_reserved_slots(tokenizer, self.reserved_slot_tokens)
+            if self.reserved_slot_tokens
+            else []
+        )
         # Hash the tokenizer files only after loading the tokenizer: the hash
         # helper only looks in the local HF cache, so on a fresh machine the
         # files are present only after from_pretrained has downloaded them.
