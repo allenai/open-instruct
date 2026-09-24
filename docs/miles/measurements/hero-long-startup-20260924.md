@@ -110,6 +110,36 @@ publication is active. The retries enable NCCL `INFO` logging for `INIT,NET`.
 See [operations](../operations.md#failure-triage). The longer deadline is an
 investigation allowance, not a claimed fix.
 
+### Scale versus regression audit
+
+Comparing the successful hero smoke application revision `d5b60f2ebbd2` with
+the first failed long-run revision `999a9a08c455` shows no changes to `actor.py`,
+`publication.py`, `models.py` or `moe_models.py`. The driver's changes add graceful
+run deadlines and final save/export/evaluation handling; its initial-publication
+path is unchanged. Core, olmo-sglang and the runtime base image retain the same
+pins. MILES moved from `cd0cbe5cc08d` to `19393c0672c3`: runtime changes concern
+rollout capture sampling, with no transfer implementation changes. The later
+publication logging and Python-module cache fixes postdate the first failure.
+
+The experiments nevertheless change several relevant conditions together:
+one H100 node / one engine / barrier publication becomes three B300 nodes /
+nineteen engines / refresh publication, with larger serving allocations.
+Barrier mode did not enforce the refresh deadline, but the hero smoke's measured
+initial transfers were about five seconds, so its success was not simply due to
+waiting longer than 180 seconds. Tiny-model refresh passed on both GPU types in
+the [September 23 checks](refresh-sanity-20260923.md). An older checkpoint and
+runtime completed 100 updates with cross-node publication to eight engines in
+the [September 12 run](two-node-async-gsm8k-20260912.md); that run's earlier
+publication-boundary timeout was producer cancellation, a different failure.
+
+This is the first recorded occurrence of the specific hero initial-transfer
+stall in the reviewed evidence. Topology/transport at scale is a plausible
+suspect, not an isolated cause. The three-node instrumented retry remains queued;
+there is no successful current-runtime hero EP4/refresh/multi-node control yet.
+A subsequent reproduction should preserve the phase and conditions identified by
+its traces, rather than assume that an additional one-engine smoke rules out a
+nineteen-engine or inter-node problem.
+
 ## A distinct Python-module cache race
 
 In the instrumented retry, one engine on node `10.93.1.244`, physical GPU 5,
