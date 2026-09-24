@@ -17,6 +17,9 @@ OLMO_SGLANG_CORE_COMPAT = "1"
 rollout_tensor_parallel_size = 1
 sglang_cuda_graph_backend_decode = "disabled"
 sglang_cuda_graph_backend_prefill = "disabled"
+
+[core]
+attention_backend = "torch"
 ```
 
 Merge the keys into existing tables rather than defining duplicate TOML tables.
@@ -24,6 +27,11 @@ Use the usual [MILES plan, validate and launch workflow](launching.md). The
 trainer continues to use Core. This mode currently requires unquantized BF16,
 TP1/EP1 serving and bias-free, no-RoPE full/KDA attention. Other geometries,
 speculative decoding and CUDA graphs are rejected explicitly.
+
+The numerical reference uses Core's Torch attention backend. Remove a conflicting
+`trainer_flash_attention_version` override when using this recipe. This does not
+claim exact agreement with the historical SFT run's Flash4 attention or distributed
+expert execution; other trainer backends need a separate comparison.
 
 ## What changes
 
