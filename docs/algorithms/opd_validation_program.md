@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-24 00:38Z (was 2026-09-22 19:53Z; details in the latest Log entries).
+Updated 2026-09-24 01:16Z (was 2026-09-24 00:38Z; details in the latest Log entries).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification `01M335TSWA8MTK1YAEZF0CXJEE` passed, including audit/export reload. The matched 100-update arm `01M338D7FBJYJX6YWJ0NX5RA03` is submitted with automatic resume. See the latest Log entry.
 
@@ -1606,3 +1606,8 @@ lower; it does not affect the per-token statistics above.
 - Team W&B report restructured in place (draft, same report ID `VmlldzoxNzk5NTU0OA==`, now titled "Qwen3.5 OPD: Open Instruct vs Miles, sync vs async"). The sections are: 2B OI vs Miles training curves; greedy held-out evals over training (2B and 4B); 4B OI vs Miles; speed (2B and 4B); the Miles paper-baseline reproduction (`2zs3yb46` + `c4four8o`, `7csinhqe`); and a collapsed diagnostics section. There is a code and branch header at the top. Dropped the buggy first fixed-batch run `j9isunya` and the phase-1 recipe runs. Builder: `~/repos/opd-campaign-scratch/wandb-report/build_report.py`.
 - Logged 10 CPU-only W&B summary runs (group `posthoc-greedy-curves`, job_type `report-summary`) that copy the existing greedy post-hoc eval scores so the report can chart them against the checkpoint step: `wylbki5v` (2B OI sync), `5q34g1z1` (2B Miles sync), `9rjx5gr6` (2B Miles async), `m215s9at` (2B OI canonical async), `sxo7obqb` (2B OI fixed-depth), `cn93vdyy` (2B teacher), `kdosiiwh` (4B OI sync), `sq6nhdgo` (4B Miles sync), `navlrj6u` (4B OI canonical async), `0muqrlm8` (4B teacher). Each run's config lists its source eval runs. Script: `~/repos/opd-campaign-scratch/wandb-report/log_greedy_curves.py`. No GPU compute.
 - New 4B timing medians over 79 matched ordinary updates: OI async-4 28.3 s per update (trainer wait 0.1 s), OI sync 151.8 s (89.7 s wait), Miles sync 789.5 s (704.7 s wait, 89 %).
+
+### 2026-09-24T01:16:20Z
+
+- Team W&B report: added a headline section under the findings. It overlays both stacks on one optimizer-update axis: in-run DAPO accuracy and training-batch truncation at 2B and 4B. It also has an in-run DAPO table and a note on where the 2B Open Instruct async crash shows and where it doesn't. The crash is visible in in-run evals at step 20 (both async runs) and step 100 (canonical), in truncation spikes around steps 15-25 and 90-100, and in reverse KL staying at 0.02-0.07 vs 0.0005 for sync. It doesn't show at in-run evals over steps 40-80, in the greedy points (no step-20 greedy eval; step 80 was 49.80), at 4B, or in Miles. Greedy section caveat added. Kevin chose the report-only option: no new greedy evals of canonical checkpoints at steps 20/40/60.
+- Logged 8 more CPU-only W&B summary runs (group `headline-inrun-curves`) copying in-run DAPO and `val/truncated_completion_fraction` / `rollout/truncated` onto optimizer updates: `vsc02yfp`, `oa780tpl`, `823lyuaa`, `2dcxvzno`, `klyl6csv` (2B), and `ig9u5qvw`, `m8rxa8tf`, `xvwoex6w` (4B). Mapping: Miles `eval/step` ending in 9 goes to N+1, while eval 0 and resume re-evals stay at N; Miles `rollout/step` N goes to update N+1. Script: `~/repos/opd-campaign-scratch/wandb-report/log_headline_curves.py`.
