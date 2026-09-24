@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-22 19:53Z (was 2026-09-22 00:32Z; details in the latest Log entries).
+Updated 2026-09-24 00:38Z (was 2026-09-22 19:53Z; details in the latest Log entries).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification `01M335TSWA8MTK1YAEZF0CXJEE` passed, including audit/export reload. The matched 100-update arm `01M338D7FBJYJX6YWJ0NX5RA03` is submitted with automatic resume. See the latest Log entry.
 
@@ -1600,3 +1600,9 @@ lower; it does not affect the per-token statistics above.
 
 - Committed and pushed Ray leader repair `f86ce3f4a`. The script now selects the Ray head by matching the resolved `BEAKER_LEADER_REPLICA_HOSTNAME` against local IPs, and binds that IP explicitly; synthetic head/worker routing checks and `bash -n` passed. `make quality` still reports existing `data_loader.py` PLC0415/B023 failures unrelated to this shell/docs change. Uploaded the versioned one-file patch as Beaker dataset `01M37S3SKAEN9YYM76C9ABBJ3B`.
 - Submitted corrected four-replica 100-update drain ablation [01M37S6JTCVD2Q8F3RDDYD0DTB](https://beaker.org/ex/01M37S6JTCVD2Q8F3RDDYD0DTB), run `opd2b_depth4_drain2_lr1e6_100step_4node_20260923_184111`, W&B ID `901d0f96`, with fresh output and checkpoint-state paths. Learning config is unchanged from failed drain ablation: Qwen3.5-2B, fixed prompt batches, `async_steps=4`, `inflight_updates=false`, 16K responses, DPPO, LR1e-6, seed42. Four jobs were created and queued at submission; scheduler events currently only say `Created`.
+
+### 2026-09-24T00:38:05Z
+
+- Team W&B report restructured in place (draft, same report ID `VmlldzoxNzk5NTU0OA==`, now titled "Qwen3.5 OPD: Open Instruct vs Miles, sync vs async"). The sections are: 2B OI vs Miles training curves; greedy held-out evals over training (2B and 4B); 4B OI vs Miles; speed (2B and 4B); the Miles paper-baseline reproduction (`2zs3yb46` + `c4four8o`, `7csinhqe`); and a collapsed diagnostics section. There is a code and branch header at the top. Dropped the buggy first fixed-batch run `j9isunya` and the phase-1 recipe runs. Builder: `~/repos/opd-campaign-scratch/wandb-report/build_report.py`.
+- Logged 10 CPU-only W&B summary runs (group `posthoc-greedy-curves`, job_type `report-summary`) that copy the existing greedy post-hoc eval scores so the report can chart them against the checkpoint step: `wylbki5v` (2B OI sync), `5q34g1z1` (2B Miles sync), `9rjx5gr6` (2B Miles async), `m215s9at` (2B OI canonical async), `sxo7obqb` (2B OI fixed-depth), `cn93vdyy` (2B teacher), `kdosiiwh` (4B OI sync), `sq6nhdgo` (4B Miles sync), `navlrj6u` (4B OI canonical async), `0muqrlm8` (4B teacher). Each run's config lists its source eval runs. Script: `~/repos/opd-campaign-scratch/wandb-report/log_greedy_curves.py`. No GPU compute.
+- New 4B timing medians over 79 matched ordinary updates: OI async-4 28.3 s per update (trainer wait 0.1 s), OI sync 151.8 s (89.7 s wait), Miles sync 789.5 s (704.7 s wait, 89 %).
