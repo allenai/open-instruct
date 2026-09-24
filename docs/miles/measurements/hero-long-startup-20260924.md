@@ -53,16 +53,24 @@ roots under `/weka/oe-training-default/robertb/open-instruct/runs/`.
 ## Publication timing remains unresolved
 
 The inference engines first load the HF checkpoint from storage and complete
-serving startup. The trainer then independently loads that checkpoint and builds
-the Core training representation. Before admitting training rollouts, the driver
-publishes the trainer's current weights through the same transport used after
-updates. Thus the initial publication updates already-populated engines; it is
-not their initial checkpoint load. This also makes restored trainer state
-authoritative when resuming. This run enables `check_weight_update_equal`, so a
-fresh run compares the published weights against the initial serving snapshot
-before proceeding. The failed attempt did not complete publication or reach
-that comparison. See `open_instruct/miles/driver.py:train` and
-`open_instruct/miles/models.py:build_train_module`.
+serving startup. This run enables `check_weight_update_equal`: MILES saves a CPU
+snapshot of the loaded engine tensors, then deliberately replaces the checked
+tensors with random values. Nonpersistent buffers and explicitly excluded tensors
+are skipped consistently by reset and comparison. The failed run's logs confirm
+both `snapshot` and `reset_tensors` actions before trainer publication.
+
+The trainer independently loads the checkpoint and builds the Core training
+representation. Before admitting training rollouts, the driver publishes the
+trainer's current weights through the same transport used after updates, then
+compares them against the initial serving snapshot. Resetting prevents an omitted
+tensor from passing just because its original HF value remained intact. Thus the
+engines do initially load HF weights, but in this checked configuration they
+require the trainer publication to restore valid serving weights. Publication
+also makes restored trainer state authoritative when resuming. The failed attempt
+did not complete publication or reach comparison. See
+`open_instruct/miles/driver.py:train`,
+`open_instruct/miles/models.py:build_train_module`, and the pinned MILES
+`miles/ray/rollout/server_cell.py:_tick_when_initializing`.
 
 All timestamps in this table are UTC on September 24:
 
