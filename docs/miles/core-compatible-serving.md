@@ -81,3 +81,24 @@ costing about 6.5–6.6× the generation time of ordinary graph-enabled serving.
 it as an experimental numerical-reference option; the measurement does not
 justify enabling it by default for RL. The qualified immutable image is
 `01M38F6YS8W767GHG7WSW5EX1W` (application `4d9d46a95`, serving `c33ed68`).
+
+## Graph-compatible rounding and norms
+
+Set `OLMO_SGLANG_CORE_COMPAT = "rounding"` in `[launch.env]` to opt into the
+intermediate arithmetic mode. Set `sglang_cuda_graph_backend_decode = "full"`
+and retain disabled prefill graphs in `[inference]`. Use unquantized BF16,
+TP1/EP1 and the Triton MoE backend. This mode retains ordinary attention,
+KDA dispatch and expert weight layouts; it changes BF16 activation/down-output
+rounding, FP32 expert combination and RMS norms. The existing `1`/`full` mode
+continues to select the eager reference. Neither mode is enabled by default.
+
+The workload benchmark accepts `--mode rounding_graphs` and `--mode rounding`
+for paired graph/eager checks. Qualify the actual graph replay, cached rollouts
+and weight refresh before selecting this experimental mode for RL.
+
+The [graph-compatible workload measurement](measurements/graph-compatible-rounding-20260923.md)
+passed 75 GPU tests and the cache/weight-refresh exercise. Graph and eager rounding
+produced identical measured tokens and probabilities. Compared with default
+graphs, rounding with graphs lost 24–25% throughput, with small, mixed mean
+rollout-error changes. This does not justify enabling it by default. The qualified
+image is `01M38HZ1ZXZHQFXBQRTXV23J3M` (application `daeee120f`, serving `ca852b8`).
