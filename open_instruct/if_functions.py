@@ -233,8 +233,12 @@ def verify_sentence_constraint(text: str, N: int, quantifier: str) -> bool:
     # Split the text into sentences
     sentences = re.split(r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|!)\s", text)
 
-    # Count the number of sentences
-    actual_count = len(sentences)
+    # Count the number of sentences, ignoring empty fragments left by a trailing
+    # sentence terminator + whitespace (e.g. "One sentence. " splits into
+    # ["One sentence.", ""]). Without this a compliant response that ends with a
+    # newline or space is counted as having one extra sentence. This mirrors
+    # verify_paragraph_count, which already filters empty splits the same way.
+    actual_count = len([s for s in sentences if s.strip()])
 
     # Check if the actual count matches the expected count based on the quantifier
     if quantifier == "at least":
