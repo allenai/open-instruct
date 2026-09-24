@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-24 01:16Z (was 2026-09-24 00:38Z; details in the latest Log entries).
+Updated 2026-09-24 01:29Z (was 2026-09-24 01:16Z; details in the latest Log entries).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification `01M335TSWA8MTK1YAEZF0CXJEE` passed, including audit/export reload. The matched 100-update arm `01M338D7FBJYJX6YWJ0NX5RA03` is submitted with automatic resume. See the latest Log entry.
 
@@ -1611,3 +1611,17 @@ lower; it does not affect the per-token statistics above.
 
 - Team W&B report: added a headline section under the findings. It overlays both stacks on one optimizer-update axis: in-run DAPO accuracy and training-batch truncation at 2B and 4B. It also has an in-run DAPO table and a note on where the 2B Open Instruct async crash shows and where it doesn't. The crash is visible in in-run evals at step 20 (both async runs) and step 100 (canonical), in truncation spikes around steps 15-25 and 90-100, and in reverse KL staying at 0.02-0.07 vs 0.0005 for sync. It doesn't show at in-run evals over steps 40-80, in the greedy points (no step-20 greedy eval; step 80 was 49.80), at 4B, or in Miles. Greedy section caveat added. Kevin chose the report-only option: no new greedy evals of canonical checkpoints at steps 20/40/60.
 - Logged 8 more CPU-only W&B summary runs (group `headline-inrun-curves`) copying in-run DAPO and `val/truncated_completion_fraction` / `rollout/truncated` onto optimizer updates: `vsc02yfp`, `oa780tpl`, `823lyuaa`, `2dcxvzno`, `klyl6csv` (2B), and `ig9u5qvw`, `m8rxa8tf`, `xvwoex6w` (4B). Mapping: Miles `eval/step` ending in 9 goes to N+1, while eval 0 and resume re-evals stay at N; Miles `rollout/step` N goes to update N+1. Script: `~/repos/opd-campaign-scratch/wandb-report/log_headline_curves.py`.
+
+### 2026-09-24T01:29:16Z
+
+- Kevin asked whether the fixed-prompt-batch "recovery" could just be run-to-run variation. It can't be ruled out, and the report's finding 3 overstated it. In-run DAPO at step 20 was 6.8, 16.0, 4.1 and 6.8 for all four 2B OI async-4 runs at LR 1e-6: canonical `v171addf`, advantage clip 2 `zur6wly1`, first fixed-batch run with the depth bug `j9isunya`, and fixed-depth `ahftfxg3`. Later crashes move: `zur6wly1` hit 2.3 at step 80 and was 28.3 at 100, while `v171addf` hit 0.8 at 100. So the fixed-batch run ending at 38.87 (vs 0.98) is within spread. LR 5e-7 `8k31aw08` dips only to 26.8, and sync `rg1a2gel` never dips. Async runs are not reproducible even at seed 42, because completion order depends on timing. One run per setting, so the cause is still unisolated.
+- Drain/isolation ablation [01M37S6JTCVD2Q8F3RDDYD0DTB](https://beaker.org/ex/01M37S6JTCVD2Q8F3RDDYD0DTB) (W&B `901d0f96`, state `failed`) never trained. All four replicas exited at 18:50Z, about 45 s after starting. Workers logged Ray "Malformed host" with the head address empty (`:8888`), so the `f86ce3f4a` leader repair did not resolve the head. Not relaunched; that needs Kevin's OK.
+- Report updated (draft, same URL):
+  - Finding 3 rewritten.
+  - The crash section gains a replicate chart of every 2B OI async run.
+  - The fixed-batch diagnostics sentence is corrected: its stop rate still swings 0.02-0.84, truncation reaches 0.88 at step 20, and it drops nothing.
+  - The diagnostics header no longer claims to explain the collapse.
+  - Every table was reformatted for readability: tables split by size, OI abbreviation, centred numbers, Avg@8 and Pass@8 split, and the runs/code section turned into bullet lists plus small run tables.
+  - Added a tokens-per-GPU-second column to the speed tables: mean batch length x 256 / (s per update x all job GPUs). 2B: OI async 1,689, fixed 1,856, sync 798; Miles sync 639, async 580. 4B: OI async 711, sync 245; Miles sync about 196.
+  - Added a Kevin-voiced "open question" at the end of section 4. Miles has 3 of 8 GPUs generating vs 16 of 32 for OI. From the wait times, a Miles rollout B300 does about 1.9k tok/s vs about 2.9k per OI H100. The note recommends the matched throughput comparison (step 8, not approved) before any switch.
+  - OI layout confirmed from the W&B config: `num_learners_per_node=[8,8]`, `vllm_num_engines=16`, TP1.
