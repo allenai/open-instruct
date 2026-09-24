@@ -1391,7 +1391,7 @@ class RewardConfig:
                         if self.apply_r1_style_format_reward and self.additive_format_reward:
                             scores[i] = raw_score + scores[i]
                         elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = raw_score if format_scores[i] == 1 else 0
+                            scores[i] = raw_score if format_scores[i] == self.r1_style_format_reward else 0
                         else:
                             scores[i] = raw_score
 
