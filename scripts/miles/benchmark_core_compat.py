@@ -80,8 +80,13 @@ def prepare(args):
 
 def serve(args):
     os.environ["OLMO_SGLANG_CORE_COMPAT"] = (
-        "rounding" if args.mode in {"rounding", "rounding_graphs"} else "1" if args.mode == "core" else "0"
+        "rounding"
+        if args.mode in {"rounding", "rounding_graphs", "rounding_torch_graphs"}
+        else "1"
+        if args.mode == "core"
+        else "0"
     )
+    os.environ["OLMO_SGLANG_ROUNDING_KERNELS"] = "torch" if args.mode == "rounding_torch_graphs" else "fused"
     register()
     rows = json.loads(args.samples.read_text())["rows"]
     engine_args = dict(
@@ -95,7 +100,9 @@ def serve(args):
         random_seed=20260923,
         disable_radix_cache=True,
         disable_overlap_schedule=True,
-        cuda_graph_backend_decode="full" if args.mode in {"default_graphs", "rounding_graphs"} else "disabled",
+        cuda_graph_backend_decode=(
+            "full" if args.mode in {"default_graphs", "rounding_graphs", "rounding_torch_graphs"} else "disabled"
+        ),
         cuda_graph_bs_decode=[1, 2, 4],
         cuda_graph_backend_prefill="disabled",
         context_length=4096,
@@ -113,6 +120,7 @@ def serve(args):
     report = {
         "model": args.model,
         "mode": args.mode,
+        "rounding_kernels": os.environ["OLMO_SGLANG_ROUNDING_KERNELS"],
         "engine_args": engine_args,
         "gpu": torch.cuda.get_device_name(),
         "samples_sha256": hashlib.sha256(args.samples.read_bytes()).hexdigest(),
@@ -323,7 +331,9 @@ def main():
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--per-domain", type=int, default=4)
     parser.add_argument(
-        "--mode", choices=["default", "core", "default_graphs", "rounding", "rounding_graphs"], default="default"
+        "--mode",
+        choices=["default", "core", "default_graphs", "rounding", "rounding_graphs", "rounding_torch_graphs"],
+        default="default",
     )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--tokens", type=int, default=512)
