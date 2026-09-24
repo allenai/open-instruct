@@ -24,7 +24,7 @@ from transformers import AutoConfig
 
 from open_instruct.miles import fla_compat
 
-MODES = ["original", "split_kda", "core_conv", "core_state", "core_norm", "all_kda"]
+MODES = ["original", "native_layout", "no_initial", "fixed_shape", "core_state"]
 _KERNELS_PATCHED = False
 
 
@@ -56,12 +56,20 @@ def trace_factory(config):
 
         def chunk(**kwargs):
             mode = json.loads((root / "control.json").read_text())["case"]
-            if mode not in {"core_state", "all_kda"}:
+            if mode not in {"core_state", "all_kda", "native_layout", "no_initial", "fixed_shape"}:
                 return original_chunk(**kwargs)
             assert kwargs["initial_state"].count_nonzero() == 0, "Full-prefix diagnostic only"
-            kwargs.update(initial_state=None, cu_seqlens=None, transpose_state_layout=False)
+            transpose = mode in {"core_state", "all_kda", "native_layout"}
+            if transpose:
+                kwargs.update(
+                    initial_state=kwargs["initial_state"].transpose(-1, -2).contiguous(), transpose_state_layout=False
+                )
+            if mode in {"core_state", "all_kda", "no_initial"}:
+                kwargs["initial_state"] = None
+            if mode in {"core_state", "all_kda", "fixed_shape"}:
+                kwargs["cu_seqlens"] = None
             output, state = original_chunk(**kwargs)
-            return output, state.transpose(-1, -2).contiguous()
+            return output, state.transpose(-1, -2).contiguous() if transpose else state
 
         gdn_backend.causal_conv1d_fn = conv
         kda.chunk_kda = chunk
