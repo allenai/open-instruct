@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import async_rollout
+from open_instruct.miles import async_rollout, rollout_errors
 
 
 class _Source:
@@ -135,7 +135,8 @@ def test_final_shutdown_accounts_for_completions_blocked_by_full_buffer(tmp_path
         fn._active_tasks = set()
         fn._producing_groups = {}
         fn._task_groups = {}
-        fn._transport_requeues = fn._consecutive_transport_failures = 0
+        fn._errors = rollout_errors.RolloutErrors()
+        fn._retry_after = 0.0
         fn._ready_completion_counts = {}
         fn._shutdown_unqueued_counts = dict(groups=0, samples=0, response_tokens=0)
         fn._completed_put_wait_seconds = 0.0
@@ -187,6 +188,7 @@ def test_completed_filter_drop_retires_prompt_ledger_once(filtered):
         producer = async_rollout.ManagedFullyAsyncRolloutFn.__new__(async_rollout.ManagedFullyAsyncRolloutFn)
         group = [SimpleNamespace(group_index=7)]
         producer.args = SimpleNamespace()
+        producer._errors = rollout_errors.RolloutErrors()
         producer.data_source = SimpleNamespace(acknowledge_groups=acknowledged.extend)
         producer._output = Buffer()
         producer._stop_requested = asyncio.Event()

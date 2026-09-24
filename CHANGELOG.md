@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Retry known transient MILES generation failures with pristine whole-group regeneration and a sustained 50%-for-five-minutes failure limit; report categorized `errors/` metrics independently of training progress in W&B and retained artifacts (PR URL pending).
 - Recover whole async prompt groups when MILES wraps a backend generation transport failure in its known HTTP 503 response; retain bounded retries and strict handling of other errors, and expose transport-requeue counters (PR URL pending).
 - Publish MILES compiler caches independently of model checkpoints with change detection, a ten-minute minimum interval, and an 8 GiB storage cap per key shared across runs/families; record generation recency without eviction, exclude operational settings from identity, and document diagnostics and coverage (PR URL pending).
 - Submit distributed MILES runs as native Beaker replica groups with synchronized start and failure/preemption propagation; require full eight-GPU nodes and track the latest attempt for each replica (PR URL pending).

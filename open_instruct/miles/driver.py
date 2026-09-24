@@ -11,7 +11,7 @@ from miles.utils import object_store
 from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
-from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
+from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
 
 from open_instruct import logger_utils
 from open_instruct.miles import evaluation as background_eval
@@ -33,6 +33,7 @@ async def train(args, *, export_hf=None):
         )
     object_store.init_instance(args, contribute_segment=False)
     init_tracking(args)
+    define_step_key_metric_group("errors", "errors/elapsed_seconds")
     manager = None
     inference = None
     learner = None

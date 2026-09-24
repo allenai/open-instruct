@@ -19,6 +19,7 @@ from miles.utils.http_utils import post
 from open_instruct import logger_utils
 from open_instruct.miles import pipeline_observer, policy_refresh, sibling_timing
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
+from open_instruct.miles.errors import GenerationRequestTimeout
 from open_instruct.miles.generation_admission import GenerationAdmission
 
 logger = logger_utils.setup_logger(__name__)
@@ -136,7 +137,7 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
             )
             raise
         except TimeoutError as error:
-            raise TimeoutError(
+            raise GenerationRequestTimeout(
                 f"Policy refresh request {payload['rid']} exceeded core.refresh_request_timeout={timeout:g}s. "
                 "This covers serving queue time, generation and refresh pauses. Check engine progress and "
                 "admission pressure; increase the request timeout for deliberately long responses. "

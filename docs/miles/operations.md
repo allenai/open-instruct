@@ -70,28 +70,63 @@ inactive. These update totals do not measure worst individual microbatch load.
 The implementation reuses Core's forward counters, excludes scoring and backward
 recomputation, and gathers only small layer/expert histograms.
 
-## Rollout transport recovery
+## Rollout error recovery and tracking
 
-Refresh sends each generation request once. If a connection fails directly, or
-MILES returns its specific `503 {"detail": "Rollout worker unavailable"}` response
-for a failed backend `/generate` transport, the producer discards the affected
-prompt group and requeues its pristine prompts. The pinned group generator
-cancels and joins sibling sample tasks before returning the error. Completed
-responses from the failed group are not reused; regenerated responses carry their
-own current behavior-version metadata. Other active groups continue normally.
+Fully async training retries whole prompt groups for known serving failures:
+connection loss (including the MILES router's wrapped transport 503), HTTP 429,
+SGLang queue-full/priority-eviction responses, temporary absence of healthy router
+workers, and generation waiting/running/request deadlines. These are recognized
+by the pinned `/generate` error contract, not by HTTP 503 alone: SGLang also uses
+503 for configuration errors, which remain fatal.
 
-The existing budget permits eight consecutive group transport failures; the
-ninth fails the run. A completed group resets that streak. Unknown HTTP errors,
-invalid samples/provenance and generation deadlines remain fatal. This is not a
-generic retry policy for all 5xx responses, and does not hide a persistently
-unavailable service. Server-side work whose HTTP connection was lost may already
-have executed; no exactly-once generation guarantee is implied.
+The producer requeues the group's pristine prompts with their original identities.
+The pinned group generator cancels and joins sibling sample tasks before returning
+the error. Partial/completed responses from a failed attempt are discarded, and
+regenerated responses carry fresh behavior-version metadata. No failed prompt is
+silently dropped or assigned zero reward. New submissions back off for one second
+after a failure; already-active groups continue. Retrying an unavailable pool
+does not re-register engines or bypass weight-readiness checks.
 
-`pipeline_occupancy.jsonl` includes `transport_requeued_groups` and
-`consecutive_transport_failures`; warning logs identify the affected group and
-exception. A router backend disconnect was previously transformed into an
-`HTTPStatusError` that bypassed the direct-transport retry predicate. Both sides
-of that mismatch predated the September 22 upstream migration.
+There is one serving-error stop rule: **stop if at least 50% of completed group
+attempts fail for five continuous minutes**. The fraction uses a trailing
+five-minute window; its sustained-failure timer resets when the fraction falls
+below 50% or the window becomes empty. This replaces the eight-consecutive-failure
+limit. A group counts once, even if multiple sibling requests fail; retried groups
+are new attempts. Cancellations for lifecycle operations, pending requests, and
+reward-based filtering are not serving failures. Successful attempts count before
+reward filtering. A short error burst cannot become fatal just because no more
+requests finish. The check runs while waiting for generation or buffer space,
+not only at optimizer boundaries.
+
+Unknown HTTP/server errors, invalid configuration, and invalid sample/policy
+provenance remain fatal. Only typed generation deadlines are recoverable; an
+unrelated timeout is not automatically treated as a serving failure. Server-side
+work whose connection was lost may already have executed; no exactly-once
+generation guarantee is implied.
+
+W&B has an `errors/` section plotted against `errors/elapsed_seconds`, independently
+of training updates. Every 15 seconds, and at producer exit, it reports:
+
+- `transport_groups`, `overload_groups`, `unavailable_groups`, `timeout_groups`:
+  cumulative failed/requeued group attempts by category.
+- `completed_group_attempts`, `requeued_groups`: cumulative totals.
+- `window_group_attempts`, `window_failed_groups`, `failure_fraction_5m`:
+  counts and failure fraction in the recent five-minute window.
+- `high_failure_seconds`: duration of the current >=50% interval.
+- `fatal`: one on a terminal producer failure, zero otherwise.
+
+These metrics also reach rollout metrics, `pipeline_occupancy.jsonl`, and the
+standalone `rollout_errors.jsonl`. The latter includes wall-clock timestamps and a
+bounded terminal error summary and is retained with Beaker artifacts. Offline W&B
+records the same metrics locally for later sync. Tracking failures are logged and
+do not stop recovery. Counts are per producer process and reset on a fresh run or
+resume. Detailed request IDs, group IDs, exception types and bounded HTTP error
+bodies stay in logs, rather than becoming W&B metric names.
+
+Both the router's transport-error wrapping and the previously narrower producer
+predicate predated the September 22 upstream migration. Recovery policy changes
+require a rebuilt application image; an already running job keeps its image's
+behavior.
 
 ## Failure triage
 
