@@ -70,3 +70,14 @@ The benchmark reports generated-token log-probability errors and the distributio
 of `p_Core / p_serving`, including fractions outside 10% and 20%. Its fixed output
 budget ignores EOS for equal work; this is a throughput and probability study,
 not an evaluation of completed answers or learning quality.
+
+The [checkpoint/system comparison and workload measurement](measurements/core-compatible-serving-20260923.md)
+separates historical checkpoints, short diagnostic interventions, full-prefix
+scoring and cached-generation probability errors, with measured generation timing.
+
+On the measured 16-prompt H100 workload, this mode nearly eliminates full-prefix
+scoring differences but improves mean cached-generation error by only 3–8%, while
+costing about 6.5–6.6× the generation time of ordinary graph-enabled serving. Keep
+it as an experimental numerical-reference option; the measurement does not
+justify enabling it by default for RL. The qualified immutable image is
+`01M38F6YS8W767GHG7WSW5EX1W` (application `4d9d46a95`, serving `c33ed68`).
