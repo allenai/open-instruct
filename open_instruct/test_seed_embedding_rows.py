@@ -151,7 +151,11 @@ class TestOlmoCoreSeeding(unittest.TestCase):
 
 
 class _StubDDPOptimizer:
-    """An OLMoDDPOptimizer's bf16 layout: fp32 main copies that are separate from the params."""
+    """An OLMoDDPOptimizer's bf16 layout: fp32 main copies that are separate from the params.
+
+    Deliberately has no all-param check: the sync must not rely on one, since on a bf16 model
+    every unsynced param differs from its fp32 main by rounding.
+    """
 
     def __init__(self, named_params, mesh):
         self.param_groups = [{"named_params": named_params}]
@@ -159,12 +163,6 @@ class _StubDDPOptimizer:
             f"{name}.main": distribute_tensor(param.detach().float().reshape(-1).clone(), mesh, [Replicate()])
             for name, param in named_params.items()
         }
-        self.checked = False
-
-    def _check_model_param_main_param_the_same(self):
-        for name, param in self.param_groups[0]["named_params"].items():
-            torch.testing.assert_close(self.states[f"{name}.main"].full_tensor(), param.float().reshape(-1))
-        self.checked = True
 
 
 class TestOptimizerMainParamSync(unittest.TestCase):
@@ -198,7 +196,17 @@ class TestOptimizerMainParamSync(unittest.TestCase):
         for name in ("embeddings.weight", "lm_head.w_out.weight"):
             main = train_module.optim.states[f"{name}.main"].full_tensor().reshape(reference_matrix().shape)
             torch.testing.assert_close(main[3], expected)
-        self.assertTrue(train_module.optim.checked)
+
+    def test_unsynced_params_that_differ_from_their_mains_by_rounding_do_not_fail(self):
+        # The H015 gate (01M38HZ936D3WNWS25A9GYSG55): a bf16 embedding_norm differs from its
+        # fp32 main by rounding, which an all-param check rejected before step 1.
+        train_module = self._train_module(include_head=True)
+        norm = torch.full((4,), 0.0014, dtype=torch.bfloat16)
+        train_module.optim.param_groups[0]["named_params"]["embedding_norm.weight"] = norm
+        train_module.optim.states["embedding_norm.weight.main"] = distribute_tensor(
+            torch.full((4,), 0.0013), self.mesh, [Replicate()]
+        )
+        olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
 
     def test_a_seeded_matrix_the_optimizer_does_not_own_raises(self):
         train_module = self._train_module(include_head=False)

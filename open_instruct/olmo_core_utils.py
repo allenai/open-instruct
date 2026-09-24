@@ -409,26 +409,32 @@ def sync_optimizer_main_params(optimizer, params: list[torch.Tensor]) -> None:
     """Make an OLMoDDPOptimizer's main copies of `params` match the params after an in-place edit.
 
     That optimizer (MoE v2 models) owns the weights: each `step()` writes its `<name>.main`
-    states back over the model. For bf16 params those are separate fp32 copies filled when the
-    base checkpoint loaded, so an edit to the model alone is undone on step 1; for fp32 params
-    they are views of the params and this copy is a no-op. Other optimizers read the params
-    themselves and need nothing. Afterwards every param is checked against its main copy, so a
-    run whose seeding did not reach the optimizer dies at startup instead of training on it.
+    states back over the model. For bf16 params -- hero-small's -- those are separate fp32
+    copies filled when the base checkpoint loaded, so an edit to the model alone is undone on
+    step 1; for fp32 params they are views of the params and this copy is a no-op. Other
+    optimizers read the params themselves and need nothing.
+
+    Afterwards each synced main must equal its param exactly, or the run dies at startup. Only
+    the synced matrices are checked: every other bf16 param differs from its fp32 main by
+    rounding, so the optimizer's own all-param check holds only right after construction.
     """
     states = getattr(optimizer, "states", None)
     if states is None:
         return
     targets = {id(param) for param in params}
-    synced = 0
+    synced: list[tuple[str, torch.Tensor]] = []
     for group in optimizer.param_groups:
         for name, param in group["named_params"].items():
             if id(param) in targets:
                 assign_full_tensor_to_dtensor(dst=states[f"{name}.main"], src=param.data.float().reshape(-1))
-                synced += 1
-    if synced != len(targets):
-        raise RuntimeError(f"Found optimizer main params for {synced} of {len(targets)} seeded matrices")
-    optimizer._check_model_param_main_param_the_same()
-    logger.info(f"Synced {synced} optimizer main param(s) with the seeded rows; every param matches its main")
+                synced.append((name, param))
+    if len(synced) != len(targets):
+        raise RuntimeError(f"Found optimizer main params for {len(synced)} of {len(targets)} seeded matrices")
+    for name, param in synced:
+        main = states[f"{name}.main"].full_tensor().reshape(-1)
+        if not torch.equal(main, param.data.float().reshape(-1)):
+            raise RuntimeError(f"{name}: optimizer main param does not match the seeded param after the sync")
+    logger.info(f"Synced {len(synced)} optimizer main param(s) with the seeded rows; each matches its main exactly")
 
 
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
