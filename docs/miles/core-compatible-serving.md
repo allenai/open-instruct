@@ -29,7 +29,8 @@ at layers 7 and 15 and KDA elsewhere, 512 experts/top-16, latent width 512,
 expert/shared width 1024, dense width 8192 and the measured norm/gating settings.
 The serving implementation's [`_ROUNDING_PROFILE`](https://github.com/allenai/olmo-sglang/blob/e0b0849d09509224879ed02aecfca41eff11e50d/src/olmo_sglang/core_compat.py)
 is the exact field contract.
-Selection requires unquantized BF16, TP1/EP1, the `auto`/`triton` MoE backend,
+Selection requires unquantized BF16 (including `dtype=auto` when resolved to BF16
+by the model loader), TP1/EP1, the `auto`/`triton` MoE backend,
 full or disabled decode graphs, disabled prefill graphs, no speculation and no
 `torch.compile`. It is independent of checkpoint path and EMO ancestry.
 Unsupported settings automatically keep the old path; explicit `rounding` and
@@ -98,7 +99,8 @@ serving cost, not universal dominance on every probability metric.
 The automatic selection is a subsequent policy change; the final benchmark image
 `01M38NY00GWVJ7WH26S3V94C9Z` contains the same rounding kernels but still needs
 an explicit `rounding` flag. Build a new image from the current runtime lock to
-get automatic selection (serving revision `e0b0849`). The selection
+get automatic selection (serving revision `5514bf5`, which also handles
+the normal MILES `dtype=auto` setting). The selection
 change passed 47 portable tests; 34 CUDA-only tests were skipped locally. It
 changes no rounding kernels; the 105-test GPU and workload qualification cited
 below precedes this default-selection change. Do not relabel that earlier image
