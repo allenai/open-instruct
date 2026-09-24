@@ -1,5 +1,9 @@
+import io
+import shlex
+import subprocess
 import unittest
 from argparse import Namespace
+from unittest import mock
 
 import beaker
 import parameterized
@@ -89,6 +93,86 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
     def test_build_command_without_args(self, name, command, args_to_remove, expected):
         result = mason.build_command_without_args(command, args_to_remove)
         self.assertEqual(result, expected)
+
+
+class TestQuoteLiteralArgs(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("opening_tag", ["--reserved_slot_tokens", "<think>"], ["--reserved_slot_tokens", "'<think>'"]),
+            ("closing_tag", ["--stop_strings", "</answer>"], ["--stop_strings", "'</answer>'"]),
+            ("pipe_tag", ["--stop_strings", "<|im_end|>"], ["--stop_strings", "'<|im_end|>'"]),
+            ("json", ["--dataset_mixer", '{"a": 1.0}'], ["--dataset_mixer", "'{\"a\": 1.0}'"]),
+            ("json_with_tag", ['{"stop": "<think>"}'], ['\'{"stop": "<think>"}\'']),
+            ("single_quote", ["<it's>"], ["'<it'\"'\"'s>'"]),
+            ("tag_with_attributes", ['<tool name="search">'], ["'<tool name=\"search\">'"]),
+            ("closing_tag_prefix", ["--stop_strings", "</tool_call"], ["--stop_strings", "'</tool_call'"]),
+            (
+                "redirections",
+                ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
+                ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
+            ),
+            (
+                "shell_syntax",
+                ["cd", "/stage", "&&", "echo", "$BEAKER_JOB_ID"],
+                ["cd", "/stage", "&&", "echo", "$BEAKER_JOB_ID"],
+            ),
+        ]
+    )
+    def test_quote_literal_args(self, name, command, expected):
+        self.assertEqual(mason.quote_literal_args(command), expected)
+
+    def test_quoted_args_reach_bash_verbatim(self):
+        args = ["<think>", "</think>", "<|im_end|>", '{"a": "b"}', "<it's>", '<tool name="search">']
+        joined = "printf '%s\\n' " + " ".join(mason.quote_literal_args(args))
+        result = subprocess.run(["/bin/bash", "-c", joined], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), args)
+
+
+class TestMakeInternalCommandQuoting(unittest.TestCase):
+    """Literal args must reach both the local cache run and the job exactly once, with no added quotes."""
+
+    LITERALS = ["<think>", "</think>", '{"a": 1.0}', "</tool_call"]
+
+    def test_cache_command_and_job_command_see_the_same_literals(self):
+        command = [
+            "python", "open_instruct/finetune.py",
+            "--reserved_slot_tokens", "<think>", "</think>",
+            "--dataset_mixer", '{"a": 1.0}',
+            "--stop_strings", "</tool_call",
+        ]  # fmt: skip
+        args = Namespace(
+            artifact_ttl=None,
+            auto_checkpoint_state_dir="",
+            auto_output_dir_path="/weka/oe-adapt-default/test",
+            cluster=["ai2/jupiter"],
+            no_auto_dataset_cache=False,
+            num_nodes=1,
+            pure_docker_mode=True,
+        )
+        cache_commands = []
+
+        class FakeProcess:
+            returncode = 0
+
+            def __init__(self, cmd, **kwargs):
+                cache_commands.append(cmd)
+                self.stdout = io.StringIO("")
+                self.stderr = io.StringIO("")
+
+            def poll(self):
+                return 0
+
+        with (
+            mock.patch.object(mason.subprocess, "Popen", FakeProcess),
+            mock.patch.object(mason.select, "select", lambda r, w, x: (r, w, x)),
+        ):
+            job_command = mason.make_internal_command(list(command), args, "tester", is_external_user=True)
+
+        self.assertEqual(len(cache_commands), 1)
+        for shell_command in (cache_commands[0], job_command):
+            words = shlex.split(shell_command)
+            for literal in self.LITERALS:
+                self.assertEqual(words.count(literal), 1, f"{literal!r} in {shell_command}")
 
 
 class TestExperimentSpec(unittest.TestCase):
