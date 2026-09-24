@@ -120,7 +120,7 @@ uv run python mason.py \
     --save_trainer_logprobs true \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "opensandbox", "task_data_hf_repo": "allenai/tmax-15k-open-instruct", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 800 \
+    --pool_size 600 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
@@ -145,4 +145,4 @@ uv run python mason.py \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False \
-    \; bash scripts/opensandbox/cleanup_opensandbox_sandboxes.sh swerl-tmax-9b-opensandbox
+    \; 'train_rc=$?' \; bash scripts/opensandbox/cleanup_opensandbox_sandboxes.sh swerl-tmax-9b-opensandbox \; exit '$train_rc'
