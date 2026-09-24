@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-24 01:56Z (was 2026-09-24 01:29Z; details in the latest Log entries).
+Updated 2026-09-24 02:18Z (was 2026-09-24 01:56Z; details in the latest Log entries).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification `01M335TSWA8MTK1YAEZF0CXJEE` passed, including audit/export reload. The matched 100-update arm `01M338D7FBJYJX6YWJ0NX5RA03` is submitted with automatic resume. See the latest Log entry.
 
@@ -1634,3 +1634,10 @@ lower; it does not affect the per-token statistics above.
   - Reworded the speed claims. The 2B OI async speedup holds: fixed batches drop nothing and run 55.7 s vs 53.1 s. At 4B, canonical async trained on about 0.57M tokens per update vs 1.18M for sync (`val/num_step_tokens`), so the length-adjusted gain is about 2.9x, not 5.4x.
   - Per-GPU generation now uses each stack's own logged metric. 2B sync: Miles `perf/effective_tokens_per_gpu_per_sec` about 1.9k per B300 vs OI `val/actor_tokens_per_second` 50.5k / 16 engines, about 3.2k per H100. 4B: about 0.6k vs 0.9k.
   - Trimmed the crash and greedy text.
+
+### 2026-09-24T02:18:49Z
+
+- Team W&B report draft, at Kevin's request:
+  - Added a "What we'd do now" list to the findings: use sync OPD in OI when the result must be trusted; don't use OI async-4 at 2B and LR 1e-6 until the crash is explained (treat 4B async as unverified because of the LR confound); don't use Miles async yet (no speedup on the one-node layout); keep working on OI async (isolation run plus seeds).
+  - Section 4 now explains why the hardware differs. OI recipes are 4-node H100 jobs, and the OI image can't JIT flashinfer on B300. The Miles run files were pinned to `ai2/holmes` in Robert's pre-campaign work (2026-09-11 commits). No OPD run of both stacks shares hardware. Of the step-8 matched plan, only the Miles 2B async arm ran, and it was on B300.
+  - Section 4 names the cheapest settling run: Miles sync vs OI sync, 20 updates each, on one 8xH100 node each (about 6 h per arm). Proposed only; not approved or launched.
