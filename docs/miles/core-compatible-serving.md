@@ -96,9 +96,25 @@ The workload benchmark accepts `--mode rounding_graphs` and `--mode rounding`
 for paired graph/eager checks. Qualify the actual graph replay, cached rollouts
 and weight refresh before selecting this experimental mode for RL.
 
-The [graph-compatible workload measurement](measurements/graph-compatible-rounding-20260923.md)
-passed 75 GPU tests and the cache/weight-refresh exercise. Graph and eager rounding
-produced identical measured tokens and probabilities. Compared with default
-graphs, rounding with graphs lost 24–25% throughput, with small, mixed mean
-rollout-error changes. This does not justify enabling it by default. The qualified
-image is `01M38HZ1ZXZHQFXBQRTXV23J3M` (application `daeee120f`, serving `ca852b8`).
+The [original tensor implementation](measurements/graph-compatible-rounding-20260923.md)
+lost 24–25% throughput. Its arithmetic is retained as a diagnostic control with
+`OLMO_SGLANG_ROUNDING_KERNELS = "torch"` in `[launch.env]`.
+
+The [fused implementation and workload comparison](measurements/fused-rounding-20260923.md)
+removes the separate activation, expert-combination and norm intermediates while
+preserving the BF16 boundaries and the pinned PyTorch reduction grouping. It is
+the default implementation **within opt-in rounding mode**; ordinary serving
+remains the default overall. The full eager reference is unchanged.
+
+On the measured H100 workload, fused rounding ran within a few percent of default
+serving at batches four and sixteen. It matched tensor rounding's tokens and
+log-probabilities exactly across 73,728 generated tokens and 8,192 fixed-prefix
+scores, recovering the earlier throughput penalty.
+
+Use image `01M38NY00GWVJ7WH26S3V94C9Z` (application `7ef67f07e`, serving
+`cc78529`). Its strict component/replay suite passed 105 tests and its engine
+cache/full-weight-refresh exercise passed. Matching the tensor rounding control
+does not imply exact agreement between cached serving probabilities and Core's
+teacher-forced scores or establish an RL learning benefit. Consult the measurement
+for throughput, probability comparisons and qualified shapes; repeat qualification
+after runtime changes.

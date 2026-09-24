@@ -25,6 +25,13 @@ from open_instruct.miles import fla_compat
 
 DOMAINS = ("math", "code", "ifeval", "general")
 SOURCE_SHA256 = "fde6da774f735ea8d3720598f85ecbd613d5fcf0533f85dd5d8997fedbe93805"
+ROUNDING_MODES = {
+    "rounding": "fused",
+    "rounding_graphs": "fused",
+    "rounding_torch_graphs": "torch",
+    "rounding_moe_graphs": "moe",
+    "rounding_norms_graphs": "norms",
+}
 
 
 def write_json(path, value):
@@ -79,9 +86,12 @@ def prepare(args):
 
 
 def serve(args):
+    if not 1 <= args.batch_size <= 16:
+        raise ValueError("This benchmark's cache budget supports batch sizes 1 through 16")
     os.environ["OLMO_SGLANG_CORE_COMPAT"] = (
-        "rounding" if args.mode in {"rounding", "rounding_graphs"} else "1" if args.mode == "core" else "0"
+        "rounding" if args.mode in ROUNDING_MODES else "1" if args.mode == "core" else "0"
     )
+    os.environ["OLMO_SGLANG_ROUNDING_KERNELS"] = ROUNDING_MODES.get(args.mode, "fused")
     register()
     rows = json.loads(args.samples.read_text())["rows"]
     engine_args = dict(
@@ -95,8 +105,8 @@ def serve(args):
         random_seed=20260923,
         disable_radix_cache=True,
         disable_overlap_schedule=True,
-        cuda_graph_backend_decode="full" if args.mode in {"default_graphs", "rounding_graphs"} else "disabled",
-        cuda_graph_bs_decode=[1, 2, 4],
+        cuda_graph_backend_decode="full" if args.mode.endswith("_graphs") else "disabled",
+        cuda_graph_bs_decode=sorted({1, 2, 4, args.batch_size}),
         cuda_graph_backend_prefill="disabled",
         context_length=4096,
         max_total_tokens=16384,
@@ -113,6 +123,7 @@ def serve(args):
     report = {
         "model": args.model,
         "mode": args.mode,
+        "rounding_kernels": os.environ["OLMO_SGLANG_ROUNDING_KERNELS"],
         "engine_args": engine_args,
         "gpu": torch.cuda.get_device_name(),
         "samples_sha256": hashlib.sha256(args.samples.read_bytes()).hexdigest(),
@@ -322,9 +333,7 @@ def main():
     parser.add_argument("--data", type=Path)
     parser.add_argument("--samples", type=Path)
     parser.add_argument("--per-domain", type=int, default=4)
-    parser.add_argument(
-        "--mode", choices=["default", "core", "default_graphs", "rounding", "rounding_graphs"], default="default"
-    )
+    parser.add_argument("--mode", choices=["default", "core", "default_graphs", *ROUNDING_MODES], default="default")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--tokens", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=2)
