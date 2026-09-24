@@ -8,6 +8,9 @@ from pathlib import Path
 
 import sglang
 import torch
+from fla.modules import FusedRMSNormGated
+from fla.modules.convolution import causal_conv1d
+from fla.ops import kda
 from olmo_core import config as core_config
 from olmo_core.nn import attention
 from olmo_core.nn.moe.v2 import olmo3
@@ -15,14 +18,54 @@ from olmo_sglang import register
 from safetensors.torch import load_file
 from scripts.miles import hero_core_fidelity as fidelity
 from scripts.miles import hero_numerics as numerics
+from sglang.srt.layers.attention.linear import gdn_backend
 from torch.nn import functional as F
 from transformers import AutoConfig
 
 from open_instruct.miles import fla_compat
 
+MODES = ["original", "split_kda", "core_conv", "core_state", "core_norm", "all_kda"]
+_KERNELS_PATCHED = False
+
 
 def trace_factory(config):
+    global _KERNELS_PATCHED
     root = Path(config["root"])
+    if not _KERNELS_PATCHED:
+        original_conv = gdn_backend.causal_conv1d_fn
+        original_chunk = kda.chunk_kda
+
+        def conv(x, weight, bias=None, **kwargs):
+            mode = json.loads((root / "control.json").read_text())["case"]
+            saved = x.clone() if mode in {"core_conv", "all_kda"} else None
+            output = original_conv(x, weight, bias, **kwargs)
+            if saved is not None:
+                assert not kwargs["has_initial_state"].any(), "Full-prefix diagnostic only"
+                output = (
+                    causal_conv1d(
+                        x=saved.t().unsqueeze(0).contiguous(),
+                        weight=weight.to(x.dtype),
+                        bias=bias,
+                        activation="silu",
+                        backend="triton",
+                    )[0]
+                    .squeeze(0)
+                    .t()
+                )
+            return output
+
+        def chunk(**kwargs):
+            mode = json.loads((root / "control.json").read_text())["case"]
+            if mode not in {"core_state", "all_kda"}:
+                return original_chunk(**kwargs)
+            assert kwargs["initial_state"].count_nonzero() == 0, "Full-prefix diagnostic only"
+            kwargs.update(initial_state=None, cu_seqlens=None, transpose_state_layout=False)
+            output, state = original_chunk(**kwargs)
+            return output, state.transpose(-1, -2).contiguous()
+
+        gdn_backend.causal_conv1d_fn = conv
+        kda.chunk_kda = chunk
+        _KERNELS_PATCHED = True
     capture = numerics.trace_factory(config)
     installed = False
 
@@ -30,6 +73,19 @@ def trace_factory(config):
         nonlocal installed
         if not installed and hasattr(module, "f_proj_1"):
             original = module.qkv_proj.forward
+            original_norm = module.o_norm.forward
+            core_norm = FusedRMSNormGated(
+                module.head_v_dim,
+                eps=module.o_norm.eps,
+                activation="sigmoid",
+                device=module.o_norm.weight.device,
+                dtype=module.o_norm.weight.dtype,
+            )
+            core_norm.weight = module.o_norm.weight
+
+            def normalize(value, gate):
+                mode = json.loads((root / "control.json").read_text())["case"]
+                return core_norm(value, gate) if mode in {"core_norm", "all_kda"} else original_norm(value, gate)
 
             def project(value):
                 if json.loads((root / "control.json").read_text()).get("split_kda"):
@@ -38,6 +94,7 @@ def trace_factory(config):
                 return original(value)
 
             module.qkv_proj.forward = project
+            module.o_norm.forward = normalize
         installed = True
         return capture(module, args, output)
 
@@ -87,7 +144,7 @@ def run(args):
     )
     try:
         engine.generate(input_ids=ids[:16], sampling_params={"temperature": 0, "max_new_tokens": 1})
-        for mode in ["original", "split_kda"]:
+        for mode in MODES:
             (root / "control.json").write_text(json.dumps({"case": mode, "split_kda": mode == "split_kda"}))
             result = engine.generate(
                 input_ids=ids,
@@ -125,7 +182,7 @@ def run(args):
         logits = model(torch.tensor([ids], device="cuda"))
         reference = fidelity.summarize_logits(logits, ids)
     report = {"tokens": len(ids), "modes": {}}
-    for mode in ["original", "split_kda"]:
+    for mode in MODES:
         values = {}
         for index, trace in enumerate(traces):
             layer = {}
