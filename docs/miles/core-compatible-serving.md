@@ -40,7 +40,10 @@ separate BF16 SiLU/multiply and down-projection results, and FP32 weighted
 unpermutation. Dense/shared MLPs use Core's packed layout. RMS normalization uses
 FP32 intermediates. Full attention uses separate Q/K/V projections and Torch
 SDPA with explicit repeated KV heads, reading SGLang's ordinary request/cache
-mapping. KDA retains the existing FLA chunk and recurrent implementations.
+mapping. KDA prefill dispatches each request through FLA with Core's `[K,V]`
+state orientation, then converts final/intermediate states to SGLang's `[V,K]`
+cache format. Cached prefixes retain their state; packed recurrent decode remains
+available. Both KDA dispatch and state orientation affect long-prefix fidelity.
 
 The installed Transformer Engine 2.17 index permutation sorts on the CUDA default
 stream. The adapter orders that operation with SGLang's model stream and records
