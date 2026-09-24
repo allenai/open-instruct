@@ -1,21 +1,28 @@
 # Hero support in the MILES / OLMo-core integration
 
-Hero conversion support is incorporated in the project branch. Full hero RL is
-**not qualified**: the full-checkpoint probability gate below failed. The earlier
-KDA/latent SFT model is a separate, exercised baseline; see the [support matrix](feature-parity.md).
+Both corrected-tokenizer hero SFT checkpoints passed a bounded
+[four-update MILES mechanics check](measurements/hero-rl-smoke-20260924.md) with
+H100 EP4 training, TP1 automatic fused-rounding serving, nonzero gradients and
+exact live weight publication. This establishes the recorded short barrier path;
+learning quality, mixed-policy refresh, long context and save/resume remain
+unqualified. The earlier HF-reference probability failures below are retained as
+historical evidence and are not being relabeled as passes. The new runs kept the
+Core/behavior mean-gap guard at 0.05. See the [support matrix](feature-parity.md).
 
 The [September 23 corrected-tokenizer SFT audit](measurements/hero-sft-20260923.md)
 locates paired 4T EMO/non-EMO pretraining lineages and their full SFT configs.
 Both SFT checkpoints disable EMO and pass exact architecture/weight conversion
 checks. H100 and B300 inference match the sampled greedy tokens but fail the
-unchanged probability gate; neither checkpoint is qualified for RL training. These are separate checkpoints
+unchanged probability gate in that earlier study, which deferred the training
+trial until the numerical investigation. These are separate checkpoints
 from the historical base-model qualification below.
 
 The [SFT numerical isolation](measurements/hero-numerics-20260923.md) finds exact
 HF/SGLang routing on identical inputs across all tested layers and prefixes.
 Routed-expert, full-attention and smaller RMSNorm arithmetic differences explain
-the observed forward mismatch; diagnostic HF substitutions remove it. Production
-arithmetic and the failed qualification gate remain unchanged.
+the observed forward mismatch; diagnostic HF substitutions remove it. That
+diagnostic predates the fused-rounding implementation and the bounded training
+exercise above; its historical failed gate result is unchanged.
 
 The [direct Core/HF fidelity investigation](measurements/hero-core-fidelity-20260923.md)
 finds exact agreement between the HF Core-layout reference, current Core scoring,
@@ -24,9 +31,10 @@ Ordinary HF execution differs, despite faithful exported tensors. Partial servin
 rounding/norm changes improve some cases but do not qualify the checkpoints;
 Core's actual training policy is the recommended serving comparison target.
 
-An experimental [Core-compatible serving mode](core-compatible-serving.md) is
-available through `OLMO_SGLANG_CORE_COMPAT=1`. It is off by default and requires
-TP1 BF16 serving with CUDA graphs disabled. This option does not by itself qualify
+The [serving-mode guide](core-compatible-serving.md) documents automatic fused
+rounding for the qualified hero profile and its opt-out. The separate full
+reference (`OLMO_SGLANG_CORE_COMPAT=1`) remains opt-in and requires TP1 BF16
+serving with CUDA graphs disabled. This option does not by itself qualify
 full hero RL or change the historical gate results below.
 
 ## Architecture and source lineage
@@ -165,5 +173,5 @@ modes. Core maximum full-vocabulary error was 0.5473 (mean 0.08255); SGLang
 maximum top-20 conditional error was 0.5619, with sampled cached-decode error
 0.08974. These measure different subsets and are not equivalent statistics.
 [The retained report](measurements/hero-serving-20260910.json) records
-the failed gate. Layerwise numerical diagnosis is required before advancing
-hero training; token agreement does not override the failed probability check.
+the failed gate. This failure motivated the subsequent layerwise investigation and Core-based
+checks linked above; token agreement did not override the failed probability check.
