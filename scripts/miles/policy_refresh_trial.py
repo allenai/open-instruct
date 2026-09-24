@@ -57,6 +57,7 @@ def configuration(campaign, output, *, mode="refresh", updates=4, resume=False):
         eval_prompt_data=["gsm8k", str(output / "eval.jsonl")],
         save=str(output / "metrics"),
         save_debug_rollout_data=str(output / "rollouts/{rollout_id}.pt"),
+        rollout_sample_rate=1.0,  # This diagnostic audits complete saved batches.
         use_wandb=False,
         skip_eval_before_train=resume,
     )

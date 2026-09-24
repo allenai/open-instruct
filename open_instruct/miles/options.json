@@ -1,5 +1,5 @@
 {
-  "sources": {"miles": {"private": true, "repository": "https://github.com/allenai/miles.git", "revision": "571560bb4d22259cd1373dc6a2bfa1fb7551d651"}, "olmo-core": {"repository": "https://github.com/allenai/OLMo-core.git", "revision": "e505356353aa7ce1f6ff83e24d6eb945f463714e"}, "olmo-sglang": {"private": true, "repository": "https://github.com/allenai/olmo-sglang.git", "revision": "72f194a35045f02cc7d87980819bd0e4652cc931"}},
+  "sources": {"miles": {"private": true, "repository": "https://github.com/allenai/miles.git", "revision": "19393c0672c3a1a6558f71fc7b42788bc62bd99c"}, "olmo-core": {"repository": "https://github.com/allenai/OLMo-core.git", "revision": "e505356353aa7ce1f6ff83e24d6eb945f463714e"}, "olmo-sglang": {"private": true, "repository": "https://github.com/allenai/olmo-sglang.git", "revision": "5514bf5885e690f7cfcd9cfb08e03111fbd70a78"}},
   "options": [
     {"dest": "config", "flags": ["--config"], "kind": "value", "nargs": null, "type": "str"},
     {"dest": "optimizer", "flags": ["--optimizer"], "kind": "value", "nargs": null, "type": "str"},
@@ -415,6 +415,7 @@
     {"dest": "router_jwt_role_claim", "flags": ["--router-jwt-role-claim"], "kind": "value", "nargs": null, "type": "str"},
     {"dest": "router_jwt_role_mapping", "flags": ["--router-jwt-role-mapping"], "kind": "value", "nargs": "*", "type": "str"},
     {"dest": "save_debug_rollout_data", "flags": ["--save-debug-rollout-data"], "kind": "value", "nargs": null, "type": "str"},
+    {"dest": "rollout_sample_rate", "flags": ["--rollout-sample-rate"], "kind": "value", "nargs": null, "type": "float"},
     {"dest": "save_debug_trajectory_data", "flags": ["--save-debug-trajectory-data"], "kind": "value", "nargs": null, "type": "str"},
     {"dest": "load_debug_rollout_data", "flags": ["--load-debug-rollout-data"], "kind": "value", "nargs": null, "type": "str"},
     {"dest": "load_debug_rollout_data_subsample", "flags": ["--load-debug-rollout-data-subsample"], "kind": "value", "nargs": null, "type": "float"},

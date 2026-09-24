@@ -82,6 +82,8 @@ def test_fingerprint_tracks_compile_inputs_but_not_weights_outputs():
 @pytest.mark.parametrize(
     "group,changes",
     [
+        ("miles", {"rollout_sample_rate": 0.1}),
+        ("miles", {"rollout_sample_rate": 1.0}),
         ("core", {"checkpoint_keep_last": 2, "checkpoint_keep_every": 20}),
         (
             "core",

@@ -56,6 +56,7 @@ def configuration(campaign, output, arm, updates):
         use_rollout_logprobs=True,
         save=str(output / "metrics"),
         save_debug_rollout_data=str(output / "rollouts/{rollout_id}.pt"),
+        rollout_sample_rate=1.0,  # This diagnostic audits complete saved batches.
         use_wandb=True,
         wandb_mode="offline",
         wandb_project="olmo-rl-comparison",

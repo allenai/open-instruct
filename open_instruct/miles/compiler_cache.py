@@ -31,6 +31,7 @@ NON_COMPILE_MILES = {
     "prompt_data",
     "eval_prompt_data",
     "save_debug_rollout_data",
+    "rollout_sample_rate",
     "save_debug_train_data",
     "wandb_project",
     "wandb_group",

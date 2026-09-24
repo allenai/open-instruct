@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Disable MILES rollout capture by default; replace the structured capture path setting with `output.rollout_sample_rate`, sampling complete prompt groups for training/evaluation artifacts and capping rates above 1 (PR URL pending).
 - Retry known transient MILES generation failures with pristine whole-group regeneration and a sustained 50%-for-five-minutes failure limit; report categorized `errors/` metrics independently of training progress in W&B and retained artifacts (PR URL pending).
 - Recover whole async prompt groups when MILES wraps a backend generation transport failure in its known HTTP 503 response; retain bounded retries and strict handling of other errors, and expose transport-requeue counters (PR URL pending).
 - Publish MILES compiler caches independently of model checkpoints with change detection, a ten-minute minimum interval, and an 8 GiB storage cap per key shared across runs/families; record generation recency without eviction, exclude operational settings from identity, and document diagnostics and coverage (PR URL pending).

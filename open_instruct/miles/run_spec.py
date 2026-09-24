@@ -55,8 +55,8 @@ UNSUPPORTED_FIELDS = {
     "accumulate_allreduce_grads_in_fp32": "Core owns reduction precision; this Megatron switch has no Core equivalent",
     "save_retain_interval": "native Core checkpoint retention is not implemented",
     "save_tokens_per_expert_interval": "tokens-per-expert checkpoint capture is not implemented",
-    "capture_generation_samples": "use save_debug_rollout_data or collect_dashboard; bounded sampling is not implemented",
-    "generation_samples_per_rollout": "use save_debug_rollout_data or collect_dashboard; bounded sampling is not implemented",
+    "capture_generation_samples": "use output.rollout_sample_rate to capture whole prompt groups",
+    "generation_samples_per_rollout": "use output.rollout_sample_rate to capture whole prompt groups",
     "rollout_recovery_max_attempts": "Core does not yet implement the baseline driver retry budget",
     "rollout_recovery_mem_fraction_static": "Core does not implement recovery-time memory overrides",
     "rollout_stage_timeout": "Core does not yet implement the baseline per-stage deadline",
@@ -226,8 +226,12 @@ class RunSpec:
         for key in ("hf_template",):
             if key in model:
                 model[key] = _path(model[key], base, f"model.{key}")
-        output = _table(document, "output", {"root", "export_hf", "hf_dir"}, required=True)
+        output = _table(document, "output", {"root", "export_hf", "hf_dir", "rollout_sample_rate"}, required=True)
         output["root"] = _path(output.get("root"), base, "output.root")
+        if "rollout_sample_rate" in output:
+            output["rollout_sample_rate"] = min(
+                validation.number(output["rollout_sample_rate"], "output.rollout_sample_rate"), 1.0
+            )
         output["export_hf"] = _boolean(output.get("export_hf", False), "output.export_hf")
         output["hf_dir"] = _path(output.get("hf_dir", str(Path(output["root"]) / "export-hf")), base, "output.hf_dir")
         conversion = _table(document, "conversion", {"hf_output"})
@@ -493,6 +497,10 @@ class RunSpec:
 
         def put(target, value, origin):
             section, key = target.split(".", 1)
+            if target == "miles.save_debug_rollout_data":
+                raise InputError(f"{origin}: use output.rollout_sample_rate; the run owns the capture path")
+            if target == "miles.rollout_sample_rate":
+                value = min(validation.number(value, origin), 1.0)
             if section == "miles":
                 record, value = options.resolve_option(key, value)
                 key = record["dest"]
@@ -583,6 +591,8 @@ class RunSpec:
         for key in ("table", "sha256"):
             if key in self.selection:
                 put(f"core.selection_{key}", self.selection[key], f"selection.{key}")
+        if "rollout_sample_rate" in self.output:
+            put("miles.rollout_sample_rate", self.output["rollout_sample_rate"], "output.rollout_sample_rate")
         core, miles = values["core"], values["miles"]
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
@@ -701,6 +711,7 @@ class RunSpec:
             "wandb_run_name": self.name,
             "save": str(root / "checkpoints"),
             "save_debug_rollout_data": str(root / "rollouts" / "{rollout_id}.pt"),
+            "rollout_sample_rate": 0.0,
             "wandb_dir": str(root / "wandb"),
             "async_save": False,
         }

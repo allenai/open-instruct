@@ -159,7 +159,7 @@ own key when loading it from the restored directory.
 | Records and prompt selection | `records_root`, `records_responses`, `records_response_sample_rate`, `selection_table`, `selection_sha256`, `reward_config` |
 | Serving endpoints and storage | `sglang_host`, `sglang_port`, `sglang_download_dir`, `sglang_file_storage_path` |
 | Serving observability | `sglang_log_level`, `sglang_log_level_http`, `sglang_log_requests`, `sglang_log_requests_level`, `sglang_log_requests_format`, `sglang_show_time_cost`, `sglang_enable_metrics`, `sglang_enable_metrics_for_all_schedulers`, `sglang_collect_traces`, `sglang_otlp_traces_endpoint` |
-| Existing MILES exclusions | `hf_checkpoint`, `save`, `load`, `prompt_data`, `eval_prompt_data`, `save_debug_rollout_data`, `save_debug_train_data`, `wandb_project`, `wandb_group`, `wandb_entity`, `wandb_run_name` |
+| Existing MILES exclusions | `hf_checkpoint`, `save`, `load`, `prompt_data`, `eval_prompt_data`, `save_debug_rollout_data`, `rollout_sample_rate`, `save_debug_train_data`, `wandb_project`, `wandb_group`, `wandb_entity`, `wandb_run_name` |
 | Environment paths | Family cache-directory variables, `CUDA_VISIBLE_DEVICES` (actual hardware is probed), `SGLANG_DG_CACHE_DIR`, `TILELANG_TMP_DIR` |
 
 The dynamic `SGLANG_DG_CACHE_DIR` previously made an otherwise identical serving
