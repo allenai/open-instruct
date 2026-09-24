@@ -20,6 +20,7 @@ import itertools
 import pathlib
 import tempfile
 from collections import OrderedDict, defaultdict
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Union
@@ -37,6 +38,7 @@ from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from torch.distributed.tensor import DTensor, distribute_tensor
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 from open_instruct import logger_utils
@@ -232,6 +234,91 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
     for module in model.modules():
         if isinstance(module, torch.nn.Dropout):
             module.p = 0
+
+
+def promoted_token_rows(tokenizer) -> list[tuple[int, tuple[int, ...]]]:
+    """(slot id, piece ids) for each token the tokenizer promoted into a reserved slot."""
+    return [(token.token_id, token.source_ids) for token in getattr(tokenizer, "promoted_reserved_slot_tokens", [])]
+
+
+def _write_row_means(matrix: torch.Tensor, rows: Sequence[tuple[int, Sequence[int]]]) -> None:
+    """Set each target row to the mean of its source rows, all read before any is written."""
+    means = {target: matrix[list(sources)].to(torch.float32).mean(dim=0) for target, sources in rows}
+    for target, mean in means.items():
+        matrix[target] = mean.to(matrix.dtype)
+
+
+def seed_embedding_rows(weight: torch.Tensor, rows: Sequence[tuple[int, Sequence[int]]]) -> None:
+    """Set each target row of `weight` to the mean of its source rows, sharded or not.
+
+    Once the embedding is sharded on the vocabulary dimension, the rows a promoted token is
+    seeded from are spread across ranks, and the row being written usually lives on a different
+    rank again. Rather than have each rank work out which global indices fall in its own shard --
+    offset arithmetic that is easy to get subtly wrong when the vocabulary does not divide
+    evenly -- this materializes the matrix once, edits it identically on every rank, and
+    redistributes it back into the parameter's own layout. It runs once at startup, so the
+    transient full copy buys simplicity cheaply.
+    """
+    data = weight.data if isinstance(weight.data, DTensor) else weight
+    for target, sources in rows:
+        if target >= data.shape[0] or max(sources) >= data.shape[0]:
+            raise ValueError(
+                f"Cannot seed row {target} from {list(sources)}: the matrix has only {data.shape[0]} rows."
+            )
+
+    with torch.no_grad():
+        if isinstance(data, DTensor):
+            full = data.full_tensor()
+            _write_row_means(full, rows)
+            data.copy_(distribute_tensor(full, data.device_mesh, data.placements))
+        else:
+            _write_row_means(data, rows)
+
+
+def initialize_promoted_token_embeddings(model: torch.nn.Module, tokenizer) -> int:
+    """Seed the embedding (and output) rows of reserved-slot-promoted tokens from their pieces.
+
+    A promoted token takes over a slot the pretraining data never emitted, so its row holds
+    whatever initialization and weight decay left there. Seeding it with the mean of the rows
+    for the ids the string used to tokenize into (`<th`, `ink`, `>` for `<think>`) starts it
+    somewhere the model already associates with the tag, so a short SFT budget measures the
+    tokenization change rather than the cost of learning an embedding from scratch.
+
+    A no-op when the tokenizer promoted nothing. Returns the number of rows written.
+    """
+    rows = promoted_token_rows(tokenizer)
+    if not rows:
+        return 0
+
+    input_embeddings = model.get_input_embeddings()
+    output_embeddings = model.get_output_embeddings()
+    # Tied weights are the same tensor; seeding it twice would read back the row just written.
+    matrices = [input_embeddings.weight]
+    if output_embeddings is not None and output_embeddings.weight is not input_embeddings.weight:
+        matrices.append(output_embeddings.weight)
+    for weight in matrices:
+        seed_embedding_rows(weight, rows)
+
+    logger.info(f"Seeded {len(rows)} promoted token embedding row(s) from their pieces: {rows}")
+    return len(rows)
+
+
+def initialize_promoted_token_embeddings_under_zero(model: torch.nn.Module, tokenizer) -> int:
+    """`initialize_promoted_token_embeddings` inside a ZeRO-3 gather of just the matrices it writes.
+
+    Returns before gathering when nothing was promoted: entering the gather materializes the full
+    embedding (and an untied head) on every rank, a cost a run without the flag must not pay.
+    `modifier_rank=0` so the write survives the re-partition on exit.
+    """
+    if not promoted_token_rows(tokenizer):
+        return 0
+    input_embeddings = model.get_input_embeddings()
+    output_embeddings = model.get_output_embeddings()
+    params = [input_embeddings.weight]
+    if output_embeddings is not None and output_embeddings.weight is not input_embeddings.weight:
+        params.append(output_embeddings.weight)
+    with deepspeed.zero.GatheredParameters(params, modifier_rank=0):
+        return initialize_promoted_token_embeddings(model, tokenizer)
 
 
 def maybe_load_checkpoint(

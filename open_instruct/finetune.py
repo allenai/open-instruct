@@ -375,6 +375,14 @@ def _create_scheduler(args: FlatArguments, optimizer, num_training_steps: int):
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
+    # A LoRA checkpoint saves only the adapters, so the seeded rows of promoted tokens -- which
+    # live in the frozen base embedding -- would not ship with it: the export would pair the
+    # promoted tokenizer with the untrained reserved-slot rows. Refuse before loading anything.
+    if args.use_lora and tc.reserved_slot_tokens:
+        raise ValueError(
+            "--reserved_slot_tokens is not supported with --use_lora/--use_qlora: the adapter checkpoint "
+            "does not carry the seeded embedding rows of the promoted tokens."
+        )
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -625,6 +633,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
+
+    # Tokens promoted into reserved vocabulary slots inherit an untrained row; seed it from the
+    # pieces the string used to tokenize into before training reads it. Gathers nothing unless
+    # the flag promoted something. A resume's load_state below overwrites these rows, as it must.
+    model_utils.initialize_promoted_token_embeddings_under_zero(model, tokenizer)
 
     if args.use_lora:
         if args.use_qlora:
