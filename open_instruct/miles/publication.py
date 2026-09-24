@@ -3,6 +3,7 @@
 import faulthandler
 import functools
 import os
+import socket
 import time
 
 from miles.backends.fsdp_utils import update_weight_utils
@@ -17,7 +18,13 @@ logger = logger_utils.setup_logger(__name__)
 def trace(phase, **details):
     """Opt-in host progress markers; do not add CUDA synchronization."""
     if os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") == "1":
-        logger.info("Core publication progress: phase=%s details=%s", phase, details)
+        logger.info(
+            "Core publication progress: host=%s pid=%s phase=%s details=%s",
+            socket.gethostname(),
+            os.getpid(),
+            phase,
+            details,
+        )
 
 
 def diagnose_update(function):
@@ -38,6 +45,21 @@ def diagnose_update(function):
             trace("update_exit")
 
     return wrapped
+
+
+async def request_bucket(engine, payload, engine_index):
+    if os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") != "1":
+        return await engine._make_request("update_weights_from_distributed", payload)
+    identity = dict(engine_index=engine_index, address=getattr(engine, "server_url", "unknown"))
+    trace("engine_request_start", **identity)
+    started = time.monotonic()
+    try:
+        result = await engine._make_request("update_weights_from_distributed", payload)
+    except BaseException as error:
+        trace("engine_request_error", **identity, error_type=type(error).__name__)
+        raise
+    trace("engine_request_complete", **identity, seconds=time.monotonic() - started)
+    return result
 
 
 class FlattenedDistributedUpdater(update_weight_utils.UpdateWeightFromDistributed):
@@ -82,8 +104,8 @@ class FlattenedDistributedUpdater(update_weight_utils.UpdateWeightFromDistribute
         # This is the same HTTP request contract used by olmo-miles direct export.
         started = time.perf_counter()
         pending = [
-            async_utils.submit(engine._make_request("update_weights_from_distributed", payload))
-            for engine in self.rollout_engines
+            async_utils.submit(request_bucket(engine, payload, index))
+            for index, engine in enumerate(self.rollout_engines)
         ]
         trace("broadcast_start", bytes=expected, engines=len(pending))
         dist.broadcast(flat, 0, group=self._model_update_groups, async_op=True).wait()

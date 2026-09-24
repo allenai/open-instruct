@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -559,6 +560,21 @@ class OLMoCoreTrainRayActor(TrainRayActor):
 
     @publication.diagnose_update
     def update_weights(self, info):
+        if os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") == "1":
+            device = torch.cuda.current_device()
+            publication.trace(
+                "trainer_identity",
+                rank=dist.get_rank(),
+                device=device,
+                uuid=str(torch.cuda.get_device_properties(device).uuid),
+            )
+            if dist.get_rank() == 0:
+                publication.trace(
+                    "engine_inventory",
+                    engines=[getattr(engine, "server_url", "unknown") for engine in info.rollout_engines],
+                    gpu_counts=info.engine_gpu_counts,
+                    gpu_offsets=info.engine_gpu_offsets,
+                )
         torch.cuda.synchronize()
         started = time.perf_counter()
         updater = self.weight_updater

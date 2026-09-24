@@ -134,7 +134,10 @@ For a publication stall, set `launch.env.OI_MILES_PUBLICATION_DIAGNOSTICS="1"`
 on a fresh run using an image containing this instrumentation. Trainer actors
 log connection, export, bucket synchronization, broadcast and engine-load progress,
 and dump their Python thread stacks every 60 seconds while `update_weights` is
-active. This adds no CUDA synchronization and does not change publication deadlines.
+active. Progress logs identify trainer GPU UUIDs and engine addresses, including
+each engine's request start, completion or exception. Enable NCCL `INFO` logging
+with `INIT,NET` subsystems to correlate communicator ranks with host/device setup.
+This adds no CUDA synchronization and does not change publication deadlines.
 The watchdog is canceled when the call returns or raises. These logs distinguish
 where publication stopped; a driver timeout alone does not identify the cause.
 

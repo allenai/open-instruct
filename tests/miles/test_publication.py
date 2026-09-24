@@ -1,5 +1,6 @@
 """Check the flattened wire contract independently of CUDA placement."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -7,6 +8,27 @@ import pytest
 import torch
 
 from open_instruct.miles import publication
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_engine_diagnostics_preserve_result_and_identity(monkeypatch, fails):
+    monkeypatch.setenv("OI_MILES_PUBLICATION_DIAGNOSTICS", "1")
+    trace = Mock()
+    monkeypatch.setattr(publication, "trace", trace)
+    remote = AsyncMock(return_value={"success": True})
+    engine = SimpleNamespace(server_url="http://engine-node:12345", _make_request=remote)
+    if fails:
+        remote.side_effect = RuntimeError("engine failed")
+        with pytest.raises(RuntimeError, match="engine failed"):
+            asyncio.run(publication.request_bucket(engine, {}, 8))
+    else:
+        assert asyncio.run(publication.request_bucket(engine, {}, 8)) == {"success": True}
+    phases = [call.args[0] for call in trace.call_args_list]
+    assert phases == ["engine_request_start", "engine_request_error" if fails else "engine_request_complete"]
+    for call in trace.call_args_list:
+        assert call.kwargs["engine_index"] == 8
+        assert call.kwargs["address"] == engine.server_url
+    remote.assert_awaited_once_with("update_weights_from_distributed", {})
 
 
 @pytest.mark.parametrize("enabled", [False, True])
