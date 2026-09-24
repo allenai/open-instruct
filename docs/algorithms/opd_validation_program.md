@@ -81,7 +81,7 @@ Paper hyperparameters: tau=0.8, alpha=1.0, k=16 (their README launch config says
 
 ## Where we are
 
-Updated 2026-09-24 01:29Z (was 2026-09-24 01:16Z; details in the latest Log entries).
+Updated 2026-09-24 01:56Z (was 2026-09-24 01:29Z; details in the latest Log entries).
 
 - **Active focus:** Kevin approved the Qwen3.5-2B Miles async-versus-sync comparison, including trainer wait time. Four-update async qualification `01M335TSWA8MTK1YAEZF0CXJEE` passed, including audit/export reload. The matched 100-update arm `01M338D7FBJYJX6YWJ0NX5RA03` is submitted with automatic resume. See the latest Log entry.
 
@@ -1625,3 +1625,12 @@ lower; it does not affect the per-token statistics above.
   - Added a tokens-per-GPU-second column to the speed tables: mean batch length x 256 / (s per update x all job GPUs). 2B: OI async 1,689, fixed 1,856, sync 798; Miles sync 639, async 580. 4B: OI async 711, sync 245; Miles sync about 196.
   - Added a Kevin-voiced "open question" at the end of section 4. Miles has 3 of 8 GPUs generating vs 16 of 32 for OI. From the wait times, a Miles rollout B300 does about 1.9k tok/s vs about 2.9k per OI H100. The note recommends the matched throughput comparison (step 8, not approved) before any switch.
   - OI layout confirmed from the W&B config: `num_learners_per_node=[8,8]`, `vllm_num_engines=16`, TP1.
+
+### 2026-09-24T01:56:21Z
+
+- Pre-share review of the team W&B report (still a draft).
+  - Added a "What we still need to run" list under the findings: a matched same-hardware speed comparison before any switch to Miles, more seeds plus the isolation run, separating size from LR, and a Miles 4B async run.
+  - Flagged a confound: the 4B runs use LR 5e-7 and the 9B teacher, and 2B at 5e-7 dipped only to 26.8, so "2B-only collapse" isn't established.
+  - Reworded the speed claims. The 2B OI async speedup holds: fixed batches drop nothing and run 55.7 s vs 53.1 s. At 4B, canonical async trained on about 0.57M tokens per update vs 1.18M for sync (`val/num_step_tokens`), so the length-adjusted gain is about 2.9x, not 5.4x.
+  - Per-GPU generation now uses each stack's own logged metric. 2B sync: Miles `perf/effective_tokens_per_gpu_per_sec` about 1.9k per B300 vs OI `val/actor_tokens_per_second` 50.5k / 16 engines, about 3.2k per H100. 4B: about 0.6k vs 0.9k.
+  - Trimmed the crash and greedy text.
