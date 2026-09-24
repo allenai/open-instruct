@@ -96,3 +96,27 @@ the latter when omitted. The Megatron use_routing_replay option is not the Core 
 For conditional constraints see [run controls](run-controls.md), [packing](sequence-packing.md),
 [topology](topology.md), and [managed judges](managed-judges.md). For all native
 flags, choices and source help see the [native appendix](native-options.md).
+
+## Rollout capture
+
+Capture defaults off. Set a group sampling rate in the run file:
+
+```toml
+[output]
+root = "/path/to/run"
+rollout_sample_rate = 0.1
+```
+
+This saves approximately 10% of prompt groups, with all sibling responses kept
+or omitted together. Selection is deterministic from the rollout seed, update,
+dataset and group identity, independent of training randomness. `0` skips capture
+entirely; `1` or higher saves every group. Negative/non-finite rates are invalid.
+The same selection controls `.pt`, dashboard Parquet and trajectory sidecars for
+training and shared evaluation. Training batches and aggregate metrics remain
+complete. Captures still serialize synchronously when enabled; a fractional rate
+reduces the work but does not make it asynchronous. Use rate `1` for full-batch
+replay diagnostics; a sampled capture is not a complete training batch.
+
+This replaces the structured `save_debug_rollout_data` path setting. The wrapper
+owns the path under `output.root/rollouts/`. Native MILES callers supply both
+`--save-debug-rollout-data PATH` and `--rollout-sample-rate RATE`.

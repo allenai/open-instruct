@@ -1,5 +1,5 @@
 {
-  "image": "sha256:4f5afc59a4fd7ece108cf78ab4064075751add67428a103d6c5c43d6375d0aff",
+  "image": "local-validation:open-instruct-miles-core-f67486a3df40+mounted-miles-19393c067",
   "options": [
     {
       "default": null,
@@ -3329,6 +3329,14 @@
         "--save-debug-rollout-data"
       ],
       "help": "Save the rollout data to this path for debugging. The file will be saved to `save_debug_rollout_data.format(rollout_id)`."
+    },
+    {
+      "default": 0.0,
+      "dest": "rollout_sample_rate",
+      "flags": [
+        "--rollout-sample-rate"
+      ],
+      "help": "Fraction of prompt groups to capture, including all sibling responses. Default 0 disables capture; values above 1 capture all groups. Applies to training and evaluation rollout dumps, including dashboard and trajectory sidecars."
     },
     {
       "default": null,
@@ -11904,5 +11912,5 @@
       "help": null
     }
   ],
-  "schema_sha256": "493a795ae0823e3e2feeeaea980a7e0f3467b26ea239efb05678e92618069078"
+  "schema_sha256": "890a6662ac314b79e5cc239302d5f417bd97aaadf5964aa6c8c1be2a735eb813"
 }

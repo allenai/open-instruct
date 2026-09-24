@@ -303,6 +303,7 @@ def run(options):
             save=str(root / "save"),
             save_interval=1,
             save_debug_rollout_data=str(root / "rollouts/{rollout_id}.pt"),
+            rollout_sample_rate=1.0,
             sglang_log_level="warning",
             lr=1e-5,
             lr_decay_iters=3,

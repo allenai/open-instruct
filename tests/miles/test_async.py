@@ -204,3 +204,25 @@ def test_live_cursor_snapshot_is_atomic_and_resume_regenerates_only_unconsumed_g
     state = torch.load(tmp_path / "rollout/global_dataset_state_dict_0.pt", weights_only=True)
     assert state["sample_offset"] == 3
     assert [g[0]["prompt"] for g in state["olmo_async_pending"]["groups"]] == ["prompt-1", "prompt-2"]
+
+
+def test_serving_failure_requeues_pristine_group_with_original_identities(tmp_path):
+    source = make_source(tmp_path)
+    [group] = source.get_samples(1)
+    identities = [sample.index for sample in group]
+    group_id = group[0].group_index
+    for sample in group:
+        sample.tokens = [10, 20]
+        sample.response_length = 1
+        sample.reward = 0.7
+        sample.weight_versions = [7]
+    source.requeue_pending_groups([group_id])
+    [retried] = source.get_samples(1)
+    assert [sample.index for sample in retried] == identities
+    assert retried[0].group_index == group_id
+    assert all(not sample.tokens and not sample.weight_versions and sample.reward is None for sample in retried)
+    assert all(sample.response_length == 0 for sample in retried)
+    assert len(source._pending_groups) == 1
+    assert not source._delegate.buffer
+    source.acknowledge_groups([retried])
+    assert not source._pending_groups

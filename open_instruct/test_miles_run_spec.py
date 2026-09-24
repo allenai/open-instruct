@@ -322,3 +322,33 @@ def test_max_retries_defaults_to_no_cap(tmp_path):
     assert spec(tmp_path).launch["max_retries"] == -1
     assert spec(tmp_path, launch={"max_retries": 0}).launch["max_retries"] == 0
     assert spec(tmp_path, launch={"max_retries": 5}).launch["max_retries"] == 5
+
+
+def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
+    default = spec(tmp_path).compile().core
+    assert default.compiler_cache_max_storage_bytes == 8 * 1024**3
+    assert default.compiler_cache_publish_interval_seconds == 600
+    run = spec(tmp_path, compiler_cache={"max_storage_bytes": 1024, "publish_interval_seconds": 30})
+    config = run.compile().core
+    assert config.compiler_cache_max_storage_bytes == 1024
+    assert config.compiler_cache_publish_interval_seconds == 30
+    restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "other.toml").compile().core
+    assert restored == config
+    assert spec(tmp_path, compiler_cache={"max_storage_bytes": 0}).compile().core.compiler_cache_max_storage_bytes == 0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("max_storage_bytes", -1),
+        ("max_storage_bytes", True),
+        ("max_storage_bytes", 1.5),
+        ("publish_interval_seconds", 0),
+        ("publish_interval_seconds", -1),
+        ("publish_interval_seconds", True),
+        ("publish_interval_seconds", float("nan")),
+    ],
+)
+def test_invalid_cache_publication_controls_are_rejected(tmp_path, field, value):
+    with pytest.raises(ValueError, match=field):
+        spec(tmp_path, compiler_cache={field: value}).compile()

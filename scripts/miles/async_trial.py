@@ -37,6 +37,7 @@ def configuration(campaign, output, *, asynchronous):
         sglang_cuda_graph_backend_decode="disabled",
         save=str(output / "metrics"),
         save_debug_rollout_data=str(output / "rollouts/{rollout_id}.pt"),
+        rollout_sample_rate=1.0,  # This diagnostic audits complete saved batches.
     )
     if asynchronous:
         config.miles.update(

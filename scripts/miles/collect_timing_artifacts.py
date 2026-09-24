@@ -11,6 +11,7 @@ PATTERNS = (
     "startup_rank*.jsonl",
     "publication.jsonl",
     "pipeline_occupancy.jsonl",
+    "rollout_errors.jsonl",
     "pipeline_lifecycle.jsonl",
     "engine_occupancy*.jsonl",
     "gpu_usage_node*.jsonl",

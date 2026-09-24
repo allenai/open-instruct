@@ -103,7 +103,13 @@ def compiler_environment(environment):
         "CUBLAS_WORKSPACE_CONFIG",
         "NVIDIA_TF32_OVERRIDE",
     }
-    excluded = set(cache.FAMILIES.values()) | {"CUDA_VISIBLE_DEVICES"}
+    excluded = set(cache.FAMILIES.values()) | {
+        "CUDA_VISIBLE_DEVICES",
+        # Locations, not compiler options. MILES can choose a fresh directory
+        # per serving process; including it prevents an identical restart hit.
+        "SGLANG_DG_CACHE_DIR",
+        "TILELANG_TMP_DIR",
+    }
     return {
         key: cache.digest(value)
         for key, value in sorted(environment.items())

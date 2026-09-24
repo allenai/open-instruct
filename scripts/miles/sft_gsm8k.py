@@ -80,6 +80,7 @@ def configuration(root):
             update_weight_buffer_size=1024 * 1024 * 1024,
             save=str(root / "metrics"),
             save_debug_rollout_data=str(root / "rollouts/{rollout_id}.pt"),
+            rollout_sample_rate=1.0,  # This diagnostic audits complete saved batches.
             lr=1e-6,
             lr_decay_iters=2,
             seed=17,

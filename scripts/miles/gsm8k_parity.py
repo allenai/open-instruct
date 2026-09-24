@@ -90,6 +90,7 @@ def configuration(
             save=str(output / "metrics"),
             **({"save_interval": save_interval} if save_interval is not None else {}),
             save_debug_rollout_data=str(output / "rollouts/{rollout_id}.pt"),
+            rollout_sample_rate=1.0,  # This diagnostic audits complete saved batches.
             lr=1e-6,
             lr_decay_style="constant",
             lr_decay_iters=updates,

@@ -26,15 +26,12 @@ from miles.rollout.submission_scheduler import make_submission_scheduler
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import async_capacity, pipeline_observer
+from open_instruct.miles import async_capacity, pipeline_observer, rollout_errors
 from open_instruct.miles.errors import GenerationInterrupted
 
 logger = logger_utils.setup_logger(__name__)
 
 _QUIESCE_LOG_INTERVAL_SECONDS = 30.0
-# Consecutive group requests that may lose their HTTP transport (connection
-# reset, closed stream) before the producer treats the router as dead.
-TRANSPORT_FAILURE_BUDGET = 8
 # A producer join that outlives the health-check budget gets one retry after the
 # engines abort their in-flight requests, which is what releases a generation
 # task still waiting on a response.
@@ -69,8 +66,8 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         # Group tasks keyed for failure bookkeeping; a transport failure on one
         # request discards its whole group and requeues the pristine prompts.
         self._task_groups: dict[asyncio.Task[Any], int] = {}
-        self._transport_requeues = 0
-        self._consecutive_transport_failures = 0
+        self._errors = rollout_errors.RolloutErrors()
+        self._retry_after = 0.0
         self._ready_completion_counts: dict[int, dict[str, int]] = {}
         self._shutdown_unqueued_counts = dict(groups=0, samples=0, response_tokens=0)
         self._completed_put_wait_seconds = 0.0
@@ -102,6 +99,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
             # A partial dequeue is not consumed training data. Commit the entire
             # batch only after the upstream drain and filtering complete.
             self.data_source.acknowledge_groups(self._draining_groups)
+            result.metrics.update(self._errors.metrics())
             return result
         except BaseException:
             self._interrupted_groups.extend(g[0].group_index for g in self._draining_groups)
@@ -146,37 +144,28 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         self._task_groups[task] = group[0].group_index
         return task
 
-    def _requeue_transport_failure(self, group_index: int | None, error: BaseException) -> bool:
-        """Discard a group whose request lost its HTTP transport and regenerate it later.
-
-        A lost connection (reset, closed stream, refused connect) leaves delivery
-        unknown, so the partial group is never reused; its pristine prompts go
-        back to the ledger exactly as after a preemption, and a fresh group is
-        sampled under the current weights. Anything other than a transport error,
-        or more than ``TRANSPORT_FAILURE_BUDGET`` failures in a row, still fails
-        the run: a dead router is not a transient.
-        """
-        if not isinstance(error, httpx.TransportError) or group_index is None:
+    def _requeue_generation_failure(self, group_index: int | None, error: BaseException) -> bool:
+        """Retry pristine groups on known serving failures, never partial responses."""
+        category = rollout_errors.recovery_category(error)
+        if category is None or group_index is None:
             return False
-        self._consecutive_transport_failures += 1
-        self._transport_requeues += 1
         self._producing_groups.pop(group_index, None)
         self.data_source.requeue_pending_groups([group_index])
+        self._errors.record(failures=[category])
+        # Pause new submissions briefly; already-active groups continue. In
+        # particular, do not spin on queue-full or no-healthy-worker responses.
+        self._retry_after = time.monotonic() + rollout_errors.RETRY_DELAY_SECONDS
+        response = getattr(error, "response", None)
         logger.warning(
-            "Async group %s lost its HTTP transport (%s: %s); prompts requeued for regeneration "
-            "(requeues=%d consecutive=%d/%d)",
+            "Async group %s generation failed: category=%s error=%s status=%s detail=%s; "
+            "pristine prompts requeued for regeneration (requeued_groups=%d)",
             group_index,
+            category,
             type(error).__name__,
-            error,
-            self._transport_requeues,
-            self._consecutive_transport_failures,
-            TRANSPORT_FAILURE_BUDGET,
+            getattr(response, "status_code", None),
+            response.text[:512] if response is not None else str(error)[:512],
+            self._errors.failures.total(),
         )
-        if self._consecutive_transport_failures > TRANSPORT_FAILURE_BUDGET:
-            raise RuntimeError(
-                f"{self._consecutive_transport_failures} consecutive async requests lost their HTTP transport; "
-                "the serving router is not reachable"
-            ) from error
         return True
 
     async def _abort_engine_requests(self, timeout: float) -> None:
@@ -252,6 +241,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         stop_waiter = asyncio.create_task(self._stop_requested.wait())
         try:
             while True:
+                self._errors.check()
                 if self._interrupted():
                     raise GenerationInterrupted("engine retired while async output buffer was full")
                 done, _ = await asyncio.wait({put_task, stop_waiter}, timeout=0.5, return_when=asyncio.FIRST_COMPLETED)
@@ -281,17 +271,20 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
     async def _worker_loop(self) -> None:
         """Generate continuously while retaining ownership of every child task."""
         observers = [
+            asyncio.create_task(rollout_errors.observe(self)),
             asyncio.create_task(pipeline_observer.observe(self)),
             asyncio.create_task(pipeline_observer.observe_engines(self, get_worker_urls)),
         ]
         active: set[asyncio.Task[Any]] = set()
         self._active_tasks = active
         self._producer_idle.clear()
+        fatal = None
         try:
             while True:
+                self._errors.check()
                 if self._interrupted():
                     raise GenerationInterrupted("rollout engine retired during async production")
-                if self._producer_resumed.is_set() and not self._stopping:
+                if self._producer_resumed.is_set() and not self._stopping and time.monotonic() >= self._retry_after:
                     while self._scheduler.has_capacity(
                         pending_groups=len(active), group_budget=self._max_in_flight_groups()
                     ):
@@ -302,7 +295,10 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                     self._producer_idle.set()
                     if self._stopping:
                         return
-                    await self._producer_resumed.wait()
+                    if self._producer_resumed.is_set():
+                        await asyncio.sleep(0.5)
+                    else:
+                        await self._producer_resumed.wait()
                     self._producer_idle.clear()
                     continue
 
@@ -315,14 +311,15 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                 for task in done:
                     group_index = self._task_groups.pop(task, None)
                     error = None if task.cancelled() else task.exception()
-                    if error is not None and self._requeue_transport_failure(group_index, error):
+                    if error is not None and self._requeue_generation_failure(group_index, error):
                         continue
                     completions.append(
                         self._collect_group_result(task, self._producing_groups[group_index])
                         if task.cancelled()
                         else task.result()
                     )
-                    self._consecutive_transport_failures = 0
+                self._errors.record(successes=sum(not task.cancelled() and task.exception() is None for task in done))
+                self._errors.check()
                 self._ready_completion_counts.update(
                     (id(completion), pipeline_observer.completion_counts([completion])) for completion in completions
                 )
@@ -332,10 +329,16 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                     if not accepted:
                         for key, value in counts.items():
                             self._shutdown_unqueued_counts[key] += value
+        except GenerationInterrupted:
+            raise
+        except Exception as error:
+            fatal = f"{type(error).__name__}: {str(error)[:1024]}"
+            raise
         finally:
             for observer in observers:
                 observer.cancel()
             await asyncio.gather(*observers, return_exceptions=True)
+            self._errors.report(self.args, fatal=fatal)
             unfinished = [task for task in active if not task.done()]
             if unfinished:
                 (logger.info if self._publication_paused or self._stopping else logger.warning)(

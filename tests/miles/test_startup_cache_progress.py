@@ -1,4 +1,4 @@
-"""Warm compiler caches are published after committed checkpoints while workers stay live."""
+"""Warm compiler caches are published after completed training collections while workers stay live."""
 
 import asyncio
 import json
@@ -69,13 +69,12 @@ def test_final_publication_still_removes_the_private_copy(live_worker):
     assert not local.exists()
 
 
-def test_progress_schedule_first_checkpoint_then_interval():
-    interval = startup_cache.PROGRESS_PUBLICATION_INTERVAL
-    assert startup_cache.progress_due(1, 0, interval=interval)
-    assert not startup_cache.progress_due(2, 1, interval=interval)
-    assert startup_cache.progress_due(interval, 1, interval=interval)
-    assert not startup_cache.progress_due(interval + 1, 2, interval=interval)
-    assert startup_cache.progress_due(2 * interval, 2, interval=interval)
+def test_progress_schedule_first_collection_then_elapsed_time():
+    assert startup_cache.progress_due(None, 100)
+    assert not startup_cache.progress_due(100, 699)
+    assert startup_cache.progress_due(100, 700)
+    assert not startup_cache.progress_due(100, 110, interval=30)
+    assert startup_cache.progress_due(100, 130, interval=30)
 
 
 def _policy(tmp_path, workers=1):
@@ -107,7 +106,7 @@ def test_publish_progress_runs_in_background_without_overlap(tmp_path, monkeypat
         release = asyncio.Event()
         first = startup_cache.publish_progress(args, 4)
         assert first is not None and not first.done()
-        # Checkpoints that commit while a publication is in flight are counted, not queued.
+        # Collections that complete while a publication is in flight are counted, not queued.
         assert startup_cache.publish_progress(args, 9) is None
         release.set()
         await first
@@ -116,14 +115,15 @@ def test_publish_progress_runs_in_background_without_overlap(tmp_path, monkeypat
         assert progress["publications"][0]["rollout_id"] == 4
         slots = {worker["slot"] for worker in progress["publications"][0]["workers"]}
         assert slots == {"rank0", "rank1", "cold"}
-        # The next due checkpoint is the configured interval, counted from process start.
+        # Arbitrarily many collections do not bypass the elapsed-time limit.
         state = startup_cache._PROGRESS[args.olmo_core_startup_cache["report_dir"]]
-        assert state["checkpoints_seen"] == 2 and state["published"] == 1
-        for rollout_id in range(10, 10 + startup_cache.PROGRESS_PUBLICATION_INTERVAL - 3):
+        assert state["collections_seen"] == 2 and state["published"] == 1
+        for rollout_id in range(10, 100):
             assert startup_cache.publish_progress(args, rollout_id) is None
         release = asyncio.Event()
         release.set()
-        task = startup_cache.publish_progress(args, 99)
+        state["last_attempt"] -= startup_cache.DEFAULT_PUBLISH_INTERVAL_SECONDS
+        task = startup_cache.publish_progress(args, 100)
         assert task is not None
         await task
         assert len(calls) == 2
@@ -159,3 +159,64 @@ def test_finish_cancels_an_in_flight_progress_publication(tmp_path, monkeypatch)
 
 def test_publish_progress_is_a_no_op_without_cache_policy():
     assert startup_cache.publish_progress(SimpleNamespace(olmo_core_startup_cache=None), 3) is None
+
+
+def test_unchanged_live_cache_skips_archiving(live_worker, monkeypatch):
+    local, _, report = live_worker
+    assert startup_cache.publish_worker(report, retain_local=True)["publish"]["status"] == "published"
+    original = cache.publish
+    calls = []
+
+    def tracked(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "publish", tracked)
+    result = startup_cache.publish_worker(report, retain_local=True)
+    assert result["publish"]["reason"] == "local_artifacts_unchanged"
+    assert not calls
+    (local / "triton" / "group" / "new.so").write_bytes(b"new kernel")
+    assert startup_cache.publish_worker(report, retain_local=True)["publish"]["status"] == "published"
+    assert calls == [True]
+
+
+def test_storage_limit_stops_worker_publication_until_run_ends(live_worker, monkeypatch):
+    local, shared, report = live_worker
+    report["max_storage_bytes"] = 0
+    result = startup_cache.publish_worker(report, retain_local=True)
+    assert result["publish"]["status"] == "storage_limit"
+    assert local.is_dir()
+    assert not list(shared.rglob("cache.tar.gz"))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("A capped worker attempted another publication")
+
+    monkeypatch.setattr(cache, "publish", unexpected)
+    (local / "triton" / "group" / "later.so").write_bytes(b"still compiles locally")
+    assert startup_cache.publish_worker(report, retain_local=True)["publish"]["status"] == "storage_limit"
+    assert startup_cache.publish_worker(report)["publish"]["status"] == "storage_limit"
+    assert not local.exists()
+
+
+def test_capped_slots_are_not_resubmitted(tmp_path, monkeypatch):
+    calls = []
+
+    async def fake_publish_all(workers, *, retain_local=False):
+        calls.append([worker["slot"] for worker in workers])
+        return [
+            {"slot": w["slot"], "publish": {"status": "storage_limit" if w["slot"] == "rank0" else "published"}}
+            for w in workers
+        ]
+
+    monkeypatch.setattr(startup_cache, "_publish_all", fake_publish_all)
+    args = SimpleNamespace(olmo_core_startup_cache=_policy(tmp_path, workers=2), save=str(tmp_path / "save"))
+
+    async def scenario():
+        await startup_cache.publish_progress(args, 0)
+        state = startup_cache._PROGRESS[args.olmo_core_startup_cache["report_dir"]]
+        state["last_attempt"] -= startup_cache.DEFAULT_PUBLISH_INTERVAL_SECONDS
+        await startup_cache.publish_progress(args, 1)
+        assert calls == [["rank0", "rank1"], ["rank1"]]
+        startup_cache._PROGRESS.pop(args.olmo_core_startup_cache["report_dir"])
+
+    asyncio.run(scenario())

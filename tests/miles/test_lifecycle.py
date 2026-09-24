@@ -95,7 +95,13 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         start_rollout_id=start_rollout,
         num_rollout=start_rollout + (2 if early_stop else 1),
     )
+    # No save interval: cache progress must still follow completed training,
+    # including resumed processes and deliberate early stops.
+    monkeypatch.setattr(driver.startup_cache, "publish_progress", lambda args, rid: events.append(f"cache-{rid}"))
     result = asyncio.run(driver.train(args, export_hf="/final" if with_export else None))
+    assert events.count(f"cache-{start_rollout}") == 1
+    assert events.index("trained") < events.index(f"cache-{start_rollout}")
+
     assert result["completed_rollout_ids"] == [start_rollout]
     if with_export and not early_stop:
         export_index = events.index(f"export-{start_rollout}-/final")

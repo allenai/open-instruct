@@ -86,6 +86,7 @@ def snapshot(producer):
         ),
         "time_unix": time.time(),
         "producer_owned_groups": len(producer._producing_groups),
+        **(producer._errors.metrics() if hasattr(producer, "_errors") else {}),
         "producer_active_group_tasks": sum(not task.done() for task in producer._active_tasks),
         "producer_admission_open": producer._producer_resumed.is_set(),
         "producer_unfinished_samples": getattr(producer._scheduler, "samples_in_flight", None),
