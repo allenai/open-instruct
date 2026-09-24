@@ -9,7 +9,7 @@ There is no Megatron checkpoint conversion in this path.
 |---|---|
 | Conventional Olmo MoE | Tiny local and EP2 lifecycle/parity checks; choose a compatible HF descriptor |
 | Earlier KDA/latent MoE SFT model | Primary full-SFT GSM8K comparison and async/replay evidence on B300 |
-| Small hero, new attention features | Adapter/conversion work exists; see [hero support](hero-support.md) for exact scope before selecting it |
+| Small hero, new attention features | Paired SFT four-update barrier mechanics passed on H100 EP4 + TP1 with automatic fused rounding; see [hero support](hero-support.md) for evidence and remaining limits |
 | Dense Olmo 3 | Separate FSDP adapter; two-GPU 7B smoke, fresh-process resume, HF export and fresh serving reload passed, with zero-advantage batches. Nonzero-gradient full-model learning remains unqualified; see [qualification](olmo3-pre-rl.md) |
 | Other HF architectures | Do not infer support from safetensors or tokenizer compatibility; inspect the model factory and identify any support gap before choosing a backend; deprecated GRPO is not an automatic fallback |
 
