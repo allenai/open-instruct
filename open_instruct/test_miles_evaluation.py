@@ -247,7 +247,12 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
     module("miles.utils.hf_config", HF_EXPORT_COMPLETE_MARKER=".complete")
     module("miles.utils.misc", should_run_periodic_action=lambda *a: False)
     module("miles.utils.tracking_utils")
-    module("miles.utils.tracking_utils.tracking", finish_tracking=lambda: None, init_tracking=lambda args: None)
+    module(
+        "miles.utils.tracking_utils.tracking",
+        define_step_key_metric_group=lambda *a: None,
+        finish_tracking=lambda: None,
+        init_tracking=lambda args: None,
+    )
     module("open_instruct.miles.rolling_publication", RollingPublication=Mock())
     # Load under a private module name so monkeypatch cleanup leaves no stale driver.
     spec = importlib.util.spec_from_file_location(
