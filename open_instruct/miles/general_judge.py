@@ -31,7 +31,7 @@ from typing import Any
 import requests
 
 from open_instruct import logger_utils
-from open_instruct.miles import judge_registry
+from open_instruct.miles import infra_timeouts, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -277,7 +277,9 @@ def _get_executor(max_workers: int) -> ThreadPoolExecutor:
 
 def count_prompt_tokens(config: GeneralJudgeConfig, prompt: str) -> int:
     """Count the complete chat request with the serving tokenizer/template."""
-    response = _get_session().post(
+    response = infra_timeouts.request(
+        _get_session(),
+        "post",
         config.api_url.removesuffix("/v1/chat/completions") + "/tokenize",
         json={"model": config.model, "messages": [{"role": "user", "content": prompt}], "add_generation_prompt": True},
         headers={"Authorization": f"Bearer {config.api_key}"},
@@ -307,7 +309,9 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
                     f"judge context overflow: {count} prompt + {config.max_tokens} output > "
                     f"{config.max_context_length}; request was not truncated"
                 )
-        response = _get_session().post(
+        response = infra_timeouts.request(
+            _get_session(),
+            "post",
             config.api_url,
             json={
                 "model": config.model,

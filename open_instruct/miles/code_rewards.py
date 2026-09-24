@@ -27,6 +27,7 @@ from typing import Any
 import requests
 
 from open_instruct import logger_utils
+from open_instruct.miles import infra_timeouts
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -188,8 +189,13 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
 
     def request() -> Any:
         try:
-            response = _get_session().post(
-                config.api_url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout
+            response = infra_timeouts.request(
+                _get_session(),
+                "post",
+                config.api_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=timeout,
             )
             diagnostics["http_status"] = response.status_code
             response.raise_for_status()

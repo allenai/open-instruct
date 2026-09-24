@@ -1,9 +1,11 @@
 # Hero non-EMO long-run startup investigation
 
-As of September 24, 2026, 17:13 UTC, these long-run attempts have completed **no
-optimizer updates** and produced no trained checkpoint or long-run quality result.
-The latest cache-fix attempt is queued. The earlier
-[four-update hero smoke](hero-rl-smoke-20260924.md) remains separate evidence.
+The cache-fix attempt completed **six optimizer updates** on September 24, 2026,
+then failed at router readiness confirmation after a successful weight transfer.
+It produced baseline background evaluations, but no trained checkpoint (saving
+was scheduled every 25 updates). A replacement with longer infrastructure
+deadlines, warnings and a router response-forwarding fix is being prepared.
+The earlier [four-update hero smoke](hero-rl-smoke-20260924.md) is separate evidence.
 
 ## Run and preparation
 
@@ -42,7 +44,7 @@ filters and holdout selection. Outputs are under:
 |---|---|---|
 | [Initial long run](https://beaker.org/ex/01M3A1BG4RQP012BY5PAD822Z6) | `01M3A0F9W9K6C4RNJGP6814SHE` / `999a9a08c455` | All engines and trainers initialized; initial publication timed out after 180 seconds |
 | [Instrumented retry](https://beaker.org/ex/01M3A4EWJHJ9ZZEBMSFV17WCAW) | `01M3A4D5CNA72MH1TVEN7D8NFR` / `aca051d369ea` | One engine crashed while importing a partial cached configuration; stopped before publication |
-| [Cache-fix retry](https://beaker.org/ex/01M3A6D4H0ZVVW07GGHCCWBX2Q) | `01M3A6AV5HDMP64ZMY8HXH46H0` / `cacc219018ee` | Queued at the timestamp above; native three-replica grouping verified |
+| [Cache-fix retry](https://beaker.org/ex/01M3A6D4H0ZVVW07GGHCCWBX2Q) | `01M3A6AV5HDMP64ZMY8HXH46H0` / `cacc219018ee` | Six updates; initial sync and all later transfers succeeded; router readiness HTTP read timed out after update six |
 
 The cache-fix retry preserves the training recipe, adds a 600-second publication
 allowance and diagnostics, and incorporates the evaluator settings below.
@@ -50,7 +52,7 @@ One-off TOMLs, submitted specifications, receipts and logs are retained in ignor
 `runs/hero-non-emo-long-20260924{,-r2,-r3}/`, with the corresponding run output
 roots under `/weka/oe-training-default/robertb/open-instruct/runs/`.
 
-## Publication timing remains unresolved
+## Original initial-publication stall
 
 The inference engines first load the HF checkpoint from storage and complete
 serving startup. This run enables `check_weight_update_equal`: MILES saves a CPU
@@ -134,8 +136,8 @@ publication-boundary timeout was producer cancellation, a different failure.
 
 This is the first recorded occurrence of the specific hero initial-transfer
 stall in the reviewed evidence. Topology/transport at scale is a plausible
-suspect, not an isolated cause. The three-node instrumented retry remains queued;
-there is no successful current-runtime hero EP4/refresh/multi-node control yet.
+suspect, not an isolated cause. The cache-fix retry subsequently completed initial
+publication and six updates at this topology; that does not isolate the original stall.
 A subsequent reproduction should preserve the phase and conditions identified by
 its traces, rather than assume that an additional one-engine smoke rules out a
 nineteen-engine or inter-node problem.
@@ -176,8 +178,8 @@ copying behavior for unrelated applications or standalone serving launches.
 Validation: 27 focused tests passed, including four fresh concurrent child
 interpreters loading a primed custom config/tokenizer with any module-copy attempt
 made fatal. The final tokenizer-mode preservation change passed that integration
-test again. Ruff and formatting checks passed. The nineteen-engine runtime
-qualification is still pending capacity.
+test again. Ruff and formatting checks passed. The cache-fix retry subsequently
+initialized all nineteen engines without reproducing the import failure.
 
 ## Evaluator execution fixes
 
@@ -197,3 +199,94 @@ evaluator image `01M3A2FDS2036RBJMXP2YB4XDT` and produced actual responses for b
 GSM8K examples and both IFBench examples. Its two examples per task and 256-token
 cap establish execution only. The scheduled full evaluations retain the requested
 128 examples per task and 10,240-token cap; no full baseline score is reported here.
+
+
+## Six-update result and distinct router timeout
+
+[Cache-fix run](https://beaker.org/ex/01M3A6D4H0ZVVW07GGHCCWBX2Q)
+([W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/ashx9ttq)) ran from
+18:06:14 to 18:57:26 UTC. All three replicas shared one native replica group on
+three distinct Holmes B300 nodes. All nineteen engines initialized.
+
+| Measurement | Observed |
+|---|---:|
+| Initial actor publication | 15.158 s |
+| Initial publication stage including HF snapshot comparison | 43.017 s, passed |
+| Actor publications after updates 1–6 | 7.453, 6.928, 5.900, 5.869, 7.695, 5.705 s |
+| Completed optimizer updates on each of four trainer ranks | 6; none skipped |
+| Trainer stage duration, updates 1–6 | 871.18, 311.65, 253.71, 79.10, 62.08, 61.34 s |
+| Peak allocated trainer memory, rank 0–3 | 102.67, 120.98, 138.18, 119.06 GiB |
+| Last mean behavior/Core log-probability error | 0.020372 over 676,251 active tokens |
+| Startup GSM8K exact match | 0.484375 (128 examples) |
+| Startup IFBench strict / loose prompt accuracy | 0.2109375 / 0.234375 (128 examples) |
+
+These evaluation scores describe the starting SFT checkpoint, not trained-model
+quality. Initial training times include cold setup; the final three stages are
+not enough to establish sustained throughput.
+
+Every publication delivered 24 buckets, 23,441 tensors and 24,992,380,160 bytes.
+The last transfer finished at 18:55:27.661 UTC. The subsequent call chain was
+`train/group.update_weights → inference_controller.end_update_weights →
+server_cell.mark_weights_ready → router_api_client.add_worker`. The router
+`/add_worker?...&weights_ready=true` request hit its separate **30-second HTTP
+read timeout** at 18:55:57.68. The publication stage lasted 35.784 seconds,
+not the configured 600-second Core deadline. Cleanup then correctly refused to
+reuse engines after incomplete readiness confirmation. No save/final export ran.
+
+### Response forwarding hypothesis and patch
+
+The router parsed and serialized each generation response as JSON on the same
+async event loop that handles readiness requests. Routing replay makes those
+responses large: at 12,288 tokens, 16 layers and top-16 expert indices, the base64
+routing field alone is about 16.8 MB. The patch forwards the HTTPX-decoded body
+bytes directly, retaining status/content type and dropping obsolete length,
+transfer and content-encoding headers. Tests cover exact JSON bytes, binary
+responses, errors and compressed upstream bodies.
+
+A local CPU synthetic burst of already-ready responses measured event-loop
+scheduling delay of 2.641 s for 64 responses, 10.342 s for 256 and 51.264 s for
+1,216 with the old JSON conversion; raw forwarding measured 0.000308, 0.000663
+and 0.002991 s respectively. This demonstrates a plausible mechanism exceeding
+30 seconds. **It is not a measured production burst or a proven root cause.**
+Raw receipts are retained under ignored `runs/hero-non-emo-long-20260924-r3/`.
+
+Readiness confirmation now logs router/worker/attempt/elapsed time and retries
+transport timeouts or network failures up to three attempts. Only the idempotent
+`weights_ready` confirmation is retried; HTTP rejection remains fatal. Router
+logs record readiness, active requests and worker epoch. Confirmation still occurs
+after every publication because it can readmit a quarantined engine.
+
+### Replacement timeout policy
+
+The replacement sets `MILES_INFRA_TIMEOUT_MULTIPLIER=5` in the replica environment.
+The code default is 1. Infrastructure waits warn at the earlier of 30 seconds or
+the old deadline, repeat every 30 seconds, and report completion after a slow wait.
+Warnings identify the operation, endpoint/request/cell where available, elapsed
+time and effective deadline. Driver/startup stage warnings also run from a thread
+so blocking GPU/Python work cannot silence those stage warnings. Async request
+watchdogs use tasks, not a thread per generation.
+
+| Wait | Previous | Replacement |
+|---|---:|---:|
+| Router control HTTP read/write/pool | 30 s | 150 s per attempt |
+| Router control connect | 10 s | 50 s |
+| Core publication | 600 s | 3,000 s |
+| Refresh request | 1,800 s | 9,000 s |
+| Engine drain | 900 s | 4,500 s |
+| Cell initialization tick | 120 s | 600 s |
+| Engine startup state deadline | 1,800 s | 9,000 s |
+| Fleet readiness | 3,600 s | 18,000 s |
+| Judge HTTP request | 600 s | 3,000 s |
+| Replica heartbeat expiry | 120 s | 600 s |
+| Replica startup | 1,200 s | 6,000 s |
+| Background evaluation submission | 30 s | 150 s |
+| Trainer distributed timeout (explicit run option) | 10 min | 50 min |
+| SGLang watchdog (explicit run option) | 300 s | 1,500 s |
+
+HTTP health probes, abort discovery/requests, producer joins and cleanup waits
+are also multiplied. Existing unbounded waits stay unbounded. Polling cadence,
+verifier execution budgets, generation token caps and the eight-hour training /
+ten-hour Beaker execution budgets retain their meanings; this does not globally
+rewrite third-party internal timers. The run retains concurrency 64, budget
+1,216, judge concurrency 16 and recomputation. Native saves move to every five
+updates (keep two) to retain progress; measure their overhead separately.

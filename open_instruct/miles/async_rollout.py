@@ -26,7 +26,7 @@ from miles.rollout.submission_scheduler import make_submission_scheduler
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import async_capacity, pipeline_observer, rollout_errors
+from open_instruct.miles import async_capacity, infra_timeouts, pipeline_observer, rollout_errors
 from open_instruct.miles.errors import GenerationInterrupted
 
 logger = logger_utils.setup_logger(__name__)
@@ -170,11 +170,17 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
 
     async def _abort_engine_requests(self, timeout: float) -> None:
         """Ask every engine to abort its in-flight requests; unreachable engines are logged."""
-        urls = await asyncio.wait_for(get_worker_urls(self.args), timeout)
+        urls = await infra_timeouts.wait_for(
+            get_worker_urls(self.args), timeout, operation="discover engines to abort"
+        )
 
         async def abort(url):
             try:
-                await asyncio.wait_for(post(f"{url}/abort_request", {"abort_all": True}, max_retries=1), timeout)
+                await infra_timeouts.wait_for(
+                    post(f"{url}/abort_request", {"abort_all": True}, max_retries=1),
+                    timeout,
+                    operation=f"abort engine requests {url}",
+                )
             except (httpx.HTTPError, TimeoutError):
                 logger.warning("Async publication abort could not reach worker=%s", url)
 
@@ -183,7 +189,11 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
     async def _join_worker(self, timeout: float) -> list[Any]:
         assert self._worker is not None
         self._worker.cancel()
-        return list(await asyncio.wait_for(asyncio.gather(self._worker, return_exceptions=True), timeout))
+        return list(
+            await infra_timeouts.wait_for(
+                asyncio.gather(self._worker, return_exceptions=True), timeout, operation="join rollout producer"
+            )
+        )
 
     async def prepare_publication(self) -> list[int]:
         """Cancel/join unfinished groups; keep completed buffered groups intact."""

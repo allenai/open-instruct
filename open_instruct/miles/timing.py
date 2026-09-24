@@ -5,6 +5,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from open_instruct.miles import infra_timeouts
+
 
 @contextmanager
 def stage(args, name, rollout_id=None, *, details=None):
@@ -12,7 +14,8 @@ def stage(args, name, rollout_id=None, *, details=None):
     wall = time.time()
     passed = False
     try:
-        yield
+        with infra_timeouts.watch(f"driver stage={name} rollout={rollout_id}"):
+            yield
         passed = True
     finally:
         if getattr(args, "save", None):
@@ -68,9 +71,10 @@ def startup_stage(args, name, *, device=None):
     wall = time.time()
     passed = False
     try:
-        yield
-        if device is not None:
-            device.synchronize()
+        with infra_timeouts.watch(f"startup stage={name} rank={getattr(args, 'rank', 0)}"):
+            yield
+            if device is not None:
+                device.synchronize()
         passed = True
     finally:
         if getattr(args, "save", None):

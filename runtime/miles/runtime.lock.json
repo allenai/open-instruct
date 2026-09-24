@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles.git",
-      "revision": "19393c0672c3a1a6558f71fc7b42788bc62bd99c",
+      "revision": "9ecde5bc80cdadf2348600c49056449c74fb4ec3",
       "private": true
     },
     "olmo-sglang": {

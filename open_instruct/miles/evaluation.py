@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles import state
+from open_instruct.miles import infra_timeouts, state
 from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
@@ -214,21 +214,24 @@ def submit(receipt, path):
         if receipt["update"] and not (Path(receipt["checkpoint"]) / ".complete").is_file():
             raise ValueError("Snapshot completion marker missing; refusing submission")
         state.atomic_json(spec_path, specification(receipt))
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "open_instruct.miles.evaluation_submit",
-                str(spec_path),
-                receipt["evaluation"]["workspace"],
-                f"miles-eval-{hashlib.sha256(receipt['evaluation']['root'].encode()).hexdigest()[:10]}-{receipt['update']}-{receipt['group_id']}",
-                str(receipt["evaluation"]["submit_timeout"]),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=receipt["evaluation"]["submit_timeout"],
-            check=True,
-        )
+        with infra_timeouts.watch(
+            "background evaluation submission", previous_timeout=receipt["evaluation"]["submit_timeout"]
+        ):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "open_instruct.miles.evaluation_submit",
+                    str(spec_path),
+                    receipt["evaluation"]["workspace"],
+                    f"miles-eval-{hashlib.sha256(receipt['evaluation']['root'].encode()).hexdigest()[:10]}-{receipt['update']}-{receipt['group_id']}",
+                    str(int(infra_timeouts.seconds(receipt["evaluation"]["submit_timeout"]))),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=infra_timeouts.seconds(receipt["evaluation"]["submit_timeout"]),
+                check=True,
+            )
         response = json.loads(result.stdout)
         experiment = response[0] if isinstance(response, list) else response
         receipt.update(status="submitted", experiment_id=experiment["id"])

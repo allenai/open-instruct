@@ -149,6 +149,18 @@ This adds no CUDA synchronization and does not change publication deadlines.
 The watchdog is canceled when the call returns or raises. These logs distinguish
 where publication stopped; a driver timeout alone does not identify the cause.
 
+Set `launch.env.MILES_INFRA_TIMEOUT_MULTIPLIER="5"` to allow longer infrastructure
+waits on a diagnostic run. The default is 1; values must be finite and at least 1.
+Covered waits warn at the earlier of 30 seconds or the original deadline, then
+every 30 seconds until completion or failure. This covers Core publication/drain,
+refresh requests, router control and health requests, readiness, judge transport,
+coordination, evaluation submission and cleanup. It does not multiply polling
+intervals, verifier execution budgets or the run duration. SGLang watchdog and
+trainer distributed deadlines remain explicit MILES run options. See the
+[hero run timeout table](measurements/hero-long-startup-20260924.md#replacement-timeout-policy)
+for concrete values and evidence. Longer waits preserve cancellation and hard
+deadlines; idempotent router readiness confirmation alone retries transport errors.
+
 | Symptom | Next check |
 |---|---|
 | Configuration rejected | Error field/context, TOML types, conflicting aliases; rerun with --debug |

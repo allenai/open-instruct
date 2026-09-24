@@ -22,7 +22,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from open_instruct.miles import judge_registry, judge_server, judging, rendezvous, topology
+from open_instruct.miles import infra_timeouts, judge_registry, judge_server, judging, rendezvous, topology
 from open_instruct.miles.run_spec import RunSpec
 
 
@@ -50,10 +50,10 @@ def terminate(process):
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGTERM)
     with contextlib.suppress(subprocess.TimeoutExpired):
-        process.wait(timeout=15)
+        process.wait(timeout=infra_timeouts.seconds(15))
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
-    process.wait(timeout=15)
+    process.wait(timeout=infra_timeouts.seconds(15))
 
 
 def require_layout(nodes, expected):
@@ -67,8 +67,9 @@ class Supervisor:
     def __init__(self, spec, root, rank, count):
         self.spec, self.root, self.rank, self.count = spec, root, rank, count
         self.started = time.monotonic()
-        self.startup_timeout = spec.launch["coordination"]["startup_timeout"]
-        self.heartbeat_timeout = spec.launch["coordination"]["heartbeat_timeout"]
+        self.startup_timeout = infra_timeouts.seconds(spec.launch["coordination"]["startup_timeout"])
+        self.heartbeat_timeout = infra_timeouts.seconds(spec.launch["coordination"]["heartbeat_timeout"])
+        self.heartbeat_warning_at = {}
         self.children = []
         self.logs = []
         self.health = {}
@@ -111,13 +112,26 @@ class Supervisor:
             if observed is None:
                 if time.monotonic() - self.started > self.startup_timeout:
                     raise TimeoutError(f"Replica {rank} did not rendezvous")
-            elif now - observed > self.heartbeat_timeout:
-                raise RuntimeError(f"Replica {rank} heartbeat expired")
+            else:
+                age = now - observed
+                if age > min(
+                    30, self.spec.launch["coordination"]["heartbeat_timeout"]
+                ) and now >= self.heartbeat_warning_at.get(rank, 0):
+                    infra_timeouts.logger.warning(
+                        "Replica heartbeat stale: observer=%s replica=%s age_s=%.1f deadline_s=%s",
+                        self.rank,
+                        rank,
+                        age,
+                        self.heartbeat_timeout,
+                    )
+                    self.heartbeat_warning_at[rank] = now + 30
+                if age > self.heartbeat_timeout:
+                    raise RuntimeError(f"Replica {rank} heartbeat expired")
 
     def probe_health(self):
         for name, url in tuple(self.health.items()):
             try:
-                with urllib.request.urlopen(url, timeout=5) as response:
+                with urllib.request.urlopen(url, timeout=infra_timeouts.seconds(5)) as response:
                     if response.status != 200:
                         raise RuntimeError("Unhealthy HTTP response")
                 self.health_failures[name] = 0
@@ -148,8 +162,18 @@ class Supervisor:
             raise RuntimeError(f"Peer failure: {read(failures[0])}")
 
     def wait(self, predicate, *, timeout=None):
-        deadline = time.monotonic() + (self.startup_timeout if timeout is None else timeout)
+        deadline = time.monotonic() + (self.startup_timeout if timeout is None else infra_timeouts.seconds(timeout))
+        started = time.monotonic()
+        next_warning = started + 30
         while True:
+            if time.monotonic() >= next_warning:
+                infra_timeouts.logger.warning(
+                    "Cluster readiness still waiting: replica=%s elapsed_s=%.1f deadline_s=%.1f",
+                    self.rank,
+                    time.monotonic() - started,
+                    deadline - started,
+                )
+                next_warning = time.monotonic() + 30
             self.check()
             result = predicate()
             if result:
@@ -201,7 +225,10 @@ def run(path):
         raise RuntimeError("Beaker replica topology differs from the submitted run")
     attempt = os.environ["OI_MILES_LAUNCH_ID"]
     root = rendezvous.join(
-        Path(spec.output["root"]) / "cluster" / attempt, rank, count, spec.launch["coordination"]["startup_timeout"]
+        Path(spec.output["root"]) / "cluster" / attempt,
+        rank,
+        count,
+        infra_timeouts.seconds(spec.launch["coordination"]["startup_timeout"]),
     )
     root.mkdir(parents=True, exist_ok=True)
     address = socket.gethostbyname(os.environ.get("BEAKER_NODE_HOSTNAME", socket.gethostname()))
@@ -255,7 +282,7 @@ def run(path):
 
             def ready(url=url):
                 try:
-                    with urllib.request.urlopen(url, timeout=3) as response:
+                    with urllib.request.urlopen(url, timeout=infra_timeouts.seconds(3)) as response:
                         return response.status == 200
                 except OSError:
                     return False
@@ -345,7 +372,7 @@ def probe(spec, root):
     ray = importlib.import_module("ray")
     ray.init(address=os.environ["RAY_ADDRESS"])
     expected = read(root / "expected-ray.json")
-    deadline = time.monotonic() + spec.launch["coordination"]["startup_timeout"]
+    deadline = time.monotonic() + infra_timeouts.seconds(spec.launch["coordination"]["startup_timeout"])
     try:
         while True:
             nodes = ray.nodes()

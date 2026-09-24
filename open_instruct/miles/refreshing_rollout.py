@@ -17,7 +17,7 @@ from miles.rollout.inference_rollout.inference_rollout_eval import run_eval_data
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import pipeline_observer, policy_refresh, sibling_timing
+from open_instruct.miles import infra_timeouts, pipeline_observer, policy_refresh, sibling_timing
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
 from open_instruct.miles.errors import GenerationRequestTimeout
 from open_instruct.miles.generation_admission import GenerationAdmission
@@ -119,8 +119,10 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
             len(payload.get("input_ids", [])),
         )
         try:
-            output = await asyncio.wait_for(
-                post(url, payload, max_retries=1, headers={"x-miles-request-id": payload["rid"]}), timeout
+            output = await infra_timeouts.wait_for(
+                post(url, payload, max_retries=1, headers={"x-miles-request-id": payload["rid"]}),
+                timeout,
+                operation=f"generation request {payload['rid']}",
             )
         except httpx.HTTPError as error:
             logger.exception(
@@ -173,7 +175,11 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         if self._output is not None and self._boundary_capacity is None:
             self._boundary_capacity = await self._output.reserve_drain_capacity(len(self._producing_groups))
         if self._worker is not None:
-            await asyncio.wait_for(self._wait_for_generation_idle(), self.args.olmo_core.engine_drain_timeout)
+            await infra_timeouts.wait_for(
+                self._wait_for_generation_idle(),
+                self.args.olmo_core.engine_drain_timeout,
+                operation="refresh generation drain",
+            )
         pipeline_observer.write_lifecycle(self, "generation_paused")
         return []
 

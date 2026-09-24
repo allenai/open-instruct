@@ -1,12 +1,10 @@
 """MILES orchestration with explicit Core publication and checkpoint boundaries."""
 
-import asyncio
 import os
 import time
 from functools import partial
 
 import wandb
-
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
@@ -14,9 +12,10 @@ from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
+
 from open_instruct import logger_utils
 from open_instruct.miles import evaluation as background_eval
-from open_instruct.miles import startup_cache, throughput
+from open_instruct.miles import infra_timeouts, startup_cache, throughput
 from open_instruct.miles.rolling_publication import RollingPublication
 from open_instruct.miles.timing import evaluation_stage, stage
 
@@ -56,9 +55,10 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
                 await inference.onload_weights()
-            await asyncio.wait_for(
+            await infra_timeouts.wait_for(
                 placement_group.update_weights(learner, manager, rollout_id=rollout_id),
                 timeout=args.olmo_core.engine_update_timeout if refresh else None,
+                operation="Core weight publication",
             )
             interval = args.olmo_core.diagnostic_interval
             fresh_initial = rollout_id is None and args.start_rollout_id == 0
@@ -75,9 +75,10 @@ async def train(args, *, export_hf=None):
                         selector=args.check_weight_update_selector,
                         skip_list=args.check_weight_update_skip_list,
                     )
-                    await asyncio.wait_for(
+                    await infra_timeouts.wait_for(
                         placement_group.update_weights(learner, manager, rollout_id=rollout_id),
                         timeout=args.olmo_core.engine_update_timeout if refresh else None,
+                        operation="Core weight publication",
                     )
                 await inference.check_weights(
                     action="compare",
@@ -251,7 +252,7 @@ async def train(args, *, export_hf=None):
                 continue
             try:
                 with stage(args, cleanup_stage):
-                    await asyncio.wait_for(operation(), timeout=timeout)
+                    await infra_timeouts.wait_for(operation(), timeout=timeout, operation=cleanup_stage)
             except BaseException as error:
                 cleanup_error = cleanup_error or error
                 logger.exception("Core RL cleanup %s failed (deadline=%ss)", cleanup_stage, timeout)
