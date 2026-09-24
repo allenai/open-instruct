@@ -11,8 +11,8 @@ MODE="${3:-train}"
 # a tokenization cache key and must never move -- vary the data order only.
 # Set before the case block: train_full puts the seed in the output dir.
 DATA_LOADER_SEED="${DATA_LOADER_SEED:-34521}"
-# EXPERIMENT=h015 gives each arm, mode and data seed its own run name, output dir and
-# convert source; the h010 defaults put control and seed2 in one existing dir.
+# EXPERIMENT=<hNNN> (anything but h010) gives each arm, mode and data seed its own run
+# name, output dir and convert source, prefixed by the tag; the h010 defaults put control and seed2 in one existing dir.
 EXPERIMENT="${EXPERIMENT:-h010}"
 BUDGET="${BUDGET:-}"
 H015_ROOT=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895
@@ -77,9 +77,9 @@ case "$MODE" in
         IMAGE="$BUILT_IMAGE"
         export JOB_TIMEOUT=2h CONVERT_GPUS=1 CONVERT_DEVICE=cuda CONVERT_CLUSTER=ai2/holmes
         export CONVERT_PYTHONPATH=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-anchor/olmo-core-b1fd2c97/src
-        if [[ "$EXPERIMENT" == "h015" ]]; then
+        if [[ "$EXPERIMENT" != "h010" ]]; then
             # BUDGET=full converts the train_full dir of the same arm and seed.
-            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/h015-${ARM}-train${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}}"
+            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/${EXPERIMENT}-${ARM}-train${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}}"
         else
             export CKPT_ROOT="${CKPT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-train-20260918}"
         fi
@@ -122,10 +122,10 @@ export PRIORITY="${PRIORITY:-normal}"
 # risk being managed, then watch the step counter on the retry.
 export MAX_RETRIES="${MAX_RETRIES:-0}"
 export KEEP_LAST_N="${KEEP_LAST_N:-1}"
-if [[ "$EXPERIMENT" == "h015" ]]; then
+if [[ "$EXPERIMENT" != "h010" ]]; then
     H015_TAG="${ARM}-${MODE}${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}"
-    export RUN_NAME="${RUN_NAME:-hero-sft-h015-$H015_TAG}"
-    export OUTPUT_DIR="${OUTPUT_DIR:-$H015_ROOT/h015-$H015_TAG}"
+    export RUN_NAME="${RUN_NAME:-hero-sft-${EXPERIMENT}-$H015_TAG}"
+    export OUTPUT_DIR="${OUTPUT_DIR:-$H015_ROOT/${EXPERIMENT}-$H015_TAG}"
 fi
 export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
 export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${RUN_TAG:-${MODE}}-20260918}"
