@@ -2,9 +2,11 @@
 
 import asyncio
 import os
+import time
 from functools import partial
 
 import wandb
+
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
@@ -12,7 +14,6 @@ from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
-
 from open_instruct import logger_utils
 from open_instruct.miles import evaluation as background_eval
 from open_instruct.miles import startup_cache, throughput
@@ -23,6 +24,9 @@ logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args, *, export_hf=None):
+    budget = getattr(args.olmo_core, "max_run_seconds", None)
+    deadline = time.monotonic() + budget if budget is not None else None
+    stopped_for_time = False
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
@@ -159,8 +163,11 @@ async def train(args, *, export_hf=None):
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
-            if sentinel or should_run_periodic_action(
-                rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout
+            stopped_for_time = deadline is not None and time.monotonic() >= deadline
+            if (
+                (stopped_for_time and getattr(args, "save", None))
+                or sentinel
+                or should_run_periodic_action(rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout)
             ):
                 # The async data source snapshots its cursor and pristine pending
                 # prompt ledger under one lock. Completed-but-unused and in-flight
@@ -180,6 +187,9 @@ async def train(args, *, export_hf=None):
             ):
                 with evaluation_stage(args, rollout_id):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
+            if stopped_for_time:
+                logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
+                break
             if (
                 args.debug_exit_after_rollout is not None
                 and rollout_id - args.start_rollout_id + 1 >= args.debug_exit_after_rollout
@@ -191,11 +201,22 @@ async def train(args, *, export_hf=None):
         # Otherwise the first process creates the final directory and the resumed
         # process cannot export its newer weights there (the exporter is exclusive).
         reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
-        if export_hf is not None and reached_end:
+        if export_hf is not None and (reached_end or stopped_for_time):
             if args.fully_async:
                 await manager.core_publication_boundary.remote(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
+        if stopped_for_time and coordinator is not None and background["final"]:
+            last = completed[-1]
+            update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
+            target = export_hf or str(background_eval.snapshot(background["root"], update))
+            if (
+                export_hf is None
+                and not (background_eval.snapshot(background["root"], update) / HF_EXPORT_COMPLETE_MARKER).is_file()
+            ):
+                with stage(args, "final_evaluation_export"):
+                    await learner.export_hf(last, target)
+            coordinator.dispatch(update, target, final=True)
     except BaseException as error:
         failure = error
         raise
@@ -241,4 +262,9 @@ async def train(args, *, export_hf=None):
         finish_tracking()
         if failure is None and cleanup_error is not None:
             raise cleanup_error
-    return {"completed_rollout_ids": completed, "start_rollout_id": args.start_rollout_id, "export_hf": export_hf}
+    return {
+        "completed_rollout_ids": completed,
+        "start_rollout_id": args.start_rollout_id,
+        "export_hf": export_hf,
+        "stopped_for_time": stopped_for_time,
+    }

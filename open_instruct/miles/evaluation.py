@@ -265,23 +265,23 @@ class Coordinator:
         self.training = training
         self.worker = None
 
-    def dispatch(self, update, checkpoint):
+    def dispatch(self, update, checkpoint, *, final=False):
         try:
-            self._dispatch(update, checkpoint)
+            self._dispatch(update, checkpoint, final=final)
         except Exception as error:
             # Local receipt/submission preparation is independent of trainer health.
             logger.warning(
                 "BACKGROUND EVALUATION GAP at update %s: cannot record/submit (%s)", update, type(error).__name__
             )
 
-    def _dispatch(self, update, checkpoint):
+    def _dispatch(self, update, checkpoint, *, final=False):
         if update == 0:
             state.atomic_json(
                 snapshot(self.config["root"], 0).parent / "reference.json",
                 {"checkpoint": str(checkpoint), "update": 0, "reuse_initial_hf": True},
             )
         receipts = []
-        for tasks in groups(self.config, update, self.config["total_updates"]):
+        for tasks in groups(self.config, update, update if final else self.config["total_updates"]):
             key = hashlib.sha256(json.dumps(tasks, sort_keys=True).encode()).hexdigest()[:16]
             path = Path(self.config["root"]) / "evaluation" / f"update-{update:08d}-{key}.json"
             path.parent.mkdir(parents=True, exist_ok=True)

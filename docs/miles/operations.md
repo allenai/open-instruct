@@ -216,3 +216,14 @@ structured run, omit `async.async_max_concurrent_samples` to use the existing
 automatic bound: the larger of one rollout collection and two waves of serving
 slots, rounded to whole prompt groups. Measure trainer wait and serving occupancy
 before increasing that budget: more queued work does not add inference capacity.
+## Bounded wall-clock runs
+
+Set `core.max_run_seconds` to a positive number to finish at a completed collection
+after that many driver wall-clock seconds, including driver startup. This is a
+soft deadline: a running collection, checkpoint, export, and teardown can extend
+past it. Leave headroom in `launch.timeout`. With checkpoint saving enabled, the
+deadline forces a native checkpoint; `output.export_hf=true` also produces the
+final HF export. Background evaluation with `final=true` requests evaluation at
+the actual final update, including off-cadence stops. Submission remains
+best-effort: inspect receipts and explicitly resubmit a failed or skipped final
+evaluation. Debug exits retain their separate resumable, non-final semantics.

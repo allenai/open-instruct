@@ -249,6 +249,7 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 
 | Field | Type | CoreConfig default | Meaning |
 |---|---|---|---|
+| core.max_run_seconds | float &#124; None | null | Optional positive driver wall-clock budget, including startup. Stop after a completed collection, save when checkpointing is enabled, export final HF weights when requested, and request final background evaluation. It is a soft limit; leave shutdown headroom before the Beaker timeout. |
 | core.filter_zero_std_groups | &lt;class &#x27;bool&#x27;&gt; | true | Default true: reject complete training prompt groups with reward std &lt;= 1e-8 through the native MILES dynamic filter and refill the batch. Requires samples_per_prompt &gt; 1. Set training.filter_zero_std_groups=false for tiny mechanics checks; evaluation is unfiltered. Compatible with offline correctness preprocessing. Custom dynamic filters require disabling this switch and remain unsupported in refresh/engine_drain. |
 | core.max_train_rollout_logprob_abs_diff | float &#124; None | null | Fail when mean absolute active-token trainer/serving log-probability gap exceeds this value; null disables. Despite the name, this is a mean, not a maximum. |
 | core.diagnostic_interval | &lt;class &#x27;int&#x27;&gt; | 0 | Interval for trainer contract diagnostics; zero disables periodic diagnostics. |

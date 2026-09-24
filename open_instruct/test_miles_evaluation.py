@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from open_instruct.miles import checkpoint, evaluation, evaluation_runner, evaluation_submit
+from open_instruct.miles.config import CoreConfig
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
@@ -211,7 +212,8 @@ def test_evaluator_command_keeps_task_overrides(run):
     assert "--save-predictions" in args
 
 
-def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
+@pytest.mark.parametrize("stop_mode", ("complete", "deadline", "debug"))
+def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode):
     # Import the real driver with CPU stand-ins for the external actor runtime.
     imported = {}
 
@@ -223,10 +225,18 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
         return value
 
     manager = SimpleNamespace(
-        get=SimpleNamespace(remote=AsyncMock(return_value={})), dispose=SimpleNamespace(remote=AsyncMock())
+        get=SimpleNamespace(remote=AsyncMock(return_value={})),
+        dispose=SimpleNamespace(remote=AsyncMock()),
+        save=SimpleNamespace(remote=AsyncMock()),
     )
     learner = SimpleNamespace(
-        update_weights=AsyncMock(), train=AsyncMock(), dispose=AsyncMock(), execute_workers=AsyncMock()
+        update_weights=AsyncMock(),
+        train=AsyncMock(),
+        dispose=AsyncMock(),
+        execute_workers=AsyncMock(),
+        save_model=AsyncMock(),
+        finalize_checkpoint=AsyncMock(),
+        export_hf=AsyncMock(),
     )
     inference = SimpleNamespace(prepare_rollout=AsyncMock(), dispose=AsyncMock())
     workers = SimpleNamespace(dispose=SimpleNamespace(remote=AsyncMock()))
@@ -260,6 +270,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
     )
     driver = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(driver)
+    monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=Mock(side_effect=[0, 2])))
     monkeypatch.setattr(driver, "stage", lambda *a, **kw: nullcontext())
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
     monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a: None)
@@ -282,7 +293,9 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
 
     learner.train.side_effect = train_step
     args = SimpleNamespace(
-        olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0),
+        olmo_core=SimpleNamespace(
+            publication_mode="barrier", diagnostic_interval=0, max_run_seconds=1 if stop_mode == "deadline" else None
+        ),
         background_evaluation=evaluation.runtime(run, run.compile().miles),
         fully_async=False,
         offload_rollout=False,
@@ -298,23 +311,47 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch):
         global_batch_size=32,
         hf_checkpoint="initial",
         save_trigger_sentinel=None,
+        save="native-checkpoints",
         save_interval=None,
         update_weights_interval=1,
-        debug_exit_after_rollout=None,
+        debug_exit_after_rollout=1 if stop_mode == "debug" else None,
     )
     try:
-        result = asyncio.run(driver.train(args))
+        result = asyncio.run(driver.train(args, export_hf="final-hf"))
         assert entered.wait(1)
         assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
-        assert result["completed_rollout_ids"] == [0, 1]
-        assert learner.train.await_count == 2
-        skipped = list((Path(run.output["root"]) / "evaluation").glob("update-00000004-*.json"))
+        expected = [0, 1] if stop_mode == "complete" else [0]
+        assert result["completed_rollout_ids"] == expected
+        assert learner.train.await_count == len(expected)
+        assert result["stopped_for_time"] == (stop_mode == "deadline")
+        if stop_mode == "deadline":
+            manager.save.remote.assert_awaited_once_with(0)
+            learner.save_model.assert_awaited_once_with(0, force_sync=True)
+            learner.finalize_checkpoint.assert_awaited_once_with(0)
+        if stop_mode == "debug":
+            learner.export_hf.assert_not_awaited()
+        else:
+            learner.export_hf.assert_awaited_once_with(expected[-1], "final-hf")
+        update = 4 if stop_mode == "complete" else 2
+        skipped = list((Path(run.output["root"]) / "evaluation").glob(f"update-{update:08d}-*.json"))
         assert skipped and json.loads(skipped[0].read_text())["status"] == "skipped_busy"
+        if stop_mode == "deadline":
+            final = [
+                json.loads(p.read_text()) for p in skipped if json.loads(p.read_text())["checkpoint"] == "final-hf"
+            ]
+            assert len(final) == 1
+            assert {t["task"] for t in final[0]["tasks"]} == {"gsm8k", "arc_easy"}
         shared.assert_not_called()
     finally:
         release.set()
         for thread in worker_threads:
             thread.join(2)
+
+
+@pytest.mark.parametrize("value", (0, -1, True, float("inf"), float("nan")))
+def test_wall_clock_budget_must_be_finite_and_positive(value):
+    with pytest.raises(InputError):
+        CoreConfig(max_run_seconds=value)
 
 
 def test_eval_snapshots_are_outside_checkpoint_cleanup(tmp_path):

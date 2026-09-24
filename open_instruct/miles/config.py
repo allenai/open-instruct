@@ -18,6 +18,7 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
+    max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
@@ -88,6 +89,8 @@ class CoreConfig:
     selection_sha256: str | None = None
 
     def __post_init__(self):
+        if self.max_run_seconds is not None:
+            validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
         for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):

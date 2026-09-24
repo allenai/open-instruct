@@ -336,8 +336,10 @@ def execute(spec):
         )
         # A deliberate debug exit is successful execution, not a completed run.
         completed = result.get("completed_rollout_ids") if result else None
-        complete = completed is None or (
-            (completed[-1] + 1 if completed else result["start_rollout_id"]) == config.miles.get("num_rollout")
+        complete = (
+            completed is None
+            or bool(result.get("stopped_for_time"))
+            or ((completed[-1] + 1 if completed else result["start_rollout_id"]) == config.miles.get("num_rollout"))
         )
         state.update(status="complete" if complete else "stopped", finished_unix=time.time(), result=result)
         write_json(root / "workflow.json", state)
