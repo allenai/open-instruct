@@ -4,7 +4,8 @@ The cache-fix attempt completed **six optimizer updates** on September 24, 2026,
 then failed at router readiness confirmation after a successful weight transfer.
 It produced baseline background evaluations, but no trained checkpoint (saving
 was scheduled every 25 updates). A replacement with longer infrastructure
-deadlines, warnings and a router response-forwarding fix is being prepared.
+deadlines, warnings and a router response-forwarding fix was submitted at
+21:59 UTC; its training outcome is pending.
 The earlier [four-update hero smoke](hero-rl-smoke-20260924.md) is separate evidence.
 
 ## Run and preparation
@@ -45,11 +46,12 @@ filters and holdout selection. Outputs are under:
 | [Initial long run](https://beaker.org/ex/01M3A1BG4RQP012BY5PAD822Z6) | `01M3A0F9W9K6C4RNJGP6814SHE` / `999a9a08c455` | All engines and trainers initialized; initial publication timed out after 180 seconds |
 | [Instrumented retry](https://beaker.org/ex/01M3A4EWJHJ9ZZEBMSFV17WCAW) | `01M3A4D5CNA72MH1TVEN7D8NFR` / `aca051d369ea` | One engine crashed while importing a partial cached configuration; stopped before publication |
 | [Cache-fix retry](https://beaker.org/ex/01M3A6D4H0ZVVW07GGHCCWBX2Q) | `01M3A6AV5HDMP64ZMY8HXH46H0` / `cacc219018ee` | Six updates; initial sync and all later transfers succeeded; router readiness HTTP read timed out after update six |
+| [Router/timeout retry](https://beaker.org/ex/01M3APWHMECTFDWQQ4ZKVH8ZQ4) | `01M3APTWSR4VH2PFYMMSPQ8TD2` / `96e215b334a4` | Submitted 21:59 UTC; native three-replica group verified; training pending |
 
 The cache-fix retry preserves the training recipe, adds a 600-second publication
 allowance and diagnostics, and incorporates the evaluator settings below.
 One-off TOMLs, submitted specifications, receipts and logs are retained in ignored
-`runs/hero-non-emo-long-20260924{,-r2,-r3}/`, with the corresponding run output
+`runs/hero-non-emo-long-20260924{,-r2,-r3,-r4}/`, with the corresponding run output
 roots under `/weka/oe-training-default/robertb/open-instruct/runs/`.
 
 ## Original initial-publication stall
@@ -290,3 +292,14 @@ ten-hour Beaker execution budgets retain their meanings; this does not globally
 rewrite third-party internal timers. The run retains concurrency 64, budget
 1,216, judge concurrency 16 and recomputation. Native saves move to every five
 updates (keep two) to retain progress; measure their overhead separately.
+
+
+Validation before replacement submission: **332 MILES tests and 115 Open Instruct
+tests passed**, covering response fidelity, router readiness retries, timeout
+scaling, warnings, cancellation, engine lifecycle, health checks, evaluation,
+judges and launch contracts. Focused lint/format checks and the documentation
+build passed. MILES source is pinned to `9ecde5bc80cdadf2348600c49056449c74fb4ec3`.
+The rendered specification uses one task with three replicas, leader selection,
+host networking, failure/preemption propagation and a 60-minute synchronized start
+allowance; job metadata confirmed ranks 0/1/2 share one replica group. These checks
+validate the submitted configuration, not successful training or the root-cause hypothesis.
