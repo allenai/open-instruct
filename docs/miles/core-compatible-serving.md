@@ -95,3 +95,10 @@ continues to select the eager reference. Neither mode is enabled by default.
 The workload benchmark accepts `--mode rounding_graphs` and `--mode rounding`
 for paired graph/eager checks. Qualify the actual graph replay, cached rollouts
 and weight refresh before selecting this experimental mode for RL.
+
+The [graph-compatible workload measurement](measurements/graph-compatible-rounding-20260923.md)
+passed 75 GPU tests and the cache/weight-refresh exercise. Graph and eager rounding
+produced identical measured tokens and probabilities. Compared with default
+graphs, rounding with graphs lost 24–25% throughput, with small, mixed mean
+rollout-error changes. This does not justify enabling it by default. The qualified
+image is `01M38HZ1ZXZHQFXBQRTXV23J3M` (application `daeee120f`, serving `ca852b8`).
