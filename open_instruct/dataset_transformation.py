@@ -66,6 +66,7 @@ from tokenizers import Tokenizer
 from transformers import GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
+from open_instruct import dataset_statistics as token_statistics
 from open_instruct import launch_utils, logger_utils, tokenizer_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
@@ -2486,17 +2487,9 @@ class LocalDatasetTransformationCache:
 
             # Count tokens if the dataset has been tokenized
             if INPUT_IDS_KEY in dataset.column_names:
-                total_tokens = 0
-                trainable_tokens = 0
-
-                def count_tokens(sample):
-                    token_count = len(sample[INPUT_IDS_KEY])
-                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != MASKED_TOKEN_VALUE)
-                    return {"token_count": token_count, "label_token_count": trainable_tokens}
-
-                token_count_dataset = dataset.map(count_tokens, batched=False)
-                total_tokens = sum(token_count_dataset["token_count"])
-                trainable_tokens = sum(token_count_dataset["label_token_count"])
+                total_tokens, trainable_tokens = token_statistics.count_tokens(
+                    dataset, INPUT_IDS_KEY, LABELS_KEY, MASKED_TOKEN_VALUE
+                )
                 stats["total_tokens"] = total_tokens
                 stats["trainable_tokens"] = trainable_tokens
                 stats["avg_tokens_per_instance"] = total_tokens / len(dataset) if len(dataset) > 0 else 0
