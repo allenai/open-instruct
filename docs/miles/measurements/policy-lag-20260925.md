@@ -346,7 +346,7 @@ establish held-out improvement. Mean TIS clipping remains between 0.00044% and
 0.00064% across these windows; no dead experts or nonfinite health metrics were
 reported. Auxiliary load-balancing and router-z losses remain disabled.
 
-All scheduled evaluations through update 200 completed with exit code zero:
+All scheduled evaluations through update 300 completed with exit code zero:
 
 | Checkpoint | GSM8K correct /128 | IFEval strict prompts /128 | IFEval loose prompts /128 |
 | --- | ---: | ---: | ---: |
@@ -355,6 +355,8 @@ All scheduled evaluations through update 200 completed with exit code zero:
 | [Update 100](https://beaker.org/ex/01M3C2ZR69F9HB4JMZAZW4V57A) | 63 | 25 | 30 |
 | [Update 150](https://beaker.org/ex/01M3C77M7AAQCX3J21MEN231C0) | 58 | 24 | 30 |
 | [Update 200](https://beaker.org/ex/01M3CBFCNAT13SM97WCN54628D) | 60 | 24 | 27 |
+| [Update 250](https://beaker.org/ex/01M3CF79JJ2Z7XSBNZWDJYN75F) | 63 | 28 | 31 |
+| [Update 300](https://beaker.org/ex/01M3CJYWNBQ5DJ8G5BSWF065G3) | 72 | 25 | 29 |
 
 The small sampled panels remain inconclusive. The final audit will retain both
 the raw-completion comparison and a separate full chat-template comparison.
@@ -363,3 +365,84 @@ both greedy and temperature-1 decoding. Its temperature-1 requests explicitly
 set `top_p=1.0` and unrestricted `top_k`; greedy requests and model EOS defaults
 remain unchanged from the earlier chat audit. This measures behavior closer to
 training's sampling mode without conflating it with greedy results.
+
+### Completed eight-hour duration exercise
+
+**The main run completed 330 updates without a restart.** All three replicas
+exited with code zero between 16:11:15 and 16:11:48 UTC, after about 8h15m of
+job runtime. The workflow records `status=complete`, `stopped_for_time=true`,
+and exactly rollout IDs 0–329. W&B reported `finished` after training cleanup.
+The eight-hour limit is the driver budget; job startup and final cleanup account
+for the longer allocation runtime.
+
+Final artifacts share this root:
+
+```text
+/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925
+```
+
+- Native resumable checkpoint: `checkpoints/core/rollout_0000329`.
+- Native pointer: `checkpoints/core-latest.json`, rollout ID 329.
+- Final HF policy: `export-hf`, including `model.safetensors` and `.complete`.
+
+Final verification checked clock 330/330/330, world size/expert parallel size
+four, all four rank-state files, model metadata and the dataset-cursor SHA256.
+The independent final chat job repeated these checks before loading the model.
+The native save took 82.7 s; final HF export took 78.3 s. All 14 native saves
+averaged 82.3 s. Retention remains two native checkpoints; immutable evaluation
+snapshots are separate. Timing, queue, GPU and workflow evidence was retained
+locally under `final-training-evidence/` in the ignored run directory, alongside
+the full W&B history and analysis script. Model weights remain on WEKA.
+
+Across 330 updates, the trainer accepted **335,420,524 response tokens**.
+Completed-queue stale drops totaled 3,428,227 tokens, or **1.01% of accepted plus
+stale decision tokens**. This excludes constant-reward filtering and terminal
+unused work. The final drained queue still held 1,124 unused responses totaling
+4,553,953 tokens; those are reported separately, not counted as ordinary stale
+drops. Accepted policy age reached six.
+
+| Window | Cycle | Wait | Training | Publication | Stale decision tokens | Accepted response tokens/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 51–100 | 85.2 s | 46.8 s | 27.6 s | 8.9 s | 0.68% | 12,913 |
+| 101–150 | 87.5 s | 49.5 s | 27.5 s | 8.7 s | 0.81% | 12,105 |
+| 151–200 | 87.2 s | 51.0 s | 25.5 s | 8.9 s | 1.27% | 11,302 |
+| 201–250 | 77.1 s | 42.4 s | 24.1 s | 8.6 s | 0.85% | 12,334 |
+| 251–300 | 76.8 s | 42.6 s | 23.3 s | 9.3 s | 0.94% | 12,050 |
+| 301–330 | 70.9 s | 39.2 s | 20.9 s | 8.2 s | 2.81% | 12,842 |
+
+Cycles include native saves between the window endpoints, so phase means do not
+sum exactly to cycle time. HF snapshots remain included in training stages.
+The whole 1–330 update window averaged 85.7 s and 11,866 accepted response tokens/s,
+including early compilation but excluding serving startup and final cleanup.
+Response length and task composition change during training, so later token
+throughput is not a constant-work kernel benchmark.
+
+There were **63 recovered transport-error attempts among 50,241 completed group
+attempts (0.125%)**, no fatal error, and no recorded timeout/overload groups.
+Short bursts included `ReadError` and router-generated HTTP503 responses. A
+read-only inspection of an implicated inference node found all eight scheduler
+and detokenizer processes alive; its bounded log scan found no CUDA/OOM/crash
+message. The underlying transport cause remains unresolved. Recovery succeeded
+at the qualified admission settings; this does not qualify higher concurrency.
+
+Full-history checks found no nonfinite training scalar or dead expert. Mean
+absolute Core/behavior token log-probability difference was 0.02202, maximum
+per-update mean 0.02627; mean TIS clipping was 0.000565%, maximum 0.002194%.
+One isolated gradient-norm spike reached 1.334 at update 269, with clipping
+configured at 1.0; the following update returned to 0.060. There was also a
+smaller 0.233 spike at update 33. These events were not sustained instability.
+Auxiliary load-balancing and router-z losses stayed zero throughout.
+
+The final 30-update training window averaged reward 0.4918, response length
+3,555, cap rate 10.64%, and router load CV 0.4388, versus 0.4491, 4,460, 14.00%,
+and 0.5446 in the first 50 updates. The held-out panels and full final audits,
+rather than these filtered training averages, determine the learning conclusion.
+
+Final evaluations are running separately: the
+[regular 128-question panels](https://beaker.org/ex/01M3CN8967AK6WHE3ZA9464G69),
+[full raw-completion GSM8K](https://beaker.org/ex/01M3CN9SZFB3VEZW9JSDNGZZJB), and
+[full chat-template baseline/final comparison](https://beaker.org/ex/01M3CN9D8MGXC0RKEXSHJZN2AE).
+Each uses one extra Holmes GPU in the same workspace. The chat comparison uses
+greedy plus one temperature-1 sample per question, seed 17 and the 10,240-token
+cap. Its model EOS defaults are preserved; only the temperature-1 request adds
+explicit `top_p=1.0`, unrestricted `top_k`. No new runtime image was needed.
