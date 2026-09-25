@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add MILES/Core collection-wide advantage extremes and response concentration metrics, plus separate async rejection counters for incomplete and mixed-policy groups (PR URL pending).
 - Disable MILES rollout capture by default; replace the structured capture path setting with `output.rollout_sample_rate`, sampling complete prompt groups for training/evaluation artifacts and capping rates above 1 (PR URL pending).
 - Retry known transient MILES generation failures with pristine whole-group regeneration and a sustained 50%-for-five-minutes failure limit; report categorized `errors/` metrics independently of training progress in W&B and retained artifacts (PR URL pending).
 - Recover whole async prompt groups when MILES wraps a backend generation transport failure in its known HTTP 503 response; retain bounded retries and strict handling of other errors, and expose transport-requeue counters (PR URL pending).

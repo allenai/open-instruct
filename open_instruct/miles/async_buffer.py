@@ -90,28 +90,38 @@ class HomogeneousPolicyDataBuffer:
         self._delegate = MeasuredDataBuffer(delegate_input)
         self._unused = input.unused_handler_fn
         self._samples = args.n_samples_per_prompt
-        self._rejected = 0
+        self._rejected = self._incomplete = self._mixed = 0
 
     async def put(self, item):
+        incomplete = len(item.group) != self._samples
         try:
             versions = policy_versions(
                 {"weight_versions": [sample.weight_versions for sample in iter_samples(item.group)]}
             )
-            valid = len(item.group) == self._samples and len(set(versions)) == 1
+            mixed = len(set(versions)) != 1
         except ValueError:
-            valid = False
-        if valid:
+            # Missing provenance cannot show that one behavior policy produced the group.
+            mixed = True
+        if not (incomplete or mixed):
             return await self._delegate.put(item)
-        else:
-            self._rejected += 1
-            self._unused(item.prompt_group)
+        # A group can fail both checks, so the reason counters may sum past the total.
+        self._rejected += 1
+        self._incomplete += incomplete
+        self._mixed += mixed
+        self._unused(item.prompt_group)
 
     async def get(self, **context):
         return await self._delegate.get(**context)
 
     def get_metrics(self):
-        rejected, self._rejected = self._rejected, 0
-        return {**self._delegate.get_metrics(), "rollout/fully_async/rejected_policy_groups": rejected}
+        rejected, incomplete, mixed = self._rejected, self._incomplete, self._mixed
+        self._rejected = self._incomplete = self._mixed = 0
+        return {
+            **self._delegate.get_metrics(),
+            "rollout/fully_async/rejected_policy_groups": rejected,
+            "rollout/fully_async/rejected_incomplete_groups": incomplete,
+            "rollout/fully_async/rejected_mixed_policy_groups": mixed,
+        }
 
     async def reserve_drain_capacity(self, additional):
         """Allow only already-owned completions through a quiescent lifecycle barrier."""

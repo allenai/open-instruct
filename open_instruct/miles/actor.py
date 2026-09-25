@@ -320,6 +320,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         scoring_mode = "standalone" if decision.standalone else ("checked" if checked else "skipped")
         miles_loss.compute_advantages_and_returns(self.args, rollout)
         self._agree(lambda: contract.validate_training_data(rollout))
+        advantages = training_metrics.advantage_metrics(rollout)
         for step_batches in self._batch_steps(rollout):
             expert_metrics = None
             if self.args.olmo_core.expert_balanced_packing:
@@ -531,6 +532,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                     lr_next=self.lr_scheduler.get_last_lr(),
                     optimizer_metrics=self.train_module._trainer.metrics,
                     gradient_stats=gradient_stats,
+                    advantages=advantages,
                 )
             )
             if logged is not None:

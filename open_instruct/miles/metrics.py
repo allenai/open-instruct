@@ -1,5 +1,7 @@
 """Core trainer metrics using MILES' sample/token accounting and tracking run."""
 
+import math
+
 import torch
 from miles.backends.training_utils import log_utils
 from miles.utils.tracking_utils import tracking
@@ -58,6 +60,35 @@ def step_summary(microbatches, auxiliary, elapsed_seconds):
     }
 
 
+def advantage_metrics(rollout):
+    """Collection-wide advantage extremes over active tokens; rank shards are disjoint.
+
+    ``top_response_share`` is the largest single response's mean absolute
+    advantage divided by the sum over all responses: it rises when one response
+    dominates the update, as rare successes in large normalized groups can.
+    """
+    masks = rollout["loss_masks"]
+    device = masks[0].device
+    # Maximum, negated minimum and the largest response magnitude share one MAX reduction.
+    largest = torch.full((3,), -math.inf, dtype=torch.float64, device=device)
+    total = torch.zeros((), dtype=torch.float64, device=device)
+    for values, mask in zip(rollout["advantages"], masks, strict=True):
+        active = torch.as_tensor(values, dtype=torch.float64, device=device)[mask.bool()]
+        if active.numel():
+            magnitude = active.abs().mean()
+            largest = torch.maximum(largest, torch.stack([active.max(), -active.min(), magnitude]))
+            total += magnitude
+    dist.all_reduce(largest, op=dist.ReduceOp.MAX)
+    dist.all_reduce(total)
+    maximum, negated_minimum, top = largest.tolist()
+    return {
+        "max": maximum,
+        "min": -negated_minimum,
+        "max_abs": max(maximum, negated_minimum),
+        "top_response_share": top / float(total) if total > 0 else 0.0,
+    }
+
+
 def score_metrics(mean_abs, active_tokens, profile):
     """Collection pre-update drift is token weighted, unlike response loss means."""
     result = {
@@ -75,7 +106,18 @@ def score_metrics(mean_abs, active_tokens, profile):
 
 
 def log_step(
-    args, *, losses, summary, scores, clock, rollout_id, lr_used, lr_next, optimizer_metrics, gradient_stats=None
+    args,
+    *,
+    losses,
+    summary,
+    scores,
+    clock,
+    rollout_id,
+    lr_used,
+    lr_next,
+    optimizer_metrics,
+    gradient_stats=None,
+    advantages=None,
 ):
     """Only rank zero logs; local probes never masquerade as global norms."""
     if dist.get_rank() != 0:
@@ -93,6 +135,8 @@ def log_step(
     for category, stats in (gradient_stats or {}).items():
         values[f"rank0_local_pre_optimizer/{category}/l2"] = stats["local_l2"]
     output = {f"train/{key}": value for key, value in values.items()}
+    # Collection-level values, repeated on each optimizer step that trains the collection.
+    output.update({f"advantages/{key}": value for key, value in (advantages or {}).items()})
     output["train/step"] = clock.completed_steps - 1
     tracking.log(args, output, step_key="train/step")
     return output

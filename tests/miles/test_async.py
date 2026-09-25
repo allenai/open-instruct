@@ -110,15 +110,19 @@ def test_async_buffer_homogeneity_and_optimizer_step_lag_budget():
             return DataBufferInput(prompt_group=group, group=group)
 
         mixed = entry([1, 2])
+        short = entry([1])
+        short_mixed = entry([1, 2, 2])
         stale = entry([0, 0])
         admitted = entry([1, 1])
-        await buffer.put(mixed)
-        await buffer.put(stale)
-        await buffer.put(admitted)
+        for item in (mixed, short, short_mixed, stale, admitted):
+            await buffer.put(item)
         assert await asyncio.wait_for(buffer.get(current_version=2), 1) is admitted
-        assert rejected == [mixed.prompt_group, stale.prompt_group]
-        assert buffer.get_metrics()["rollout/fully_async/rejected_policy_groups"] == 1
-        assert buffer.get_metrics()["rollout/fully_async/rejected_policy_groups"] == 0
+        assert rejected == [mixed.prompt_group, short.prompt_group, short_mixed.prompt_group, stale.prompt_group]
+        counters = ("rejected_policy_groups", "rejected_incomplete_groups", "rejected_mixed_policy_groups")
+        metrics = buffer.get_metrics()
+        assert [metrics[f"rollout/fully_async/{name}"] for name in counters] == [3, 2, 2]
+        metrics = buffer.get_metrics()
+        assert [metrics[f"rollout/fully_async/{name}"] for name in counters] == [0, 0, 0]
 
     asyncio.run(exercise())
 

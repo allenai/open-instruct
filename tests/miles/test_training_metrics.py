@@ -62,6 +62,17 @@ def _worker(rank, rendezvous):
                     "step_seconds": 3.0,
                 }
             )
+        # Masked tokens are excluded; extremes and magnitudes span both ranks.
+        if rank == 0:
+            rollout = {
+                "advantages": [torch.tensor([50.0, 2.0, 2.0]), torch.tensor([-0.5, -0.5])],
+                "loss_masks": [torch.tensor([0, 1, 1]), torch.tensor([1, 1])],
+            }
+        else:
+            rollout = {"advantages": [torch.tensor([-3.0, -3.0, 9.0])], "loss_masks": [torch.tensor([1, 1, 0])]}
+        assert metrics.advantage_metrics(rollout) == pytest.approx(
+            {"max": 2.0, "min": -3.0, "max_abs": 3.0, "top_response_share": 3.0 / 5.5}
+        )
         # Both ranks participate in aggregation, but only rank zero joins/logs.
         args = SimpleNamespace(wandb_run_id="driver-run", entropy_coef=0, observe_training_entropy=False)
         with mock.patch.object(metrics.tracking, "init_tracking") as init:
@@ -82,6 +93,7 @@ def _worker(rank, rendezvous):
                 lr_next=[9e-7],
                 optimizer_metrics={"optim/total grad norm": 4.0},
                 gradient_stats={"router": {"local_l2": 99}},
+                advantages={"max": 2.0, "top_response_share": 0.5},
             )
             if rank == 0:
                 log.assert_called_once_with(args, output, step_key="train/step")
@@ -93,6 +105,9 @@ def _worker(rank, rendezvous):
                 assert output["train/lr_used-pg_0"] == 1e-6
                 assert output["train/lr-pg_0"] == 9e-7
                 assert "train/entropy_loss" not in output
+                assert output["advantages/max"] == 2.0
+                assert output["advantages/top_response_share"] == 0.5
+                assert not any(key.startswith("train/advantages") for key in output)
             else:
                 log.assert_not_called()
                 assert output is None
