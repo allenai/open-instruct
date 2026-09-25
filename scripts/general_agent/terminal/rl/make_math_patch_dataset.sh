@@ -10,7 +10,7 @@ set -euo pipefail
 
 WORKSPACE="${1:-${WORKSPACE:-ai2/olmo-instruct}}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-FILES=(data_loader.py ground_truth_utils.py grpo_fast.py grpo_utils.py actor_manager.py data_types.py vllm_utils.py)
+FILES=(data_loader.py ground_truth_utils.py grpo_fast.py grpo_utils.py actor_manager.py data_types.py rl_utils.py utils.py vllm_utils.py)
 
 if [[ -n "$(git -C "$REPO" status --porcelain -- open_instruct)" ]]; then
     echo "open_instruct/ has uncommitted changes; commit them so the patch is reproducible" >&2
