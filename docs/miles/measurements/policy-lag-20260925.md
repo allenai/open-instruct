@@ -265,3 +265,58 @@ retry includes the script. The runtime image is unchanged. This audit also
 changes serving batch settings and the scorer relative to the raw audit, so it
 is not a controlled prompt-only attribution. Results and the eventual matching
 final-checkpoint chat evaluation belong to a separate series.
+
+### Full chat audit and hundred-update milestone
+
+The chat audit completed successfully at 10:21 UTC. It confirms that greedy
+length degeneration is also present with the proper chat template; changing
+prompt format alone does not explain the raw audit's length failures.
+
+| Full GSM8K chat audit, 1,319 questions | Original SFT | Update 50 |
+| --- | ---: | ---: |
+| Correct by last-number verifier | 688 (52.16%) | 701 (53.15%) |
+| Reached 10,240-token cap | 723 (54.81%) | 707 (53.60%) |
+| Correct **and finished before the cap** | 538 (40.79%) | 562 (42.61%) |
+| Capped responses scored correct | 150 | 139 |
+| Capped responses that closed `</think>` | 3 | 3 |
+| Mean response tokens | 6,277 | 6,180 |
+| Median response tokens | 10,240 | 10,240 |
+| Generation time, one B300 | 881.7 s | 846.2 s |
+
+Inspected capped chat responses repeatedly reconsider arithmetic instead of
+finishing the answer. The last-number verifier can credit an unfinished thought,
+so ordinary accuracy and correctly finished answers should both be reported.
+There were 195 baseline-only and 208 update-50-only correct answers; the paired
+exact McNemar p-value is 0.55. For correctly finished answers the corresponding
+counts are 168 and 192, p=0.23. The direction is mildly favorable, but neither
+comparison establishes a learning gain. This is greedy decoding on GSM8K;
+the temperature-1 mixed-task RL batches have different length behavior.
+Engine startup was 277.3 s for the baseline and 61.3 s for update 50 in the same
+allocation, so startup timing is confounded by order and warmed caches.
+Per-question responses, timing and paired summaries are retained in the linked
+Beaker result and locally under `chat-gsm8k/results/` in this run directory.
+
+The sampled 128-question update-50 panel also completed: GSM8K 65/128 versus
+53/128 at startup, IFEval strict 22/128 versus 24/128, and loose 27/128 versus
+29/128. Those small panels are mixed and subject to the baseline variability
+already described.
+
+At 10:52 UTC, the main run had completed 101 updates. Its update-100 native
+checkpoint passed clock 100/100/100, four-rank and cursor-checksum checks; the
+[update-100 evaluation](https://beaker.org/ex/01M3C2ZR69F9HB4JMZAZW4V57A) was
+running. The milestone training stage, including its HF snapshot, took 127.2 s,
+and the separate native save took 81.8 s. No main-fleet restart had been needed.
+
+| Training-cycle window | Cycle | Wait | Training | Publication | Stale decision-token fraction | Accepted response tokens/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Lag 6, updates 26–50 | 72.4 s | 33.1 s | 31.2 s | 8.1 s | 0.27% | 15,694 |
+| Lag 6, updates 51–75 | 80.4 s | 45.1 s | 26.1 s | 9.2 s | 0.53% | 14,123 |
+| Lag 6, updates 29–48 | 75.7 s | 38.7 s | 28.9 s | 8.1 s | 0.35% | 14,870 |
+| Prior R6 lag 2, updates 29–48 | about 233 s | 198.5 s | 28.1 s | 6.7 s | 53.19% | 4,920 |
+
+Windows start at the first generation wait and end after the last publication;
+checkpoint writes outside those endpoints are excluded. Training includes any
+HF evaluation snapshot within its stage. These are separate hero runs with
+stochastic sampling and filtering, not a controlled large-scale A/B. The small
+matched comparison above remains the controlled throughput screen. The longer
+windows nevertheless support retaining lag six for the ongoing duration test.
