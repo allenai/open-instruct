@@ -1,12 +1,16 @@
 # Hero non-EMO long-run startup investigation
 
-The cache-fix attempt completed **six optimizer updates** on September 24, 2026,
+**Update September 25:** the three-hour R6 qualification completed **48 optimizer updates**,
+all replicas exited zero, and final checkpoint/export/evaluations succeeded.
+See [completion and timings](#completed-three-hour-qualification).
+
+The earlier cache-fix attempt completed **six optimizer updates** on September 24, 2026,
 then failed at router readiness confirmation after a successful weight transfer.
 It produced baseline background evaluations, but no trained checkpoint (saving
 was scheduled every 25 updates). A replacement with longer infrastructure
 deadlines, warnings and a router response-forwarding fix was submitted at
 21:59 UTC, then replaced while still queued to restore the original 25-update
-checkpoint cadence; its training outcome is pending.
+checkpoint cadence; it was later replaced by the successful three-hour qualification below.
 The earlier [four-update hero smoke](hero-rl-smoke-20260924.md) is separate evidence.
 
 ## Run and preparation
@@ -309,3 +313,70 @@ The rendered specification uses one task with three replicas, leader selection,
 host networking, failure/preemption propagation and a 60-minute synchronized start
 allowance; job metadata confirmed ranks 0/1/2 share one replica group. These checks
 validate the submitted configuration, not successful training or the root-cause hypothesis.
+
+
+## Completed three-hour qualification
+
+[R6](https://beaker.org/ex/01M3B6EBQRYEJZWXPFK36KF9B5) ran September 25,
+03:20–06:36 UTC, using image `01M3APTWSR4VH2PFYMMSPQ8TD2` and application
+`96e215b334a43d40a2e6d0a942438dbbd2d681b6`. The user requested a three-hour
+qualification before another eight-hour reservation. R6 preserved the above
+recipe and lag two, with `max_run_seconds=10800`, `minRuntime=3h` and
+hard timeout 4h. **48 optimizer updates completed**; all three replicas exited 0.
+The workflow records `status=complete` and `stopped_for_time=true`.
+
+Final native checkpoint `core/rollout_0000047` has completed/next/published clocks
+48/48/48 and a committed cursor. Native checkpoint stage 81.59 s; final HF export
+82.87 s. Artifacts live under:
+
+```text
+/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-20260924-r6
+```
+
+`checkpoints/core-latest.json` identifies the native checkpoint; `export-hf/`
+contains the final serving checkpoint. Trainer result dataset is
+`01M3B6EC2KN3D8MHX3VVWY7AYC`; phase, queue, pipeline and per-node GPU telemetry
+are under `run/checkpoints/`. W&B [n0i2e93u](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/n0i2e93u)
+reported a crashed state despite the verified successful workflow, scheduler
+exits and final artifacts; this reporting discrepancy is unresolved.
+
+### Steady-state timing
+
+| Window, one-based updates | Rollout wait/update | Training/update | Publication/update | Completed-queue stale-token fraction |
+|---|---:|---:|---:|---:|
+| 29–48 | 198.54 s | 28.13 s | 6.67 s | 53.19% |
+| 39–48 | 203.12 s | 25.36 s | 6.70 s | 54.10% |
+| 44–48 | 164.75 s | 24.74 s | 6.69 s | 46.04% |
+
+Stage means exclude checkpoint/export time. Stale fractions count dropped versus
+accepted response tokens at the completed-queue age decision; they are not a
+fraction of all generated tokens or all GPU time. Reward-filtered and unfinished
+work have separate accounting. The last five updates are noisy, including one
+400-second generation wait and one 62-second wait.
+
+Across updates 29–48, unfinished samples averaged 1,214 of the 1,216 budget while
+active policy HTTP calls averaged 91 (p90 158, maximum 214) across 19 engines.
+The completed queue was usually empty. Ten-second GPU samples averaged roughly
+90–95% utilization on policy GPUs, 53% on the judge and 8–11% on trainer GPUs.
+GPU busy percentage does not establish compute efficiency. Partial sibling
+groups and reward work retain admission reservations, so the unfinished-sample
+budget does not imply that every engine is serving 64 requests. These observations
+support reducing stale waste first; they do not establish a benefit from higher
+engine/judge concurrency, a larger producer budget or removing recomputation.
+
+### Background evaluation
+
+[Final evaluation](https://beaker.org/ex/01M3BMBFRRJ7BK1ANSZ9ARR3WX) completed
+successfully at 06:49 UTC. Its publication identifies update 48; result dataset
+`01M3BMBFS179VY2GP6VS8QA4Q0` contains scores and publication/evaluation receipts.
+
+| Fixed 128-example panel | Startup | Update 48 |
+|---|---:|---:|
+| GSM8K | 72/128 (56.25%) | 76/128 (59.38%) |
+| IFEval OOD strict prompt | 25/128 (19.53%) | 28/128 (21.88%) |
+| IFEval OOD loose prompt | 29/128 (22.66%) | 32/128 (25.00%) |
+
+These small positive changes are encouraging, not conclusive evidence of a
+quality gain. No update 50 evaluation was due before the time stop. The
+[eight-hour follow-up and lag comparison](policy-lag-20260925.md#eight-hour-hero-follow-up)
+now exercise lag six with the same runtime and core training settings.
