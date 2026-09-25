@@ -1,0 +1,1962 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-25",
+  "image": "01M3APTWSR4VH2PFYMMSPQ8TD2",
+  "versions": {
+    "transformers": "5.12.1",
+    "tokenizers": "0.22.2"
+  },
+  "tokenizers": {
+    "canonical_retokenization_source": {
+      "path": "/weka/oe-adapt-default/jacobm/olmoe3/olmo-ddp-migration/sft-data/retokenize-olmo3-20260921/payload/tokenizer-source",
+      "files": {
+        "tokenizer_config.json": "768461353d27a100fe02df01fc2a046fa159217856046eb94d59578838dea5c0",
+        "tokenizer.json": "ae12cb7a47a48bba7131225fb776a7c1c138747986affea7902b5d9966a49891"
+      },
+      "class": "GPT2Tokenizer",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": 100257,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": false,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          1954,
+          2495,
+          3487,
+          1958,
+          717
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          2495,
+          1954,
+          4513,
+          10961,
+          2495,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          7,
+          87,
+          1680,
+          198,
+          262,
+          471,
+          865,
+          489,
+          220,
+          717,
+          1958,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          27,
+          27963,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          29,
+          198,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          27,
+          27963,
+          29
+        ]
+      },
+      "raw_backend_probes_match": false,
+      "generation": null
+    },
+    "sft_training_tokenizer": {
+      "path": "/weka/oe-adapt-default/jacobm/olmoe3/olmo-ddp-migration/sft-data/corrected-sft-20260921/data/dolci-think/train/tokenizer",
+      "files": {
+        "chat_template.jinja": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+        "tokenizer_config.json": "66aac50018490afe1b6f26baeb6654ddb835e2e9ce73be02d05fde0ac7da64f3",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": null
+    },
+    "sft_hf_export": {
+      "path": "/weka/olmo-3p5-checkpoints/scratch/olmo35-fixedtok-sft-20260921/olmo35-fixedtok-sft-20260921-4t-non-emo-dolci-think/emo/step5402/hf",
+      "files": {
+        "tokenizer-export-audit.json": "e4d19f88a027fe4cfdd6b7105f186c44c78f5f41b3dac8eb87aa3ad2909e436e",
+        "tokenizer_config.json": "fd1dc6a6a4f941c8c1dc82885ed1fb7efcf03c82c080660f6449aecf49355197",
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_prepared": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/prepared/hf",
+      "files": {
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "tokenizer_config.json": "fd1dc6a6a4f941c8c1dc82885ed1fb7efcf03c82c080660f6449aecf49355197",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer-export-audit.json": "e4d19f88a027fe4cfdd6b7105f186c44c78f5f41b3dac8eb87aa3ad2909e436e",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_update_50": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/eval-snapshots/update-00000050/hf",
+      "files": {
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_update_100": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/eval-snapshots/update-00000100/hf",
+      "files": {
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04",
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_update_150": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/eval-snapshots/update-00000150/hf",
+      "files": {
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04",
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_update_200": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/eval-snapshots/update-00000200/hf",
+      "files": {
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_update_250": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/eval-snapshots/update-00000250/hf",
+      "files": {
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_update_300": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/eval-snapshots/update-00000300/hf",
+      "files": {
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04",
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    },
+    "rl_final": {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-non-emo-long-lag6-20260925/export-hf",
+      "files": {
+        "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+        "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+        "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+        "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04"
+      },
+      "class": "TokenizersBackend",
+      "vocab_size": 100278,
+      "length": 100278,
+      "bos": null,
+      "eos": 100257,
+      "pad": 100277,
+      "pretokenizer_sha256": "ba2cf544ccca9022f2033fe108be1c340633f0f30f50c0dd6835bb49371ac6a1",
+      "raw_runtime_pretokenizer_equal": true,
+      "vocab_sha256": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c",
+      "probes": {
+        "9078563412": [
+          23505,
+          25505,
+          16546,
+          17
+        ],
+        "12345678901234567890": [
+          4513,
+          10961,
+          16474,
+          11531,
+          12901,
+          17458,
+          1954
+        ],
+        "def f(x):\n    return x + 1234\n": [
+          755,
+          282,
+          2120,
+          997,
+          262,
+          471,
+          865,
+          489,
+          220,
+          4513,
+          19,
+          198
+        ],
+        "\u4e2d\u6587 123456": [
+          16325,
+          17161,
+          220,
+          4513,
+          10961
+        ],
+        "  \n\t\n\n": [
+          2355,
+          16176
+        ],
+        "I'm testing contractions, aren't we?": [
+          40,
+          2846,
+          7649,
+          6155,
+          4109,
+          11,
+          7784,
+          956,
+          584,
+          30
+        ],
+        "<think>2 + 2 = 4.</think>\nThe answer is 4.": [
+          14023,
+          771,
+          29,
+          17,
+          489,
+          220,
+          17,
+          284,
+          220,
+          19,
+          4005,
+          27963,
+          397,
+          791,
+          4320,
+          374,
+          220,
+          19,
+          13
+        ],
+        "<|im_start|>assistant\n<think>": [
+          100264,
+          78191,
+          198,
+          14023,
+          771,
+          29
+        ]
+      },
+      "raw_backend_probes_match": true,
+      "generation": {
+        "do_sample": true,
+        "eos_token_id": [
+          100265,
+          100257
+        ],
+        "max_new_tokens": 32768,
+        "pad_token_id": 100277,
+        "temperature": 0.6,
+        "top_k": 0,
+        "top_p": 0.95,
+        "transformers_version": "5.16.1"
+      }
+    }
+  },
+  "metadata": {
+    "sft_native": {
+      "path": "/weka/olmo-3p5-checkpoints/production-corrected-sft/olmo35-fixedtok-sft-20260921/olmo35-fixedtok-sft-20260921-4t-non-emo-dolci-think/step5402/config.json",
+      "sha256": "74587b59dde2cb434cf8b19849b492187f8f752e89b1c7b98ba022cb7550776b",
+      "value": {
+        "model.init_seed": 0,
+        "dataset.tokenizer": {
+          "vocab_size": 100278,
+          "eos_token_id": 100257,
+          "pad_token_id": 100277,
+          "identifier": "/weka/oe-adapt-default/jacobm/olmoe3/olmo-ddp-migration/sft-data/corrected-sft-20260921/data/dolci-think/train/tokenizer",
+          "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+        },
+        "trainer.load_path": "/weka/olmo-3p5-checkpoints/uploader/automation/olmo35-4t-lc-sft8mi-5epoch-20260920/sources/posttrain-noemo-4t-20260916/lc100b/non-emo/step5961/olmo-core",
+        "trainer.load_strategy": "always",
+        "init_seed": 12536
+      }
+    },
+    "lc_parent": {
+      "path": "/weka/olmo-3p5-checkpoints/uploader/automation/olmo35-4t-lc-sft8mi-5epoch-20260920/sources/posttrain-noemo-4t-20260916/lc100b/non-emo/step5961/olmo-core/config.json",
+      "sha256": "72147102ddd2fc886d9bc0546c908e18dcbff178120e3f3ef9317125a8be6efd",
+      "value": {
+        "model.init_seed": 0,
+        "dataset.tokenizer": {
+          "vocab_size": 100278,
+          "eos_token_id": 100257,
+          "pad_token_id": 100277,
+          "identifier": "allenai/dolma2-tokenizer",
+          "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+        },
+        "trainer.load_path": "/weka/olmo-3p5-checkpoints/production-hero-small-lc/olmo35-small-4t-lc100b-noemo-20260916/olmo35-small-4t-lc100b-noemo-20260916-non-emo/step4",
+        "trainer.load_strategy": "always",
+        "trainer.callbacks.lm_evaluator.eval_dataset.tokenizer": {
+          "vocab_size": 100278,
+          "eos_token_id": 100257,
+          "pad_token_id": 100277,
+          "identifier": "allenai/dolma2-tokenizer",
+          "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+        },
+        "init_seed": 12536
+      }
+    },
+    "retokenization_manifest": {
+      "path": "/weka/oe-adapt-default/jacobm/olmoe3/olmo-ddp-migration/sft-data/retokenize-olmo3-20260921/datasets/dolci-think/manifest.json",
+      "sha256": "43f122058d6cb177cc7e18094104ad309089979f24ea27c608f45d06fa06d5ab"
+    },
+    "retokenization_proof": {
+      "path": "/weka/oe-adapt-default/jacobm/olmoe3/olmo-ddp-migration/sft-data/retokenize-olmo3-20260921/datasets/dolci-think/tokenizer-proof.json",
+      "sha256": "32fbc36a5d1d3075cd0606242f2974f1c24fce66d3b2e8d5cb26fcc720f57e8e"
+    },
+    "sft_data_plan": {
+      "path": "/weka/oe-adapt-default/jacobm/olmoe3/olmo-ddp-migration/sft-data/corrected-sft-20260921/data/dolci-think/data-plan.json",
+      "sha256": "385673e6d4900bb881a982a7011f5a581e6fab2a7842b8dcb276e7b57fbacab8"
+    }
+  },
+  "pretraining_comparison": {
+    "dolma_revision": "5292e5d6c0f40b67cc765fe41bec991cf4345b5c",
+    "pretokenizer_equal": true,
+    "model_equal": true,
+    "vocab_diff": {},
+    "added_tokens_equal": true,
+    "production_vocab_sha": "a5a0d5e00a14d7ce506e9977acdd6cc8d6e76815b29f7f143c2f8779250a448c"
+  },
+  "save_config_diff": {
+    "local_files_only": {
+      "prepared": true,
+      "final": false
+    }
+  },
+  "training_mode_render_identical": true,
+  "sglang_loader": {
+    "prepared": {
+      "class": "TokenizersBackend",
+      "digits": [
+        23505,
+        25505,
+        16546,
+        17
+      ],
+      "eos": 100257,
+      "bos": null,
+      "chat_matches": true
+    },
+    "final": {
+      "class": "TokenizersBackend",
+      "digits": [
+        23505,
+        25505,
+        16546,
+        17
+      ],
+      "eos": 100257,
+      "bos": null,
+      "chat_matches": true
+    }
+  },
+  "miles_loader": {
+    "prepared/hf": {
+      "class": "TokenizersBackend",
+      "digits": [
+        23505,
+        25505,
+        16546,
+        17
+      ],
+      "bos": null,
+      "eos": 100257
+    },
+    "export-hf": {
+      "class": "TokenizersBackend",
+      "digits": [
+        23505,
+        25505,
+        16546,
+        17
+      ],
+      "bos": null,
+      "eos": 100257
+    }
+  },
+  "full_evaluations": {
+    "chat_greedy": {
+      "baseline": {
+        "n": 1319,
+        "correct": 705,
+        "capped": 709,
+        "correct_finished": 556,
+        "capped_correct": 149,
+        "capped_closed_think": 0,
+        "mean_tokens": 6174.335860500379,
+        "median_tokens": 10240
+      },
+      "final330": {
+        "n": 1319,
+        "correct": 838,
+        "capped": 464,
+        "correct_finished": 751,
+        "capped_correct": 87,
+        "capped_closed_think": 2,
+        "mean_tokens": 4481.349507202426,
+        "median_tokens": 1693
+      },
+      "paired_correct": {
+        "baseline_only": 122,
+        "final_only": 255,
+        "p": 6.442616419260653e-12
+      },
+      "paired_correct_finished": {
+        "baseline_only": 88,
+        "final_only": 283,
+        "p": 5.412526661301521e-25
+      }
+    },
+    "chat_t1": {
+      "baseline": {
+        "n": 1319,
+        "correct": 1046,
+        "capped": 101,
+        "correct_finished": 1040,
+        "capped_correct": 6,
+        "capped_closed_think": 12,
+        "mean_tokens": 4403.548142532221,
+        "median_tokens": 3647
+      },
+      "final330": {
+        "n": 1319,
+        "correct": 1053,
+        "capped": 54,
+        "correct_finished": 1050,
+        "capped_correct": 3,
+        "capped_closed_think": 11,
+        "mean_tokens": 3305.842304776346,
+        "median_tokens": 2248
+      },
+      "paired_correct": {
+        "baseline_only": 112,
+        "final_only": 119,
+        "p": 0.6931012792711919
+      },
+      "paired_correct_finished": {
+        "baseline_only": 109,
+        "final_only": 119,
+        "p": 0.5512435649994101
+      }
+    },
+    "raw_greedy": {
+      "baseline": {
+        "n": 1319,
+        "correct": 602,
+        "capped": 490,
+        "correct_finished": 558,
+        "capped_correct": 44,
+        "capped_closed_think": 30,
+        "mean_tokens": 3996.134192570129,
+        "median_tokens": 398
+      },
+      "final330": {
+        "n": 1319,
+        "correct": 596,
+        "capped": 456,
+        "correct_finished": 564,
+        "capped_correct": 32,
+        "capped_closed_think": 24,
+        "mean_tokens": 3741.772554965883,
+        "median_tokens": 376
+      },
+      "paired_correct": {
+        "baseline_only": 166,
+        "final_only": 160,
+        "p": 0.7818885941510128
+      },
+      "paired_correct_finished": {
+        "baseline_only": 139,
+        "final_only": 145,
+        "p": 0.7667600163481919
+      }
+    }
+  },
+  "controlled_continuations": {
+    "temperatures": {
+      "0": {
+        "responses": 3,
+        "finished": 0,
+        "closed_think": 0,
+        "correct_finished": 0,
+        "mean_tokens": 4096
+      },
+      "0.3": {
+        "responses": 12,
+        "finished": 0,
+        "closed_think": 0,
+        "correct_finished": 0,
+        "mean_tokens": 4096
+      },
+      "0.6": {
+        "responses": 12,
+        "finished": 0,
+        "closed_think": 0,
+        "correct_finished": 0,
+        "mean_tokens": 4096
+      },
+      "1": {
+        "responses": 12,
+        "finished": 4,
+        "closed_think": 4,
+        "correct_finished": 4,
+        "mean_tokens": 3250.5833333333335
+      }
+    },
+    "cases": {
+      "gsm8k:test:1": {
+        "prefix_repeated_32gram_fraction": 0.7338253382533826,
+        "control_matches_original_next_tokens": 2048,
+        "original_comparison_tokens": 2048,
+        "temperatures": {
+          "0": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -0.0007354479897550281,
+              "mean_selected_probability": 0.9992694437089941
+            }
+          ],
+          "0_unique_outputs": 1,
+          "0.3": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -1.353330686751364e-08,
+              "mean_selected_probability": 0.9999999864667185
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -1.3737031016175516e-08,
+              "mean_selected_probability": 0.9999999862629918
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -1.385345215626499e-08,
+              "mean_selected_probability": 0.9999999861465764
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -1.353330686751364e-08,
+              "mean_selected_probability": 0.9999999864667185
+            }
+          ],
+          "0.3_unique_outputs": 1,
+          "0.6": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -2.0268649104499686e-05,
+              "mean_selected_probability": 0.9999797402123749
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -2.0268561771681626e-05,
+              "mean_selected_probability": 0.999979740299688
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -2.0268488780995214e-05,
+              "mean_selected_probability": 0.9999797403725037
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": true,
+              "repeated_32gram_fraction": 0.9731857318573186,
+              "mean_selected_logprob": -2.0268488780995214e-05,
+              "mean_selected_probability": 0.9999797403725037
+            }
+          ],
+          "0.6_unique_outputs": 1,
+          "1": [
+            {
+              "replicate": 0,
+              "tokens": 1334,
+              "finished": true,
+              "closed_think": true,
+              "correct": true,
+              "repeated_32gram_fraction": 0.2003069838833461,
+              "mean_selected_logprob": -0.45147019180718057,
+              "mean_selected_probability": 0.80213697511579
+            },
+            {
+              "replicate": 1,
+              "tokens": 1623,
+              "finished": true,
+              "closed_think": true,
+              "correct": true,
+              "repeated_32gram_fraction": 0.0,
+              "mean_selected_logprob": -0.7956204512135062,
+              "mean_selected_probability": 0.6651657841054117
+            },
+            {
+              "replicate": 2,
+              "tokens": 2503,
+              "finished": true,
+              "closed_think": true,
+              "correct": true,
+              "repeated_32gram_fraction": 0.40129449838187703,
+              "mean_selected_logprob": -0.42552558864203405,
+              "mean_selected_probability": 0.8139028582820041
+            },
+            {
+              "replicate": 3,
+              "tokens": 779,
+              "finished": true,
+              "closed_think": true,
+              "correct": true,
+              "repeated_32gram_fraction": 0.4197860962566845,
+              "mean_selected_logprob": -0.28632268984983195,
+              "mean_selected_probability": 0.8754711690380368
+            }
+          ],
+          "1_unique_outputs": 4
+        }
+      },
+      "gsm8k:test:2": {
+        "prefix_repeated_32gram_fraction": 0.6403444034440344,
+        "control_matches_original_next_tokens": 2048,
+        "original_comparison_tokens": 2048,
+        "temperatures": {
+          "0": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9694956949569495,
+              "mean_selected_logprob": -0.001955970852749067,
+              "mean_selected_probability": 0.9981475404182355
+            }
+          ],
+          "0_unique_outputs": 1,
+          "0.3": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9694956949569495,
+              "mean_selected_logprob": -2.48271207586373e-05,
+              "mean_selected_probability": 0.999975233920799
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9694956949569495,
+              "mean_selected_logprob": -2.482714986257878e-05,
+              "mean_selected_probability": 0.9999752338916952
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9694956949569495,
+              "mean_selected_logprob": -4.106180786538072e-05,
+              "mean_selected_probability": 0.9999591267112148
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9694956949569495,
+              "mean_selected_logprob": -2.482714986257878e-05,
+              "mean_selected_probability": 0.9999752338916952
+            }
+          ],
+          "0.3_unique_outputs": 1,
+          "0.6": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9616236162361623,
+              "mean_selected_logprob": -0.0013070652979469272,
+              "mean_selected_probability": 0.999429281739562
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9694956949569495,
+              "mean_selected_logprob": -0.00042713530328217925,
+              "mean_selected_probability": 0.9995842857882353
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9616236162361623,
+              "mean_selected_logprob": -0.0010787458103189082,
+              "mean_selected_probability": 0.9993651335611676
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9616236162361623,
+              "mean_selected_logprob": -0.001550243571116463,
+              "mean_selected_probability": 0.9991960841193731
+            }
+          ],
+          "0.6_unique_outputs": 4,
+          "1": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9537515375153751,
+              "mean_selected_logprob": -0.006262098979075259,
+              "mean_selected_probability": 0.9959112938808744
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.13579335793357938,
+              "mean_selected_logprob": -0.8895505241434507,
+              "mean_selected_probability": 0.64345741285245
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.23763837638376384,
+              "mean_selected_logprob": -0.7100609962013142,
+              "mean_selected_probability": 0.7004002602160763
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.031734317343173446,
+              "mean_selected_logprob": -1.0964525440346,
+              "mean_selected_probability": 0.5643214956243628
+            }
+          ],
+          "1_unique_outputs": 4
+        }
+      },
+      "gsm8k:test:3": {
+        "prefix_repeated_32gram_fraction": 0.7330873308733088,
+        "control_matches_original_next_tokens": 2048,
+        "original_comparison_tokens": 2048,
+        "temperatures": {
+          "0": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -0.0007778143861534859,
+              "mean_selected_probability": 0.9992379648507254
+            }
+          ],
+          "0_unique_outputs": 1,
+          "0.3": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -2.1507785285396208e-08,
+              "mean_selected_probability": 0.9999999784922691
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -3.0704889929233925e-08,
+              "mean_selected_probability": 0.9999999692954589
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -2.1507785285396208e-08,
+              "mean_selected_probability": 0.9999999784922691
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -2.1507785285396208e-08,
+              "mean_selected_probability": 0.9999999784922691
+            }
+          ],
+          "0.3_unique_outputs": 1,
+          "0.6": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -2.5857645643802968e-05,
+              "mean_selected_probability": 0.9999741756037027
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.04821648216482166,
+              "mean_selected_logprob": -0.36900338315230946,
+              "mean_selected_probability": 0.8208161657329756
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -2.5857645643802968e-05,
+              "mean_selected_probability": 0.9999741756037027
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -2.585786360199613e-05,
+              "mean_selected_probability": 0.9999741753855004
+            }
+          ],
+          "0.6_unique_outputs": 2,
+          "1": [
+            {
+              "replicate": 0,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.07675276752767524,
+              "mean_selected_logprob": -0.9686506695903191,
+              "mean_selected_probability": 0.6262307721696155
+            },
+            {
+              "replicate": 1,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.00319803198031976,
+              "mean_selected_logprob": -0.9725204988526768,
+              "mean_selected_probability": 0.6148763512539416
+            },
+            {
+              "replicate": 2,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.5175891758917589,
+              "mean_selected_logprob": -0.3889562652483989,
+              "mean_selected_probability": 0.8355592131849768
+            },
+            {
+              "replicate": 3,
+              "tokens": 4096,
+              "finished": false,
+              "closed_think": false,
+              "correct": false,
+              "repeated_32gram_fraction": 0.9685116851168512,
+              "mean_selected_logprob": -0.0007778143861534859,
+              "mean_selected_probability": 0.9992379648507254
+            }
+          ],
+          "1_unique_outputs": 4
+        }
+      }
+    }
+  },
+  "controlled_experiment": "01M3CRMAXFKK3ZKA0WE6MZJ1Q2",
+  "controlled_dataset": "01M3CRMAXZ84K75RZ1HTZZ6DDS",
+  "submitted_sources": {
+    "hero_gsm_audit.py": "cb672170948bdaf0ab078849eef2db004ded074274faa4491e804169e1d7b387",
+    "controlled.py": "7b06408b7884203a449d8f3fee518a515d1378df13ee91046fa4e5624f78cadd",
+    "metadata_extra.py": "8e03222ab89ee5a226bfb422b395a766286d6211845f0d8b5b9a426a1acff1aa"
+  }
+}

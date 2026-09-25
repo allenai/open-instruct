@@ -346,7 +346,7 @@ establish held-out improvement. Mean TIS clipping remains between 0.00044% and
 0.00064% across these windows; no dead experts or nonfinite health metrics were
 reported. Auxiliary load-balancing and router-z losses remain disabled.
 
-All scheduled evaluations through update 300 completed with exit code zero:
+All scheduled evaluations, including the final update 330, completed with exit code zero:
 
 | Checkpoint | GSM8K correct /128 | IFEval strict prompts /128 | IFEval loose prompts /128 |
 | --- | ---: | ---: | ---: |
@@ -357,14 +357,12 @@ All scheduled evaluations through update 300 completed with exit code zero:
 | [Update 200](https://beaker.org/ex/01M3CBFCNAT13SM97WCN54628D) | 60 | 24 | 27 |
 | [Update 250](https://beaker.org/ex/01M3CF79JJ2Z7XSBNZWDJYN75F) | 63 | 28 | 31 |
 | [Update 300](https://beaker.org/ex/01M3CJYWNBQ5DJ8G5BSWF065G3) | 72 | 25 | 29 |
+| [Final update 330](https://beaker.org/ex/01M3CN8967AK6WHE3ZA9464G69) | 57 | 21 | 25 |
 
-The small sampled panels remain inconclusive. The final audit will retain both
-the raw-completion comparison and a separate full chat-template comparison.
-The latter will repeat the original baseline alongside the final policy, with
-both greedy and temperature-1 decoding. Its temperature-1 requests explicitly
-set `top_p=1.0` and unrestricted `top_k`; greedy requests and model EOS defaults
-remain unchanged from the earlier chat audit. This measures behavior closer to
-training's sampling mode without conflating it with greedy results.
+The small sampled panels remain inconclusive. Both full final audits completed;
+see the final comparison below. Temperature-1 requests explicitly set `top_p=1.0`
+and unrestricted `top_k`; greedy requests and model EOS defaults remain unchanged
+from the earlier chat audit.
 
 ### Completed eight-hour duration exercise
 
@@ -438,11 +436,41 @@ The final 30-update training window averaged reward 0.4918, response length
 and 0.5446 in the first 50 updates. The held-out panels and full final audits,
 rather than these filtered training averages, determine the learning conclusion.
 
-Final evaluations are running separately: the
-[regular 128-question panels](https://beaker.org/ex/01M3CN8967AK6WHE3ZA9464G69),
-[full raw-completion GSM8K](https://beaker.org/ex/01M3CN9SZFB3VEZW9JSDNGZZJB), and
-[full chat-template baseline/final comparison](https://beaker.org/ex/01M3CN9D8MGXC0RKEXSHJZN2AE).
-Each uses one extra Holmes GPU in the same workspace. The chat comparison uses
+The [regular final 128-question panels](https://beaker.org/ex/01M3CN8967AK6WHE3ZA9464G69)
+completed: GSM8K 57/128, IFEval strict 21/128 and loose 25/128, versus 53, 24
+and 29 at startup. This is mixed, not established learning improvement. The
+[full raw-completion GSM8K](https://beaker.org/ex/01M3CN9SZFB3VEZW9JSDNGZZJB) and
+[full chat-template baseline/final comparison](https://beaker.org/ex/01M3CN9D8MGXC0RKEXSHJZN2AE)
+also completed successfully. Each used one extra Holmes GPU in the same workspace. The chat comparison uses
 greedy plus one temperature-1 sample per question, seed 17 and the 10,240-token
 cap. Its model EOS defaults are preserved; only the temperature-1 request adds
 explicit `top_p=1.0`, unrestricted `top_k`. No new runtime image was needed.
+
+
+### Final full evaluations and operating decision
+
+All final evaluation jobs exited zero. The [full tokenizer and behavior audit](hero-tokenizer-loops-20260925.md)
+records protocols, paired outcomes, qualitative loops and artifact provenance.
+Each row below covers all 1,319 GSM8K test questions; the cap is 10,240 tokens.
+
+| Protocol | Original SFT correct | Final 330 correct | Original → final correct and finished | Original → final cap hits |
+| --- | ---: | ---: | ---: | ---: |
+| Checkpoint chat, greedy | 705 (53.45%) | 838 (63.53%) | 556 → 751 | 709 → 464 |
+| Checkpoint chat, T=1 | 1,046 (79.30%) | 1,053 (79.83%) | 1,040 → 1,050 | 101 → 54 |
+| Raw completion, greedy | 602 (45.64%) | 596 (45.19%) | 558 → 564 | 490 → 456 |
+
+The strongest result is improved **greedy chat termination and correctness**.
+Sampled accuracy and raw-completion accuracy are essentially flat in this
+comparison. Chat T=1 mean response length falls from 4,404 to 3,306 tokens,
+with cap hits falling from 7.66% to 4.09%. This is useful behavior movement,
+not evidence of a broad capability gain across the mixed workload; IFEval's
+small panels do not establish improvement. Greedy loops were already present
+in the original corrected SFT policy and remain common after RL.
+
+Keep lag six, temperature one, the 10,240-token cap, EP4, 19 policy engines,
+64 requests/graphs per engine, judge concurrency 16, recomputation and auxiliary
+losses off as the measured starting point. The run establishes eight-hour
+endurance with saved final artifacts and all requested evaluations. It does not
+establish optimal lag, admission, or learning hyperparameters. Address reasoning
+termination and evaluate quality per wall-clock hour before spending another
+long allocation on a simultaneous sweep of those settings.
