@@ -63,12 +63,17 @@ zero. Explicit `async.max_weight_staleness` (or `core.max_policy_lag`) overrides
 the structured default. The low-level Core configuration still defaults to zero
 and requires a positive allowance when enabling async explicitly.
 
-Six is a provisional operating choice to reduce premature rejection of slow
-groups, not an established learning optimum. Previously the structured async
+Use six as the starting point for new async training, including explicitly
+setting `core.max_policy_lag = 6` in low-level configurations. It reduces
+premature rejection of slow groups; it is not an established learning optimum.
+Previously the structured async
 fallback was one while medium/large selected two. Existing submitted runs and
 dated measurement configurations retain their original limits. The
-[small comparison](measurements/policy-lag-20260925.md) records the experiment
-and its current evidence; changing the default does not establish qualification.
+[comparison and duration report](measurements/policy-lag-20260925.md) records
+28% higher accepted-token throughput in the small lag-two/six screen and a
+330-update hero run at lag six with 1.01% stale-token waste. These support the
+operating default, but do not establish equal learning quality versus lag two
+or qualify other workloads.
 
 For refresh, group age uses the oldest sampled-token policy version across all
 responses. Rebuilding a prefix under new weights does not resample its tokens

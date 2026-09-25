@@ -22,6 +22,16 @@ Follow this workflow without requiring the user to supply a special agent prompt
    alone do not check them. Follow completion using the operations guide.
    Report the configuration, image, experiment link and validation outcomes.
 
+For new asynchronous runs, start with **six optimizer updates of policy lag**
+(`async.max_weight_staleness = 6`, compiled to `core.max_policy_lag = 6`). This
+is the structured async default and the explicit setting in `medium.toml` and
+`large.toml`. When writing a low-level `[core]`/`[miles]` async configuration,
+set `core.max_policy_lag = 6` explicitly. Preserve explicit user overrides and
+historical reproduction settings; synchronous mechanics runs retain zero lag.
+Use [policy lag and TIS](docs/miles/async-pipeline.md#policy-lag-and-tis) for the
+evidence and monitoring guidance. Six is the starting point, not a claim of an
+optimal lag for every learning rate, group size or response length.
+
 `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` are **deprecated**.
 Their presence, tests and launch scripts support existing runs and historical
 reproduction; they are not alternatives to recommend for new GRPO work. Do not
