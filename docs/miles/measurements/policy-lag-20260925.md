@@ -213,3 +213,55 @@ semantics; current worker receipts report cache misses. This is a candidate for
 a narrow future cache-key fix. No patch or restart was imposed on this running
 experiment. The shared cache currently covers Triton; this observation does not
 establish reuse of all TileLang, CUDA-graph or other startup work.
+
+### First 50 updates and prompt-format audit
+
+At 09:40 UTC, the long run had completed 50 updates and retained a native
+checkpoint with clock 50/50/50, all four rank states, model metadata and a matching
+dataset-cursor checksum. Saving it took 77.1 s. The
+[update-50 background evaluation](https://beaker.org/ex/01M3BYVBTB84QPEYNTG51RMTF2)
+started successfully. Updates 43–47 averaged 64.5 s per cycle: 31.6 s waiting,
+24.6 s training and 8.4 s publishing. That window delivered 17,197 response
+tokens/s with no stale-token drops. Treat this as an early window, not a final
+sustained-throughput result; checkpoint/export milestones add overhead.
+
+Training means through update 50:
+
+| Updates | Raw reward | Response tokens | At length cap | Absolute log-probability gap | TIS clipped fraction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1–10 | 0.447 | 4,414 | 13.09% | 0.02022 | 0.000055% |
+| 11–25 | 0.461 | 4,527 | 15.23% | 0.02288 | 0.000399% |
+| 26–50 | 0.443 | 4,437 | 13.63% | 0.02375 | 0.000619% |
+
+These mixed-task, filtered training batches do not establish a learning trend.
+Router load CV averaged about 0.54 after the first ten updates; no dead experts
+were reported. Ten recoverable transport-error attempts had occurred by 09:27,
+including repeated attempts for the same group; all three replicas continued,
+with no fatal error. Errors at 09:22:29 and 09:23:55 occurred during training,
+not the checked publication windows. Their underlying network cause remains
+unisolated; successful recovery is not evidence that higher admission is safe.
+
+The full greedy **raw-completion** baseline finished with 602/1,319 correct
+(45.64%), but 490 responses (37.15%) reached 10,240 tokens. Mean length was 3,996
+and median 398. Some capped responses invent subsequent `Question:`/`Answer:`
+exchanges or repeat reasoning. Only 44 of those 490 capped responses scored
+correctly. The task's normal completion stop sequences were removed for this
+long-reasoning recipe, and the task never applies the checkpoint's chat template.
+This is therefore a poor measure of chat response-length behavior; the final
+comparison must retain that limitation rather than treating the cap rate as an
+RL regression.
+
+A separate [chat-template audit](https://beaker.org/ex/01M3BZ9QF7PTCDF9F0CEW38A81)
+now compares the original SFT and immutable update-50 HF snapshot on all 1,319
+GSM8K test questions. It uses the existing committed `gsm8k_test_eval.py`, the
+checkpoint's own chat template and `GSM8KVerifier`, greedy decoding, seed 17,
+10,240 response tokens and one additional B300. The historical script's context,
+KV-token capacity and Mamba-state capacity are explicitly configured to 12,288,
+786,432 and 1,024; its remaining serving settings include concurrency/decode
+graphs 64 and disabled radix caching. The script is carried byte-for-byte from
+commit `96e215b334a4` because the minimal runtime image omits it. A first audit
+attempt failed immediately on that missing import, before inference; the linked
+retry includes the script. The runtime image is unchanged. This audit also
+changes serving batch settings and the scorer relative to the raw audit, so it
+is not a controlled prompt-only attribution. Results and the eventual matching
+final-checkpoint chat evaluation belong to a separate series.
