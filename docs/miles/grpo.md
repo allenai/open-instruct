@@ -121,7 +121,9 @@ qualification does not establish a new workload or topology in advance.
 The `small` starter uses one trainer and one TP1 engine with barrier publication,
 four prompts × two responses and eight samples per update. The `medium` refresh
 template uses **EP8 + seven TP1 engines + one judge**, 64 prompts × four responses,
-256 samples per update, FIFO groups, lag at most two optimizer updates, and TIS.
+256 samples per update, FIFO groups, lag at most six optimizer updates, and TIS.
+Six is a provisional operating choice, not a measured optimum or a guarantee of
+learning stability; see [policy lag and TIS](async-pipeline.md#policy-lag-and-tis).
 In refresh mode, lag is measured from the oldest token's policy version. Original sampled-token
 log probabilities remain the behavior denominator; trainer scoring supplies the
 PPO anchor. Replay routes describe the final forward that rebuilt the route table,

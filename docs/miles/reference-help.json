@@ -25,7 +25,7 @@
     "engine_update_timeout": "Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run.",
     "expert_parallel_size": "Expert-parallel group size; must divide trainer world size.",
     "expert_publication": "per_expert exports separate HF expert slices; fused publishes stacked serving tensors. Disk HF export remains per-expert.",
-    "max_policy_lag": "Maximum optimizer-step age at consumption; multiple updates per collection also consume this allowance.",
+    "max_policy_lag": "Maximum optimizer-step age at consumption; multiple updates per collection also consume this allowance. Structured async runs default to six (provisional); synchronous and low-level defaults remain zero. Explicit limits take precedence.",
     "max_sequence_length": "Trainer context limit in tokens; structured max_context_length sets trainer and serving limits together.",
     "max_train_rollout_logprob_abs_diff": "Fail when mean absolute active-token trainer/serving log-probability gap exceeds this value; null disables. Despite the name, this is a mean, not a maximum.",
     "model_config": "Optional Core model factory configuration path for supported construction.",
@@ -184,6 +184,8 @@
   "structured": {
     "compiler_cache.diagnostics": "Boolean; maps to core.compiler_cache_diagnostics (default false).",
     "compiler_cache.enabled": "Boolean; maps to core.compiler_cache (default true).",
+    "compiler_cache.max_storage_bytes": "Nonnegative bytes per shared cache key; maps to core.compiler_cache_max_storage_bytes (default 8 GiB).",
+    "compiler_cache.publish_interval_seconds": "Positive minimum seconds between changed-cache publications; maps to core.compiler_cache_publish_interval_seconds (default 600).",
     "compiler_cache.restore": "Boolean; maps to core.compiler_cache_restore (default true).",
     "compiler_cache.shared_root": "Shared cache path; maps to core.compiler_cache_root. Default shared TTL root documented in cache guide.",
     "conversion.hf_output": "Prepared HF descriptor/export path; default output.root/prepared/hf.",

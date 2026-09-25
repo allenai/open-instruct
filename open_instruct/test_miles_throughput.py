@@ -118,6 +118,7 @@ def test_self_contained_example_plans(profile, gpus):
     assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k"
     assert spec.plan()["allocation"]["allocated_gpus"] == gpus
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
+    assert spec.compile().core.max_policy_lag == (6 if profile in ("medium", "large") else 0)
 
 
 def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path):

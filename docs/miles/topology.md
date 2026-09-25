@@ -33,7 +33,7 @@ own fixed-weight service. Plan reports unused slots. Consult
 The [four maintained examples](../../configs/miles/examples/README.md) separate
 mechanics from training. Dev uses one colocated GPU; small uses one trainer and
 one inference GPU. Medium uses EP8 + seven engines + one judge, mixed-policy
-refresh, 64 prompts × 4 responses and batch 256 with lag two. Large is an
+refresh, 64 prompts × 4 responses and batch 256 with provisional lag six. Large is an
 unqualified two-node trainer / 32-engine production proposal. Inspect `plan`
 for physical allocation, including the judge node's unused slots.
 

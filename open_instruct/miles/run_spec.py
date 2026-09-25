@@ -636,7 +636,9 @@ class RunSpec:
         # final save is always the newest). Set core.checkpoint_keep_every to also
         # keep milestones, or unset checkpoint_keep_last explicitly to keep all.
         core.setdefault("checkpoint_keep_last", 1)
-        core.setdefault("max_policy_lag", 1 if asynchronous else 0)
+        # Provisional async starting point; explicit study limits still win.
+        # Policy drift depends on the full recipe, not optimizer-step age alone.
+        core.setdefault("max_policy_lag", 6 if asynchronous else 0)
         if "max_context_length" in controls:
             length, origin = controls["max_context_length"]
             _positive(length, origin)

@@ -129,6 +129,8 @@ owns the path under `output.root/rollouts/`. Native MILES callers supply both
 |---|---|
 | compiler_cache.diagnostics | Boolean; maps to core.compiler_cache_diagnostics (default false). |
 | compiler_cache.enabled | Boolean; maps to core.compiler_cache (default true). |
+| compiler_cache.max_storage_bytes | Nonnegative bytes per shared cache key; maps to core.compiler_cache_max_storage_bytes (default 8 GiB). |
+| compiler_cache.publish_interval_seconds | Positive minimum seconds between changed-cache publications; maps to core.compiler_cache_publish_interval_seconds (default 600). |
 | compiler_cache.restore | Boolean; maps to core.compiler_cache_restore (default true). |
 | compiler_cache.shared_root | Shared cache path; maps to core.compiler_cache_root. Default shared TTL root documented in cache guide. |
 | conversion.hf_output | Prepared HF descriptor/export path; default output.root/prepared/hf. |
@@ -292,7 +294,7 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.expert_balance_search_proposals | &lt;class &#x27;int&#x27;&gt; | 1024 | Maximum guided/random swap attempts per optimizer block, default 1024; zero keeps the greedy-only planner. Search uses exact incremental packing and preserves the original nonregression guard. |
 | core.expert_balance_search_seconds | &lt;class &#x27;float&#x27;&gt; | 0.25 | Swap-search wall-clock allowance per collection in seconds, split across complete optimizer blocks; default 0.25. Zero skips swaps. Histogram construction and greedy scoring are outside this allowance. Deadline termination may differ across machines; seed, attempts and selected permutation are logged. |
 | core.packing_max_tokens | int &#124; None | null | Maximum tokens per pack; null uses context limit. Must cover max_sequence_length; samples are never split. |
-| core.max_policy_lag | &lt;class &#x27;int&#x27;&gt; | 0 | Maximum optimizer-step age at consumption; multiple updates per collection also consume this allowance. |
+| core.max_policy_lag | &lt;class &#x27;int&#x27;&gt; | 0 | Maximum optimizer-step age at consumption; multiple updates per collection also consume this allowance. Structured async runs default to six (provisional); synchronous and low-level defaults remain zero. Explicit limits take precedence. |
 | core.router_aux_loss_grouping | &lt;class &#x27;str&#x27;&gt; | &quot;pack&quot; | pack retains native Core local-forward balancing; sequence computes counts and mean scores within each original response document while preserving physical packing. Experimental; requires MoE, TP=CP=1, no global balancing and no model compilation. |
 | core.router_aux_loss_reduction | &lt;class &#x27;str&#x27;&gt; | &quot;token&quot; | token weights each document by its full model-token count; response averages document token means equally over all responses in the optimizer update. |
 | core.router_z_loss_reduction | &lt;class &#x27;str&#x27;&gt; | &quot;token&quot; | token preserves native global model-token normalization; response averages per-document z-loss token means equally. Independent of balancing grouping and weighting. |

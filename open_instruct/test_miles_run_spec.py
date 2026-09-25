@@ -31,7 +31,7 @@ def test_async_defaults_are_real_tis_and_eight_by_eight(tmp_path):
     assert config.miles["colocate"] is False
     assert config.miles["rollout_batch_size"] == config.miles["n_samples_per_prompt"] == 8
     assert config.miles["global_batch_size"] == 64
-    assert config.core.max_policy_lag == 1
+    assert config.core.max_policy_lag == 6
     assert "--use-tis" in config.arguments()
     assert "--use-rollout-logprobs" not in config.arguments()
 
@@ -79,6 +79,13 @@ def test_colocation_and_launch_defaults(tmp_path):
     assert run.launch["workspace"] == "ai2/open-instruct-dev"
     assert run.plan()["runtime_validated"] is False
     assert config.miles["use_tis"] is False
+    assert config.core.max_policy_lag == 0
+
+
+@pytest.mark.parametrize("lag", [1, 2, 6])
+def test_explicit_async_lag_survives_default(tmp_path, lag):
+    config = spec(tmp_path, **{"async": {"fully_async": True, "max_weight_staleness": lag}}).compile()
+    assert config.core.max_policy_lag == lag
 
 
 def test_section_translation_and_consistent_direct_overrides(tmp_path):

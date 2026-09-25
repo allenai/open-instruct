@@ -165,7 +165,8 @@ disable_grpo_std_normalization = true
 [async]
 fully_async = true
 # Auto-size producer admission to the fleet; completed-buffer capacity stays tied to batch size.
-max_weight_staleness = 2
+# Provisional starting point; tune against drift, stale-token waste and eval/hour.
+max_weight_staleness = 6
 async_data_buffer_capacity_factor = 1.0
 async_unused_samples_handler = "retry"
 rollout_submission_granularity = "sample"

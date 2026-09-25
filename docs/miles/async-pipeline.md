@@ -55,6 +55,43 @@ logs further capped running requests to five per engine for that trial's state
 pool. Neither allocating more nodes nor increasing only the FIFO changes those
 other limits.
 
+## Policy lag and TIS
+
+Structured asynchronous runs default to **six optimizer updates** of permitted
+policy lag. Medium and large explicitly select six; synchronous dev/small retain
+zero. Explicit `async.max_weight_staleness` (or `core.max_policy_lag`) overrides
+the structured default. The low-level Core configuration still defaults to zero
+and requires a positive allowance when enabling async explicitly.
+
+Six is a provisional operating choice to reduce premature rejection of slow
+groups, not an established learning optimum. Previously the structured async
+fallback was one while medium/large selected two. Existing submitted runs and
+dated measurement configurations retain their original limits. The
+[small comparison](measurements/policy-lag-20260925.md) records the experiment
+and its current evidence; changing the default does not establish qualification.
+
+For refresh, group age uses the oldest sampled-token policy version across all
+responses. Rebuilding a prefix under new weights does not resample its tokens
+or reset their behavior age. An over-age group is discarded and, with the retry
+handler, regenerated from its original prompts. Six is an upper bound, not a
+request to hold every group for six updates.
+
+TIS weights token loss contributions by trainer pre-update probability divided
+by the recorded sampling probability, capped at two by the current native
+defaults. It corrects both policy drift and inference/trainer numerical mismatch;
+it does not activate only when a version changes. Token-level weighting cannot
+fully correct the distribution of entire reasoning prefixes, and capping weights
+trades correction accuracy for lower variance. The PPO update ratio and its
+clipping are separate from the TIS correction.
+
+Reassess the lag limit after changing learning rate, batch/group size, number of
+optimizer updates, response length, or admission. Compare actual accepted ages,
+stale response-token fractions, useful tokens/second, trainer wait, probability
+ratio tails, TIS clipping and held-out improvement per hour. Metrics on accepted
+lag <=2 groups alone cannot establish that rejected lag 3–6 groups are safe.
+The existing `train/ess_ratio` describes the PPO new/anchor ratio; it is not the
+effective sample size of the trainer/behavior TIS weights.
+
 ## Structured defaults and overrides
 
 For structured async run files, omission of `async_max_concurrent_samples` now
