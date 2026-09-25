@@ -17,6 +17,7 @@ from open_instruct.ground_truth_utils import (
     LMJudgeVerifier,
     LMJudgeVerifierConfig,
     PuzzleMatcherVerifier,
+    RewardConfig,
     cleanup_all_llm_judge_clients,
 )
 
@@ -239,6 +240,55 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestRewardConfigNonAdditiveFormatGate(unittest.TestCase):
+    """The non-additive R1 format gate keys off `r1_style_format_reward`, not a literal 1.0."""
+
+    MATCHING = "reasoning</think><answer>42</answer>"
+    NON_MATCHING = "42"
+
+    def _scores(self, format_reward, responses):
+        reward_fn = RewardConfig(
+            apply_r1_style_format_reward=True, r1_style_format_reward=format_reward, additive_format_reward=False
+        ).build()
+        n = len(responses)
+        infos = SimpleNamespace(
+            timeouts=[False] * n,
+            tool_errors=[False] * n,
+            tool_outputs=[[] for _ in range(n)],
+            tool_calleds=[False] * n,
+            rollout_states=None,
+        )
+        verifier_mock = AsyncMock(return_value=([10.0] * n, [{} for _ in range(n)]))
+        with patch.object(ground_truth_utils, "apply_verifiable_reward", new=verifier_mock):
+            scores, _ = asyncio.run(
+                reward_fn(
+                    responses=[[] for _ in range(n)],
+                    decoded_responses=responses,
+                    ground_truths=[None] * n,
+                    datasets=["dataset"] * n,
+                    finish_reasons=["stop"] * n,
+                    infos=infos,
+                )
+            )
+        return scores
+
+    @parameterized.expand(
+        [
+            ("default_reward_matching", 1.0, MATCHING, 10.0),
+            ("default_reward_non_matching", 1.0, NON_MATCHING, 0.0),
+            ("half_reward_matching", 0.5, MATCHING, 10.0),
+            ("half_reward_non_matching", 0.5, NON_MATCHING, 0.0),
+            ("double_reward_matching", 2.0, MATCHING, 10.0),
+        ]
+    )
+    def test_format_gate(self, _name, format_reward, response, expected_score):
+        self.assertEqual(self._scores(format_reward, [response]), [expected_score])
+
+    def test_mixed_batch(self):
+        scores = self._scores(0.5, [self.MATCHING, self.NON_MATCHING, self.MATCHING])
+        self.assertEqual(scores, [10.0, 0.0, 10.0])
 
 
 if __name__ == "__main__":
