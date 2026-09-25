@@ -7,6 +7,17 @@ import parameterized
 import mason
 
 
+class TestHolmesWekaMount(unittest.TestCase):
+    def test_holmes_mounts_opd_teacher_volume(self):
+        mounts = mason.get_datasets([], ["ai2/holmes"])
+        self.assertTrue(
+            any(
+                mount.mount_path == "/weka/oe-adapt-default" and mount.source.weka == "oe-adapt-default"
+                for mount in mounts
+            )
+        )
+
+
 class TestBuildCommandWithoutArgs(unittest.TestCase):
     @parameterized.parameterized.expand(
         [
@@ -173,9 +184,7 @@ class TestExperimentSpec(unittest.TestCase):
         auto_resume = getattr(args, "auto_resume", None)
         if min_runtime is not None or auto_resume is not None:
             expected_context = beaker.BeakerTaskContext(
-                priority=beaker.BeakerJobPriority[args.priority],
-                min_runtime=min_runtime,
-                auto_resume=auto_resume,
+                priority=beaker.BeakerJobPriority[args.priority], min_runtime=min_runtime, auto_resume=auto_resume
             )
         else:
             expected_context = beaker.BeakerTaskContext(
