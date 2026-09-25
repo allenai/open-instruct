@@ -461,6 +461,7 @@ class TestUtilityFunctions(unittest.TestCase):
     @parameterized.expand(
         [
             ("NVIDIA H100 80GB HBM3", "h100"),
+            ("NVIDIA B300 SXM6 AC", "b300"),
             ("NVIDIA L40S", "l40s"),
             ("NVIDIA RTX A6000", "a6000"),
             ("NVIDIA A100-SXM4-80GB", "a100"),
@@ -476,6 +477,7 @@ class TestUtilityFunctions(unittest.TestCase):
     @parameterized.expand(
         [
             ("NVIDIA H100 80GB HBM3", {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12}),
+            ("NVIDIA B300 SXM6 AC", {"flops": 2250e12, "memory_size": 288e9, "memory_bandwidth": 8e12}),
             ("NVIDIA RTX A6000", {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9}),
             (
                 "NVIDIA RTX PRO 6000 Blackwell Server Edition",
