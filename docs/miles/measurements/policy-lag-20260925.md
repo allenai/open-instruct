@@ -169,3 +169,47 @@ retention 2, final native/HF outputs, and background 128-example GSM8K/IFEval at
 startup/every 50/final. The run stays in `ai2/open-instruct-dev`; background eval
 allocations may be extra. Its rendered config and launch receipt are under
 ignored `runs/hero-non-emo-long-lag6-20260925/`.
+
+
+### Follow-up startup and evaluation repeatability
+
+The three-node long run started at 07:56:18 UTC. Initial publication passed in
+50.6 s, including exact tensor checks. The first full driver training stage took
+916.1 s versus 936.1 s in R6; the actor's 584.9 s training timer excludes the initial
+scoring work and must not be compared with the full driver stage. At 08:45 UTC,
+eight updates had completed; accepted sample ages had reached five, with no
+stale-group drops. Four transport failures were recovered by regenerating
+pristine groups, and the recent failure window was zero. These are startup
+observations, not a qualification of the full eight-hour duration.
+W&B: [rlzb9wwq](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/rlzb9wwq).
+
+The [startup evaluation](https://beaker.org/ex/01M3BT3VD87R5QM1E9BGRC8HFN)
+completed successfully: GSM8K 53/128, IFEval strict prompt 24/128 and loose 29/128.
+GSM8K’s 53/128 contrasts with R6’s 72/128 on the same original SFT checkpoint.
+An artifact audit found **identical 128requests, native IDs, task settings and
+pinned evaluator image**, but different automatically selected server RNG seeds
+(299960870 versus 522344102) with temperature 0.8. Both evaluations hit the response
+cap 13 times; mean response lengths were 2,432 and 2,541 tokens. Paired correctness:
+41 both right,44 both wrong,31 R6-only and 12 new-only. This is observed baseline
+variation; seed and asynchronous execution differ, and a seed-only causal
+explanation has not been isolated. The small changes in R6's final evaluation
+must not be read as established learning gains.
+
+A separate [full GSM8K greedy baseline](https://beaker.org/ex/01M3BVS0SF91RY4NH7V6EAKZ1E)
+was launched to support a less noisy final-checkpoint comparison: all 1,319 test
+examples, zero shot, temperature 0, `do_sample=false`, server seed 17 and the same
+10,240-token cap. It uses one extra Holmes GPU, one-hour minimum and three-hour
+hard timeout. The default task's completion prompt is retained; this is not a
+chat-template evaluation. Greedy decoding does not establish bitwise determinism
+across batch schedules or kernel choices. A matching final-checkpoint evaluation
+is planned. These scores are kept separate from the sampled periodic W&B series
+to avoid overwriting identical metric keys. Local receipts/results live under
+`runs/hero-non-emo-long-lag6-20260925/greedy-full-gsm8k/`.
+
+A startup-efficiency issue was also identified in source: `startup_cache.prepare`
+includes `max_run_seconds` in its compiler-cache identity. Changing three hours
+to eight hours therefore changes the namespace despite identical compilation
+semantics; current worker receipts report cache misses. This is a candidate for
+a narrow future cache-key fix. No patch or restart was imposed on this running
+experiment. The shared cache currently covers Triton; this observation does not
+establish reuse of all TileLang, CUDA-graph or other startup work.
