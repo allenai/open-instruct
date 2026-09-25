@@ -320,3 +320,46 @@ HF evaluation snapshot within its stage. These are separate hero runs with
 stochastic sampling and filtering, not a controlled large-scale A/B. The small
 matched comparison above remains the controlled throughput screen. The longer
 windows nevertheless support retaining lag six for the ongoing duration test.
+
+### Two hundred updates: sustained health and learning indicators
+
+The update-200 native checkpoint passed clock 200/200/200, four-rank, model
+metadata and cursor-checksum verification. Training continued without a main
+fleet restart. At this milestone, 24 transport-error attempts had been requeued;
+the latest five-minute failure fraction was zero. These are failed attempts,
+not necessarily distinct groups. The underlying intermittent `ReadError` cause
+remains unisolated, but recovery has preserved progress.
+
+W&B history contains all 50 updates in each window below. Rewards and lengths
+describe accepted, filtered mixed-task training batches, not a fixed evaluation
+set; changing task composition can contribute to these trends.
+
+| Updates | Mean raw reward | Mean response tokens | Reached cap | Mean absolute log-probability gap | Mean gradient norm | Mean router load CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1–50 | 0.4491 | 4,460 | 14.00% | 0.02278 | 0.07024 | 0.5446 |
+| 51–100 | 0.4596 | 4,297 | 13.13% | 0.02293 | 0.06652 | 0.5074 |
+| 101–150 | 0.4710 | 4,137 | 12.75% | 0.02201 | 0.07167 | 0.4848 |
+| 151–200 | 0.4798 | 3,851 | 11.59% | 0.02229 | 0.07217 | 0.4745 |
+
+The rising training reward and shorter responses are encouraging but do not
+establish held-out improvement. Mean TIS clipping remains between 0.00044% and
+0.00064% across these windows; no dead experts or nonfinite health metrics were
+reported. Auxiliary load-balancing and router-z losses remain disabled.
+
+All scheduled evaluations through update 200 completed with exit code zero:
+
+| Checkpoint | GSM8K correct /128 | IFEval strict prompts /128 | IFEval loose prompts /128 |
+| --- | ---: | ---: | ---: |
+| [Original SFT](https://beaker.org/ex/01M3BT3VD87R5QM1E9BGRC8HFN) | 53 | 24 | 29 |
+| [Update 50](https://beaker.org/ex/01M3BYVBTB84QPEYNTG51RMTF2) | 65 | 22 | 27 |
+| [Update 100](https://beaker.org/ex/01M3C2ZR69F9HB4JMZAZW4V57A) | 63 | 25 | 30 |
+| [Update 150](https://beaker.org/ex/01M3C77M7AAQCX3J21MEN231C0) | 58 | 24 | 30 |
+| [Update 200](https://beaker.org/ex/01M3CBFCNAT13SM97WCN54628D) | 60 | 24 | 27 |
+
+The small sampled panels remain inconclusive. The final audit will retain both
+the raw-completion comparison and a separate full chat-template comparison.
+The latter will repeat the original baseline alongside the final policy, with
+both greedy and temperature-1 decoding. Its temperature-1 requests explicitly
+set `top_p=1.0` and unrestricted `top_k`; greedy requests and model EOS defaults
+remain unchanged from the earlier chat audit. This measures behavior closer to
+training's sampling mode without conflating it with greedy results.
