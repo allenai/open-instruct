@@ -104,12 +104,22 @@ case "$RUN_MODE" in
 esac
 
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+MIN_RUNTIME="${BENCH_MIN_RUNTIME:-$MIN_RUNTIME}"
+TIMEOUT="${BENCH_TIMEOUT:-$TIMEOUT}"
+BUDGET="${BUDGET:-ai2/oe-other}"
 
-uv run python mason.py \
+if [[ -n "${OPEN_INSTRUCT_SUBMISSION_PYTHON:-}" ]]; then
+    MASON_PYTHON=("$OPEN_INSTRUCT_SUBMISSION_PYTHON")
+else
+    MASON_PYTHON=(uv run python)
+fi
+
+"${MASON_PYTHON[@]}" mason.py \
     --task_name "$EXP_NAME" \
     --description "$RUN_NAME: Qwen3.5-2B on fixed DAPO split; $DESCRIPTION" \
     --cluster "$CLUSTER" \
     --workspace "$WORKSPACE" \
+    --budget "$BUDGET" \
     --priority "$PRIORITY" \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \

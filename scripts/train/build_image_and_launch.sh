@@ -25,36 +25,46 @@ image_name=open-instruct-integration-test-${sanitized_branch}
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
-existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.[0].description // ""' || echo "")
-
-if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"* ]]; then
-  echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
+if [[ -n "${OPEN_INSTRUCT_EXISTING_IMAGE:-}" ]]; then
+  # An immutable, compatible image can be reused when the launch script overlays
+  # committed training code from a separate Beaker dataset.
+  beaker image get "$OPEN_INSTRUCT_EXISTING_IMAGE" --format json >/dev/null
+  launch_image="$OPEN_INSTRUCT_EXISTING_IMAGE"
+  echo "Using existing Beaker image $launch_image"
 else
-  echo "Creating new beaker image for commit $git_hash..."
-  CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
+  existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.[0].description // ""' || echo "")
 
-  # Try to build with cache push first, fall back to cache-from only if push fails
-  if docker buildx build --platform=linux/amd64 \
-    --build-arg GIT_COMMIT="$git_hash" \
-    --build-arg GIT_BRANCH="$git_branch" \
-    --cache-from "type=registry,ref=$CACHE_REPO" \
-    --cache-to "type=registry,ref=$CACHE_REPO,mode=max" \
-    --load \
-    . -t "$image_name"; then
-    echo "Build succeeded with cache push."
+  if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"* ]]; then
+    echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
   else
-    echo "Warning: Build with cache push failed (likely due to permissions). Retrying without cache push..."
-    docker buildx build --platform=linux/amd64 \
+    echo "Creating new beaker image for commit $git_hash..."
+    CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
+
+    # Try to build with cache push first, fall back to cache-from only if push fails
+    if docker buildx build --platform=linux/amd64 \
       --build-arg GIT_COMMIT="$git_hash" \
       --build-arg GIT_BRANCH="$git_branch" \
       --cache-from "type=registry,ref=$CACHE_REPO" \
+      --cache-to "type=registry,ref=$CACHE_REPO,mode=max" \
       --load \
-      . -t "$image_name"
+      . -t "$image_name"; then
+      echo "Build succeeded with cache push."
+    else
+      echo "Warning: Build with cache push failed (likely due to permissions). Retrying without cache push..."
+      docker buildx build --platform=linux/amd64 \
+        --build-arg GIT_COMMIT="$git_hash" \
+        --build-arg GIT_BRANCH="$git_branch" \
+        --cache-from "type=registry,ref=$CACHE_REPO" \
+        --load \
+        . -t "$image_name"
+    fi
+
+    beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
+
+    beaker image create "$image_name" -n "$image_name" -w "ai2/oe-agents" --description "Git commit: $git_hash"
   fi
 
-  beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
-
-  beaker image create "$image_name" -n "$image_name" -w "ai2/oe-agents" --description "Git commit: $git_hash"
+  launch_image="$beaker_user/$image_name"
 fi
 
 # Ensure uv is installed and sync dependencies before running the script
@@ -64,11 +74,17 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-# Install Python dependencies
-echo "Installing dependencies with uv..."
-uv sync
+# A separate, already-provisioned Python environment is useful for submitting
+# from macOS while the immutable training image contains the CUDA dependencies.
+if [[ -n "${OPEN_INSTRUCT_SUBMISSION_PYTHON:-}" ]]; then
+  "$OPEN_INSTRUCT_SUBMISSION_PYTHON" -c 'import mason' >/dev/null
+  echo "Using submission Python $OPEN_INSTRUCT_SUBMISSION_PYTHON"
+else
+  echo "Installing dependencies with uv..."
+  uv sync
+fi
 
 # Run the provided script with the image name and all remaining arguments
 script="$1"
 shift
-bash "$script" "$beaker_user/$image_name" "$@"
+bash "$script" "$launch_image" "$@"
