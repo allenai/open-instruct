@@ -32,6 +32,8 @@ def test_profile_uses_frozen_image_bounded_topology_and_private_rank_caches():
     encoded_parts = re.findall(r"printf %s ([A-Za-z0-9+/=]+) \| base64", command)
     worker_text, embedded_manifest, rank_script = [base64.b64decode(value).decode() for value in encoded_parts]
     assert json.loads(embedded_manifest)["worker_sha256"] == hashlib.sha256(worker_text.encode()).hexdigest()
+    assert "from open_instruct.miles import actor, data, models" in worker_text
+    assert "open_instruct.miles.training" not in worker_text
     assert "rank${RANK}/triton" in rank_script
     assert "rank${RANK}/inductor" in rank_script
     manifest = json.loads((ROOT / "scripts/miles/frozen_core_score_manifest.json").read_text())

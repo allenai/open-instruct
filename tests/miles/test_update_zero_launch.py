@@ -76,6 +76,13 @@ def test_trainer_route_mode_embeds_qualified_probe_with_original_resources():
     command = task["arguments"][0]
     assert "export OI_UPDATE_ZERO_MODE=trainer-routes" in command
     assert "/tmp/zero-probe/update_zero_training_capture.py" in command
+    source = next(
+        base64.b64decode(shlex.split(line)[2]).decode()
+        for line in command.splitlines()
+        if line.startswith("printf %s ") and line.endswith("/update_zero_training_capture.py")
+    )
+    assert "open_instruct.miles.actor" in source
+    assert "open_instruct.miles.training" not in source
     assert "export TRITON_CACHE_DIR=" not in command
     subprocess.run(["bash", "-n"], input=command, text=True, check=True)
 

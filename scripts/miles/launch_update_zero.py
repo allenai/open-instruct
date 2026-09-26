@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from scripts.miles import update_zero_megatron
+from scripts.miles.launch_frozen_core_score_profile import frozen_worker_source
 
 ROOT = "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1"
 IMAGES = {"core": "01M26N80T0V9PREQTS87J849P8", "megatron": update_zero_megatron.IMAGE}
@@ -30,7 +31,7 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="o
     probe_dir = "/tmp/zero-probe"
     files = {name: (source / name).read_text() for name in ("update_zero_driver.py", "update_zero_capture.py")}
     if mode == "trainer-routes":
-        files["update_zero_training_capture.py"] = (source / "update_zero_training_capture.py").read_text()
+        files["update_zero_training_capture.py"] = frozen_worker_source(source / "update_zero_training_capture.py")
     if pin_autotune_a:
         files["update_zero_autotune.py"] = (source / "update_zero_autotune.py").read_text()
         files["autotune-reference.json"] = (

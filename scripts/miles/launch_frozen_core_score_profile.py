@@ -19,6 +19,15 @@ def encoded(value):
     return base64.b64encode(value.encode()).decode()
 
 
+def frozen_worker_source(path):
+    """Translate current trainer imports for workers embedded in the fixed pre-layout images."""
+    return (
+        path.read_text()
+        .replace("from open_instruct.miles.training import", "from open_instruct.miles import")
+        .replace("open_instruct.miles.training.", "open_instruct.miles.")
+    )
+
+
 def specification(image, *, output=OUTPUT, rollout=5):
     if image != IMAGE:
         raise ValueError("Use the immutable original Core100 image")
@@ -26,7 +35,7 @@ def specification(image, *, output=OUTPUT, rollout=5):
         raise ValueError("Use a distinct score-profile directory beneath the original campaign")
     if rollout < 0 or rollout >= 100:
         raise ValueError("Choose a retained training rollout in0..99")
-    worker = Path(__file__).with_name("profile_frozen_core_scores.py").read_text()
+    worker = frozen_worker_source(Path(__file__).with_name("profile_frozen_core_scores.py"))
     manifest = json.loads(Path(__file__).with_name("frozen_core_score_manifest.json").read_text())
     manifest["worker_sha256"] = hashlib.sha256(worker.encode()).hexdigest()
     rank_script = f"""#!/bin/bash

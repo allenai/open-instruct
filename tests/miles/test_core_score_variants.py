@@ -1,7 +1,9 @@
 """Fail-closed source/input/numerical checks for the isolated score experiment."""
 
+import base64
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,9 @@ def test_launch_isolates_sources_caches_and_processes():
     command = task["arguments"][0]
     assert "cp -a /opt/core-rl/sources/olmo-core /tmp/score-parent/core" in command
     assert "cp -a /opt/core-rl/sources/olmo-core /tmp/score-candidate/core" in command
+    worker = base64.b64decode(re.findall(r"printf %s ([A-Za-z0-9+/=]+) \| base64", command)[0]).decode()
+    assert "from open_instruct.miles import actor, data, models" in worker
+    assert "open_instruct.miles.training" not in worker
     assert "for arm in parent candidate" in command
     assert "--fuzz=0" in command
     assert task["resources"]["gpuCount"] == 2

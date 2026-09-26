@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from scripts.miles.launch_frozen_core_score_profile import ROOT, encoded
+from scripts.miles.launch_frozen_core_score_profile import ROOT, encoded, frozen_worker_source
 
 IMAGE = "01M279KKMX3RGXB6AYB273DE3C"
 OUTPUT = ROOT + "/score-variants-20260911-v1"
@@ -21,7 +21,7 @@ def specification(image, *, output=OUTPUT):
     if Path(output).parent != Path(ROOT) or not re.fullmatch(r"score-variants-[A-Za-z0-9._-]+", Path(output).name):
         raise ValueError("Use a distinct score-variants directory beneath the retained campaign")
     directory = Path(__file__).parent
-    worker = (directory / "profile_core_score_variants.py").read_text()
+    worker = frozen_worker_source(directory / "profile_core_score_variants.py")
     patch = (directory / "diagnostics/swiglu-runtime-rows.patch").read_text()
     manifest = json.loads((directory / "diagnostics/score-variants.json").read_text())
     if manifest["image"] != image or hashlib.sha256(patch.encode()).hexdigest() != manifest["patch_sha256"]:

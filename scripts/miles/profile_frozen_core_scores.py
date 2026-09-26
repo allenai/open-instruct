@@ -22,11 +22,7 @@ from scripts.miles import gsm8k_parity
 from torch import distributed as dist
 from triton.runtime import cache, jit
 
-# This worker is also embedded into an immutable image with the original flat adapter.
-_adapter = "open_instruct.miles.training" if importlib.util.find_spec("open_instruct.miles.training") else "open_instruct.miles"
-actor = importlib.import_module(f"{_adapter}.actor")
-data = importlib.import_module(f"{_adapter}.data")
-models = importlib.import_module(f"{_adapter}.models")
+from open_instruct.miles.training import actor, data, models
 
 
 def file_digest(path):
