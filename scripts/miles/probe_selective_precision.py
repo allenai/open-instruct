@@ -35,6 +35,7 @@ def serve(args):
         "kda_variant": os.environ.get("OI_KDA_ABLATION", "baseline"),
         "linear_variant": os.environ.get("OI_LINEAR_ABLATION", "none"),
         "prefill_core": os.environ.get("OI_PREFILL_CORE") == "1",
+        "chunk_fp32": os.environ.get("OI_CHUNK_FP32") == "1",
         "fp32_lm_head": args.fp32_lm_head,
         "batches": [],
         "rollouts": [],
@@ -135,6 +136,8 @@ def serve(args):
 def score(args):
     fla_compat.install_kda_triton_compat()
     torch.backends.cuda.matmul.allow_tf32 = False
+    if args.chunk_fp32:
+        runtime.install_chunk_fp32()
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
     core = olmo3.build_olmo3_moe_config_from_hf_config(
         config,
@@ -219,6 +222,7 @@ def main():
     parser.add_argument("--tokens", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--fp32-lm-head", action="store_true")
+    parser.add_argument("--chunk-fp32", action="store_true")
     parser.add_argument("--serving-reports", type=Path, nargs="+")
     args = parser.parse_args()
     {"serve": serve, "score": score}[args.stage](args)

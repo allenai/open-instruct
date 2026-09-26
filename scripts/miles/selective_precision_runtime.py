@@ -7,12 +7,15 @@ import os
 from pathlib import Path
 
 import torch
+from fla.ops.kda import chunk_intra
+from olmo_core.nn.attention import kda as core_kda
 from olmo_sglang.kda import backend
 from olmo_sglang.models import olmo3_moe
 from scripts.miles import selective_kda_precision
 from sglang.srt.layers import sampler
 from sglang.srt.model_executor import model_runner
 from sglang.srt.sampling import sampling_batch_info
+from triton import language as tl
 
 
 def fp32_output(module, serving, value):
@@ -58,8 +61,43 @@ def forced_next_tokens(params, positions):
     return result
 
 
+def strict_arithmetic():
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.set_float32_matmul_precision("highest")
+    if hasattr(chunk_intra, "SOLVE_TRIL_DOT_PRECISION"):
+        chunk_intra.SOLVE_TRIL_DOT_PRECISION = tl.constexpr("ieee")
+
+
+def install_chunk_fp32():
+    """Widen only KDA kernel inputs; preserve projection and output dtypes."""
+    strict_arithmetic()
+    original_core = core_kda.dispatch_chunk_kda
+
+    def core_chunk(**kwargs):
+        dtype = kwargs["q"].dtype
+        kwargs = {k: v.float() if k in {"q", "k", "v", "g"} else v for k, v in kwargs.items()}
+        output, state = original_core(**kwargs)
+        return output.to(dtype), state
+
+    core_kda.dispatch_chunk_kda = core_chunk
+    original_run = backend.OlmoFLAKDAKernel._run
+
+    def run(self, q, k, v, raw_gate, raw_beta, **kwargs):
+        result = original_run(self, q.float(), k.float(), v.float(), raw_gate.float(), raw_beta, **kwargs)
+        if isinstance(result, tuple):
+            return (result[0].to(q.dtype), *result[1:])
+        return result.to(q.dtype)
+
+    backend.OlmoFLAKDAKernel._run = run
+
+
 def install():
     selective_kda_precision.install()
+    if os.environ.get("OI_STRICT_ARITHMETIC") == "1":
+        strict_arithmetic()
+    if os.environ.get("OI_CHUNK_FP32") == "1":
+        install_chunk_fp32()
     linear_variant = os.environ.get("OI_LINEAR_ABLATION", "none")
     original_init = olmo3_moe.Olmo3MoeForCausalLM.__init__
 

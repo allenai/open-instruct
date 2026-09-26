@@ -168,15 +168,40 @@ def run(args):
             benchmark.write_json(args.output / "report.json", report)
 
 
+def replay_saved(args):
+    fla_compat.install_kda_triton_compat()
+    captures = torch.load(args.saved_inputs, weights_only=False)
+    args.output.mkdir(parents=True, exist_ok=True)
+    function, digest = selective.load_variant("baseline", args.output / "kernels")
+    report = {
+        "input_sha256": hashlib.sha256(args.saved_inputs.read_bytes()).hexdigest(),
+        "kernel_sha256": digest,
+        "cases": [],
+    }
+    with torch.no_grad():
+        for capture in captures:
+            case = {k: v for k, v in capture.items() if k != "inputs"}
+            case["bf16"] = replay(function, capture["inputs"], capture["prefix"])
+            case["fp32"] = replay(function, capture["inputs"], capture["prefix"], fp32=True)
+            report["cases"].append(case)
+            benchmark.write_json(args.output / "report.json", report)
+            print("KDA_KERNEL_PRECISION", json.dumps(case), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--samples", type=Path, required=True)
-    parser.add_argument("--rollouts", type=Path, required=True)
+    parser.add_argument("--model")
+    parser.add_argument("--samples", type=Path)
+    parser.add_argument("--rollouts", type=Path)
+    parser.add_argument("--saved-inputs", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rows", type=int, default=2)
     parser.add_argument("--tokens", type=int, default=512)
-    run(parser.parse_args())
+    args = parser.parse_args()
+    if args.saved_inputs:
+        replay_saved(args)
+    else:
+        run(args)
 
 
 if __name__ == "__main__":
