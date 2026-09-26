@@ -2,7 +2,7 @@
 
 This investigation tests whether a few inexpensive precision changes can remove
 roughly half of the inference/training mismatch without sacrificing serving
-speed. The initial larger comparison does **not** support that hypothesis:
+speed. The completed comparisons do **not** support that hypothesis:
 the FP32-output LM-head remains the most reliable small change, and several
 apparently promising single-site changes do not add together. These are
 process-local diagnostic patches, not new production defaults.
@@ -75,6 +75,11 @@ with identical inputs leaves most end-to-end error. The complete paths can
 already disagree at the KDA inputs and can introduce further differences in
 subsequent layers.
 
+The earlier [graph-compatible rounding control](graph-compatible-rounding-20260923.md)
+also found exact graph-on/graph-off agreement on its BF16 workload. The new
+selective probes retain CUDA graphs, so their measured improvements do not
+require turning serving into an eager reference implementation.
+
 ## Initial single-site screen
 
 Non-EMO, four fixed cached continuations, default runtime arithmetic:
@@ -123,6 +128,67 @@ The extra changes do not improve mean mismatch beyond the head alone. Some tail
 statistics improve, others worsen; none of these results establishes that
 selective precision improves RL learning or makes long asynchronous runs safe.
 
+## EMO checkpoint check
+
+The 16-prompt EMO study uses strict arithmetic in every arm, including its own
+baseline. Start/end baseline probabilities match exactly.
+
+| Change | Mean error | Reduction | Error p99 | Ratios outside 20% |
+|---|---:|---:|---:|---:|
+| Baseline | 0.045443 | — | 0.35561 | 4.346% |
+| LM-head | 0.041173 | 9.4% | 0.34846 | 3.625% |
+| Small combination | 0.040754 | 10.3% | 0.32130 | 3.442% |
+| KDA FP32 both sides + head | 0.037970 | 16.4% | 0.29569 | 2.905% |
+
+KDA plus head therefore has a modest advantage here, without approaching the
+proposed 50% reduction. EMO timing drifts from 993 to 1,045 tokens/s between
+baseline repeats. Head throughput is 996, the small combination 1,058, and
+KDA plus head 993. This supports neither a precise speedup nor a claim of
+zero cost; its roughly 5% baseline drift limits interpretation.
+
+## Focused Q/K-plus-head qualification
+
+The strongest cheap pair from the four-prompt screen was retested on all 16
+prompts for both checkpoints, against freshly measured baselines. Both new
+baselines reproduce their earlier matching-arithmetic scores exactly.
+
+| Checkpoint | Baseline mean | Q/K rounding + head mean | Reduction | Head alone reduction | Pair error p99 | Pair outside 20% |
+|---|---:|---:|---:|---:|---:|---:|
+| Non-EMO | 0.035414 | 0.030692 | 13.3% | 11.7% | 0.24771 | 1.917% |
+| EMO | 0.045443 | 0.040685 | 10.5% | 9.4% | 0.32640 | 3.345% |
+
+The pair adds only 1–2 percentage points to the reduction from the head alone.
+Its non-EMO timing is 1,062 versus 997 tokens/s; EMO is 990 versus 992.
+Do not interpret the first difference as a speedup: this sequential test has
+no ending timing baseline, and comparable studies show several-percent drift.
+All 10,220 recorded decode calls per arm use CUDA graphs.
+
+## Upstream Q/K/V and convolution boundary
+
+A final four-prompt non-EMO screen preserves FP32 outputs from BF16-operand
+Q/K/V projections, runs the short convolution with FP32 activations, and uses
+an FP32 convolution cache. The first variant rounds Q/K/V back to BF16 before
+KDA. The wider variant retains FP32 Q/K/V through KDA and rounds its output to BF16
+before the gated output normalization. Raw gate projection outputs remain BF16; this wider variant is not the
+all-inputs-FP32 KDA control above. The large expert bank remains at baseline
+precision. Strict arithmetic
+is held fixed in all arms.
+
+| Change | Mean error | Reduction | Tokens/s |
+|---|---:|---:|---:|
+| Baseline start | 0.035135 | — | 1,067 |
+| Q/K/V + convolution | 0.034477 | 1.9% | 941 |
+| Above + head | 0.030391 | 13.5% | 978 |
+| FP32 Q/K/V through convolution/KDA + head | 0.029345 | 16.5% | 1,049 |
+| Baseline end | 0.035135 | — | 998 |
+
+The wider intervention still leaves most mismatch. Baseline timing drifts
+6.5%, and the variant with an extra cast before KDA is slower than both
+controls. These measurements do not justify this complexity for its small
+incremental benefit. All 2,555 recorded decode calls per arm use CUDA graphs;
+start/end baseline probabilities match exactly. This screen was not expanded
+to 16 prompts because its benefit remained modest.
+
 ## Arithmetic controls
 
 FP32 KDA experiments disable TF32 explicitly in PyTorch, NVIDIA and Triton,
@@ -138,9 +204,56 @@ baseline probabilities are exactly equal. No clear throughput loss appears
 in this small inference screen, but this says nothing by itself about the
 cost of the training backward pass.
 
+## Backward feasibility and implementation limits
+
+The direct FP32-output GEMM used by these inference probes does **not** have
+an automatic backward implementation in the pinned runtime:
+`torch.mm(..., out_dtype=torch.float32).sum().backward()` raises
+`derivative for aten::mm is not implemented`. This does not invalidate the
+frozen-weight forward comparisons. It does mean the head, gate, beta and
+latent-output prototypes cannot be copied directly into an autograd training
+path. A training implementation needs an explicit, validated backward path
+(or a separately measured supported projection). The serving head already
+has the needed inference option. **The 9–12% head gains require both forward
+paths to use FP32-output heads.** Changing serving alone while leaving Core's
+head BF16 gives only 4.5% on non-EMO (0.035414 → 0.033822) and 4.0% on EMO
+(0.045443 → 0.043617). Changing Core's head alone gives 4.0% and 4.2%. No training default was changed.
+
+KDA FP32 forward/backward completes with finite gradients for Q/K/V, gate,
+beta, A-log and time-step bias. Five measured BF16 samples span 2.62–8.23 ms;
+FP32 spans 6.77–25.24 ms. The final two samples are 2.62–2.71 ms versus
+6.77–6.79 ms, approximately 2.5 times slower for this one captured layer.
+The warmup was insufficient for a stable five-sample estimate, so retain the
+raw timings rather than treating this as a measured full-training slowdown.
+Gradient finiteness is a feasibility check, not a gradient-accuracy proof.
+
+The head's prompt-bootstrap 95% interval for mean reduction is 9.7–14.1%
+on non-EMO and 7.2–11.6% on EMO (2,000 paired prompt resamples). On the
+12 prompts outside the initial screen it improves 12.5% and 9.1%, respectively.
+These describe this small prompt collection, not population-level guarantees.
+
+## Decision
+
+Prioritize the FP32-output LM-head as the simplest measured candidate, with a
+proper training backward implementation and separate training-cost validation.
+Q/K normalization rounding is a possible small addition, not a second large
+win. Do not adopt the gate/beta/latent combination or whole KDA FP32 on the
+expectation that their individual gains add to 50%. The broader interventions
+are useful diagnostic controls but do not provide the requested large gain.
+
+This study used fixed SFT weights, short continuations and one serving GPU;
+it does not qualify RL learning, long-context accumulation, distributed
+training, large serving batches or overall trainer throughput. The remaining
+source is not fully localized. A next attribution study should compare the
+same captured inputs through projection and expert kernels and trace where
+hidden-state and route differences first grow, before widening more components.
+
 ## Reproduction and provenance
 
-The committed diagnostic entry points are:
+The [machine-readable measurements](selective-precision-20260926.json) contain
+matched summaries, per-prompt errors, timing, bootstrap intervals, component
+replay, intermediate attribution and backward feasibility. The committed
+diagnostic entry points are:
 
 * `scripts/miles/probe_selective_precision.py`: cached teacher forcing, ordinary
   serving timing, Core rescoring and unchanged-weight checks.
@@ -166,6 +279,9 @@ probes, not new GRPO configurations or an alternative training backend.
 | Completed KDA rescoring | [chunk-score-r2](https://beaker.org/ex/01M3E41N0ZHRXPXMWSD0EPK8MG) | `01M3E41N1A9SVAEQDH6K0ZFYJR` |
 | Combination serving collection | [combination-r2](https://beaker.org/ex/01M3E3B18GR5E0QBX4TN919NAE) | `01M3E3B18XMS56NVV356NP3172` |
 | Combination rescoring/backward | [combination-score-r3](https://beaker.org/ex/01M3E4DVHH3VNWBV63709KKRBM) | `01M3E4DVHWPA52KZ3ZB2XTBK4P` |
+| Completed EMO rescoring | [emo-score-r2](https://beaker.org/ex/01M3E5326KC7T7P2ADYSCB2XHJ) | `01M3E53271RJHCTFDWG092BT9Q` |
+| Q/K/V boundary screen | [qkv-r1](https://beaker.org/ex/01M3E52Z0FDRTXK3PV8YY0307V) | `01M3E52Z12H21BKZSJFW9S188A` |
+| Q/K + head qualification | [qk-head-r1](https://beaker.org/ex/01M3E5HWVBKRTNYYZFD26Y5RCR) | `01M3E5HWVN1RCET943EBG6C4J5` |
 | EMO serving/intermediates | [emo-r1](https://beaker.org/ex/01M3E3EAW48J4ZVFJDKMD3FD8N) | `01M3E3EAWD7WFQJEAFHMGK774D` |
 
 The serving-collection jobs for KDA, combinations and EMO were deliberately
@@ -175,3 +291,11 @@ threads to four fixed this without changing retained serving measurements.
 An earlier combination setup failed a guard expecting 16 latent blocks; the
 model has 15, plus a dense first block. That attempt supplies no comparison
 results. No failed or interrupted partial arm is counted as a successful run.
+
+Validation: four focused tests pass in the pinned GPU runtime, covering cached
+forcing positions, the normalized-Q/K one-step expression, FP32 latent
+normalization and sparse-block patch/restore behavior. Ruff checks/formatting,
+Python compilation and the documentation build pass. Full-model execution
+qualifies the additional Q/K/V variants; this is not the repository-wide GPU
+test suite. Completed scoring/qualification experiments exit zero and preserve
+unchanged parameter versions. All result artifacts were retrieved and checked.
