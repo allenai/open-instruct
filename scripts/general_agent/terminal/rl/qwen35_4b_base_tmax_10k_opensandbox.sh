@@ -143,4 +143,4 @@ uv run python mason.py \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False \
-    \; 'train_rc=$?' \; bash scripts/opensandbox/cleanup_opensandbox_sandboxes.sh swerl-tmax-opensandbox \; exit '$train_rc'
+    \; 'train_rc=$?' \; bash scripts/opensandbox/cleanup_opensandbox_sandboxes.sh swerl-tmax-opensandbox \; exit '$train_rc' '#'
