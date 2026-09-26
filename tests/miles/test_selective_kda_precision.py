@@ -1,5 +1,7 @@
 """Check the experimental fused rounding against a separate one-step expression."""
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 from scripts.miles import selective_kda_precision as selective
@@ -12,6 +14,18 @@ def test_forcing_selects_each_requests_causal_position():
     assert runtime.forced_next_tokens(params, [3, 8]) == [12, 22]
     with pytest.raises(ValueError, match="outside continuation"):
         runtime.forced_next_tokens(params, [4, 8])
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA diagnostic")
+def test_fp32_latent_norm_returns_bf16_at_residual_boundary():
+    torch.manual_seed(73)
+    value = torch.randn(5, 1024, device="cuda")
+    weight = torch.randn(1024, device="cuda", dtype=torch.bfloat16)
+    module = SimpleNamespace(weight=weight, variance_epsilon=1e-6)
+    expected = (value * torch.rsqrt(value.square().mean(-1, keepdim=True) + 1e-6) * weight.float()).bfloat16()
+    actual = runtime.latent_norm(module, True, value)
+    assert actual.dtype == torch.bfloat16
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA diagnostic")

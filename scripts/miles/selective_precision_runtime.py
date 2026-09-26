@@ -7,8 +7,10 @@ import os
 from pathlib import Path
 
 import torch
+import triton
 from fla.ops.kda import chunk_intra
 from olmo_core.nn.attention import kda as core_kda
+from olmo_sglang import rounding_kernels
 from olmo_sglang.kda import backend
 from olmo_sglang.models import olmo3_moe
 from scripts.miles import selective_kda_precision
@@ -27,11 +29,59 @@ def fp32_output(module, serving, value):
     return (result, None) if serving else result
 
 
+def latent_norm(module, serving, value):
+    if not serving:
+        return module._diagnostic_original_forward(value).bfloat16()
+    value = value.contiguous()
+    width = value.shape[-1]
+    if width != 1024:
+        raise ValueError("Latent precision probe is scoped to the hero model's width 1024")
+    output = torch.empty_like(value, dtype=torch.bfloat16)
+    rows = value.numel() // width
+    if rows:
+        dim0 = min(512, 1 << ((width // 4).bit_length() - 1))
+        dim1 = min(512, 1 << (rows.bit_length() - 1))
+        height = min(dim1, 512 // min(dim0, 32))
+        threads = min(dim0, 512 // height)
+        rounding_kernels._rms_norm[(rows,)](
+            value,
+            module.weight,
+            output,
+            width,
+            module.variance_epsilon,
+            triton.next_power_of_2(width),
+            threads,
+            4,
+            enable_fp_fusion=False,
+        )
+    return output
+
+
 def set_linear_variant(model, variant, *, serving):
     selected = set(variant.split("+")) - {"none"}
-    if selected - {"gate", "beta"}:
+    if selected - {"gate", "beta", "latent_up"}:
         raise ValueError(variant)
     count = collections.Counter()
+    for module in model.modules():
+        if hasattr(module, "_diagnostic_original_forward"):
+            module.forward = module._diagnostic_original_forward
+    if "latent_up" in selected:
+        norm_count = 0
+        for module in model.modules():
+            linear = getattr(module, "latent_up_proj", None)
+            if linear is not None:
+                if not hasattr(linear, "_diagnostic_original_forward"):
+                    linear._diagnostic_original_forward = linear.forward
+                linear.forward = functools.partial(fp32_output, linear, serving)
+                count["latent_up"] += 1
+            norm = getattr(module, "post_feedforward_layernorm" if serving else "feed_forward_norm", None)
+            if norm is not None:
+                if not hasattr(norm, "_diagnostic_original_forward"):
+                    norm._diagnostic_original_forward = norm.forward
+                norm.forward = functools.partial(latent_norm, norm, serving)
+                norm_count += 1
+        if norm_count != count["latent_up"]:
+            raise ValueError("Latent projection and post-normalization count mismatch")
     for module in model.modules():
         if not hasattr(module, "f_proj_2"):
             continue
