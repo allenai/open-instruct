@@ -396,21 +396,31 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                         step_batches, int(maximum)
                     )
                 )
+                logger.info(
+                    "Core stopping scoring: %d active contexts, %d padding contexts, %d model tokens",
+                    len(candidates),
+                    len(stopping_batches) - len(candidates),
+                    sum(b["tokens"].numel() for b in stopping_batches),
+                )
                 self.train_module.model.eval()
                 with torch.no_grad():
                     for auxiliary in stopping_batches:
                         with self._replay_context(self.train_module, auxiliary):
                             stopping.anchor_closing_scores(auxiliary, self._forward(self.train_module, auxiliary))
                 torch.cuda.synchronize()
-                contract.record(
-                    self.args,
-                    {
-                        "event": "stopping_scoring",
-                        "step": self.clock.completed_steps,
-                        "seconds": time.perf_counter() - stopping_started,
-                        "contexts_per_rank": len(stopping_batches),
-                        "model_tokens": sum(b["tokens"].numel() for b in stopping_batches),
-                    },
+                logger.info(
+                    "Core stopping scoring complete: %s",
+                    contract.record(
+                        self.args,
+                        {
+                            "event": "stopping_scoring",
+                            "step": self.clock.completed_steps,
+                            "seconds": time.perf_counter() - stopping_started,
+                            "contexts_per_rank": len(stopping_batches),
+                            "active_contexts": len(candidates),
+                            "model_tokens": sum(b["tokens"].numel() for b in stopping_batches),
+                        },
+                    ),
                 )
             metric_template = {}
 

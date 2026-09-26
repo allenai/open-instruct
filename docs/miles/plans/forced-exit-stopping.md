@@ -45,6 +45,11 @@ parent-logit shortcut. Answer suffixes are never trained or forwarded by the
 trainer. Prefix/forced behavior probabilities from inference are never used as
 fabricated model scores.
 
+Cuts with exactly zero advantage skip auxiliary scoring/training. Their labels
+and natural-state captures remain available, and averaging still divides by the
+original number of cuts. This removes zero-gradient work without reweighting the
+remaining guidance. Rank padding is computed after this omission.
+
 The anchor is a fresh detached actor score before the optimizer update. The loss
 is a clipped sequence-ratio surrogate with coefficient **0.1**, clipping **0.2
 below / 0.28 above**. Average over cuts, weight each sampled parent by the inverse
@@ -69,8 +74,8 @@ Maintained examples are unchanged. All jobs use one Beaker task/one replica on
 | Run | GPUs | Updates | Scope |
 |---|---|---:|---|
 | `qualification.json` | EP2 trainer + two TP1 engines = 4 | 4 | Authorized actual-model machinery check, 32 natural responses/update |
-| `baseline.json` | EP2 trainer + six TP1 engines = 8 | 128 | Pending review; ordinary natural GRPO, 64 responses/update |
-| `forced.json` | EP2 trainer + six TP1 engines = 8 | 128 | Pending review; matched GRPO plus full-tag guidance |
+| `baseline-clean-unallocated.json` | EP2 trainer + six TP1 engines = 8 | 128 | Authorized after qualification; ordinary natural GRPO, 64 responses/update |
+| `forced-clean-unallocated.json` | EP2 trainer + six TP1 engines = 8 | 128 | Authorized after qualification; matched GRPO plus full-tag guidance |
 
 Qualification protects one hour and has a two-hour hard timeout, with an explicit
 one-hour driver budget. No checkpoint saving/HF export; whole-group rollout capture
@@ -79,12 +84,18 @@ they have no four-hour soft cutoff. Review their hard timeout after measuring
 qualification throughput. Their comparison needs both matched-update and measured
 compute reporting; forced generation and auxiliary prefix training add work.
 
+The active qualification replacement uses low priority and `minRuntime=0s`, as
+requested. Cancel the original allocated backup only after the replacement
+finishes. Learning runs also use unallocated scheduling with automatic resume.
+
 Math mix: 8,192 pinned Open Reasoner Math + 2,048 GSM8K training examples (80:20),
 384 Math + 128 GSM8K held-out examples. Qualification uses 128 + 32 training and
 8 + 8 evaluation examples. Both learning arms share seed 17, LR 1e-6, 8,192 response
 and 10,240 context tokens, BF16 head, packing/recomputation, offline W&B, zero router
-auxiliary losses, and identical reward/filter rules. Checkpoints every 32 updates
-and final HF export are retained only for learning arms, for later frozen audits.
+auxiliary losses, and identical reward/filter rules. The learning arms use
+`techarb/gsm8k-cleaner` revision `3a4e9e3e600ea2854a6d2d0483721b3cd68580ce`.
+Save native recovery checkpoints every eight updates, retaining the latest two
+completed checkpoints; export final HF weights for later frozen audits.
 
 ## Evidence and qualification gates
 

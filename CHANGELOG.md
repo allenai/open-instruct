@@ -6,8 +6,8 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add experimental synchronous MILES full-tag stopping guidance with label-only forced exits, zero-truncation rewards, readiness capture, and omission of zero-gradient auxiliary contexts (PR URL pending).
 - Point the MILES `gsm8k` task at the label-cleaned `techarb/gsm8k-cleaner` (39 corrected targets, 93 unreliable problems removed) and keep the original source as `gsm8k_original` (PR URL pending).
-- Add experimental synchronous MILES full-tag stopping guidance with label-only forced exits, zero-truncation rewards, and readiness capture (PR URL pending).
 - Add MILES/Core collection-wide advantage extremes and response concentration metrics, plus separate async rejection counters for incomplete and mixed-policy groups (PR URL pending).
 - Disable MILES rollout capture by default; replace the structured capture path setting with `output.rollout_sample_rate`, sampling complete prompt groups for training/evaluation artifacts and capping rates above 1 (PR URL pending).
 - Retry known transient MILES generation failures with pristine whole-group regeneration and a sustained 50%-for-five-minutes failure limit; report categorized `errors/` metrics independently of training progress in W&B and retained artifacts (PR URL pending).

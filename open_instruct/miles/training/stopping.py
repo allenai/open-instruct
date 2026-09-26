@@ -79,6 +79,11 @@ def auxiliary_batches(batches, pad_to=None):
         ):
             probes = metadata["stopping_probes"]
             for info in probes:
+                # These cuts contribute exactly zero loss/gradient. Keep their
+                # labels and natural-state captures, but avoid prefix recompute.
+                # The denominator below still includes every original cut.
+                if info["advantage"] == 0:
+                    continue
                 cut = info["cut"]
                 if not 0 < cut <= response or not info["close_ids"]:
                     raise ValueError("Invalid full-tag stopping cut")

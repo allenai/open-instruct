@@ -338,13 +338,32 @@ def test_bpe_merged_natural_close_is_detected():
     assert forced_exits.uniform_positions([1, 2, 3, 4, 5], [20, 21, 22], 5, 100, tokenizer) == [1]
 
 
+def test_zero_advantage_cuts_skip_compute_without_reweighting_or_losing_labels():
+    probes = [{"cut": 2, "close_ids": [8, 9, 10], "advantage": a} for a in [0.5, 0.0, -0.2]]
+    parent = {
+        "unconcat_tokens": [torch.arange(6)],
+        "total_lengths": [6],
+        "response_lengths": [4],
+        "metadata": [{"stopping_probes": probes}],
+    }
+    contexts = stopping.auxiliary_batches([parent])
+    assert len(contexts) == 2
+    assert all(b["stopping_context"]["count"] == 3 for b in contexts)
+    assert len(parent["metadata"][0]["stopping_probes"]) == 3
+    for p in probes:
+        p["advantage"] = 0.0
+    assert stopping.auxiliary_batches([parent]) == []
+    assert all(b["stopping_context"]["dummy"] for b in stopping.auxiliary_batches([parent], pad_to=2))
+
+
 def _distributed_full_tag_worker(rank, rendezvous):
     dist.init_process_group("gloo", init_method=rendezvous, rank=rank, world_size=2)
     try:
         torch.manual_seed(101)
         raw_model = torch.nn.Sequential(torch.nn.Embedding(11, 4), torch.nn.Linear(4, 11))
         model = DistributedDataParallel(raw_model)
-        probes = [{"cut": 2, "close_ids": [8, 9, 10], "advantage": a} for a in [0.5, -0.2]] if rank == 0 else []
+        advantages = [0.5, 0.0, -0.2] if rank == 0 else [0.0]
+        probes = [{"cut": 2, "close_ids": [8, 9, 10], "advantage": a} for a in advantages]
         parent = {
             "tokens": torch.arange(6).unsqueeze(0),
             "unconcat_tokens": [torch.arange(6)],
@@ -376,12 +395,14 @@ def _distributed_full_tag_worker(rank, rendezvous):
         reference = torch.nn.Sequential(torch.nn.Embedding(11, 4), torch.nn.Linear(4, 11))
         reference_parent = dict(
             parent,
-            metadata=[{"stopping_probes": [{"cut": 2, "close_ids": [8, 9, 10], "advantage": a} for a in [0.5, -0.2]]}],
+            metadata=[
+                {"stopping_probes": [{"cut": 2, "close_ids": [8, 9, 10], "advantage": a} for a in [0.5, 0.0, -0.2]]}
+            ],
         )
         expected = sum(
             -0.1
             / 2
-            / 2
+            / 3
             * b["stopping_context"]["info"]["advantage"]
             * stopping.closing_scores(b, reference(b["tokens"])).sum()
             for b in stopping.auxiliary_batches([reference_parent])
