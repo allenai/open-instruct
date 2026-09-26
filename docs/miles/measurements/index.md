@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [FP32 LM-head at unchanged weights](lm-head-fp32-20260925.md) | Paired SFT inference/scoring: modest mismatch reduction, serving timing and strict FP32 control |
 | [Hero tokenizer continuity and reasoning loops](hero-tokenizer-loops-20260925.md) | Tokenizer lineage/save audits, full original/final GSM8K comparison and controlled temperature continuations |
 | [Provisional lag-six default and small comparison](policy-lag-20260925.md) | Completed six-GPU lag-two/six screen: throughput, numerical limits and eight-hour hero follow-up |
 | [Hero long-run startup investigation](hero-long-startup-20260924.md) | Startup/transport repairs; completed48-update qualification, timings, final checkpoint and evaluations |
