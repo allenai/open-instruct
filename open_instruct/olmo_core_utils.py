@@ -24,6 +24,7 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -31,7 +32,11 @@ from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingConfig,
     TransformerActivationCheckpointingMode,
 )
-from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
+from olmo_core.train.train_module.transformer.config import (
+    OLMoDDPTrainModuleConfig,
+    TransformerContextParallelConfig,
+    TransformerDataParallelConfig,
+)
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -437,6 +442,45 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
+def build_ddp_train_module_config(
+    config_path: str,
+    rank_microbatch_size: int,
+    max_sequence_length: int,
+    learning_rate: float,
+    weight_decay: float,
+    scheduler: Any,
+    max_grad_norm: float | None,
+    compile_model: bool,
+    ac_config: Any,
+) -> OLMoDDPTrainModuleConfig:
+    """Build the DDP train-module config for OLMoDDPModel (MoE v2) models.
+
+    These models refuse FSDP and train through olmo-core's DDP train module. The
+    optimizer and dp_config come verbatim from the checkpoint's train_module section
+    (the combination that pretrained the model), with only the SFT-specific knobs
+    overridden: lr, weight decay, scheduler, batch geometry and grad clipping.
+    """
+    with open(config_path) as config_file:
+        payload = json.load(config_file)
+    checkpoint_train_module = payload["train_module"]
+
+    optim_config = OLMoDDPOptimizerConfig.from_dict(checkpoint_train_module["optim"])
+    optim_config.lr = learning_rate
+    optim_config.weight_decay = weight_decay
+
+    return OLMoDDPTrainModuleConfig(
+        rank_microbatch_size=rank_microbatch_size,
+        max_sequence_length=max_sequence_length,
+        optim=optim_config,
+        dp_config=TransformerDataParallelConfig.from_dict(checkpoint_train_module["dp_config"]),
+        scheduler=scheduler,
+        compile_model=compile_model,
+        ac_config=ac_config,
+        max_grad_norm=max_grad_norm,
+        z_loss_multiplier=checkpoint_train_module.get("z_loss_multiplier"),
+    )
+
+
 def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_backend: str) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name or config name.
 
@@ -451,6 +495,24 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     Raises:
         ValueError: If model/config not found.
     """
+    # A path to an olmo-core config.json: build the architecture the checkpoint records
+    # rather than a preset. This is the only way to load a model that has no preset
+    # (e.g. OLMoE3 KDA), and it avoids hand-transcription errors in a preset.
+    if model_name_or_config.endswith(".json") and os.path.isfile(model_name_or_config):
+        with open(model_name_or_config) as config_file:
+            payload = json.load(config_file)
+        config = TransformerConfig.from_dict(payload.get("model", payload))
+        logger.info(
+            f"Built TransformerConfig from {model_name_or_config}: "
+            f"{config.num_params:,} params, {config.n_layers} layers, vocab {config.vocab_size}"
+        )
+        if config.vocab_size != vocab_size:
+            logger.warning(
+                f"Config vocab_size {config.vocab_size} != tokenizer-derived {vocab_size}; "
+                "keeping the checkpoint's value so the weights still load."
+            )
+        return config
+
     config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_config)
     if config_name is None:
         config_name = model_name_or_config

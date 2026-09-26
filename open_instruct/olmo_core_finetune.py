@@ -42,6 +42,7 @@ from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import is_distributed
+from olmo_core.nn.ddp import model as ddp_model_lib
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -275,22 +276,45 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
 
-    train_module_config = train_module_lib.TransformerTrainModuleConfig(
-        rank_microbatch_size=rank_microbatch_size,
-        max_sequence_length=args.training.max_seq_length,
-        z_loss_multiplier=None,
-        compile_model=args.training.compile_model,
-        optim=optim.SkipStepAdamWConfig(
-            lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
-        ),
-        dp_config=dp_config,
-        cp_config=cp_config,
-        ac_config=ac_config,
-        scheduler=scheduler,
-        max_grad_norm=args.training.max_grad_norm
-        if args.training.max_grad_norm and args.training.max_grad_norm > 0
-        else None,
+    max_grad_norm = (
+        args.training.max_grad_norm if args.training.max_grad_norm and args.training.max_grad_norm > 0 else None
     )
+    if isinstance(model, ddp_model_lib.OLMoDDPModel):
+        # MoE v2 models (e.g. OLMoE3 KDA) refuse FSDP; they train through olmo-core's
+        # DDP train module, configured from the checkpoint's own train_module section.
+        assert args.model.config_name is not None and args.model.config_name.endswith(".json"), (
+            "OLMoDDPModel requires --config_name pointing at the checkpoint config json"
+        )
+        assert cp_config is None, "context parallelism is not wired for the DDP train module"
+        train_module_config = olmo_core_utils.build_ddp_train_module_config(
+            args.model.config_name,
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            learning_rate=args.training.learning_rate,
+            weight_decay=args.training.weight_decay,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+            compile_model=args.training.compile_model,
+            ac_config=ac_config,
+        )
+    else:
+        train_module_config = train_module_lib.TransformerTrainModuleConfig(
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            z_loss_multiplier=None,
+            compile_model=args.training.compile_model,
+            optim=optim.SkipStepAdamWConfig(
+                lr=args.training.learning_rate,
+                weight_decay=args.training.weight_decay,
+                betas=(0.9, 0.95),
+                compile=False,
+            ),
+            dp_config=dp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+        )
 
     train_module = train_module_config.build(model)
 
@@ -380,7 +404,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             resumed = True
     if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
-        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
+        # model_name_or_path is weight initialization, not a resume: skip the optimizer
+        # state (SFT starts a fresh optimizer) as well as the trainer state.
+        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False, load_optim_state=False)
 
     # Last point at which the base weights are settled: the HF path loaded them before the
     # trainer was built, the olmo-core path just above, and the trainer is configured with
