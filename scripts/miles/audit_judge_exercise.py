@@ -9,7 +9,9 @@ from pathlib import Path
 
 from scripts.miles import audit_workflow
 
-from open_instruct.miles import general_judge, policy_versions, workflow
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.publication import policy_versions
+from open_instruct.miles.rewards import general_judge
 
 require = audit_workflow.require
 

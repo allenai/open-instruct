@@ -19,9 +19,9 @@ from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from torch import distributed as dist
 from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
 
-from open_instruct.miles import actor, checkpoint, data, models, scheduler
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor, checkpoint, data, models, scheduler
 
 
 @pytest.fixture(params=["qwen3", "kda", "kda_latent", "olmo3_full", "olmo3_sliding", "olmo3_yarn", "olmo3_yarn_ac"])

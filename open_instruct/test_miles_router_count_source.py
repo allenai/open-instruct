@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import moe_models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.training import moe_models
 
 
 @pytest.mark.parametrize("source", ["dispatch", "current"])

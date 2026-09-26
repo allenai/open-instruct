@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from open_instruct.miles import __main__ as cli
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 def test_validate_rejects_nonshared_multinode_output(tmp_path, monkeypatch, capsys):

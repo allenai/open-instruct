@@ -8,8 +8,8 @@ import torch
 from olmo_core.nn.moe.v2.router import MoERouterConfigV2
 from transformers import AutoModelForCausalLM, Olmo3Config
 
-from open_instruct.miles import actor, checkpoint, models, moe_models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import actor, checkpoint, models, moe_models
 
 
 @pytest.mark.parametrize("replay,ep,error", [(True, 1, "replay"), (False, 2, "Expert parallelism")])

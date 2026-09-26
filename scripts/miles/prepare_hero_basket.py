@@ -11,8 +11,9 @@ from pathlib import Path
 
 from scripts.miles import prepare_baseline_basket, prepare_olmo3_basket
 
-from open_instruct.miles import run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
 
 BASELINE_PROVENANCE = (
     Path(__file__).resolve().parents[2] / "docs/miles/measurements/full-sft-basket-20260914/preparation.json"

@@ -36,7 +36,7 @@ def test_profile_uses_frozen_image_bounded_topology_and_private_rank_caches():
     assert "rank${RANK}/inductor" in rank_script
     manifest = json.loads((ROOT / "scripts/miles/frozen_core_score_manifest.json").read_text())
     assert manifest["image"] == launch.IMAGE
-    assert set(manifest["module_sha256"]) >= {"open_instruct.miles.actor", "olmo_core.kernels.swiglu"}
+    assert set(manifest["module_sha256"]) >= {"open_instruct.miles.training.actor", "olmo_core.kernels.swiglu"}
 
 
 @pytest.mark.parametrize("kwargs", [{"image": "alias"}, {"output": launch.ROOT + "/old"}, {"rollout": 100}])

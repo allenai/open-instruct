@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from open_instruct.miles import code_rewards
+from open_instruct.miles.rewards import code_rewards
 
 
 def test_retry_policy_covers_the_scoring_posts():

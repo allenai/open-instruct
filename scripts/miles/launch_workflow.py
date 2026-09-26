@@ -4,8 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from open_instruct.miles import launch
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import launch
 
 
 def main():

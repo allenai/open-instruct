@@ -10,9 +10,9 @@ from miles.ray.rollout import rollout_data_conversion, train_data_conversion
 from miles.utils import arguments
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
-from open_instruct.miles import arguments as core_arguments
-from open_instruct.miles import expert_schedule
-from open_instruct.miles.config import EXPERT_SCHEDULE
+from open_instruct.miles.configuration import arguments as core_arguments
+from open_instruct.miles.configuration.config import EXPERT_SCHEDULE
+from open_instruct.miles.training import expert_schedule
 from open_instruct.test_miles_expert_schedule import configuration, hook_args, sample_groups
 
 

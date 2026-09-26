@@ -2,9 +2,9 @@
 
 import pytest
 
-from open_instruct.miles import async_capacity, validation
-from open_instruct.miles.queue_metrics import QueueMetrics
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration import async_capacity, validation
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.rollout.queue_metrics import QueueMetrics
 
 
 def configured(tmp_path, **sections):

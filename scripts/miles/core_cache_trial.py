@@ -11,8 +11,8 @@ from pathlib import Path
 
 import torch
 
-from open_instruct.miles import compiler_cache as cache
-from open_instruct.miles.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.infrastructure import compiler_cache as cache
 
 
 def expected_config(root):

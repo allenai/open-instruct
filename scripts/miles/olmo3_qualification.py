@@ -9,8 +9,8 @@ import torch
 from olmo_core.nn.hf import convert
 from transformers import AutoModelForCausalLM
 
-from open_instruct.miles import models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import models
 
 
 def main():

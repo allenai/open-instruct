@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-from open_instruct.miles import topology
+from open_instruct.miles.configuration import topology
 
 
 def records(path):

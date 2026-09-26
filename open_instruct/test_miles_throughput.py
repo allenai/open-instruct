@@ -8,9 +8,10 @@ import httpx
 import pytest
 from scripts.miles import sample_gpu_usage, throughput_basket, throughput_occupancy
 
-from open_instruct.miles import pipeline_observer, throughput, validation
-from open_instruct.miles.config import CoreConfig
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration import throughput, validation
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.rollout import pipeline_observer
 
 
 @pytest.mark.parametrize(

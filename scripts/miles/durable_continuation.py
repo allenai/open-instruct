@@ -23,7 +23,6 @@ import numpy as np
 import torch
 from miles.backends.training_utils import parallel
 from miles.backends.training_utils.loss_hub import losses
-from miles.rollout.data_source import RolloutDataSource
 from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from scripts.miles.checkpoint_weights import SafeTensorState
@@ -34,9 +33,10 @@ from torch import distributed as dist
 from torch.distributed.tensor import DTensor
 from transformers import PreTrainedTokenizerFast
 
-from open_instruct.miles import actor, checkpoint, models, scheduler
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.state import PolicyClock, atomic_json
+from miles.rollout.data_source import RolloutDataSource
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.publication.state import PolicyClock, atomic_json
+from open_instruct.miles.training import actor, checkpoint, models, scheduler
 
 HORIZON = 4
 BOUNDARY = 2

@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from open_instruct.miles import sibling_timing
+from open_instruct.miles.rollout import sibling_timing
 
 
 def samples(count=4):

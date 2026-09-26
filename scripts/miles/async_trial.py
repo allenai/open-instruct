@@ -16,8 +16,8 @@ from miles.utils import arguments
 from scripts.miles import analyze_gsm8k_parity as evidence
 from scripts.miles import gsm8k_parity, prepare_gsm8k_parity
 
-from open_instruct.miles import policy_versions
-from open_instruct.miles.driver import train
+from open_instruct.miles.execution.driver import train
+from open_instruct.miles.publication import policy_versions
 
 UPDATES = 4
 

@@ -165,7 +165,7 @@ trusted Python objects, not a registration of legacy open-instruct GRPO flags.
 
 ## Maintaining the parser contract
 
-`open_instruct/miles/options.json` records the pinned native argparse actions,
+`open_instruct/miles/configuration/options.json` records the pinned native argparse actions,
 including serving flags. Regenerate it inside the runtime with
 `scripts/miles/snapshot_options.py`, review the diff, and update it with the runtime
 pins. CPU tests check provenance and invalid values; runtime tests compare every

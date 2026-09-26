@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from open_instruct.miles import workflow
+from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.execution import workflow
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "configs/miles/examples/medium.toml"
 

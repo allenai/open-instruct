@@ -9,7 +9,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from open_instruct.miles import policy_refresh, policy_versions, replay_diagnostics
+from open_instruct.miles.publication import policy_refresh, policy_versions
+from open_instruct.miles.training import replay_diagnostics
 
 
 def records(path):

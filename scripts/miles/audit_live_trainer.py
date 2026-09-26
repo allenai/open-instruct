@@ -12,7 +12,7 @@ from pathlib import Path
 import ray
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 def node_snapshot():

@@ -29,9 +29,9 @@ from olmo_miles.evaluation.policy_contract_capture import validate_capture
 from torch import distributed as dist
 from torch.distributed.tensor import DTensor
 
-from open_instruct.miles import actor, models, moe_models, scheduler
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor, models, moe_models, scheduler
 
 
 def load_fixture(root):

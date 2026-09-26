@@ -12,8 +12,9 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 from scripts.miles import prepare_baseline_basket
 
-from open_instruct.miles import run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
 
 MODEL = "allenai/Olmo-3-7B-Think-SFT"
 REVISION = "6ff857587e040d6d523a3d5f3a56e918f5401d66"

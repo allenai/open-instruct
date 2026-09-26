@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from open_instruct.miles import expert_schedule
+from open_instruct.miles.training import expert_schedule
 
 
 def benchmark(panel, configurations, budgets):

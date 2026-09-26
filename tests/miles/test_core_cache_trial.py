@@ -11,7 +11,7 @@ import torch
 from scripts.miles import core_cache_trial as trial
 from scripts.miles import launch_core_cache_trial as launch
 
-from open_instruct.miles.config import RunConfig
+from open_instruct.miles.configuration.config import RunConfig
 
 IMAGE = "01M24E7MSDGN2QFW1T8Z31BCKS"
 

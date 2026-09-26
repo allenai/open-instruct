@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+- Organize the MILES adapter into responsibility-based packages, update the paired runtime integration and dynamic hooks, and preserve CPU-only planning and validation (PR URL pending).
+
 
 ### Added
 - Add MILES/Core collection-wide advantage extremes and response concentration metrics, plus separate async rejection counters for incomplete and mixed-policy groups (PR URL pending).

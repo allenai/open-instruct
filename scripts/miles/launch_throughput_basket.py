@@ -12,7 +12,7 @@ from pathlib import Path
 
 from scripts.miles import throughput_basket as basket
 
-from open_instruct.miles import launch
+from open_instruct.miles.execution import launch
 
 
 def main():

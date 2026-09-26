@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import cluster
+from open_instruct.miles.execution import cluster
 
 
 def supervisor(tmp_path, monkeypatch):

@@ -1,6 +1,7 @@
 """Rolling retention of committed native Core checkpoints."""
 
-from open_instruct.miles import checkpoint, config
+from open_instruct.miles.configuration import config
+from open_instruct.miles.training import checkpoint
 
 
 def test_retention_does_not_change_native_writer_options():

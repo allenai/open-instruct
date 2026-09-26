@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from scripts.miles import launch_baseline_basket, prepare_baseline_basket
 
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -65,7 +65,7 @@ def test_baseline_allocation_and_cpu_placement():
     assert task["constraints"] == {"cluster": ["ai2/saturn"]}
     assert task["resources"]["gpuCount"] == 0
     assert "scripts.miles.prepare_baseline_basket" in task["arguments"][0]
-    assert "open_instruct.miles.cluster /output" not in task["arguments"][0]
+    assert "open_instruct.miles.execution.cluster /output" not in task["arguments"][0]
 
 
 def test_preparation_writes_separate_partitions_and_canary_receipt(tmp_path, monkeypatch):

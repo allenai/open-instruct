@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import compiler_cache as cache
-from open_instruct.miles import startup_cache
+from open_instruct.miles.infrastructure import compiler_cache as cache
+from open_instruct.miles.infrastructure import startup_cache
 
 KEY = "a" * 64
 

@@ -5,10 +5,10 @@ import json
 
 import pytest
 
-from open_instruct.miles import inference_records, record_selection
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import inference_records, record_selection
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
 from open_instruct.test_miles_inference_records import checkpoint, document, make_args, sample
 
 

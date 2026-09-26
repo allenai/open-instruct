@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import async_rollout, rollout_errors
+from open_instruct.miles.rollout import async_rollout, rollout_errors
 
 
 class _Source:

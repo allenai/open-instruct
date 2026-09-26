@@ -9,7 +9,7 @@ from olmo_core.nn import attention
 from olmo_core.nn.hf import convert
 from olmo_core.nn.moe.v2 import olmo3
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles.training import fla_compat
 
 
 class CoreCheckpointState(Mapping):

@@ -5,7 +5,7 @@ import json
 import pytest
 from scripts.miles import capacity_metrics, throughput_occupancy
 
-from open_instruct.miles import performance
+from open_instruct.miles.training import performance
 
 
 def test_training_rate_counts_global_tokens_once():

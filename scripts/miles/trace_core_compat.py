@@ -22,7 +22,7 @@ from sglang.srt.layers.attention.linear import gdn_backend
 from torch.nn import functional as F
 from transformers import AutoConfig
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles.training import fla_compat
 
 MODES = ["original", "native_layout", "no_initial", "fixed_shape", "core_state"]
 _KERNELS_PATCHED = False

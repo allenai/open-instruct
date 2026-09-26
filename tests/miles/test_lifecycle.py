@@ -7,9 +7,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from open_instruct.miles import actor, driver
-from open_instruct.miles.config import CoreConfig
-from open_instruct.miles.engine_drain import Engine, EngineDrain, WeightSnapshot
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.execution import driver
+from open_instruct.miles.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
+from open_instruct.miles.training import actor
 
 
 def install_components(monkeypatch, manager):

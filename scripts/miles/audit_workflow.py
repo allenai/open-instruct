@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from statistics import mean
 
-from open_instruct.miles import policy_versions
+from open_instruct.miles.publication import policy_versions
 
 
 def digest(path):

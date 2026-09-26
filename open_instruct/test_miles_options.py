@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from open_instruct.miles import __main__, options
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles import __main__
+from open_instruct.miles.configuration import options
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 def config(**kwargs):
@@ -109,7 +110,7 @@ def test_overrides_and_shape(tmp_path):
 
 def test_snapshot_tracks_runtime_pins():
     root = Path(__file__).parents[1]
-    schema = json.loads((root / "open_instruct/miles/options.json").read_text())
+    schema = json.loads((root / "open_instruct/miles/configuration/options.json").read_text())
     lock = json.loads((root / "runtime/miles/runtime.lock.json").read_text())
     assert schema["sources"] == lock["sources"]
 

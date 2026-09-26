@@ -12,9 +12,9 @@ from torch import distributed as dist
 from torch import multiprocessing as mp
 from torch import nn
 
-from open_instruct.miles import actor
-from open_instruct.miles.config import CoreConfig
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor
 
 
 def _rollout(count):

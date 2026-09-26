@@ -21,7 +21,7 @@ from olmo_sglang import register
 from safetensors.torch import load_file
 from transformers import AutoConfig, AutoTokenizer
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles.training import fla_compat
 
 DOMAINS = ("math", "code", "ifeval", "general")
 SOURCE_SHA256 = "fde6da774f735ea8d3720598f85ecbd613d5fcf0533f85dd5d8997fedbe93805"

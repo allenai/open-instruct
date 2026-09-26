@@ -10,9 +10,9 @@ from miles.utils import arguments
 from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import AutoModelForCausalLM, Olmo3Config, PreTrainedTokenizerFast, Qwen3Config
 
-from open_instruct.miles import models as core_models
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.driver import train
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.execution.driver import train
+from open_instruct.miles.training import models as core_models
 
 parser = argparse.ArgumentParser(description="Synthetic Ray/SGLang/Core smoke fixture; not a learning evaluation.")
 parser.add_argument("output", type=Path)

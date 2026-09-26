@@ -8,7 +8,7 @@ import html
 import json
 from pathlib import Path
 
-from open_instruct.miles import config, run_spec
+from open_instruct.miles.configuration import config, run_spec
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs/miles"
@@ -37,7 +37,7 @@ def table(headers, rows):
 
 def source_constraints():
     """Include the explicit fixed-value/replacement checks without another registry."""
-    tree = ast.parse((ROOT / "open_instruct/miles/config.py").read_text())
+    tree = ast.parse((ROOT / "open_instruct/miles/configuration/config.py").read_text())
     constraints = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.For) and isinstance(node.target, ast.Tuple):
@@ -88,7 +88,7 @@ def source_constraints():
 def render():
     help_data = json.loads((DOCS / "reference-help.json").read_text())
     native = json.loads((DOCS / "native-help.json").read_text())
-    schema_path = ROOT / "open_instruct/miles/options.json"
+    schema_path = ROOT / "open_instruct/miles/configuration/options.json"
     if native["schema_sha256"] != hashlib.sha256(schema_path.read_bytes()).hexdigest():
         raise ValueError("Native help provenance is stale; recapture against the updated parser snapshot")
     fields = dataclasses.fields(config.CoreConfig)

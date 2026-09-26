@@ -12,8 +12,8 @@ import torch
 from torch import distributed as dist
 from torch import multiprocessing as mp
 
-from open_instruct.miles import actor, checkpoint
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor, checkpoint
 
 
 def _manifest(schema=2, world=2, ep=2):

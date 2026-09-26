@@ -116,7 +116,7 @@ For offline training, sync the training run first, then publish to that existing
 run with the manual command. The same command repairs a failed online upload:
 
 ```bash
-python -m open_instruct.miles.evaluation_runner publish RECEIPT.json \
+python -m open_instruct.miles.evaluation.evaluation_runner publish RECEIPT.json \
   --results /path/to/evaluation/results/update-UPDATE-GROUP \
   --wandb-run ENTITY/PROJECT/RUN_ID
 ```
@@ -133,7 +133,7 @@ mean the API accepted the job but the trainer missed its response. Check the
 latest job attempt; if queued, inspect `beaker job events JOB_ID`.
 
 ```bash
-python -m open_instruct.miles.evaluation resubmit RECEIPT.json
+python -m open_instruct.miles.evaluation.evaluation resubmit RECEIPT.json
 ```
 
 This creates a new receipt and results group, retaining the original diagnostic.

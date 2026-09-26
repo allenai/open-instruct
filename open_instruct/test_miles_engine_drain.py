@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from scripts.miles import analyze_engine_drain
 
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.engine_drain import Engine, EngineDrain, WeightSnapshot
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
 
 
 def snapshot(version):

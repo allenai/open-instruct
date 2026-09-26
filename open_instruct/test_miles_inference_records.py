@@ -10,10 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import inference_records, rewards
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import inference_records
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.rewards import rewards
 
 
 class Status(enum.Enum):

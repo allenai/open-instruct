@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from open_instruct.miles import rollout_errors
 from open_instruct.miles.errors import GenerationRequestTimeout
+from open_instruct.miles.rollout import rollout_errors
 
 
 def http_error(status, body, path="/generate", method="POST"):

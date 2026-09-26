@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from open_instruct.miles.config import ZERO_STD_FILTER, CoreConfig, RunConfig
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.config import ZERO_STD_FILTER, CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 def configured(mode="barrier", enabled=True, **miles):

@@ -4,8 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from open_instruct.miles import rendezvous
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.execution import rendezvous
 
 
 def test_staggered_retry_waits_for_every_new_replica(tmp_path):

@@ -24,8 +24,8 @@ from torch import distributed as dist
 from torch._dynamo import utils as dynamo_utils
 from triton.runtime import cache, jit
 
-from open_instruct.miles import actor, models, scheduler
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor, models, scheduler
 
 
 def main():

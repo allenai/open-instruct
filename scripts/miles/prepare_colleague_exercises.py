@@ -16,8 +16,10 @@ from types import SimpleNamespace
 
 from scripts.miles.prepare_judge_exercise import CODE_URL, MANIFEST
 
-from open_instruct.miles import code_rewards, judge_server, run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.rewards import code_rewards, judge_server
 
 
 def digest(value):
@@ -95,11 +97,11 @@ def select(spec, manifest, partitions, quotas, collections_count, eval_per_domai
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
         registry[name] = {
-            "factory": "open_instruct.miles.code_rewards.CodeVerifier",
+            "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
             "config": {"api_url": CODE_URL, "stdio": name == "code_stdio", "pass_rate_reward_threshold": 0.99},
         }
     for name in spec.judges.get("judging", {}).get("bindings", {}):
-        registry[name] = {"factory": "open_instruct.miles.judge_registry.NamedJudgeVerifier", "config": {"name": name}}
+        registry[name] = {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier", "config": {"name": name}}
     selected, seen_content, seen_ids = {}, set(), set()
     dropped = collections.Counter()
     # Reserve held-out identities first, then exclude them from training, across all domains.

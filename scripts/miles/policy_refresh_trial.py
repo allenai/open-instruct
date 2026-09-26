@@ -11,9 +11,9 @@ from pathlib import Path
 import ray
 from scripts.miles import gsm8k_parity
 
-from open_instruct.miles.config import RunConfig
-from open_instruct.miles.driver import train
-from open_instruct.miles.workflow import parse_runtime
+from open_instruct.miles.configuration.config import RunConfig
+from open_instruct.miles.execution.driver import train
+from open_instruct.miles.execution.workflow import parse_runtime
 
 
 def configuration(campaign, output, *, mode="refresh", updates=4, resume=False):

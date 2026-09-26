@@ -10,8 +10,8 @@ from pathlib import Path
 import requests
 from transformers import AutoTokenizer
 
-from open_instruct.miles import general_judge, judge_server
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.rewards import general_judge, judge_server
 
 
 def qualify(spec):

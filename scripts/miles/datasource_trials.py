@@ -34,9 +34,10 @@ from transformers import AutoTokenizer
 
 from open_instruct.ground_truth_utils import IFEvalVerifier, IFEvalVerifierOld, MathVerifier
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
-from open_instruct.miles import policy_versions, rewards
-from open_instruct.miles.driver import train
-from open_instruct.miles.rewards import registered_reward
+from open_instruct.miles.execution.driver import train
+from open_instruct.miles.publication import policy_versions
+from open_instruct.miles.rewards import rewards
+from open_instruct.miles.rewards.rewards import registered_reward
 
 TASK_ROOT = Path(__file__).resolve().parents[2] / "scripts/miles/assets/tasks"
 VERIFIERS = {"math": MathVerifier, "ifeval_old": IFEvalVerifierOld, "ifeval": IFEvalVerifier}

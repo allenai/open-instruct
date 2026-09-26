@@ -9,7 +9,8 @@ import torch
 from scripts.miles.audit_workflow import audit_samples, digest, prepared_rows, read_jsonl, require
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles import checkpoint, workflow
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.training import checkpoint
 
 
 def audit(root):

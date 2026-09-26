@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from open_instruct.miles import infra_timeouts
+from open_instruct.miles.infrastructure import infra_timeouts
 
 
 def test_transport_deadline_scaled_with_sanitized_warning(monkeypatch, caplog):

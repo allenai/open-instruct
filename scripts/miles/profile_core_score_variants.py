@@ -21,7 +21,7 @@ from scripts.miles import gsm8k_parity
 from scripts.miles.profile_frozen_core_scores import compare_scores, file_digest, scored_pass
 from torch import distributed as dist
 
-from open_instruct.miles import actor, data, models
+from open_instruct.miles.training import actor, data, models
 
 
 def sources():

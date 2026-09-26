@@ -12,16 +12,16 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 from transformers import AutoModelForCausalLM, LlamaConfig, Olmo2Config, Qwen2Config, Qwen3Config
 
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
 
 # The normal SFT/DPO environment intentionally keeps its existing Core pin.
 # These numerical tests run when the separate patched Core runtime is supplied.
 replay_routes = pytest.importorskip("olmo_core.nn.moe.v2.replay").replay_routes
 train_batch_with_loss = pytest.importorskip("olmo_core.train.train_module.transformer.objective").train_batch_with_loss
-core_models = import_module("open_instruct.miles.models")
+core_models = import_module("open_instruct.miles.training.models")
 model_config_from_hf = core_models.model_config_from_hf
 iter_export_state = core_models.iter_export_state
-prepare_checkpoint_path = import_module("open_instruct.miles.checkpoint").prepare_checkpoint_path
+prepare_checkpoint_path = import_module("open_instruct.miles.training.checkpoint").prepare_checkpoint_path
 
 
 class ObjectiveModule:

@@ -11,8 +11,8 @@ from pathlib import Path
 
 from scripts.miles import launch_judge_preparation
 
-from open_instruct.miles import launch
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import launch
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,9 +59,9 @@ def document(
         task["arguments"][0] = task["arguments"][0].replace("cd /opt/core-rl\n", "cd /opt/core-rl\n" + node_overlay, 1)
         if stage == "train":
             task["arguments"][0] = task["arguments"][0].replace(
-                "python -m open_instruct.miles.cluster /output/submitted-run.json",
+                "python -m open_instruct.miles.execution.cluster /output/submitted-run.json",
                 "python -m scripts.miles.prepare_baseline_basket /output/submitted-run.json --verify --wait-seconds 1800\n"
-                "python -m open_instruct.miles.cluster /output/submitted-run.json",
+                "python -m open_instruct.miles.execution.cluster /output/submitted-run.json",
             )
     return spec
 

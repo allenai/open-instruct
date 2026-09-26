@@ -27,9 +27,9 @@ merged main commit `72f194a35045f02cc7d87980819bd0e4652cc931`. OLMo-core is pinn
 to `e505356353aa7ce1f6ff83e24d6eb945f463714e` on `robertb/miles-rl-main`.
 That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
 and carries the MILES adapter plus inherited HF interchange support. MILES uses
-`19393c0672c3a1a6558f71fc7b42788bc62bd99c` on
-[`allenai/miles:main`](https://github.com/allenai/miles/tree/main).
-This integrates the Open Instruct runtime changes on upstream
+`592905363e9efbbb1e45d7e838ec48b7b716dc69` on
+[`allenai/miles:robertb/miles-polish`](https://github.com/allenai/miles/tree/robertb/miles-polish).
+This includes the organized Open Instruct adapter paths and integrates runtime changes on upstream
 `e89b45f7f85a0e76fba6a99474b1dd9b67a3c20e`. Worker launch, inference lifecycle,
 and rollout execution follow the upstream ownership boundaries. Builds fetch exact
 commits, not moving branch tips. See the [migration checks](measurements/miles-upstream-20260922.md)
@@ -105,3 +105,37 @@ Do not add an unconditionally required, ignored runtime directory to the global
 `tool.ty.environment.extra-paths`: a fresh clone has no such directory and the
 checker exits before examining any files. The runtime image and dependency lock
 continue to define the actual training implementation.
+
+## Adapter package layout
+
+`open_instruct/miles/` groups code by responsibility. The public CLI remains
+`python -m open_instruct.miles`; package initializers do not load the GPU runtime.
+
+| Package | Responsibility |
+|---|---|
+| `configuration` | RunSpec/CoreConfig, native options, validation, topology and capacity planning |
+| `execution` | Preparation, Beaker submission, cluster bootstrap and training coordination |
+| `training` | Core actor, model backends, packing, optimizer scheduling, checkpoints and trainer diagnostics |
+| `rollout` | Generation, admission, data-source buffering and rollout/queue observations |
+| `publication` | Weight delivery, engine drain, policy versions and durable policy state |
+| `rewards` | Verifiers, reward routing and managed judges |
+| `datasets` | Dataset preparation, mixtures, inference records and prompt selection |
+| `evaluation` | Background evaluation submission, workers and result publication |
+| `infrastructure` | Compiler/HF module cache lifecycle and bounded infrastructure waits |
+
+Keep diagnostics next to the component they observe. Keep configuration imports
+CPU-only, model backends loaded on demand, and package initializers minimal.
+`training/data.py` adapts samples to the trainer; `rollout/data_source.py` owns
+runtime data-source behavior; `datasets/run_data.py` prepares researcher inputs.
+
+Python integration imports now use these package paths, for example
+`from open_instruct.miles.configuration.run_spec import RunSpec`. The pinned
+AllenAI MILES fork must use the matching trainer and rollout hook paths. Rebuild
+the application image when updating this layout and its runtime pin together;
+existing images retain their original code. Custom verifier factories and saved
+native options containing old Python paths need the corresponding package prefix
+before use with a new image. Historical run artifacts retain their original paths.
+
+The CPU CLI checks in `open_instruct/test_miles_package_layout.py` run without
+site-packages. `tests/miles/test_package_layout.py` resolves hooks supplied by
+both repositories inside the pinned runtime.

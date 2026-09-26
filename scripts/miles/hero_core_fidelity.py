@@ -19,7 +19,7 @@ from olmo_core.nn.moe.v2 import olmo3, routed_experts
 from olmo_sglang import register
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles.training import fla_compat
 
 BOUNDARIES = {
     "attention": ("self_attn", "attention"),

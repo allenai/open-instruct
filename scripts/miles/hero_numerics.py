@@ -17,7 +17,7 @@ from olmo_sglang import register
 from torch.nn import functional as F
 from transformers import AutoModelForCausalLM
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles.training import fla_compat
 
 _ROUTER_OBSERVATIONS = {}
 _ACTIVE_MLP = None

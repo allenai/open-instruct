@@ -8,8 +8,9 @@ from huggingface_hub import snapshot_download
 from scripts.miles import stage_olmo3
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles import run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
 
 MODEL = "allenai/Olmo-3-7B-Think-DPO"
 REVISION = "7b18bf927b430ff06376fdfa5610eb3b1b6a5c38"

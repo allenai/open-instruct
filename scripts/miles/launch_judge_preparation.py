@@ -7,8 +7,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from open_instruct.miles import launch, topology
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration import topology
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import launch
 
 
 def specification(image, spec, stage, prepare_module="scripts.miles.prepare_judge_exercise"):
@@ -62,7 +63,7 @@ for path in sorted(paths):
         raise ValueError("Unknown CPU exercise stage")
     command = task["arguments"][0]
     command = "\n".join(line for line in command.splitlines() if "preflight_attention" not in line)
-    command = command.replace("python -m open_instruct.miles.cluster /output/submitted-run.json", entrypoint)
+    command = command.replace("python -m open_instruct.miles.execution.cluster /output/submitted-run.json", entrypoint)
     task["arguments"] = [command]
     task["envVars"] = [entry for entry in task["envVars"] if not entry["name"].startswith("OI_MILES_REPLICA_")]
     task["envVars"].append({"name": "LD_LIBRARY_PATH", "value": "/usr/local/cuda/compat"})

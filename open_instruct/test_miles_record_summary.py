@@ -2,7 +2,7 @@
 
 import json
 
-from open_instruct.miles import inference_records, record_summary
+from open_instruct.miles.datasets import inference_records, record_summary
 from open_instruct.test_miles_inference_records import Status, checkpoint, make_args, sample
 
 

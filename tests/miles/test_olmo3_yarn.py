@@ -9,9 +9,9 @@ from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from sglang.srt.utils.hf_transformers import config as serving_config
 from transformers import AutoConfig, Olmo3Config
 
-from open_instruct.miles import checkpoint, standard_models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.training import checkpoint, standard_models
 
 
 def published():

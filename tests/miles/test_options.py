@@ -10,9 +10,9 @@ import pytest
 from miles.backends.fsdp_utils import arguments as fsdp_arguments
 from miles.utils import arguments
 
-from open_instruct.miles import arguments as core_arguments
-from open_instruct.miles import options
-from open_instruct.miles.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration import arguments as core_arguments
+from open_instruct.miles.configuration import options
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
 
 @pytest.fixture(scope="module")
@@ -140,7 +140,7 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
     with contextlib.redirect_stderr(io.StringIO()):
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
     assert parsed.max_weight_staleness == 2
-    assert parsed.custom_async_data_buffer_path == "open_instruct.miles.async_buffer.HomogeneousPolicyDataBuffer"
+    assert parsed.custom_async_data_buffer_path == "open_instruct.miles.rollout.async_buffer.HomogeneousPolicyDataBuffer"
 
 
 @pytest.mark.parametrize("enabled", [True, False])

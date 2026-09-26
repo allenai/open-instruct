@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from open_instruct.miles import general_judge
+from open_instruct.miles.rewards import general_judge
 
 
 @pytest.mark.parametrize("reply", ["**SCORE:** 1", "**SCORE**: 1", "SCORE: 1", '{"REASONING":"poor", "SCORE":1}'])

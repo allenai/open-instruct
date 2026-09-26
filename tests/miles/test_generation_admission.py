@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from open_instruct.miles.generation_admission import GenerationAdmission
+from open_instruct.miles.rollout.generation_admission import GenerationAdmission
 
 
 def test_pause_drains_active_call_but_preserves_waiter_identity():

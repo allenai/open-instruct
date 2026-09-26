@@ -314,7 +314,7 @@ def diagnostic_score_probe(self, payload, output):
         loss_masks=[torch.tensor(x["loss_mask"], device="cuda") for x in cases],
     )
     if backend == "olmo_core":
-        data = importlib.import_module("open_instruct.miles.data")
+        data = importlib.import_module("open_instruct.miles.training.data")
         batches = data.sample_batches(rollout, self.args.rollout_max_context_len)
         model = self.model
 
@@ -377,7 +377,7 @@ def diagnostic_score_probe(self, payload, output):
 
 def install(backend):
     module_name, class_name = (
-        ("open_instruct.miles.actor", "OLMoCoreTrainRayActor")
+        ("open_instruct.miles.training.actor", "OLMoCoreTrainRayActor")
         if backend == "olmo_core"
         else ("miles.backends.megatron_utils.actor", "MegatronTrainRayActor")
     )

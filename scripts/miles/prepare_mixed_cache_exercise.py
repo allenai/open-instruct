@@ -17,8 +17,9 @@ from pathlib import Path
 
 from scripts.miles.prepare_judge_exercise import CODE_URL, MANIFEST, code_canaries
 
-from open_instruct.miles import run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
 
 DOMAINS = ("math", "ifeval", "code", "code_stdio")
 
@@ -59,7 +60,7 @@ def prepare(spec, *, train_per_domain, eval_per_domain):
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
         registry[name] = {
-            "factory": "open_instruct.miles.code_rewards.CodeVerifier",
+            "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
             "config": {"api_url": CODE_URL, "stdio": name == "code_stdio"},
         }
     for rows in selected.values():

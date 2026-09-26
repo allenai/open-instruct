@@ -14,7 +14,7 @@ from torch import nn
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import DTensor
 
-from open_instruct.miles import contract
+from open_instruct.miles.training import contract
 
 
 def test_probe_uses_optimizer_parameters_when_model_exposes_temporary_views():

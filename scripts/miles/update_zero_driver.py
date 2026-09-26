@@ -17,7 +17,7 @@ from miles.ray import placement_group, wiring
 from miles.utils import arguments, object_store
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
-from open_instruct.miles import startup_cache
+from open_instruct.miles.infrastructure import startup_cache
 
 
 def write_json(path, value):

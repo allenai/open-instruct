@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from scripts.miles import compiler_cache_run as wrapper
 
-from open_instruct.miles import compiler_cache as cache
+from open_instruct.miles.infrastructure import compiler_cache as cache
 
 KEY = "a" * 64
 IMAGE = "sha256:" + "b" * 64

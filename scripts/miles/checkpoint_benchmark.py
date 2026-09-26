@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.miles import durable_continuation as continuation
 
-from open_instruct.miles.state import atomic_json
+from open_instruct.miles.publication.state import atomic_json
 
 MODES = {
     "baseline": {"profile": True},

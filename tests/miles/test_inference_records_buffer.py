@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
-from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
-from open_instruct.miles.config import ZERO_STD_FILTER, CoreConfig
+from open_instruct.miles.configuration.config import ZERO_STD_FILTER, CoreConfig
+from open_instruct.miles.rollout.async_buffer import HomogeneousPolicyDataBuffer
 
 
 def test_buffer_records_every_scored_group_and_keeps_filter_semantics(tmp_path):

@@ -9,7 +9,7 @@ from concurrent import futures
 from tokenizers import Tokenizer, models
 from transformers import PreTrainedTokenizerFast, dynamic_module_utils
 
-from open_instruct.miles import hf_module_cache
+from open_instruct.miles.infrastructure import hf_module_cache
 
 
 def test_primed_custom_modules_need_no_copy_in_concurrent_children(tmp_path, monkeypatch):

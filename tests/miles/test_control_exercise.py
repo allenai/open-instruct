@@ -10,7 +10,7 @@ from miles.utils import arguments
 from scripts.miles import analyze_control_exercise, exercise_controls, launch_control_exercise
 from transformers import Qwen3Config
 
-from open_instruct.miles.timing import evaluation_stage, stage
+from open_instruct.miles.execution.timing import evaluation_stage, stage
 
 
 def test_pair_differs_only_in_scheduling_and_output(tmp_path):

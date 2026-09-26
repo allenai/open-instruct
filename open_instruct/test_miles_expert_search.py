@@ -5,8 +5,8 @@ import json
 import numpy as np
 import pytest
 
-from open_instruct.miles import expert_schedule, expert_search
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import expert_schedule, expert_search
 
 
 def test_incremental_swaps_match_full_rescore_across_pack_changes():

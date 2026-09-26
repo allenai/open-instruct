@@ -16,7 +16,10 @@ from types import SimpleNamespace
 from scripts.miles import audit_workflow, prepare_colleague_exercises
 from torch.distributed.checkpoint import metadata as checkpoint_metadata
 
-from open_instruct.miles import general_judge, policy_versions, rewards, run_data, workflow
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.publication import policy_versions
+from open_instruct.miles.rewards import general_judge, rewards
 
 require = audit_workflow.require
 

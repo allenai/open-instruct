@@ -9,8 +9,8 @@ from olmo_core import config as core_config
 from olmo_core.nn.moe.v2 import router as core_router
 from torch.utils import checkpoint
 
-from open_instruct.miles import contract, router_load, router_objective
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import contract, router_load, router_objective
 
 
 def reference(logits, indices, lengths, token_denominator, response_denominator, grouping, reduction, z_reduction):

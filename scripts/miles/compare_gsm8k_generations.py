@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from open_instruct.miles import policy_versions
+from open_instruct.miles.publication import policy_versions
 
 BACKENDS = ("core", "megatron")
 STEPS = (0, 20, 40, 60, 80, 100)

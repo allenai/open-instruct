@@ -13,7 +13,7 @@ There is no Megatron checkpoint conversion in this path.
 | Dense Olmo 3 | Separate FSDP adapter; two-GPU 7B smoke, fresh-process resume, HF export and fresh serving reload passed, with zero-advantage batches. Nonzero-gradient full-model learning remains unqualified; see [qualification](olmo3-pre-rl.md) |
 | Other HF architectures | Do not infer support from safetensors or tokenizer compatibility; inspect the model factory and identify any support gap before choosing a backend; deprecated GRPO is not an automatic fallback |
 
-For the authoritative factories inspect `open_instruct/miles/models.py`,
+For the authoritative factories inspect `open_instruct/miles/training/models.py`,
 `moe_models.py`, and `standard_models.py`. Both deprecated `grpo.py` and the MILES path
 use OLMo-core, but have different orchestration and serving implementations.
 

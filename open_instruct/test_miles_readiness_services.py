@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from scripts.miles import launch_readiness_cpu, prepare_stdio_exercise, readiness_services
 
-from open_instruct.miles import code_rewards
+from open_instruct.miles.rewards import code_rewards
 
 
 def test_real_http_retry_budget_and_recovery(monkeypatch):

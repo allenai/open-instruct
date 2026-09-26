@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import torch
 
-from open_instruct.miles import publication
+from open_instruct.miles.publication import publication
 
 
 @pytest.mark.parametrize("fails", [False, True])

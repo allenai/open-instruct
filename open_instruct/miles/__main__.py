@@ -11,10 +11,11 @@ import json
 import sys
 from pathlib import Path
 
-from open_instruct.miles import record_selection, record_summary, validation
-from open_instruct.miles.config import RunConfig
+from open_instruct.miles.configuration import validation
+from open_instruct.miles.configuration.config import RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import record_selection, record_summary
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
 
 
 def main() -> None:
@@ -59,13 +60,13 @@ def execute(parser, options):
     if options.command in ("run", "status"):
         if not structured:
             parser.error("run/status require a schema_version=1 run file; raw configs support plan/validate/train")
-        launch = importlib.import_module("open_instruct.miles.launch")
+        launch = importlib.import_module("open_instruct.miles.execution.launch")
         if options.command == "run":
             launch.run(options.config, options.overrides)
         else:
             print(json.dumps(launch.status(config), indent=2))
         return
-    workflow = importlib.import_module("open_instruct.miles.workflow")
+    workflow = importlib.import_module("open_instruct.miles.execution.workflow")
     if options.command == "validate":
         if structured:
             config.plan()  # Validate physical allocation as well as trainer options.

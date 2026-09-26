@@ -3,8 +3,14 @@
 import pytest
 import torch
 
-from open_instruct.miles import contract
-from open_instruct.miles.config import CoreConfig, RunConfig, scoring_check_due, scoring_pass, stochastic_fields
+from open_instruct.miles.configuration.config import (
+    CoreConfig,
+    RunConfig,
+    scoring_check_due,
+    scoring_pass,
+    stochastic_fields,
+)
+from open_instruct.miles.training import contract
 
 
 def _options(**overrides):

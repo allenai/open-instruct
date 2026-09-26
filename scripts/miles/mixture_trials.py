@@ -22,9 +22,10 @@ from scripts.miles import datasource_trials
 from transformers import AutoTokenizer
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles import mixture, policy_versions
-from open_instruct.miles.driver import train
-from open_instruct.miles.rewards import registered_reward
+from open_instruct.miles.datasets import mixture
+from open_instruct.miles.execution.driver import train
+from open_instruct.miles.publication import policy_versions
+from open_instruct.miles.rewards.rewards import registered_reward
 
 BATCH_PROMPTS = mixture.BATCH_PROMPTS
 REGISTRY = {

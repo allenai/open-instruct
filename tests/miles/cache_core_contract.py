@@ -12,8 +12,8 @@ import ep_stress_contract
 import torch
 from triton.runtime import cache as triton_cache
 
-from open_instruct.miles import compiler_cache as cache
-from open_instruct.miles.config import RunConfig
+from open_instruct.miles.configuration.config import RunConfig
+from open_instruct.miles.infrastructure import compiler_cache as cache
 
 
 def model_state(worker):

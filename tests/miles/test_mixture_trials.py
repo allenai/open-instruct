@@ -7,12 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from miles.rollout.data_source import RolloutDataSource
 from miles.utils.data import Dataset
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 from scripts.miles import mixture_trials as trial
 
-from open_instruct.miles import mixture
+from miles.rollout.data_source import RolloutDataSource
+from open_instruct.miles.datasets import mixture
 
 
 def tokenizer():

@@ -15,8 +15,8 @@ from scripts.miles import analyze_gsm8k_parity as evidence
 from scripts.miles import async_trial, gsm8k_parity, prepare_gsm8k_parity
 from scripts.miles.check_gsm8k_checkpoints import check_boundaries
 
-from open_instruct.miles import replay_diagnostics
-from open_instruct.miles.config import RunConfig
+from open_instruct.miles.configuration.config import RunConfig
+from open_instruct.miles.training import replay_diagnostics
 
 ARMS = ("sync", "async", "controls", "sync-admission64", "async-admission64", "replay-admission64")
 ADMISSION_KEYS = (

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import run_data
+from open_instruct.miles.datasets import run_data
 
 
 class Tokenizer:

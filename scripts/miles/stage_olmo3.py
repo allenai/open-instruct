@@ -6,8 +6,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from open_instruct.miles import workflow
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.execution import workflow
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts/miles/assets/templates/olmo-thinker.jinja"

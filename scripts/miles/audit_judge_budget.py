@@ -7,8 +7,8 @@ from pathlib import Path
 
 from transformers import AutoTokenizer
 
-from open_instruct.miles import general_judge
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.rewards import general_judge
 
 
 def audit(spec):

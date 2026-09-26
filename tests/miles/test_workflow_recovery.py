@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import workflow
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.execution import workflow
 
 
 def saved_run(tmp_path, *, status="failed"):

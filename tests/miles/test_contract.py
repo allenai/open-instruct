@@ -27,8 +27,8 @@ from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.checkpoint import checkpoint as recompute
 
-from open_instruct.miles import contract
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import contract
 
 
 def loss_args(token_average):

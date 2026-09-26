@@ -20,7 +20,7 @@ import torch
 from matplotlib import pyplot as plt
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles import policy_versions
+from open_instruct.miles.publication import policy_versions
 
 UPDATES = 100
 EVAL_STEPS = (0, 20, 40, 60, 80, 100)

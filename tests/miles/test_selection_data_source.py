@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import torch
 from miles.utils.types import Sample
 
-from open_instruct.miles import inference_records, record_selection
-from open_instruct.miles.config import CoreConfig
-from open_instruct.miles.data_source import DashboardDrainingRolloutDataSource
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.datasets import inference_records, record_selection
+from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 
 def metadata(index):

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts.miles import throughput_basket, throughput_occupancy
 
-from open_instruct.miles.performance import training_rates
+from open_instruct.miles.training.performance import training_rates
 
 PREFIX = "rollout/fully_async/completed_queue/"
 

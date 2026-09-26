@@ -14,8 +14,8 @@ import ray
 import torch
 from torch import distributed as dist
 
-from open_instruct.miles import engine_delivery
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.publication import engine_delivery
+from open_instruct.miles.publication.state import PolicyClock
 
 
 @ray.remote(num_gpus=1)

@@ -11,7 +11,7 @@ from statistics import mean, median
 
 import torch
 
-from open_instruct.miles import policy_versions
+from open_instruct.miles.publication import policy_versions
 
 UPDATES = 100
 EVAL_STEPS = (0, 20, 40, 60, 80, 100)

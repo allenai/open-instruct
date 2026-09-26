@@ -12,7 +12,7 @@ from typing import TypedDict
 
 import requests
 
-from open_instruct.miles import code_rewards
+from open_instruct.miles.rewards import code_rewards
 
 
 class ProxyState(TypedDict):

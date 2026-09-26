@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from open_instruct.miles.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
 
 def configured():

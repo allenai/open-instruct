@@ -4,9 +4,9 @@ import pytest
 import torch
 from torch import nn
 
-from open_instruct.miles import data, packing
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.training import data, packing
 
 
 def fixture():

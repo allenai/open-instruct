@@ -11,7 +11,7 @@ from miles.rollout.inference_rollout.inference_rollout_common import InferenceRo
 from miles.utils.eval_config import EvalDatasetConfig
 from scripts.miles.prepare_gsm8k_parity import digest, json_bytes, write_immutable
 
-from open_instruct.miles import policy_versions
+from open_instruct.miles.publication import policy_versions
 
 
 def independent_score(response, label):

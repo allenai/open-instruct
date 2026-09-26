@@ -12,8 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import cluster, general_judge, judge_registry, judging, launch, rewards, topology
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration import topology
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import cluster, launch
+from open_instruct.miles.rewards import general_judge, judge_registry, judging, rewards
 
 
 @pytest.fixture
@@ -83,7 +85,7 @@ def test_task_replication_and_secret_free_ownership(document):
         assert "cluster" not in task["constraints"]
         assert task["resources"]["gpuCount"] == 8
         assert all(task[key] for key in ("hostNetworking", "propagateFailure", "propagatePreemption"))
-        assert "open_instruct.miles.cluster" in task["arguments"][0]
+        assert "open_instruct.miles.execution.cluster" in task["arguments"][0]
         assert not any("REPLICA_" in v["name"] for v in task["envVars"])
         assert not any("BEAKER_TOKEN" in v["name"] for v in task["envVars"])
 
@@ -95,7 +97,7 @@ def test_single_node_judge_bootstrap_uses_host_networking(document):
     assert len(tasks) == 1
     assert tasks[0]["resources"]["gpuCount"] == 5
     assert tasks[0]["hostNetworking"] is True
-    assert "open_instruct.miles.cluster" in tasks[0]["arguments"][0]
+    assert "open_instruct.miles.execution.cluster" in tasks[0]["arguments"][0]
 
 
 def test_wrong_ray_node_gpu_layout_fails():
@@ -212,7 +214,7 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatc
         json.dumps(
             {
                 "general-quality": {
-                    "factory": "open_instruct.miles.judge_registry.NamedJudgeVerifier",
+                    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
                     "config": {"name": "general-quality"},
                 }
             }

@@ -11,7 +11,7 @@ from miles.utils.ft_utils.process_group_utils import GroupInfo
 from torch import distributed as dist
 from torch import multiprocessing as mp
 
-from open_instruct.miles import metrics
+from open_instruct.miles.training import metrics
 
 
 def _worker(rank, rendezvous):

@@ -21,7 +21,7 @@ from safetensors.torch import load_file
 from scripts.miles import benchmark_core_compat as benchmark
 from transformers import AutoConfig
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles.training import fla_compat
 
 
 def read_samples(path):

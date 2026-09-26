@@ -10,9 +10,9 @@ import pytest
 from ray._private.ray_constants import WORKER_PROCESS_SETUP_HOOK_ENV_VAR
 from scripts.miles import launch_startup_trial
 
-from open_instruct.miles import startup_cache as startup
-from open_instruct.miles.config import CoreConfig
-from open_instruct.miles.timing import startup_stage
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.execution.timing import startup_stage
+from open_instruct.miles.infrastructure import startup_cache as startup
 
 
 def policy(root, *, restore=True):

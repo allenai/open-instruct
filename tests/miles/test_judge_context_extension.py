@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from open_instruct.miles import judge_server, judging
+from open_instruct.miles.rewards import judge_server, judging
 
 
 def service(tmp_path):

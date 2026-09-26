@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import rewards, rollout_metrics
+from open_instruct.miles.rewards import rewards
+from open_instruct.miles.rollout import rollout_metrics
 
 WORKER = """
 import json, sys, time

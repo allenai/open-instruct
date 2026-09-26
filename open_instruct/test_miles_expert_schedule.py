@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 import torch
 
-from open_instruct.miles import data
-from open_instruct.miles import expert_schedule as schedule
-from open_instruct.miles.config import EXPERT_SCHEDULE, CoreConfig, RunConfig
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.config import EXPERT_SCHEDULE, CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.training import data
+from open_instruct.miles.training import expert_schedule as schedule
 
 
 def configuration(**changes):

@@ -17,7 +17,7 @@ from miles.utils.ft_utils.process_group_utils import GroupInfo
 from miles.utils.types import Sample
 from torch import distributed as dist
 
-from open_instruct.miles import actor, expert_schedule
+from open_instruct.miles.training import actor, expert_schedule
 from open_instruct.test_miles_expert_schedule import sample_groups
 
 

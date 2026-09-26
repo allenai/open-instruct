@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import rewards
+from open_instruct.miles.rewards import rewards
 
 
 @dataclasses.dataclass

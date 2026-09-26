@@ -13,7 +13,7 @@ from pathlib import Path
 from miles.backends.fsdp_utils import arguments as fsdp_arguments
 from miles.utils import arguments
 
-from open_instruct.miles import options
+from open_instruct.miles.configuration import options
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
     cli.add_argument("--image", required=True, help="Immutable image identity used for this capture")
     args = cli.parse_args()
     root = Path(__file__).resolve().parents[2]
-    schema = root / "open_instruct/miles/options.json"
+    schema = root / "open_instruct/miles/configuration/options.json"
     with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
         parser = fsdp_arguments.build_fsdp_parser(arguments.get_miles_extra_args_provider())
         parser.add_argument("--olmo-core-config", required=True)

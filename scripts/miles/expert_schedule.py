@@ -3,13 +3,13 @@
 This helper retains the earlier within-replica skew scorer and greedy experiments.
 It does not model the global slowest replica or attention cost and must not be used
 as a production throughput predictor. The qualified planner lives in
-open_instruct.miles.expert_schedule and includes those additional work proxies.
+open_instruct.miles.training.expert_schedule and includes those additional work proxies.
 """
 
 import numpy as np
 
 from open_instruct import logger_utils
-from open_instruct.miles import packing
+from open_instruct.miles.training import packing
 
 logger = logger_utils.setup_logger(__name__)
 

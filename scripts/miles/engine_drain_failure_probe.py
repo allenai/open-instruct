@@ -15,9 +15,9 @@ from unittest import mock
 
 from miles.utils.workers.ray_worker_manager import RayWorkerManager
 
-from open_instruct.miles import driver, workflow
-from open_instruct.miles.rolling_publication import RollingPublication
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import driver, workflow
+from open_instruct.miles.publication.rolling_publication import RollingPublication
 
 
 def validate_failure(events, injected, failed, elapsed):

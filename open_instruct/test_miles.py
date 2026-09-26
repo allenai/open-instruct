@@ -7,10 +7,15 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from open_instruct.miles import rewards
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.data import policy_versions, sample_batches, score_agreement, validate_score_agreement
-from open_instruct.miles.state import PolicyClock, atomic_json
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.publication.state import PolicyClock, atomic_json
+from open_instruct.miles.rewards import rewards
+from open_instruct.miles.training.data import (
+    policy_versions,
+    sample_batches,
+    score_agreement,
+    validate_score_agreement,
+)
 
 
 def test_config_compiles_native_miles_options(tmp_path):

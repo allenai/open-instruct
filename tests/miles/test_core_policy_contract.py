@@ -13,7 +13,7 @@ from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
 from olmo_miles.evaluation import policy_contract_schema as schema
 
-from open_instruct.miles import data
+from open_instruct.miles.training import data
 
 
 def fixture():

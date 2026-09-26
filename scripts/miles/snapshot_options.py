@@ -1,7 +1,7 @@
 """Write the CPU planning schema using the installed, pinned MILES/SGLang runtime.
 
 Usage inside the runtime: python scripts/miles/snapshot_options.py /tmp/options.json
-Review the diff and copy to open_instruct/miles/options.json when updating pins.
+Review the diff and copy to open_instruct/miles/configuration/options.json when updating pins.
 """
 
 import argparse
@@ -13,7 +13,7 @@ from pathlib import Path
 from miles.backends.fsdp_utils import arguments as fsdp_arguments
 from miles.utils import arguments
 
-from open_instruct.miles.options import describe_parser
+from open_instruct.miles.configuration.options import describe_parser
 
 
 def snapshot():

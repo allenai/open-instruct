@@ -26,8 +26,8 @@ from pyarrow import parquet
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.driver import train
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.execution.driver import train
 
 
 def prepare(options):
@@ -299,7 +299,7 @@ def run(options):
             sglang_disable_cuda_graph=True,
             sglang_attention_backend="torch_native",
             sglang_sampling_backend="pytorch",
-            custom_rm_path="open_instruct.miles.rewards.registered_reward",
+            custom_rm_path="open_instruct.miles.rewards.rewards.registered_reward",
             save=str(root / "save"),
             save_interval=1,
             save_debug_rollout_data=str(root / "rollouts/{rollout_id}.pt"),

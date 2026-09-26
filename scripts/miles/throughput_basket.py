@@ -6,7 +6,7 @@ import math
 import statistics
 from pathlib import Path
 
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 ROOT = Path(__file__).resolve().parents[2]
 CAMPAIGN = Path("/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1")

@@ -9,7 +9,7 @@ import torch
 from torch import distributed as dist
 from torch import multiprocessing as mp
 
-from open_instruct.miles import contract, data, expert_schedule, packing
+from open_instruct.miles.training import contract, data, expert_schedule, packing
 from open_instruct.test_miles_expert_schedule import histograms, hook_args, sample_groups
 
 

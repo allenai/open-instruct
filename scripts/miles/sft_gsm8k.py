@@ -17,9 +17,9 @@ from miles.utils import arguments
 from transformers import AutoTokenizer
 
 from open_instruct.ground_truth_utils import GSM8KVerifier
-from open_instruct.miles import policy_versions
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.driver import train
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.execution.driver import train
+from open_instruct.miles.publication import policy_versions
 
 CHECKPOINT_NAME = "olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2"
 CHECKPOINT_ROOT = Path("/weka/oe-training-default/robertb/olmo-miles/checkpoints")
@@ -65,7 +65,7 @@ def configuration(root):
             eval_temperature=0.0,
             n_samples_per_eval_prompt=1,
             eval_max_response_len=4096,
-            custom_rm_path="open_instruct.miles.rewards.registered_reward",
+            custom_rm_path="open_instruct.miles.rewards.rewards.registered_reward",
             sglang_context_length=6144,
             sglang_max_total_tokens=32768,
             sglang_max_running_requests=4,

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from scripts.miles import launch_olmo3_preparation, stage_olmo3
 
-from open_instruct.miles import topology
+from open_instruct.miles.configuration import topology
+from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
 
 ROOT = Path(__file__).resolve().parents[1]
 

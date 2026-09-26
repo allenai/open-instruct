@@ -10,8 +10,10 @@ from pathlib import Path
 
 from scripts.miles.prepare_judge_exercise import CODE_URL, MANIFEST, code_canaries
 
-from open_instruct.miles import judge_server, run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.rewards import judge_server
 
 DOMAINS = {
     "math": "math",
@@ -82,11 +84,11 @@ def prepare(spec):
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
         registry[name] = {
-            "factory": "open_instruct.miles.code_rewards.CodeVerifier",
+            "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
             "config": {"api_url": CODE_URL, "stdio": name == "code_stdio"},
         }
     for name in spec.judges["judging"]["bindings"]:
-        registry[name] = {"factory": "open_instruct.miles.judge_registry.NamedJudgeVerifier", "config": {"name": name}}
+        registry[name] = {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier", "config": {"name": name}}
     limit = spec.compile().miles["rollout_max_prompt_len"]
     excluded = collections.Counter()
     eligible = {}

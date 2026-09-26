@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from scripts.miles import launch_workflow
 
-from open_instruct.miles import launch, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import launch, workflow
 
 IMAGE_ID = "01M2931KARFP3Y2W2FPADGRFEP"
 

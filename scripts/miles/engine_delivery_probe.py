@@ -12,8 +12,9 @@ import torch
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 from torch import distributed as dist
 
-from open_instruct.miles import actor, engine_delivery
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.publication import engine_delivery
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor
 
 
 def fixture(device):

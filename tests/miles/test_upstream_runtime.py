@@ -11,10 +11,12 @@ from miles.ray.rollout.inference_controller import InferenceController
 from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
 from miles.utils.workers.worker_spec import CommandWorkerSpec, SchedulingSpec, WorkerLaunchContext
 
-from open_instruct.miles import actor, policy_versions, startup_cache
-from open_instruct.miles.config import CoreConfig
-from open_instruct.miles.engine_drain import WeightSnapshot
-from open_instruct.miles.rolling_publication import RollingPublication
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.infrastructure import startup_cache
+from open_instruct.miles.publication import policy_versions
+from open_instruct.miles.publication.engine_drain import WeightSnapshot
+from open_instruct.miles.publication.rolling_publication import RollingPublication
+from open_instruct.miles.training import actor
 
 
 def test_serving_child_receives_model_package_and_its_own_cache_slot():
@@ -35,7 +37,7 @@ def test_serving_child_receives_model_package_and_its_own_cache_slot():
     assert shlex.split(configured.launch_command(context)) == [
         "/usr/bin/python",
         "-m",
-        "open_instruct.miles.serving",
+        "open_instruct.miles.rollout.serving",
         "--model-path",
         "/model with spaces",
     ]

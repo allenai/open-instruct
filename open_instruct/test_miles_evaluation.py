@@ -14,10 +14,11 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from open_instruct.miles import checkpoint, evaluation, evaluation_runner, evaluation_submit
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.evaluation import evaluation, evaluation_runner, evaluation_submit
+from open_instruct.miles.training import checkpoint
 
 
 @pytest.fixture
@@ -288,10 +289,10 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         finish_tracking=lambda: None,
         init_tracking=lambda args: None,
     )
-    module("open_instruct.miles.rolling_publication", RollingPublication=Mock())
+    module("open_instruct.miles.publication.rolling_publication", RollingPublication=Mock())
     # Load under a private module name so monkeypatch cleanup leaves no stale driver.
     spec = importlib.util.spec_from_file_location(
-        "test_background_driver", Path(evaluation.__file__).with_name("driver.py")
+        "test_background_driver", Path(evaluation.__file__).parents[1] / "execution/driver.py"
     )
     driver = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(driver)

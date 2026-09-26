@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles import topology
+from open_instruct.miles.configuration import topology
 
 
 @pytest.mark.parametrize(

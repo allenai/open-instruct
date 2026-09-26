@@ -13,7 +13,7 @@ from scripts.miles import exercise_controls, launch_control_exercise, launch_con
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from open_instruct.miles import data, replay_diagnostics
+from open_instruct.miles.training import data, replay_diagnostics
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])

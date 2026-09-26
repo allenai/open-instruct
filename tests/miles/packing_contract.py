@@ -18,9 +18,9 @@ from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from torch import distributed as dist
 
-from open_instruct.miles import actor, data, models, scheduler
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.publication.state import PolicyClock
+from open_instruct.miles.training import actor, data, models, scheduler
 
 
 def bootstrap(root):

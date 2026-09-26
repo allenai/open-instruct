@@ -446,7 +446,7 @@ def run(root, validate_only=False, local_hf=None):
         (output / f"{name}.json").write_bytes(json_bytes(value))
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
     ray = importlib.import_module("ray")
-    driver = importlib.import_module("open_instruct.miles.driver")
+    driver = importlib.import_module("open_instruct.miles.execution.driver")
     started = time.monotonic()
     ray.init(num_gpus=4, num_cpus=16, include_dashboard=False, object_store_memory=1024**3)
     try:

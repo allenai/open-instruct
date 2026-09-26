@@ -10,8 +10,8 @@ import torch
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
-from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
-from open_instruct.miles.data_source import DashboardDrainingRolloutDataSource
+from open_instruct.miles.rollout.async_buffer import HomogeneousPolicyDataBuffer
+from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 
 def make_source(root, *, load=None):

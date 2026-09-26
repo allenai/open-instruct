@@ -11,7 +11,8 @@ from pathlib import Path
 from datasets import load_dataset
 from scripts.miles.prepare_judge_exercise import CODE_URL
 
-from open_instruct.miles import run_data, workflow
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
 
 DATASET = "allenai/Dolci-Think-RL-7B"
 REVISION = "0fb6466d31ef3a9dd16985ef635e6429e05a6491"
@@ -127,7 +128,7 @@ def prepare(model, output):
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
         registry[name] = {
-            "factory": "open_instruct.miles.code_rewards.CodeVerifier",
+            "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
             "config": {"api_url": CODE_URL, "stdio": name == "code_stdio"},
         }
     # Two distinct natural long prompts suffice for a boundary exercise: one

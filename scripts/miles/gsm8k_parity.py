@@ -14,8 +14,8 @@ from miles.utils import arguments
 from scripts.miles.check_gsm8k_checkpoints import check_boundaries
 from scripts.miles.prepare_gsm8k_parity import verify_preparation
 
-from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.driver import train
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.execution.driver import train
 
 CAMPAIGN = "gsm8k-core-megatron-20260910-v1"
 DEFAULT_ROOT = Path("/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1")
@@ -70,7 +70,7 @@ def configuration(
             eval_temperature=0.0,
             n_samples_per_eval_prompt=1,
             eval_max_response_len=4096,
-            custom_rm_path="open_instruct.miles.rewards.registered_reward",
+            custom_rm_path="open_instruct.miles.rewards.rewards.registered_reward",
             sglang_context_length=6144,
             sglang_attention_backend="triton",
             **({"sglang_chunked_prefill_size": chunked_prefill_size} if chunked_prefill_size is not None else {}),

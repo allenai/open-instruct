@@ -8,7 +8,7 @@ configuration, data/verifiers, lifecycle coordination and retained evidence.
 
 ## Trainer hookup
 
-`open_instruct/miles/actor.py` implements the trainer actor contract. The
+`open_instruct/miles/training/actor.py` implements the trainer actor contract. The
 `models.py` facade selects `moe_models.py` for the specialized OLMoDDP MoE path
 or `standard_models.py` for dense Core `TransformerTrainModule`/FSDP. MILES calls
 the actor for initialization, scoring, training, save/restore and weight export.

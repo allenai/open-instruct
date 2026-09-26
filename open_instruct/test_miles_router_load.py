@@ -8,7 +8,7 @@ import torch
 from torch import distributed as dist
 from torch import multiprocessing as mp
 
-from open_instruct.miles import router_load
+from open_instruct.miles.training import router_load
 
 
 def test_replica_imbalance_is_visible_when_global_load_is_uniform():

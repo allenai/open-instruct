@@ -213,7 +213,7 @@ def observe_objective(module, rollout):
 
 def native_pass(worker, rollout):
     if worker.args.train_backend == "olmo_core":
-        actor = importlib.import_module("open_instruct.miles.actor")
+        actor = importlib.import_module("open_instruct.miles.training.actor")
         advantages = rollout["advantages"]
 
         def inject(_args, batch):

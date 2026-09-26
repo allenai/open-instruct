@@ -7,8 +7,8 @@ import torch
 from olmo_core.nn.hf import convert
 from transformers import AutoModelForCausalLM, Olmo3Config
 
-from open_instruct.miles import models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import models
 
 
 @pytest.mark.parametrize("sliding", [False, True])

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import tomllib
 
-from open_instruct.miles import compiler_cache as cache
+from open_instruct.miles.infrastructure import compiler_cache as cache
 
 
 def command_version(command, environment):

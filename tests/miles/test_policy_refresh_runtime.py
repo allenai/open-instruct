@@ -15,10 +15,11 @@ from miles.rollout.inference_rollout import inference_rollout_common
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 from sglang.srt.observability import req_time_stats
 
-from open_instruct.miles import policy_refresh, refreshing_rollout
-from open_instruct.miles.async_buffer import RefreshPolicyDataBuffer
-from open_instruct.miles.generation_admission import GenerationAdmission
-from open_instruct.miles.refreshing_rollout import RefreshingRolloutFn
+from open_instruct.miles.publication import policy_refresh
+from open_instruct.miles.rollout import refreshing_rollout
+from open_instruct.miles.rollout.async_buffer import RefreshPolicyDataBuffer
+from open_instruct.miles.rollout.generation_admission import GenerationAdmission
+from open_instruct.miles.rollout.refreshing_rollout import RefreshingRolloutFn
 
 
 def sample(group=0, versions=(0, 1)):

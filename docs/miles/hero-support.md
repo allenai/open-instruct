@@ -116,7 +116,7 @@ need their own qualification. EMO is outside this first non-EMO target.
 
 ## Standard Olmo 3 trainer
 
-`open_instruct/miles/models.py` is the shared actor-facing façade. The specialized
+`open_instruct/miles/training/models.py` is the shared actor-facing façade. The specialized
 OLMoDDP factory, optimizer, HF import/export, native checkpoint methods and router
 replay live in `moe_models.py`. Dense Olmo 3 uses `standard_models.py`, Core's
 `TransformerTrainModule`, AdamW and the standard FSDP path where applicable.

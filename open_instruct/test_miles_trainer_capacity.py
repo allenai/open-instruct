@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from scripts.miles import launch_trainer_capacity, trainer_capacity_config
 
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
 
 
 @pytest.mark.parametrize("variant", trainer_capacity_config.VARIANTS)

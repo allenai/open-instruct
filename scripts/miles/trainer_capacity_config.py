@@ -4,7 +4,7 @@ import dataclasses
 
 from scripts.miles import throughput_basket
 
-from open_instruct.miles.config import RunConfig
+from open_instruct.miles.configuration.config import RunConfig
 
 SOURCE = (
     "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/steady-2t2i-c32-b128-graphs-986935b17569/run"

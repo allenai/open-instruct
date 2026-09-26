@@ -134,7 +134,8 @@ environment and inspect it against this contract:
 ```bash
 python - <<'PY'
 import json
-from open_instruct.miles import launch, run_spec
+from open_instruct.miles.execution import launch
+from open_instruct.miles.configuration import run_spec
 
 spec = run_spec.RunSpec.load("runs/my-grpo.toml")
 document = launch.specification("IMMUTABLE_IMAGE_ID", spec)

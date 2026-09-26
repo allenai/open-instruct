@@ -14,7 +14,7 @@ from scripts.miles import analyze_engine_drain, audit_workflow
 from scripts.miles.checkpoint_weights import SafeTensorState
 from scripts.miles.core_checkpoint_stream import CoreCheckpointState
 
-from open_instruct.miles import policy_versions
+from open_instruct.miles.publication import policy_versions
 
 
 def audit(root):

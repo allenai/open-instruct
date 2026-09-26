@@ -22,7 +22,7 @@ from scripts.miles import gsm8k_parity
 from torch import distributed as dist
 from triton.runtime import cache, jit
 
-from open_instruct.miles import actor, data, models
+from open_instruct.miles.training import actor, data, models
 
 
 def file_digest(path):

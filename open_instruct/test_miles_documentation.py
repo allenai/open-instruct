@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from scripts.miles import docs_site, generate_docs
 
-from open_instruct.miles import launch, run_spec
+from open_instruct.miles.configuration import run_spec
+from open_instruct.miles.execution import launch
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs/miles"
@@ -23,7 +24,7 @@ def test_generated_reference_is_current():
 
 def test_structured_field_descriptions_cover_closed_schemas():
     descriptions = json.loads((DOCS / "reference-help.json").read_text())["structured"]
-    tree = ast.parse((ROOT / "open_instruct/miles/run_spec.py").read_text())
+    tree = ast.parse((ROOT / "open_instruct/miles/configuration/run_spec.py").read_text())
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Call)
@@ -45,7 +46,7 @@ def test_structured_field_descriptions_cover_closed_schemas():
             for field in ast.literal_eval(allowed.value):
                 assert f"{node.name[1:]}.{field}" in descriptions
     # Judge/rubric schemas are separate from RunSpec.
-    tree = ast.parse((ROOT / "open_instruct/miles/judging.py").read_text())
+    tree = ast.parse((ROOT / "open_instruct/miles/rewards/judging.py").read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "fields":
             if len(node.args) != 3 or not isinstance(node.args[2], ast.Set):
@@ -67,7 +68,7 @@ def test_structured_field_descriptions_cover_closed_schemas():
 
 def test_special_control_descriptions_cover_dispatch():
     described = json.loads((DOCS / "reference-help.json").read_text())["special"]
-    tree = ast.parse((ROOT / "open_instruct/miles/run_spec.py").read_text())
+    tree = ast.parse((ROOT / "open_instruct/miles/configuration/run_spec.py").read_text())
     loop = next(
         node
         for node in ast.walk(tree)

@@ -8,8 +8,9 @@ import pytest
 import torch
 from scripts.miles import launch_publication_profile, publication_profile
 
-from open_instruct.miles import actor, publication
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.publication import publication
+from open_instruct.miles.training import actor
 
 
 def _record(buffer_bytes, total, details):

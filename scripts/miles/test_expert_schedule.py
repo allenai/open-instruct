@@ -5,7 +5,7 @@ import pytest
 import torch
 from scripts.miles import expert_schedule
 
-from open_instruct.miles import data, packing
+from open_instruct.miles.training import data, packing
 
 EXPERTS = 64
 TOP_K = 4

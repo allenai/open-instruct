@@ -8,8 +8,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from open_instruct.miles import code_rewards, judge_server, run_data, workflow
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.rewards import code_rewards, judge_server
 
 MANIFEST = Path(
     "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/rl-manifest.json"
@@ -69,11 +71,11 @@ def prepare(spec):
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
         registry[name] = {
-            "factory": "open_instruct.miles.code_rewards.CodeVerifier",
+            "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
             "config": {"api_url": CODE_URL, "stdio": name == "code_stdio"},
         }
     for name in spec.judges["judging"]["bindings"]:
-        registry[name] = {"factory": "open_instruct.miles.judge_registry.NamedJudgeVerifier", "config": {"name": name}}
+        registry[name] = {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier", "config": {"name": name}}
     for rows in selected.values():
         for row in rows:
             run_data._verify_row(row, tokenizer, 2048, registry)

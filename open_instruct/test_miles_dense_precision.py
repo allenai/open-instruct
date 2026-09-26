@@ -7,8 +7,8 @@ import torch
 from transformers import AutoModelForCausalLM, Olmo2Config, Olmo3Config, Qwen3Config
 
 pytest.importorskip("olmo_core.train.train_module.transformer.objective")
-from open_instruct.miles import standard_models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import standard_models
 
 
 @pytest.fixture(params=["cpu", "cuda"])

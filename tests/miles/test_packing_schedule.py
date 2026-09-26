@@ -8,8 +8,8 @@ import torch
 from torch import distributed as dist
 from torch import multiprocessing as mp
 
-from open_instruct.miles import actor
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.training import actor
 
 
 def exercise(rank, rendezvous, output):

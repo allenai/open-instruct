@@ -7,10 +7,12 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles import __main__ as cli
-from open_instruct.miles import options, run_data, workflow
-from open_instruct.miles.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration import options
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.run_spec import RunSpec
+from open_instruct.miles.execution import workflow
 
 
 def raw_config(**values):
