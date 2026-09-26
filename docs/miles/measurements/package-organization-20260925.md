@@ -164,7 +164,34 @@ Ruff checks passed and the runtime-source tests passed (8 tests). Evidence is in
 remain evidence for their original immutable image; no GPU rerun was needed for
 this source-file packaging correction.
 
-## Follow-up gates before merge
+## Working-branch integration — September 26
+
+Integrated Open Instruct working-branch head `114fa539b` into polish at
+`9c8e5a65b`, preserving the newer precision experiments and documentation. Updated
+five new diagnostic imports to `open_instruct.miles.training.fla_compat` and kept
+both sides of the measurements-index additions.
+
+Integrated AllenAI MILES `main` (`fe5aa73a7`) at
+`9874d6f589f37b070f15489585325fa32dd5c638`, retaining its deferred optional
+Open Instruct import while using the moved evaluation module. The corresponding
+tracking regression test covers both ordinary tracking without Open Instruct
+and background-evaluation metrics. Open Instruct now pins this integrated commit.
+The already-qualified router timeout commit remains part of that runtime.
+
+Focused validation: MILES tracking/argument/trainer tests **249 passed**;
+Open Instruct package/parser/runtime-source and LM-head probe tests **63 passed,
+1 skipped**. Ruff checks and formatting passed. The two newer FP32/selective
+precision test files cannot collect in the CPU-only container because SGLang's
+conditional GPU symbols are absent (`fused_moe.silu_and_mul`). The identical
+collection failures were reproduced on the unchanged primary branch. GPU
+validation of the integrated branch is left to the owner's upcoming runs, as
+requested; earlier smoke results above apply to their recorded source revisions.
+
+All 1,465 parser action definitions are unchanged. Native help/default records
+are also unchanged; their provenance was recaptured from the local integrated
+image `sha256:a5ae63530028b43ee693bd3c440f6003943d6c86a4047b6bc7f61916f5556648`.
+
+## Follow-up gates before merge into upstream main
 
 - Reconcile the readiness-service exhaustion expectation with the current
   verifier failure policy.
