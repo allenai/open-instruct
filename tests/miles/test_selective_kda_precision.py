@@ -16,6 +16,20 @@ def test_forcing_selects_each_requests_causal_position():
         runtime.forced_next_tokens(params, [4, 8])
 
 
+def test_latent_patch_skips_dense_first_block_and_restores_forward():
+    model = torch.nn.Module()
+    model.dense = torch.nn.Module()
+    model.dense.feed_forward_norm = torch.nn.Identity()
+    model.sparse = torch.nn.Module()
+    model.sparse.feed_forward_norm = torch.nn.Identity()
+    model.sparse.latent_up_proj = torch.nn.Linear(2, 2, bias=False)
+    original = model.sparse.latent_up_proj.forward
+    assert runtime.set_linear_variant(model, "latent_up", serving=False) == {"latent_up": 1}
+    assert not hasattr(model.dense.feed_forward_norm, "_diagnostic_original_forward")
+    runtime.set_linear_variant(model, "none", serving=False)
+    assert model.sparse.latent_up_proj.forward == original
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA diagnostic")
 def test_fp32_latent_norm_returns_bf16_at_residual_boundary():
     torch.manual_seed(73)

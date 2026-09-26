@@ -75,13 +75,14 @@ def set_linear_variant(model, variant, *, serving):
                 linear.forward = functools.partial(fp32_output, linear, serving)
                 count["latent_up"] += 1
             norm = getattr(module, "post_feedforward_layernorm" if serving else "feed_forward_norm", None)
-            if norm is not None:
+            sparse = getattr(module, "mlp", None) if serving else module
+            if norm is not None and getattr(sparse, "latent_up_proj", None) is not None:
                 if not hasattr(norm, "_diagnostic_original_forward"):
                     norm._diagnostic_original_forward = norm.forward
                 norm.forward = functools.partial(latent_norm, norm, serving)
                 norm_count += 1
         if norm_count != count["latent_up"]:
-            raise ValueError("Latent projection and post-normalization count mismatch")
+            raise ValueError(f"Latent projection/norm count mismatch: {count['latent_up']} versus {norm_count}")
     for module in model.modules():
         if not hasattr(module, "f_proj_2"):
             continue
