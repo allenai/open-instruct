@@ -204,6 +204,13 @@ else
 fi
 PREEMPTIBLE="${PREEMPTIBLE:-1}"
 if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
+# ceres rejects allocated (minRuntime > 0) jobs from ai2/olmo-instruct, which has no
+# allocation there; drop it when PREEMPTIBLE=0.
+if [[ "$PREEMPTIBLE" == "1" ]]; then
+    CPU_CLUSTERS="${CPU_CLUSTERS:-ai2/saturn ai2/neptune ai2/ceres ai2/jupiter}"
+else
+    CPU_CLUSTERS="${CPU_CLUSTERS:-ai2/saturn ai2/neptune ai2/jupiter}"
+fi
 
 # Global batch 1,048,576 tokens = SEQ * ranks * GRAD_ACCUM.
 grad_accum_for() {
@@ -226,7 +233,7 @@ case "$MODE" in
         DESC="Tokenize Dolci-Think-SFT full (seq $SEQ, olmo123) for the KDA MoE think baseline"
     fi
     $PY mason.py \
-        --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
+        --cluster $CPU_CLUSTERS \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
         --image "$BEAKER_IMAGE" \
@@ -258,7 +265,7 @@ case "$MODE" in
     # 32768 think cache. So ask the job. It raises FileNotFoundError printing
     # the exact path it wants, before touching distributed init or a GPU.
     $PY mason.py \
-        --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
+        --cluster $CPU_CLUSTERS \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
         --image "$BEAKER_IMAGE" \
