@@ -29,6 +29,8 @@ def score(args):
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     torch.set_float32_matmul_precision("highest")
+    if args.dtype == "float32":
+        fp32_reference.strict_arithmetic()
     samples = json.loads(args.samples.read_text())
     digest = hashlib.sha256(args.samples.read_bytes()).hexdigest()
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)

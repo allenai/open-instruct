@@ -9,10 +9,12 @@ import functools
 import json
 
 import torch
+from fla.ops.kda import chunk_intra
 from olmo_sglang import core_compat
 from olmo_sglang.kda import backend
 from olmo_sglang.models import olmo3_moe
 from torch.utils import _pytree
+from triton import language as tl
 
 
 def reject_low_precision(module, inputs, output):
@@ -30,14 +32,21 @@ def audit_model(model):
     print("FP32_MODEL_AUDIT", json.dumps(dict(counts)), flush=True)
 
 
+def strict_arithmetic():
+    """Also override FLA's explicit triangular-solve TF32 choice."""
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.set_float32_matmul_precision("highest")
+    if hasattr(chunk_intra, "SOLVE_TRIL_DOT_PRECISION"):
+        chunk_intra.SOLVE_TRIL_DOT_PRECISION = tl.constexpr("ieee")
+
+
 def install():
     """Allow FP32 in the eager reference and allocate its conv caches in FP32."""
     if getattr(core_compat, "_fp32_diagnostic_installed", False):
         return
     core_compat._fp32_diagnostic_installed = True
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
-    torch.set_float32_matmul_precision("highest")
+    strict_arithmetic()
     original_check = core_compat._is_bf16
 
     def allowed_reference_dtype(args, dtype):
