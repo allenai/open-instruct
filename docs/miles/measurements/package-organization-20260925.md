@@ -136,6 +136,34 @@ These are MILES runtime tests and training exercises, not the general Open
 Instruct `scripts/test/run_gpu_pytest.sh` experiment. They must not be used as a
 `GPU_TESTS=` CI override for that separate suite.
 
+## Packaging follow-up — September 26
+
+Removed the Docker exclusions for `core_checkpoint_stream.py`, `gsm8k_test_eval.py`
+and `original_baseline.py` in source commit `f692e8780`. These three helpers total
+63,435 bytes. They are dependencies of test files already copied into the image;
+excluding them saved negligible space and prevented those files from collecting.
+Standalone learning-probe exclusions remain unchanged.
+
+The locally rebuilt image
+`sha256:4b12d0cbf22c39b0a58f22325b2ae5b3c58c382e9ded8d1af78bca032844acde`
+collects 1,201 tests without the four helper-import errors. This check uses the
+same pre-existing exclusion of `test_core_policy_contract.py`, whose optional
+comparison package is absent from the MILES image. No source-file mounts were
+used for the rebuilt-image verification.
+
+Running the four affected files locally in that rebuilt image gives **58 passed,
+9 failed, no collection errors**. The checkpoint-drift, engine-drain learning-audit
+and GSM8K evaluator files all pass. The nine historical-baseline failures are the
+previously observed environment requirements: seven need the exact frozen
+`/stage/open_instruct/grpo_fast.py`, and two need DeepSpeed. Including the helper
+source fixes collection; it does not supply that historical trainer environment.
+
+Ruff checks passed and the runtime-source tests passed (8 tests). Evidence is in
+`runs/polish/helpers-built-image-tests.{log,xml}` and
+`runs/polish/helpers-built-image-collection.log`. The earlier Beaker results above
+remain evidence for their original immutable image; no GPU rerun was needed for
+this source-file packaging correction.
+
 ## Follow-up gates before merge
 
 - Reconcile the readiness-service exhaustion expectation with the current
