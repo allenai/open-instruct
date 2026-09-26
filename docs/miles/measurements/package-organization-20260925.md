@@ -74,8 +74,9 @@ this does not establish a clean type-check gate.
 
 ## Beaker validation
 
-Status at 2026-09-26 01:37 UTC: all three final Holmes jobs remain queued.
-No successful GPU validation result is claimed yet.
+Validation runs finished on 2026-09-26. Both training smokes passed on B300s;
+the completed GPU suite still has pre-existing test failures and image/test
+collection mismatches. This is not a clean merge gate.
 
 Training smoke image: `01M3DMJ5D88G1SEPG7J1EMYKD3`, built through the committed-image
 wrapper from Open Instruct `e99a7b9a0` with MILES `592905363`.
@@ -97,9 +98,30 @@ local run evidence. Latest attempts are selected per task and replica.
 
 Runs:
 
-1. Runtime GPU tests: [Beaker](https://beaker.org/ex/01M3DN7BDTA71BTFPBVV8G6CVQ) — pending.
-2. Barrier mechanics: [Beaker](https://beaker.org/ex/01M3DMNGY2M5R3AV72RZTJ6KGJ) — pending.
-3. Async-refresh mechanics: [Beaker](https://beaker.org/ex/01M3DMNM2TRGWK841Q5M0FKDBW) — pending.
+1. Runtime GPU tests: [Beaker](https://beaker.org/ex/01M3DN7BDTA71BTFPBVV8G6CVQ) — CUDA canary passed; pytest exited 2 with four collection errors.
+2. Barrier mechanics: [Beaker](https://beaker.org/ex/01M3DMNGY2M5R3AV72RZTJ6KGJ) — passed, exit 0.
+3. Async-refresh mechanics: [Beaker](https://beaker.org/ex/01M3DMNM2TRGWK841Q5M0FKDBW) — passed, exit 0.
+4. Runtime GPU tests with continued collection: [Beaker](https://beaker.org/ex/01M3E041TJ98F1H2FW4F199N96) — exit 1: 1,117 passed, 10 skipped, 7 failed, 4 collection errors in 963.91 seconds.
+
+Both smoke workflows report `complete`, with rollout IDs 0–3, optimizer steps
+1–4 (none skipped), four post-update publications and three evaluations. Every
+driver stage reports success, including cleanup and the refresh run's final
+generation drain. Barrier behavior versions advance 0–3; refresh consumes
+version-0 samples while optimizer/publication steps advance. The recorded policy
+objectives were zero, and barrier gradient/update diagnostics were zero. These
+checks establish execution mechanics, not nonzero learning or mixed-version
+responses. Checkpoint and export qualification were intentionally out of scope.
+
+The GPU test collection errors come from tests importing `core_checkpoint_stream`,
+`gsm8k_test_eval` and `original_baseline`, which the existing Docker ignore file
+excludes as local-only experiment helpers. The follow-up kept those errors
+visible with `--continue-on-collection-errors` and executed the remaining tests
+using the same immutable image. It did not treat omitted helpers as passing.
+All seven test failures match both test names and failure causes reproduced on
+the original checkout: one stale `driver.asyncio` mock, one trainer mock missing
+`model`, two router mocks missing `host`, and three router log-capture assertions.
+No additional failing test was found in this run. JUnit output and complete
+logs are retained in the Beaker results and local run evidence.
 
 The initial Holmes GPU-unit submission `01M3DM77A6H284KEH4R17MTQH2` was
 canceled while still queued. A one-GPU Saturn compatibility attempt
@@ -107,8 +129,8 @@ canceled while still queued. A one-GPU Saturn compatibility attempt
 its driver reports CUDA 12.8 and cannot initialize PyTorch 2.13.0+cu130.
 No training ran there; the final test job returned to Holmes. Training and GPU
 qualification are restricted to H100s or B300s per the project owner; Saturn is
-not a fallback for these runs. All three active submissions are constrained to
-Holmes, whose cluster metadata identifies B300 GPUs.
+not a fallback for these runs. All final submissions were constrained to
+Holmes and ran on B300 GPUs.
 
 These are MILES runtime tests and training exercises, not the general Open
 Instruct `scripts/test/run_gpu_pytest.sh` experiment. They must not be used as a
