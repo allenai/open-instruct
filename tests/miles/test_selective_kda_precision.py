@@ -3,6 +3,15 @@
 import pytest
 import torch
 from scripts.miles import selective_kda_precision as selective
+from scripts.miles import selective_precision_runtime as runtime
+
+
+def test_forcing_selects_each_requests_causal_position():
+    params = [{"prefix_length": 3, "forced_ids": [11, 12]}, {"prefix_length": 8, "forced_ids": [21, 22]}]
+    assert runtime.forced_next_tokens(params, [2, 7]) == [11, 21]
+    assert runtime.forced_next_tokens(params, [3, 8]) == [12, 22]
+    with pytest.raises(ValueError, match="outside continuation"):
+        runtime.forced_next_tokens(params, [4, 8])
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA diagnostic")
