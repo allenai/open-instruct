@@ -15,8 +15,15 @@ Choose exactly one mode under `[data]`:
 | `prompt_data` | Prepared JSONL; supply reward_config and optional alternating dataset-name/eval-path entries |
 | `recipe` | Rejected: the olmo-miles named recipe catalog is not ported |
 
-Current named tasks are `gsm8k`, `math`, legacy `ifeval`, and generated
-`multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
+Current named tasks are `gsm8k`, `gsm8k_original`, `math`, legacy `ifeval`, and
+generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
+
+`gsm8k` uses [`techarb/gsm8k-cleaner`](https://huggingface.co/datasets/techarb/gsm8k-cleaner),
+the `ai2-adapt-dev/rlvr_gsm8k_zs` train split with reviewed labels. It has 39 corrected
+targets and omits 93 ambiguous or unreliable problems, leaving 7,380 rows. Each prepared
+row records `metadata.original_row`, its index in the original dataset. Use
+`gsm8k_original` to reproduce runs prepared before this change. Row sampling differs
+between the two tasks, so equal seeds do not select the same problems.
 The [multitask example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/medium.toml) mixes
 GSM8K and math; it is not the complete published Olmo 3 mixture.
 Use manifest adoption and the [mixed-task qualification](measurements/mixture-qualification.md)

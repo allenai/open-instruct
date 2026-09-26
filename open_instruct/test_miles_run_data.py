@@ -143,6 +143,23 @@ def test_named_tasks_strip_reference_answers_and_select_disjoint(environment, mo
     assert len(environment[2].rendered) == 8
 
 
+def test_gsm8k_uses_cleaned_source_and_original_remains_available(environment, monkeypatch):
+    assert run_data.TASKS["gsm8k"][0] == "techarb/gsm8k-cleaner"
+    assert run_data.TASKS["gsm8k_original"][0] == "ai2-adapt-dev/rlvr_gsm8k_zs"
+    assert run_data.TASKS["gsm8k"][2] == run_data.TASKS["gsm8k_original"][2] == "gsm8k"
+    rows = [
+        {"messages": [{"role": "user", "content": f"Question {i}"}], "ground_truth": [str(i)], "original_row": 10 + i}
+        for i in range(4)
+    ]
+    loaded = []
+    monkeypatch.setattr(run_data, "_source_rows", lambda name: loaded.append(name) or rows)
+    result = prepare(environment, {"tasks": [{"task": "gsm8k", "train_count": 4}]})
+    train = [json.loads(line) for line in Path(result["prompt_data"]).read_text().splitlines()]
+    assert loaded == ["gsm8k"]
+    assert {row["metadata"]["original_row"] - row["metadata"]["source_row"] for row in train} == {10}
+    assert {row["metadata"]["source_dataset"] for row in train} == {"techarb/gsm8k-cleaner"}
+
+
 def test_generated_multiplication_is_reproducible_and_preserves_reward_weights(environment, tmp_path):
     data = {"tasks": [{"task": "multiplication", "train_count": 8, "eval_count": 4}]}
     first = prepare(environment, data)

@@ -17,7 +17,9 @@ from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
 
 TASKS = {
-    "gsm8k": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
+    # Label-cleaned rlvr_gsm8k_zs: 39 corrected targets, 93 ambiguous/unreliable rows removed.
+    "gsm8k": ("techarb/gsm8k-cleaner", "3a4e9e3e600ea2854a6d2d0483721b3cd68580ce", "gsm8k"),
+    "gsm8k_original": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
     "math": ("ai2-adapt-dev/rlvr_open_reasoner_math", "2cdc4f9e67b426a693d19f11dcc05f1cb8f44793", "math"),
     "ifeval": ("allenai/RLVR-IFeval", "47c03c73621c4aab2b824b7818681117d662770e", "ifeval_old"),
     "multiplication": ("generated-multiplication-v1", None, "multiplication"),
@@ -383,7 +385,7 @@ def _tasks(data, tokenizer, template, seed):
             raw = rows[index]
             messages = _messages(raw, strip_answer=True)
             target = raw.get("ground_truth")
-            if target is None and name == "gsm8k":
+            if target is None and verifier == "gsm8k":
                 target = raw.get("answer", "").split("####")[-1]
             target = (
                 json.dumps(target, sort_keys=True) if verifier == "ifeval_old" and isinstance(target, dict) else target
@@ -407,6 +409,7 @@ def _tasks(data, tokenizer, template, seed):
                 "source_dataset": source,
                 "source_revision": revision,
                 "source_row": index,
+                **({"original_row": raw["original_row"]} if "original_row" in raw else {}),
                 "query": messages[-1]["content"],
                 "prompt_wrapper": wrapper,
                 "verifiers": [{"name": verifier, "target": target, "weight": 1.0}],
