@@ -211,6 +211,7 @@ Names below work in the organizational sections training, trainer, inference, op
 | enable_mixed_chunk | miles.sglang_enable_mixed_chunk |
 | eval_max_response_length | miles.eval_max_response_len |
 | expert_parallel_size | core.expert_parallel_size |
+| fp32_lm_head | core.fp32_lm_head |
 | learning_rate | miles.lr |
 | mamba_radix_cache_strategy | miles.sglang_mamba_radix_cache_strategy |
 | max_response_length | miles.rollout_max_response_len |
@@ -283,6 +284,7 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.reward_config | str &#124; None | null | Trusted verifier registry path; structured workflow preparation supplies it. |
 | core.expert_parallel_size | &lt;class &#x27;int&#x27;&gt; | 1 | Expert-parallel group size; must divide trainer world size. |
 | core.attention_backend | &lt;class &#x27;str&#x27;&gt; | &quot;torch&quot; | Core attention implementation: torch, flash_2, flash_3 or flash_4; hardware/model qualification is separate. |
+| core.fp32_lm_head | &lt;class &#x27;bool&#x27;&gt; | false | Opt-in trainable FP32-output vocabulary projection on Core and SGLang. Keeps BF16 operands and ordinary low-precision gradient GEMMs; requires the updated Core runtime. Default false. Default LM head/loss and trainer TP1 only; training cost and learning effects require qualification. |
 | core.activation_checkpointing | &lt;class &#x27;bool&#x27;&gt; | true | Recompute blocks during backward to reduce activation memory. |
 | core.compile_model | &lt;class &#x27;bool&#x27;&gt; | false | Compile native Core model forwards. Experimental for variable-shaped RL; monitor graph recompilation. Default false. |
 | core.compile_optimizer | &lt;class &#x27;bool&#x27;&gt; | false | Compile the native MoE distributed optimizer update. Experimental; independent of model compilation. Default false. |

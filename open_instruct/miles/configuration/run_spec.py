@@ -30,6 +30,7 @@ FIELD_MAP = {
     "rollout_expert_parallel_size": "miles.sglang_ep_size",
     "expert_parallel_size": "core.expert_parallel_size",
     "activation_recompute": "core.activation_checkpointing",
+    "fp32_lm_head": "core.fp32_lm_head",
     "replay_rollout_data": "miles.load_debug_rollout_data",
     "replay_rollout_data_subsample": "miles.load_debug_rollout_data_subsample",
     "num_rollouts": "miles.num_rollout",

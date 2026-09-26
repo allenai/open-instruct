@@ -286,3 +286,25 @@ outputs and policy gradients. The pinned Core source includes native count-sourc
 regressions. `tests/miles/router_objective_contract.py` supplies GPU training and
 repacking checks; its `--count-source` option selects either count source. CPU
 checks do not establish distributed GPU qualification for every combination.
+
+## FP32-output vocabulary head
+
+Opt in with `trainer.fp32_lm_head=true` in a structured run, or
+`core.fp32_lm_head=true` in the low-level configuration. This sets Core's
+`LMHeadConfig.fp32_output` and SGLang's `enable_fp32_lm_head` together.
+An explicit conflicting serving false value is rejected. Default is false.
+Rebuild the runtime from the updated lock; old images do not gain this option.
+
+CUDA BF16/FP16 projections retain FP32 output instead of rounding logits to the
+operand dtype. Weights remain in their original storage dtype. A custom backward
+uses ordinary low-precision gradient GEMMs, including rounding the incoming
+logit gradient to the operand dtype; this is not full-FP32 training. Autocast
+continues to select operand precision. Checkpoint parameter names are unchanged.
+The native Core option currently supports the default head and default loss,
+with tensor-parallel size one. Its low-precision CUDA path supports first-order
+gradients; higher-order derivatives and fused-linear cross entropy are excluded.
+
+The [frozen-weight study](measurements/selective-precision-20260926.md) motivates
+the option but does not establish an RL learning benefit. FP32 logits double
+that output tensor's storage; measure training memory and step cost for the
+chosen token/vocabulary sizes.

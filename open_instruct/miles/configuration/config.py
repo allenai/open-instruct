@@ -53,6 +53,7 @@ class CoreConfig:
     reward_config: str | None = None
     expert_parallel_size: int = 1
     attention_backend: str = "torch"
+    fp32_lm_head: bool = False
     activation_checkpointing: bool = True
     compile_model: bool = False
     compile_optimizer: bool = False
@@ -154,6 +155,7 @@ class CoreConfig:
             "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",
+            "fp32_lm_head",
             "compile_model",
             "compile_optimizer",
             "use_reduce_scatter",
@@ -272,6 +274,10 @@ class RunConfig:
     def resolved_miles(self) -> dict[str, Any]:
         """Resolve the default group filter for plans, native argv and direct CLI callers."""
         options = cli_options.normalize_options(self.miles)
+        if self.core.fp32_lm_head:
+            if options.get("sglang_enable_fp32_lm_head") is False:
+                raise InputError("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
+            options["sglang_enable_fp32_lm_head"] = True
         path = options.get("dynamic_sampling_filter_path")
         if self.core.filter_zero_std_groups:
             if path not in (None, ZERO_STD_FILTER):

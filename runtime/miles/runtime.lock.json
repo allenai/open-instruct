@@ -8,7 +8,7 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/OLMo-core.git",
-      "revision": "e505356353aa7ce1f6ff83e24d6eb945f463714e"
+      "revision": "3c2ad5989f88f8cfb04c983b4243e1a502e4ea1d"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles.git",

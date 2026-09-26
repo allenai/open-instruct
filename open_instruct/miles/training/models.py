@@ -32,10 +32,15 @@ def model_config_from_hf(hf: Any, options: Any):
     if options.model_config:
         document = json.loads(Path(options.model_config).read_text())
         config = core_config.Config.from_dict(document.get("model", document))
-        if not isinstance(config, (transformer.TransformerConfig, transformer_config.OLMoDDPModelConfig)):
+        if not isinstance(config, transformer.TransformerConfig | transformer_config.OLMoDDPModelConfig):
             raise ValueError("core.model_config must describe a Core transformer")
-        return config
-    return _backend("moe" if hf.model_type == "olmo3moe" else "standard").model_config_from_hf(hf, options)
+    else:
+        config = _backend("moe" if hf.model_type == "olmo3moe" else "standard").model_config_from_hf(hf, options)
+    if getattr(options, "fp32_lm_head", False):
+        if not hasattr(config.lm_head, "fp32_output"):
+            raise ValueError("core.fp32_lm_head requires the updated OLMo-core runtime; rebuild the image")
+        config.lm_head.fp32_output = True
+    return config
 
 
 class MetricSink:
