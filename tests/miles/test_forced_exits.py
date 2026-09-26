@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -78,9 +79,14 @@ def test_producer_returns_only_natural_samples(monkeypatch):
             forced_exit_positions=2, forced_exit_trials=3, forced_exit_parents=1, forced_exit_answer_tokens=1024
         ),
     )
+
+    def encode(text, **kwargs):
+        assert text == "</think>\n\n"
+        return [8, 9]
+
     tokenizer = SimpleNamespace(
-        encode=lambda *a, **kw: [8, 9],
-        decode=lambda ids, **kw: "".join({1: "work", 2: "\n\n", 7: "42", 8: "</", 9: "think>"}[i] for i in ids),
+        encode=encode,
+        decode=lambda ids, **kw: "".join({1: "work", 2: "\n\n", 7: "42", 8: "</", 9: "think>\n\n"}[i] for i in ids),
     )
     seen = []
 
@@ -88,6 +94,7 @@ def test_producer_returns_only_natural_samples(monkeypatch):
         seen.append(sample)
         if sample.response_length:
             assert params["max_new_tokens"] - sample.response_length == 1024
+            assert sample.response.endswith("</think>\n\n")
             sample.tokens += [7]
             sample.response_length += 1
             sample.response += "42"
@@ -224,6 +231,21 @@ def test_failed_group_joins_siblings():
     asyncio.run(run())
 
 
+def test_readiness_capture_persists_finiteness_evidence(tmp_path):
+    records = [{"state": torch.tensor([3.0, 4.0]), "rewards": [1, 0, 1]}]
+    stopping.save_readiness(tmp_path, 2, 0, records)
+    folder = tmp_path / "readiness-probes"
+    summary = json.loads((folder / "step2-rank0.json").read_text())
+    assert summary["all_finite"] and summary["records"] == 1 and summary["hidden_size"] == 2
+    assert summary["norm_min"] == summary["norm_max"] == 5
+    saved = torch.load(folder / "step2-rank0.pt", weights_only=True)
+    assert saved["records"][0]["rewards"] == [1, 0, 1]
+    records[0]["state"][0] = torch.nan
+    with pytest.raises(ValueError, match="finite"):
+        stopping.save_readiness(tmp_path, 3, 0, records)
+    assert not (folder / "step3-rank0.pt").exists()
+
+
 def test_real_loss_packing_tis_and_guidance(tmp_path):
     dist.init_process_group("gloo", init_method=f"file://{tmp_path}/group", rank=0, world_size=1)
     previous = parallel._parallel_state
@@ -312,7 +334,10 @@ def test_full_tag_guidance_trains_all_pieces_only(advantage):
     }
     contexts = stopping.auxiliary_batches([parent], pad_to=2)
     assert contexts[0]["tokens"].tolist() == [[0, 1, 2, 3, 8, 9, 10]]
+    assert contexts[0]["doc_lens"].tolist() == [[7]]
+    assert contexts[0]["max_doc_lens"] == [7]
     assert contexts[1]["stopping_context"]["dummy"]
+    assert contexts[1]["doc_lens"].tolist() == [[2]]
     logits = torch.zeros(1, 7, 11, requires_grad=True)
     stopping.anchor_closing_scores(contexts[0], logits.detach())
     template = {"_miles_metric_count": torch.tensor(1.0), "normalized_policy_objective": torch.tensor(0.0)}

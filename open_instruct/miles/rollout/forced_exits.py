@@ -19,6 +19,8 @@ from open_instruct.miles.publication import policy_versions
 
 logger = logger_utils.setup_logger(__name__)
 
+CLOSING_TEXT = "</think>\n\n"
+
 
 def sequence_start(tokens, sequence):
     """Find a delimiter without decoding/re-encoding the parent prefix."""
@@ -131,7 +133,9 @@ class ForcedExitRollout(common.InferenceRolloutFn):
             raise RuntimeError("Forced-exit parent did not finish")
         if not probe:
             return parent
-        close_ids = state.tokenizer.encode("</think>", add_special_tokens=False)
+        # Match the natural answer boundary. BPE merges the final '>' with
+        # trailing newlines; forcing a bare '>' creates a different, rare path.
+        close_ids = state.tokenizer.encode(CLOSING_TEXT, add_special_tokens=False)
         if not close_ids:
             raise ValueError("The checkpoint tokenizer must encode a nonempty </think> delimiter")
         response_ids = parent.tokens[len(parent.tokens) - parent.response_length :]

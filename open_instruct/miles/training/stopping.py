@@ -1,6 +1,7 @@
 """Explicit forced-action guidance; sampled-token PPO keeps honest behavior scores."""
 
 import contextlib
+import json
 from pathlib import Path
 
 import torch
@@ -56,10 +57,29 @@ def capture_readiness(model, batch, records, context_parallel_size=1):
 
 def save_readiness(root, step, rank, records):
     if records:
+        states = torch.stack([r["state"] for r in records])
+        if states.ndim != 2 or not torch.isfinite(states).all():
+            raise ValueError("Readiness capture requires finite one-dimensional hidden states")
         folder = Path(root) / "readiness-probes"
         folder.mkdir(parents=True, exist_ok=True)
         torch.save(
             {"policy_step": step, "layer": "lm_head_input", "records": records}, folder / f"step{step}-rank{rank}.pt"
+        )
+        norms = torch.linalg.vector_norm(states, dim=-1)
+        (folder / f"step{step}-rank{rank}.json").write_text(
+            json.dumps(
+                {
+                    "policy_step": step,
+                    "rank": rank,
+                    "layer": "lm_head_input",
+                    "records": len(records),
+                    "hidden_size": states.shape[1],
+                    "all_finite": True,
+                    "norm_min": float(norms.min()),
+                    "norm_max": float(norms.max()),
+                },
+                allow_nan=False,
+            )
         )
 
 
@@ -94,6 +114,8 @@ def auxiliary_batches(batches, pad_to=None):
                     {
                         "tokens": sequence.unsqueeze(0),
                         "total_lengths": [len(sequence)],
+                        "doc_lens": torch.tensor([[len(sequence)]], dtype=torch.int32, device=sequence.device),
+                        "max_doc_lens": [len(sequence)],
                         "stopping_context": {"info": info, "count": len(probes), "prefix_length": len(prefix)},
                     }
                 )
@@ -105,7 +127,13 @@ def auxiliary_batches(batches, pad_to=None):
         for _ in range(pad_to - len(result)):
             tokens = batches[0]["unconcat_tokens"][0][:2]
             result.append(
-                {"tokens": tokens.unsqueeze(0), "total_lengths": [len(tokens)], "stopping_context": {"dummy": True}}
+                {
+                    "tokens": tokens.unsqueeze(0),
+                    "total_lengths": [len(tokens)],
+                    "doc_lens": torch.tensor([[len(tokens)]], dtype=torch.int32, device=tokens.device),
+                    "max_doc_lens": [len(tokens)],
+                    "stopping_context": {"dummy": True},
+                }
             )
     return result
 

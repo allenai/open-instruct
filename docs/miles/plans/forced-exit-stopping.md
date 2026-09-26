@@ -45,10 +45,18 @@ parent-logit shortcut. Answer suffixes are never trained or forwarded by the
 trainer. Prefix/forced behavior probabilities from inference are never used as
 fabricated model scores.
 
+The forced boundary is `</think>\n\n`, including the natural answer separator.
+For the 4T tokenizer this is `[524, 27963, 1363]`; encoding the bare tag instead
+ends in token 29. Retained natural generations use the merged `>\n\n` token,
+so scoring/training and forced inference must use that same boundary sequence.
+
 Cuts with exactly zero advantage skip auxiliary scoring/training. Their labels
 and natural-state captures remain available, and averaging still divides by the
 original number of cuts. This removes zero-gradient work without reweighting the
 remaining guidance. Rank padding is computed after this omission.
+Auxiliary contexts carry explicit single-document boundaries, using the same
+variable-length attention path as natural packed batches. Readiness tensor files
+have small JSON companions recording counts, dimensions, norms, and finiteness.
 
 The anchor is a fresh detached actor score before the optimizer update. The loss
 is a clipped sequence-ratio surrogate with coefficient **0.1**, clipping **0.2
