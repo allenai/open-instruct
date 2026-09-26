@@ -15,7 +15,7 @@ from pathlib import Path
 import torch
 from olmo_core import config as core_config
 from olmo_core.nn import attention
-from olmo_core.nn.moe.v2 import hf
+from olmo_core.nn.moe.v2 import olmo3
 from safetensors.torch import load_file
 from scripts.miles import benchmark_core_compat as benchmark
 from transformers import AutoConfig
@@ -55,7 +55,7 @@ def score(args):
     samples = json.loads(args.samples.read_text())
     rows = samples["rows"]
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
-    core = hf.build_olmo3_moe_config_from_hf_config(
+    core = olmo3.build_olmo3_moe_config_from_hf_config(
         config,
         dtype=core_config.DType.bfloat16,
         attention_backend=attention.AttentionBackendName.torch,
@@ -71,7 +71,7 @@ def score(args):
         if state.keys() & part.keys():
             raise ValueError("Duplicate checkpoint tensor")
         state.update(part)
-    hf.load_olmo3_moe_hf_state(model, config, state)
+    olmo3.load_olmo3_moe_hf_state(model, config, state)
     del state
     model.eval()
     projection = model.lm_head.w_out

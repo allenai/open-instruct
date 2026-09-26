@@ -5,6 +5,11 @@ import torch
 from scripts.miles import probe_lm_head_precision as probe
 
 
+def test_pinned_core_factory_entry_points():
+    assert callable(probe.olmo3.build_olmo3_moe_config_from_hf_config)
+    assert callable(probe.olmo3.load_olmo3_moe_hf_state)
+
+
 def test_strict_projection_preserves_weights_and_fp32_output():
     weight = torch.tensor([[1.0, 0.5], [0.25, -0.5], [1.0, -1.0]], dtype=torch.bfloat16)
     hidden = torch.tensor([[[0.3, 0.7], [0.1, 0.9]]], dtype=torch.bfloat16)
