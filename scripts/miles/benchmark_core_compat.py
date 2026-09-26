@@ -99,6 +99,7 @@ def serve(args):
         trust_remote_code=True,
         skip_tokenizer_init=True,
         dtype="bfloat16",
+        enable_fp32_lm_head=getattr(args, "fp32_lm_head", False),
         tp_size=1,
         attention_backend="triton",
         sampling_backend="pytorch",
@@ -123,6 +124,7 @@ def serve(args):
     report = {
         "model": args.model,
         "mode": args.mode,
+        "fp32_lm_head": getattr(args, "fp32_lm_head", False),
         "rounding_kernels": os.environ["OLMO_SGLANG_ROUNDING_KERNELS"],
         "engine_args": engine_args,
         "gpu": torch.cuda.get_device_name(),
@@ -188,8 +190,8 @@ def serve(args):
                     )
                 write_json(args.output, report)
                 print("BENCH_BATCH", args.mode, repeat, start, token_count, elapsed, flush=True)
-        if args.reference_rollouts:
-            baseline = json.loads(args.reference_rollouts.read_text())
+        if args.reference_rollouts or getattr(args, "score_own_prefixes", False):
+            baseline = json.loads(args.reference_rollouts.read_text()) if args.reference_rollouts else report
             # One matched trajectory per domain; distinguish prefill scoring from cached decode.
             for rollout in baseline["rollouts"][:4]:
                 row = rollout["row"]
@@ -338,6 +340,8 @@ def main():
     parser.add_argument("--tokens", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--reference-rollouts", type=Path)
+    parser.add_argument("--fp32-lm-head", action="store_true", help="Use SGLang's FP32-output LM-head GEMM")
+    parser.add_argument("--score-own-prefixes", action="store_true", help="Also prefill-score four own continuations")
     parser.add_argument("--serving-reports", type=Path, nargs="+")
     args = parser.parse_args()
     {"prepare": prepare, "serve": serve, "score": score}[args.stage](args)
