@@ -51,6 +51,9 @@ def score(args):
     del state
     model.eval()
     if args.dtype == "float32":
+        # The pinned loader assigns checkpoint tensors, replacing the factory's
+        # requested dtype. Widen the loaded values without changing the checkpoint.
+        model.float()
         fp32_reference.audit_model(model)
     versions = {name: p._version for name, p in model.named_parameters()}
     report = {
