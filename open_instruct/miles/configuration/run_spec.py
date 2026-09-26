@@ -499,7 +499,7 @@ class RunSpec:
         origins = {}
         controls = {}
 
-        def put(target, value, origin):
+        def put(target: str, value: Any, origin: str):
             section, key = target.split(".", 1)
             if target == "miles.save_debug_rollout_data":
                 raise InputError(f"{origin}: use output.rollout_sample_rate; the run owns the capture path")
@@ -518,7 +518,8 @@ class RunSpec:
                     options.encode_options({key: value})
                     validation.runtime_values({key: value})
                 else:
-                    CoreConfig(**{key: value})
+                    core_values: dict[str, Any] = {key: value}
+                    CoreConfig(**core_values)
             except InputError as error:
                 raise InputError(f"{origin}: {error}") from error
             if target in origins and values[section][key] != value:

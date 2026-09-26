@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Trainable FP32-output head](trainable-fp32-head-math-20260926.md) | Opt-in Core head, GPU backward/compile qualification, paired 32-update GSM8K screen, numerical gap and cost |
 | [MILES package organization](package-organization-20260925.md) | Package boundaries, paired runtime update, local test results, completed B300 smokes and GPU-suite findings |
 | [Selective precision attribution](selective-precision-20260926.md) | Frozen-token component ablations, combinations, KDA kernel replay and inference cost |
 | [Full FP32 precision baseline](full-fp32-20260925.md) | Four-order improvement in short cached inference; matched BF16 reference and a longer EMO residual |

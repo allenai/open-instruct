@@ -21,18 +21,21 @@ and checkpoint boundaries. A policy version advances only after a successful
 optimizer step. The async producer attaches behavior versions to samples; the
 trainer checks their age again when consuming the batch.
 
-The Core adapter lives on OLMo-core's `robertb/miles-rl-main` branch, based on
+The Core adapter is based on OLMo-core's `robertb/miles-rl-main` branch and
 Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
-at `ad28862b5`. The runtime pins `e505356353aa7ce1f6ff83e24d6eb945f463714e`
-directly; image builds fetch that commit without applying a Core patch.
+at `ad28862b5`. The runtime pins `3c2ad5989` from `robertb/miles-fp32-head`,
+which adds the optional trainable FP32-output head to `e505356353`.
+Image builds fetch the full commit in the runtime lock without applying a Core patch.
 The port retains custom objectives, routing replay/count controls, bounded
 checkpoint planning and streaming HF interchange, including the inherited
 per-head attention and hybrid configuration export support.
 
 Local checks cover model/configuration roundtrips, checkpoint planning, adapter
-contracts and a single-GPU hybrid-MoE scoring/backward/optimizer step. Multi-GPU EP,
-Blackwell-only paths and full-policy runs still need qualification on this new
-base. Earlier measurement reports describe their original source and image pins.
+contracts and a single-GPU hybrid-MoE scoring/backward/optimizer step. The
+[FP32-head comparison](measurements/trainable-fp32-head-math-20260926.md) additionally
+exercises the full non-EMO SFT policy with EP2, B300 kernels, packing and async
+publication on this pin. Broader topologies and feature combinations need their
+own qualification. Earlier reports describe their original source and image pins.
 Use the [runtime lock and build procedure](architecture.md#runtime-sources-and-images)
 to reproduce the current source.
 
@@ -301,10 +304,16 @@ uses ordinary low-precision gradient GEMMs, including rounding the incoming
 logit gradient to the operand dtype; this is not full-FP32 training. Autocast
 continues to select operand precision. Checkpoint parameter names are unchanged.
 The native Core option currently supports the default head and default loss,
-with tensor-parallel size one. Its low-precision CUDA path supports first-order
+without tensor-parallel wrapping. Its low-precision CUDA path supports first-order
 gradients; higher-order derivatives and fused-linear cross entropy are excluded.
 
 The [frozen-weight study](measurements/selective-precision-20260926.md) motivates
 the option but does not establish an RL learning benefit. FP32 logits double
 that output tensor's storage; measure training memory and step cost for the
 chosen token/vocabulary sizes.
+
+The [short math comparison](measurements/trainable-fp32-head-math-20260926.md)
+completed 32 updates per arm: observed warmed logprob mismatch fell 34%, trainer
+time rose about 1%, and peak rank-zero allocation rose 1.87 GiB. It did not show a
+held-out answer-quality improvement. Rollouts differ between arms; the frozen-token
+study isolates the component more directly.
