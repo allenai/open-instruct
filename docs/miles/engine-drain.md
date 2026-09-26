@@ -83,16 +83,15 @@ closes their communicators before engine disposal.
 
 ## Qualification and use
 
-The separate configs under `configs/miles/qualification/engine-drain/` select six
-updates, EP2 trainers, two TP1 engines, packing, replay, TIS and initial/final held-out
-GSM8K evaluation. Save boundaries are at three/six updates. The barrier config is
-the matched rollback/control. Run via the committed-image wrapper:
+For a new run, copy an example to `runs/`, set `core.publication_mode` to
+`"engine_drain"`, and choose a supported MoE model and topology. Check the
+[configuration reference](configuration.md), run `plan` and `validate`, and submit
+through the [committed-image launcher](launching.md).
 
-```bash
-python -m open_instruct.miles plan configs/miles/qualification/engine-drain/ep2-gsm8k.toml
-MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
-  python -m open_instruct.miles run configs/miles/qualification/engine-drain/ep2-gsm8k.toml
-```
+The [archived qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/engine-drain-20260913/README.md)
+used six updates, EP2 trainers, two TP1 engines, packing, replay, TIS and
+initial/final GSM8K evaluation. Saves at three/six updates and a matched barrier
+control established the recorded lifecycle behavior.
 
 The separate slow fixture sets `OI_MILES_ENGINE_DRAIN_TEST_DELAY_SECONDS=120`.
 This qualification-only switch delays exactly one reserved request on engine 1
@@ -123,10 +122,7 @@ consumed lag, learning, or recovery.
 A separate two-GPU transport probe uses real Ray object-store snapshots and NCCL,
 but a synthetic receiver. Run through the same committed-image wrapper:
 
-```bash
-MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
-  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_engine_delivery_probe.sh
-```
+The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/engine-drain.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
 CPU tests have demonstrated independent progress, version checks, admission ordering,
 last-reader snapshot retention, deadlines and saturated-buffer lifecycle behavior.

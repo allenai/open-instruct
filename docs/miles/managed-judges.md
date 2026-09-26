@@ -7,17 +7,12 @@ before submitting a multi-node run.
 The initial two-node exercise and later four-update combined async exercise are
 recorded below; short execution gates do not establish mixture learning quality.
 
-```bash
-python -m open_instruct.miles plan configs/miles/qualification/multinode-judges.toml
-python -m open_instruct.miles run configs/miles/qualification/multinode-judges.toml
-```
-
-The checked-in qualification file names account-specific prepared paths. Prepare
-its tiny Dolci subset with `scripts/train/debug/miles_judge_preparation.sh` through
-the required build wrapper first. That CPU job runs on Saturn, validates the
-cached judge identity/template and checks the function/stdio code endpoints.
-GPU jobs run urgent on Holmes in `ai2/open-instruct-dev`, with a positive minimum
-runtime. The example disables checkpoint saves and export to bound the exercise.
+Start from [medium.toml](../../configs/miles/examples/medium.toml), copying it to
+`runs/` before changing policy, dataset, verifier and judge inputs. Run `plan` and
+`validate` on that personal file, inspect the rendered replica group, then submit
+through the [committed-image launcher](launching.md). The example paths are
+placeholders, not downloadable prepared inputs. CPU-only preparation needing
+WEKA belongs on Saturn; GPU placement follows the selected run topology.
 
 ## GPU ownership
 

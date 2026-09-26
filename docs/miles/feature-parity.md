@@ -1,7 +1,7 @@
 # Support and remaining parity gaps
 
 MILES + OLMo-core is the preferred GRPO path. This is the current support summary
-for the project branches, updated September 21, 2026; historical evidence retains its original runtime identity. An image qualification
+for the integration; historical evidence retains its original runtime identity. An image qualification
 applies to its recorded model, hardware and configuration; a combination of
 individually tested flags is not automatically qualified.
 
@@ -23,8 +23,7 @@ individually tested flags is not automatically qualified.
 | Background evaluation | Opt-in `evaluation.mode="background"`: independent Beaker evaluator jobs that never borrow, drain or pause rollout engines; [tiny MoE mechanics qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/background-evaluation-20260920.md) with accepted W&B status semantics | Best effort by design: a busy submitter drops milestones, failures are not retried and preemption can interrupt submission. The large template is provisional, and architecture, task, tensor-parallel size and evaluator image each need their own qualification |
 | Long sequences | Actual 16K/32K/64K input serving probes; bounded 16K and 32K RL exercises | Read [length evidence](long-sequences.md): serving success does not establish 64K backward or high-concurrency memory fit |
 
-Use image **`01M2XGZM2N1V4DQVMYHM52KBHZ`**; [MILES GRPO](grpo.md) records its
-source identity, publication modes and qualification boundaries.
+Build from the selected application revision and [runtime lock](architecture.md#runtime-sources-and-images). Historical image results below apply only to their recorded sources and configurations.
 
 ## Evidence to read first
 

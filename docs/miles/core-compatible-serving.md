@@ -215,13 +215,7 @@ probabilities rather than claiming a separately generated token sequence.
 
 To regenerate the summary:
 
-```bash
-beaker dataset fetch 01M391832WNY710ATQJ8QTT5MM -o runs/core-choices/results
-python scripts/miles/summarize_core_choices.py \
-  runs/core-choices/results runs/core-choices/summary.json \
-  --experiment 01M391832GK9QPG5XS39SBFX07 \
-  --result-dataset 01M391832WNY710ATQJ8QTT5MM
-```
+The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/core-compatible-serving.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
 The local RTX 4090 was usable: a BF16 CUDA operation passed outside the agent
 sandbox. After CUDA initialization it had 23.02 GiB free, while hero BF16

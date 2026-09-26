@@ -166,13 +166,15 @@ These are native consistency checks, not full-model Megatron equality.
 [native EP report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-native-ep-20260910.json) retain thresholds
 and measured errors. Current test counts belong to each image's qualification.
 
+Run the current packaged regression suite inside the pinned application image:
+
 ```bash
-# Run inside the pinned image; the GPU suite needs the allocated device(s).
-python scripts/miles/check_contract.py /output/contract
-# Submit the native EP gate through the committed-image wrapper:
-MILES_EXISTING_IMAGE=IMMUTABLE_IMAGE_ID \
-  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_contract.sh
+bash scripts/miles/test_runtime.sh -q
 ```
+
+The [archived distributed qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/core.md#numerical-evidence-and-development-checks)
+retains the original EP gate and its inputs. Those distributed experiments are
+separate from the packaged unit suite.
 
 The [historical local MoE procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check)
 records the original fixture/debug workflow. Use the current structured examples

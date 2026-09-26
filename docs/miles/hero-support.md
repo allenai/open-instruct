@@ -96,11 +96,7 @@ Tiny tests use multiple model widths and expert counts, distinct non-unit gains
 and scales, and the real distributed-checkpoint reader. The real checkpoint audit
 uses a CPU worker on Saturn with WEKA mounted, urgent priority and a minimum runtime:
 
-```bash
-MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
-  ./scripts/train/build_image_and_launch.sh --miles \
-  scripts/train/debug/miles_hero_conversion.sh
-```
+The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/hero-support.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
 Source changes must be committed before launching. Native and HF paths can be
 overridden with `--native` and `--hf`; the geometry remains config-driven.
