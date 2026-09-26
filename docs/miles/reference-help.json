@@ -59,7 +59,15 @@
     "selection_table": "Absolute path of a frozen exclusion table from `records select`; null disables selection. The data source skips its excluded prompts as they stream in.",
     "selection_sha256": "Pinned SHA-256 of core.selection_table; the run fails at startup if the file, its lineage or its protocol does not match.",
     "max_run_seconds": "Optional positive driver wall-clock budget, including startup. Stop after a completed collection, save when checkpointing is enabled, export final HF weights when requested, and request final background evaluation. It is a soft limit; leave shutdown headroom before the Beaker timeout.",
-    "fp32_lm_head": "Opt-in trainable FP32-output vocabulary projection on Core and SGLang. Keeps BF16 operands and ordinary low-precision gradient GEMMs; requires the updated Core runtime. Default false. Default LM head/loss and trainer TP1 only; training cost and learning effects require qualification."
+    "fp32_lm_head": "Opt-in trainable FP32-output vocabulary projection on Core and SGLang. Keeps BF16 operands and ordinary low-precision gradient GEMMs; requires the updated Core runtime. Default false. Default LM head/loss and trainer TP1 only; training cost and learning effects require qualification.",
+    "reward_zero_truncated": "Opt-in: assign reward zero to every length-truncated response before filtering or group centering; retain its policy loss mask. Applies to training and held-out evaluation.",
+    "reward_final_answer_only": "Opt-in for text verifiers: grade only text after the last closing think delimiter; missing or empty final sections score zero. Managed judges are unsupported.",
+    "forced_exit_positions": "Maximum paragraph-boundary exit positions per natural parent, zero disables. Natural GRPO groups remain separate from per-parent cut comparisons. Requires synchronous barrier publication and forced-exit producer/loss hooks.",
+    "forced_exit_trials": "Sampled final-answer continuations per selected position, default 3.",
+    "forced_exit_answer_tokens": "Sampled answer budget per forced exit, default 1024. Cuts reserve this space within the response budget. Every truncated answer receives reward zero.",
+    "forced_exit_coefficient": "Coefficient for full-delimiter clipped guidance, averaged over cuts and sampled parents. Each cut has one auxiliary teacher-forced prefix context shared by all answer trials; natural GRPO and behavior probabilities are unchanged.",
+    "forced_exit_probe_interval": "Zero disables readiness capture; otherwise capture parent LM-head inputs before selected cuts every N optimizer steps, including zero. Requires context parallelism one and a validated unpadded layout. Saves labeled states under checkpoints/readiness-probes.",
+    "forced_exit_parents": "Number of uniformly selected natural parents to probe per prompt group, default 1. Their auxiliary weight compensates for subsampling; answer trials remain labels only."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",

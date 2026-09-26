@@ -18,6 +18,14 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
+    reward_zero_truncated: bool = False
+    reward_final_answer_only: bool = False
+    forced_exit_positions: int = 0
+    forced_exit_parents: int = 1
+    forced_exit_trials: int = 3
+    forced_exit_answer_tokens: int = 1024
+    forced_exit_coefficient: float = 0.1
+    forced_exit_probe_interval: int = 0
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
@@ -90,6 +98,12 @@ class CoreConfig:
     selection_sha256: str | None = None
 
     def __post_init__(self):
+        validation.integer(self.forced_exit_positions, "core.forced_exit_positions", minimum=0)
+        validation.integer(self.forced_exit_probe_interval, "core.forced_exit_probe_interval", minimum=0)
+        validation.integer(self.forced_exit_parents, "core.forced_exit_parents", minimum=1)
+        validation.integer(self.forced_exit_trials, "core.forced_exit_trials", minimum=1)
+        validation.integer(self.forced_exit_answer_tokens, "core.forced_exit_answer_tokens", minimum=1)
+        validation.number(self.forced_exit_coefficient, "core.forced_exit_coefficient", exclusive_min=True)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -148,6 +162,8 @@ class CoreConfig:
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise InputError("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
+            "reward_zero_truncated",
+            "reward_final_answer_only",
             "filter_zero_std_groups",
             "compiler_cache",
             "compiler_cache_restore",
@@ -352,6 +368,51 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise InputError("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
+        if self.core.forced_exit_positions:
+            if options.get("n_samples_per_prompt", 1) < 2:
+                raise InputError("Forced exits require at least two natural responses per prompt")
+            if self.core.forced_exit_parents > options.get("n_samples_per_prompt", 1):
+                raise InputError("forced_exit_parents cannot exceed natural responses per prompt")
+            if self.core.router_aux_loss_weight or self.core.router_z_loss_weight:
+                raise InputError("Forced exits currently require zero router auxiliary coefficients")
+            if self.core.publication_mode != "barrier" or options.get("fully_async", False):
+                raise InputError("Forced exits currently require synchronous barrier publication")
+            if not self.core.reward_zero_truncated or not self.core.reward_final_answer_only:
+                raise InputError("Forced exits require zero-truncation and final-answer-only rewards")
+            if not self.core.scoring_pass_required:
+                raise InputError("Forced exits require scoring_pass_required=true for the guidance anchor")
+            if options.get("calculate_per_token_loss", False):
+                raise InputError("Forced exits require response-averaged loss for separate closing-token weighting")
+            required = {
+                "rollout_function_path": "open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
+                "loss_type": "custom_loss",
+                "custom_loss_function_path": "open_instruct.miles.training.stopping.policy_loss",
+            }
+            for name, value in required.items():
+                if options.get(name) != value:
+                    raise InputError(f"Forced exits require miles.{name}={value!r}")
+            for name in (
+                "partial_rollout",
+                "group_rm",
+                "use_dynamic_global_batch_size",
+                "use_rollout_logprobs",
+                "custom_generate_function_path",
+                "custom_reward_post_process_path",
+                "custom_convert_samples_to_train_data_path",
+                "rollout_sample_filter_path",
+                "rollout_all_samples_process_path",
+                "recompute_rollout_log_probs",
+            ):
+                if options.get(name):
+                    raise InputError(f"Forced exits do not support miles.{name}")
+            if options.get("advantage_estimator", "grpo") != "grpo":
+                raise InputError("Forced exits require GRPO advantages")
+            if options.get("kl_coef", 0) or options.get("normalize_advantages", False):
+                raise InputError("Forced exits require unmodified group-centered reward advantages")
+            if not options.get("rewards_normalization", True):
+                raise InputError("Forced exits require group-centered rewards")
+        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
+            raise InputError("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
         if self.core.records_root is not None and not options.get("fully_async", False):
             # The completed buffer that records groups exists only in fully async runs.

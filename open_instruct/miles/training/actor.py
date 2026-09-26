@@ -40,6 +40,7 @@ from open_instruct.miles.training import (
     router_load,
     router_objective,
     scheduler,
+    stopping,
 )
 from open_instruct.miles.training import metrics as training_metrics
 
@@ -212,8 +213,10 @@ class OLMoCoreTrainRayActor(TrainRayActor):
 
     @contextlib.contextmanager
     def _replay_context(self, module, batch):
-        context = models.replay_context(module, batch, enabled=self.args.use_rollout_routing_replay)
-        if getattr(self.args.olmo_core, "replay_diagnostics", False):
+        context = models.replay_context(
+            module, batch, enabled=self.args.use_rollout_routing_replay and "stopping_context" not in batch
+        )
+        if getattr(self.args.olmo_core, "replay_diagnostics", False) and "stopping_context" not in batch:
             context = replay_diagnostics.checked_context(self, module, batch, context)
         with router_objective.batch_context(batch, module.model), context:
             yield
@@ -371,9 +374,62 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             self.train_module.zero_grads()
 
             count = len(step_batches)
+            probe_interval = self.args.olmo_core.forced_exit_probe_interval
+            readiness = (
+                []
+                if (
+                    self.args.olmo_core.forced_exit_positions
+                    and probe_interval
+                    and self.clock.completed_steps % probe_interval == 0
+                )
+                else None
+            )
 
-            def objective(module, batch, count=count, normalization=normalization):
-                logits = self._forward(module, batch)
+            stopping_batches = []
+            stopping_started = time.perf_counter()
+            if self.args.olmo_core.forced_exit_positions:
+                candidates = self._agree(lambda step_batches=step_batches: stopping.auxiliary_batches(step_batches))
+                maximum = torch.tensor(len(candidates), device=step_batches[0]["tokens"].device)
+                dist.all_reduce(maximum, op=dist.ReduceOp.MAX)
+                stopping_batches = self._agree(
+                    lambda step_batches=step_batches, maximum=maximum: stopping.auxiliary_batches(
+                        step_batches, int(maximum)
+                    )
+                )
+                self.train_module.model.eval()
+                with torch.no_grad():
+                    for auxiliary in stopping_batches:
+                        with self._replay_context(self.train_module, auxiliary):
+                            stopping.anchor_closing_scores(auxiliary, self._forward(self.train_module, auxiliary))
+                torch.cuda.synchronize()
+                contract.record(
+                    self.args,
+                    {
+                        "event": "stopping_scoring",
+                        "step": self.clock.completed_steps,
+                        "seconds": time.perf_counter() - stopping_started,
+                        "contexts_per_rank": len(stopping_batches),
+                        "model_tokens": sum(b["tokens"].numel() for b in stopping_batches),
+                    },
+                )
+            metric_template = {}
+
+            def objective(
+                module,
+                batch,
+                count=count,
+                normalization=normalization,
+                readiness=readiness,
+                metric_template=metric_template,
+            ):
+                if "stopping_context" in batch:
+                    loss, values = stopping.auxiliary_loss(
+                        self.args, batch, self._forward(module, batch), metric_template, normalization.world_size
+                    )
+                    self._agree(lambda: self._validate_loss(loss))
+                    return loss, values
+                with stopping.capture_readiness(module.model, batch, readiness, self.args.context_parallel_size):
+                    logits = self._forward(module, batch)
                 if capture:
                     batch["training_log_probs"] = self._training_log_probs(logits, batch)
                 loss, _, metrics = miles_loss.loss_function(
@@ -382,9 +438,17 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 if self.args.calculate_per_token_loss:
                     loss = normalization.scale_token_loss(loss)
                 self._agree(lambda: self._validate_loss(loss))
-                return loss, training_metrics.loss_metrics(metrics, loss)
+                values = training_metrics.loss_metrics(metrics, loss)
+                if self.args.olmo_core.forced_exit_positions:
+                    values.update({name: loss.detach().new_zeros(()) for name in stopping.METRICS})
+                metric_template.update(values)
+                return loss, values
 
-            metrics = self.train_module.train_batch_with_loss(step_batches, objective, self._replay_context)
+            metrics = self.train_module.train_batch_with_loss(
+                step_batches + stopping_batches, objective, self._replay_context
+            )
+            if readiness is not None and self.args.save:
+                stopping.save_readiness(self.args.save, self.clock.completed_steps, dist.get_rank(), readiness)
             if capture:
                 training_scores = self._agree(
                     lambda step_batches=step_batches: [
@@ -457,6 +521,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                         "local_auxiliary_objective": aux_metrics,
                         "local_behavior_versions": sorted(set(step_versions)),
                         "local_microbatches": count,
+                        "stopping_microbatches": len(stopping_batches),
                         "lr_used": lr_used,
                         "lr_next": self.lr_scheduler.get_last_lr(),
                         "published_step": self.clock.published_step,

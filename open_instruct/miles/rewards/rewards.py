@@ -304,6 +304,26 @@ async def _score(args, sample):
     metadata = sample.metadata
     if not isinstance(metadata, dict) or not isinstance(metadata.get("verifiers"), list) or not metadata["verifiers"]:
         raise ValueError("Each sample requires nonempty metadata.verifiers")
+    for spec in metadata["verifiers"]:
+        if spec["name"] not in registry:
+            raise ValueError(f"Verifier {spec['name']!r} is absent from the trusted reward registry")
+        _finite(spec.get("weight", 1.0), "weight")
+    status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
+    reason = None
+    response = sample.response
+    if getattr(args.olmo_core, "reward_zero_truncated", False) and status == "truncated":
+        reason = "truncated"
+    elif getattr(args.olmo_core, "reward_final_answer_only", False):
+        _, separator, response = response.rpartition("</think>")
+        if not separator or not response.strip():
+            reason = "missing_final_answer"
+    if reason:
+        metadata["reward_gate"] = reason
+        metadata["reward_components"] = [
+            {"name": spec["name"], "score": 0.0, "weight": spec.get("weight", 1.0), "cost": 0.0}
+            for spec in metadata["verifiers"]
+        ]
+        return 0.0
     components = []
     total = 0.0
     for spec in metadata["verifiers"]:
@@ -314,7 +334,13 @@ async def _score(args, sample):
         # response_length includes tool observations. Their tokens remain in the
         # trajectory, while the policy loss uses the separate MILES loss mask.
         tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
+        if getattr(args.olmo_core, "reward_final_answer_only", False):
+            # Text math verifiers do not use token IDs. Never pass the hidden
+            # reasoning's tokens alongside an extracted final-answer string.
+            tokens = []
         if judge_registry.bound(name):
+            if getattr(args.olmo_core, "reward_final_answer_only", False):
+                raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")
             score = await general_judge.general_judge_score(
                 args, sample, name=name, target=copy.deepcopy(spec["target"])
             )
@@ -323,7 +349,7 @@ async def _score(args, sample):
             continue
         result = await registry[name].async_call(
             tokens,
-            sample.response,
+            response,
             # Verifiers may consume dictionary labels; preserve the original targets.
             copy.deepcopy(spec["target"]),
             query=metadata.get("query", sample.prompt),
