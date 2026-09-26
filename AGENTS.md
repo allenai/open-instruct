@@ -42,7 +42,7 @@ maintain or reproduce a legacy run still apply.
 
 MILES has its own Core adapter and uses SGLang. The deprecated Core/vLLM path in
 `grpo.py` is separate, even though both use OLMo-core. Dated measurements/plans
-are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/legacy_grpo.md)
+are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/grpo.md)
 contains the old CLI and reproduction instructions.
 
 # Beaker scheduling and distributed launches
@@ -98,8 +98,7 @@ contains the old CLI and reproduction instructions.
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
-- To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
-- To launch experiment scripts, use the `build_image_and_launch.sh` script, like this: `./scripts/train/build_image_and_launch.sh $SOME_SCRIPT`.
+- To run `./scripts/train/build_image_and_launch.sh`, first commit all changes. The ordinary launcher supports `--cuda-version 12|13` before the script path; CUDA 13 images are intended for compatible clusters such as `ai2/holmes`. MILES uses the separate `--miles` dispatch and pinned runtime.
 - For the deprecated vLLM GRPO implementation only, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.

@@ -7,7 +7,7 @@ OLMo-core and serves through SGLang. Check model and workload support below.
 
 The older `grpo.py` Core/vLLM and `grpo_fast.py` DeepSpeed/vLLM entry points are
 **deprecated** and retained for existing runs and historical reproduction only.
-Their [legacy reference](../algorithms/legacy_grpo.md) does not define MILES behavior.
+Their [legacy reference](../algorithms/grpo.md) does not define MILES behavior.
 If a required capability is missing here, identify the gap rather than silently
 switching to a deprecated backend.
 

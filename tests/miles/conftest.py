@@ -17,7 +17,7 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    if config.getoption("--require-miles-runtime") and collect_ignore:
+    if config.getoption("--require-miles-runtime", default=False) and collect_ignore:
         raise pytest.UsageError(
             "MILES runtime dependencies are missing; use the image built with runtime/miles/Dockerfile"
         )
