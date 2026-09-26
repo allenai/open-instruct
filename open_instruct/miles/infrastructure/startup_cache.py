@@ -20,10 +20,9 @@ from importlib import util
 from pathlib import Path
 from typing import Any, cast
 
-from scripts.miles import compiler_cache_run as probes
-
 from open_instruct import logger_utils
 from open_instruct.miles.infrastructure import compiler_cache as cache
+from open_instruct.miles.infrastructure import compiler_identity as probes
 
 logger = logger_utils.setup_logger(__name__)
 ENV = "OI_CORE_STARTUP_CACHE"

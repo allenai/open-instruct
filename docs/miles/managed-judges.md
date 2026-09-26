@@ -41,7 +41,7 @@ allocation launcher could avoid those unused GPUs. Increasing inference capacity
 is already expressible with `inference.gpus`; engines must fit within a node and
 tensor parallelism must divide the node capacity. Multi-node colocation, separate
 evaluation GPU pools, cross-node serving TP and automatic coordinated restart
-remain unsupported. Restarting a run that carries a managed judge is not qualified: the [multi-node resume qualification](measurements/multinode-resume-20260922.md) covers a two-replica trainer and engine with no judge in the allocation.
+remain unsupported. Restarting a run that carries a managed judge is not qualified: the [multi-node resume qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md) covers a two-replica trainer and engine with no judge in the allocation.
 
 The launcher submits one task with native replicas, leader selection and
 synchronized start. Multi-node launches require full eight-GPU nodes; partial-node
@@ -82,7 +82,7 @@ a serving override without rewriting prepared weights. The native default stays
 unchanged; unsupported models, double scaling and limits above 131072 fail.
 This changes judge computation, so compare runs using the same judge setting and
 qualify long grading requests before using it for a benchmark. See the
-[qualification record](measurements/learning-confidence-20260914/README.md).
+[qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/learning-confidence-20260914/README.md).
 
 The judge client was ported from olmo-miles `afbdd6f`. It uses the same rubric
 text/digests and answer extraction, keeps `metadata.judge_query` and reference
@@ -117,8 +117,8 @@ or throughput for a production mixture.
 
 Implementation status: the two-node, two-update EP2 mixed-task exercise passed
 with the native MILES router and both named judge bindings; its retained-sample
-audit also passed. See the [results](measurements/multinode-judges-20260912.md).
-The later [EP2 + three engines + one judge exercise](measurements/colleague-20260913/README.md)
+audit also passed. See the [results](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-judges-20260912.md).
+The later [EP2 + three engines + one judge exercise](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/colleague-20260913/README.md)
 also passed async/TIS, replay/packing, saves and actual prefix-cache hits. Neither
 establishes the full EP8 judged combination, 32K judged responses or sustained
 multi-node performance.
@@ -138,4 +138,4 @@ cannot prove an engine has current policy weights. Registration epochs reject
 late probe results from retired incarnations. This fix does not independently
 qualify engine replacement or enable fault tolerance. The bounded named-judge
 exercise and its failed attempts are recorded in the
-[measurement note](measurements/multinode-judges-20260912.md).
+[measurement note](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-judges-20260912.md).

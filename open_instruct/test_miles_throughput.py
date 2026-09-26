@@ -2,11 +2,12 @@
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from scripts.miles import sample_gpu_usage, throughput_basket, throughput_occupancy
+from scripts.miles import analyze_throughput, sample_gpu_usage, throughput_occupancy
 
 from open_instruct.miles.configuration import throughput, validation
 from open_instruct.miles.configuration.config import CoreConfig
@@ -63,59 +64,9 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
     } <= codes
 
 
-@pytest.mark.parametrize(
-    "case,gpus,replicas",
-    [
-        ("dev", 1, 1),
-        ("tiny", 2, 1),
-        ("small-2t4i-group", 6, 1),
-        ("small-4t2i-group", 6, 1),
-        ("small-2t4i-sample", 6, 1),
-        ("small-2t4i-c8", 6, 1),
-        ("bridge-2t6i", 8, 1),
-        ("bridge-8t8i", 16, 2),
-        ("large-8t56i", 64, 8),
-        ("steady-8t24i-c8-b256", 32, 4),
-        ("steady-2t6i-c8-b32", 8, 1),
-        ("steady-2t6i-c8-b128", 8, 1),
-        ("steady-2t16i-c8-b128", 18, 3),
-        ("steady-2t6i-c8-b128-graphs", 8, 1),
-        ("steady-2t4i-c8-b32-graphs", 6, 1),
-        ("steady-2t4i-c8-b128-graphs", 6, 1),
-        ("steady-2t2i-c32-b128-graphs", 4, 1),
-        ("steady-2t4i-c8-b32-graphs-p32", 6, 1),
-        ("steady-8t8i-c16-b256-graphs", 16, 2),
-    ],
-)
-def test_basket_allocates_requested_policy_gpus(case, gpus, replicas):
-    spec = throughput_basket.specification(case, "/weka/oe-training-default/test/" + case + "/run")
-    plan = spec.plan()
-    assert plan["allocation"]["policy_gpus"] == gpus
-    assert plan["allocation"]["replicas"] == replicas
-    assert not spec.compile().miles.get("eval_interval")
-    assert plan["launch"]["auto_resume"] is False
-
-
-def test_small_comparisons_hold_model_data_and_objective_fixed():
-    cases = [
-        throughput_basket.specification(name, "/weka/oe-training-default/test/" + name + "/run")
-        for name in throughput_basket.CASES
-        if name.startswith("small-")
-    ]
-    for spec in cases:
-        assert spec.model == cases[0].model
-        assert spec.data == cases[0].data
-        config = spec.compile()
-        assert config.miles["global_batch_size"] == 32
-        assert config.miles["rollout_max_response_len"] == 4096
-        assert config.miles["lr"] == 1e-6
-        assert config.core.max_policy_lag == 2
-        assert config.core.publication_mode == "refresh"
-
-
 @pytest.mark.parametrize("profile,gpus", [("dev", 1), ("small", 2), ("medium", 16), ("large", 56)])
 def test_self_contained_example_plans(profile, gpus):
-    spec = RunSpec.load(throughput_basket.ROOT / f"configs/miles/examples/{profile}.toml")
+    spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
     assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k"
     assert spec.plan()["allocation"]["allocated_gpus"] == gpus
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
@@ -156,7 +107,7 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
         "training_contract_rank0.jsonl",
         [dict(event="optimizer", step=i + 1, optimizer_skipped=False) for i in range(4)],
     )
-    result = throughput_basket.analyze(tmp_path, warmup=1)
+    result = analyze_throughput.analyze(tmp_path, warmup=1)
     assert result["batch_collection_breakdown"]["completed_queue_get_seconds"] == 0.75
     assert result["batch_collection_breakdown"]["other_collection_seconds"] == 2.25
     assert result["warm_cycle_seconds"] == 9
@@ -166,8 +117,8 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     assert result["validated_trainer_ranks"] == 1
     (tmp_path / "workflow.json").write_text(json.dumps({"status": "failed", "error": "cleanup timed out"}))
     with pytest.raises(ValueError, match="Workflow"):
-        throughput_basket.analyze(tmp_path, warmup=1)
-    measured = throughput_basket.analyze(tmp_path, warmup=1, allow_incomplete_workflow=True)
+        analyze_throughput.analyze(tmp_path, warmup=1)
+    measured = analyze_throughput.analyze(tmp_path, warmup=1, allow_incomplete_workflow=True)
     assert not measured["end_to_end_passed"]
     assert measured["workflow"]["error"] == "cleanup timed out"
     (tmp_path / "workflow.json").write_text(json.dumps({"status": "complete"}))
@@ -175,10 +126,10 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
         json.dumps({"runtime": {"miles": {"num_rollout": 4, "actor_num_gpus_per_node": 2}}})
     )
     with pytest.raises(ValueError, match="rank 1"):
-        throughput_basket.analyze(tmp_path, warmup=1)
+        analyze_throughput.analyze(tmp_path, warmup=1)
     (tmp_path / "plan.json").write_text(json.dumps({"runtime": {"miles": {"num_rollout": 4, "fully_async": True}}}))
     with pytest.raises(ValueError, match="queue counters"):
-        throughput_basket.analyze(tmp_path, warmup=1)
+        analyze_throughput.analyze(tmp_path, warmup=1)
     prefix = "rollout/fully_async/completed_queue/"
     write(
         "rollout_flow.jsonl",
@@ -193,10 +144,10 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
         ],
     )
     with pytest.raises(ValueError, match="delivery accounting"):
-        throughput_basket.analyze(tmp_path, warmup=1)
+        analyze_throughput.analyze(tmp_path, warmup=1)
     write("training_contract_rank0.jsonl", [])
     with pytest.raises(ValueError, match="optimizer"):
-        throughput_basket.analyze(tmp_path, warmup=1)
+        analyze_throughput.analyze(tmp_path, warmup=1)
 
 
 @pytest.mark.parametrize("value", [0, -1, True, float("inf"), float("nan")])
@@ -332,16 +283,6 @@ def test_graph_warning_uses_json_over_convenience_and_legacy_flags():
     assert any(issue["code"] == "decode_graph_coverage" for issue in report["warnings"])
 
 
-def test_graph_followup_changes_only_producer_budget_and_identity():
-    root = "/weka/oe-training-default/test/run"
-    baseline = throughput_basket.specification("steady-2t4i-c8-b32-graphs", root).to_dict()
-    bounded = throughput_basket.specification("steady-2t4i-c8-b32-graphs-p32", root).to_dict()
-    assert bounded["async"].pop("async_max_concurrent_samples") == 32
-    baseline.pop("name")
-    bounded.pop("name")
-    assert bounded == baseline
-
-
 def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
     cluster = tmp_path / "cluster" / "attempt"
     cluster.mkdir(parents=True)
@@ -351,21 +292,6 @@ def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
         (cluster / f"node-{rank}.json").write_text(json.dumps(dict(rank=rank, address=address)))
         (cluster / f"placement-{rank}.json").write_text(json.dumps(dict(address=address, layout=layout)))
     assert throughput_occupancy.node_roles(tmp_path) == {"0": nodes[1], "1": nodes[0]}
-
-
-@pytest.mark.parametrize("concurrency", [32, 64, 128])
-def test_packed_capacity_sweep_preserves_workload_and_supplies_engines(concurrency):
-    spec = throughput_basket.specification(
-        f"packed-2t2i-c{concurrency}-p512-b128", "/weka/oe-training-default/test/run"
-    )
-    config = spec.compile()
-    assert config.core.sequence_packing and config.core.packing_max_tokens == 6144
-    assert config.miles["async_max_concurrent_samples"] == 512
-    assert config.miles["sglang_server_concurrency"] == concurrency
-    assert config.miles["sglang_max_running_requests"] == concurrency
-    assert config.miles["sglang_cuda_graph_max_bs_decode"] == concurrency
-    assert config.miles["global_batch_size"] == 128
-    assert spec.plan()["allocation"]["policy_gpus"] == 4
 
 
 def test_terminal_inventory_distinguishes_buffered_ready_and_shutdown_leftovers(tmp_path):
@@ -404,55 +330,18 @@ def test_terminal_inventory_distinguishes_buffered_ready_and_shutdown_leftovers(
 
 
 def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run():
-    assert throughput_basket.terminal_unused_work(None, delivered_tokens=80, stale_dropped_tokens=10) is None
+    assert analyze_throughput.terminal_unused_work(None, delivered_tokens=80, stale_dropped_tokens=10) is None
     record = {
         "event": "shutdown_complete",
         "completed_queue": dict(groups=2, samples=8, response_tokens=20),
         "producer_ready": dict(groups=0, samples=0, response_tokens=0),
         "shutdown_unqueued": dict(groups=1, samples=4, response_tokens=10),
     }
-    result = throughput_basket.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10)
+    result = analyze_throughput.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10)
     assert result["samples"] == 12 and result["response_tokens"] == 30
     assert result["fraction_of_accounted_response_tokens"] == 0.25
     record["event"] = "shutdown_incomplete"
-    assert throughput_basket.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10) is None
-
-
-def test_c256_supplies_both_engines_and_scales_required_caches():
-    spec = throughput_basket.specification("packed-2t2i-c256-p1024-b128", "/weka/oe-training-default/test/run")
-    config = spec.compile()
-    assert config.core.sequence_packing and config.core.packing_max_tokens == 6144
-    assert config.miles["async_max_concurrent_samples"] == 1024
-    assert config.miles["sglang_server_concurrency"] == 256
-    assert config.miles["sglang_max_running_requests"] == 256
-    assert config.miles["sglang_cuda_graph_max_bs_decode"] == 256
-    assert config.miles["sglang_max_mamba_cache_size"] == 2048
-    assert config.miles["sglang_max_total_tokens"] == 1572864
-    assert spec.plan()["allocation"]["policy_gpus"] == 4
-
-
-def test_fast_live_probe_keeps_inference_and_objective_fixed():
-    root = "/weka/oe-training-default/test/run"
-    base = throughput_basket.specification("packed-2t2i-c32-p512-b128", root).to_dict()
-    fast = throughput_basket.specification("packed-fast-2t2i-c32-p512-b128", root).to_dict()
-    base.pop("name")
-    fast.pop("name")
-    base["trainer"]["activation_recompute"] = False
-    base["core"].update(scoring_pass_required=False, replay_diagnostics=False)
-    assert fast == base
-
-
-def test_fast_four_engine_probe_changes_only_capacity_and_duration():
-    root = "/weka/oe-training-default/test/run"
-    base = throughput_basket.specification("packed-fast-2t2i-c32-p512-b128", root).to_dict()
-    more = throughput_basket.specification("packed-fast-2t4i-c32-p512-b128", root).to_dict()
-    base.pop("name")
-    more.pop("name")
-    base["inference"]["gpus"] = 4
-    base["launch"]["gpus_per_replica"] = 6
-    base["training"]["num_rollouts"] = 48
-    base["miles"]["lr_decay_iters"] = 48
-    assert more == base
+    assert analyze_throughput.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10) is None
 
 
 def test_triton_artifact_sampler_tracks_growth_without_unrelated_caches(tmp_path):

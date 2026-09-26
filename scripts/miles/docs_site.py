@@ -21,7 +21,13 @@ def on_page_markdown(markdown, *, page, config, files):
         target = (source.parent / path).resolve()
         if target.is_relative_to(docs) or not target.is_relative_to(repo):
             return match[0]
-        url = config["repo_url"].rstrip("/") + "/blob/robertb/miles-olmo-core/" + str(target.relative_to(repo))
+        url = (
+            config["repo_url"].rstrip("/")
+            + "/blob/"
+            + config.get("repo_branch", "main")
+            + "/"
+            + str(target.relative_to(repo))
+        )
         return match[1] + url + (separator + anchor if separator else "") + match[3]
 
     return LINK.sub(rewrite, markdown)

@@ -19,7 +19,7 @@ Current named tasks are `gsm8k`, `math`, legacy `ifeval`, and generated
 `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
 The [multitask example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/medium.toml) mixes
 GSM8K and math; it is not the complete published Olmo 3 mixture.
-Use manifest adoption and the [mixed-task qualification](measurements/mixture-qualification.md)
+Use manifest adoption and the [mixed-task qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/mixture-qualification.md)
 for broader data. Unsupported task/verifier contracts fail rather than silently
 substituting a different judge or reward.
 
@@ -106,7 +106,7 @@ implementation. Examine paired answer changes rather than just aggregate scores.
 Rollout dumps are trusted tensor artifacts on WEKA; do not load arbitrary external
 pickle files. The small Beaker reports are an index into the larger retained
 artifacts, not a replacement for per-sample auditing. See [operations](operations.md)
-and [comparison evidence](measurements/gsm8k-results-20260911.md).
+and [comparison evidence](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/gsm8k-results-20260911.md).
 
 
 ## Code-service failure policy

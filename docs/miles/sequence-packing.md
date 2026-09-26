@@ -84,7 +84,7 @@ independent retained-data audit.
 
 
 Numerical results and run identities are recorded in
-[the measurement notes](measurements/sequence-packing-20260912/README.md).
+[the measurement notes](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/sequence-packing-20260912/README.md).
 The small real-model follow-up is configured in
 `configs/miles/qualification/sequence-packing.toml`: EP2 plus one TP1 SGLang engine,
 three async updates, 8 prompts × 2 responses, replay/recomputation, and a 4096-token

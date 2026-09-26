@@ -50,7 +50,7 @@ def test_reconstructed_rates_use_global_counts_and_slowest_rank(tmp_path, monkey
         completed_queue_get_seconds=0.2,
         other_collection_seconds=0.8,
     )
-    monkeypatch.setattr(capacity_metrics.throughput_basket, "analyze", lambda *a, **k: {"per_update": [cycle]})
+    monkeypatch.setattr(capacity_metrics.analyze_throughput, "analyze", lambda *a, **k: {"per_update": [cycle]})
 
     def rows(path):
         if path.name.startswith("training_contract"):
@@ -71,7 +71,7 @@ def test_reconstructed_rates_use_global_counts_and_slowest_rank(tmp_path, monkey
             ]
         return [dict(rollout_id=0, queue_metrics={}, mixed_responses=0)]
 
-    monkeypatch.setattr(capacity_metrics.throughput_basket, "rows", rows)
+    monkeypatch.setattr(capacity_metrics.analyze_throughput, "rows", rows)
     monkeypatch.setattr(throughput_occupancy, "node_roles", lambda _: {})
     monkeypatch.setattr(
         throughput_occupancy, "analyze", lambda *a, **k: {"pipeline": {}, "hardware": {}, "engines": {}}

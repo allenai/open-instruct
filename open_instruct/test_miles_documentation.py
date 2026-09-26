@@ -122,5 +122,5 @@ def test_site_links_target_repository_without_changing_local_doc_links():
         config={"docs_dir": str(ROOT / "docs"), "repo_url": "https://github.com/allenai/open-instruct"},
         files=None,
     )
-    assert "https://github.com/allenai/open-instruct/blob/robertb/miles-olmo-core/configs/miles/README.md" in result
+    assert "https://github.com/allenai/open-instruct/blob/main/configs/miles/README.md" in result
     assert "[workflow](workflow.md)" in result

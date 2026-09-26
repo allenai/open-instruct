@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from scripts.miles import build_image, launch_hero_serving, prepare_runtime
+from scripts.miles import build_image, prepare_runtime
 
 
 @pytest.fixture
@@ -98,14 +98,3 @@ def test_image_build_passes_token_as_secret(monkeypatch, credential_source):
     assert args[args.index("--secret") + 1] == "id=github_token,env=MILES_BUILD_GITHUB_TOKEN"
     assert "test-token" not in str(args)
     assert kwargs["env"]["MILES_BUILD_GITHUB_TOKEN"] == "test-token"
-
-
-@pytest.mark.parametrize("mode_matrix", [False, True])
-def test_serving_launcher_uses_merged_tool(mode_matrix):
-    spec = launch_hero_serving.specification("image", hf="/model with spaces", mode_matrix=mode_matrix)
-    command = spec["tasks"][0]["arguments"][0]
-    assert "tools/qualify_serving.py" in command
-    assert "--model '/model with spaces'" in command
-    assert ("--diagnostic-mode-matrix" in command) == mode_matrix
-    assert "--core-reference" not in command
-    assert all(dataset["mountPath"] != "/reference" for dataset in spec["tasks"][0]["datasets"])

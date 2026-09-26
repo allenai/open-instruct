@@ -16,6 +16,7 @@ import pytest
 from scripts.miles import compiler_cache_run as wrapper
 
 from open_instruct.miles.infrastructure import compiler_cache as cache
+from open_instruct.miles.infrastructure import compiler_identity as probes
 
 KEY = "a" * 64
 IMAGE = "sha256:" + "b" * 64
@@ -192,11 +193,11 @@ def test_compiler_environment_ignores_ephemeral_directories_but_keeps_options():
         "SGLANG_DG_CACHE_DIR_PER_PROCESS": "1",
         "TILELANG_DISABLE_CACHE": "0",
     }
-    first = wrapper.compiler_environment(env)
+    first = probes.compiler_environment(env)
     env.update(SGLANG_DG_CACHE_DIR="/tmp/engine-b", TILELANG_TMP_DIR="/tmp/tile-b")
-    assert wrapper.compiler_environment(env) == first
+    assert probes.compiler_environment(env) == first
     env["SGLANG_DG_CACHE_DIR_PER_PROCESS"] = "0"
-    assert wrapper.compiler_environment(env) != first
+    assert probes.compiler_environment(env) != first
 
 
 def test_source_identity_hashes_dirty_code_and_rejects_symlink(tmp_path):
@@ -359,7 +360,7 @@ def test_unknown_embedded_private_path_and_links_rejected(tmp_path):
 
 
 def options(tmp_path, monkeypatch):
-    monkeypatch.setattr(wrapper, "toolchain", lambda environment: {"test_only_gpu": "fake"})
+    monkeypatch.setattr(probes, "toolchain", lambda environment: {"test_only_gpu": "fake"})
     runtime_lock = write(tmp_path, "lock.json", b'{"revision":"fixed"}')
     hf_config = write(tmp_path, "hf-config.json", b'{"hidden_size":128}')
     run_config = write(tmp_path, "run.toml", b"[core]\nep_size=1\n[miles]\nnum_rollout=1\n")
@@ -446,7 +447,7 @@ def test_compiler_environment_excludes_private_paths_but_tracks_precision():
         "OLMO_USE_TORCH_GROUPED_MM": "0",
         "NVIDIA_TF32_OVERRIDE": "0",
     }
-    assert wrapper.compiler_environment(env) == {
+    assert probes.compiler_environment(env) == {
         "NVIDIA_TF32_OVERRIDE": cache.digest("0"),
         "OLMO_USE_TORCH_GROUPED_MM": cache.digest("0"),
     }
@@ -481,8 +482,8 @@ def test_changed_runtime_source_blocks_publication(tmp_path, monkeypatch):
     ],
 )
 def test_compile_environment_changes_are_fingerprinted_without_raw_values(name):
-    first = wrapper.compiler_environment({name: "0", "SGLANG_API_KEY": "private-credential"})
-    second = wrapper.compiler_environment({name: "1", "SGLANG_API_KEY": "private-credential"})
+    first = probes.compiler_environment({name: "0", "SGLANG_API_KEY": "private-credential"})
+    second = probes.compiler_environment({name: "1", "SGLANG_API_KEY": "private-credential"})
     assert first != second
     assert "private-credential" not in json.dumps(first)
 
@@ -498,8 +499,8 @@ def test_compile_environment_changes_are_fingerprinted_without_raw_values(name):
 )
 def test_remote_or_custom_cache_controls_rejected(name):
     with pytest.raises(ValueError, match="not qualified"):
-        wrapper.validate_local_cache_controls({name: "1"})
-    wrapper.validate_local_cache_controls({"TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0"})
+        probes.validate_local_cache_controls({name: "1"})
+    probes.validate_local_cache_controls({"TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0"})
 
 
 def test_interrupted_wait_stops_owned_child_and_records_evidence(tmp_path, monkeypatch):

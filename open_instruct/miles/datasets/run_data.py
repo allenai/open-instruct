@@ -23,7 +23,7 @@ TASKS = {
     "multiplication": ("generated-multiplication-v1", None, "multiplication"),
 }
 FACTORIES = {
-    "gsm8k": "open_instruct.ground_truth_utils.GSM8KVerifier",
+    "gsm8k": "open_instruct.miles.rewards.verifiers.GSM8KVerifier",
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "strict_math": "open_instruct.ground_truth_utils.StrictMathVerifier",
     "ifeval_old": "open_instruct.ground_truth_utils.IFEvalVerifierOld",

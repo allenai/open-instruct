@@ -1,7 +1,7 @@
 # Hero support in the MILES / OLMo-core integration
 
 Both corrected-tokenizer hero SFT checkpoints passed a bounded
-[four-update MILES mechanics check](measurements/hero-rl-smoke-20260924.md) with
+[four-update MILES mechanics check](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-rl-smoke-20260924.md) with
 H100 EP4 training, TP1 automatic fused-rounding serving, nonzero gradients and
 exact live weight publication. This establishes the recorded short barrier path;
 learning quality, mixed-policy refresh, long context and save/resume remain
@@ -9,7 +9,7 @@ unqualified. The earlier HF-reference probability failures below are retained as
 historical evidence and are not being relabeled as passes. The new runs kept the
 Core/behavior mean-gap guard at 0.05. See the [support matrix](feature-parity.md).
 
-The [September 23 corrected-tokenizer SFT audit](measurements/hero-sft-20260923.md)
+The [September 23 corrected-tokenizer SFT audit](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-sft-20260923.md)
 locates paired 4T EMO/non-EMO pretraining lineages and their full SFT configs.
 Both SFT checkpoints disable EMO and pass exact architecture/weight conversion
 checks. H100 and B300 inference match the sampled greedy tokens but fail the
@@ -17,14 +17,14 @@ unchanged probability gate in that earlier study, which deferred the training
 trial until the numerical investigation. These are separate checkpoints
 from the historical base-model qualification below.
 
-The [SFT numerical isolation](measurements/hero-numerics-20260923.md) finds exact
+The [SFT numerical isolation](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-numerics-20260923.md) finds exact
 HF/SGLang routing on identical inputs across all tested layers and prefixes.
 Routed-expert, full-attention and smaller RMSNorm arithmetic differences explain
 the observed forward mismatch; diagnostic HF substitutions remove it. That
 diagnostic predates the fused-rounding implementation and the bounded training
 exercise above; its historical failed gate result is unchanged.
 
-The [direct Core/HF fidelity investigation](measurements/hero-core-fidelity-20260923.md)
+The [direct Core/HF fidelity investigation](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-core-fidelity-20260923.md)
 finds exact agreement between the HF Core-layout reference, current Core scoring,
 and Core gradient-enabled forward for both SFT checkpoints on the tested inputs.
 Ordinary HF execution differs, despite faithful exported tensors. Partial serving
@@ -126,7 +126,7 @@ expert parallelism before allocating model weights.
 Actual tiny Olmo 3 full/sliding models pass HF logit checks and exact weight
 roundtrips. Both also pass a real MILES loss/update and exact next-update restore
 check on a local GPU, alongside Qwen3, KDA and latent KDA. The checks found and
-fixed a duplicated sliding-window decrement on this newer Core lineage. Full-size dense lifecycle evidence is described in the [dense guide](olmo3-pre-rl.md);
+fixed a duplicated sliding-window decrement on this newer Core lineage. Full-size dense lifecycle evidence is described in the [dense guide](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/olmo3-pre-rl.md);
 hero qualification does not transfer to that model, or vice versa.
 
 ## Current local evidence
@@ -162,7 +162,7 @@ The full-checkpoint serving launcher enables the same comparison with a preset
 finished with exit zero. All 23,441 HF tensors matched native FP32 masters after
 the expected BF16 export cast and embedding/head vocabulary trim. HF import
 through the adapter and re-export produced the identical tensor-content digest.
-The [machine-readable report](measurements/hero-conversion-20260910.json)
+The [machine-readable report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-conversion-20260910.json)
 records architecture, source pins, CPU-only execution overrides, 579 seconds
 elapsed and 72 GiB peak RSS. No optimizer moments were loaded.
 
@@ -172,6 +172,6 @@ finished with exit one because both Core and SGLang exceeded the predeclared
 modes. Core maximum full-vocabulary error was 0.5473 (mean 0.08255); SGLang
 maximum top-20 conditional error was 0.5619, with sampled cached-decode error
 0.08974. These measure different subsets and are not equivalent statistics.
-[The retained report](measurements/hero-serving-20260910.json) records
+[The retained report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-serving-20260910.json) records
 the failed gate. This failure motivated the subsequent layerwise investigation and Core-based
 checks linked above; token agreement did not override the failed probability check.

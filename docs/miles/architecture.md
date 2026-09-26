@@ -21,20 +21,13 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 
 ## Runtime sources and images
 
-`runtime/miles/runtime.lock.json` pins every runtime source to an exact Git commit;
-image builds fetch those commits without applying patches. `olmo-sglang` uses its
-merged main commit `72f194a35045f02cc7d87980819bd0e4652cc931`. OLMo-core is pinned
-to `3c2ad5989f88f8cfb04c983b4243e1a502e4ea1d` on `robertb/miles-fp32-head`.
-This adds the opt-in trainable FP32-output LM head to the prior MILES runtime.
-That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
-and carries the MILES adapter plus inherited HF interchange support. MILES uses
-`592905363e9efbbb1e45d7e838ec48b7b716dc69` on
-[`allenai/miles:robertb/miles-polish`](https://github.com/allenai/miles/tree/robertb/miles-polish).
-This includes the organized Open Instruct adapter paths and integrates runtime changes on upstream
-`e89b45f7f85a0e76fba6a99474b1dd9b67a3c20e`. Worker launch, inference lifecycle,
-and rollout execution follow the upstream ownership boundaries. Builds fetch exact
-commits, not moving branch tips. See the [migration checks](measurements/miles-upstream-20260922.md)
-for validation and dependency limits.
+[`runtime/miles/runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the
+source of truth for exact dependency commits and the immutable binary base.
+Builds fetch those commits without patches or moving branch tips. MILES uses the
+organized adapter hooks; OLMo-core provides the model, objective and checkpoint
+APIs required by this adapter; olmo-sglang supplies compatible serving models.
+The ordinary Open Instruct environment keeps its own dependency versions.
+
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
 require a qualified new binary base. The Dockerfile separates a `runtime-base`
@@ -65,12 +58,38 @@ command with different mounts or source provenance.
 
 ## Local development
 
-CPU-only plan/structured validate exercise the public configuration contract.
-For a GPU lifecycle check use the [tiny example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/dev.toml)
-and a compatible tiny HF fixture in the pinned runtime. The existing
-[historical local MoE and restart procedure](measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check) covers
-model preparation and execution. A host-only parser test cannot qualify routing,
-attention, distributed gradients or publication.
+The ordinary CPU suite covers configuration, planning, launch specifications,
+rewards, data preparation and workflow contracts without installing MILES or
+SGLang. The `MILES contracts` workflow also checks the maintained scripts and
+checks adapter types against the public Core revision in the runtime lock.
+The general Open Instruct type check excludes only the three model adapters that
+require this separate Core API.
+
+```bash
+uv run pytest open_instruct/test_miles*.py
+```
+
+The dedicated runtime suite uses the separate application image. From its
+`/opt/core-rl` working directory, run:
+
+```bash
+bash scripts/miles/test_runtime.sh -q
+```
+
+This command fails if runtime dependencies are missing. Without the explicit
+runtime flag, ordinary CPU collection omits `tests/miles/` when MILES or SGLang
+is absent. CUDA numerical cases skip when no GPU is visible. A passing CPU run
+therefore does not qualify GPU kernels, distributed gradients or publication.
+The ordinary Open Instruct GPU CI image does not include the private MILES
+runtime; dedicated runtime checks are a separate maintainer validation step.
+
+For a training lifecycle check, copy [small.toml](../../configs/miles/examples/small.toml)
+to `runs/`, select a compatible tiny checkpoint, and follow the
+[committed-image launcher](launching.md). Verify the rendered replica group and
+retain image, config and completion artifacts. Exercise refresh separately when
+changing publication behavior; a tiny mechanics check does not establish learning
+quality. Archived research harnesses and their tests live at the
+[pre-cleanup revision](https://github.com/allenai/open-instruct/tree/813bd5988beb16be5b4d879ee3e2c49d8d859ee5).
 
 ## Documentation checks
 
@@ -99,7 +118,7 @@ Core can report missing members. To resolve its types against the exact Core
 branch during MILES development, pass that source path explicitly:
 
 ```bash
-uv run ty check --extra-search-path /path/to/OLMo-core/src
+uv run ty check open_instruct/miles --extra-search-path /path/to/OLMo-core/src --config 'src.exclude = []'
 ```
 
 Do not add an unconditionally required, ignored runtime directory to the global

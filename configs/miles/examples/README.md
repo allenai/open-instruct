@@ -25,7 +25,7 @@ The example TOMLs do not pin a trainer image; `MILES_EXISTING_IMAGE` selects it 
 background-evaluation support when running that example; the older small image
 above is not its qualification.
 The image above includes online filtering and passed the
-[small barrier/refresh qualification](../../../docs/miles/measurements/online-filtering-20260919.md).
+[small barrier/refresh qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/online-filtering-20260919.md).
 That check does not qualify every model or topology in these templates.
 
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test

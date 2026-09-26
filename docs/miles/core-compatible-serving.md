@@ -73,8 +73,8 @@ A strict parity investigation has a different execution contract:
 The **pure parity path is the first row**, with every operator/backend and shape
 held fixed and the outputs checked explicitly. Neither flag alone promises
 bitwise equality on every workload. Use the
-[Core/HF fidelity diagnostic](../../scripts/miles/hero_core_fidelity.py) and its
-[recorded source/attention controls](measurements/hero-core-fidelity-20260923.md)
+[Core/HF fidelity diagnostic](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/scripts/miles/hero_core_fidelity.py) and its
+[recorded source/attention controls](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-core-fidelity-20260923.md)
 when validating an export. `OLMO_HF_MOE_CORE_REFERENCE=1` does not alter SGLang,
 and enabling SGLang `full` does not turn cached generation into the same
 computation as a full-prefix Core forward.
@@ -95,7 +95,7 @@ the EMO-specific excess error has not been causally isolated.
 
 The existing 0.05 mean absolute log-probability gate is a bounded mechanics
 criterion, not a requirement that every token be close or that greedy choices
-match. The [paired four-update smoke](measurements/hero-rl-smoke-20260924.md)
+match. The [paired four-update smoke](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-rl-smoke-20260924.md)
 passed that mean criterion for both checkpoints, but its worst individual
 probability gaps were 0.734 nats (EMO) and 1.199 nats (non-EMO). It did not capture
 Core's argmax choices. A small average alone does not make those tails harmless.
@@ -189,18 +189,18 @@ from the prefix-at-a-time table above.
 
 ### Artifacts and reproduction
 
-The [machine-readable summary](measurements/core-token-choices-20260924.json)
+The [machine-readable summary](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-token-choices-20260924.json)
 retains disagreement token IDs and positions, top-two probabilities, Core ranks
 and margins, engine settings, source pins and timings. Raw artifacts are Beaker
 result dataset `01M391832WNY710ATQJ8QTT5MM`: `samples.json`, both modes' serving
 JSON, both Core scorer outputs, checkpoint config/source digests and logs.
 The two checkpoints are the corrected-tokenizer 4T Dolci Think step5402 exports
-in the [checkpoint audit](measurements/hero-sft-20260923.md).
+in the [checkpoint audit](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-sft-20260923.md).
 
 Runtime image `01M38YYQFVP5EBXRG9D83RW3CQ` contains application `d5b60f2ebbd2`,
 Core `e505356`, olmo-sglang `5514bf5` and SGLang `3145136`. The job overlaid only
 committed diagnostic `37c7ef386`; it did not replace runtime model code.
-[`probe_core_choices.py`](../../scripts/miles/probe_core_choices.py) runs serving
+[`probe_core_choices.py`](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/scripts/miles/probe_core_choices.py) runs serving
 and scoring in separate processes, with BF16 weights, TP1/EP1, Triton attention,
 no radix reuse or overlap, eager prefill, and full decode graphs only for `auto`.
 Core uses its Torch attention backend. No training or weight update occurs.
@@ -234,7 +234,7 @@ The older `grpo.py` Core/vLLM trainer records mean, maximum and standard deviati
 of absolute trainer/rollout log-probability gaps through
 [`compute_vllm_local_debug_metrics`](../../open_instruct/grpo_utils.py).
 A verified numerical baseline for that particular backend pair was not recovered
-in this investigation. The retained [dense Olmo 3 framework comparison](measurements/gsm8k-dense-test-20260916.md)
+in this investigation. The retained [dense Olmo 3 framework comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/gsm8k-dense-test-20260916.md)
 reports approximately 0.01 mean gaps for both **HF/DeepSpeed + vLLM** and
 **MILES/Core + SGLang**; it is not a Core/vLLM result or a matched hero comparison.
 The old metric uses the current trainer forward against stored rollout scores,
@@ -276,12 +276,12 @@ serving cost, not universal dominance on every probability metric.
 
 ## Evidence and continuing the investigation
 
-- [Final fused benchmark](measurements/fused-rounding-20260923.md) and its linked
+- [Final fused benchmark](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/fused-rounding-20260923.md) and its linked
   JSON retain checkpoint paths, exact source pins, immutable images, Beaker runs,
   timing protocol, probability tables and component ablations.
-- [Tensor rounding benchmark](measurements/graph-compatible-rounding-20260923.md)
+- [Tensor rounding benchmark](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/graph-compatible-rounding-20260923.md)
   records the initial slowdown and graph comparison.
-- [Full reference and historical checkpoint comparison](measurements/core-compatible-serving-20260923.md)
+- [Full reference and historical checkpoint comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-compatible-serving-20260923.md)
   separates short probes, full-prefix scores and cached-generation measurements.
 
 The automatic selection is a subsequent policy change; the final benchmark image
@@ -365,7 +365,7 @@ not establish an RL learning benefit.
 
 ## Reproducible workload comparison
 
-[`benchmark_core_compat.py`](../../scripts/miles/benchmark_core_compat.py) freezes
+[`benchmark_core_compat.py`](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/scripts/miles/benchmark_core_compat.py) freezes
 real RL prompt identities/token IDs, runs isolated serving processes with mode
 off/on, and scores each retained rollout through actual Core. A third
 `default_graphs` arm measures ordinary serving with full decode graphs. Timing
@@ -377,7 +377,7 @@ of `p_Core / p_serving`, including fractions outside 10% and 20%. Its fixed outp
 budget ignores EOS for equal work; this is a throughput and probability study,
 not an evaluation of completed answers or learning quality.
 
-The [checkpoint/system comparison and workload measurement](measurements/core-compatible-serving-20260923.md)
+The [checkpoint/system comparison and workload measurement](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-compatible-serving-20260923.md)
 separates historical checkpoints, short diagnostic interventions, full-prefix
 scoring and cached-generation probability errors, with measured generation timing.
 
@@ -402,11 +402,11 @@ The workload benchmark accepts `--mode rounding_graphs` and `--mode rounding`
 for paired graph/eager checks. Qualify the actual graph replay, cached rollouts
 and weight refresh before selecting this experimental mode for RL.
 
-The [original tensor implementation](measurements/graph-compatible-rounding-20260923.md)
+The [original tensor implementation](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/graph-compatible-rounding-20260923.md)
 lost 24–25% throughput. Its arithmetic is retained as a diagnostic control with
 `OLMO_SGLANG_ROUNDING_KERNELS = "torch"` in `[launch.env]`.
 
-The [fused implementation and workload comparison](measurements/fused-rounding-20260923.md)
+The [fused implementation and workload comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/fused-rounding-20260923.md)
 removes the separate activation, expert-combination and norm intermediates while
 preserving the BF16 boundaries and the pinned PyTorch reduction grouping. It is
 the default implementation within rounding mode, which is now selected

@@ -48,7 +48,7 @@ def test_actor_disabled_replay_does_not_load_any_backend(monkeypatch):
     worker.args = SimpleNamespace(use_rollout_routing_replay=False, olmo_core=CoreConfig())
     with (
         mock.patch.object(models, "_backend", side_effect=AssertionError("backend loaded")),
-        worker._replay_context(SimpleNamespace(), {}),
+        worker._replay_context(SimpleNamespace(model=torch.nn.Module()), {"tokens": torch.zeros(1, 2)}),
     ):
         pass
 

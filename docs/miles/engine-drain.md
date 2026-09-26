@@ -135,7 +135,7 @@ evaluation and shutdown; the slow peer allowed 71 responses from the updated
 engine. Fresh-process resume through update 12, complete optimizer overlap with a slow
 peer drain, pinned immutable transfer, and deliberate terminal failure also passed
 the follow-up gates. The failure probe establishes bounded failure, not automatic
-recovery. See [final audits](measurements/engine-drain-20260913/final-resume-audits.json). See the [qualification measurements](measurements/engine-drain-20260913/README.md)
+recovery. See [final audits](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/engine-drain-20260913/final-resume-audits.json). See the [qualification measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/engine-drain-20260913/README.md)
 for exact images, attempts, timings and limitations. Per-update full audits remain
 disabled; initial weight equality and fixed-byte snapshot tests are separate
 numerical checks.
@@ -185,4 +185,4 @@ policy-span metadata. It is selected by the full-model starting profiles.
 This document covers `engine_drain`, which finishes requests on their admitted
 weights and does not mix policies inside a response. See the current
 [publication-mode guide](grpo.md#publication-modes) and
-[qualification](measurements/full-sft-basket-20260914.md).
+[qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md).

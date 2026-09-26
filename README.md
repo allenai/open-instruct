@@ -8,10 +8,6 @@ This repo serves as an open effort on instruction-tuning and post-training popul
 2. Code for DPO, preference finetuning and reinforcement learning with verifiable rewards (RLVR).
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
-**Reinforcement learning in this branch uses [MILES GRPO](docs/miles/grpo.md)**:
-Open Instruct configuration and rewards, OLMo-core training, and SGLang inference.
-Start there for RL setup and runs; agents should also read [AGENTS.md](AGENTS.md).
-
 We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
 
 The latest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
@@ -43,7 +39,7 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
 - [2023-09-17] Supported [LoRA](https://arxiv.org/abs/2106.09685) and [QLoRA](https://arxiv.org/abs/2305.14314) finetuning. See [here](#parameter-efficient-finetuning) for more details.
 - [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TruthfulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
-- [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
+- [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
 - [2023-08-06] Supported LLaMa 2 finetuning and FlashAttention-2 by bumping the version of transformers and many other dependencies.
 - [2023-06-29] Added [licensing info](#licensing) for our released models.
 - [2023-06-09] Released Tülu (a suite of LLaMa models fully-finetuned on a strong mix of datasets) and many other checkpoints on HuggingFace [[Links]](#released-checkpoints).
@@ -51,11 +47,7 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## Setup
 
-For RL, follow the [MILES launch guide](docs/miles/launching.md), using its pinned
-runtime image and lightweight submission environment. The setup below covers
-the other Open Instruct training workflows and general development.
-
-Their setup follows our [Dockerfile](Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
+Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
 
 ### Installation with uv
 
@@ -77,14 +69,12 @@ beaker image delete $beaker_user/open_instruct_dev
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 ```
 
-For the general Open Instruct workflows at AI2, the auto-built image is
-`nathanl/open_instruct_auto`. MILES GRPO uses the image specified in its
-[launch guide](docs/miles/launching.md).
+If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
 
 
 ## Training
 
-After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](docs/tulu1_tulu2.md).
+After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](./docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](./docs/tulu1_tulu2.md).
 
 ### Finetuning
 
@@ -106,58 +96,22 @@ bash scripts/train/tulu3/dpo_8b.sh
 ```
 
 
-### Reinforcement learning: MILES GRPO
+### Reinforcement Learning with Verifiable Rewards (RLVR)
 
-Use **`python -m open_instruct.miles`** for RL/GRPO runs in this branch. Open Instruct supplies
-configuration and data/reward integration; MILES coordinates rollouts, the Core
-adapter trains the model, and SGLang serves it. Start with the
-[MILES GRPO guide](docs/miles/grpo.md) and check
-[model support and qualification limits](docs/miles/models-and-checkpoints.md).
-The guide covers the runtime image, supported models, configuration and launch workflow.
+We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_image_and_launch.sh`, which builds the Beaker image from your current commit and runs the chosen script:
 
 ```bash
-# Python 3.12. After copying, set model/output paths for your small checkpoint.
-mkdir -p runs
-cp configs/miles/examples/small.toml runs/my-grpo.toml
-python -m open_instruct.miles plan runs/my-grpo.toml
-python -m open_instruct.miles validate runs/my-grpo.toml
-# After authenticating Beaker and checking resource access:
-export MILES_EXISTING_IMAGE=01M2XGZM2N1V4DQVMYHM52KBHZ
-python -m open_instruct.miles run runs/my-grpo.toml
+# Single-GPU smoke test on Beaker (small model, fast).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
+
+# Two-node 8xGPU run (Qwen2.5-7B on code RLVR).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh
 ```
-
-Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
-The [four maintained examples](configs/miles/examples/README.md) are `dev`
-(one-GPU colocation), `small` (two-GPU disaggregated GSM8K), `medium`
-(16-GPU mixed-workload training), and `large` (an unqualified production proposal).
-The starter above is a mechanics check with a tiny model. Model/data paths are
-placeholders, W&B defaults to offline, and personal configurations belong in
-Git-ignored `runs/`.
-
-## MILES documentation
-
-Start with [MILES GRPO](docs/miles/grpo.md); use the
-[documentation index](docs/miles/index.md) for the complete topic map.
-Current instructions are separate from historical evidence.
-
-| Document | Use it when |
-|---|---|
-| [MILES GRPO](docs/miles/grpo.md) | Setting up MILES GRPO, selecting its runtime image and launching a first run |
-| [Support matrix](docs/miles/feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
-| [Workflow and examples](docs/miles/workflow.md) | Choosing and editing a run recipe |
-| [Launching jobs](docs/miles/launching.md) | Submitting from a laptop or Beaker session |
-| [Configuration reference](docs/miles/configuration.md) | Looking up every structured/Core field and native passthrough |
-| [Models and checkpoints](docs/miles/models-and-checkpoints.md) | Checking support, conversion, save/resume and export |
-| [Topology and capacity](docs/miles/topology.md) | Sizing trainer/engine pools, async, packing and admission |
-| [Data and evaluation](docs/miles/data-and-evaluation.md) | Selecting tasks, mixtures, judges and held-out evaluation |
-| [Operations](docs/miles/operations.md) | Monitoring, troubleshooting and verifying completion |
-| [Architecture and development](docs/miles/architecture.md) | Understanding hooks, runtime images and local validation |
-| [Measurements](docs/miles/measurements/index.md) | Reviewing evidence and its qualification limits |
 
 
 ## Contamination checks
 
-We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](decontamination/README.md) for more details.
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
 ### Developing
 When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
@@ -200,9 +154,9 @@ uv run pre-commit run --all-files
 
 ## Licensing
 
-This codebase is licensed under Apache 2.0 as given in [LICENSE](LICENSE).
+This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
 
-The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](./assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 

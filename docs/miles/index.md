@@ -47,8 +47,8 @@ switching to a deprecated backend.
 | [Run-control semantics](run-controls.md) | Comparing Core controls with olmo-miles/Megatron terminology |
 | [Router auxiliary objectives](core.md#router-auxiliary-objectives) | Selecting grouping, averaging, count source and coefficients |
 | [Implementation contracts](core.md) | Reviewing detailed trainer, replay and publication checks |
-| [Measurements](measurements/index.md) | Finding point-in-time evidence, configurations and limitations |
-| [Historical plans](plans/index.md) | Understanding previous proposals, not selecting operating defaults |
+| [Measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md) | Finding point-in-time evidence, configurations and limitations |
+| [Historical plans](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/plans/index.md) | Understanding previous proposals, not selecting operating defaults |
 
 ## Authority and maintenance
 

@@ -8,25 +8,25 @@ inference GPUs without warm completed-queue drops. The historical EP2 throughput
 no recomputation and guarded scoring skip. Its 24-update live qualification
 measured 5,089 useful response tokens/s, 58% awaited collection and 0.79% warm
 stale-token drops. The faster trainer shifted the bottleneck toward batch supply.
-See [qualification](measurements/full-sft-basket-20260914.md) and the preceding
-[packed controls](measurements/packed-capacity-results-20260914.md).
+See [qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md) and the preceding
+[packed controls](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/packed-capacity-results-20260914.md).
 
 These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
 GSM8K-style responses capped at 4096 tokens, and Holmes B300 GPUs. They are a
 measured starting point, not a universal fit or learning-quality guarantee. The
 hero checkpoint, dense/FSDP trainer, judges, code execution and longer contexts
-need their own capacity checks. See [measurements and figures](measurements/throughput-20260913.md)
-and the [chronological campaign log](measurements/throughput-campaign-20260913.md).
+need their own capacity checks. See [measurements and figures](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/throughput-20260913.md)
+and the [chronological campaign log](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/throughput-campaign-20260913.md).
 
 ## Runtime image
 
 For the maintained examples, use the current image and qualification boundaries
-in the [MILES GRPO guide](grpo.md). Its [September 18 qualification record](measurements/router-controls-20260918.md)
+in the [MILES GRPO guide](grpo.md). Its [September 18 qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/router-controls-20260918.md)
 distinguishes completed tiny-model checks from the full-policy checks still in progress.
 
 The historical throughput results below used application source `2c477efd5`
 and image `01M2F1RKZFZVJYAS0XQGEC3SEJ`, with the exact qualification overlays
-recorded in [the original report](measurements/full-sft-basket-20260914.md).
+recorded in [the original report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md).
 That runtime passed 113 packaged CPU tests; the EP8 mixed-task attempt stopped
 after one update on an HTTP transport error. These measurements are not a new
 throughput qualification of the current image or the 32K medium template.
@@ -97,7 +97,7 @@ Worked budget at `C = 34,816` with 1,024 state slots (32 GiB):
 On B300, memory stops binding well before the other limits. The 4K live refresh
 runs at 128 and 256 concurrency failed after 8 and 6 updates with MILES-router `ReadError`/503
 transport errors, without evidence of an out-of-memory failure
-([packed capacity results](measurements/packed-capacity-results-20260914.md)).
+([packed capacity results](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/packed-capacity-results-20260914.md)).
 Keep `R ≤ 64` until that failure is understood. On a smaller GPU, run the same
 arithmetic before lowering anything: an 80 GiB GPU at static fraction 0.7 leaves
 about 21 GiB after weights, so reduce `R` or the state-slot count to fit that.
@@ -134,7 +134,7 @@ concurrent sequences and was still rising at 512.
   activation recomputation and used guarded scoring skip. The full-SFT EP2 live test passed
   all 24 updates, with an initial bit-exact scoring check. It used about 197 GiB
   per trainer GPU in the matched screen; restore recomputation for smaller memory
-  budgets. See [qualification and the larger baseline](measurements/full-sft-basket-20260914.md).
+  budgets. See [qualification and the larger baseline](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md).
 * Keep the completed FIFO to one collection. The historical small profile used a
   512-sample producer budget; it can retain substantial work at shutdown.
   The automatic producer default, when not overridden, is
@@ -151,7 +151,7 @@ GSM8K inputs and disabled eval/saves/export to isolate normal cycles. Its timing
 numbers therefore do not predict total wall time with those additional stages.
 Do not infer resume or export qualification from this basket.
 
-See the [capacity dashboard guide](capacity-dashboard.md) for rate definitions,
+See the [capacity dashboard guide](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/capacity-dashboard.md) for rate definitions,
 trainer tuning controls and the reusable W&B report publisher.
 
 ## Read the right measurements
@@ -259,5 +259,5 @@ ownership, semaphore, retry and lifecycle semantics.
 The examples use urgent Holmes placement in `ai2/open-instruct-dev`, one-hour
 minimum runtime and explicit GPU allocation. CPU-only jobs needing WEKA belong
 on Saturn. Multi-node auto-resume is qualified for the restart path in
-[multi-node resume](measurements/multinode-resume-20260922.md); forced preemption, and restarts of runs
+[multi-node resume](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md); forced preemption, and restarts of runs
 carrying a managed judge, are not.

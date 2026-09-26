@@ -25,9 +25,9 @@ from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from pyarrow import parquet
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from open_instruct.ground_truth_utils import GSM8KVerifier
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.execution.driver import train
+from open_instruct.miles.rewards.verifiers import GSM8KVerifier
 
 
 def prepare(options):
@@ -156,7 +156,7 @@ def write_tasks(root, rows):
         )
     (root / "prompts.jsonl").write_text("".join(json.dumps(row) + "\n" for row in prepared))
     (root / "verifiers.json").write_text(
-        json.dumps({"gsm8k": {"factory": "open_instruct.ground_truth_utils.GSM8KVerifier"}})
+        json.dumps({"gsm8k": {"factory": "open_instruct.miles.rewards.verifiers.GSM8KVerifier"}})
     )
 
 

@@ -8,7 +8,6 @@ from unittest import mock
 
 import pytest
 from ray._private.ray_constants import WORKER_PROCESS_SETUP_HOOK_ENV_VAR
-from scripts.miles import launch_startup_trial
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution.timing import startup_stage
@@ -124,15 +123,6 @@ def test_cache_controls_validate_types():
     for key in ("compiler_cache", "compiler_cache_restore", "compiler_cache_diagnostics"):
         with pytest.raises(ValueError, match=key):
             CoreConfig(**{key: "false"})
-
-
-def test_trial_resource_bounds():
-    task = launch_startup_trial.specification("image")["tasks"][0]
-    assert task["resources"]["gpuCount"] == 3
-    assert task["constraints"]["cluster"] == ["ai2/holmes"]
-    assert task["context"]["priority"] == "urgent"
-    assert task["context"]["minRuntime"] == "1h"
-    assert task["timeout"] == "2h"
 
 
 def test_cache_is_opt_out_and_uses_olmo_miles_ttl_namespace():

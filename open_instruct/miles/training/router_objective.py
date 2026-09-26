@@ -20,7 +20,7 @@ class Batch:
     response_denominator: float
 
 
-_CURRENT = contextvars.ContextVar("miles_router_objective_batch", default=None)
+_CURRENT: contextvars.ContextVar[Batch | None] = contextvars.ContextVar("miles_router_objective_batch", default=None)
 
 
 @contextlib.contextmanager

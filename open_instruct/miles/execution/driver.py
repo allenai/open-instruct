@@ -147,7 +147,7 @@ async def train(args, *, export_hf=None):
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.
                 startup_cache.publish_progress(args, rollout_id)
-                if coordinator is not None:
+                if coordinator is not None and background is not None:
                     per_collection = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
                     for update in range(rollout_id * per_collection + 1, (rollout_id + 1) * per_collection + 1):
                         target = background_eval.snapshot(background["root"], update)
@@ -208,7 +208,7 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary.remote(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
-        if stopped_for_time and coordinator is not None and background["final"]:
+        if stopped_for_time and coordinator is not None and background is not None and background["final"]:
             last = completed[-1]
             update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
             target = export_hf or str(background_eval.snapshot(background["root"], update))

@@ -81,7 +81,7 @@ They are not training or long-decode throughput qualifications. The standalone
 probe did not return router traces. Production RL additionally exercises that
 path and must keep its own trainer/serving memory budget.
 
-The [full record](measurements/length-guidance-20260913/README.md) distinguishes
+The [full record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/length-guidance-20260913/README.md) distinguishes
 submitted requests from periodically logged engine occupancy, includes the
 smaller-pool comparison, and retains runtime pins and generations. The reasoning
 model hit the 128-token output cap throughout: finite execution passed, retrieval
@@ -89,7 +89,7 @@ accuracy was not established.
 
 ## What has actually been exercised
 
-See the [length exercise record](measurements/length-guidance-20260913/README.md)
+See the [length exercise record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/length-guidance-20260913/README.md)
 for exact commands, configurations, runtime pins and outcomes. Until a result is
 recorded there, a candidate configuration is not qualified.
 
@@ -106,7 +106,7 @@ The subsequent two-update 16K and 32K-context RL jobs and independent audits
 passed. Maximum actual total lengths were **14,466** and **30,850** tokens;
 response medians were 14,336 and 30,720, with 11/16 and 9/16 cap hits. Each
 retained 24 replay observations with zero mismatches. See the
-[final length audit](measurements/length-guidance-20260913/README.md#final-long-response-rl-audit).
+[final length audit](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/length-guidance-20260913/README.md#final-long-response-rl-audit).
 This qualifies bounded long-response execution with EP2, packing and recomputation;
 it does not establish 64K backward or high-concurrency training capacity.
 

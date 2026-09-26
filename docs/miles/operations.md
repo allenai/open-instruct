@@ -157,7 +157,7 @@ refresh requests, router control and health requests, readiness, judge transport
 coordination, evaluation submission and cleanup. It does not multiply polling
 intervals, verifier execution budgets or the run duration. SGLang watchdog and
 trainer distributed deadlines remain explicit MILES run options. See the
-[hero run timeout table](measurements/hero-long-startup-20260924.md#replacement-timeout-policy)
+[hero run timeout table](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-long-startup-20260924.md#replacement-timeout-policy)
 for concrete values and evidence. Longer waits preserve cancellation and hard
 deadlines; idempotent router readiness confirmation alone retries transport errors.
 

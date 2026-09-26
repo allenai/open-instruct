@@ -94,7 +94,7 @@ def test_manifest_adoption_preserves_template_targets_and_resume(environment, tm
     assert prepare(environment, data) == result
     assert len(environment[2].rendered) == before
     registry = json.loads(Path(result["reward_config"]).read_text())
-    assert registry["gsm8k"]["factory"] == "open_instruct.ground_truth_utils.GSM8KVerifier"
+    assert registry["gsm8k"]["factory"] == "open_instruct.miles.rewards.verifiers.GSM8KVerifier"
 
 
 @pytest.mark.parametrize("target", ["input", "output", "tokenizer"])
