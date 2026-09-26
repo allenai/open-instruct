@@ -57,9 +57,17 @@ def latent_norm(module, serving, value):
     return output
 
 
+def rounded_conv(module, *args, **kwargs):
+    return module._diagnostic_original_forward(*args, **kwargs).bfloat16()
+
+
+def rounded_kda_norm(module, value, gate):
+    return module._diagnostic_original_forward(value.bfloat16(), gate)
+
+
 def set_linear_variant(model, variant, *, serving):
     selected = set(variant.split("+")) - {"none"}
-    if selected - {"gate", "beta", "latent_up"}:
+    if selected - {"gate", "beta", "latent_up", "qkv", "qkv_full"} or {"qkv", "qkv_full"} <= selected:
         raise ValueError(variant)
     count = collections.Counter()
     for module in model.modules():
@@ -86,6 +94,25 @@ def set_linear_variant(model, variant, *, serving):
     for module in model.modules():
         if not hasattr(module, "f_proj_2"):
             continue
+        qkv_mode = next(iter(selected & {"qkv", "qkv_full"}), None)
+        if qkv_mode:
+            for attribute in ("qkv_proj",) if serving else ("w_q", "w_k", "w_v"):
+                linear = getattr(module, attribute)
+                if not hasattr(linear, "_diagnostic_original_forward"):
+                    linear._diagnostic_original_forward = linear.forward
+                linear.forward = functools.partial(fp32_output, linear, serving)
+            count[qkv_mode] += 1
+            if qkv_mode == "qkv" and not serving:
+                for attribute in ("q_conv1d", "k_conv1d", "v_conv1d"):
+                    conv = getattr(module, attribute)
+                    if not hasattr(conv, "_diagnostic_original_forward"):
+                        conv._diagnostic_original_forward = conv.forward
+                    conv.forward = functools.partial(rounded_conv, conv)
+            if qkv_mode == "qkv_full":
+                norm = module.o_norm
+                if not hasattr(norm, "_diagnostic_original_forward"):
+                    norm._diagnostic_original_forward = norm.forward
+                norm.forward = functools.partial(rounded_kda_norm, norm)
         for name, attribute in (("gate", "f_proj_2"), ("beta", "beta_proj" if serving else "w_b")):
             linear = getattr(module, attribute)
             if not hasattr(linear, "_diagnostic_original_forward"):
@@ -150,6 +177,20 @@ def install():
     if os.environ.get("OI_CHUNK_FP32") == "1":
         install_chunk_fp32()
     linear_variant = os.environ.get("OI_LINEAR_ABLATION", "none")
+    if set(linear_variant.split("+")) & {"qkv", "qkv_full"}:
+        backend._model_activation_dtype = lambda config: torch.float32
+    if "qkv" in linear_variant.split("+"):
+        original_run = backend.OlmoFLAKDAKernel._run
+        original_packed = backend.OlmoPackedKDAKernel.packed_decode
+
+        def run(self, q, k, v, raw_gate, raw_beta, **kwargs):
+            return original_run(self, q.bfloat16(), k.bfloat16(), v.bfloat16(), raw_gate, raw_beta, **kwargs)
+
+        def packed(self, mixed_qkv, *args, **kwargs):
+            return original_packed(self, mixed_qkv.bfloat16(), *args, **kwargs)
+
+        backend.OlmoFLAKDAKernel._run = run
+        backend.OlmoPackedKDAKernel.packed_decode = packed
     original_init = olmo3_moe.Olmo3MoeForCausalLM.__init__
 
     @functools.wraps(original_init)
