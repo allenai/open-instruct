@@ -1,0 +1,248 @@
+"""Process-local selective precision and fixed-token sampling for diagnostics."""
+
+import collections
+import functools
+import json
+import os
+from pathlib import Path
+
+import torch
+import triton
+from fla.ops.kda import chunk_intra
+from olmo_core.nn.attention import kda as core_kda
+from olmo_sglang import rounding_kernels
+from olmo_sglang.kda import backend
+from olmo_sglang.models import olmo3_moe
+from scripts.miles import selective_kda_precision
+from sglang.srt.layers import sampler
+from sglang.srt.model_executor import model_runner
+from sglang.srt.sampling import sampling_batch_info
+from triton import language as tl
+
+
+def fp32_output(module, serving, value):
+    flat = value.reshape(-1, value.shape[-1])
+    result = torch.mm(flat, module.weight.T, out_dtype=torch.float32)
+    if module.bias is not None:
+        result = result + module.bias.float()
+    result = result.reshape(*value.shape[:-1], module.weight.shape[0])
+    return (result, None) if serving else result
+
+
+def latent_norm(module, serving, value):
+    if not serving:
+        return module._diagnostic_original_forward(value).bfloat16()
+    value = value.contiguous()
+    width = value.shape[-1]
+    if width != 1024:
+        raise ValueError("Latent precision probe is scoped to the hero model's width 1024")
+    output = torch.empty_like(value, dtype=torch.bfloat16)
+    rows = value.numel() // width
+    if rows:
+        dim0 = min(512, 1 << ((width // 4).bit_length() - 1))
+        dim1 = min(512, 1 << (rows.bit_length() - 1))
+        height = min(dim1, 512 // min(dim0, 32))
+        threads = min(dim0, 512 // height)
+        rounding_kernels._rms_norm[(rows,)](
+            value,
+            module.weight,
+            output,
+            width,
+            module.variance_epsilon,
+            triton.next_power_of_2(width),
+            threads,
+            4,
+            enable_fp_fusion=False,
+        )
+    return output
+
+
+def rounded_conv(module, *args, **kwargs):
+    return module._diagnostic_original_forward(*args, **kwargs).bfloat16()
+
+
+def rounded_kda_norm(module, value, gate):
+    return module._diagnostic_original_forward(value.bfloat16(), gate)
+
+
+def set_linear_variant(model, variant, *, serving):
+    selected = set(variant.split("+")) - {"none"}
+    if selected - {"gate", "beta", "latent_up", "qkv", "qkv_full"} or {"qkv", "qkv_full"} <= selected:
+        raise ValueError(variant)
+    count = collections.Counter()
+    for module in model.modules():
+        if hasattr(module, "_diagnostic_original_forward"):
+            module.forward = module._diagnostic_original_forward
+    if "latent_up" in selected:
+        norm_count = 0
+        for module in model.modules():
+            linear = getattr(module, "latent_up_proj", None)
+            if linear is not None:
+                if not hasattr(linear, "_diagnostic_original_forward"):
+                    linear._diagnostic_original_forward = linear.forward
+                linear.forward = functools.partial(fp32_output, linear, serving)
+                count["latent_up"] += 1
+            norm = getattr(module, "post_feedforward_layernorm" if serving else "feed_forward_norm", None)
+            sparse = getattr(module, "mlp", None) if serving else module
+            if norm is not None and getattr(sparse, "latent_up_proj", None) is not None:
+                if not hasattr(norm, "_diagnostic_original_forward"):
+                    norm._diagnostic_original_forward = norm.forward
+                norm.forward = functools.partial(latent_norm, norm, serving)
+                norm_count += 1
+        if norm_count != count["latent_up"]:
+            raise ValueError(f"Latent projection/norm count mismatch: {count['latent_up']} versus {norm_count}")
+    for module in model.modules():
+        if not hasattr(module, "f_proj_2"):
+            continue
+        qkv_mode = next(iter(selected & {"qkv", "qkv_full"}), None)
+        if qkv_mode:
+            for attribute in ("qkv_proj",) if serving else ("w_q", "w_k", "w_v"):
+                linear = getattr(module, attribute)
+                if not hasattr(linear, "_diagnostic_original_forward"):
+                    linear._diagnostic_original_forward = linear.forward
+                linear.forward = functools.partial(fp32_output, linear, serving)
+            count[qkv_mode] += 1
+            if qkv_mode == "qkv" and not serving:
+                for attribute in ("q_conv1d", "k_conv1d", "v_conv1d"):
+                    conv = getattr(module, attribute)
+                    if not hasattr(conv, "_diagnostic_original_forward"):
+                        conv._diagnostic_original_forward = conv.forward
+                    conv.forward = functools.partial(rounded_conv, conv)
+            if qkv_mode == "qkv_full":
+                norm = module.o_norm
+                if not hasattr(norm, "_diagnostic_original_forward"):
+                    norm._diagnostic_original_forward = norm.forward
+                norm.forward = functools.partial(rounded_kda_norm, norm)
+        for name, attribute in (("gate", "f_proj_2"), ("beta", "beta_proj" if serving else "w_b")):
+            linear = getattr(module, attribute)
+            if not hasattr(linear, "_diagnostic_original_forward"):
+                linear._diagnostic_original_forward = linear.forward
+            linear.forward = (
+                functools.partial(fp32_output, linear, serving)
+                if name in selected
+                else linear._diagnostic_original_forward
+            )
+            if name in selected:
+                count[name] += 1
+    if selected and set(count) != selected:
+        raise ValueError(f"No matching projections: {variant}, {count}")
+    return dict(count)
+
+
+def forced_next_tokens(params, positions):
+    result = []
+    for config, position in zip(params, positions, strict=True):
+        index = position - config["prefix_length"] + 1
+        if not 0 <= index < len(config["forced_ids"]):
+            raise ValueError(f"Forced-token position outside continuation: {position}, {index}")
+        result.append(config["forced_ids"][index])
+    return result
+
+
+def strict_arithmetic():
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.set_float32_matmul_precision("highest")
+    if hasattr(chunk_intra, "SOLVE_TRIL_DOT_PRECISION"):
+        chunk_intra.SOLVE_TRIL_DOT_PRECISION = tl.constexpr("ieee")
+
+
+def install_chunk_fp32():
+    """Widen only KDA kernel inputs; preserve projection and output dtypes."""
+    strict_arithmetic()
+    original_core = core_kda.dispatch_chunk_kda
+
+    def core_chunk(**kwargs):
+        dtype = kwargs["q"].dtype
+        kwargs = {k: v.float() if k in {"q", "k", "v", "g"} else v for k, v in kwargs.items()}
+        output, state = original_core(**kwargs)
+        return output.to(dtype), state
+
+    core_kda.dispatch_chunk_kda = core_chunk
+    original_run = backend.OlmoFLAKDAKernel._run
+
+    def run(self, q, k, v, raw_gate, raw_beta, **kwargs):
+        result = original_run(self, q.float(), k.float(), v.float(), raw_gate.float(), raw_beta, **kwargs)
+        if isinstance(result, tuple):
+            return (result[0].to(q.dtype), *result[1:])
+        return result.to(q.dtype)
+
+    backend.OlmoFLAKDAKernel._run = run
+
+
+def install():
+    selective_kda_precision.install()
+    if os.environ.get("OI_STRICT_ARITHMETIC") == "1":
+        strict_arithmetic()
+    if os.environ.get("OI_CHUNK_FP32") == "1":
+        install_chunk_fp32()
+    linear_variant = os.environ.get("OI_LINEAR_ABLATION", "none")
+    if set(linear_variant.split("+")) & {"qkv", "qkv_full"}:
+        backend._model_activation_dtype = lambda config: torch.float32
+    if "qkv" in linear_variant.split("+"):
+        original_run = backend.OlmoFLAKDAKernel._run
+        original_packed = backend.OlmoPackedKDAKernel.packed_decode
+
+        def run(self, q, k, v, raw_gate, raw_beta, **kwargs):
+            return original_run(self, q.bfloat16(), k.bfloat16(), v.bfloat16(), raw_gate, raw_beta, **kwargs)
+
+        def packed(self, mixed_qkv, *args, **kwargs):
+            return original_packed(self, mixed_qkv.bfloat16(), *args, **kwargs)
+
+        backend.OlmoFLAKDAKernel._run = run
+        backend.OlmoPackedKDAKernel.packed_decode = packed
+    original_init = olmo3_moe.Olmo3MoeForCausalLM.__init__
+
+    @functools.wraps(original_init)
+    def init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        print("LINEAR_ABLATION", linear_variant, set_linear_variant(self, linear_variant, serving=True), flush=True)
+
+    olmo3_moe.Olmo3MoeForCausalLM.__init__ = init
+    if os.environ.get("OI_PREFILL_CORE") == "1":
+        original_kernel_init = backend.OlmoFLAKDAKernel.__init__
+
+        def kernel_init(self, *args, **kwargs):
+            original_kernel_init(self, *args, **kwargs)
+            self.core_compat = True
+
+        backend.OlmoFLAKDAKernel.__init__ = kernel_init
+    original_batch = sampling_batch_info.SamplingBatchInfo.from_schedule_batch.__func__
+
+    @classmethod
+    def batch(cls, scheduled, vocab_size):
+        result = original_batch(cls, scheduled, vocab_size)
+        params = [r.sampling_params.custom_params for r in scheduled.reqs]
+        if any(p and "forced_ids" in p for p in params):
+            if not all(p and "forced_ids" in p for p in params):
+                raise ValueError("Mixed forced and ordinary requests")
+            result.custom_params = params
+        return result
+
+    sampling_batch_info.SamplingBatchInfo.from_schedule_batch = batch
+    original_sample = sampler.Sampler._sample_from_probs
+
+    def sample(self, probs, sampling_info, positions, simple_sampling_case):
+        params = sampling_info.custom_params
+        if params and all(p and "forced_ids" in p for p in params):
+            if not simple_sampling_case:
+                raise ValueError("Forced diagnostic requires untruncated probabilities")
+            ids = forced_next_tokens(params, positions.cpu().tolist())
+            return torch.tensor(ids, device=probs.device, dtype=torch.int64)
+        return original_sample(self, probs, sampling_info, positions, simple_sampling_case)
+
+    sampler.Sampler._sample_from_probs = sample
+    original_forward = model_runner.ModelRunner.forward
+    counts = collections.Counter()
+    trace_path = os.environ.get("OI_GRAPH_AUDIT")
+
+    def forward(self, forward_batch, *args, **kwargs):
+        result = original_forward(self, forward_batch, *args, **kwargs)
+        if trace_path:
+            key = f"{'decode' if forward_batch.forward_mode.is_decode() else 'prefill'}/graph={result.can_run_graph}"
+            counts[key] += 1
+            if counts[key] in (1, 2) or sum(counts.values()) % 256 == 0:
+                Path(trace_path).write_text(json.dumps(dict(counts)))
+        return result
+
+    model_runner.ModelRunner.forward = forward

@@ -94,11 +94,13 @@ def serve(args):
     os.environ["OLMO_SGLANG_ROUNDING_KERNELS"] = ROUNDING_MODES.get(args.mode, "fused")
     register()
     rows = json.loads(args.samples.read_text())["rows"]
+    if getattr(args, "prompt_limit", None):
+        rows = rows[: args.prompt_limit]
     engine_args = dict(
         model_path=args.model,
         trust_remote_code=True,
         skip_tokenizer_init=True,
-        dtype="bfloat16",
+        dtype=getattr(args, "dtype", "bfloat16"),
         enable_fp32_lm_head=getattr(args, "fp32_lm_head", False),
         tp_size=1,
         attention_backend="triton",
@@ -115,7 +117,7 @@ def serve(args):
         max_mamba_cache_size=16,
         chunked_prefill_size=8192,
         max_prefill_tokens=8192,
-        mem_fraction_static=0.65,
+        mem_fraction_static=0.9 if getattr(args, "dtype", "bfloat16") == "float32" else 0.65,
         skip_server_warmup=True,
     )
     started = time.perf_counter()
@@ -337,6 +339,8 @@ def main():
     parser.add_argument("--per-domain", type=int, default=4)
     parser.add_argument("--mode", choices=["default", "core", "default_graphs", *ROUNDING_MODES], default="default")
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--dtype", choices=["bfloat16", "float32"], default="bfloat16")
+    parser.add_argument("--prompt-limit", type=int)
     parser.add_argument("--tokens", type=int, default=512)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--reference-rollouts", type=Path)

@@ -6,6 +6,9 @@ current operating defaults; start with the [MILES guide](../index.md).
 | Record | Topic |
 |---|---|
 | [MILES package organization](package-organization-20260925.md) | Package boundaries, paired runtime update, local test results, completed B300 smokes and GPU-suite findings |
+| [Selective precision attribution](selective-precision-20260926.md) | Frozen-token component ablations, combinations, KDA kernel replay and inference cost |
+| [Full FP32 precision baseline](full-fp32-20260925.md) | Four-order improvement in short cached inference; matched BF16 reference and a longer EMO residual |
+| [FP32 LM-head at unchanged weights](lm-head-fp32-20260925.md) | Paired SFT inference/scoring: modest mismatch reduction, serving timing and strict FP32 control |
 | [Hero tokenizer continuity and reasoning loops](hero-tokenizer-loops-20260925.md) | Tokenizer lineage/save audits, full original/final GSM8K comparison and controlled temperature continuations |
 | [Provisional lag-six default and small comparison](policy-lag-20260925.md) | Completed six-GPU lag-two/six screen: throughput, numerical limits and eight-hour hero follow-up |
 | [Hero long-run startup investigation](hero-long-startup-20260924.md) | Startup/transport repairs; completed48-update qualification, timings, final checkpoint and evaluations |

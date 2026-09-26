@@ -1,5 +1,5 @@
 {
-  "sources": {"miles": {"private": true, "repository": "https://github.com/allenai/miles.git", "revision": "592905363e9efbbb1e45d7e838ec48b7b716dc69"}, "olmo-core": {"repository": "https://github.com/allenai/OLMo-core.git", "revision": "e505356353aa7ce1f6ff83e24d6eb945f463714e"}, "olmo-sglang": {"private": true, "repository": "https://github.com/allenai/olmo-sglang.git", "revision": "5514bf5885e690f7cfcd9cfb08e03111fbd70a78"}},
+  "sources": {"miles": {"private": true, "repository": "https://github.com/allenai/miles.git", "revision": "9874d6f589f37b070f15489585325fa32dd5c638"}, "olmo-core": {"repository": "https://github.com/allenai/OLMo-core.git", "revision": "e505356353aa7ce1f6ff83e24d6eb945f463714e"}, "olmo-sglang": {"private": true, "repository": "https://github.com/allenai/olmo-sglang.git", "revision": "5514bf5885e690f7cfcd9cfb08e03111fbd70a78"}},
   "options": [
     {"dest": "config", "flags": ["--config"], "kind": "value", "nargs": null, "type": "str"},
     {"dest": "optimizer", "flags": ["--optimizer"], "kind": "value", "nargs": null, "type": "str"},
