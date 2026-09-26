@@ -134,6 +134,8 @@ def serve(args):
 
 
 def score(args):
+    torch.set_num_threads(args.cpu_threads)
+    print("SCORER_CPU_THREADS", torch.get_num_threads(), flush=True)
     fla_compat.install_kda_triton_compat()
     torch.backends.cuda.matmul.allow_tf32 = False
     if args.chunk_fp32:
@@ -155,6 +157,7 @@ def score(args):
     olmo3.load_olmo3_moe_hf_state(model, config, state)
     del state
     model.eval()
+    print("SCORER_MODEL_READY", flush=True)
     versions = {n: p._version for n, p in model.named_parameters()}
     captured = {}
 
@@ -223,6 +226,7 @@ def main():
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--fp32-lm-head", action="store_true")
     parser.add_argument("--chunk-fp32", action="store_true")
+    parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument("--serving-reports", type=Path, nargs="+")
     args = parser.parse_args()
     {"serve": serve, "score": score}[args.stage](args)
