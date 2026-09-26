@@ -69,6 +69,21 @@ images preceding the filtering qualification do not include this change. The
 with barrier and refresh publication. Local source changes are not overlaid onto
 an existing application image.
 
+## Excluding truncated responses
+
+By default a response that reaches `max_response_length` is scored like any other:
+the verifier reads the unfinished text, and an answer mentioned mid-reasoning can earn
+reward. To leave truncated responses out of training (overlong filtering), set:
+
+```toml
+[miles]
+custom_reward_post_process_path = "open_instruct.miles.rewards.truncation.exclude_truncated"
+```
+
+Truncated responses then get zero advantage and a zeroed loss mask, and each group's
+baseline uses only its finished responses. Raw reward metrics are unchanged. With
+response-averaged loss, excluded responses still count in the batch denominator.
+
 ## Current runtime and qualification
 
 For online filtering, use **`01M2XGZM2N1V4DQVMYHM52KBHZ`**, application source
