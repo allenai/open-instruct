@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Selective precision attribution](selective-precision-20260926.md) | Frozen-token component ablations, combinations, KDA kernel replay and inference cost |
 | [Full FP32 precision baseline](full-fp32-20260925.md) | Four-order improvement in short cached inference; matched BF16 reference and a longer EMO residual |
 | [FP32 LM-head at unchanged weights](lm-head-fp32-20260925.md) | Paired SFT inference/scoring: modest mismatch reduction, serving timing and strict FP32 control |
 | [Hero tokenizer continuity and reasoning loops](hero-tokenizer-loops-20260925.md) | Tokenizer lineage/save audits, full original/final GSM8K comparison and controlled temperature continuations |
