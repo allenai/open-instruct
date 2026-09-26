@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "status": "MILES/Core internal sharing candidate; see docs/miles/feature-parity.md for qualified scope",
+  "base_image": {
+    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+  },
+  "sources": {
+    "olmo-core": {
+      "repository": "https://github.com/allenai/OLMo-core.git",
+      "revision": "3c2ad5989f88f8cfb04c983b4243e1a502e4ea1d"
+    },
+    "miles": {
+      "repository": "https://github.com/allenai/miles.git",
+      "revision": "9874d6f589f37b070f15489585325fa32dd5c638",
+      "private": true
+    },
+    "olmo-sglang": {
+      "repository": "https://github.com/allenai/olmo-sglang.git",
+      "revision": "5514bf5885e690f7cfcd9cfb08e03111fbd70a78",
+      "private": true
+    }
+  }
+}

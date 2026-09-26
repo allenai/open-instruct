@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--miles" ]]; then
+  shift
+  exec bash scripts/miles/build_and_launch.sh "$@"
+fi
+
 cuda_version=12
 if [[ "${1:-}" == "--cuda-version" ]]; then
   if [[ $# -lt 2 ]]; then

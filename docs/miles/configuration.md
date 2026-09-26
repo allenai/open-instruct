@@ -1,0 +1,372 @@
+# Configuration reference
+
+This is the maintained help for the MILES + OLMo-core wrapper. Start from a
+[structured example](../../configs/miles/examples/README.md), then inspect `plan`.
+The tables below are generated; edit reference-help.json or source definitions
+and run `python -m scripts.miles.generate_docs`.
+
+## Interface and precedence
+
+`python -m open_instruct.miles {plan,validate,train,run,status} run.toml` accepts
+repeatable `--set SECTION.KEY=TOML_VALUE` and `--debug`. Structured files require
+schema_version=1 and model/data/output sections. Low-level files contain [core]
+and [miles] and support only plan/validate/train. Structured validate is CPU-safe;
+low-level validate invokes the installed native parser. Neither certifies GPU fit.
+
+```bash
+python -m open_instruct.miles plan configs/miles/examples/medium.toml \
+  --set training.num_rollouts=20 \
+  --set 'tracking.wandb_group="my-comparison"'
+```
+
+Repeated assignments to the same override key use the last value. Structured
+aliases and explicit Core/native options targeting one resolved value must agree;
+conflicting values fail. Native aliases cannot be supplied twice under different
+spellings. There is no implicit environment expansion or configuration inheritance.
+Booleans are unquoted true/false; strings need TOML quotes protected by shell quotes.
+Lists and inline tables are encoded according to the pinned native parser.
+
+Python callers may use RunSpec.load(path).compile() or
+RunConfig(CoreConfig(...), miles_options). The latter assumes prepared inputs and
+has no launch/data workflow. User-input failures raise InputError (a ValueError
+subclass); the CLI prints a field-oriented error and exits 2. --debug includes the
+traceback. Preparation checks that need data/model files run where those are mounted.
+
+## Which section to edit
+
+| Section | Purpose |
+|---|---|
+| model / conversion / output | Input identity, preparation and final artifacts |
+| data | Tasks, immutable manifests or prepared rows and reward configuration |
+| launch | Allocation, mounts, secrets and scheduling |
+| training | Collection count, evaluation and saving cadence |
+| trainer | Trainer node/GPU geometry, EP, microbatching and recomputation |
+| inference | Engine topology, sampling geometry, lengths and SGLang admission |
+| optimizer | Learning rate, Adam, clipping, entropy and KL |
+| async | Buffering, lag and importance correction |
+| tracking | W&B and retained reporting |
+| runtime / compiler_cache | Adapter execution and compiler reuse |
+| judges / rubrics / judging | Named service identity and verifier bindings |
+| core / miles | Explicit backend controls and advanced native escape hatch |
+
+## Defaults and interactions
+
+There are three different sources of values: raw CoreConfig/parser defaults,
+structured workflow defaults, and explicit example recipe choices. The generated
+Core and native tables identify raw defaults; `plan` shows the effective structured
+configuration and leaves unspecified native runtime choices unresolved.
+
+Structured runs default to 8 prompts × 8 responses, global batch equal to the
+collection, 100 collections, microbatch one, LR 1e-6 with constant schedule,
+Adam betas 0.9/0.95 and epsilon 1e-8, weight decay zero, gradient clip 1, PPO clip
+0.2/0.28, no GRPO standard-deviation normalization, KL/entropy coefficients zero.
+Online constant-reward group filtering defaults to true through
+`training.filter_zero_std_groups` (also `core.filter_zero_std_groups`). It uses the
+native MILES dynamic filter and replenishes accepted groups to fill the training
+batch. This is independent of GRPO standard-deviation normalization and offline
+dataset preprocessing. Set it to false for a tiny mechanics check that cannot yet
+produce mixed rewards. See [online filtering](data-and-evaluation.md#online-group-filtering).
+Do not confuse PPO clipping with TIS clipping or reward normalization.
+
+Context defaults to 6144 tokens during structured compilation. max_context_length
+sets Core, SGLang and rollout context together; response must be smaller to leave
+prompt space. max_total_tokens defaults to at least 524288 and at least engine
+admission × context. This is a requested pool capacity, not measured GPU allocation.
+
+Synchronous colocation is the implicit default; async requires explicit resident
+disaggregation. Structured async enables TIS unless rollout log probabilities are
+explicitly the anchor. TIS and use_rollout_logprobs cannot both be enabled. Async
+derives the omitted producer budget from engine count and request capacity; see
+[async queues and discard metrics](async-pipeline.md). It uses buffer factor 2,
+retry, group submissions, and requires an explicit valid Core
+lag allowance. The maintained async example selects lag one. KL > 0 enables the
+reference pass with the prepared starting model unless ref_load is supplied.
+
+Saving defaults to the final collection; save_checkpoints=false disables cadence
+and conflicts with explicit save_interval. Held-out data enables initial and
+periodic evaluation (interval 20, greedy, one response), using the training response
+cap unless overridden. Tracking stays disabled unless explicitly enabled or a
+non-disabled wandb_mode is selected. Example offline tracking is an explicit choice.
+
+Core's raw packing default is false and row_specialization is static. The async
+example enables packing and dynamic specialization. Replay is independent:
+use_rollout_routing_replay requires use_miles_router; structured compilation supplies
+the latter when omitted. The Megatron use_routing_replay option is not the Core switch.
+
+For conditional constraints see [run controls](run-controls.md), [packing](sequence-packing.md),
+[topology](topology.md), and [managed judges](managed-judges.md). For all native
+flags, choices and source help see the [native appendix](native-options.md).
+
+## Rollout capture
+
+Capture defaults off. Set a group sampling rate in the run file:
+
+```toml
+[output]
+root = "/path/to/run"
+rollout_sample_rate = 0.1
+```
+
+This saves approximately 10% of prompt groups, with all sibling responses kept
+or omitted together. Selection is deterministic from the rollout seed, update,
+dataset and group identity, independent of training randomness. `0` skips capture
+entirely; `1` or higher saves every group. Negative/non-finite rates are invalid.
+The same selection controls `.pt`, dashboard Parquet and trajectory sidecars for
+training and shared evaluation. Training batches and aggregate metrics remain
+complete. Captures still serialize synchronously when enabled; a fractional rate
+reduces the work but does not make it asynchronous. Use rate `1` for full-batch
+replay diagnostics; a sampled capture is not a complete training batch.
+
+This replaces the structured `save_debug_rollout_data` path setting. The wrapper
+owns the path under `output.root/rollouts/`. Native MILES callers supply both
+`--save-debug-rollout-data PATH` and `--rollout-sample-rate RATE`.
+
+<!-- Generated by python -m scripts.miles.generate_docs; edit reference-help.json or source definitions. -->
+
+## Workflow fields
+
+| Field | Type, default and behavior |
+|---|---|
+| compiler_cache.diagnostics | Boolean; maps to core.compiler_cache_diagnostics (default false). |
+| compiler_cache.enabled | Boolean; maps to core.compiler_cache (default true). |
+| compiler_cache.max_storage_bytes | Nonnegative bytes per shared cache key; maps to core.compiler_cache_max_storage_bytes (default 8 GiB). |
+| compiler_cache.publish_interval_seconds | Positive minimum seconds between changed-cache publications; maps to core.compiler_cache_publish_interval_seconds (default 600). |
+| compiler_cache.restore | Boolean; maps to core.compiler_cache_restore (default true). |
+| compiler_cache.shared_root | Shared cache path; maps to core.compiler_cache_root. Default shared TTL root documented in cache guide. |
+| conversion.hf_output | Prepared HF descriptor/export path; default output.root/prepared/hf. |
+| data.eval_prompt_data | List alternating dataset names and held-out JSONL paths; paths resolve relative to TOML. |
+| data.prompt_data | Prepared training JSONL path; exclusive data selector. Pair with reward_config. |
+| data.recipe | Rejected: named olmo-miles recipes are not ported. Use tasks or an immutable manifest. |
+| data.reward_config | Trusted verifier registry path for prepared inputs. |
+| data.rl_manifest | Path to immutable prepared manifest with supported verifier contracts; exclusive data selector. |
+| data.seed | Nonnegative integer, default 17; controls preparation and default rollout seeds. |
+| data.shuffle | Boolean, default true; shuffle prepared training data. |
+| data.tasks | Nonempty array of unique task tables; cannot combine with another data selector. |
+| data.tasks[].eval_count | Positive integer number of held-out prompts; omit for no held-out rows from this task. |
+| data.tasks[].prompt_wrapper | Task rendering wrapper: none, auto or open_instruct_rlzero_answer; default none. See data guide. |
+| data.tasks[].task | Required named task: gsm8k, math, ifeval or multiplication. |
+| data.tasks[].train_count | Positive integer number of training prompts. At least one task must select training data. |
+| judges.NAME.backend | Managed only: sglang (default and only supported value). |
+| judges.NAME.chat_template | Managed only: qwen3-no-thinking (default and only supported template). |
+| judges.NAME.context_extension | Optional explicit context extension recipe; qwen3-yarn-128k enables the validated Qwen3 YaRN settings for a 128K judge context. |
+| judges.NAME.endpoint | External only: required HTTP(S) endpoint without embedded credentials. |
+| judges.NAME.gpus | Managed only: positive GPU count, default 1; must equal tensor_parallel_size. |
+| judges.NAME.max_concurrent_calls | Positive client concurrency, default 16. |
+| judges.NAME.max_context_length | Positive context tokens, default 40960. |
+| judges.NAME.mode | Required managed or external; determines service ownership. |
+| judges.NAME.model | Required model identifier used by the judge. |
+| judges.NAME.prepared_dir | Managed only: required absolute pre-cached judge directory; prepare before GPU allocation. |
+| judges.NAME.revision | Managed only: required immutable 40-character hexadecimal model revision. |
+| judges.NAME.tensor_parallel_size | Managed only: positive TP count, default 1. |
+| judges.NAME.timeout | Positive seconds per judge request, default 120. |
+| judging.bindings.VERIFIER.judge | Required name of a declared judge. |
+| judging.bindings.VERIFIER.rubric | Required name of a declared rubric. |
+| launch.auto_resume | Boolean, default true; Beaker restart policy. A restart into the same output root resumes from the newest native checkpoint. Restarting a run that carries a managed judge is not qualified. |
+| launch.budget | Beaker budget string; default ai2/oe-other. |
+| launch.cluster | Cluster string; default ai2/holmes for GPU runs. CPU-only WEKA work requires ai2/saturn. |
+| launch.coordination | Multi-node coordination timeouts table. |
+| launch.coordination.heartbeat_timeout | Positive seconds for replica heartbeat timeout; default 120. |
+| launch.coordination.startup_timeout | Positive seconds to await coordinated startup; default 1200. |
+| launch.env | Environment-name to nonsecret string mapping, default empty; rank/Ray/CUDA variables are reserved. |
+| launch.gpus_per_replica | Positive integer physical GPUs per replica; inferred from topology if omitted. |
+| launch.max_retries | Restarts this run may make before it refuses to start again; default -1 for no cap. Counts every start recorded in attempts.json under output.root, including productive ones. |
+| launch.min_runtime | Beaker minimum runtime duration; default 1h. |
+| launch.priority | low, normal, high or urgent; default urgent. |
+| launch.secrets | Environment-name to Beaker secret-name mapping, default empty; no overlap with env. |
+| launch.shared_memory | Shared memory quantity string; default 200 GiB. |
+| launch.timeout | Beaker task timeout duration string; default 3h (examples override). |
+| launch.weka_mounts | Array of filesystem/mount tables; default oe-training-default at /weka/oe-training-default. |
+| launch.weka_mounts[].mount_path | Absolute/resolved destination; distinct nonoverlapping directories below root. |
+| launch.weka_mounts[].weka | WEKA filesystem name; unique per mount. |
+| launch.workspace | Beaker workspace string; default ai2/open-instruct-dev. |
+| model.format | hf (default) or olmo_core. Megatron checkpoint inputs are rejected. |
+| model.hf_template | Required only for native olmo_core input; compatible HF architecture/tokenizer template path. |
+| model.reference_hf | Rejected baseline conversion-validation field; use miles.ref_load for a frozen KL reference. |
+| model.source | Required checkpoint path, resolved relative to the run file; input remains read-only. |
+| name | Required run identifier: letters, digits, dots, underscores and hyphens; starts with a letter/digit. |
+| output.export_hf | Boolean, default false. Export final HF weights after training. |
+| output.hf_dir | Final HF export path; default output.root/export-hf. |
+| output.rollout_sample_rate | Float, default 0 (disabled). Fraction of whole prompt groups to save, including all sibling responses; values above 1 become 1. Applies to training and shared evaluation capture, including dashboard/trajectory sidecars. Negative and non-finite values are rejected. Artifacts go under output.root/rollouts; metrics and training still use the full batch. |
+| output.root | Required fresh run directory. Resume requires matching recorded specification; completed runs cannot be overwritten. |
+| records.enabled | Boolean, default false; when true, records every scored training group and its disposition to records.root. Requires fully_async=true. Recording never changes admission, filtering or training. |
+| records.response_sample_rate | Fraction of groups in (0, 1] whose text is stored with responses=sample; maps to core.records_response_sample_rate. |
+| records.responses | off (default), all or sample; maps to core.records_responses. |
+| records.root | Shared absolute store path; required when records.enabled=true; maps to core.records_root. Share one store across runs so later runs can select prompts from earlier outcomes. |
+| rubrics.NAME.max_response_tokens | Positive judge output reservation, default 2048; smaller than judge context. |
+| rubrics.NAME.profile | Required supported open-instruct/general-* profile; see managed judges guide. |
+| rubrics.NAME.temperature | Nonnegative sampling temperature, default 1.0. |
+| schema_version | Required integer 1. |
+| selection.sha256 | SHA-256 printed by `records select`; maps to core.selection_sha256 and freezes the table in the plan. |
+| selection.table | Exclusion table path from `records select`; maps to core.selection_table. Requires selection.sha256. |
+
+## Structured aliases
+
+Names below work in the organizational sections training, trainer, inference, optimizer, async, tracking and runtime unless stated otherwise. Use the semantically appropriate section shown in examples. These sections are not closed independent schemas: Core field names resolve to Core, other native names resolve to MILES.
+
+| Alias | Resolved target |
+|---|---|
+| activation_recompute | core.activation_checkpointing |
+| collect_dashboard | miles.use_miles_dashboard |
+| comparison_id | miles.wandb_group |
+| enable_mixed_chunk | miles.sglang_enable_mixed_chunk |
+| eval_max_response_length | miles.eval_max_response_len |
+| expert_parallel_size | core.expert_parallel_size |
+| fp32_lm_head | core.fp32_lm_head |
+| learning_rate | miles.lr |
+| mamba_radix_cache_strategy | miles.sglang_mamba_radix_cache_strategy |
+| max_response_length | miles.rollout_max_response_len |
+| max_train_rollout_logprob_abs_diff | core.max_train_rollout_logprob_abs_diff |
+| max_weight_staleness | core.max_policy_lag |
+| num_gpus | miles.actor_num_gpus_per_node |
+| num_rollouts | miles.num_rollout |
+| replay_rollout_data | miles.load_debug_rollout_data |
+| replay_rollout_data_subsample | miles.load_debug_rollout_data_subsample |
+| rollout_expert_parallel_size | miles.sglang_ep_size |
+| rollout_gpus_per_node | miles.num_gpus_per_node |
+| rollout_tensor_parallel_size | miles.rollout_num_gpus_per_engine |
+| router_balance_abs_threshold | miles.router_balance_abs_threshold |
+| router_balance_rel_threshold | miles.router_balance_rel_threshold |
+| router_cache_threshold | miles.router_cache_threshold |
+| router_policy | miles.sglang_router_policy |
+| samples_per_prompt | miles.n_samples_per_prompt |
+| trainer_num_nodes | miles.actor_num_nodes |
+
+| Special control | Behavior |
+|---|---|
+| disable_radix_cache | Boolean alias for miles.sglang_disable_radix_cache. |
+| dynamic_batching | Boolean alias for miles.use_dynamic_batch_size; Core validation still constrains supported modes. |
+| gpus | Only trainer/inference: trainer GPUs per node or total rollout GPUs, respectively. |
+| max_context_length | Positive token limit applied to Core, SGLang and rollout context. |
+| off_policy_correction | tis only; enables use_tis and requires use_rollout_logprobs=false. |
+| placement_mode | colocated or disaggregated; resolves miles.colocate. |
+| policy_drift_action | fail only; warn is rejected. |
+| radix_cache | Boolean; inverse of miles.sglang_disable_radix_cache. |
+| recompute_mode | full or off; resolves Core block activation checkpointing. |
+| save_checkpoints | Boolean, default true; false removes save cadence and conflicts with explicit save_interval. |
+| trainer_diagnostics | Boolean mapped to core.diagnostic_interval as 1 or 0. |
+| trainer_flash_attention_version | 2, 3 or 4; selects corresponding Core flash backend, not a hardware qualification. |
+
+## Core fields
+
+These are dataclass defaults for raw CoreConfig. Structured compilation and example files can override them; null means unset.
+
+| Field | Type | CoreConfig default | Meaning |
+|---|---|---|---|
+| core.max_run_seconds | float &#124; None | null | Optional positive driver wall-clock budget, including startup. Stop after a completed collection, save when checkpointing is enabled, export final HF weights when requested, and request final background evaluation. It is a soft limit; leave shutdown headroom before the Beaker timeout. |
+| core.filter_zero_std_groups | &lt;class &#x27;bool&#x27;&gt; | true | Default true: reject complete training prompt groups with reward std &lt;= 1e-8 through the native MILES dynamic filter and refill the batch. Requires samples_per_prompt &gt; 1. Set training.filter_zero_std_groups=false for tiny mechanics checks; evaluation is unfiltered. Compatible with offline correctness preprocessing. Custom dynamic filters require disabling this switch and remain unsupported in refresh/engine_drain. |
+| core.max_train_rollout_logprob_abs_diff | float &#124; None | null | Fail when mean absolute active-token trainer/serving log-probability gap exceeds this value; null disables. Despite the name, this is a mean, not a maximum. |
+| core.diagnostic_interval | &lt;class &#x27;int&#x27;&gt; | 0 | Interval for trainer contract diagnostics; zero disables periodic diagnostics. |
+| core.pipeline_observation_interval | &lt;class &#x27;float&#x27;&gt; | 0.0 | Seconds between read-only async producer/completed-buffer observations; zero disables. Engine metrics are sampled no more frequently than every five seconds when observation is enabled. Missing samples remain explicit. |
+| core.replay_diagnostics | &lt;class &#x27;bool&#x27;&gt; | false | Retain expert-ID replay diagnostics; does not enable replay itself. |
+| core.stream_moe_export | &lt;class &#x27;bool&#x27;&gt; | true | Stream MoE tensors during HF-layout publication to reduce export memory. |
+| core.weight_sync_mode | &lt;class &#x27;str&#x27;&gt; | &quot;flattened&quot; | flattened batches tensor transfers; per_tensor is the rollback/reference transport. |
+| core.publication_mode | &lt;class &#x27;str&#x27;&gt; | &quot;barrier&quot; | barrier (low-level default) synchronously publishes the fleet; engine_drain finishes admitted TP1 requests before independent publication; refresh (current full-model starters) preserves sampled tokens/behavior logprobs across publication and continues decoding with policy-span metadata. Refresh requires managed disaggregated TP1 async GRPO, one optimizer step per collection, MILES router, TIS, and use_rollout_logprobs=false; consult docs/miles/grpo.md for scope. |
+| core.engine_drain_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine. |
+| core.engine_update_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run. |
+| core.refresh_request_timeout | &lt;class &#x27;float&#x27;&gt; | 1800.0 | Positive seconds allowed for an entire refresh generation request, including admission, decode and publication pauses; separate from the lifecycle drain timeout. |
+| core.snapshot_capacity | &lt;class &#x27;int&#x27;&gt; | 2 | Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store. |
+| core.row_specialization | &lt;class &#x27;str&#x27;&gt; | &quot;static&quot; | static specializes no-gradient SwiGLU on capacity; dynamic avoids capacity-specific compilation. Independent of arithmetic flags. |
+| core.compiler_cache | &lt;class &#x27;bool&#x27;&gt; | true | Enable persistent compiler-cache lifecycle. |
+| core.compiler_cache_root | str &#124; None | null | Shared cache root; null selects maintained default. WEKA custom paths require a TTL component. |
+| core.compiler_cache_restore | &lt;class &#x27;bool&#x27;&gt; | true | Restore a compatible cache before worker startup. |
+| core.compiler_cache_diagnostics | &lt;class &#x27;bool&#x27;&gt; | false | Retain detailed cache diagnostics. |
+| core.compiler_cache_max_storage_bytes | &lt;class &#x27;int&#x27;&gt; | 8589934592 | Storage cap per shared compiler-cache key across runs and families; default 8 GiB. A capped worker stops publishing for the rest of the run. |
+| core.compiler_cache_publish_interval_seconds | &lt;class &#x27;float&#x27;&gt; | 600.0 | Minimum interval between changed-cache publications; default 600 seconds. The first completed collection triggers an initial publication. |
+| core.checkpoint_profile | &lt;class &#x27;bool&#x27;&gt; | false | Record checkpoint-planning and writer timings. |
+| core.checkpoint_thread_count | int &#124; None | null | Optional checkpoint writer thread bucket count; positive integer. |
+| core.checkpoint_process_count | int &#124; None | null | Optional spawned checkpoint worker count; positive integer. |
+| core.checkpoint_compact_storage | &lt;class &#x27;bool&#x27;&gt; | true | Compact tensor storage before native checkpoint writes. |
+| core.checkpoint_dedup_save_to_lowest_rank | &lt;class &#x27;bool&#x27;&gt; | false | Use the lowest rank for duplicated checkpoint entries; independent writer policy switch. |
+| core.checkpoint_constant_memory_planning | &lt;class &#x27;bool&#x27;&gt; | true | Use bounded-memory checkpoint planning; separate from async save (unsupported). |
+| core.checkpoint_keep_last | int &#124; None | null | Committed native checkpoints to keep after each commit (newest first); unset keeps every checkpoint. Run files default to 1. |
+| core.checkpoint_keep_every | int &#124; None | null | Also keep the checkpoint after every N completed updates (rollout id N-1, 2N-1, ...); unset keeps no milestones. |
+| core.model_config | str &#124; None | null | Optional Core model factory configuration path for supported construction. |
+| core.reward_config | str &#124; None | null | Trusted verifier registry path; structured workflow preparation supplies it. |
+| core.expert_parallel_size | &lt;class &#x27;int&#x27;&gt; | 1 | Expert-parallel group size; must divide trainer world size. |
+| core.attention_backend | &lt;class &#x27;str&#x27;&gt; | &quot;torch&quot; | Core attention implementation: torch, flash_2, flash_3 or flash_4; hardware/model qualification is separate. |
+| core.fp32_lm_head | &lt;class &#x27;bool&#x27;&gt; | false | Opt-in trainable FP32-output vocabulary projection on Core and SGLang. Keeps BF16 operands and ordinary low-precision gradient GEMMs; requires the updated Core runtime. Default false. Default LM head/loss and trainer TP1 only; training cost and learning effects require qualification. |
+| core.activation_checkpointing | &lt;class &#x27;bool&#x27;&gt; | true | Recompute blocks during backward to reduce activation memory. |
+| core.compile_model | &lt;class &#x27;bool&#x27;&gt; | false | Compile native Core model forwards. Experimental for variable-shaped RL; monitor graph recompilation. Default false. |
+| core.compile_optimizer | &lt;class &#x27;bool&#x27;&gt; | false | Compile the native MoE distributed optimizer update. Experimental; independent of model compilation. Default false. |
+| core.use_reduce_scatter | &lt;class &#x27;bool&#x27;&gt; | false | Use the native MoE reduce-scatter gradient path. Experimental; qualify EP topology before promoting. Default false. |
+| core.max_sequence_length | &lt;class &#x27;int&#x27;&gt; | 8192 | Trainer context limit in tokens; structured max_context_length sets trainer and serving limits together. |
+| core.sequence_packing | &lt;class &#x27;bool&#x27;&gt; | false | Pack complete samples within each optimizer partition using document-isolated attention/KDA and replay alignment. |
+| core.expert_balanced_packing | &lt;class &#x27;bool&#x27;&gt; | false | Experimental, opt-in replay-informed sample ordering within optimizer steps; disabled by default. Correctness is qualified on tested configurations, but net throughput benefit depends on workload/topology and planning overhead. Requires world &gt; EP &gt; 1, sequence packing, routing replay, zero balancing loss and miles.balance_data=false. Uses exact pack/equalization scoring with identity fallback. Only single-turn Olmo3MoE inputs with original prompt identities are supported. |
+| core.expert_balance_layer_stride | &lt;class &#x27;int&#x27;&gt; | 1 | Positive stride over routed model layers used to score expert-aware packing and report dispatch load. Default 1 measures every routed layer; larger strides give sampled-layer metrics. |
+| core.expert_balance_search_proposals | &lt;class &#x27;int&#x27;&gt; | 1024 | Maximum guided/random swap attempts per optimizer block, default 1024; zero keeps the greedy-only planner. Search uses exact incremental packing and preserves the original nonregression guard. |
+| core.expert_balance_search_seconds | &lt;class &#x27;float&#x27;&gt; | 0.25 | Swap-search wall-clock allowance per collection in seconds, split across complete optimizer blocks; default 0.25. Zero skips swaps. Histogram construction and greedy scoring are outside this allowance. Deadline termination may differ across machines; seed, attempts and selected permutation are logged. |
+| core.packing_max_tokens | int &#124; None | null | Maximum tokens per pack; null uses context limit. Must cover max_sequence_length; samples are never split. |
+| core.max_policy_lag | &lt;class &#x27;int&#x27;&gt; | 0 | Maximum optimizer-step age at consumption; multiple updates per collection also consume this allowance. Structured async runs default to six (provisional); synchronous and low-level defaults remain zero. Explicit limits take precedence. |
+| core.router_aux_loss_grouping | &lt;class &#x27;str&#x27;&gt; | &quot;pack&quot; | pack retains native Core local-forward balancing; sequence computes counts and mean scores within each original response document while preserving physical packing. Experimental; requires MoE, TP=CP=1, no global balancing and no model compilation. |
+| core.router_aux_loss_reduction | &lt;class &#x27;str&#x27;&gt; | &quot;token&quot; | token weights each document by its full model-token count; response averages document token means equally over all responses in the optimizer update. |
+| core.router_z_loss_reduction | &lt;class &#x27;str&#x27;&gt; | &quot;token&quot; | token preserves native global model-token normalization; response averages per-document z-loss token means equally. Independent of balancing grouping and weighting. |
+| core.router_aux_count_source | &lt;class &#x27;str&#x27;&gt; | &quot;dispatch&quot; | Balancing histogram source: dispatch (default, includes replay) or current (fresh trainer top-k). Current changes balancing only; replay dispatch, selected weights and z-loss are unchanged. Supported for local, plain-softmax MoE routing. |
+| core.router_aux_loss_weight | &lt;class &#x27;float&#x27;&gt; | 0.01 | Coefficient for Core router balancing loss; zero disables its gradient contribution. Grouping, reduction and count source are configured independently. |
+| core.router_z_loss_weight | &lt;class &#x27;float&#x27;&gt; | 1e-05 | Router z-loss coefficient; replay does not itself disable router losses or gradients. |
+| core.scoring_pass_required | &lt;class &#x27;bool&#x27;&gt; | false | Force standalone scoring even when the recipe permits skipping it. |
+| core.scoring_check_interval | &lt;class &#x27;int&#x27;&gt; | 50 | Periodic standalone-versus-training score check; startup/resume also checks the first update. |
+| core.scoring_check_tolerance | &lt;class &#x27;float&#x27;&gt; | 0.001 | Allowed absolute difference for the standalone/training scoring check. |
+| core.expert_publication | &lt;class &#x27;str&#x27;&gt; | &quot;per_expert&quot; | per_expert exports separate HF expert slices; fused publishes stacked serving tensors. Disk HF export remains per-expert. |
+| core.records_root | str &#124; None | null | Absolute shared store for inference records; null disables recording. Every scored training group (passed, filtered or aborted) and its later consumption or expiry is appended as JSONL under &lt;root&gt;/&lt;lineage&gt;/&lt;run&gt;/ by a bounded background writer. See the inference records guide. |
+| core.records_responses | &lt;class &#x27;str&#x27;&gt; | &quot;off&quot; | Response text in inference records: off (default) keeps outcomes only, all stores every response, sample stores whole groups selected deterministically at records_response_sample_rate. |
+| core.records_response_sample_rate | float &#124; None | null | Fraction of groups, in (0, 1], whose response text is stored when records_responses=sample; must be null otherwise. |
+| core.selection_table | str &#124; None | null | Absolute path of a frozen exclusion table from `records select`; null disables selection. The data source skips its excluded prompts as they stream in. |
+| core.selection_sha256 | str &#124; None | null | Pinned SHA-256 of core.selection_table; the run fails at startup if the file, its lineage or its protocol does not match. |
+
+## Unsupported olmo-miles controls
+
+| Field | Replacement or limitation |
+|---|---|
+| accumulate_allreduce_grads_in_fp32 | Core owns reduction precision; this Megatron switch has no Core equivalent |
+| capture_generation_samples | use output.rollout_sample_rate to capture whole prompt groups |
+| code_service_host | per-run code-service provisioning is not implemented |
+| code_service_log | per-run code-service provisioning is not implemented |
+| code_service_mode | provision the verifier service externally and pass its environment |
+| code_service_port | per-run code-service provisioning is not implemented |
+| code_service_python | per-run code-service provisioning is not implemented |
+| code_service_source_revision | record externally provisioned service provenance |
+| code_service_source_root | per-run code-service provisioning is not implemented |
+| code_service_workers | provision the verifier service externally |
+| colocated_live_weight_export | Core already owns live IPC export; there is no Megatron patch selector |
+| dataset_profile | choose data.tasks, data.recipe or data.rl_manifest |
+| determinism_probe_cross_gpu | use retained-input diagnostic scripts |
+| determinism_probe_forward_trace | use retained-input diagnostic scripts |
+| determinism_probe_l2norm_inputs | use retained-input diagnostic scripts |
+| determinism_probe_retune_kda | use retained-input diagnostic scripts |
+| determinism_probe_samples | use retained-input diagnostic scripts |
+| fla_prewarm | use compiler_cache.enabled; generic FLA prewarming is not implemented |
+| fla_prewarm_sequence_length | generic FLA prewarming is not implemented |
+| generation_samples_per_rollout | use output.rollout_sample_rate to capture whole prompt groups |
+| hardware_profile | choose explicit Core/serving settings and launch.cluster; automatic hardware policy is not implemented |
+| hf_checkpoint | use model.source; preparation supplies miles.hf_checkpoint |
+| inference_ep_diagnostics | use the separate inference-EP diagnostics |
+| megatron_checkpoint | use model.source/model.format or miles.load for a native Core RL resume |
+| miles_train_script | this workflow owns the Core driver |
+| no_start_ray | the launcher owns Ray startup |
+| output_dir | use output.root |
+| python_path | install code in the pinned runtime image; the launcher owns PYTHONPATH |
+| recompute_modules | Core supports block activation_checkpointing, not Megatron selective modules |
+| rl_manifest | use data.rl_manifest |
+| rollout_health_diagnostics | use dedicated recovery probes; the baseline diagnostic wrapper is not installed |
+| rollout_recovery_max_attempts | Core does not yet implement the baseline driver retry budget |
+| rollout_recovery_mem_fraction_static | Core does not implement recovery-time memory overrides |
+| rollout_stage_timeout | Core does not yet implement the baseline per-stage deadline |
+| rollout_test_fault | use a dedicated fault-injection qualification, not an ordinary run |
+| save_retain_interval | native Core checkpoint retention is not implemented |
+| save_tokens_per_expert_interval | tokens-per-expert checkpoint capture is not implemented |
+| skip_cuda_check | plan is CPU-safe; validate checks the installed runtime |
+| start_code_service | per-run code-service provisioning is not implemented |
+| trainer_backend | Core selects its native model backend; omit the Megatron optimized/compatibility switch |
+| validate_miles_args | use the validate command |
+| weight_export_mode | Core exports native HF tensors; use core.stream_moe_export |
+
+## Example recipes
+
+Generated from the actual structured TOMLs. These are recipe choices, not universal defaults or production qualification. GPU columns distinguish per-node trainers from total rollout GPUs.
+
+| Example | Trainer GPUs | Rollout GPUs | Colocated | Prompts × responses | Global batch | Async | TIS | Packing | Collections |
+|---|---|---|---|---|---|---|---|---|---|
+| dev.toml | 1 × 1 | 1 | True | 4 × 2 | 8 | False | False | False | 4 |
+| large.toml | 2 × 8 | 32 | False | 64 × 4 | 256 | True | True | True | 200 |
+| medium.toml | 1 × 8 | 7 | False | 64 × 4 | 256 | True | True | True | 200 |
+| small.toml | 1 × 1 | 1 | False | 4 × 2 | 8 | False | False | False | 4 |
