@@ -110,9 +110,9 @@ that Core has lost.
 | Compiler cache | Baseline public run-spec defaults enable its cache lifecycle. | Core cache implementation exists but remains opt-in. Dynamic row specialization is a separate option, selected by RL starters. |
 
 For source-level detail see baseline `src/olmo_miles/config.py:269`, `:403`,
-`:1234` and `:1239`, and Core [actor.py](../../../open_instruct/miles/actor.py),
-[scheduler.py](../../../open_instruct/miles/scheduler.py),
-[async buffer](../../../open_instruct/miles/async_buffer.py), and the
+`:1234` and `:1239`, and Core [actor.py](../../../open_instruct/miles/training/actor.py),
+[scheduler.py](../../../open_instruct/miles/training/scheduler.py),
+[async buffer](../../../open_instruct/miles/rollout/async_buffer.py), and the
 [starter profiles](../../../configs/miles/README.md).
 
 Raw defaults are not a recommended full-model recipe. `CoreConfig` defaults to
@@ -152,8 +152,8 @@ facade and direct native argument validation:
 
 These are fixed interface defects, not newly implemented capabilities. Normal
 working profiles retain their behavior. The guards and tests are in
-[config.py](../../../open_instruct/miles/config.py),
-[arguments.py](../../../open_instruct/miles/arguments.py), and
+[config.py](../../../open_instruct/miles/configuration/config.py),
+[arguments.py](../../../open_instruct/miles/configuration/arguments.py), and
 [test_options.py](../../../tests/miles/test_options.py).
 
 **Remaining debug-dump limitation:** `save_debug_train_data` does not currently
@@ -256,7 +256,7 @@ recomputation ordering, normalization, checkpointing and weight export all need
 to follow the new topology.
 
 The original dense Olmo 3 trainer is isolated in
-[standard_models.py](../../../open_instruct/miles/standard_models.py). It has
+[standard_models.py](../../../open_instruct/miles/training/standard_models.py). It has
 architecture/conversion support and local update/resume evidence, but not a full
 original Olmo 3 training recipe qualification. Core H100 MoE execution is likewise
 unqualified; the baseline's smaller-model H100 lifecycle does not prove this

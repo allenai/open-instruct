@@ -1,5 +1,5 @@
 {
-  "image": "local-validation:open-instruct-miles-core-f67486a3df40+mounted-miles-19393c067",
+  "image": "sha256:e9309b0d650e4b499d0ae941563e301ee1869542eae6f47c27b0b90646c0dc42",
   "options": [
     {
       "default": null,
@@ -11912,5 +11912,5 @@
       "help": null
     }
   ],
-  "schema_sha256": "890a6662ac314b79e5cc239302d5f417bd97aaadf5964aa6c8c1be2a735eb813"
+  "schema_sha256": "d051be554846e86a2626dd62f1aff58ce1f959d74dbb1f2ab689058d4669633d"
 }
