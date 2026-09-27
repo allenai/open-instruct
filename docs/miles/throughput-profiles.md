@@ -14,7 +14,7 @@ See [qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16
 These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
 GSM8K-style responses capped at 4096 tokens, and Holmes B300 GPUs. They are a
 measured starting point, not a universal fit or learning-quality guarantee. The
-hero checkpoint, dense/FSDP trainer, judges, code execution and longer contexts
+hybrid MoE checkpoint, dense/FSDP trainer, judges, code execution and longer contexts
 need their own capacity checks. See [measurements and figures](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/throughput-20260913.md)
 and the [chronological campaign log](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/throughput-campaign-20260913.md).
 
@@ -256,8 +256,9 @@ insufficient capture/pool coverage, and excessive retained work. Intentional
 small runs can retain warnings. See [the queue guide](async-pipeline.md) for exact
 ownership, semaphore, retry and lifecycle semantics.
 
-The examples use urgent Holmes placement in `ai2/open-instruct-dev`, one-hour
-minimum runtime and explicit GPU allocation. CPU-only jobs needing WEKA belong
-on Saturn. Multi-node auto-resume is qualified for the restart path in
+The examples use high-priority Holmes placement in `ai2/open-instruct-dev`
+and explicit GPU allocation. Minimum runtimes vary by tier; see
+[placement guidance](launching.md#placement-secrets-and-results), including the
+separate CPU scheduling policy. Multi-node auto-resume is qualified for the restart path in
 [multi-node resume](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md); forced preemption, and restarts of runs
 carrying a managed judge, are not.

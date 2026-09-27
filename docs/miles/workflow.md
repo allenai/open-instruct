@@ -83,7 +83,7 @@ checkpoint when one exists. Without a completed checkpoint, training begins
 from the initial model again. A killed process may leave the last recorded
 workflow state; consult the Beaker attempt status when checking liveness.
 
-The launch defaults in the examples are urgent priority,
+The launch defaults in the examples are high priority,
 `ai2/open-instruct-dev`, `ai2/holmes`, and a one-hour minimum runtime. The
 100-update examples allow eight hours before timeout, including preparation,
 evaluation and synchronous saves. CPU-only

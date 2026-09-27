@@ -3,15 +3,16 @@
 import ast
 import base64
 import json
+import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-from scripts.miles import launch_workflow
 
 from open_instruct.miles.configuration.run_spec import RunSpec
-from open_instruct.miles.execution import launch, workflow
+from open_instruct.miles.execution import launch, submit, workflow
 
 IMAGE_ID = "01M2931KARFP3Y2W2FPADGRFEP"
 
@@ -51,6 +52,7 @@ def test_payload_is_exact_resolved_spec_with_quoted_paths_and_overrides(tmp_path
     assert payload(command) == run.to_dict()
     assert payload(command)["optimizer"]["learning_rate"] == 3e-6
     assert task["image"] == {"beaker": IMAGE_ID}
+    assert "python -m open_instruct.miles.execution.preflight_attention" in command
     subprocess.run(["bash", "-n"], input=command, text=True, check=True)
     assert not (tmp_path / "should-not-exist").exists()
 
@@ -124,10 +126,10 @@ def test_every_weka_input_and_output_requires_mount_coverage(tmp_path, section):
 
 def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "PRIVATE-VALUE-SENTINEL")
-    run = spec(tmp_path, launch={"secrets": {"HF_TOKEN": "robertb_hf_secret"}, "env": {"DEBUG_LABEL": "visible"}})
+    run = spec(tmp_path, launch={"secrets": {"HF_TOKEN": "test_hf_secret"}, "env": {"DEBUG_LABEL": "visible"}})
     document = launch.specification(IMAGE_ID, run)
     env = document["tasks"][0]["envVars"]
-    assert {"name": "HF_TOKEN", "secret": "robertb_hf_secret"} in env
+    assert {"name": "HF_TOKEN", "secret": "test_hf_secret"} in env
     assert not any(value["name"] == "HF_TOKEN" and "value" in value for value in env)
     assert "PRIVATE-VALUE-SENTINEL" not in json.dumps(document)
     run.launch["env"]["WANDB_API_KEY"] = "should-not-print"
@@ -145,13 +147,8 @@ def test_run_freezes_overrides_before_required_build_wrapper(tmp_path, monkeypat
     calls = []
 
     def run(command, **kwargs):
-        assert command[:4] == [
-            "bash",
-            "./scripts/train/build_image_and_launch.sh",
-            "--miles",
-            "scripts/train/debug/miles_workflow.sh",
-        ]
-        frozen = Path(command[4])
+        assert command[:3] == ["bash", "./scripts/train/build_image_and_launch.sh", "--miles"]
+        frozen = Path(command[3])
         assert frozen != path and frozen.suffix == ".json"
         assert json.loads(frozen.read_text()) == expected
         path.write_text("changed while image builds")
@@ -161,7 +158,7 @@ def test_run_freezes_overrides_before_required_build_wrapper(tmp_path, monkeypat
 
     monkeypatch.setattr(launch.subprocess, "run", run)
     launch.run(path, ["optimizer.learning_rate=0.000004"])
-    assert len(calls) == 1 and not Path(calls[0][4]).exists()
+    assert len(calls) == 1 and not Path(calls[0][3]).exists()
 
 
 def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatch):
@@ -171,7 +168,7 @@ def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatc
 
     def check_output(command, **kwargs):
         if command[:3] == ["beaker", "image", "get"]:
-            assert command[3] == "robertb/image-alias"
+            assert command[3] == "test-user/image-alias"
             return json.dumps([{"id": IMAGE_ID}])
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             assert kwargs["cwd"] == launch.ROOT
@@ -182,13 +179,13 @@ def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatc
         return json.dumps([{"id": f"experiment-{len(submitted)}"}])
 
     monkeypatch.setattr(launch.subprocess, "check_output", check_output)
-    first = launch.submit("robertb/image-alias", run)
-    assert first["image"] == IMAGE_ID and first["requested_image"] == "robertb/image-alias"
+    first = launch.submit("test-user/image-alias", run)
+    assert first["image"] == IMAGE_ID and first["requested_image"] == "test-user/image-alias"
     assert first["revision"] == "source-revision"
     assert first["spec_sha256"] == workflow.fingerprint(run.to_dict())
     assert payload(submitted[0]["tasks"][0]["arguments"][0]) == first["spec"]
     assert submitted[0]["tasks"][0]["image"]["beaker"] == IMAGE_ID
-    second = launch.submit("robertb/image-alias", run)
+    second = launch.submit("test-user/image-alias", run)
     assert json.loads(launch.receipt_path(run).read_text()) == second
     assert len(list((tmp_path / "receipts").glob("*.json"))) == 2
 
@@ -257,15 +254,13 @@ def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
     path = tmp_path / "frozen.json"
     path.write_text(json.dumps(run.to_dict()))
     calls = []
+    monkeypatch.setattr(submit.launch, "submit", lambda image, actual: calls.append((image, actual.to_dict())))
     monkeypatch.setattr(
-        launch_workflow.launch, "submit", lambda image, actual: calls.append((image, actual.to_dict()))
-    )
-    monkeypatch.setattr(
-        launch_workflow.argparse.ArgumentParser,
+        submit.argparse.ArgumentParser,
         "parse_args",
         lambda parser: type("Args", (), {"image": IMAGE_ID, "config": path, "overrides": [], "render_only": False})(),
     )
-    launch_workflow.main()
+    submit.main()
     assert calls == [(IMAGE_ID, run.to_dict())]
 
 
@@ -297,3 +292,60 @@ def test_status_requires_every_replica_and_ignores_older_attempts(tmp_path, monk
         assert {job["execution"]["replicaRank"] for job in result["current_jobs"]} == {0, 1}
     jobs[-1]["status"]["exitCode"] = 1
     assert launch.status(run)["state"] == "failed"
+
+
+@pytest.mark.parametrize("failure", [None, "dirty", "alias", "mismatch"])
+def test_image_wrapper_dispatches_to_package_without_a_debug_script(tmp_path, failure):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    received = tmp_path / "submission.json"
+    immutable_image = IMAGE_ID if failure != "alias" else "test-user/image-alias"
+    resolved = "different-image" if failure == "mismatch" else IMAGE_ID
+    programs = {
+        "git": "import sys\nprint(' M file' if sys.argv[1] == 'status' and "
+        + repr(failure == "dirty")
+        + " else '')\n",
+        "beaker": "import json, sys\nassert sys.argv[1:] == ['image', 'get', "
+        + repr(IMAGE_ID)
+        + ", '--format', 'json']\nprint(json.dumps([{'id': "
+        + repr(resolved)
+        + "}]))\n",
+        "python": "import json, os, sys\nfrom pathlib import Path\n"
+        + "if sys.argv[1:3] == ['-m', 'open_instruct.miles.execution.submit']:\n"
+        + "    Path("
+        + repr(str(received))
+        + ").write_text(json.dumps(sys.argv[1:]))\n"
+        + "else:\n    os.execv("
+        + repr(sys.executable)
+        + ", ["
+        + repr(sys.executable)
+        + ", *sys.argv[1:]])\n",
+    }
+    for name, program in programs.items():
+        path = tools / name
+        path.write_text(f"#!{sys.executable}\n{program}")
+        path.chmod(0o755)
+    # The wrapper must forward paths and overrides as literal arguments.
+    frozen = tmp_path / "run with 'quotes' $(touch should-not-exist).json"
+    overrides = ["--set", 'tracking.wandb_run_name="literal $HOME `x`"']
+    result = subprocess.run(
+        ["bash", "./scripts/train/build_image_and_launch.sh", "--miles", str(frozen), *overrides],
+        cwd=launch.ROOT,
+        env={**os.environ, "PATH": str(tools) + os.pathsep + os.defpath, "MILES_EXISTING_IMAGE": immutable_image},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if failure:
+        assert result.returncode != 0
+        assert not received.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert json.loads(received.read_text()) == [
+            "-m",
+            "open_instruct.miles.execution.submit",
+            IMAGE_ID,
+            str(frozen),
+            *overrides,
+        ]
+    assert not (launch.ROOT / "should-not-exist").exists()

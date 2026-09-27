@@ -20,7 +20,6 @@ RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision
 COPY open_instruct /opt/core-rl/open_instruct
 COPY tests/miles /opt/core-rl/tests/miles
 COPY scripts/miles /opt/core-rl/scripts/miles
-COPY scripts/train/debug /opt/core-rl/scripts/train/debug
 COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
 COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles

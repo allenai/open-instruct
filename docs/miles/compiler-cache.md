@@ -18,7 +18,7 @@ publish_interval_seconds = 600  # minimum time between progress checks
 The root must be absolute; custom WEKA paths need an exact `tmp-N[hdwmy]` TTL
 component. Expired artifacts are cold misses. No new cleanup daemon is required.
 
-The implementation lives in our pinned MILES fork under
+The implementation lives in the pinned MILES fork under
 `miles.utils.compiler_cache`. Open Instruct supplies the run configuration and
 application source root, then calls the MILES lifecycle from its driver. Worker
 hooks, the SGLang entrypoint, and the standalone probe are owned by MILES.
@@ -273,8 +273,7 @@ reports determine current end-to-end cost. The [full-SFT runtime check](https://
 published all three workers in 11.2 seconds total, with no timeout. Warm caches do not remove HF loading,
 optimizer setup or CUDA graph capture.
 
-The separate `python -m miles.utils.compiler_cache.run` command (also available through the forwarding entrypoint
-`python -m scripts.miles.compiler_cache_run`) is an experimental
+The separate `python -m miles.utils.compiler_cache.run` command is an experimental
 single-node wrapper for controlled probes. Its broader TileLang/Inductor/FA4/
 DeepEP/DeepGEMM families are not qualified Ray persistence. See the
 [historical probe procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/implementation-history/compiler-cache-before-sharing-20260913.md#coldrestored-screen)

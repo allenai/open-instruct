@@ -22,14 +22,6 @@ logger = logger_utils.setup_logger(__name__)
 CLOSING_TEXT = "</think>\n\n"
 
 
-def sequence_start(tokens, sequence):
-    """Find a delimiter without decoding/re-encoding the parent prefix."""
-    for index in range(len(tokens) - len(sequence) + 1):
-        if tokens[index : index + len(sequence)] == sequence:
-            return index
-    return None
-
-
 def thinking_end(tokens, tokenizer):
     # BPE can merge the tag with adjacent punctuation/newlines, so matching only
     # tokenizer.encode("</think>") misses naturally generated closing tags.

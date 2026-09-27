@@ -69,7 +69,9 @@ python -m open_instruct.miles run runs/my-grpo.toml
 checks the ID, but does **not** prove source compatibility with your checkout.
 The submitted config is carried into the job; your local Python changes are not.
 Use an image built from the intended source revision. The launch receipt records
-the submitting revision and selected image separately.
+the submitting revision and selected image separately. In particular, the job
+now calls `open_instruct.miles.execution.preflight_attention`; an older image
+with only the scripts entrypoint must be rebuilt.
 
 To deploy source changes, commit them and build the source overlay instead.
 Read the immutable base identity from the lock and pull it into local Docker:
@@ -89,7 +91,9 @@ Do not use the general Open Instruct/vLLM auto image for MILES.
 
 Both modes require a clean, committed checkout and delegate through
 `scripts/train/build_image_and_launch.sh --miles`. `run` performs launch checks
-before building, including mount coverage. It does not implement olmo-miles'
+before building, including mount coverage. The MILES image wrapper passes the
+frozen configuration directly to `open_instruct.miles.execution.submit`; no
+debug launch script is involved. It does not implement olmo-miles'
 `--skip-local-gate` option or its image-preflight contract.
 
 ## Distributed scheduling contract
@@ -114,7 +118,7 @@ tasks:
     resources:
       gpuCount: 8
     context:
-      priority: urgent
+      priority: high
       minRuntime: 4h
     timeout: 6h
 ```
@@ -201,8 +205,11 @@ selection before training.
 
 ## Placement, secrets and results
 
-GPU examples use Holmes, `ai2/open-instruct-dev`, urgent priority and minimum runtimes of one hour for dev/small, four hours for
-medium and eight hours for large. CPU-only preparation requiring WEKA must use **ai2/saturn**.
+GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and minimum runtimes of one hour for dev/small, four hours for
+medium and eight hours for large. CPU-only preparation is unallocated: omit `context.minRuntime`, retain the
+execution timeout and WEKA mounts, and try **ai2/saturn** first. If scheduler
+events show it cannot schedule, cancel that attempt before trying **ai2/jupiter**.
+Do not use Holmes for CPU-only WEKA work.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.
 See [topology](topology.md) for replica and engine counts and
 [managed judges](managed-judges.md) for preparation and placement.

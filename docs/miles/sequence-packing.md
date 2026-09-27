@@ -72,8 +72,8 @@ The historical tiny KDA/full-attention/latent-MoE model gate is preserved with i
 
 The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
-It used two Holmes GPUs, urgent priority, a positive minimum runtime, random
-local weights and no external datasets. It exercises EP1/EP2 with recomputation
+The historical gate used two Holmes GPUs with random local weights and no
+external datasets. It exercises EP1/EP2 with recomputation
 on/off, fixed replay, document-isolation perturbations, two updates (checked then
 skipped scoring), policy-only gradient/Adam comparisons and the combined
 objective. Per-rank reports and contracts are retained even on failure. This was followed by a passing small real SGLang/Core async exercise and

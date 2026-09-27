@@ -65,7 +65,9 @@ def specification(image, spec, *, hostnames=None):
     collect = f"from open_instruct.miles.execution.launch import collect_results; collect_results({spec.output['root']!r}, '/output')"
     preflight = ""
     if config.core.attention_backend in ("torch", "flash_4"):
-        preflight = f"python -m scripts.miles.preflight_attention --backend {config.core.attention_backend}\n"
+        preflight = (
+            f"python -m open_instruct.miles.execution.preflight_attention --backend {config.core.attention_backend}\n"
+        )
     cleanup = "status=$?; python -c " + shlex.quote(collect) + ' || true; exit "$status"'
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
@@ -176,13 +178,7 @@ def run(path, overrides):
     with tempfile.TemporaryDirectory(prefix="miles-submitted-run-") as directory:
         frozen = Path(directory) / "run.json"
         workflow.write_json(frozen, spec.to_dict())
-        command = [
-            "bash",
-            "./scripts/train/build_image_and_launch.sh",
-            "--miles",
-            "scripts/train/debug/miles_workflow.sh",
-            str(frozen),
-        ]
+        command = ["bash", "./scripts/train/build_image_and_launch.sh", "--miles", str(frozen)]
         subprocess.run(command, cwd=ROOT, check=True)
 
 

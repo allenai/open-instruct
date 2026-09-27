@@ -15,8 +15,10 @@ cp configs/miles/examples/small.toml runs/my-run.toml
 # Replace model/output paths and YOUR_USERNAME; select an appropriate tiny model.
 python -m open_instruct.miles plan runs/my-run.toml
 python -m open_instruct.miles validate runs/my-run.toml
-# Tested small barrier/refresh image; see the qualification scope below.
-export MILES_EXISTING_IMAGE=01M3GNG2J3DEE8BCJTMPGA1AAB
+# Load the pinned binary base into Docker as described in the launch guide.
+# Build an application image from this clean, committed checkout.
+unset MILES_EXISTING_IMAGE
+export MILES_BASE_IMAGE=LOCAL_LOADED_BASE_IMAGE
 python -m open_instruct.miles run runs/my-run.toml
 ```
 
@@ -24,16 +26,18 @@ The examples default to high priority and the `open-instruct-miles` W&B project.
 Their explicit Holmes placement matches the B300 profiles; choose a compatible
 cluster and review the plan before submitting.
 
-The example TOMLs do not pin a trainer image; `MILES_EXISTING_IMAGE` selects it at launch.
-`large` separately pins its evaluator image. The trainer image above contains
-Open Instruct `3684951ec` and MILES `53cd9ec39`, including the relocated Core
-adapter and publication machinery. Two-B300 tiny-model checks passed for
-[packed barrier training and HF export](https://beaker.org/ex/01M3GP47X09HS882JR75ST5E4R),
-[mixed-policy refresh](https://beaker.org/ex/01M3GPN5XX0SZSFZTASMKSG0KC), and
-[checkpoint resume with compiler-cache hits](https://beaker.org/ex/01M3GQ5Y1SZ81HH6G9N9N8YADH).
-These checks used FlashAttention 4 with packing and disabled constant-reward
-filtering. They do not qualify colocation, background evaluation, full-policy
-memory use or the larger topologies. Build a new image when runtime source changes.
+The example TOMLs do not pin a trainer image. Follow the
+[image build instructions](../../../docs/miles/launching.md#laptop-choose-or-build-an-image)
+to load the base and build the current application. `MILES_EXISTING_IMAGE` is an
+alternative only when that immutable image contains the intended source revision
+and runtime lock. The packaged attention-preflight entrypoint requires a rebuilt
+application image; older qualification images contain its former scripts path.
+`large` separately pins its evaluator image.
+
+The [archived small-run qualification](https://github.com/allenai/open-instruct/blob/7a477910405a65d914b48096f83c13a6c61a60ad/configs/miles/examples/README.md)
+records barrier/export, refresh and resume/cache checks for their original image.
+Those results do not qualify the rebased runtime pins, colocation, background
+evaluation, full-policy memory use or larger topologies.
 
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test
 mechanics. They are not accuracy baselines. They exercise evaluation, saving and HF export as well as generation and
