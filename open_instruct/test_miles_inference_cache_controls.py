@@ -8,7 +8,7 @@ from open_instruct.miles.configuration import validation
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 
-EXAMPLE = Path(__file__).resolve().parents[2] / "configs/miles/examples/medium.toml"
+EXAMPLE = Path(__file__).resolve().parents[1] / "configs/miles/examples/medium.toml"
 
 RADIX_ON = [
     "inference.radix_cache=true",

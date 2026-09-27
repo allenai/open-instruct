@@ -21,10 +21,9 @@ and checkpoint boundaries. A policy version advances only after a successful
 optimizer step. The async producer attaches behavior versions to samples; the
 trainer checks their age again when consuming the batch.
 
-The Core adapter is based on OLMo-core's `robertb/miles-rl-main` branch and
-Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
-at `ad28862b5`. The runtime pins `3c2ad5989` from `robertb/miles-fp32-head`,
-which adds the optional trainable FP32-output head to `e505356353`.
+The runtime uses the exact OLMo-core commit recorded in
+[`runtime.lock.json`](../../runtime/miles/runtime.lock.json), including the
+optional trainable FP32-output head and production MoE support.
 Image builds fetch the full commit in the runtime lock without applying a Core patch.
 The port retains custom objectives, routing replay/count controls, bounded
 checkpoint planning and streaming HF interchange, including the inherited

@@ -24,28 +24,6 @@ def receipt_path(spec):
     return directory / f"{spec.name}-{key}.json"
 
 
-def cluster_hostnames(spec):
-    """Return the cluster inventory, with currently available nodes first.
-
-    This is an inventory snapshot for optional host filtering, not a resource
-    reservation; Beaker remains the scheduler.
-    """
-    response = json.loads(
-        subprocess.check_output(["beaker", "cluster", "get", spec.launch["cluster"], "--format", "json"], text=True)
-    )
-    cluster = response[0] if isinstance(response, list) else response
-    nodes = json.loads(subprocess.check_output(["beaker", "node", "list", "--format", "json"], text=True))
-    available = {
-        entry["nodeId"]: entry["slotCounts"].get("available", 0)
-        for entry in cluster.get("clusterOccupancy", {}).get("nodeOccupancies", [])
-    }
-    selected = [node for node in nodes if node.get("clusterId", node.get("cluster_id")) == cluster["id"]]
-    return [
-        node["hostname"]
-        for node in sorted(selected, key=lambda node: (-available.get(node["id"], 0), node["hostname"]))
-    ]
-
-
 def specification(image, spec, *, hostnames=None):
     config = spec.compile()
     layout = topology.plan(spec)

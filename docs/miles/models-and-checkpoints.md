@@ -78,7 +78,7 @@ override.
 
 ```toml
 [model]
-source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+source = "/weka/oe-training-default/YOUR_USERNAME/checkpoints/policy-hf"
 format = "hf"
-hf_template = "/weka/oe-training-default/robertb/open-instruct/tokenizers/dolma2-tokenizer-olmo35"
+hf_template = "/weka/oe-training-default/YOUR_USERNAME/tokenizers/compatible-template"
 ```

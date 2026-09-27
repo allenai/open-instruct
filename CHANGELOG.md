@@ -2,14 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
-
-
 ### Added
-- Archive the bounded MILES GSM8K research auditor and keep standalone evaluator regression tests with the test suites (PR URL pending).
-- Move MILES inference recording and summaries into the pinned MILES fork while retaining Open Instruct prompt selection and checkpoint identity (PR URL pending).
-- Keep MILES configuration validation independent of the GPU runtime with a compact parser schema; generate option references during documentation builds (PR URL pending).
-- Preserve opt-in synchronous full-tag stopping guidance, readiness capture, and the label-cleaned GSM8K task through the MILES Core adapter move (PR URL pending).
-- Add the opt-in MILES integration with OLMo-core training, SGLang serving, structured run configuration, and dedicated runtime validation; reject sequence packing with incompatible Torch attention before launch. The Core trainer adapter, weight publication, managed rollout coordination, sequence packing, expert-load scheduling, and compiler-cache persistence are provided by the pinned MILES fork (PR URL pending).
+- Add opt-in MILES GRPO with OLMo-core training, SGLang serving, structured configuration, dataset and reward integration, and dedicated CPU/runtime validation. The pinned MILES fork owns the Core adapter, publication, packing, compiler caches and inference recording. Existing training paths and their dependency pins remain unchanged (PR URL pending).
 - Count cached SFT token statistics with Arrow batches instead of materializing a duplicate tokenized dataset (https://github.com/allenai/open-instruct/pull/1904).
 - Add `--reserved_slot_tokens`, which makes a multi-token tag a single token by renaming unused `<|extra_id_N|>` vocabulary entries in place. `<think>` is `<th` `ink` `>` in the Olmo vocabularies and the BPE merges that `>` forward (`>\n`, `>\n\n` and `></` are each one token), so a generation prompt ending in `<think>` cannot produce the first token of a turn whose reasoning starts on the next line (27% of Dolci-Think traces) or whose think block is empty (every Instruct turn under the olmo35 template). Renaming a reserved slot rather than appending leaves `vocab_size` and olmo-core's `padded_vocab_size()` unchanged, so no checkpoint is resized. Both SFT paths seed each promoted row with the mean of its pieces, the olmo-core one through the vocabulary-sharded embedding DTensor that `parallelize_model` leaves behind, and only when the run is not resuming. The tokenization command that path suggests on a cache miss now carries the flag, shell-quoted, without which following the hint would rebuild the same missing cache entry forever. Refused with `--use_lora`/`--use_qlora`, whose adapter checkpoint would not carry the seeded rows. Unset by default, which keeps existing dataset cache keys (https://github.com/allenai/open-instruct/pull/1911).
 - `mason.py --extra_weka_buckets` mounts additional WEKA buckets at `/weka/<bucket>`, so jobs can reach checkpoints outside `oe-adapt-default` and `oe-training-default` (e.g. `olmo-3p5-checkpoints`) (https://github.com/allenai/open-instruct/pull/1897).

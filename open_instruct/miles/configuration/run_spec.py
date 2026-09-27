@@ -409,7 +409,7 @@ class RunSpec:
             workspace="ai2/open-instruct-dev",
             budget="ai2/oe-other",
             cluster="ai2/holmes",
-            priority="urgent",
+            priority="high",
             min_runtime="1h",
             auto_resume=True,
             max_retries=-1,

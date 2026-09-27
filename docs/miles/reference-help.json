@@ -234,7 +234,7 @@
     "launch.gpus_per_replica": "Positive integer physical GPUs per replica; inferred from topology if omitted.",
     "launch.max_retries": "Restarts this run may make before it refuses to start again; default -1 for no cap. Counts every start recorded in attempts.json under output.root, including productive ones.",
     "launch.min_runtime": "Beaker minimum runtime duration; default 1h.",
-    "launch.priority": "low, normal, high or urgent; default urgent.",
+    "launch.priority": "low, normal, high or urgent; default high.",
     "launch.secrets": "Environment-name to Beaker secret-name mapping, default empty; no overlap with env.",
     "launch.shared_memory": "Shared memory quantity string; default 200 GiB.",
     "launch.timeout": "Beaker task timeout duration string; default 3h (examples override).",

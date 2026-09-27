@@ -20,6 +20,10 @@ export MILES_EXISTING_IMAGE=01M3GNG2J3DEE8BCJTMPGA1AAB
 python -m open_instruct.miles run runs/my-run.toml
 ```
 
+The examples default to high priority and the `open-instruct-miles` W&B project.
+Their explicit Holmes placement matches the B300 profiles; choose a compatible
+cluster and review the plan before submitting.
+
 The example TOMLs do not pin a trainer image; `MILES_EXISTING_IMAGE` selects it at launch.
 `large` separately pins its evaluator image. The trainer image above contains
 Open Instruct `3684951ec` and MILES `53cd9ec39`, including the relocated Core

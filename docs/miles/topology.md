@@ -37,22 +37,19 @@ refresh, 64 prompts × 4 responses and batch 256 with provisional lag six. Large
 unqualified two-node trainer / 32-engine production proposal. Inspect `plan`
 for physical allocation, including the judge node's unused slots.
 
-The following smaller barrier recipe is an illustration of batch geometry,
-not an additional maintained configuration.
-
 ## Collections, optimization and async
 
-The older barrier baseline collects **8 prompts × 8 responses = 64 samples**, with global batch
-64 for one optimizer update per collection. Smaller global batches introduce
+`small.toml` collects **4 prompts × 2 responses = 8 samples**, with global batch
+8 for one optimizer update per collection. Smaller global batches introduce
 multiple optimizer updates and change policy lag requirements. Core microbatch
 size remains one; optional [packing](sequence-packing.md) groups original samples
 into document-isolated forwards within an optimizer partition.
 
-Async requires resident disaggregated engines. That barrier starter uses staleness one,
-buffer factor two, retry of unused groups, group submission, and TIS with
-trainer-scored old log probabilities. Staleness counts optimizer steps, not elapsed
-seconds or merely collections. Multiple optimizer steps per collection consume
-lag allowance. Replay, auxiliary loss and reference KL are independent settings.
+Async requires resident disaggregated engines. Staleness counts optimizer steps,
+not elapsed seconds or collections. Multiple optimizer steps per collection
+consume lag allowance. See [policy lag and TIS](async-pipeline.md#policy-lag-and-tis)
+for the current refresh settings. Replay, auxiliary loss and reference KL are
+independent settings.
 
 Eight engines do not each get 64 requests from a 64-response collection. Admission
 is a ceiling, not guaranteed occupancy; async buffering can provide additional

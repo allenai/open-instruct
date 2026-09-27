@@ -4,9 +4,9 @@ import asyncio
 import dataclasses
 import json
 import os
-import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+from urllib import request
 
 from open_instruct.miles.rewards import general_judge, judging
 
@@ -83,7 +83,7 @@ async def probe(output):
         service = value["judges"][binding["judge"]]
 
         def models(service=service):
-            with urllib.request.urlopen(service["endpoint"].rstrip("/") + "/models", timeout=10) as response:
+            with request.urlopen(service["endpoint"].rstrip("/") + "/models", timeout=10) as response:
                 return json.load(response)
 
         advertised = await asyncio.to_thread(models)

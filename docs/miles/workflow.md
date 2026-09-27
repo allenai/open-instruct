@@ -154,41 +154,14 @@ way to keep prompts, splits, rendering and reward configuration fixed between
 runs. Compare the recorded question IDs when checking parity; matching counts
 alone does not establish identical datasets.
 
-## Historical 8 × 8 baseline recipe
+## Collection and policy settings
 
-The current [first-run guide](grpo.md) uses the mixed-policy small recipe at
-32 × 4 and batch 128. The settings below describe the older `grpo-*` barrier
-examples; both recipe families run on the current image.
-
-The training starters collect **8 prompts × 8 responses = 64 samples** and set
-`global_batch_size=64`, giving one optimizer update per collection. The older
-maintained profiles used 16 × 4. Both have 64 responses, but the number of
-independent prompts and the reward-group distribution differ. Historical run
-configs and measurement reports remain frozen.
-
-The async example adds:
-
-```toml
-[async]
-fully_async = true
-max_weight_staleness = 1
-async_data_buffer_capacity_factor = 2.0
-async_unused_samples_handler = "retry"
-rollout_submission_granularity = "sample"
-off_policy_correction = "tis"
-```
-
-This resolves to `fully_async=true`, `use_tis=true`,
-`use_rollout_logprobs=false` and Core's `max_policy_lag=1`. Core scores the old
-policy; TIS uses the serving-versus-scoring log-probability ratio to correct the
-behavior-policy mismatch. This differs from the earlier async measurements,
-which directly anchored on rollout log probabilities without TIS. It is a
-recipe change, not a retrospective correction of those results.
-
-The LR stays `1e-6`, GRPO standard-deviation normalization stays disabled, and
-PPO lower/upper clipping stays `0.2` / `0.28`. Router auxiliary and z-loss
-coefficients remain `0.01` and `1e-5`. Router replay remains an independent
-choice; enabling async or TIS does not enable replay.
+The [first-run guide](grpo.md) uses `small.toml`: **4 prompts × 2 responses =
+8 samples**, global batch 8, and synchronous barrier publication. Each collection
+produces one optimizer update. The medium and large examples use mixed-policy
+refresh; see [policy lag and TIS](async-pipeline.md#policy-lag-and-tis) for the
+current default and its limits. Router replay, auxiliary losses and reference
+KL are independent settings; consult the copied run file for their values.
 
 ## Trainer mappings that need care
 

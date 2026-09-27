@@ -15,9 +15,10 @@ from transformers import AutoModelForCausalLM, LlamaConfig, Olmo2Config, Qwen2Co
 from open_instruct.miles.configuration.config import CoreConfig
 
 # The normal SFT/DPO environment intentionally keeps its existing Core pin.
-# These numerical tests run when the separate patched Core runtime is supplied.
-replay_routes = pytest.importorskip("olmo_core.nn.moe.v2.replay").replay_routes
-train_batch_with_loss = pytest.importorskip("olmo_core.train.train_module.transformer.objective").train_batch_with_loss
+# These numerical tests require the separate pinned Core runtime; a wrong Core
+# version must fail collection rather than silently skip the numerical checks.
+replay_routes = import_module("olmo_core.nn.moe.v2.replay").replay_routes
+train_batch_with_loss = import_module("olmo_core.train.train_module.transformer.objective").train_batch_with_loss
 core_models = import_module("miles.backends.core_utils.models")
 model_config_from_hf = core_models.model_config_from_hf
 iter_export_state = core_models.iter_export_state

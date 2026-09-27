@@ -60,13 +60,17 @@ command with different mounts or source provenance.
 ## Local development
 
 The ordinary CPU suite covers configuration, planning, launch specifications,
-rewards, data preparation and workflow contracts without installing MILES or
+rewards, data preparation, rendezvous, heartbeat, recovery and topology contracts
+without installing MILES or
 SGLang. The `MILES contracts` workflow also checks the maintained scripts and
 checks application types without requiring the private runtime.
 Recording and summary implementation tests live with their MILES implementation;
 Open Instruct keeps record configuration tests and runtime selection/buffer integration tests.
 The moved adapter is checked against that Core API in the dedicated runtime
 environment; Open Instruct's ordinary type check covers the application integration.
+The MoE numerical tests deliberately require the Core revision in the runtime
+lock. The ordinary `uv.lock` Core version is for existing SFT/DPO paths and is
+not upgraded to make those runtime-only tests importable.
 
 ```bash
 uv run pytest open_instruct/test_miles*.py

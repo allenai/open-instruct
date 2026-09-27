@@ -18,9 +18,9 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 import uuid
 from pathlib import Path
+from urllib import request
 
 from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.run_spec import RunSpec
@@ -134,7 +134,7 @@ class Supervisor:
     def probe_health(self):
         for name, url in tuple(self.health.items()):
             try:
-                with urllib.request.urlopen(url, timeout=infra_timeouts.seconds(5)) as response:
+                with request.urlopen(url, timeout=infra_timeouts.seconds(5)) as response:
                     if response.status != 200:
                         raise RuntimeError("Unhealthy HTTP response")
                 self.health_failures[name] = 0
@@ -285,7 +285,7 @@ def run(path):
 
             def ready(url=url):
                 try:
-                    with urllib.request.urlopen(url, timeout=infra_timeouts.seconds(3)) as response:
+                    with request.urlopen(url, timeout=infra_timeouts.seconds(3)) as response:
                         return response.status == 200
                 except OSError:
                     return False

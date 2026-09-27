@@ -1,8 +1,6 @@
 """Named services and rubric bindings, following the olmo-miles run-file contract."""
 
 import copy
-import hashlib
-import json
 import re
 from urllib.parse import urlsplit
 
@@ -130,7 +128,3 @@ def registry(sections):
             "bindings": sections["judging"]["bindings"],
         }
     )
-
-
-def registry_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()

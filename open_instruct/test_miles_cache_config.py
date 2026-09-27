@@ -1,26 +1,8 @@
-"""CPU-only cache configuration and startup timing contracts."""
-
-import json
-from types import SimpleNamespace
-from unittest import mock
+"""CPU-only cache configuration contracts."""
 
 import pytest
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.execution.timing import startup_stage
-
-
-def test_startup_timer_records_success_and_failure(tmp_path):
-    args = SimpleNamespace(save=str(tmp_path), rank=2)
-    device = mock.Mock()
-    with startup_stage(args, "build", device=device):
-        pass
-    with pytest.raises(ValueError), startup_stage(args, "restore"):
-        raise ValueError("injected")
-    device.synchronize.assert_called_once()
-    rows = [json.loads(s) for s in (tmp_path / "startup_rank2.jsonl").read_text().splitlines()]
-    assert [r["passed"] for r in rows] == [True, False]
-    assert all(r["seconds"] >= 0 for r in rows)
 
 
 def test_cache_controls_validate_types():

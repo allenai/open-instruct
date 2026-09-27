@@ -2,12 +2,14 @@
 
 import ast
 import inspect
+import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 from miles.backends import core_utils
-from miles.backends.core_utils import actor, performance, scoring
+from miles.backends.core_utils import actor, performance, scoring, timing
 from miles.backends.core_utils.rollout import async_buffer
 from miles.utils.function_registry import load_function
 from scripts.miles import capacity_metrics
@@ -23,12 +25,7 @@ from open_instruct.miles.evaluation import evaluation
         ("infra_timeouts.py", "infrastructure/infra_timeouts.py", None),
         ("publication/policy_versions.py", "datasets/policy_versions.py", None),
         ("publication/state.py", "infrastructure/artifacts.py", {"atomic_json"}),
-        ("timing.py", "execution/timing.py", {"startup_stage"}),
-        (
-            "scoring.py",
-            "configuration/config.py",
-            {"ScoringPass", "scoring_pass", "stochastic_fields", "scoring_check_due"},
-        ),
+        ("scoring.py", "configuration/config.py", {"ScoringPass", "scoring_pass"}),
         ("validation.py", "configuration/validation.py", {"integer", "number", "mapping", "fields"}),
     ],
 )
@@ -79,3 +76,16 @@ def test_backend_modules_have_no_application_imports():
         assert "open_instruct" not in path.read_text(), path
     assert actor.OLMoCoreTrainRayActor.__module__ == "miles.backends.core_utils.actor"
     assert async_buffer.HomogeneousPolicyDataBuffer.__module__ == "miles.backends.core_utils.rollout.async_buffer"
+
+
+def test_startup_timer_records_success_and_failure(tmp_path):
+    args = SimpleNamespace(save=str(tmp_path), rank=2)
+    device = mock.Mock()
+    with timing.startup_stage(args, "build", device=device):
+        pass
+    with pytest.raises(ValueError), timing.startup_stage(args, "restore"):
+        raise ValueError("injected")
+    device.synchronize.assert_called_once()
+    rows = [json.loads(s) for s in (tmp_path / "startup_rank2.jsonl").read_text().splitlines()]
+    assert [r["passed"] for r in rows] == [True, False]
+    assert all(r["seconds"] >= 0 for r in rows)

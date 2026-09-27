@@ -5,10 +5,7 @@ There are four maintained run examples in [examples/](examples/README.md):
 before customizing it. Do not add personal runs, qualification snapshots or sweep
 variants to this directory.
 
-Historical configurations were moved locally to
-`runs/miles-archive-20260915/configs/miles/`. They also remain in Git history at
-`fe4d9f2bd`. Existing Beaker runs retain their submitted configuration and source
-revision; this cleanup does not change those jobs.
-
-Tokenizer templates, diagnostic inputs and datasource definitions used by helper
-scripts live in `scripts/miles/assets/`; they are not additional run examples.
+Historical configurations and diagnostic assets are preserved in the
+[research archive](https://github.com/allenai/open-instruct/tree/813bd5988beb16be5b4d879ee3e2c49d8d859ee5).
+Reproduce those runs from that revision in a separate checkout. Current examples
+use the inputs described in the [MILES guide](../../docs/miles/grpo.md).

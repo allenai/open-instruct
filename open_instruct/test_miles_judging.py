@@ -265,7 +265,7 @@ def test_health_probe_tolerates_transient_failures_but_bounds_outage(document, t
     def fail(*args, **kwargs):
         raise TimeoutError("busy")
 
-    monkeypatch.setattr(cluster.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(cluster.request, "urlopen", fail)
     owner.probe_health()
     owner.probe_health()
     assert owner.health_failures["general"] == 2
@@ -279,10 +279,10 @@ def test_health_probe_tolerates_transient_failures_but_bounds_outage(document, t
         def __exit__(self, *args):
             pass
 
-    monkeypatch.setattr(cluster.urllib.request, "urlopen", lambda *args, **kwargs: Healthy())
+    monkeypatch.setattr(cluster.request, "urlopen", lambda *args, **kwargs: Healthy())
     owner.probe_health()
     assert owner.health_failures["general"] == 0
-    monkeypatch.setattr(cluster.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(cluster.request, "urlopen", fail)
     owner.probe_health()
     owner.probe_health()
     with pytest.raises(RuntimeError, match="three consecutive"):

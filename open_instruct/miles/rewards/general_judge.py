@@ -31,6 +31,7 @@ from typing import Any
 import requests
 
 from open_instruct import logger_utils
+from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
 from open_instruct.miles.rewards import judge_registry
 
@@ -181,18 +182,6 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
         max_concurrent_calls=max_concurrent_calls,
         check_context=os.environ.get("OI_MILES_JUDGE_CHECK_CONTEXT", "false").lower() == "true",
     )
-
-
-def extract_final_answer(prediction: str) -> str:
-    """Extract the answer surface using Open-Instruct's precedence rules."""
-    answer_match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    think_match = re.search(r"</think>(.*)", prediction, re.DOTALL)
-    if think_match:
-        return think_match.group(1).strip()
-    cleaned = re.sub(r"<\|assistant\|>", "", prediction)
-    return cleaned.strip() if cleaned != prediction else prediction
 
 
 def parse_judge_response(content: str) -> tuple[str, float]:

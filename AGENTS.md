@@ -1,6 +1,6 @@
 # Reinforcement learning: MILES GRPO
 
-For RL, RLVR or GRPO work in this branch, use `python -m open_instruct.miles`.
+For RL, RLVR or GRPO work, use `python -m open_instruct.miles`.
 Start with [docs/miles/grpo.md](docs/miles/grpo.md); it is the main RL guide.
 [docs/miles/index.md](docs/miles/index.md) maps the detailed documentation.
 Follow this workflow without requiring the user to supply a special agent prompt:
@@ -47,42 +47,20 @@ contains the old CLI and reproduction instructions.
 
 # Beaker scheduling and distributed launches
 
-- A distributed run whose nodes must run together must use **one Beaker task
-  with `replicas: N` and `leaderSelection: true`**. Beaker schedules that replica
-  group as a unit. Multiple independent tasks in one experiment do not provide
-  this guarantee, even with identical priorities, minimum runtimes, failure
-  propagation, or an application-level rendezvous.
-- Set a positive `context.minRuntime` appropriate to the run. It selects allocated
-  scheduling and protects against preemption for that window; it does not group
-  independent tasks or guarantee immediate capacity. `timeout` is a separate
-  execution limit.
-- Distributed MILES tasks also require `hostNetworking: true`,
-  `propagateFailure: true`, `propagatePreemption: true`, and an explicit
-  `synchronizedStartTimeout`. Use Beaker's replica rank/count environment variables.
-  Preserve these settings when changing launchers or porting a working recipe.
-- Inspect the **rendered Beaker spec before submission**, not just the TOML or
-  GPU plan: replica group, GPUs per replica and total, minimum runtime, cluster,
-  mounts and immutable image. After submission, retain
-  `beaker experiment spec EXPERIMENT_ID` and verify the job metadata from
-  `beaker experiment get EXPERIMENT_ID --format json`: replicas must share
-  `execution.replicaGroupID`, cover the expected `execution.replicaRank` values,
-  and have `execution.spec.leaderSelection=true`. Exported spec YAML expands
-  replicas into separate task entries; task count there does not prove grouping. See the
-  [spec inspection procedure](docs/miles/launching.md#distributed-scheduling-contract).
-- Distinct physical nodes and group scheduling are separate requirements.
-  Partial-node replicas may share a host. Do not force separation by splitting a
-  distributed run into independent tasks with disjoint hostname pools. Preserve
-  native group scheduling and verify placement; report an unsupported topology
-  if both requirements cannot be met.
-- When changing a distributed launcher, regression tests must assert one task,
-  the expected replica count, leader selection, synchronized start, propagation
-  settings, and total GPU allocation. Tests that only count jobs or successful
-  runs on an idle cluster do not establish group scheduling.
-- If one node starts while another remains queued, inspect the submitted replica
-  group and each job's scheduler events before diagnosing capacity or increasing
-  rendezvous timeouts. Do not add client-side polling for simultaneously idle
-  nodes as a substitute for Beaker's scheduler; it can place eligible allocated
-  work through preemption. Follow the latest attempt for **each task and replica**.
+Before submitting MILES work, read and follow the full
+[distributed scheduling contract](docs/miles/launching.md#distributed-scheduling-contract).
+Distributed GPU work requires one task with grouped replicas and leader selection,
+a positive minimum runtime, host networking and failure/preemption propagation.
+Inspect the rendered spec and verify replica grouping and placement after submission.
+Do not replace group scheduling with separate tasks or hostname polling.
+
+CPU-only jobs are unallocated: omit `context.minRuntime`, retain an execution
+timeout and required WEKA mounts. Try Saturn first, then Jupiter if scheduler
+events show Saturn cannot schedule; stop the superseded job before replacement.
+Do not launch CPU-only WEKA jobs on Holmes.
+
+GPU training defaults to high priority; urgent remains available when appropriate.
+Priority is separate from minimum runtime and checkpoint/resume settings.
 
 # Bash commands
 - `uv run pytest`: Run the tests.
@@ -99,6 +77,7 @@ contains the old CLI and reproduction instructions.
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
 - To run `./scripts/train/build_image_and_launch.sh`, first commit all changes. The ordinary launcher supports `--cuda-version 12|13` before the script path; CUDA 13 images are intended for compatible clusters such as `ai2/holmes`. MILES uses the separate `--miles` dispatch and pinned runtime.
+- Launch experiment scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13] $SOME_SCRIPT`.
 - For the deprecated vLLM GRPO implementation only, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
@@ -110,7 +89,6 @@ contains the old CLI and reproduction instructions.
   - `scripts/train/debug/dpo/local.sh`: local single GPU (no Beaker).
   - `scripts/train/debug/dpo/single_gpu.sh`: single GPU on Beaker.
   - `scripts/train/debug/dpo/multi_node.sh`: two 8x GPU nodes on Beaker.
-- To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - For legacy vLLM GRPO maintenance, launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
 - For legacy vLLM GRPO maintenance, launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
 - Launch OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh`.
@@ -118,7 +96,6 @@ contains the old CLI and reproduction instructions.
 - Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.
 - Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh`.
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
-- Before creating a Beaker experiment or otherwise reserving compute, ask for confirmation for each launch and state the cluster, GPU and node count, priority, preemption behavior, and timeout. Approval does not carry over to later launches.
 - When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
 - If you are given a Beaker URL (`beaker.org` or `beaker.allen.ai`), use the Beaker CLI tool to interact with it.
 - When a Beaker job stays queued or pending, run `beaker job events <job-id>` before diagnosing why — it prints the scheduler's own reason; don't infer one from cluster documentation. If that reason is the workspace slot limit, it applies to every cluster at once: wait or request fewer GPUs rather than relaunching elsewhere.

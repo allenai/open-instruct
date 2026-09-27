@@ -9,7 +9,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import workflow
 
-EXAMPLE = Path(__file__).resolve().parents[2] / "configs/miles/examples/medium.toml"
+EXAMPLE = Path(__file__).resolve().parents[1] / "configs/miles/examples/medium.toml"
 
 
 def test_hf_input_accepts_a_template_override(tmp_path):

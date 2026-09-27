@@ -64,6 +64,9 @@ markdown_extensions:
   # - pymdownx.tabbed
 
 
+exclude_docs: |
+  /miles/configuration-intro.md
+
 hooks:
   - scripts/miles/docs_site.py
 

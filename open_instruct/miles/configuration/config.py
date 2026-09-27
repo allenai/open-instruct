@@ -270,17 +270,6 @@ def scoring_pass(core: CoreConfig, options: dict[str, Any]) -> ScoringPass:
     )
 
 
-def stochastic_fields(model_config: dict[str, Any]) -> list[str]:
-    """Model settings that make a forward pass non-repeatable, so no single old log-probability exists."""
-    return sorted(name for name, value in model_config.items() if "dropout" in name and value)
-
-
-def scoring_check_due(core: CoreConfig, checks_done: int, completed_steps: int) -> bool:
-    """Check the first update of every process (including after resume), then on the interval."""
-    interval = core.scoring_check_interval
-    return checks_done == 0 or (interval > 0 and completed_steps % interval == 0)
-
-
 @dataclasses.dataclass(frozen=True)
 class RunConfig:
     core: CoreConfig

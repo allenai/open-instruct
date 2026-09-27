@@ -11,7 +11,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 def test_validate_rejects_nonshared_multinode_output(tmp_path, monkeypatch, capsys):
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[1]
     payload = RunSpec.load(root / "configs/miles/examples/medium.toml").to_dict()
     payload["output"]["root"] = str(tmp_path / "not-shared")
     config = tmp_path / "run.json"

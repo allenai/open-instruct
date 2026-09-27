@@ -75,7 +75,7 @@ def test_colocation_and_launch_defaults(tmp_path):
     assert config.miles["colocate"] is True
     assert config.miles["offload_train"] is False
     assert config.miles["rollout_num_gpus"] == config.miles["actor_num_gpus_per_node"] == 2
-    assert run.launch["priority"] == "urgent"
+    assert run.launch["priority"] == "high"
     assert run.launch["min_runtime"] == "1h"
     assert run.launch["workspace"] == "ai2/open-instruct-dev"
     assert run.plan()["runtime_validated"] is False

@@ -61,7 +61,7 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     task = launch.specification(IMAGE_ID, run)["tasks"][0]
     assert task["resources"]["gpuCount"] == gpus
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
-    assert task["context"]["priority"] == "urgent"
+    assert task["context"]["priority"] == "high"
     assert task["context"]["minRuntime"] == "1h"
 
 

@@ -68,22 +68,11 @@ control; their defaults are false, and changing them changes reward semantics.
 
 ## Evidence and limitations
 
-The 128-update Math/GSM8K pilot used runtime image
-`01M3FRZC4JSZ44PTYCWZN0FX91`, with the qualified training implementation from
-`21f2dc65c`. Both [control](https://beaker.org/ex/01M3FSD4B5F03NMVPHZ7J0M9F9)
-and [treatment](https://beaker.org/ex/01M3FSDJZME9H0ZGP5XN41X6V7) completed and
-exported weights. Their final unforced, greedy 512-question evaluations were:
-
-| Metric | Control | Treatment |
-|---|---:|---:|
-| Accuracy | 38.28% | 58.79% |
-| Mean response tokens | 5867.16 | 3515.89 |
-| Truncation | 57.81% | 24.41% |
-
-This is a single matched-update pair, not a replicated or matched-compute result.
-Conditional readiness and mechanism claims require further audits. The
-[sampling/entropy audit](https://beaker.org/ex/01M3J1134K4SPESQSVD4Q8ZP8K)
-is separate evaluation tooling, not required to enable training.
+A single matched-update Math/GSM8K pilot completed training and unforced
+evaluation. Its [archived qualification record](https://github.com/allenai/open-instruct/blob/8ae0e322f89d5f8dd00ef407c59f577e8e739cad/docs/miles/forced-exit-stopping.md#evidence-and-limitations)
+contains the image, runs and measurements. This is not a replicated or
+matched-compute result. Conditional readiness and mechanism claims require
+further audits; separate sampling/entropy tooling is not required for training.
 
 An exit's success is correctness **within its answer budget**: truncated answers
 always score zero. Monitor `forced_exit/truncation_rate`; a high rate can obscure

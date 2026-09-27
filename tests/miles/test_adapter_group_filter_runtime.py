@@ -9,7 +9,6 @@ from miles.backends.core_utils.publication import policy_refresh
 
 from open_instruct.miles.configuration.config import ZERO_STD_FILTER
 
-pytest.importorskip("miles")
 buffers = import_module("miles.backends.core_utils.rollout.async_buffer")
 native = import_module("miles.rollout.fully_async_data_buffer")
 Sample = import_module("miles.utils.types").Sample

@@ -16,7 +16,7 @@ export_hf = true
 workspace = "ai2/open-instruct-dev"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
-priority = "urgent"
+priority = "high"
 min_runtime = "1h"
 timeout = "2h"
 auto_resume = true
@@ -93,7 +93,7 @@ eps_clip_high = 0.28
 
 [tracking]
 wandb_mode = "offline"
-wandb_project = "olmo-rl-comparison"
+wandb_project = "open-instruct-miles"
 wandb_group = "core-workflow-basic"
 
 [runtime]
