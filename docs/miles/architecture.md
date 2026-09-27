@@ -209,3 +209,23 @@ and offline analysis work without the private runtime. Runtime integration tests
 compare their algorithms with the MILES counterparts: scoring policy, capacity
 reporting, wait diagnostics, wire-version parsing, atomic JSON publication,
 startup timing, model input checks and throughput arithmetic.
+
+## Core runtime rebase (September 27, 2026)
+
+The runtime lock now pins Core `05da655b9f10d9a621d3795ef029c22bbc6e0391`,
+rebased onto upstream main `718d08f7` after PR #872 merged. The adapter changes
+are proposed in [OLMo-core draft PR #888](https://github.com/allenai/OLMo-core/pull/888). The commit is retained
+by the durable [`miles-runtime-20260927` tag](https://github.com/allenai/OLMo-core/tree/miles-runtime-20260927).
+The previous pin remains available as `miles-runtime-pre-main-3c2ad5989`.
+
+Core's routed-expert `match_eager_rounding` now defaults to false. The companion
+MILES pin `e6e466e668413514372ee5d601818ade190e4cbb` explicitly enables it for
+policy scoring and treats old MILES checkpoint manifests as equivalent to that
+opt-in. The parser options are unchanged; the option snapshot records the new
+source revisions.
+
+Validation covered 119 CPU/local checkpoint tests, 36 local RTX 4090 numerical
+tests and two MILES adapter contracts. Multi-GPU EP/Blackwell and end-to-end
+training qualification remain separate. Rebuild the runtime/application images
+from the new lock before running: existing image IDs retain their previous
+source and qualification history.
