@@ -37,14 +37,5 @@ jobs:
         run: |
           uv run --frozen pytest open_instruct/test_miles*.py
           uv run --frozen python -m scripts.miles.generate_docs --check
-      - name: Fetch public Core type definitions at the runtime pin
-        run: |
-          uv run --frozen python - <<'PY'
-          import json
-          from pathlib import Path
-          from scripts.miles import prepare_runtime
-          source = json.loads(Path('runtime/miles/runtime.lock.json').read_text())['sources']['olmo-core']
-          prepare_runtime.prepare_source('olmo-core', source, Path('runs/typecheck-core'))
-          PY
-      - name: Check adapter against its Core API
-        run: uv run --frozen ty check open_instruct/miles --extra-search-path runs/typecheck-core/src --config 'src.exclude = []'
+      - name: Check application integration types
+        run: uv run --frozen ty check open_instruct/miles --config 'src.exclude = []'

@@ -18,8 +18,8 @@ from pathlib import Path
 
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.infrastructure import artifacts as state
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.publication import state
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -349,3 +349,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def training_snapshot(args, update):
+    """Return a requested export path for the backend after an optimizer update."""
+    config = args.background_evaluation
+    if groups(config, update, config["total_updates"]):
+        return str(snapshot(config["root"], update))
+    return None

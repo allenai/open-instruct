@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import driver
-from open_instruct.miles.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
-from open_instruct.miles.training import actor
 
 
 def install_components(monkeypatch, manager):

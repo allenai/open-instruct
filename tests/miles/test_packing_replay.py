@@ -4,10 +4,8 @@ import numpy as np
 import pytest
 import torch
 from expert_schedule_helpers import histograms, sample_groups
-from miles.backends.core_utils import packing
+from miles.backends.core_utils import data, packing
 from torch import nn
-
-from open_instruct.miles.training import data
 
 
 def fixture():

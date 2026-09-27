@@ -18,10 +18,10 @@ from open_instruct.miles.configuration.config import CoreConfig
 # These numerical tests run when the separate patched Core runtime is supplied.
 replay_routes = pytest.importorskip("olmo_core.nn.moe.v2.replay").replay_routes
 train_batch_with_loss = pytest.importorskip("olmo_core.train.train_module.transformer.objective").train_batch_with_loss
-core_models = import_module("open_instruct.miles.training.models")
+core_models = import_module("miles.backends.core_utils.models")
 model_config_from_hf = core_models.model_config_from_hf
 iter_export_state = core_models.iter_export_state
-prepare_checkpoint_path = import_module("open_instruct.miles.training.checkpoint").prepare_checkpoint_path
+prepare_checkpoint_path = import_module("miles.backends.core_utils.checkpoint").prepare_checkpoint_path
 
 
 class ObjectiveModule:

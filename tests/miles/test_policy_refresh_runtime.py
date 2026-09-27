@@ -8,18 +8,17 @@ import httpx
 import numpy as np
 import pytest
 import torch
+from miles.backends.core_utils.publication import policy_refresh
+from miles.backends.core_utils.rollout import refreshing_rollout
+from miles.backends.core_utils.rollout.async_buffer import RefreshPolicyDataBuffer
+from miles.backends.core_utils.rollout.generation_admission import GenerationAdmission
+from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
 from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_function
 from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.rollout.inference_rollout import inference_rollout_common
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 from sglang.srt.observability import req_time_stats
-
-from open_instruct.miles.publication import policy_refresh
-from open_instruct.miles.rollout import refreshing_rollout
-from open_instruct.miles.rollout.async_buffer import RefreshPolicyDataBuffer
-from open_instruct.miles.rollout.generation_admission import GenerationAdmission
-from open_instruct.miles.rollout.refreshing_rollout import RefreshingRolloutFn
 
 
 def sample(group=0, versions=(0, 1)):

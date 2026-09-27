@@ -4,12 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from miles.backends.core_utils import data, replay_diagnostics
 from olmo_core.nn.moe.v2 import replay
 from olmo_core.nn.moe.v2.router import MoERouterConfigV2
 from torch import nn
 from torch.utils.checkpoint import checkpoint
-
-from open_instruct.miles.training import data, replay_diagnostics
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])

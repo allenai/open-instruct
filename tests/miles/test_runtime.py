@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from miles.backends.core_utils import actor, checkpoint, data, models, scheduler
+from miles.backends.core_utils.publication.state import PolicyClock
 from miles.backends.fsdp_utils import lr_scheduler
 from miles.backends.training_utils import parallel
 from miles.utils import arguments
@@ -20,8 +22,6 @@ from torch import distributed as dist
 from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
-from open_instruct.miles.publication.state import PolicyClock
-from open_instruct.miles.training import actor, checkpoint, data, models, scheduler
 
 
 @pytest.fixture(params=["qwen3", "kda", "kda_latent", "olmo3_full", "olmo3_sliding", "olmo3_yarn", "olmo3_yarn_ac"])

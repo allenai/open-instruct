@@ -11,9 +11,10 @@ from torch import multiprocessing as mp
 
 pytest.importorskip("miles")
 
+from miles.backends.core_utils import actor  # noqa: E402
+from miles.backends.core_utils.publication.state import PolicyClock  # noqa: E402
+
 from open_instruct.miles.configuration.config import CoreConfig  # noqa: E402
-from open_instruct.miles.publication.state import PolicyClock  # noqa: E402
-from open_instruct.miles.training import actor  # noqa: E402
 
 
 def _worker(required=False, hf_config=None, **args):

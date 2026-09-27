@@ -4,13 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from miles.backends.core_utils import packing
+from miles.backends.core_utils import contract, data, packing
 from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from torch import distributed as dist
-
-from open_instruct.miles.training import contract, data
 
 
 @pytest.mark.parametrize("token_average", [False, True])

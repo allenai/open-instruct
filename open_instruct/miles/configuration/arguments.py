@@ -125,14 +125,15 @@ def load_core_args(extra_args_provider):
     config.validate()
     args.dynamic_sampling_filter_path = config.resolved_miles().get("dynamic_sampling_filter_path")
     args.rollout_sample_filter_path = config.resolved_miles().get("rollout_sample_filter_path")
+    args.core_records_factory = "open_instruct.miles.datasets.inference_records.Recorder"
     args.olmo_core = core
     args.compress_ratios = None
     if args.fully_async:
         args.max_weight_staleness = core.max_policy_lag
         args.custom_async_data_buffer_path = (
-            "open_instruct.miles.rollout.async_buffer.RefreshPolicyDataBuffer"
+            "miles.backends.core_utils.rollout.async_buffer.RefreshPolicyDataBuffer"
             if core.publication_mode == "refresh"
-            else "open_instruct.miles.rollout.async_buffer.HomogeneousPolicyDataBuffer"
+            else "miles.backends.core_utils.rollout.async_buffer.HomogeneousPolicyDataBuffer"
         )
     args.data_source_path = "open_instruct.miles.rollout.data_source.DashboardDrainingRolloutDataSource"
     return args

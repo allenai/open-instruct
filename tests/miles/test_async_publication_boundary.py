@@ -6,8 +6,7 @@ from contextlib import suppress
 from types import SimpleNamespace
 
 import pytest
-
-from open_instruct.miles.rollout import async_rollout, rollout_errors
+from miles.backends.core_utils.rollout import async_rollout, rollout_errors
 
 
 class _Source:
@@ -157,7 +156,7 @@ def test_final_shutdown_accounts_for_completions_blocked_by_full_buffer(tmp_path
 
             return asyncio.create_task(generate())
 
-        fn._submit_one_group = submit
+        fn._submit_managed_group = submit
         fn._worker = asyncio.create_task(fn._worker_loop())
         async with asyncio.timeout(2):
             while len(fn._ready_completion_counts) != 2:

@@ -5,11 +5,11 @@ from unittest import mock
 
 import pytest
 import torch
+from miles.backends.core_utils import actor, checkpoint, models, moe_models
 from olmo_core.nn.moe.v2.router import MoERouterConfigV2
 from transformers import AutoModelForCausalLM, Olmo3Config
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.training import actor, checkpoint, models, moe_models
 
 
 @pytest.mark.parametrize("replay,ep,error", [(True, 1, "replay"), (False, 2, "Expert parallelism")])

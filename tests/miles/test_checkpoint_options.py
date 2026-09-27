@@ -4,10 +4,10 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from miles.backends.core_utils import models, standard_models
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
-from open_instruct.miles.training import models, standard_models
 
 
 @pytest.mark.parametrize("field", ["checkpoint_thread_count", "checkpoint_process_count"])

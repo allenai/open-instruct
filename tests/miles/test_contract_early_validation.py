@@ -7,14 +7,14 @@ from unittest import mock
 
 import pytest
 import torch
+from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication.state import PolicyClock
 from olmo_core.nn.moe.v2.router import MoERouterConfigV2
 from torch import distributed as dist
 from torch import multiprocessing as mp
 from torch import nn
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.publication.state import PolicyClock
-from open_instruct.miles.training import actor
 
 
 def _rollout(count):

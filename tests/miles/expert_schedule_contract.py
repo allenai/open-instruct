@@ -12,14 +12,12 @@ import ep_contract
 import packing_contract
 import torch
 from expert_schedule_helpers import sample_groups
-from miles.backends.core_utils import expert_schedule
+from miles.backends.core_utils import actor, expert_schedule
 from miles.backends.training_utils import parallel
 from miles.ray.rollout import rollout_data_conversion, train_data_conversion
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from miles.utils.types import Sample
 from torch import distributed as dist
-
-from open_instruct.miles.training import actor
 
 
 def rows_for(worker, rank, enabled):

@@ -6,13 +6,13 @@ from pathlib import Path
 
 import ray
 import torch
+from miles.backends.core_utils import models as core_models
 from miles.utils import arguments
 from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import AutoModelForCausalLM, Olmo3Config, PreTrainedTokenizerFast, Qwen3Config
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.execution.driver import train
-from open_instruct.miles.training import models as core_models
 
 parser = argparse.ArgumentParser(description="Synthetic Ray/SGLang/Core smoke fixture; not a learning evaluation.")
 parser.add_argument("output", type=Path)

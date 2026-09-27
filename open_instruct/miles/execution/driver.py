@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 
 import wandb
+from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
@@ -20,7 +21,6 @@ from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.publication.rolling_publication import RollingPublication
 
 logger = logger_utils.setup_logger(__name__)
 

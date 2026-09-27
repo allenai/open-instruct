@@ -18,7 +18,6 @@ from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner, evaluation_submit
-from open_instruct.miles.training import checkpoint
 
 
 @pytest.fixture
@@ -295,7 +294,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         finish_tracking=lambda: None,
         init_tracking=lambda args: None,
     )
-    module("open_instruct.miles.publication.rolling_publication", RollingPublication=Mock())
+    module("miles.backends.core_utils.publication.rolling_publication", RollingPublication=Mock())
     # Load under a private module name so monkeypatch cleanup leaves no stale driver.
     spec = importlib.util.spec_from_file_location(
         "test_background_driver", Path(evaluation.__file__).parents[1] / "execution/driver.py"
@@ -384,19 +383,6 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
 def test_wall_clock_budget_must_be_finite_and_positive(value):
     with pytest.raises(InputError):
         CoreConfig(max_run_seconds=value)
-
-
-def test_eval_snapshots_are_outside_checkpoint_cleanup(tmp_path):
-    from_checkpoint_root = tmp_path / "checkpoints"
-    for update in (1, 2):
-        path = from_checkpoint_root / "core" / f"rollout_{update:07d}"
-        path.mkdir(parents=True)
-        (path / "complete.json").write_text("{}")
-    frozen = evaluation.snapshot(tmp_path, 1)
-    frozen.mkdir(parents=True)
-    (frozen / "model.safetensors").write_bytes(b"immutable")
-    assert checkpoint.prune(from_checkpoint_root, 2, keep_last=1, keep_every=None) == [1]
-    assert (frozen / "model.safetensors").read_bytes() == b"immutable"
 
 
 def test_incomplete_snapshot_never_submitted(run, monkeypatch):

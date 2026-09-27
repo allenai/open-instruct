@@ -30,8 +30,8 @@ import uuid
 from pathlib import Path
 
 from open_instruct import logger_utils
+from open_instruct.miles.datasets import policy_versions
 from open_instruct.miles.execution import workflow
-from open_instruct.miles.publication import policy_versions
 
 logger = logger_utils.setup_logger(__name__)
 

@@ -5,13 +5,12 @@ import json
 from pathlib import Path
 
 import pytest
+from miles.backends.core_utils import checkpoint, standard_models
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from sglang.srt.utils.hf_transformers import config as serving_config
 from transformers import AutoConfig, Olmo3Config
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.errors import InputError
-from open_instruct.miles.training import checkpoint, standard_models
 
 
 def published():
@@ -49,19 +48,19 @@ def test_published_config_maps_scaling_to_only_global_layers():
 )
 def test_unsupported_yarn_semantics_fail_before_allocation(change, match):
     rope = published()["rope_scaling"] | change
-    with pytest.raises(InputError, match=match):
+    with pytest.raises(ValueError, match=match):
         standard_models._rope_scaling("olmo3", rope)
 
 
 def test_other_models_do_not_silently_adopt_olmo3_scaling():
-    with pytest.raises(InputError, match="explicit"):
+    with pytest.raises(ValueError, match="explicit"):
         standard_models._rope_scaling("qwen3", published()["rope_scaling"])
 
 
 def test_layer_layout_is_validated():
     hf = Olmo3Config(**published())
     hf.layer_types = ["full_attention"]
-    with pytest.raises(InputError, match="every layer"):
+    with pytest.raises(ValueError, match="every layer"):
         standard_models.model_config_from_hf(hf, CoreConfig())
 
 

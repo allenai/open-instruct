@@ -3,9 +3,9 @@
 from types import SimpleNamespace
 
 import pytest
+from miles.backends.core_utils import moe_models, standard_models
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.training import moe_models, standard_models
 
 
 @pytest.mark.parametrize("enabled", [False, True])

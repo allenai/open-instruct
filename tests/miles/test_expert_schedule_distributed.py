@@ -7,11 +7,9 @@ from pathlib import Path
 import numpy as np
 import torch
 from expert_schedule_helpers import histograms, hook_args, sample_groups
-from miles.backends.core_utils import expert_schedule, packing
+from miles.backends.core_utils import contract, data, expert_schedule, packing
 from torch import distributed as dist
 from torch import multiprocessing as mp
-
-from open_instruct.miles.training import contract, data
 
 
 def exercise(rank, rendezvous, output):

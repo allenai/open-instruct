@@ -5,12 +5,12 @@ from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
+from miles.backends.core_utils.publication import policy_refresh
 
 from open_instruct.miles.configuration.config import ZERO_STD_FILTER
-from open_instruct.miles.publication import policy_refresh
 
 pytest.importorskip("miles")
-buffers = import_module("open_instruct.miles.rollout.async_buffer")
+buffers = import_module("miles.backends.core_utils.rollout.async_buffer")
 native = import_module("miles.rollout.fully_async_data_buffer")
 Sample = import_module("miles.utils.types").Sample
 

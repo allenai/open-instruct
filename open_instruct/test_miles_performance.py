@@ -5,23 +5,6 @@ import json
 import pytest
 from scripts.miles import capacity_metrics, throughput_occupancy
 
-from open_instruct.miles.training import performance
-
-
-def test_training_rate_counts_global_tokens_once():
-    rates = performance.training_rates(1200, 800, 2, 4)
-    assert rates == {
-        "model_tokens_per_second": 600,
-        "model_tokens_per_gpu_second": 150,
-        "active_response_tokens_per_gpu_second": 100,
-    }
-
-
-@pytest.mark.parametrize("args", [(10, 11, 2, 1), (10, 2, 0, 1), (10, 2, 2, 0), (10, 2, float("nan"), 1)])
-def test_invalid_rate_denominators_rejected(args):
-    with pytest.raises(ValueError):
-        performance.training_rates(*args)
-
 
 def test_window_missing_coverage_is_not_idle():
     summary = throughput_occupancy.summarize([(0, 100), (20, None)], 5, 25)
