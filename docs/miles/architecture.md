@@ -92,7 +92,17 @@ to `runs/`, select a compatible tiny checkpoint, and follow the
 retain image, config and completion artifacts. Exercise refresh separately when
 changing publication behavior; a tiny mechanics check does not establish learning
 quality. Archived research harnesses and their tests live at the
-[pre-cleanup revision](https://github.com/allenai/open-instruct/tree/813bd5988beb16be5b4d879ee3e2c49d8d859ee5).
+[pre-cleanup revision](https://github.com/allenai/open-instruct/tree/813bd5988beb16be5b4d879ee3e2c49d8d859ee5)
+on `archive/miles-before-main-cleanup-20260926`. That snapshot retains the dated
+launchers, experiment payloads, reports and their campaign-specific tests. Use
+a separate checkout of the archived revision to reproduce those experiments.
+
+The narrower GSM8K `audit_workflow.py` and its tests are preserved at the
+[later cleanup snapshot](https://github.com/allenai/open-instruct/tree/8ae0e322f89d5f8dd00ef407c59f577e8e739cad)
+on `archive/miles-before-provenance-cleanup-20260927`. They assumed a fresh run,
+one optimizer step per collection, rank-strided sample distribution and
+per-step diagnostics. Current runtime contract tests and the lifecycle checks
+above cover the maintained path; this historical auditor is not part of it.
 
 ## Documentation checks
 

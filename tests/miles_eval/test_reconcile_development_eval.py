@@ -1,11 +1,11 @@
+import importlib
 import json
 from types import SimpleNamespace
 
 import pytest
 
-reconcile_development_eval = pytest.importorskip(
-    "reconcile_development_eval", reason="Requires the pinned olmo-eval environment", exc_type=ModuleNotFoundError
-)
+pytest.importorskip("olmo_eval", reason="Requires the pinned olmo-eval environment", exc_type=ModuleNotFoundError)
+reconcile_development_eval = importlib.import_module("reconcile_development_eval")
 
 
 def fixture_source(tmp_path, count=4):

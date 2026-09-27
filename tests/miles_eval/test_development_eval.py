@@ -1,10 +1,11 @@
 """Run with the pinned olmo-eval Python environment; no GPU or network required."""
 
+import importlib
+
 import pytest
 
-development_eval = pytest.importorskip(
-    "development_eval", reason="Requires the pinned olmo-eval environment", exc_type=ModuleNotFoundError
-)
+pytest.importorskip("olmo_eval", reason="Requires the pinned olmo-eval environment", exc_type=ModuleNotFoundError)
+development_eval = importlib.import_module("development_eval")
 
 
 @pytest.mark.parametrize("label", ["42", ["42"], ["41", "42"]])

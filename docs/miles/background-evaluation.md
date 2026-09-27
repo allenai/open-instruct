@@ -183,8 +183,13 @@ Regression tests cover scalar/list/multiple gold answers and completion gates:
 
 ```bash
 # Run inside the pinned olmo-eval environment; no GPU is needed.
-python -m pytest scripts/miles/test_development_eval.py scripts/miles/test_reconcile_development_eval.py
+python -m pytest --confcutdir=tests/miles_eval -o pythonpath=scripts/miles tests/miles_eval
 ```
+
+These tests are separate from the MILES trainer suite because they use the
+evaluator environment. `pythonpath` mirrors the standalone module layout in
+custom evaluator bundles; a missing scoring module fails collection when
+olmo-eval is installed. Without olmo-eval, ordinary CPU collection skips them.
 
 Include this module in the custom worker's content manifest and import its
 `score_one(row, item)` for development tasks. Qualify the actual panel's label

@@ -7,6 +7,7 @@ on:
       - 'open_instruct/miles/**'
       - 'open_instruct/test_miles*.py'
       - 'tests/miles/**'
+      - 'tests/miles_eval/**'
       - 'scripts/miles/**'
       - 'runtime/miles/**'
       - 'configs/miles/**'
@@ -29,8 +30,8 @@ jobs:
       - run: uv sync --frozen
       - name: Check integration, scripts and runtime test style
         run: |
-          uv run --frozen ruff check open_instruct/miles scripts/miles tests/miles
-          uv run --frozen ruff format --check open_instruct/miles scripts/miles tests/miles
+          uv run --frozen ruff check open_instruct/miles scripts/miles tests/miles tests/miles_eval
+          uv run --frozen ruff format --check open_instruct/miles scripts/miles tests/miles tests/miles_eval
       - name: Check CPU contracts and generated references
         env:
           OMP_NUM_THREADS: '1'
