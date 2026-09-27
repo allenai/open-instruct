@@ -279,6 +279,12 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     shared = Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
     module("miles.ray.rollout.eval_dispatch", EvalDispatcher=shared)
     module("miles.utils", object_store=SimpleNamespace(init_instance=lambda *a, **kw: None))
+    module(
+        "miles.utils.compiler_cache",
+        startup_cache=SimpleNamespace(
+            prepare=Mock(), finish=AsyncMock(), configure_specs=Mock(), publish_progress=Mock()
+        ),
+    )
     module("miles.utils.data", remove_rollout_data_refs=lambda *a: None)
     module("miles.utils.hf_config", HF_EXPORT_COMPLETE_MARKER=".complete")
     module("miles.utils.misc", should_run_periodic_action=lambda *a: False)
@@ -299,7 +305,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=Mock(side_effect=[0, 2])))
     monkeypatch.setattr(driver, "stage", lambda *a, **kw: nullcontext())
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
-    monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a: None)
+    monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a, **kw: None)
     monkeypatch.setattr(driver.startup_cache, "finish", AsyncMock())
     entered, release = threading.Event(), threading.Event()
     worker_threads = []

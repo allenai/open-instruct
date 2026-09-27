@@ -3,11 +3,13 @@
 import os
 import time
 from functools import partial
+from pathlib import Path
 
 import wandb
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
+from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
@@ -17,7 +19,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
-from open_instruct.miles.infrastructure import infra_timeouts, startup_cache
+from open_instruct.miles.infrastructure import infra_timeouts
 from open_instruct.miles.publication.rolling_publication import RollingPublication
 
 logger = logger_utils.setup_logger(__name__)
@@ -30,7 +32,7 @@ async def train(args, *, export_hf=None):
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
-        startup_cache.prepare(args)
+        startup_cache.prepare(args, application_root=Path(__file__).resolve().parents[3])
     with stage(args, "placement"):
         worker_manager = wiring.launch_worker_manager(
             args, transform_specs=partial(startup_cache.configure_specs, args)

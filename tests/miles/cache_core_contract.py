@@ -10,10 +10,10 @@ from unittest import mock
 import ep_contract
 import ep_stress_contract
 import torch
+from miles.utils.compiler_cache import compiler_cache as cache
 from triton.runtime import cache as triton_cache
 
 from open_instruct.miles.configuration.config import RunConfig
-from open_instruct.miles.infrastructure import compiler_cache as cache
 
 
 def model_state(worker):

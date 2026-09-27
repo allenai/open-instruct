@@ -3,6 +3,7 @@
 import difflib
 import json
 import math
+import re
 from pathlib import Path
 
 import tomllib
@@ -233,3 +234,14 @@ def inference_capacity(values):
         integer(values["router_balance_abs_threshold"], "miles.router_balance_abs_threshold", minimum=0)
     if "router_balance_rel_threshold" in values:
         number(values["router_balance_rel_threshold"], "miles.router_balance_rel_threshold", minimum=1.0)
+
+
+def compiler_cache_root(shared):
+    """Validate retention policy before creating reports or cache artifacts."""
+    if not shared.is_absolute():
+        raise ValueError("Compiler cache root must be an absolute path")
+    resolved = shared.resolve()
+    if resolved.is_relative_to("/weka") and not any(
+        re.fullmatch(r"tmp-[1-9][0-9]*[hdwmy]", part) for part in resolved.parts
+    ):
+        raise ValueError("WEKA cache root requires an expiry component such as tmp-30d")

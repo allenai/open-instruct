@@ -9,7 +9,6 @@ from typing import Any
 from open_instruct.miles.configuration import async_capacity, graph_config, throughput, validation
 from open_instruct.miles.configuration import options as cli_options
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.infrastructure import compiler_cache as cache
 
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
@@ -36,7 +35,7 @@ class CoreConfig:
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
-    compiler_cache_max_storage_bytes: int = cache.DEFAULT_MAX_STORAGE_BYTES
+    compiler_cache_max_storage_bytes: int = 8 * 1024**3
     compiler_cache_publish_interval_seconds: float = 600.0
     checkpoint_profile: bool = False
     checkpoint_thread_count: int | None = None
@@ -108,7 +107,7 @@ class CoreConfig:
             if not isinstance(self.compiler_cache_root, str) or not self.compiler_cache_root:
                 raise InputError("core.compiler_cache_root must be a nonempty absolute path or unset")
             try:
-                cache.validate_shared_root(Path(self.compiler_cache_root))
+                validation.compiler_cache_root(Path(self.compiler_cache_root))
             except ValueError as error:
                 raise InputError(f"core.compiler_cache_root: {error}") from error
         if self.records_root is not None:
