@@ -16,17 +16,20 @@ cp configs/miles/examples/small.toml runs/my-run.toml
 python -m open_instruct.miles plan runs/my-run.toml
 python -m open_instruct.miles validate runs/my-run.toml
 # Tested small barrier/refresh image; see the qualification scope below.
-export MILES_EXISTING_IMAGE=01M2XGZM2N1V4DQVMYHM52KBHZ
+export MILES_EXISTING_IMAGE=01M3GNG2J3DEE8BCJTMPGA1AAB
 python -m open_instruct.miles run runs/my-run.toml
 ```
 
 The example TOMLs do not pin a trainer image; `MILES_EXISTING_IMAGE` selects it at launch.
-`large` separately pins its evaluator image. Use a trainer image containing
-background-evaluation support when running that example; the older small image
-above is not its qualification.
-The image above includes online filtering and passed the
-[small barrier/refresh qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/online-filtering-20260919.md).
-That check does not qualify every model or topology in these templates.
+`large` separately pins its evaluator image. The trainer image above contains
+Open Instruct `3684951ec` and MILES `53cd9ec39`, including the relocated Core
+adapter and publication machinery. Two-B300 tiny-model checks passed for
+[packed barrier training and HF export](https://beaker.org/ex/01M3GP47X09HS882JR75ST5E4R),
+[mixed-policy refresh](https://beaker.org/ex/01M3GPN5XX0SZSFZTASMKSG0KC), and
+[checkpoint resume with compiler-cache hits](https://beaker.org/ex/01M3GQ5Y1SZ81HH6G9N9N8YADH).
+These checks used FlashAttention 4 with packing and disabled constant-reward
+filtering. They do not qualify colocation, background evaluation, full-policy
+memory use or the larger topologies. Build a new image when runtime source changes.
 
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test
 mechanics. They are not accuracy baselines. They exercise evaluation, saving and HF export as well as generation and
