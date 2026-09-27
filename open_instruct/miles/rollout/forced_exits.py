@@ -130,6 +130,10 @@ class ForcedExitRollout(common.InferenceRolloutFn):
         close_ids = state.tokenizer.encode(CLOSING_TEXT, add_special_tokens=False)
         if not close_ids:
             raise ValueError("The checkpoint tokenizer must encode a nonempty </think> delimiter")
+        # Branches always insert the whole delimiter. Guidance on a multi-token delimiter's
+        # later pieces also trains its spelling: negative advantages then discourage
+        # completing a close that has already begun.
+        guidance_ids = close_ids[:1] if args.olmo_core.forced_exit_guidance == "first_token" else close_ids
         response_ids = parent.tokens[len(parent.tokens) - parent.response_length :]
         positions = uniform_positions(
             response_ids,
@@ -182,7 +186,8 @@ class ForcedExitRollout(common.InferenceRolloutFn):
                     "parent_index": parent.index,
                     "prompt_id": parent.metadata.get("prepared_sample_id"),
                     "cut": cut,
-                    "close_ids": close_ids,
+                    "close_ids": guidance_ids,
+                    "forced_ids": close_ids,
                     "position": position,
                     "thinking_length": thinking_end(response_ids, state.tokenizer),
                     "relative_position": cut / max(1, thinking_end(response_ids, state.tokenizer)),

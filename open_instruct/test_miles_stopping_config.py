@@ -67,6 +67,7 @@ def test_reject_unsafe_stopping_options(key, value):
         ("publication_mode", "refresh"),
         ("router_aux_loss_weight", 0.01),
         ("forced_exit_parents", 17),
+        ("forced_exit_guidance", "last_token"),
     ],
 )
 def test_reject_unsafe_core_stopping_options(key, value):

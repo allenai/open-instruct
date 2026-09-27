@@ -24,6 +24,9 @@ class CoreConfig:
     forced_exit_trials: int = 3
     forced_exit_answer_tokens: int = 1024
     forced_exit_coefficient: float = 0.1
+    # Tokens of the closing tag that receive stopping guidance. "first_token" trains only
+    # the decision to begin closing; "full_delimiter" also trains its remaining spelling.
+    forced_exit_guidance: str = "first_token"
     forced_exit_probe_interval: int = 0
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
@@ -103,6 +106,7 @@ class CoreConfig:
         validation.integer(self.forced_exit_trials, "core.forced_exit_trials", minimum=1)
         validation.integer(self.forced_exit_answer_tokens, "core.forced_exit_answer_tokens", minimum=1)
         validation.number(self.forced_exit_coefficient, "core.forced_exit_coefficient", exclusive_min=True)
+        validation.choice(self.forced_exit_guidance, "core.forced_exit_guidance", ("first_token", "full_delimiter"))
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))

@@ -24,6 +24,7 @@ forced_exit_parents = 1
 forced_exit_trials = 3
 forced_exit_answer_tokens = 1024
 forced_exit_coefficient = 0.1
+forced_exit_guidance = "first_token"
 forced_exit_probe_interval = 0 # Optional: 8 captures labeled hidden states every 8 updates
 
 [miles]
@@ -41,10 +42,15 @@ parent, and three answers per cut. Both arms disabled
 between control and treatment. The answer trials are labels and never enter the
 natural GRPO group or its behavior-policy importance correction.
 
-A separate clipped objective trains the probability of the **full closing tag**,
-including multi-token delimiters. Each nonzero cut advantage requires an extra
-teacher-forced prefix forward/backward context; the method has real generation
-and training cost. Zero-advantage cuts skip this auxiliary computation.
+A separate clipped objective trains the probability of closing at each cut. By
+default (`forced_exit_guidance = "first_token"`) it trains only the first token of
+the closing tag, the decision to begin closing. With a multi-token tag,
+`full_delimiter` also trains the remaining pieces. The pilot used that setting;
+negative advantages then discouraged spelling the tag after it had begun, and
+the model emitted malformed closes. Branches insert the whole tag either way.
+Each nonzero cut advantage requires an extra teacher-forced prefix
+forward/backward context; the method has real generation and training cost.
+Zero-advantage cuts skip this auxiliary computation.
 
 Run `python -m open_instruct.miles plan runs/YOUR_RUN.toml` and `validate` before
 launching. Validation rejects async/refresh publication, conflicting hooks,

@@ -65,7 +65,8 @@
     "forced_exit_positions": "Maximum paragraph-boundary exit positions per natural parent, zero disables. Natural GRPO groups remain separate from per-parent cut comparisons. Requires synchronous barrier publication and forced-exit producer/loss hooks.",
     "forced_exit_trials": "Sampled final-answer continuations per selected position, default 3.",
     "forced_exit_answer_tokens": "Sampled answer budget per forced exit, default 1024. Cuts reserve this space within the response budget. Every truncated answer receives reward zero.",
-    "forced_exit_coefficient": "Coefficient for full-delimiter clipped guidance, averaged over cuts and sampled parents. Each cut has one auxiliary teacher-forced prefix context shared by all answer trials; natural GRPO and behavior probabilities are unchanged.",
+    "forced_exit_coefficient": "Coefficient for clipped closing guidance, averaged over cuts and sampled parents. Each cut has one auxiliary teacher-forced prefix context shared by all answer trials; natural GRPO and behavior probabilities are unchanged.",
+    "forced_exit_guidance": "Closing-tag tokens that receive guidance: first_token (default) trains only the decision to begin closing; full_delimiter also trains the remaining pieces of a multi-token tag. Branches always insert the whole tag.",
     "forced_exit_probe_interval": "Zero disables readiness capture; otherwise capture parent LM-head inputs before selected cuts every N optimizer steps, including zero. Requires context parallelism one and a validated unpadded layout. Saves labeled states under checkpoints/readiness-probes.",
     "forced_exit_parents": "Number of uniformly selected natural parents to probe per prompt group, default 1. Their auxiliary weight compensates for subsampling; answer trials remain labels only."
   },

@@ -68,7 +68,8 @@ def test_cut_groups_do_not_change_natural_advantages():
     assert not forced_exits.has_signal(group, args)
 
 
-def test_producer_returns_only_natural_samples(monkeypatch):
+@pytest.mark.parametrize(("guidance", "guided"), [("first_token", [8]), ("full_delimiter", [8, 9])])
+def test_producer_returns_only_natural_samples(monkeypatch, guidance, guided):
     args = SimpleNamespace(
         reward_key=None,
         rollout_max_response_len=2048,
@@ -76,7 +77,11 @@ def test_producer_returns_only_natural_samples(monkeypatch):
         rollout_seed=17,
         router_load_balancing_method="round_robin",
         olmo_core=SimpleNamespace(
-            forced_exit_positions=2, forced_exit_trials=3, forced_exit_parents=1, forced_exit_answer_tokens=1024
+            forced_exit_positions=2,
+            forced_exit_trials=3,
+            forced_exit_parents=1,
+            forced_exit_answer_tokens=1024,
+            forced_exit_guidance=guidance,
         ),
     )
 
@@ -119,6 +124,10 @@ def test_producer_returns_only_natural_samples(monkeypatch):
     assert len({s.routing_key for s in seen}) == len(seen)
     assert len({s.index for s in seen}) == len(seen)
     assert sorted(len(s.train_metadata["stopping_probes"]) for s in group) == [0, 0, 0, 2]
+    probes = [p for s in group for p in s.train_metadata["stopping_probes"]]
+    # Branches force the whole tag; guidance scores only the configured pieces.
+    assert all(p["forced_ids"] == [8, 9] and p["close_ids"] == guided for p in probes)
+    assert all(s.tokens[-3:-1] == [8, 9] for s in seen if s.response_length and s.index < 0)
 
 
 def test_branch_provenance_and_mask():
