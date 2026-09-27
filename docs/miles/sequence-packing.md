@@ -23,6 +23,9 @@ context limit. Disabling packing restores the previous unpadded one-sample path;
 omit `packing_max_tokens` when disabling. The structured CLI maps both trainer
 fields to Core options. MILES receives `qkv_format=thd` for response-logit slicing.
 
+The packing implementation lives in our MILES fork under
+`miles.backends.core_utils`; the Open Instruct Core actor imports it directly.
+
 The packer greedily combines consecutive samples within each optimizer batch. It
 does not reorder, split, truncate, add padding, change GRPO groups, or cross policy
 updates. Original sample lists retain masks, advantages, reference/behavior log
@@ -162,7 +165,9 @@ not post-permutation adjacency, for GRPO normalization. Missing/malformed routes
 compact/multi-turn rollouts, dynamic global batch sizes, alternative partitioning,
 custom reward/conversion callbacks and conflicting sample filters are rejected.
 Any incomplete trailing optimizer block remains untouched for normal MILES trimming.
-No MILES or OLMo-core source patch is needed.
+The pinned MILES fork provides the planner, search, and packing implementation in
+`miles.backends.core_utils`. Open Instruct supplies its configuration and calls
+that facility from the Core actor; no additional OLMo-core patch is needed.
 
 Producer `expert_schedule` JSON events record before/after predictions and total
 planning time. Trainer `expert_balance` contract events count the actual packs;

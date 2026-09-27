@@ -9,6 +9,7 @@ from pathlib import Path
 
 import ray
 import torch
+from miles.backends.core_utils import expert_schedule, packing
 from miles.backends.fsdp_utils import update_weight_utils
 from miles.backends.megatron_utils.ft.types import TrainStepOutcome, TrainStepOutput
 from miles.backends.training_utils import data as miles_data
@@ -32,9 +33,7 @@ from open_instruct.miles.training import (
     checkpoint,
     contract,
     data,
-    expert_schedule,
     models,
-    packing,
     performance,
     replay_diagnostics,
     router_load,

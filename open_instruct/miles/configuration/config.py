@@ -12,7 +12,7 @@ from open_instruct.miles.errors import InputError
 from open_instruct.miles.infrastructure import compiler_cache as cache
 
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
-EXPERT_SCHEDULE = "open_instruct.miles.training.expert_schedule.reorder_samples"
+EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 
