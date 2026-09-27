@@ -23,8 +23,8 @@ context limit. Disabling packing restores the previous unpadded one-sample path;
 omit `packing_max_tokens` when disabling. The structured CLI maps both trainer
 fields to Core options. MILES receives `qkv_format=thd` for response-logit slicing.
 
-The packing implementation lives in our MILES fork under
-`miles.backends.core_utils`; the Open Instruct Core actor imports it directly.
+The packing implementation and the Core actor that uses it live in our MILES fork
+under `miles.backends.core_utils`.
 
 The packer greedily combines consecutive samples within each optimizer batch. It
 does not reorder, split, truncate, add padding, change GRPO groups, or cross policy
