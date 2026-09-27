@@ -191,6 +191,36 @@ def test_debug_preserves_input_exception(tmp_path, monkeypatch):
         cli.main()
 
 
+@pytest.mark.parametrize("command", ["plan", "validate", "train", "run"])
+@pytest.mark.parametrize("section", ["raw", "trainer", "core"])
+def test_cli_rejects_packing_with_torch_before_runtime_or_launch(tmp_path, monkeypatch, capsys, command, section):
+    if section == "raw":
+        document = {**raw_config(), "core": {"sequence_packing": True}}
+    else:
+        document = {
+            "schema_version": 1,
+            "name": "invalid-packing",
+            "model": {"source": "/unavailable-model"},
+            "output": {"root": str(tmp_path / "output")},
+            "data": {"tasks": [{"task": "gsm8k", "train_count": 32, "eval_count": 8}]},
+            section: {"sequence_packing": True},
+        }
+        document.setdefault("core", {})["attention_backend"] = "torch"
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(sys, "argv", ["miles", command, str(path)])
+    monkeypatch.setattr(cli.importlib, "import_module", lambda name: pytest.fail(f"Imported runtime/launcher: {name}"))
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 2
+    stderr = capsys.readouterr().err
+    assert 'core.attention_backend="torch"' in stderr
+    assert 'core.attention_backend="flash_4"' in stderr
+    assert "disable sequence_packing" in stderr
+    assert "Traceback" not in stderr
+    assert not (tmp_path / "output").exists()
+
+
 def test_unexpected_failure_is_not_mislabeled_as_input(tmp_path, monkeypatch):
     path = tmp_path / "run.json"
     path.write_text(json.dumps(raw_config()))

@@ -345,6 +345,13 @@ class RunConfig:
             raise InputError(
                 'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
             )
+        if self.core.sequence_packing and self.core.attention_backend == "torch":
+            raise InputError(
+                'core.sequence_packing=true is incompatible with core.attention_backend="torch": '
+                "Torch attention does not support packed document boundaries. "
+                'Select a packing-capable backend (for example core.attention_backend="flash_4" '
+                "on supported hardware), or disable sequence_packing."
+            )
         if self.core.packing_max_tokens is not None:
             if not self.core.sequence_packing:
                 raise InputError("core.packing_max_tokens requires sequence_packing=true")

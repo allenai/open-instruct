@@ -12,6 +12,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 def configuration(**changes):
     core = dict(
         sequence_packing=True,
+        attention_backend="flash_4",
         expert_balanced_packing=True,
         expert_parallel_size=2,
         router_aux_loss_weight=0,
@@ -102,6 +103,7 @@ expert_balanced_packing = true
 expert_balance_layer_stride = 2
 expert_parallel_size = 2
 sequence_packing = true
+trainer_flash_attention_version = 4
 router_aux_loss_weight = 0.0
 trainer_num_nodes = 1
 gpus = 4

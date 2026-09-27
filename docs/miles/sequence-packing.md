@@ -4,6 +4,7 @@ Packed full-attention models require an attention backend that supports document
 boundaries, such as `core.attention_backend="flash_4"`. The `dev` and `small`
 examples use Torch attention without packing; enabling packing in a copy also
 requires changing that backend. Torch attention rejects intra-document masking.
+`plan` and `validate` reject packing with Torch attention before runtime startup.
 
 Basic sequence packing is available in this adapter. Historical small GPU
 numerical and live async audits are linked below with their source identities.

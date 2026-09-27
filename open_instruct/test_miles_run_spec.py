@@ -50,6 +50,7 @@ def test_expert_packing_and_native_length_balancing_are_mutually_exclusive(tmp_p
                 "gpus": 4,
                 "expert_parallel_size": 2,
                 "sequence_packing": True,
+                "trainer_flash_attention_version": 4,
                 "expert_balanced_packing": expert_packing,
                 "router_aux_loss_weight": 0.0,
             },
