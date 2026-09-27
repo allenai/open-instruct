@@ -20,6 +20,14 @@ Recording requires a fully async run (`[async] fully_async = true`), because it
 lives in the completed-group buffer. `validate` rejects `records.enabled` in a
 synchronous run.
 
+The writer and summary reader live in our pinned MILES fork
+(`miles.utils.inference_records` and `miles.utils.record_summary`). Open Instruct
+supplies checkpoint identity through `datasets/recording.py` and retains prompt
+selection and filtering policy. The record format and the commands below are
+unchanged. Record analysis requires the MILES package (the reader itself uses
+only Python's standard library); run it in the pinned image or a checkout with
+MILES available. `plan` and `validate` do not require MILES.
+
 ## Enable recording
 
 ```toml

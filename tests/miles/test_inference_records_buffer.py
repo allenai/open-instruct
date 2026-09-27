@@ -27,7 +27,7 @@ def test_buffer_records_every_scored_group_and_keeps_filter_semantics(tmp_path):
             async_data_buffer_capacity_factor=2,
             dynamic_sampling_filter_path=ZERO_STD_FILTER,
             reward_key=None,
-            core_records_factory="open_instruct.miles.datasets.inference_records.Recorder",
+            core_records_factory="open_instruct.miles.datasets.recording.create_recorder",
             olmo_core=CoreConfig(records_root=str(tmp_path / "records")),
             hf_checkpoint=str(checkpoint),
             wandb_run_name="buffer-test",

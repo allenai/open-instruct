@@ -14,16 +14,25 @@ from pathlib import Path
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.configuration.config import RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
-from open_instruct.miles.datasets import record_selection, record_summary
 from open_instruct.miles.errors import InputError
 
 
 def main() -> None:
     if sys.argv[1:2] == ["records"]:
-        if sys.argv[2:3] == ["select"]:
-            record_selection.main(sys.argv[3:])
-        else:
-            record_summary.main(sys.argv[2:])
+        module = (
+            "open_instruct.miles.datasets.record_selection"
+            if sys.argv[2:3] == ["select"]
+            else "miles.utils.record_summary"
+        )
+        try:
+            command = importlib.import_module(module)
+        except ModuleNotFoundError as error:
+            if error.name == "miles":
+                raise SystemExit(
+                    "Record analysis requires the MILES package; run it in the pinned runtime."
+                ) from error
+            raise
+        command.main(sys.argv[3:] if sys.argv[2:3] == ["select"] else sys.argv[2:])
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "validate", "train", "run", "status"))

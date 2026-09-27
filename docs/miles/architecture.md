@@ -63,6 +63,8 @@ The ordinary CPU suite covers configuration, planning, launch specifications,
 rewards, data preparation and workflow contracts without installing MILES or
 SGLang. The `MILES contracts` workflow also checks the maintained scripts and
 checks application types without requiring the private runtime.
+Recording and summary implementation tests live with their MILES implementation;
+Open Instruct keeps record configuration tests and runtime selection/buffer integration tests.
 The moved adapter is checked against that Core API in the dedicated runtime
 environment; Open Instruct's ordinary type check covers the application integration.
 

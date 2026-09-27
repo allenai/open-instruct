@@ -135,7 +135,7 @@ def load_core_args(extra_args_provider):
     config.validate()
     args.dynamic_sampling_filter_path = config.resolved_miles().get("dynamic_sampling_filter_path")
     args.rollout_sample_filter_path = config.resolved_miles().get("rollout_sample_filter_path")
-    args.core_records_factory = "open_instruct.miles.datasets.inference_records.Recorder"
+    args.core_records_factory = "open_instruct.miles.datasets.recording.create_recorder"
     args.olmo_core = core
     args.compress_ratios = None
     if args.fully_async:

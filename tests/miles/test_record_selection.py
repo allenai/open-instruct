@@ -4,12 +4,14 @@ import hashlib
 import json
 
 import pytest
+from miles.utils import inference_records
+from record_helpers import checkpoint, make_args, sample
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
-from open_instruct.miles.datasets import inference_records, record_selection
+from open_instruct.miles.datasets import record_selection, recording
 from open_instruct.miles.errors import InputError
-from open_instruct.test_miles_inference_records import checkpoint, document, make_args, sample
+from open_instruct.test_miles_inference_records import document
 
 
 def prompt(name):
@@ -19,7 +21,7 @@ def prompt(name):
 def record(tmp_path, run, groups, *, deterministic=False, policy=None):
     args = make_args(tmp_path, run=run, policy=policy or checkpoint(tmp_path))
     args.sglang_enable_deterministic_inference = deterministic
-    recorder = inference_records.Recorder(args)
+    recorder = recording.create_recorder(args)
     for name, rewards, versions in groups:
         responses = [sample(i, reward, prompt=prompt(name), versions=versions) for i, reward in enumerate(rewards)]
         recorder.record_group(responses, decision="passed")

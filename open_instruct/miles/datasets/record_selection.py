@@ -28,8 +28,10 @@ import json
 import time
 from pathlib import Path
 
+from miles.utils import inference_records, record_summary
+
 from open_instruct import logger_utils
-from open_instruct.miles.datasets import inference_records, record_summary
+from open_instruct.miles.datasets import recording
 from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
@@ -193,7 +195,7 @@ class Selection:
         table = json.loads(data)
         if table.get("schema_version") != TABLE_SCHEMA_VERSION:
             raise RuntimeError(f"Selection table {path} has unsupported schema {table.get('schema_version')!r}")
-        lineage = inference_records.lineage_identity(args.hf_checkpoint)["inventory_sha256"]
+        lineage = recording.lineage_identity(args.hf_checkpoint)["inventory_sha256"]
         if lineage != table["lineage"]:
             raise RuntimeError(
                 f"Selection table lineage {table['lineage']} does not match this checkpoint ({lineage})"

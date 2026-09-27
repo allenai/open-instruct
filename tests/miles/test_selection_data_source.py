@@ -4,10 +4,11 @@ import json
 from types import SimpleNamespace
 
 import torch
+from miles.utils import inference_records
 from miles.utils.types import Sample
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.datasets import inference_records, record_selection
+from open_instruct.miles.datasets import record_selection, recording
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 
@@ -68,7 +69,7 @@ def write_table(root, excluded):
     ]
     table = {
         "schema_version": record_selection.TABLE_SCHEMA_VERSION,
-        "lineage": inference_records.lineage_identity(args.hf_checkpoint)["inventory_sha256"],
+        "lineage": recording.lineage_identity(args.hf_checkpoint)["inventory_sha256"],
         "protocol_sha256": protocol,
         "excluded": [{"input_key": key, "domain": "math"} for key in keys],
     }
