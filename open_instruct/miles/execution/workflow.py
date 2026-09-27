@@ -233,7 +233,7 @@ def parse_runtime(config):
             "This MILES installation does not select the olmo_core backend; use the pinned MILES/Core runtime image built by scripts/train/build_image_and_launch.sh --miles."
         )
     if args.load:
-        checkpoint = importlib.import_module("open_instruct.miles.training.checkpoint")
+        checkpoint = importlib.import_module("miles.backends.core_utils.checkpoint")
         _, manifest = checkpoint.resume_manifest(args.load)
         args.start_rollout_id = manifest["clock"]["next_rollout_id"]
     return args
@@ -242,6 +242,9 @@ def parse_runtime(config):
 def train_config(config, *, export_hf=None, background_evaluation=None):
     args = parse_runtime(config)
     args.background_evaluation = background_evaluation
+    args.core_evaluation_snapshot = (
+        "open_instruct.miles.evaluation.evaluation.training_snapshot" if background_evaluation else None
+    )
     os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
     driver = importlib.import_module("open_instruct.miles.execution.driver")
     return asyncio.run(driver.train(args, export_hf=export_hf))

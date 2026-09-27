@@ -10,10 +10,10 @@ There is no Megatron checkpoint conversion in this path.
 | Conventional Olmo MoE | Tiny local and EP2 lifecycle/parity checks; choose a compatible HF descriptor |
 | Earlier KDA/latent MoE SFT model | Primary full-SFT GSM8K comparison and async/replay evidence on B300 |
 | Small hero, new attention features | Paired SFT four-update barrier mechanics passed on H100 EP4 + TP1 with automatic fused rounding; see [hero support](hero-support.md) for evidence and remaining limits |
-| Dense Olmo 3 | Separate FSDP adapter; two-GPU 7B smoke, fresh-process resume, HF export and fresh serving reload passed, with zero-advantage batches. Nonzero-gradient full-model learning remains unqualified; see [qualification](olmo3-pre-rl.md) |
+| Dense Olmo 3 | Separate FSDP adapter; two-GPU 7B smoke, fresh-process resume, HF export and fresh serving reload passed, with zero-advantage batches. Nonzero-gradient full-model learning remains unqualified; see [qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/olmo3-pre-rl.md) |
 | Other HF architectures | Do not infer support from safetensors or tokenizer compatibility; inspect the model factory and identify any support gap before choosing a backend; deprecated GRPO is not an automatic fallback |
 
-For the authoritative factories inspect `open_instruct/miles/training/models.py`,
+For the authoritative factories inspect `miles/backends/core_utils/models.py`,
 `moe_models.py`, and `standard_models.py`. Both deprecated `grpo.py` and the MILES path
 use OLMo-core, but have different orchestration and serving implementations.
 
@@ -27,7 +27,7 @@ not a numerical or routing-parity certificate.
 
 Preserve router storage/computation precision and architecture metadata. The
 KDA/latent runs depend on BF16 stored routers with FP32 router computation; inspect
-[precision evidence](measurements/router-precision-20260911.md) before adopting a
+[precision evidence](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/router-precision-20260911.md) before adopting a
 new export. Do not blindly cast a checkpoint to address a mismatch.
 
 Preparation treats sources as read-only. HF staging references source weights:
@@ -54,13 +54,13 @@ checkpoint loaded from another run's root.
 `launch.auto_resume=true` permits supported Beaker retries. Workflow preparation
 is reused only for the same recorded specification; the latest completed native
 checkpoint is loaded when present, otherwise training restarts from the input.
-Multi-node configurations may keep auto_resume=true; a restart into the same output root adopts the newest completed checkpoint and continues the rollout cursor, qualified in [multi-node resume](measurements/multinode-resume-20260922.md). Forced preemption, and restarts of runs carrying a managed judge, remain unqualified. Manual
+Multi-node configurations may keep auto_resume=true; a restart into the same output root adopts the newest completed checkpoint and continues the rollout cursor, qualified in [multi-node resume](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md). Forced preemption, and restarts of runs carrying a managed judge, remain unqualified. Manual
 relaunch with the same unchanged specification/output root can adopt a completed
 checkpoint after failure; a completed run root cannot be overwritten. Do not
 change the recipe in-place and call it a resume.
 
 Budget checkpoint disk space, synchronous save time and startup load time. See
-[checkpoint measurements](measurements/checkpoint-perf-20260911.md) for the measured
+[checkpoint measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/checkpoint-perf-20260911.md) for the measured
 EP2 workload, and [operations](operations.md) for artifact/completion checks.
 
 ## Using a template that does not ship with the checkpoint

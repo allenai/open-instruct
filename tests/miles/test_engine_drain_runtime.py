@@ -6,17 +6,16 @@ from unittest.mock import AsyncMock
 
 import numpy as np
 import torch
+from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication import engine_delivery
+from miles.backends.core_utils.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
+from miles.backends.core_utils.publication.rolling_publication import RollingPublication
+from miles.backends.core_utils.publication.state import PolicyClock
+from miles.backends.core_utils.rollout import draining_rollout
+from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyDataBuffer
+from miles.backends.core_utils.rollout.draining_rollout import DrainingRolloutFn
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
-
-from open_instruct.miles.publication import engine_delivery
-from open_instruct.miles.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
-from open_instruct.miles.publication.rolling_publication import RollingPublication
-from open_instruct.miles.publication.state import PolicyClock
-from open_instruct.miles.rollout import draining_rollout
-from open_instruct.miles.rollout.async_buffer import HomogeneousPolicyDataBuffer
-from open_instruct.miles.rollout.draining_rollout import DrainingRolloutFn
-from open_instruct.miles.training import actor
 
 
 def test_snapshot_has_no_live_parameter_storage(monkeypatch):

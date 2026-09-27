@@ -7,10 +7,7 @@ for building and updating that image.
 
 ## Prepare a submitting host
 
-Use the project's `robertb/miles-olmo-core` branch. For the internal pilot, first
-follow the [source setup](grpo.md#run-miles-grpo): the
-supplied bundle includes local commits that may not yet be on GitHub. The clone
-command below applies once the intended revision is available there.
+Use a checkout of the intended Open Instruct revision.
 
 Python 3.12 is sufficient for
 CPU-only planning and submission from the checkout; those modules use the standard
@@ -21,7 +18,7 @@ configured workspace, budget, secrets, images and WEKA filesystems. Building an
 image additionally requires Docker and `jq`.
 
 ```bash
-git clone --branch robertb/miles-olmo-core https://github.com/allenai/open-instruct.git
+git clone https://github.com/allenai/open-instruct.git
 cd open-instruct
 uv python install 3.12
 uv venv --python 3.12 "$HOME/.venvs/oi-miles-submit"
@@ -53,10 +50,11 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
-The current [MILES GRPO](grpo.md) uses image
-`01M2XGZM2N1V4DQVMYHM52KBHZ`. Choose a starter from the four maintained examples and verify image compatibility
-with its backend and serving features. Supply the model/data paths and any secrets
-needed by your run. Beaker resource permissions are required.
+Choose a starter from the four maintained examples and an image built from the
+intended application revision and runtime lock. Building requires access to the
+private sources described in [architecture](architecture.md#runtime-sources-and-images).
+Supply model/data paths and any secrets needed by your run. Beaker resource
+permissions are required.
 
 For an **already built compatible image**, obtain its immutable ID and source
 provenance from its maintainer or qualification record. Inspect its metadata:

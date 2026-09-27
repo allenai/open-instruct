@@ -50,6 +50,7 @@ def test_expert_packing_and_native_length_balancing_are_mutually_exclusive(tmp_p
                 "gpus": 4,
                 "expert_parallel_size": 2,
                 "sequence_packing": True,
+                "trainer_flash_attention_version": 4,
                 "expert_balanced_packing": expert_packing,
                 "router_aux_loss_weight": 0.0,
             },
@@ -260,9 +261,20 @@ def test_all_researcher_examples_compile_to_native_arguments():
         assert config.arguments()
         assert config.miles["rollout_batch_size"] == run.sections["inference"].get("rollout_batch_size", 8)
         assert config.miles["n_samples_per_prompt"] == run.sections["inference"].get("samples_per_prompt", 8)
+        # Packed examples need document-boundary attention; Torch rejects it on
+        # the first scoring/training forward even though argument parsing works.
+        if config.core.sequence_packing:
+            assert config.core.attention_backend == "flash_4"
+        else:
+            assert config.core.attention_backend == "torch"
         if config.miles["fully_async"]:
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
+            assert config.core.publication_mode == "refresh"
+            assert config.core.max_policy_lag == 6
+        else:
+            assert config.core.publication_mode == "barrier"
+            assert config.core.filter_zero_std_groups is False
 
 
 @pytest.mark.parametrize(

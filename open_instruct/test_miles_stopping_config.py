@@ -28,7 +28,7 @@ def configuration():
             n_samples_per_prompt=16,
             rollout_function_path="open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
             loss_type="custom_loss",
-            custom_loss_function_path="open_instruct.miles.training.stopping.policy_loss",
+            custom_loss_function_path="miles.backends.core_utils.stopping.policy_loss",
         ),
     )
 

@@ -30,7 +30,7 @@ forced_exit_probe_interval = 0 # Optional: 8 captures labeled hidden states ever
 calculate_per_token_loss = false
 rollout_function_path = "open_instruct.miles.rollout.forced_exits.ForcedExitRollout"
 loss_type = "custom_loss"
-custom_loss_function_path = "open_instruct.miles.training.stopping.policy_loss"
+custom_loss_function_path = "miles.backends.core_utils.stopping.policy_loss"
 ```
 
 This is an overlay, not a complete run configuration. Keep at least two natural

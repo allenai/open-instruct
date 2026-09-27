@@ -18,7 +18,6 @@ from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner, evaluation_submit
-from open_instruct.miles.training import checkpoint
 
 
 @pytest.fixture
@@ -279,6 +278,12 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     shared = Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
     module("miles.ray.rollout.eval_dispatch", EvalDispatcher=shared)
     module("miles.utils", object_store=SimpleNamespace(init_instance=lambda *a, **kw: None))
+    module(
+        "miles.utils.compiler_cache",
+        startup_cache=SimpleNamespace(
+            prepare=Mock(), finish=AsyncMock(), configure_specs=Mock(), publish_progress=Mock()
+        ),
+    )
     module("miles.utils.data", remove_rollout_data_refs=lambda *a: None)
     module("miles.utils.hf_config", HF_EXPORT_COMPLETE_MARKER=".complete")
     module("miles.utils.misc", should_run_periodic_action=lambda *a: False)
@@ -289,7 +294,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         finish_tracking=lambda: None,
         init_tracking=lambda args: None,
     )
-    module("open_instruct.miles.publication.rolling_publication", RollingPublication=Mock())
+    module("miles.backends.core_utils.publication.rolling_publication", RollingPublication=Mock())
     # Load under a private module name so monkeypatch cleanup leaves no stale driver.
     spec = importlib.util.spec_from_file_location(
         "test_background_driver", Path(evaluation.__file__).parents[1] / "execution/driver.py"
@@ -299,7 +304,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=Mock(side_effect=[0, 2])))
     monkeypatch.setattr(driver, "stage", lambda *a, **kw: nullcontext())
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
-    monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a: None)
+    monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a, **kw: None)
     monkeypatch.setattr(driver.startup_cache, "finish", AsyncMock())
     entered, release = threading.Event(), threading.Event()
     worker_threads = []
@@ -378,19 +383,6 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
 def test_wall_clock_budget_must_be_finite_and_positive(value):
     with pytest.raises(InputError):
         CoreConfig(max_run_seconds=value)
-
-
-def test_eval_snapshots_are_outside_checkpoint_cleanup(tmp_path):
-    from_checkpoint_root = tmp_path / "checkpoints"
-    for update in (1, 2):
-        path = from_checkpoint_root / "core" / f"rollout_{update:07d}"
-        path.mkdir(parents=True)
-        (path / "complete.json").write_text("{}")
-    frozen = evaluation.snapshot(tmp_path, 1)
-    frozen.mkdir(parents=True)
-    (frozen / "model.safetensors").write_bytes(b"immutable")
-    assert checkpoint.prune(from_checkpoint_root, 2, keep_last=1, keep_every=None) == [1]
-    assert (frozen / "model.safetensors").read_bytes() == b"immutable"
 
 
 def test_incomplete_snapshot_never_submitted(run, monkeypatch):

@@ -4,11 +4,11 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyDataBuffer
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles.configuration.config import ZERO_STD_FILTER, CoreConfig
-from open_instruct.miles.rollout.async_buffer import HomogeneousPolicyDataBuffer
 
 
 def test_buffer_records_every_scored_group_and_keeps_filter_semantics(tmp_path):
@@ -27,6 +27,7 @@ def test_buffer_records_every_scored_group_and_keeps_filter_semantics(tmp_path):
             async_data_buffer_capacity_factor=2,
             dynamic_sampling_filter_path=ZERO_STD_FILTER,
             reward_key=None,
+            core_records_factory="open_instruct.miles.datasets.inference_records.Recorder",
             olmo_core=CoreConfig(records_root=str(tmp_path / "records")),
             hf_checkpoint=str(checkpoint),
             wandb_run_name="buffer-test",

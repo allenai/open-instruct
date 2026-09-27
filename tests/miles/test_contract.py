@@ -13,6 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from miles.backends.core_utils import contract
+from miles.backends.core_utils.publication.state import PolicyClock
 from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
 from miles.utils.ft_utils.process_group_utils import GroupInfo
@@ -26,9 +28,6 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.checkpoint import checkpoint as recompute
-
-from open_instruct.miles.publication.state import PolicyClock
-from open_instruct.miles.training import contract
 
 
 def loss_args(token_average):

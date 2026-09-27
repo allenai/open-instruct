@@ -66,7 +66,7 @@ def exercise(upstream):
         for name, statuses, stdio, expected, expected_error in (
             ("function-transient-gateway", [503, 502, 504], False, 1.0, False),
             ("stdio-transient-gateway", [503, 502, 504], True, 1.0, False),
-            ("exhausted-gateway", [503] * (retries + 1), True, None, True),
+            ("exhausted-gateway", [503] * (retries + 1), True, 0.0, False),
             ("healthy-after-exhaustion", [], True, 1.0, False),
             ("rate-limit-retry-after", [429], True, 1.0, False),
             ("sample-rejection", [500], True, 0.0, False),
@@ -83,7 +83,7 @@ def exercise(upstream):
                 score, diagnostics = asyncio.run(code_rewards.execute(args, program, tests, stdio=stdio))
             except RuntimeError as error:
                 error_text = str(error)
-            expected_attempts = statuses if expected_error or name == "sample-rejection" else statuses + [200]
+            expected_attempts = statuses if name in {"exhausted-gateway", "sample-rejection"} else statuses + [200]
             passed = (
                 (error_text is not None) == expected_error
                 and score == expected
@@ -93,7 +93,14 @@ def exercise(upstream):
                 passed = (
                     passed
                     and diagnostics is not None
-                    and diagnostics["status"] == ("rejected" if name == "sample-rejection" else "ok")
+                    and diagnostics["status"]
+                    == (
+                        "service_error"
+                        if name == "exhausted-gateway"
+                        else "rejected"
+                        if name == "sample-rejection"
+                        else "ok"
+                    )
                 )
             row = {
                 "name": name,

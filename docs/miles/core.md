@@ -8,7 +8,7 @@ configuration, data/verifiers, lifecycle coordination and retained evidence.
 
 ## Trainer hookup
 
-`open_instruct/miles/training/actor.py` implements the trainer actor contract. The
+`miles/backends/core_utils/actor.py` implements the trainer actor contract. The
 `models.py` facade selects `moe_models.py` for the specialized OLMoDDP MoE path
 or `standard_models.py` for dense Core `TransformerTrainModule`/FSDP. MILES calls
 the actor for initialization, scoring, training, save/restore and weight export.
@@ -32,7 +32,7 @@ per-head attention and hybrid configuration export support.
 
 Local checks cover model/configuration roundtrips, checkpoint planning, adapter
 contracts and a single-GPU hybrid-MoE scoring/backward/optimizer step. The
-[FP32-head comparison](measurements/trainable-fp32-head-math-20260926.md) additionally
+[FP32-head comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/trainable-fp32-head-math-20260926.md) additionally
 exercises the full non-EMO SFT policy with EP2, B300 kernels, packing and async
 publication on this pin. Broader topologies and feature combinations need their
 own qualification. Earlier reports describe their original source and image pins.
@@ -73,8 +73,8 @@ that convention is not a claim of Megatron auxiliary-loss equivalence.
 Expert-parallel ranks receive the routing information needed by their local
 forward; trainer PP/TP/CP greater than one are rejected, not implicitly supported.
 
-[Full-model replay](measurements/core-replay-full-sft-20260911.md) and the later
-[packed async restart](measurements/colleague-20260913/README.md) passed their
+[Full-model replay](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-replay-full-sft-20260911.md) and the later
+[packed async restart](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/colleague-20260913/README.md) passed their
 retained-route audits. A replay match verifies supplied assignments; it does not
 measure what the trainer would have selected without replay.
 
@@ -162,19 +162,21 @@ lengths, PPO clipping, entropy, KL and loss reduction without reusing the loss
 helpers it is testing. Tiny native EP1/EP2 comparisons cover policy-only,
 auxiliary-only and combined gradients/Adam state, with recomputation on/off.
 These are native consistency checks, not full-model Megatron equality.
-[Contract report](measurements/core-contract-final-20260910.json) and
-[native EP report](measurements/core-native-ep-20260910.json) retain thresholds
+[Contract report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-contract-final-20260910.json) and
+[native EP report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-native-ep-20260910.json) retain thresholds
 and measured errors. Current test counts belong to each image's qualification.
 
+Run the current packaged regression suite inside the pinned application image:
+
 ```bash
-# Run inside the pinned image; the GPU suite needs the allocated device(s).
-python scripts/miles/check_contract.py /output/contract
-# Submit the native EP gate through the committed-image wrapper:
-MILES_EXISTING_IMAGE=IMMUTABLE_IMAGE_ID \
-  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_contract.sh
+bash scripts/miles/test_runtime.sh -q
 ```
 
-The [historical local MoE procedure](measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check)
+The [archived distributed qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/core.md#numerical-evidence-and-development-checks)
+retains the original EP gate and its inputs. Those distributed experiments are
+separate from the packaged unit suite.
+
+The [historical local MoE procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check)
 records the original fixture/debug workflow. Use the current structured examples
 for new runs; old trial commands and then-pending gates are not current defaults.
 
@@ -307,12 +309,12 @@ The native Core option currently supports the default head and default loss,
 without tensor-parallel wrapping. Its low-precision CUDA path supports first-order
 gradients; higher-order derivatives and fused-linear cross entropy are excluded.
 
-The [frozen-weight study](measurements/selective-precision-20260926.md) motivates
+The [frozen-weight study](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/selective-precision-20260926.md) motivates
 the option but does not establish an RL learning benefit. FP32 logits double
 that output tensor's storage; measure training memory and step cost for the
 chosen token/vocabulary sizes.
 
-The [short math comparison](measurements/trainable-fp32-head-math-20260926.md)
+The [short math comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/trainable-fp32-head-math-20260926.md)
 completed 32 updates per arm: observed warmed logprob mismatch fell 34%, trainer
 time rose about 1%, and peak rank-zero allocation rose 1.87 GiB. It did not show a
 held-out answer-quality improvement. Rollouts differ between arms; the frozen-token

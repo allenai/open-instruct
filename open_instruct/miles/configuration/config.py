@@ -9,10 +9,9 @@ from typing import Any
 from open_instruct.miles.configuration import async_capacity, graph_config, throughput, validation
 from open_instruct.miles.configuration import options as cli_options
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.infrastructure import compiler_cache as cache
 
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
-EXPERT_SCHEDULE = "open_instruct.miles.training.expert_schedule.reorder_samples"
+EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 
@@ -44,7 +43,7 @@ class CoreConfig:
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
-    compiler_cache_max_storage_bytes: int = cache.DEFAULT_MAX_STORAGE_BYTES
+    compiler_cache_max_storage_bytes: int = 8 * 1024**3
     compiler_cache_publish_interval_seconds: float = 600.0
     checkpoint_profile: bool = False
     checkpoint_thread_count: int | None = None
@@ -122,7 +121,7 @@ class CoreConfig:
             if not isinstance(self.compiler_cache_root, str) or not self.compiler_cache_root:
                 raise InputError("core.compiler_cache_root must be a nonempty absolute path or unset")
             try:
-                cache.validate_shared_root(Path(self.compiler_cache_root))
+                validation.compiler_cache_root(Path(self.compiler_cache_root))
             except ValueError as error:
                 raise InputError(f"core.compiler_cache_root: {error}") from error
         if self.records_root is not None:
@@ -317,7 +316,7 @@ class RunConfig:
             raise InputError("The expert schedule hook requires core.expert_balanced_packing=true")
         if not self.core.forced_exit_positions and (
             options.get("rollout_function_path") == "open_instruct.miles.rollout.forced_exits.ForcedExitRollout"
-            or options.get("custom_loss_function_path") == "open_instruct.miles.training.stopping.policy_loss"
+            or options.get("custom_loss_function_path") == "miles.backends.core_utils.stopping.policy_loss"
         ):
             raise InputError(
                 "core.forced_exit_positions=0 disables stopping guidance; remove the forced-exit "
@@ -370,6 +369,13 @@ class RunConfig:
             raise InputError(
                 'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
             )
+        if self.core.sequence_packing and self.core.attention_backend == "torch":
+            raise InputError(
+                'core.sequence_packing=true is incompatible with core.attention_backend="torch": '
+                "Torch attention does not support packed document boundaries. "
+                'Select a packing-capable backend (for example core.attention_backend="flash_4" '
+                "on supported hardware), or disable sequence_packing."
+            )
         if self.core.packing_max_tokens is not None:
             if not self.core.sequence_packing:
                 raise InputError("core.packing_max_tokens requires sequence_packing=true")
@@ -394,7 +400,7 @@ class RunConfig:
             required = {
                 "rollout_function_path": "open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
                 "loss_type": "custom_loss",
-                "custom_loss_function_path": "open_instruct.miles.training.stopping.policy_loss",
+                "custom_loss_function_path": "miles.backends.core_utils.stopping.policy_loss",
             }
             for name, value in required.items():
                 if options.get(name) != value:

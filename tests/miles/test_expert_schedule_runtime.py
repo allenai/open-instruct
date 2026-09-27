@@ -5,15 +5,21 @@ from copy import deepcopy
 
 import pytest
 import torch
+from expert_schedule_helpers import hook_args, sample_groups
+from miles.backends.core_utils import expert_schedule
 from miles.backends.training_utils.loss_hub import advantages
 from miles.ray.rollout import rollout_data_conversion, train_data_conversion
 from miles.utils import arguments
+from miles.utils.function_registry import load_function
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles.configuration import arguments as core_arguments
 from open_instruct.miles.configuration.config import EXPERT_SCHEDULE
-from open_instruct.miles.training import expert_schedule
-from open_instruct.test_miles_expert_schedule import configuration, hook_args, sample_groups
+from open_instruct.test_miles_expert_schedule import configuration
+
+
+def test_managed_hook_resolves_to_the_miles_implementation():
+    assert load_function(EXPERT_SCHEDULE) is expert_schedule.reorder_samples
 
 
 def test_hook_through_real_reward_normalization_and_partition(tmp_path):

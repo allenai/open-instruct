@@ -3,7 +3,9 @@
 import json
 from types import SimpleNamespace
 
-from open_instruct.miles.rollout import rollout_metrics, sibling_timing
+from miles.backends.core_utils.rollout import sibling_timing
+
+from open_instruct.miles.rollout import rollout_metrics
 
 
 def _sample(diagnostics):

@@ -10,12 +10,12 @@ import collections
 import json
 from pathlib import Path
 
+from miles.backends.core_utils.publication import policy_versions
+from miles.backends.core_utils.rollout import sibling_timing
 from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
-from open_instruct.miles.publication import policy_versions
-from open_instruct.miles.rollout import sibling_timing
 
 logger = logger_utils.setup_logger(__name__)
 

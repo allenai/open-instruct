@@ -24,11 +24,3 @@ runtime/miles/sources/
 !docs/miles/
 !docs/miles/**
 !README.md
-
-# Standalone learning probes are not part of the distributed training image.
-# Keep helpers imported by tests/miles so the included tests can be collected.
-scripts/miles/learning_probe.py
-scripts/miles/learning_probe_export.py
-scripts/miles/learning_probe_generate.py
-scripts/miles/learning_probe_score.py
-scripts/miles/learning_probe_screen.py

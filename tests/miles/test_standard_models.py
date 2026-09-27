@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from miles.backends.core_utils import models
 from olmo_core.nn.hf import convert
 from transformers import AutoModelForCausalLM, Olmo3Config
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.training import models
 
 
 @pytest.mark.parametrize("sliding", [False, True])

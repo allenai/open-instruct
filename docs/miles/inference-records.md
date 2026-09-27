@@ -11,7 +11,7 @@ the online filter passed it or not, and whether training later consumed it. They
 live in a shared store that later runs and analyses read. Recording never changes
 admission, filtering or training.
 
-This covers phases 1–3 of the [inference records plan](plans/inference-records-20260921.md):
+This covers phases 1–3 of the [inference records plan](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/plans/inference-records-20260921.md):
 recording, [summaries](#summarize-a-store) and [prompt selection](#select-prompts).
 The starter configurations leave recording off until a reliability qualification
 is recorded.

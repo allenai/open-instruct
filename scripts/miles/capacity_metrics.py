@@ -5,18 +5,17 @@ Hardware observations include coverage; unavailable values are never zero-filled
 """
 
 import json
+import math
 from pathlib import Path
 
-from scripts.miles import throughput_basket, throughput_occupancy
-
-from open_instruct.miles.training.performance import training_rates
+from scripts.miles import analyze_throughput, throughput_occupancy
 
 PREFIX = "rollout/fully_async/completed_queue/"
 
 
 def measurements(root, *, warmup=6):
     root = Path(root)
-    report = throughput_basket.analyze(root, warmup=0)
+    report = analyze_throughput.analyze(root, warmup=0)
     plan = json.loads((root / "plan.json").read_text())
     allocation = plan["allocation"]
     if plan["runtime"]["miles"].get("colocate", False):
@@ -26,10 +25,10 @@ def measurements(root, *, warmup=6):
     inference_gpus = sum(node["rollout_gpus"] for node in allocation["nodes"])
     expected_engines = inference_gpus // plan["runtime"]["miles"]["rollout_num_gpus_per_engine"]
     contracts = [
-        throughput_basket.rows(root / "checkpoints" / f"training_contract_rank{r}.jsonl") for r in range(trainer_gpus)
+        analyze_throughput.rows(root / "checkpoints" / f"training_contract_rank{r}.jsonl") for r in range(trainer_gpus)
     ]
-    stages = throughput_basket.rows(root / "checkpoints/driver_timing.jsonl")
-    flows = {r["rollout_id"]: r for r in throughput_basket.rows(root / "checkpoints/rollout_flow.jsonl")}
+    stages = analyze_throughput.rows(root / "checkpoints/driver_timing.jsonl")
+    flows = {r["rollout_id"]: r for r in analyze_throughput.rows(root / "checkpoints/rollout_flow.jsonl")}
     output = []
     for cycle in report["per_update"]:
         rollout_id = cycle["rollout_id"]
@@ -178,4 +177,17 @@ def measurements(root, *, warmup=6):
         "allocation": allocation,
         "warmup_updates": warmup,
         "rows": output,
+    }
+
+
+def training_rates(model_tokens, active_tokens, seconds, gpus):
+    """Counts are global across trainer ranks, not rank-local or FLOP estimates."""
+    if not all(math.isfinite(v) for v in (model_tokens, active_tokens, seconds, gpus)):
+        raise ValueError("Training rate inputs must be finite")
+    if seconds <= 0 or gpus <= 0 or active_tokens < 0 or model_tokens < active_tokens:
+        raise ValueError("Training rates require positive time/GPUs and valid global token counts")
+    return {
+        "model_tokens_per_second": model_tokens / seconds,
+        "model_tokens_per_gpu_second": model_tokens / seconds / gpus,
+        "active_response_tokens_per_gpu_second": active_tokens / seconds / gpus,
     }

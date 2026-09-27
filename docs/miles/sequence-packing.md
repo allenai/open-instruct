@@ -4,13 +4,11 @@ Packed full-attention models require an attention backend that supports document
 boundaries, such as `core.attention_backend="flash_4"`. The `dev` and `small`
 examples use Torch attention without packing; enabling packing in a copy also
 requires changing that backend. Torch attention rejects intra-document masking.
+`plan` and `validate` reject packing with Torch attention before runtime startup.
 
-Basic sequence packing is incorporated into project primary branches
-`robertb/miles-olmo-core` (Open Instruct) and `robertb/miles-rl-adapter` (Core).
-The implementation was qualified on `robertb/miles-sequence-packing`, originally
-based on `016318180`. The small GPU numerical gate and live async retained-data
-audit passed. The recommended async example enables packing; the Core option
-remains opt-in for other configurations.
+Basic sequence packing is available in this adapter. Historical small GPU
+numerical and live async audits are linked below with their source identities.
+The medium example enables packing; it remains opt-in for other configurations.
 
 ```toml
 [trainer]
@@ -25,6 +23,9 @@ cover it. A larger budget increases the trainer forward capacity, not the rollou
 context limit. Disabling packing restores the previous unpadded one-sample path;
 omit `packing_max_tokens` when disabling. The structured CLI maps both trainer
 fields to Core options. MILES receives `qkv_format=thd` for response-logit slicing.
+
+The packing implementation and the Core actor that uses it live in our MILES fork
+under `miles.backends.core_utils`.
 
 The packer greedily combines consecutive samples within each optimizer batch. It
 does not reorder, split, truncate, add padding, change GRPO groups, or cross policy
@@ -67,15 +68,11 @@ Host tests cover pack schedules, identity, replay tails, overflow and CLI mappin
 Pinned-runtime fixed-logit tests compare losses and gradients for token/response
 reduction, TIS, KL, scoring skip, interior masks and completely masked responses.
 
-Launch the tiny KDA/full-attention/latent-MoE model gate with:
+The historical tiny KDA/full-attention/latent-MoE model gate is preserved with its evidence:
 
-```bash
-MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
-  ./scripts/train/build_image_and_launch.sh --miles \
-  scripts/train/debug/miles_sequence_packing.sh
-```
+The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
-It uses two Holmes GPUs, urgent priority, a positive minimum runtime, random
+It used two Holmes GPUs, urgent priority, a positive minimum runtime, random
 local weights and no external datasets. It exercises EP1/EP2 with recomputation
 on/off, fixed replay, document-isolation perturbations, two updates (checked then
 skipped scoring), policy-only gradient/Adam comparisons and the combined
@@ -84,9 +81,8 @@ independent retained-data audit.
 
 
 Numerical results and run identities are recorded in
-[the measurement notes](measurements/sequence-packing-20260912/README.md).
-The small real-model follow-up is configured in
-`configs/miles/qualification/sequence-packing.toml`: EP2 plus one TP1 SGLang engine,
+[the measurement notes](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/sequence-packing-20260912/README.md).
+The recorded small real-model follow-up used EP2 plus one TP1 SGLang engine,
 three async updates, 8 prompts × 2 responses, replay/recomputation, and a 4096-token
 pack budget. This tests plumbing, not GSM8K learning with its short generation cap.
 
@@ -98,8 +94,7 @@ and effects on learning across workloads and topologies remain unestablished;
 planning overhead can offset the trainer-time savings. Measure total planning and
 training time on your workload before enabling it for a production run.
 
-The implementation is already incorporated into the project working branch
-`robertb/miles-olmo-core`, including bounded swap search. All maintained examples
+The implementation includes bounded swap search. All maintained examples
 leave it disabled. This option is separate from ordinary sequence packing, which
 can remain enabled while expert-aware scheduling is off.
 
@@ -171,7 +166,9 @@ not post-permutation adjacency, for GRPO normalization. Missing/malformed routes
 compact/multi-turn rollouts, dynamic global batch sizes, alternative partitioning,
 custom reward/conversion callbacks and conflicting sample filters are rejected.
 Any incomplete trailing optimizer block remains untouched for normal MILES trimming.
-No MILES or OLMo-core source patch is needed.
+The pinned MILES fork provides the planner, search, and packing implementation in
+`miles.backends.core_utils`. Open Instruct supplies its configuration and calls
+that facility from the Core actor; no additional OLMo-core patch is needed.
 
 Producer `expert_schedule` JSON events record before/after predictions and total
 planning time. Trainer `expert_balance` contract events count the actual packs;
@@ -179,15 +176,11 @@ W&B exposes `packing/expert_dispatch_skew_mean` and
 `packing/expert_dispatch_skew_max`. The work proxy sums the busiest destination
 across groups at each pack/layer; it is a count proxy, not predicted wall time.
 
-The dedicated qualification allocates four GPUs and exercises EP2, replay,
+The archived dedicated qualification allocated four GPUs and exercises EP2, replay,
 per-sample scores, two policy-only updates, full gradients/Adam state, and
 activation recomputation on/off:
 
-```bash
-MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
-  ./scripts/train/build_image_and_launch.sh --miles \
-  scripts/train/debug/miles_expert_schedule.sh
-```
+The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
 A passing fixed-input numerical gate does not establish throughput improvement
 or learning quality on a heterogeneous production workload.
@@ -216,12 +209,10 @@ than a matched-input causal estimate. Keep this feature off by default until its
 net benefit is measured for the intended topology, batch and workload.
 
 
-The CPU benchmark accepts a routing-panel JSON file with per-document expert
+The archived CPU benchmark accepts a routing-panel JSON file with per-document expert
 histograms (no GPU or new generation required):
 
-```bash
-python -m scripts.miles.benchmark_expert_search PANEL.json OUTPUT.json
-```
+The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
 
 It compares greedy-only and bounded search on task/general panels, verifies each
 returned result with a full rescore, and records the input checksum. Panel

@@ -5,23 +5,6 @@ import json
 import pytest
 from scripts.miles import capacity_metrics, throughput_occupancy
 
-from open_instruct.miles.training import performance
-
-
-def test_training_rate_counts_global_tokens_once():
-    rates = performance.training_rates(1200, 800, 2, 4)
-    assert rates == {
-        "model_tokens_per_second": 600,
-        "model_tokens_per_gpu_second": 150,
-        "active_response_tokens_per_gpu_second": 100,
-    }
-
-
-@pytest.mark.parametrize("args", [(10, 11, 2, 1), (10, 2, 0, 1), (10, 2, 2, 0), (10, 2, float("nan"), 1)])
-def test_invalid_rate_denominators_rejected(args):
-    with pytest.raises(ValueError):
-        performance.training_rates(*args)
-
 
 def test_window_missing_coverage_is_not_idle():
     summary = throughput_occupancy.summarize([(0, 100), (20, None)], 5, 25)
@@ -50,7 +33,7 @@ def test_reconstructed_rates_use_global_counts_and_slowest_rank(tmp_path, monkey
         completed_queue_get_seconds=0.2,
         other_collection_seconds=0.8,
     )
-    monkeypatch.setattr(capacity_metrics.throughput_basket, "analyze", lambda *a, **k: {"per_update": [cycle]})
+    monkeypatch.setattr(capacity_metrics.analyze_throughput, "analyze", lambda *a, **k: {"per_update": [cycle]})
 
     def rows(path):
         if path.name.startswith("training_contract"):
@@ -71,7 +54,7 @@ def test_reconstructed_rates_use_global_counts_and_slowest_rank(tmp_path, monkey
             ]
         return [dict(rollout_id=0, queue_metrics={}, mixed_responses=0)]
 
-    monkeypatch.setattr(capacity_metrics.throughput_basket, "rows", rows)
+    monkeypatch.setattr(capacity_metrics.analyze_throughput, "rows", rows)
     monkeypatch.setattr(throughput_occupancy, "node_roles", lambda _: {})
     monkeypatch.setattr(
         throughput_occupancy, "analyze", lambda *a, **k: {"pipeline": {}, "hardware": {}, "engines": {}}

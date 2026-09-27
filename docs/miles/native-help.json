@@ -1,5 +1,5 @@
 {
-  "image": "01M3E7THRAXQ77QR6S2W94AS6Q",
+  "image": "sha256:c30240ddb2793efc681a85f6104ba4e08b7721de14e93e59321e9c7db1412ea0",
   "options": [
     {
       "default": null,
@@ -11912,5 +11912,5 @@
       "help": null
     }
   ],
-  "schema_sha256": "6ec7557b89dd8cc5cb5665219090450b5c85aaa4e0aa211247a5526f4c0ac54b"
+  "schema_sha256": "6f63c766cfbfc285eaff852fb4f20ad79980b5a44f8b81a33fef1b06724cb75f"
 }

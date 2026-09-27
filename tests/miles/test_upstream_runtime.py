@@ -3,20 +3,21 @@
 import asyncio
 import json
 import shlex
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication import policy_versions
+from miles.backends.core_utils.publication.engine_drain import WeightSnapshot
+from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray.rollout.inference_controller import InferenceController
+from miles.utils.compiler_cache import startup_cache
 from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
 from miles.utils.workers.worker_spec import CommandWorkerSpec, SchedulingSpec, WorkerLaunchContext
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.infrastructure import startup_cache
-from open_instruct.miles.publication import policy_versions
-from open_instruct.miles.publication.engine_drain import WeightSnapshot
-from open_instruct.miles.publication.rolling_publication import RollingPublication
-from open_instruct.miles.training import actor
 
 
 def test_serving_child_receives_model_package_and_its_own_cache_slot():
@@ -37,7 +38,7 @@ def test_serving_child_receives_model_package_and_its_own_cache_slot():
     assert shlex.split(configured.launch_command(context)) == [
         "/usr/bin/python",
         "-m",
-        "open_instruct.miles.rollout.serving",
+        "miles.utils.compiler_cache.serving",
         "--model-path",
         "/model with spaces",
     ]
@@ -153,3 +154,20 @@ def test_independent_delivery_holds_controller_window_until_acknowledged(failed)
         assert not inference.context_lock.locked
 
     asyncio.run(exercise())
+
+
+def test_cache_fingerprints_packaged_application_root(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    args = SimpleNamespace(
+        olmo_core=CoreConfig(compiler_cache_root=str(tmp_path / "shared")), hf_checkpoint=str(tmp_path / "model")
+    )
+    Path(args.hf_checkpoint).mkdir()
+    (Path(args.hf_checkpoint) / "config.json").write_text('{"model_type": "test"}')
+    startup_cache.prepare(args, application_root=root)
+    lock_path = root / "build/runtime/miles/runtime.lock.json"
+    if not lock_path.exists():
+        lock_path = root / "runtime/miles/runtime.lock.json"
+    assert args.olmo_core_startup_cache["runtime_lock"] == json.loads(lock_path.read_text())
+    assert args.olmo_core_startup_cache["sources"]["open-instruct"] == startup_cache.cache.source_identity(
+        root / "open_instruct"
+    )

@@ -9,32 +9,26 @@ preparation, placement and submission should come from one file.
 |---|---|
 | Open Instruct wrapper | Config validation, preparation, verifiers, launch/receipts, retained evidence |
 | MILES runtime | Rollout actors, SGLang engines, sample/advantage/loss machinery, shared transport helpers |
-| Core adapter | Model construction, document/replay alignment, scoring/training forward, gradient synchronization, optimizer/checkpoints and tensor export |
+| Core adapter (in MILES) | Model construction, document/replay alignment, scoring/training forward, gradient synchronization, optimizer/checkpoints and tensor export |
 | OLMo-core | Model and distributed-training primitives, attention/expert execution |
 | olmo-sglang | Serving architecture registration and model-specific execution |
 
-The Core actor implements the MILES trainer boundary; no Megatron trainer is
-selected. The driver coordinates collections, optimization and versioned weight
+The Core actor at `miles.backends.core_utils.actor.OLMoCoreTrainRayActor` implements
+the MILES trainer boundary. Its model/checkpoint code and publication machinery
+live in the pinned MILES fork. The driver coordinates collections, optimization and versioned weight
 publication. Dense standard-model support is isolated from the specialized MoE
 path. [Implementation contracts](core.md) describe the detailed lifecycle and
 [packing](sequence-packing.md) describes document/routing alignment.
 
 ## Runtime sources and images
 
-`runtime/miles/runtime.lock.json` pins every runtime source to an exact Git commit;
-image builds fetch those commits without applying patches. `olmo-sglang` uses its
-merged main commit `72f194a35045f02cc7d87980819bd0e4652cc931`. OLMo-core is pinned
-to `3c2ad5989f88f8cfb04c983b4243e1a502e4ea1d` on `robertb/miles-fp32-head`.
-This adds the opt-in trainable FP32-output LM head to the prior MILES runtime.
-That branch starts from Jacob's [production MoE PR #872](https://github.com/allenai/OLMo-core/pull/872)
-and carries the MILES adapter plus inherited HF interchange support. MILES uses
-`592905363e9efbbb1e45d7e838ec48b7b716dc69` on
-[`allenai/miles:robertb/miles-polish`](https://github.com/allenai/miles/tree/robertb/miles-polish).
-This includes the organized Open Instruct adapter paths and integrates runtime changes on upstream
-`e89b45f7f85a0e76fba6a99474b1dd9b67a3c20e`. Worker launch, inference lifecycle,
-and rollout execution follow the upstream ownership boundaries. Builds fetch exact
-commits, not moving branch tips. See the [migration checks](measurements/miles-upstream-20260922.md)
-for validation and dependency limits.
+[`runtime/miles/runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the
+source of truth for exact dependency commits and the immutable binary base.
+Builds fetch those commits without patches or moving branch tips. MILES uses the
+organized adapter hooks; OLMo-core provides the model, objective and checkpoint
+APIs required by this adapter; olmo-sglang supplies compatible serving models.
+The ordinary Open Instruct environment keeps its own dependency versions.
+
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
 require a qualified new binary base. The Dockerfile separates a `runtime-base`
@@ -65,12 +59,38 @@ command with different mounts or source provenance.
 
 ## Local development
 
-CPU-only plan/structured validate exercise the public configuration contract.
-For a GPU lifecycle check use the [tiny example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/dev.toml)
-and a compatible tiny HF fixture in the pinned runtime. The existing
-[historical local MoE and restart procedure](measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check) covers
-model preparation and execution. A host-only parser test cannot qualify routing,
-attention, distributed gradients or publication.
+The ordinary CPU suite covers configuration, planning, launch specifications,
+rewards, data preparation and workflow contracts without installing MILES or
+SGLang. The `MILES contracts` workflow also checks the maintained scripts and
+checks application types without requiring the private runtime.
+The moved adapter is checked against that Core API in the dedicated runtime
+environment; Open Instruct's ordinary type check covers the application integration.
+
+```bash
+uv run pytest open_instruct/test_miles*.py
+```
+
+The dedicated runtime suite uses the separate application image. From its
+`/opt/core-rl` working directory, run:
+
+```bash
+bash scripts/miles/test_runtime.sh -q
+```
+
+This command fails if runtime dependencies are missing. Without the explicit
+runtime flag, ordinary CPU collection omits `tests/miles/` when MILES or SGLang
+is absent. CUDA numerical cases skip when no GPU is visible. A passing CPU run
+therefore does not qualify GPU kernels, distributed gradients or publication.
+The ordinary Open Instruct GPU CI image does not include the private MILES
+runtime; dedicated runtime checks are a separate maintainer validation step.
+
+For a training lifecycle check, copy [small.toml](../../configs/miles/examples/small.toml)
+to `runs/`, select a compatible tiny checkpoint, and follow the
+[committed-image launcher](launching.md). Verify the rendered replica group and
+retain image, config and completion artifacts. Exercise refresh separately when
+changing publication behavior; a tiny mechanics check does not establish learning
+quality. Archived research harnesses and their tests live at the
+[pre-cleanup revision](https://github.com/allenai/open-instruct/tree/813bd5988beb16be5b4d879ee3e2c49d8d859ee5).
 
 ## Documentation checks
 
@@ -91,21 +111,16 @@ when parser flags change. Update descriptions and rerun generation, reviewing th
 diff. Do not edit generated tables manually or copy a measurement's settings into
 current defaults without a deliberate recipe change.
 
-### Type checking with an external Core checkout
+### Type checking the moved adapter
 
-The repository's type-check command does not require a hidden runtime source
-directory. The MILES adapter still needs the pinned Core APIs: an older installed
-Core can report missing members. To resolve its types against the exact Core
-branch during MILES development, pass that source path explicitly:
+In a development environment with the pinned MILES and Core sources, run:
 
 ```bash
-uv run ty check --extra-search-path /path/to/OLMo-core/src
+ty check /path/to/miles/miles/backends/core_utils --extra-search-path /path/to/OLMo-core/src
 ```
 
-Do not add an unconditionally required, ignored runtime directory to the global
-`tool.ty.environment.extra-paths`: a fresh clone has no such directory and the
-checker exits before examining any files. The runtime image and dependency lock
-continue to define the actual training implementation.
+Open Instruct's CPU checks do not fetch the private MILES repository. The committed
+application image and runtime tests exercise both repositories together.
 
 ## Adapter package layout
 
@@ -116,17 +131,17 @@ continue to define the actual training implementation.
 |---|---|
 | `configuration` | RunSpec/CoreConfig, native options, validation, topology and capacity planning |
 | `execution` | Preparation, Beaker submission, cluster bootstrap and training coordination |
-| `training` | Core actor, model backends, packing, optimizer scheduling, checkpoints and trainer diagnostics |
-| `rollout` | Generation, admission, data-source buffering and rollout/queue observations |
-| `publication` | Weight delivery, engine drain, policy versions and durable policy state |
+| MILES `backends/core_utils` | Core actor, model backends, packing, optimizer scheduling, checkpoints and trainer diagnostics |
+| `rollout` | Application data-source selection and rollout metrics; managed generation, admission and completed queues live in MILES `backends/core_utils/rollout` |
+| MILES `backends/core_utils/publication` | Weight delivery, engine drain, policy versions and durable policy state |
 | `rewards` | Verifiers, reward routing and managed judges |
 | `datasets` | Dataset preparation, mixtures, inference records and prompt selection |
 | `evaluation` | Background evaluation submission, workers and result publication |
-| `infrastructure` | Compiler/HF module cache lifecycle and bounded infrastructure waits |
+| `infrastructure` | Application artifact publication and bounded infrastructure waits; compiler/HF cache lifecycle lives in MILES |
 
 Keep diagnostics next to the component they observe. Keep configuration imports
 CPU-only, model backends loaded on demand, and package initializers minimal.
-`training/data.py` adapts samples to the trainer; `rollout/data_source.py` owns
+MILES `backends/core_utils/data.py` adapts samples to the trainer; `rollout/data_source.py` owns
 runtime data-source behavior; `datasets/run_data.py` prepares researcher inputs.
 
 Python integration imports now use these package paths, for example
@@ -140,3 +155,19 @@ before use with a new image. Historical run artifacts retain their original path
 The CPU CLI checks in `open_instruct/test_miles_package_layout.py` run without
 site-packages. `tests/miles/test_package_layout.py` resolves hooks supplied by
 both repositories inside the pinned runtime.
+
+### Application callbacks and CPU tools
+
+The backend trainer and managed rollout modules do not import Open Instruct.
+Open Instruct supplies `core_records_factory` for per-question recording and
+`core_evaluation_snapshot` for requested post-update HF exports. Those callbacks
+preserve the existing recording and evaluation schedules. Dataset preparation,
+reward callbacks, data-source selection, Beaker launch and evaluation submission
+remain application-owned. The native `olmo_core` argument loader still resolves
+Open Instruct's run configuration; that is an explicit configuration integration.
+
+Small CPU planning and artifact-reader helpers remain local so `plan`, `validate`
+and offline analysis work without the private runtime. Runtime integration tests
+compare their algorithms with the MILES counterparts: scoring policy, capacity
+reporting, wait diagnostics, wire-version parsing, atomic JSON publication,
+startup timing, model input checks and throughput arithmetic.

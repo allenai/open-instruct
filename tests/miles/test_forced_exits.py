@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from miles.backends.core_utils import data, packing, stopping
 from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
 from miles.ray.rollout import train_data_conversion
@@ -20,7 +21,6 @@ from torch.nn.parallel import DistributedDataParallel
 
 from open_instruct.miles.rewards import rewards
 from open_instruct.miles.rollout import forced_exits
-from open_instruct.miles.training import data, packing, stopping
 
 
 @pytest.mark.parametrize("advantage,direction", [(1.0, -1), (-1.0, 1), (0.0, 0)])
@@ -270,7 +270,7 @@ def test_real_loss_packing_tis_and_guidance(tmp_path):
         args.tis_clip_low, args.tis_clip = 0.9, 1.1
         args.custom_tis_function_path = None
         args.loss_type = "custom_loss"
-        args.custom_loss_function_path = "open_instruct.miles.training.stopping.policy_loss"
+        args.custom_loss_function_path = "miles.backends.core_utils.stopping.policy_loss"
         args.olmo_core = SimpleNamespace(forced_exit_coefficient=0.1)
         args.context_parallel_size = 1
         lengths, responses = [5, 8, 6, 7], [3, 5, 2, 4]

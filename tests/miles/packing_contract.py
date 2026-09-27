@@ -13,14 +13,14 @@ from unittest import mock
 
 import ep_contract
 import torch
+from miles.backends.core_utils import actor, data, models, scheduler
+from miles.backends.core_utils.publication.state import PolicyClock
 from miles.backends.training_utils import parallel
 from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from torch import distributed as dist
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
-from open_instruct.miles.publication.state import PolicyClock
-from open_instruct.miles.training import actor, data, models, scheduler
 
 
 def bootstrap(root):

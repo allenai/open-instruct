@@ -18,6 +18,11 @@ publish_interval_seconds = 600  # minimum time between progress checks
 The root must be absolute; custom WEKA paths need an exact `tmp-N[hdwmy]` TTL
 component. Expired artifacts are cold misses. No new cleanup daemon is required.
 
+The implementation lives in our pinned MILES fork under
+`miles.utils.compiler_cache`. Open Instruct supplies the run configuration and
+application source root, then calls the MILES lifecycle from its driver. Worker
+hooks, the SGLang entrypoint, and the standalone probe are owned by MILES.
+
 ## Ray startup integration
 
 The MILES/Core driver now has a worker-level Triton lifecycle controlled by
@@ -81,7 +86,7 @@ shared storage before atomically advancing `CURRENT`. The gzip archive format
 and integrity/relocation checks remain compatible with existing generations.
 Logs identify task submission/start, lock wait, merge, compression, upload and
 pointer phases; completed reports include file counts, bytes and phase timings.
-[Local proxy and timeout validation](measurements/cache-publication-20260912/README.md)
+[Local proxy and timeout validation](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/cache-publication-20260912/README.md)
 cover the reliability change. Compare actual publication reports on the selected image; old shared-filesystem staging timings do not describe the new local-staging implementation.
 
 Failed training does not perform a final publication; generations published
@@ -259,19 +264,20 @@ family is enabled by this change, and no GPU speedup is claimed from CPU tests.
 
 ## What has been measured
 
-The [full-SFT cold/restored screen](measurements/startup-full-sft-20260911.json)
+The [full-SFT cold/restored screen](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/startup-full-sft-20260911.json)
 observed restored Triton groups, zero new compiler writes and faster first updates
 on all three workers. Its 174/238-second publication timings came from the old
-WEKA staging implementation. The [publication fix](measurements/cache-publication-20260912/README.md)
+WEKA staging implementation. The [publication fix](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/cache-publication-20260912/README.md)
 qualifies local staging, shared timeout and best-effort behavior. Current run
-reports determine current end-to-end cost. The [full-SFT runtime check](measurements/sharing-20260913/README.md)
+reports determine current end-to-end cost. The [full-SFT runtime check](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/sharing-20260913/README.md)
 published all three workers in 11.2 seconds total, with no timeout. Warm caches do not remove HF loading,
 optimizer setup or CUDA graph capture.
 
-The separate `python -m scripts.miles.compiler_cache_run` command is an experimental
+The separate `python -m miles.utils.compiler_cache.run` command (also available through the forwarding entrypoint
+`python -m scripts.miles.compiler_cache_run`) is an experimental
 single-node wrapper for controlled probes. Its broader TileLang/Inductor/FA4/
 DeepEP/DeepGEMM families are not qualified Ray persistence. See the
-[historical probe procedure](measurements/implementation-history/compiler-cache-before-sharing-20260913.md#coldrestored-screen)
+[historical probe procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/implementation-history/compiler-cache-before-sharing-20260913.md#coldrestored-screen)
 for its explicit source/fingerprint contract. In the image, Open Instruct is at
 `/opt/core-rl/open_instruct`, scripts at `/opt/core-rl/scripts/miles`, and the lock
 at `/opt/core-rl/runtime/miles/runtime.lock.json`. Do not wrap an existing remote

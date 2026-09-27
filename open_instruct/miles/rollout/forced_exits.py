@@ -9,13 +9,13 @@ import time
 import uuid
 from pathlib import Path
 
+from miles.backends.core_utils.publication import policy_versions
 from miles.rollout.base_types import RolloutFnTrainOutput
 from miles.rollout.generate_utils import generate_endpoint_utils
 from miles.rollout.inference_rollout import inference_rollout_common as common
 from miles.utils.types import Sample
 
 from open_instruct import logger_utils
-from open_instruct.miles.publication import policy_versions
 
 logger = logger_utils.setup_logger(__name__)
 

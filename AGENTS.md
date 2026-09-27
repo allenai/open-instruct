@@ -42,7 +42,7 @@ maintain or reproduce a legacy run still apply.
 
 MILES has its own Core adapter and uses SGLang. The deprecated Core/vLLM path in
 `grpo.py` is separate, even though both use OLMo-core. Dated measurements/plans
-are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/legacy_grpo.md)
+are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/grpo.md)
 contains the old CLI and reproduction instructions.
 
 # Beaker scheduling and distributed launches
@@ -98,8 +98,7 @@ contains the old CLI and reproduction instructions.
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
-- To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
-- To launch experiment scripts, use the `build_image_and_launch.sh` script, like this: `./scripts/train/build_image_and_launch.sh $SOME_SCRIPT`.
+- To run `./scripts/train/build_image_and_launch.sh`, first commit all changes. The ordinary launcher supports `--cuda-version 12|13` before the script path; CUDA 13 images are intended for compatible clusters such as `ai2/holmes`. MILES uses the separate `--miles` dispatch and pinned runtime.
 - For the deprecated vLLM GRPO implementation only, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
@@ -119,10 +118,12 @@ contains the old CLI and reproduction instructions.
 - Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.
 - Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh`.
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
+- Before creating a Beaker experiment or otherwise reserving compute, ask for confirmation for each launch and state the cluster, GPU and node count, priority, preemption behavior, and timeout. Approval does not carry over to later launches.
 - When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
-- If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
+- If you are given a Beaker URL (`beaker.org` or `beaker.allen.ai`), use the Beaker CLI tool to interact with it.
 - When a Beaker job stays queued or pending, run `beaker job events <job-id>` before diagnosing why — it prints the scheduler's own reason; don't infer one from cluster documentation. If that reason is the workspace slot limit, it applies to every cluster at once: wait or request fewer GPUs rather than relaunching elsewhere.
 - A Beaker experiment can hold several jobs when a preempted one is retried. Read the most recently created attempt for each task and replica rank, not `jobs[0]` or one latest job for the entire experiment, or a successful retry looks like a failure and missing replicas can be overlooked.
+- Mason currently exposes only the deprecated `--preemptible` switch, not Beaker's finer-grained `minRuntime` and `autoResume` settings. The switch maps to `minRuntime: 0` and `autoResume: true`; on strict-priority clusters, such unallocated jobs run only as backfill and may wait indefinitely. Omitting it maps to an eight-hour protected, non-resumable job. Call out this trade-off before launching instead of silently copying a checked-in script's choice.
 - Experiment launch scripts that call `mason.py` must include `--no_auto_dataset_cache` (before the `--` separator) because vllm is not installed locally on macOS. Without this flag, mason.py tries to cache the dataset locally which fails on the `import vllm` in `data_loader.py`.
 - The `oe-eval-internal` directory is required in the Docker image for experiments that use `--try_launch_beaker_eval_jobs_on_weka`. If it's missing (e.g. in a fresh clone or worktree), clone it with: `git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal`.
 - When updating PR bodies with experiment results, use the "Runs:" format (numbered list with Beaker links):

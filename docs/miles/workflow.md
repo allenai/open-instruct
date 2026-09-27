@@ -67,7 +67,7 @@ The config launcher supports single-node runs and replicated disaggregated
 allocations with independent trainer, rollout and named-judge GPU counts.
 See [multi-node placement and managed judges](managed-judges.md) for the
 ownership rules, limits and tiny qualification configuration. `plan` reports
-per-node assignments and unused GPUs; multi-node runs may keep `launch.auto_resume=true`: a restart into the same output root resumes from the newest native checkpoint and continues the rollout cursor without repeating or skipping an update, qualified in [multi-node resume](measurements/multinode-resume-20260922.md). Forced multi-node preemption, and restarts of runs carrying a managed judge, remain unqualified.
+per-node assignments and unused GPUs; multi-node runs may keep `launch.auto_resume=true`: a restart into the same output root resumes from the newest native checkpoint and continues the rollout cursor without repeating or skipping an update, qualified in [multi-node resume](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md). Forced multi-node preemption, and restarts of runs carrying a managed judge, remain unqualified.
 
 `status` reports the latest Beaker attempt, all experiment details and whether
 the current config matches the submitted config. Receipts live under
@@ -219,4 +219,4 @@ GSM8K preparation, heldout evaluation, async TIS and 8 × 8 sampling. It disable
 checkpoint saving and final export to isolate the configuration-to-training
 path. This is a workflow check, not a new 100-update learning comparison.
 
-The [completed exercise and independent sample audit](measurements/researcher-workflow-20260911.md) passed: four updates, 256 training responses, and 12/16 held-out answers correct both initially and finally. The report records the exact scope and observed TIS clipping.
+The [completed exercise and independent sample audit](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/researcher-workflow-20260911.md) passed: four updates, 256 training responses, and 12/16 held-out answers correct both initially and finally. The report records the exact scope and observed TIS clipping.

@@ -2,7 +2,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from scripts.miles import launch_readiness_cpu, prepare_stdio_exercise, readiness_services
+from scripts.miles import readiness_services
 
 from open_instruct.miles.rewards import code_rewards
 
@@ -39,35 +39,3 @@ def test_real_http_retry_budget_and_recovery(monkeypatch):
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
-
-
-def test_service_launcher_preserves_url_and_has_no_mode_argument():
-    url = "https://example.invalid/prod"
-    spec = launch_readiness_cpu.specification("image", "services", [url], b"pass")
-    assert spec["tasks"][0]["arguments"][0].endswith("python /output/readiness_cpu.py " + url)
-    assert spec["tasks"][0]["resources"]["gpuCount"] == 0
-
-
-def test_stdio_selection_rejects_example_only_prompts():
-    wrapper = "where CODE is the solution for the problem.\n\n"
-    suffix = "\nWrite Python code to solve the problem."
-    assert not prepare_stdio_exercise.has_statement(wrapper + "Example\nInput\n5\nOutput\n5" + suffix)
-    assert not prepare_stdio_exercise.has_statement(
-        wrapper + "Return the Nth Even Number\nThe input will not be 0." + suffix
-    )
-
-    assert not prepare_stdio_exercise.has_statement(
-        wrapper + "Time Limit: 8 sec / Memory Limit: 64 MB\nExample\nInput\n5\nOutput\n5" + suffix
-    )
-    assert prepare_stdio_exercise.has_statement(
-        wrapper + "Calculate the sum of two given integers.\nInput\nTwo integers a and b.\nOutput\nTheir sum." + suffix
-    )
-
-    assert not prepare_stdio_exercise.has_statement(
-        wrapper
-        + "-----Input-----\nThe input contains a single integer a.\n-----Output-----\nOutput a single integer.\nExample\nInput\n3\nOutput\n27"
-        + suffix
-    )
-    assert not prepare_stdio_exercise.has_statement(
-        wrapper + "Solve the following coding problem using python.\nExample\nInput\n5\nOutput\n5" + suffix
-    )

@@ -69,7 +69,7 @@ premature rejection of slow groups; it is not an established learning optimum.
 Previously the structured async
 fallback was one while medium/large selected two. Existing submitted runs and
 dated measurement configurations retain their original limits. The
-[comparison and duration report](measurements/policy-lag-20260925.md) records
+[comparison and duration report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/policy-lag-20260925.md) records
 28% higher accepted-token throughput in the small lag-two/six screen and a
 330-update hero run at lag six with 1.01% stale-token waste. These support the
 operating default, but do not establish equal learning quality versus lag two

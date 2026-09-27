@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import driver
-from open_instruct.miles.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
-from open_instruct.miles.training import actor
 
 
 def install_components(monkeypatch, manager):
@@ -328,7 +328,7 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
     deadlines = []
     original_wait_for = asyncio.wait_for
 
-    async def wait_for(awaitable, timeout):
+    async def wait_for(awaitable, timeout, **kwargs):
         deadlines.append(timeout)
         return await original_wait_for(awaitable, timeout)
 
@@ -343,7 +343,7 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
     async def create(*args):
         return learner, None
 
-    monkeypatch.setattr(driver.asyncio, "wait_for", wait_for)
+    monkeypatch.setattr(driver.infra_timeouts, "wait_for", wait_for)
     monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
     install_components(monkeypatch, manager)
     monkeypatch.setattr(driver.placement_group, "create_training_models", create)

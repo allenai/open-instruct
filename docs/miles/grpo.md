@@ -1,13 +1,13 @@
 # MILES GRPO
 
 Use MILES GRPO for reinforcement learning through Open Instruct, with OLMo-core
-training and SGLang inference. This guide covers setup, the verified runtime image
+training and SGLang inference. This guide covers setup, the pinned runtime
 and a first run. [Support and boundaries](feature-parity.md) remain specific to the
 model and topology; retain each run's image, configuration and checkpoint identity.
 
 ## Run MILES GRPO
 
-1. Obtain the matching source bundle or supplied checkout, then follow the
+1. Check out the intended Open Instruct revision, then follow the
    [laptop/session setup](launching.md). Sibling development worktrees are unnecessary.
 2. Copy [small.toml](../../configs/miles/examples/small.toml) to ignored
    `runs/my-grpo.toml`. Set model and output paths for a two-GPU disaggregated
@@ -18,22 +18,14 @@ model and topology; retain each run's image, configuration and checkpoint identi
 4. Retain the launch receipt, submitted TOML and [completion artifacts](operations.md).
    Report a symptom with the experiment ID, image, model and configuration.
 
-For an internal source handoff, the standalone `open-instruct-miles-sharing.bundle`
-can be cloned without publishing the integration history to the public GitHub
-repository:
+The submitting host needs Python 3.12 and the Beaker CLI. Training runs use a
+separate image built from the selected application revision and
+[`runtime.lock.json`](../../runtime/miles/runtime.lock.json). Building that image
+currently requires access to private AI2 source repositories and the pinned
+binary base; this integration is not a self-contained public training install.
+See [image setup](launching.md#laptop-choose-or-build-an-image).
 
-```bash
-git clone -b robertb/miles-olmo-core /path/to/open-instruct-miles-sharing.bundle open-instruct
-cd open-instruct
-```
-
-Then follow laptop/session setup above. The image contains the runtime dependencies;
-the submitting laptop does not need Core, MILES or SGLang sibling checkouts.
-The runtime image contains the merged training implementation. The submitted TOML
-is carried into the job; local Python edits are not. Use the image and source
-identity below when reporting or reproducing a run.
-
-The [support matrix](feature-parity.md) and [measurements](measurements/index.md)
+The [support matrix](feature-parity.md) and [measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md)
 distinguish short lifecycle checks, learning-path evidence and longer experiments.
 Use those recorded boundaries when choosing a model, topology or recipe.
 
@@ -65,7 +57,7 @@ batch semantics and the opt-out.
 This default and its refresh/engine-drain support require an application image
 built from the updated source, including async retry-ledger retirement. The older
 images preceding the filtering qualification do not include this change. The
-[small filtering qualification](measurements/online-filtering-20260919.md) passed
+[small filtering qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/online-filtering-20260919.md) passed
 with barrier and refresh publication. Local source changes are not overlaid onto
 an existing application image.
 
@@ -84,46 +76,16 @@ Truncated responses then get zero advantage and a zeroed loss mask, and each gro
 baseline uses only its finished responses. Raw reward metrics are unchanged. With
 response-averaged loss, excluded responses still count in the batch denominator.
 
-## Current runtime and qualification
+## Runtime and qualification
 
-For online filtering, use **`01M2XGZM2N1V4DQVMYHM52KBHZ`**, application source
-`a8f8aca84`. It passed four-update small checks with barrier and refresh publication,
-including all-zero/all-one rejection, full batch replenishment and checkpoint
-cursor audits. See the [qualification record](measurements/online-filtering-20260919.md)
-for the synthetic reward fixture and limits; full-policy qualification remains separate.
+Build an application image from the source revision you intend to run, using the
+[locked runtime](architecture.md#runtime-sources-and-images). Reusing an image
+runs its original code; local Python edits are not submitted with the TOML.
 
-The September 18 router-controls runtime was
-**`01M2V3EGGYA2YFMYCAS1X6JSD7`**
-(`robertb/open-instruct-router-controls-dcc77a875`), application source `dcc77a875`
-and Core `ab64c30699d5c3de327830be6f4b2e2277a0edd3`. Dev and small have
-completed bounded lifecycle checks; full-policy and optional-objective
-qualification is in progress. Read the [current qualification record](measurements/router-controls-20260918.md)
-for scope, results and limitations. Do not treat this image as a completed
-qualification of every template.
-
-The preceding runtime was **`01M2F1RKZFZVJYAS0XQGEC3SEJ`**
-(`robertb/open-instruct-miles-fast-2c477efd5`), built from application source
-`2c477efd5`. It contains the merged mixed-policy refresh, queue instrumentation,
-packing and scoring optimizations; no source overlay is needed. Its Docker ID is
-`sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f`.
-
-That earlier runtime pinned Core adapter `3d35ab326`, MILES backend `b18b71b18` and serving
-adapter `02ccb5d`. The reusable runtime/application image layers retain the
-qualified binary foundation. See [architecture](architecture.md) for builds.
-
-| Evidence | What it establishes |
-|---|---|
-| Packaged CPU suite: 113 passed on build `917fb0a44`; final `2c477efd5` differs only in documentation | Integration imports and tested contracts in the rebuilt runtime |
-| EP2 full-SFT fast configuration: 24 updates passed using the matching committed runtime overlay | Live mixed-policy training with packing, no recomputation, guarded scoring skip and two serving engines |
-| EP8 GSM8K throughput screen: intended 16 updates passed | Distributed refresh/queue operation on that recorded configuration; not the full mixed-task recipe |
-| EP8 mixed-task baseline: stopped after one update with a producer HTTP transport error | First-step scoring, gradients and publication passed; sustained mixed-task operation is not established by that attempt |
-
-[Full-SFT qualification and integration provenance](measurements/full-sft-basket-20260914.md)
-and [throughput records](measurements/throughput-20260913.md) retain exact source,
-image/overlay identities and limits. Earlier dense/restart and 16K/32K checks
-remain historical evidence for their recorded images; they were not rerun merely
-by promoting this image. The maintained templates document their model and capacity assumptions; historical
-qualification does not establish a new workload or topology in advance.
+Historical [qualification records](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md)
+record their own model, image, topology and limits. They do not qualify subsequent
+source changes or every maintained template. Use the [validation procedure](architecture.md#local-development)
+for current changes, then exercise the selected model and topology.
 
 ## Publication modes
 
@@ -165,5 +127,5 @@ a policy boundary; inspect retained token spans and `refresh_scores` observation
 Agents discover this workflow from the repository README and AGENTS.md; no
 special prompt is needed. Follow the [documentation index](index.md) for model
 support, configuration, data, parallelism and operations. The dated
-[consolidation record](measurements/sharing-20260913/README.md#consolidation-decisions-september-13)
+[consolidation record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/sharing-20260913/README.md#consolidation-decisions-september-13)
 tracks which branches supplied the current implementation.

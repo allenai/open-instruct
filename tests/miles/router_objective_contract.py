@@ -12,11 +12,10 @@ from unittest import mock
 import ep_contract
 import packing_contract
 import torch
+from miles.backends.core_utils import actor
 from miles.backends.training_utils import parallel
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from torch import distributed as dist
-
-from open_instruct.miles.training import actor
 
 
 def run(root, checkpointing, count_source="dispatch"):

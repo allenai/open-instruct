@@ -46,8 +46,8 @@ def test_runtime_hooks_resolve(mode, tmp_path):
         compiled.miles["custom_rm_path"],
         compiled.miles["custom_rollout_log_function_path"],
         "open_instruct.miles.rollout.data_source.DashboardDrainingRolloutDataSource",
-        "open_instruct.miles.rollout.async_buffer.RefreshPolicyDataBuffer",
-        "open_instruct.miles.rollout.async_buffer.HomogeneousPolicyDataBuffer",
+        "miles.backends.core_utils.rollout.async_buffer.RefreshPolicyDataBuffer",
+        "miles.backends.core_utils.rollout.async_buffer.HomogeneousPolicyDataBuffer",
         "open_instruct.miles.rewards.code_rewards.CodeVerifier",
         "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     ]

@@ -22,9 +22,10 @@
 #
 # Choices that look wrong but are not -- do not "fix" these without re-testing:
 #
-# * CHAT_TEMPLATE=olmo123 is not a typo. It is unregistered, so it falls through
-#   to the tokenizer's own template, which is what the released Olmo 3 Instruct
-#   models used. The silent fallback is tracked in #1805.
+# * CHAT_TEMPLATE=tokenizer_default is not a typo. It is the explicit sentinel
+#   for "use the tokenizer's own template", which is what the released Olmo 3
+#   Instruct models used. An unregistered name (the old `olmo123` placeholder)
+#   now raises; see #1805. This changes the cache key vs `olmo123` — re-tokenize.
 # * --ephemeral_save_interval -1 must be passed explicitly, not omitted: the
 #   parser defaults it to 500, which exceeds save_interval and trips olmo-core's
 #   'ephemeral_save_interval must be less than save_interval' check. Together
@@ -50,13 +51,13 @@ MODE="${2:-train}"
 # ---- cache-key arguments: MUST be byte-identical across both jobs ----
 MODEL=allenai/Olmo-3-1025-7B
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
-CHAT_TEMPLATE=olmo123
+CHAT_TEMPLATE=tokenizer_default
 MAX_SEQ_LENGTH=32768
 MIXER="allenai/Dolci-Instruct-SFT 1.0"
 SEED=33333
 LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/numpy_sft_cache
-# add_bos must stay off: dataset_transformation.py asserts it for any "olmo*"
-# chat template.
+# add_bos must stay off: the Olmo 3 instruct tokenizer has no BOS in its
+# published template.
 # ----------------------------------------------------------------------
 
 echo "Using Beaker image: $BEAKER_IMAGE"
@@ -71,7 +72,7 @@ if [[ "$MODE" == "tokenize" ]]; then
         --workspace ai2/open-instruct-dev \
         --priority urgent \
         --image "$BEAKER_IMAGE" \
-        --description "Tokenize Dolci-Instruct-SFT for Olmo-3-7B SFT (seq 32768, olmo123)" \
+        --description "Tokenize Dolci-Instruct-SFT for Olmo-3-7B SFT (seq 32768, tokenizer_default)" \
         --pure_docker_mode \
         --preemptible \
         --num_nodes 1 \

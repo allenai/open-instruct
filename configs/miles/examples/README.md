@@ -16,17 +16,20 @@ cp configs/miles/examples/small.toml runs/my-run.toml
 python -m open_instruct.miles plan runs/my-run.toml
 python -m open_instruct.miles validate runs/my-run.toml
 # Tested small barrier/refresh image; see the qualification scope below.
-export MILES_EXISTING_IMAGE=01M2XGZM2N1V4DQVMYHM52KBHZ
+export MILES_EXISTING_IMAGE=01M3GNG2J3DEE8BCJTMPGA1AAB
 python -m open_instruct.miles run runs/my-run.toml
 ```
 
 The example TOMLs do not pin a trainer image; `MILES_EXISTING_IMAGE` selects it at launch.
-`large` separately pins its evaluator image. Use a trainer image containing
-background-evaluation support when running that example; the older small image
-above is not its qualification.
-The image above includes online filtering and passed the
-[small barrier/refresh qualification](../../../docs/miles/measurements/online-filtering-20260919.md).
-That check does not qualify every model or topology in these templates.
+`large` separately pins its evaluator image. The trainer image above contains
+Open Instruct `3684951ec` and MILES `53cd9ec39`, including the relocated Core
+adapter and publication machinery. Two-B300 tiny-model checks passed for
+[packed barrier training and HF export](https://beaker.org/ex/01M3GP47X09HS882JR75ST5E4R),
+[mixed-policy refresh](https://beaker.org/ex/01M3GPN5XX0SZSFZTASMKSG0KC), and
+[checkpoint resume with compiler-cache hits](https://beaker.org/ex/01M3GQ5Y1SZ81HH6G9N9N8YADH).
+These checks used FlashAttention 4 with packing and disabled constant-reward
+filtering. They do not qualify colocation, background evaluation, full-policy
+memory use or the larger topologies. Build a new image when runtime source changes.
 
 `dev` and `small` use short GSM8K responses with a tiny checkpoint to test
 mechanics. They are not accuracy baselines. They exercise evaluation, saving and HF export as well as generation and
@@ -52,7 +55,7 @@ no-recompute win at 4K is not a memory qualification for 32K packs. SGLang uses
 radix caching and decode graphs, with client admission, active-request limits
 and decode graph capture all set to 64 per engine. The KV pool holds 64 full-context
 requests, and about 165 GiB of each B300 stays free. See
-[admission sizing](../../docs/miles/throughput-profiles.md#size-engine-admission-from-memory)
+[admission sizing](../../../docs/miles/throughput-profiles.md#size-engine-admission-from-memory)
 for the arithmetic and the metrics that confirm it. The live throughput gain over
 the previous 16 has not yet been measured at 32K. These MoE cache budgets must not
 be copied unchanged to dense Olmo 3 or a different architecture.
@@ -60,7 +63,7 @@ be copied unchanged to dense Olmo 3 or a different architecture.
 The completed queue holds one 256-response collection. The producer budget is
 derived from the fleet: two waves of the 448 serving slots, or 896 outstanding
 responses, including those waiting for inference admission.
-Mixed-policy refresh and TIS retain a lag limit of two updates. Evaluation runs
+Mixed-policy refresh and TIS retain a lag limit of six updates. Evaluation runs
 before training and every 50 updates; native checkpoints every five updates
 protect progress against preemption. All four templates explicitly keep only
 the two newest committed checkpoints (`core.checkpoint_keep_last=2`); retention runs

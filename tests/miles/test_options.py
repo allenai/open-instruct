@@ -140,7 +140,10 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
     with contextlib.redirect_stderr(io.StringIO()):
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
     assert parsed.max_weight_staleness == 2
-    assert parsed.custom_async_data_buffer_path == "open_instruct.miles.rollout.async_buffer.HomogeneousPolicyDataBuffer"
+    assert (
+        parsed.custom_async_data_buffer_path
+        == "miles.backends.core_utils.rollout.async_buffer.HomogeneousPolicyDataBuffer"
+    )
 
 
 @pytest.mark.parametrize("enabled", [True, False])

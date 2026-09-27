@@ -9,11 +9,10 @@ from unittest import mock
 import numpy as np
 import pytest
 import torch
+from miles.backends.core_utils import actor, checkpoint
+from miles.backends.core_utils.publication.state import PolicyClock
 from torch import distributed as dist
 from torch import multiprocessing as mp
-
-from open_instruct.miles.publication.state import PolicyClock
-from open_instruct.miles.training import actor, checkpoint
 
 
 def _manifest(schema=2, world=2, ep=2):

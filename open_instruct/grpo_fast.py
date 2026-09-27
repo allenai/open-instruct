@@ -27,14 +27,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Deprecated GRPO entry point using DeepSpeed and vLLM.
-
-For new GRPO work, use `python -m open_instruct.miles`; see docs/miles/index.md
-for model/workload support and launch instructions. This implementation is
-retained for existing runs and historical reproduction. Do not use it as the
-starting point for new GRPO recipes or features.
-"""
-
 # isort: off
 import contextlib
 import os
@@ -113,6 +105,7 @@ from open_instruct.model_utils import (
     load_ref_policy,
     print_rich_single_line_metrics,
     push_folder_to_hub,
+    uses_olmo3_generation_config,
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
@@ -849,12 +842,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_to_save = model_to_save.module
 
         # Set generation config after unwrapping to ensure it's on the actual model being saved
-        # Check both chat_template_name and model name for OLMo 3 detection
-        model_name = getattr(model_to_save.config, "_name_or_path", "") or ""
-        is_olmo3 = (
-            chat_template_name is not None and "olmo" in chat_template_name.lower()
-        ) or "olmo-3" in model_name.lower()
-        if is_olmo3:
+        if uses_olmo3_generation_config(chat_template_name, tokenizer, model_to_save):
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
@@ -2395,12 +2383,6 @@ def main(
 
 
 if __name__ == "__main__":
-    logger.warning(
-        "DEPRECATED: open_instruct/grpo_fast.py is retained for existing runs and historical reproduction. "
-        "For new GRPO work, use `python -m open_instruct.miles`; "
-        "see docs/miles/index.md for model/workload support and launch instructions. "
-        "Continuing with the legacy implementation; arguments are not translated."
-    )
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus(

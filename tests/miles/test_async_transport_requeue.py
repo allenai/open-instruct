@@ -5,10 +5,9 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from miles.backends.core_utils.rollout import async_rollout, rollout_errors
 from miles.router.config import MilesRouterConfig
 from miles.router.router import MilesRouter
-
-from open_instruct.miles.rollout import async_rollout, rollout_errors
 
 
 async def _router_transport_failure():

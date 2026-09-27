@@ -12,7 +12,7 @@ The Python API is the same `RunConfig(CoreConfig(...), {...})` used by the trial
 For current exhaustive field help, use the [configuration reference](configuration.md).
 
 This audit compares `olmo-miles` revision `07887b783ab254577a6656168dc0e0d21aebfe3d`
-with the runtime pinned in this repository. The [historical olmo-miles field inventory](measurements/knob-inventory.md)
+with the runtime pinned in this repository. The [historical olmo-miles field inventory](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/knob-inventory.md)
 accounts for every `MilesSmokeConfig` field, including controls that belong to
 preparation, launch, or diagnostics rather than training arguments. Native parser
 acceptance does not establish backend support or GPU qualification.
@@ -114,7 +114,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Dial | open-instruct control and semantics |
 | --- | --- |
 | Save / restart | `save`, `save_interval`, `load`. Saves are synchronous native Core checkpoints with completion manifests and a rollout/policy cursor. `async_save=true` is rejected. Baseline NVRX saves, retention and token-per-expert cadence are not ported. |
-| Native MoE checkpoint writer | Arithmetic metadata planning, compact storage, and balanced replicated ownership are enabled by default. Opt out with `core.checkpoint_constant_memory_planning=false`, `core.checkpoint_compact_storage=false`, and `core.checkpoint_dedup_save_to_lowest_rank=true`. Each switch is independent. Profiling (`core.checkpoint_profile`) and spawned workers (`core.checkpoint_process_count`) remain opt-in; `core.checkpoint_thread_count` controls thread buckets. The separate dense trainer keeps its own checkpoint path and rejects policy overrides. See the [qualification record](measurements/checkpoint-perf-20260911.md). |
+| Native MoE checkpoint writer | Arithmetic metadata planning, compact storage, and balanced replicated ownership are enabled by default. Opt out with `core.checkpoint_constant_memory_planning=false`, `core.checkpoint_compact_storage=false`, and `core.checkpoint_dedup_save_to_lowest_rank=true`. Each switch is independent. Profiling (`core.checkpoint_profile`) and spawned workers (`core.checkpoint_process_count`) remain opt-in; `core.checkpoint_thread_count` controls thread buckets. The separate dense trainer keeps its own checkpoint path and rejects policy overrides. See the [qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/checkpoint-perf-20260911.md). |
 | Final HF export | `output.export_hf=true` in structured files requests explicit driver export at completion; `eval_hf_dir` remains snapshot export for evaluation. Dense export and fresh serving reload passed; native MoE async restart has separate evidence in the support matrix. `save_hf` remains rejected because native saves do not produce HF output. |
 | Auto resume / launch | Structured `[launch]` controls placement, priority, minimum runtime, mounts and Beaker restart policy. `run` delegates to `build_image_and_launch.sh --miles`; `status` reads a local receipt and queries Beaker. The workflow loads the latest completed Core checkpoint on retry when `auto_resume=true`. The config launcher supports multi-node disaggregated placement and managed judges; raw training files do not submit jobs. |
 | Restart cap | `launch.max_retries` bounds how many times a run may start, default -1 for no cap. Beaker's `autoResume` restarts a preempted task without limit and its own `retry.allowedTaskRetries` applies only to tasks that failed, so neither bounds a run that is preempted repeatedly before it saves. Every start appends to `attempts.json` under `output.root`; once the count exceeds the cap the run refuses to start and says so, rather than consuming the allocation again. The cap counts all restarts, including productive ones, so raise it or choose a new `output.root` to continue. |
@@ -142,20 +142,20 @@ training contract; they do not add the missing capabilities.
 eligibility is decided separately by the recipe checks above. On skipped updates,
 the training forward supplies agreement diagnostics before the optimizer step.
 TIS still compares detached trainer scores against rollout scores and can clip.
-See the [scoring-pass merge review](measurements/scoring-pass-merge-20260912.md)
+See the [scoring-pass merge review](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/scoring-pass-merge-20260912.md)
 for the GPU evidence, integration checks, and remaining test dependency gap.
 The maintained async starter now selects trainer-scored old logprobs with TIS,
 matching olmo-miles' async correction. Full-SFT starters also restore the historical
 8 prompts × 8 responses. Earlier measurements used 16 × 4 and rollout logprobs
 without TIS; preserve those configurations when interpreting their results. The
-new configuration-driven combined exercise passed four updates; see the [workflow evidence](measurements/researcher-workflow-20260911.md).
+new configuration-driven combined exercise passed four updates; see the [workflow evidence](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/researcher-workflow-20260911.md).
 Core also repeats an initial evaluation after resume when it is enabled, whereas
 olmo-miles suppresses that duplicate; account for the extra point and cost.
 
 `output.rollout_sample_rate` controls capture (default 0); the wrapper owns the dump path. The inherited `save_debug_train_data` field has
 no Core writer; `dump_details` must not be interpreted as retaining a Core trainer
 payload. Use the adapter's contract JSONL and retained rollout diagnostics.
-The [full parity audit](measurements/feature-parity-audit-20260911.md)
+The [full parity audit](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/feature-parity-audit-20260911.md)
 separates these interface gaps from measured runtime capabilities.
 
 The adapter owns `train_backend`, `olmo_core_config`, `data_source_path` and

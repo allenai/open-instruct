@@ -3,11 +3,14 @@
 import os
 import time
 from functools import partial
+from pathlib import Path
 
 import wandb
+from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
+from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
@@ -17,8 +20,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
-from open_instruct.miles.infrastructure import infra_timeouts, startup_cache
-from open_instruct.miles.publication.rolling_publication import RollingPublication
+from open_instruct.miles.infrastructure import infra_timeouts
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -30,7 +32,7 @@ async def train(args, *, export_hf=None):
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
-        startup_cache.prepare(args)
+        startup_cache.prepare(args, application_root=Path(__file__).resolve().parents[3])
     with stage(args, "placement"):
         worker_manager = wiring.launch_worker_manager(
             args, transform_specs=partial(startup_cache.configure_specs, args)
@@ -147,7 +149,7 @@ async def train(args, *, export_hf=None):
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.
                 startup_cache.publish_progress(args, rollout_id)
-                if coordinator is not None:
+                if coordinator is not None and background is not None:
                     per_collection = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
                     for update in range(rollout_id * per_collection + 1, (rollout_id + 1) * per_collection + 1):
                         target = background_eval.snapshot(background["root"], update)
@@ -208,7 +210,7 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary.remote(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
-        if stopped_for_time and coordinator is not None and background["final"]:
+        if stopped_for_time and coordinator is not None and background is not None and background["final"]:
             last = completed[-1]
             update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
             target = export_hf or str(background_eval.snapshot(background["root"], update))

@@ -36,22 +36,21 @@ async def test_failure_retains_cause_and_releases_request_count(caplog):
     assert "private prompt" not in caplog.text
 
 
-@pytest.mark.parametrize("seconds", [5, 60])
-def test_router_shares_explicit_serving_keep_alive(monkeypatch, seconds):
-    monkeypatch.setenv("SGLANG_TIMEOUT_KEEP_ALIVE", str(seconds))
+def test_router_uses_explicit_bind_configuration(monkeypatch):
     app = object()
     calls = []
     monkeypatch.setattr(router, "configure_logger_raw", lambda *a: None)
     monkeypatch.setattr(router.setproctitle, "setproctitle", lambda *a: None)
     monkeypatch.setattr(router, "MilesRouter", lambda *a, **kw: SimpleNamespace(app=app))
     monkeypatch.setattr(router.uvicorn, "run", lambda *a, **kw: calls.append((a, kw)))
-    router.run_router(SimpleNamespace(sglang_router_ip="127.0.0.1", sglang_router_port=1234))
-    assert calls == [((app,), dict(host="127.0.0.1", port=1234, log_level="info", timeout_keep_alive=seconds))]
+    router.run_router(SimpleNamespace(host="127.0.0.1", port=1234))
+    assert calls == [((app,), dict(host="127.0.0.1", port=1234, log_level="info"))]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_type", [ClientDisconnect, asyncio.CancelledError])
-async def test_incoming_disconnect_is_logged_before_forwarding_and_releases_count(caplog, failure_type):
+async def test_incoming_disconnect_prevents_forwarding_and_releases_count(caplog, failure_type):
+    caplog.set_level("DEBUG", logger="miles.router.router")
     calls, finished = [], []
     failure = failure_type()
 
@@ -71,14 +70,12 @@ async def test_incoming_disconnect_is_logged_before_forwarding_and_releases_coun
         await instance.do_proxy(request, "generate")
     assert caught.value is failure
     assert calls == [] and finished == ["http://worker:1"]
-    assert "request='request-17'" in caplog.text
-    assert "phase=reading_request_body" in caplog.text
     assert "Forward started" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_forwarding_logs_correlate_without_exposing_payload(caplog):
-    caplog.set_level("INFO")
+async def test_forwarding_preserves_request_id_without_logging_payload(caplog):
+    caplog.set_level("DEBUG", logger="miles.router.router")
     calls, finished = [], []
 
     async def forward(method, url, **kwargs):
@@ -95,7 +92,4 @@ async def test_forwarding_logs_correlate_without_exposing_payload(caplog):
     assert result["status_code"] == 200
     assert calls[0][2]["headers"]["x-miles-request-id"] == "request-18"
     assert finished == ["http://worker:1"]
-    assert "Request received: request='request-18'" in caplog.text
-    assert "Forward started: request='request-18'" in caplog.text
-    assert "Upstream complete: request='request-18'" in caplog.text
     assert "secret prompt" not in caplog.text and "secret response" not in caplog.text
