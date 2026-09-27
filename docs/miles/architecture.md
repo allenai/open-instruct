@@ -212,10 +212,10 @@ startup timing, model input checks and throughput arithmetic.
 
 ## Core runtime rebase (September 27, 2026)
 
-The runtime lock now pins Core `05da655b9f10d9a621d3795ef029c22bbc6e0391`,
+The runtime lock now pins Core `b1a2703d73493bb7f8ca2b91b200f3e3394a5f74`,
 rebased onto upstream main `718d08f7` after PR #872 merged. The adapter changes
 are proposed in [OLMo-core draft PR #888](https://github.com/allenai/OLMo-core/pull/888). The commit is retained
-by the durable [`miles-runtime-20260927` tag](https://github.com/allenai/OLMo-core/tree/miles-runtime-20260927).
+by the durable [`miles-runtime-20260927-ci1` tag](https://github.com/allenai/OLMo-core/tree/miles-runtime-20260927-ci1).
 The previous pin remains available as `miles-runtime-pre-main-3c2ad5989`.
 
 Core's routed-expert `match_eager_rounding` now defaults to false. The companion
@@ -229,3 +229,8 @@ tests and two MILES adapter contracts. Multi-GPU EP/Blackwell and end-to-end
 training qualification remain separate. Rebuild the runtime/application images
 from the new lock before running: existing image IDs retain their previous
 source and qualification history.
+
+The CI follow-up adds FLA dependency markers to hybrid tests, preserves upstream
+attention validation messages, and fixes static typing. Mypy passes across all
+578 source files; the complete CPU attention slice passes (157 tests), as do
+factory/export checks with FLA available and dependency-limited checks without it.
