@@ -1,5 +1,7 @@
 # Full-tag forced-exit stopping pilot
 
+This is the historical qualification plan. See the [current enable/disable guide](../forced-exit-stopping.md) for integration settings and pilot results.
+
 September 26, 2026. The user authorized a machinery check; learning runs still
 require review. Source is isolated on `robertb/miles-forced-exit-machinery` so
 concurrent group-size and other planning changes are not included.

@@ -1,0 +1,96 @@
+# Forced-exit stopping guidance
+
+This is an experimental, **opt-in training objective**. Ordinary configurations
+have `core.forced_exit_positions=0` and use the existing GRPO rollout/loss path.
+No maintained example enables it. Inference from the trained checkpoint needs no
+special stopping controller: the model generates its own closing delimiter.
+Disabling this objective stops further stopping supervision; it does not undo
+what a checkpoint has already learned.
+
+## Enable
+
+Add these settings to a compatible synchronous run in ignored `runs/`:
+
+```toml
+[core]
+publication_mode = "barrier"
+scoring_pass_required = true
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+reward_zero_truncated = true
+reward_final_answer_only = true
+forced_exit_positions = 5
+forced_exit_parents = 1
+forced_exit_trials = 3
+forced_exit_answer_tokens = 1024
+forced_exit_coefficient = 0.1
+forced_exit_probe_interval = 0 # Optional: 8 captures labeled hidden states every 8 updates
+
+[miles]
+calculate_per_token_loss = false
+rollout_function_path = "open_instruct.miles.rollout.forced_exits.ForcedExitRollout"
+loss_type = "custom_loss"
+custom_loss_function_path = "open_instruct.miles.training.stopping.policy_loss"
+```
+
+This is an overlay, not a complete run configuration. Keep at least two natural
+responses per prompt and the normal GRPO group-centered reward calculation. The
+pilot used four natural responses, five paragraph cuts on one uniformly chosen
+parent, and three answers per cut. Both arms disabled
+`training.filter_zero_std_groups` to retain all prompt groups; match this choice
+between control and treatment. The answer trials are labels and never enter the
+natural GRPO group or its behavior-policy importance correction.
+
+A separate clipped objective trains the probability of the **full closing tag**,
+including multi-token delimiters. Each nonzero cut advantage requires an extra
+teacher-forced prefix forward/backward context; the method has real generation
+and training cost. Zero-advantage cuts skip this auxiliary computation.
+
+Run `python -m open_instruct.miles plan runs/YOUR_RUN.toml` and `validate` before
+launching. Validation rejects async/refresh publication, conflicting hooks,
+incompatible reward postprocessors and unsupported objective settings. Readiness
+capture requires context parallelism one and a supported unpadded layout.
+
+## Disable
+
+Set `core.forced_exit_positions=0` (or remove it), and remove these three
+`[miles]` overrides so their normal defaults apply:
+
+- `rollout_function_path`
+- `loss_type`
+- `custom_loss_function_path`
+
+Leftover forced-exit hooks with zero positions are rejected explicitly. Do not
+set the coefficient to zero as an off switch: it must be positive while enabled.
+`forced_exit_probe_interval=0` disables hidden-state capture only, not stopping
+supervision. You can retain the two reward gates independently for a matched
+control; their defaults are false, and changing them changes reward semantics.
+
+## Evidence and limitations
+
+The 128-update Math/GSM8K pilot used runtime image
+`01M3FRZC4JSZ44PTYCWZN0FX91`, with the qualified training implementation from
+`21f2dc65c`. Both [control](https://beaker.org/ex/01M3FSD4B5F03NMVPHZ7J0M9F9)
+and [treatment](https://beaker.org/ex/01M3FSDJZME9H0ZGP5XN41X6V7) completed and
+exported weights. Their final unforced, greedy 512-question evaluations were:
+
+| Metric | Control | Treatment |
+|---|---:|---:|
+| Accuracy | 38.28% | 58.79% |
+| Mean response tokens | 5867.16 | 3515.89 |
+| Truncation | 57.81% | 24.41% |
+
+This is a single matched-update pair, not a replicated or matched-compute result.
+Conditional readiness and mechanism claims require further audits. The
+[sampling/entropy audit](https://beaker.org/ex/01M3J1134K4SPESQSVD4Q8ZP8K)
+is separate evaluation tooling, not required to enable training.
+
+An exit's success is correctness **within its answer budget**: truncated answers
+always score zero. Monitor `forced_exit/truncation_rate`; a high rate can obscure
+readiness. This pilot has no position-decaying reward and does not independently
+sample continuation value at every cut. Three training answer trials per cut
+are noisy labels, not a calibrated answer-entropy measurement.
+
+Use an application image containing this implementation. Local configuration and
+source changes do not update an older Beaker image. The integration adds clearer
+disabled-hook validation; build from the integrated branch for that guard.

@@ -315,6 +315,14 @@ class RunConfig:
             options["rollout_sample_filter_path"] = EXPERT_SCHEDULE
         elif hook == EXPERT_SCHEDULE:
             raise InputError("The expert schedule hook requires core.expert_balanced_packing=true")
+        if not self.core.forced_exit_positions and (
+            options.get("rollout_function_path") == "open_instruct.miles.rollout.forced_exits.ForcedExitRollout"
+            or options.get("custom_loss_function_path") == "open_instruct.miles.training.stopping.policy_loss"
+        ):
+            raise InputError(
+                "core.forced_exit_positions=0 disables stopping guidance; remove the forced-exit "
+                "rollout_function_path, custom_loss_function_path and loss_type overrides"
+            )
         return options
 
     @classmethod

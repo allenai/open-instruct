@@ -35,6 +35,7 @@ switching to a deprecated backend.
 | [Throughput starting profiles](throughput-profiles.md) | Choosing a measured trainer/inference allocation and understanding queues, waste and warmup |
 | [Async queues and discard metrics](async-pipeline.md) | Sizing producer and completed buffers, tracing waits, and measuring discarded work |
 | [Topology and capacity](topology.md) | Choosing GPU placement, async scheduling, batch geometry and serving capacity |
+| [Forced-exit stopping guidance](forced-exit-stopping.md) | Enabling or disabling experimental conditional stopping supervision |
 | [Data and evaluation](data-and-evaluation.md) | Selecting tasks, importing mixtures and retaining held-out generations |
 | [Background evaluation](background-evaluation.md) | Configuring best-effort external olmo-eval jobs, receipts and W&B publishing |
 | [Managed judges](managed-judges.md) | Binding named rubrics and placing fixed-weight judge services |

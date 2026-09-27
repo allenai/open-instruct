@@ -1,10 +1,13 @@
 """CPU-only configuration guards for experimental forced-exit training."""
 
 import dataclasses
+from pathlib import Path
 
 import pytest
+import tomllib
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 def configuration():
@@ -70,3 +73,59 @@ def test_reject_unsafe_core_stopping_options(key, value):
     config = configuration()
     with pytest.raises(ValueError):
         dataclasses.replace(config, core=dataclasses.replace(config.core, **{key: value})).validate()
+
+
+def test_disabled_stopping_preserves_default_training_options():
+    baseline = RunConfig(CoreConfig(), {"hf_checkpoint": "model", "n_samples_per_prompt": 4, "global_batch_size": 8})
+    baseline.validate()
+    options = baseline.resolved_miles()
+    assert baseline.core.forced_exit_positions == 0
+    assert baseline.core.forced_exit_probe_interval == 0
+    assert baseline.core.reward_zero_truncated is False
+    assert baseline.core.reward_final_answer_only is False
+    assert "rollout_function_path" not in options
+    assert "custom_loss_function_path" not in options
+    assert "loss_type" not in options
+
+
+def test_disable_guidance_keeps_reward_policy_when_requested():
+    enabled = configuration()
+    options = {
+        k: v
+        for k, v in enabled.miles.items()
+        if k not in {"rollout_function_path", "custom_loss_function_path", "loss_type"}
+    }
+    disabled = dataclasses.replace(
+        enabled, core=dataclasses.replace(enabled.core, forced_exit_positions=0), miles=options
+    )
+    disabled.validate()
+    assert disabled.core.reward_zero_truncated and disabled.core.reward_final_answer_only
+
+
+@pytest.mark.parametrize("hook", ["rollout_function_path", "custom_loss_function_path"])
+def test_disabled_stopping_rejects_leftover_hooks(hook):
+    enabled = configuration()
+    disabled = RunConfig(CoreConfig(), {"hf_checkpoint": "model", hook: enabled.miles[hook]})
+    with pytest.raises(ValueError, match="remove the forced-exit"):
+        disabled.validate()
+
+
+def test_documented_enable_overlay_compiles(tmp_path):
+    guide = Path(__file__).parents[1] / "docs/miles/forced-exit-stopping.md"
+    overlay = tomllib.loads(guide.read_text().split("```toml\n")[1].split("```")[0])
+    spec = RunSpec.from_dict(
+        {
+            "schema_version": 1,
+            "name": "stopping-doc-check",
+            "model": {"source": "model", "format": "hf"},
+            "output": {"root": str(tmp_path)},
+            "data": {"tasks": [{"task": "gsm8k", "train_count": 8}]},
+            "training": {"filter_zero_std_groups": False},
+            "inference": {"samples_per_prompt": 4, "max_response_length": 8192, "max_context_length": 10240},
+            **overlay,
+        }
+    )
+    compiled = spec.compile()
+    compiled.validate()
+    assert compiled.core.forced_exit_positions == 5
+    assert compiled.miles["custom_loss_function_path"].endswith("stopping.policy_loss")
