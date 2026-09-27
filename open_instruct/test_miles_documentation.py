@@ -1,25 +1,66 @@
 """Documentation coverage and launch examples must follow the real CPU contract."""
 
 import ast
+import hashlib
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from mkdocs.structure.files import Files
 from scripts.miles import docs_site, generate_docs
 
-from open_instruct.miles.configuration import run_spec
+from open_instruct.miles.configuration import options, run_spec
 from open_instruct.miles.execution import launch
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs/miles"
 
 
-def test_generated_reference_is_current():
-    for path, expected in generate_docs.render().items():
-        assert path.read_text() == expected, f"Regenerate {path}"
+def test_references_build_without_runtime_or_native_help(monkeypatch, tmp_path):
+    monkeypatch.delenv("MILES_NATIVE_HELP", raising=False)
+    config = SimpleNamespace(
+        site_dir=str(tmp_path), use_directory_urls=True, plugins=SimpleNamespace(_current_plugin=None)
+    )
+    files = docs_site.on_files(Files([]), config)
+    assert {file.src_uri for file in files} == {
+        "miles/configuration.md",
+        "miles/native-options.md",
+        "miles/native-training-options.md",
+        "miles/native-serving-options.md",
+    }
+    native = files.get_file_from_path("miles/native-training-options.md").content_string
+    assert "Not captured" in native and "global_batch_size" in native
+    assert not (DOCS / "native-help.json").exists()
+    assert all(not path.exists() for path in generate_docs.render())
+
+
+def test_optional_help_requires_matching_provenance_and_complete_actions(tmp_path):
+    schema_path = ROOT / "open_instruct/miles/configuration/options.json"
+    capture = {
+        "image": "test-image",
+        "schema_sha256": hashlib.sha256(schema_path.read_bytes()).hexdigest(),
+        "options": [
+            {"dest": r["dest"], "flags": r["flags"], "help": "Captured description", "default": 17}
+            for r in options.load_schema()["options"]
+        ],
+    }
+    path = tmp_path / "help.json"
+    path.write_text(json.dumps(capture))
+    rendered = generate_docs.render(path)
+    assert "Captured description" in rendered[DOCS / "native-serving-options.md"]
+    assert "test-image" in rendered[DOCS / "native-options.md"]
+    capture["options"].pop()
+    path.write_text(json.dumps(capture))
+    with pytest.raises(ValueError, match="every pinned parser action"):
+        generate_docs.render(path)
+    capture["schema_sha256"] = "stale"
+    path.write_text(json.dumps(capture))
+    with pytest.raises(ValueError, match="provenance is stale"):
+        generate_docs.render(path)
 
 
 def test_structured_field_descriptions_cover_closed_schemas():
@@ -100,12 +141,15 @@ def test_example_plans_and_launch_render_without_gpu_or_network(path):
 
 
 def test_current_guide_links_exist():
-    for path in DOCS.rglob("*.md"):
-        content = re.sub(r"```.*?```", "", path.read_text(), flags=re.DOTALL)
+    generated = generate_docs.render()
+    documents = {path: path.read_text() for path in DOCS.rglob("*.md")} | generated
+    for path, text in documents.items():
+        content = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
         for link in re.findall(r"!?\[[^\]\n]*\]\(([^\s)]+)(?:[^)]*)\)", content):
             if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", link) or link.startswith(("/", "#")):
                 continue
-            assert (path.parent / link.split("#")[0]).exists(), (path, link)
+            target = (path.parent / link.split("#")[0]).resolve()
+            assert target.exists() or target in generated, (path, link)
 
 
 def test_site_links_target_repository_without_changing_local_doc_links():

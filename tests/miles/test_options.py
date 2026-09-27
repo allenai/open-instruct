@@ -4,7 +4,6 @@ import contextlib
 import io
 import json
 import sys
-from pathlib import Path
 
 import pytest
 from miles.backends.fsdp_utils import arguments as fsdp_arguments
@@ -29,7 +28,7 @@ def parser():
 
 
 def test_schema_matches_installed_runtime(parser):
-    recorded = json.loads(Path(options.__file__).with_name("options.json").read_text())
+    recorded = options.load_schema()
     assert options.describe_parser(parser) == recorded["options"]
 
 

@@ -169,3 +169,10 @@ scratch/
 
 # Personal MILES run configs and local run artifacts.
 /runs/
+
+# MILES references are documentation build artifacts.
+/docs/miles/native-help.json
+/docs/miles/configuration.md
+/docs/miles/native-options.md
+/docs/miles/native-training-options.md
+/docs/miles/native-serving-options.md

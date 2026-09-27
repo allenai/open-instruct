@@ -51,9 +51,35 @@ def describe_parser(parser):
     return records
 
 
+def compact_options(records):
+    """Omit derivable flags and repeated defaults without dropping parser behavior."""
+    result = []
+    for record in records:
+        record = dict(record)
+        if record["flags"] == ["--" + record["dest"].replace("_", "-")]:
+            del record["flags"]
+        for key, default in (("kind", "value"), ("nargs", None), ("type", None)):
+            if record[key] == default:
+                del record[key]
+        result.append(record)
+    return result
+
+
+def load_schema(path=None):
+    """Expand the compact on-disk schema for existing validation and parser checks."""
+    schema = json.loads((Path(path) if path is not None else Path(__file__).with_name("options.json")).read_text())
+    if schema["schema_version"] != 1:
+        raise ValueError("Unsupported MILES option schema version")
+    schema["options"] = [
+        {"flags": ["--" + record["dest"].replace("_", "-")], "kind": "value", "nargs": None, "type": None, **record}
+        for record in schema["options"]
+    ]
+    return schema
+
+
 @lru_cache(maxsize=1)
 def option_index():
-    records = json.loads(Path(__file__).with_name("options.json").read_text())["options"]
+    records = load_schema()["options"]
     index = {}
     for record in records:
         canonical_flag = "--" + record["dest"].replace("_", "-")

@@ -26,6 +26,26 @@ def test_boolean_flags_and_inverse_names():
         config(grpo_std_normalization=False, disable_grpo_std_normalization=True).arguments()
 
 
+def test_compact_schema_round_trip_preserves_aliases_and_actions(tmp_path):
+    records = [
+        {"dest": "count", "flags": ["--count"], "kind": "value", "nargs": None, "type": "int"},
+        {
+            "dest": "enabled",
+            "flags": ["--enabled", "--no-enabled"],
+            "kind": "boolean",
+            "nargs": 0,
+            "type": None,
+            "default": True,
+            "const": None,
+        },
+        {"dest": "mode", "flags": ["--legacy"], "kind": "alias_const", "nargs": 0, "type": None, "const": "old"},
+        {"dest": "items", "flags": ["--item"], "kind": "append", "nargs": "+", "type": "str", "choices": ["a", "b"]},
+    ]
+    path = tmp_path / "options.json"
+    path.write_text(json.dumps({"schema_version": 1, "options": options.compact_options(records)}))
+    assert options.load_schema(path)["options"] == records
+
+
 def test_structured_json_and_nargs_are_distinct():
     argv = config(
         train_env_vars={"NCCL_DEBUG": "WARN"},

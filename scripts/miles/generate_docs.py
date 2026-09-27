@@ -1,4 +1,4 @@
-"""Generate CPU-safe MILES field references; --check fails on documentation drift."""
+"""Generate MILES references at build time; the compact schema needs no GPU runtime."""
 
 import argparse
 import ast
@@ -8,7 +8,7 @@ import html
 import json
 from pathlib import Path
 
-from open_instruct.miles.configuration import config, run_spec
+from open_instruct.miles.configuration import config, options, run_spec
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs/miles"
@@ -85,25 +85,27 @@ def source_constraints():
     return constraints
 
 
-def render():
+def render(native_help=None):
     help_data = json.loads((DOCS / "reference-help.json").read_text())
-    native = json.loads((DOCS / "native-help.json").read_text())
     schema_path = ROOT / "open_instruct/miles/configuration/options.json"
-    if native["schema_sha256"] != hashlib.sha256(schema_path.read_bytes()).hexdigest():
-        raise ValueError("Native help provenance is stale; recapture against the updated parser snapshot")
+    schema = options.load_schema(schema_path)["options"]
     fields = dataclasses.fields(config.CoreConfig)
     if set(help_data["core"]) != {f.name for f in fields}:
         raise ValueError("Every CoreConfig field needs exactly one reviewed description")
-    native_by_flags = {tuple(item["flags"]): item for item in native["options"]}
-    schema = json.loads(schema_path.read_text())["options"]
-    if set(native_by_flags) != {tuple(item["flags"]) for item in schema}:
-        raise ValueError("Native help must cover every pinned parser action")
-    undocumented = {item["dest"] for item in native["options"] if not item["help"]}
-    if undocumented - set(help_data["native"]):
-        raise ValueError(
-            "Native options without source help need reviewed descriptions: "
-            + str(sorted(undocumented - set(help_data["native"])))
-        )
+    native = json.loads(Path(native_help).read_text()) if native_help is not None else None
+    native_by_flags = {}
+    if native is not None:
+        if native["schema_sha256"] != hashlib.sha256(schema_path.read_bytes()).hexdigest():
+            raise ValueError("Native help provenance is stale; recapture against the updated parser snapshot")
+        native_by_flags = {tuple(item["flags"]): item for item in native["options"]}
+        if set(native_by_flags) != {tuple(item["flags"]) for item in schema}:
+            raise ValueError("Native help must cover every pinned parser action")
+        undocumented = {item["dest"] for item in native["options"] if not item["help"]}
+        if undocumented - set(help_data["native"]):
+            raise ValueError(
+                "Native options without source help need reviewed descriptions: "
+                + str(sorted(undocumented - set(help_data["native"])))
+            )
     result = {}
     text = (DOCS / "configuration-intro.md").read_text() + "\n" + GENERATED
     text += "\n## Workflow fields\n\n" + table(
@@ -160,8 +162,15 @@ def render():
     groups = {"native-training-options": [], "native-serving-options": []}
     for record in schema:
         name = record["dest"]
-        detail = native_by_flags[tuple(record["flags"])]
-        description = detail["help"] or help_data["native"][name]
+        detail = native_by_flags.get(tuple(record["flags"]))
+        description = (detail["help"] if detail else None) or help_data["native"].get(name, "See pinned runtime help.")
+        default = (
+            literal(detail["default"])
+            if detail
+            else literal(record["default"])
+            if "default" in record
+            else "Not captured"
+        )
         group = "native-serving-options" if name.startswith("sglang_") else "native-training-options"
         groups[group].append(
             (
@@ -169,16 +178,23 @@ def render():
                 ", ".join(record["flags"]),
                 record["type"] or record["kind"],
                 literal(record.get("choices", [])) if "choices" in record else "—",
-                literal(detail["default"]),
+                default,
                 constraints.get(name, "Parser option; subject to Core/model/runtime validation"),
                 description,
             )
         )
+    provenance = (
+        "Full help and raw defaults were captured from the pinned parser in image `" + native["image"] + "`."
+        if native
+        else "This build uses the compact parser schema and reviewed integration descriptions. Full upstream help and value defaults were not captured; boolean defaults remain available from the schema."
+    )
     for name, rows in groups.items():
         result[DOCS / (name + ".md")] = (
             f"# {'SGLang' if 'serving' in name else 'MILES'} native option reference\n\n"
             + GENERATED
             + "\nUse these names under [miles]. Defaults below come from the pinned parser **before** structured, backend and model-dependent resolution. Some inherited options are inapplicable to Core; see the restrictions column and [run controls](run-controls.md). Parser acceptance is not qualification. Source help describes the upstream runtime, which may mention other backends.\n\n[Reference index and provenance](native-options.md).\n\n"
+            + provenance
+            + "\n\n"
             + table(
                 [
                     "TOML key",
@@ -197,11 +213,11 @@ def render():
         + GENERATED
         + "\nFor normal runs start with the [configuration guide](configuration.md). Native flags use underscores under [miles]. This appendix includes every pinned parser action, including aliases and inherited backend options. It does not claim every parser option is implemented by the Core trainer.\n\n"
         + f"- [MILES options](native-training-options.md): {len(groups['native-training-options'])} actions.\n- [SGLang options](native-serving-options.md): {len(groups['native-serving-options'])} actions.\n\n"
-        + "Help and raw defaults were captured from the actual parser in immutable Docker image `"
-        + native["image"]
-        + "`. The capture verified all action definitions against options.json; schema SHA-256: `"
-        + native["schema_sha256"]
-        + "`. This certifies the parser snapshot, not the image as a recommended training release.\n\nRefresh inside the matching pinned runtime, from a writable checkout:\n\n```bash\npython -m scripts.miles.capture_option_help --image IMMUTABLE_IMAGE_ID\npython -m scripts.miles.generate_docs\npython -m scripts.miles.generate_docs --check\n```\n\nThe capture refuses a parser-schema mismatch. If the runtime changed, regenerate and review options.json first using scripts/miles/snapshot_options.py. Source help is preserved; options without source help have reviewed supplements in reference-help.json. Conditional backend restrictions remain authoritative in config.py, validation.py and the installed runtime.\n"
+        + provenance
+        + "\n\nThese pages are generated during the documentation build and are not tracked in Git. "
+        + "The [architecture guide](architecture.md#documentation-checks) explains schema regeneration and optional native help capture. "
+        + "The compact schema is tied to runtime.lock.json. Captured help must match its SHA-256 and every parser action. "
+        + "Parser acceptance does not establish backend support; config.py, validation.py and the runtime enforce those restrictions.\n"
     )
     return result
 
@@ -209,17 +225,17 @@ def render():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--native-help", type=Path, help="Optional help artifact captured in the pinned runtime")
+    parser.add_argument(
+        "--output-dir", type=Path, default=ROOT / "runs/miles-docs", help="Directory for generated Markdown"
+    )
     args = parser.parse_args()
-    stale = []
-    for path, content in render().items():
-        if args.check:
-            if not path.exists() or path.read_text() != content:
-                stale.append(str(path.relative_to(ROOT)))
-        else:
-            path.write_text(content)
-    if stale:
-        raise SystemExit("Generated docs are stale: " + ", ".join(stale))
-    print("MILES reference checked" if args.check else "MILES reference generated")
+    rendered = render(args.native_help)
+    if not args.check:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        for path, content in rendered.items():
+            (args.output_dir / path.name).write_text(content)
+    print("MILES reference inputs checked" if args.check else f"MILES references generated in {args.output_dir}")
 
 
 if __name__ == "__main__":

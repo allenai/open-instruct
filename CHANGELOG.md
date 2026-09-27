@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Keep MILES configuration validation independent of the GPU runtime with a compact parser schema; generate option references during documentation builds (PR URL pending).
 - Preserve opt-in synchronous full-tag stopping guidance, readiness capture, and the label-cleaned GSM8K task through the MILES Core adapter move (PR URL pending).
 - Add the opt-in MILES integration with OLMo-core training, SGLang serving, structured run configuration, and dedicated runtime validation; reject sequence packing with incompatible Torch attention before launch. The Core trainer adapter, weight publication, managed rollout coordination, sequence packing, expert-load scheduling, and compiler-cache persistence are provided by the pinned MILES fork (PR URL pending).
 - Count cached SFT token statistics with Arrow batches instead of materializing a duplicate tokenized dataset (https://github.com/allenai/open-instruct/pull/1904).

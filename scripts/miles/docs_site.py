@@ -1,9 +1,28 @@
 """Keep repository-relative MILES links useful in both GitHub Markdown and MkDocs."""
 
+import os
 import re
+import sys
 from pathlib import Path
 
+from mkdocs.structure.files import File
+
+# MkDocs loads hooks by file path; its console entrypoint need not put the repo on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.miles import generate_docs  # noqa: E402
+
 LINK = re.compile(r"(!?\[[^\]\n]*\]\()([^\s)]+)([^)]*\))")
+
+
+def on_files(files, config):
+    """Build virtual reference pages without modifying the source checkout."""
+    for path, content in generate_docs.render(os.environ.get("MILES_NATIVE_HELP")).items():
+        uri = str(path.relative_to(generate_docs.ROOT / "docs"))
+        existing = files.get_file_from_path(uri)
+        if existing is not None:
+            files.remove(existing)
+        files.append(File.generated(config, uri, content=content))
+    return files
 
 
 def on_page_markdown(markdown, *, page, config, files):

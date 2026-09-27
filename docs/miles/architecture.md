@@ -102,14 +102,36 @@ make style-check
 make quality-check
 ```
 
-The generator derives inventories from configuration sources and pinned parser
-metadata, and joins reviewed descriptions from docs/miles/reference-help.json.
-Native help is captured separately from the pinned runtime, with its image and
-parser provenance; parser defaults are not model-dependent resolved defaults.
-Regenerate that snapshot with the documented capture command in the native appendix
-when parser flags change. Update descriptions and rerun generation, reviewing the
-diff. Do not edit generated tables manually or copy a measurement's settings into
-current defaults without a deliberate recipe change.
+MkDocs generates the four reference pages in memory from configuration sources,
+the compact pinned parser schema and reviewed `reference-help.json` descriptions.
+Neither the pages nor native help are tracked. Ordinary documentation builds and
+local `plan`/`validate` commands need no MILES installation. Without a native help
+capture, option tables show names, types, choices, restrictions and reviewed
+supplements; other help and value defaults are explicitly marked unavailable.
+
+When runtime pins change, regenerate the compact schema inside the matching
+runtime and review its diff:
+
+```bash
+python -m scripts.miles.snapshot_options open_instruct/miles/configuration/options.json
+```
+
+For full upstream help and parser defaults, capture an artifact in the pinned
+runtime using a writable checkout, then supply it to the documentation build:
+
+```bash
+python -m scripts.miles.capture_option_help --image IMMUTABLE_IMAGE_ID --output runs/native-help.json
+MILES_NATIVE_HELP=runs/native-help.json uv run mkdocs build
+```
+
+The capture checks the installed parser against the expanded compact schema;
+the docs build rejects stale hashes or missing actions. Parser defaults are not
+model-dependent resolved defaults. To inspect Markdown separately, run
+`python -m scripts.miles.generate_docs --output-dir runs/miles-docs` (optionally
+with `--native-help runs/native-help.json`). `--check` validates the reference
+inputs without writing files. Edit source definitions and reviewed descriptions,
+not generated output. Do not copy measurement settings into maintained examples
+without a deliberate recipe change.
 
 ### Type checking the moved adapter
 
