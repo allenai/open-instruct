@@ -2,14 +2,11 @@
 
 Use the trainer size and **desired optimization batch** to choose a starting
 profile, then provision inference to keep completed-group waiting near zero.
-The September 13 exercise found that full decode CUDA graphs mattered more than
-adding serving GPUs. The initial unpacked concurrency-32 follow-up used two
-inference GPUs without warm completed-queue drops. The historical EP2 throughput experiment combined 6144-token packing with
-no recomputation and guarded scoring skip. Its 24-update live qualification
-measured 5,089 useful response tokens/s, 58% awaited collection and 0.79% warm
-stale-token drops. The faster trainer shifted the bottleneck toward batch supply.
-See [qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md) and the preceding
-[packed controls](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/packed-capacity-results-20260914.md).
+Measure decode CUDA graphs, engine admission and trainer wait together. Faster
+training can shift the bottleneck to rollout supply. The [archived throughput
+qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md)
+and [packed controls](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/packed-capacity-results-20260914.md)
+retain the measured configurations and results.
 
 These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
 GSM8K-style responses capped at 4096 tokens, and Holmes B300 GPUs. They are a
@@ -21,7 +18,7 @@ and the [chronological campaign log](https://github.com/allenai/open-instruct/bl
 ## Runtime image
 
 For the maintained examples, use the current image and qualification boundaries
-in the [MILES GRPO guide](grpo.md). Its [September 18 qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/router-controls-20260918.md)
+in the [MILES GRPO guide](grpo.md). Its [archived router qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/router-controls-20260918.md)
 distinguishes completed tiny-model checks from the full-policy checks still in progress.
 
 The historical throughput results below used application source `2c477efd5`
@@ -67,7 +64,7 @@ For the 18.5B-total KDA/latent MoE served on one GPU per engine:
 | KDA recurrent state | About 32 MiB per slot (16 KDA layers × 16 heads × 128 × 256, FP32) | Pool allocation minus KV: 45 GiB for 1,024 slots and 786,432 tokens |
 
 SGLang reports these values in GiB although its logs print “GB”. The sources are
-engine logs from the September 20 mixed 32K runs on Holmes B300, where each engine
+engine logs from the archived mixed 32K runs on Holmes B300, where each engine
 saw 266.9 GiB and kept 187.3 GiB free after all pools and graphs were allocated.
 
 To choose admission `R` for context length `C` (`inference.max_context_length`):
@@ -110,7 +107,7 @@ After launch, confirm the setting from the engine metrics:
   about 1,730 tokens/s.
 
 If requests run at the cap with KV usage far below one half while training waits,
-admission is too low. That is what the September 20 run showed at `R = 16`: 15.6
+admission is too low. The archived mixed 32K run showed this at `R = 16`: 15.6
 of 16 running, 24% KV usage, and training waiting for batches for 78% of the
 workflow. The throughput gain from 16 to 64 at 32K has not yet been measured live. The fixed-policy single-engine benchmark, with
 2,048-token responses, rose from 4,749 to 6,171 tokens/s between 32 and 64

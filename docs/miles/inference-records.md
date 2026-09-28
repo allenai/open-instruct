@@ -1,18 +1,16 @@
 # Inference records
 
-A training run's rollouts are its most expensive product, and the trainer keeps
-only part of them. In the September 20 mixed 32K run, 30.6% of the 722M generated
-tokens reached training. All-zero groups alone held an estimated 65% of generated
-tokens. No per-prompt outcome was kept, so later runs could not avoid those
-prompts, and the per-domain token split could not be computed.
+Rollout generation produces groups that training may reject or leave unused.
+Recording their outcomes makes it possible to measure that work, inspect which
+prompts repeatedly fail, and choose prompts for later runs.
 
 Inference records keep the outcome of **every scored training group**, whether
 the online filter passed it or not, and whether training later consumed it. They
 live in a shared store that later runs and analyses read. Recording never changes
 admission, filtering or training.
 
-This covers phases 1–3 of the [inference records plan](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/plans/inference-records-20260921.md):
-recording, [summaries](#summarize-a-store) and [prompt selection](#select-prompts).
+Recording, [summaries](#summarize-a-store) and [prompt selection](#select-prompts)
+follow the [archived design](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/plans/inference-records-20260921.md).
 The starter configurations leave recording off until a reliability qualification
 is recorded.
 
@@ -20,7 +18,7 @@ Recording requires a fully async run (`[async] fully_async = true`), because it
 lives in the completed-group buffer. `validate` rejects `records.enabled` in a
 synchronous run.
 
-The writer and summary reader live in our pinned MILES fork
+The writer and summary reader live in the pinned MILES fork
 (`miles.utils.inference_records` and `miles.utils.record_summary`). Open Instruct
 supplies checkpoint identity through `datasets/recording.py` and retains prompt
 selection and filtering policy. The record format and the commands below are
@@ -50,8 +48,8 @@ The section maps to `core.records_root`, `core.records_responses` and
 `plan` shows the resolved `records` section.
 
 An outcome-only group record is about 1.5 KB, so a 13,000-group run adds about
-20 MB. With `responses = "all"`, a run like the September 20 one would also
-store several GB of text.
+20 MB. With `responses = "all"`, a long-response run can also store several GB
+of text; budget for response volume separately from outcome metadata.
 
 ## Store layout
 

@@ -2,7 +2,7 @@
 
 Start from a [structured example](../../configs/miles/examples/README.md), then
 change the length and capacity controls together. The SFT MoE checkpoint used in
-our readiness exercises advertises 65,536 positions. That is an architecture
+the retained readiness exercises advertises 65,536 positions. That is an architecture
 limit, not evidence that every training topology or serving concurrency fits.
 
 ## Choose a prompt/response budget first

@@ -207,30 +207,24 @@ Open Instruct's run configuration; that is an explicit configuration integration
 Small CPU planning and artifact-reader helpers remain local so `plan`, `validate`
 and offline analysis work without the private runtime. Runtime integration tests
 compare their algorithms with the MILES counterparts: scoring policy, capacity
-reporting, wait diagnostics, wire-version parsing, atomic JSON publication,
-startup timing, model input checks and throughput arithmetic.
+reporting, timeout diagnostics, atomic JSON publication, input validation and
+throughput arithmetic.
 
-## Core runtime rebase (September 27, 2026)
+## Core runtime compatibility
 
-The runtime lock now pins Core `b1a2703d73493bb7f8ca2b91b200f3e3394a5f74`,
-rebased onto upstream main `718d08f7` after PR #872 merged. The adapter changes
-are proposed in [OLMo-core draft PR #888](https://github.com/allenai/OLMo-core/pull/888). The commit is retained
-by the durable [`miles-runtime-20260927-ci1` tag](https://github.com/allenai/OLMo-core/tree/miles-runtime-20260927-ci1).
-The previous pin remains available as `miles-runtime-pre-main-3c2ad5989`.
+The runtime lock pins Core `b1a2703d73493bb7f8ca2b91b200f3e3394a5f74`, retained by
+the durable [`miles-runtime-20260927-ci1` tag](https://github.com/allenai/OLMo-core/tree/miles-runtime-20260927-ci1).
+The adapter interfaces are proposed in [OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888).
+The previous pin remains available as `miles-runtime-pre-main-3c2ad5989` for
+historical reproduction.
 
-Core's routed-expert `match_eager_rounding` now defaults to false. The companion
-MILES pin `e6e466e668413514372ee5d601818ade190e4cbb` explicitly enables it for
-policy scoring and treats old MILES checkpoint manifests as equivalent to that
-opt-in. The parser options are unchanged; the option snapshot records the new
-source revisions.
+Core's routed-expert `match_eager_rounding` defaults to false. The pinned MILES
+adapter explicitly enables it for policy scoring and accepts legacy MILES
+checkpoint manifests with equivalent scoring semantics. Existing Core users
+retain the default behavior.
 
-Validation covered 119 CPU/local checkpoint tests, 36 local RTX 4090 numerical
-tests and two MILES adapter contracts. Multi-GPU EP/Blackwell and end-to-end
-training qualification remain separate. Rebuild the runtime/application images
-from the new lock before running: existing image IDs retain their previous
-source and qualification history.
-
-The CI follow-up adds FLA dependency markers to hybrid tests, preserves upstream
-attention validation messages, and fixes static typing. Mypy passes across all
-578 source files; the complete CPU attention slice passes (157 tests), as do
-factory/export checks with FLA available and dependency-limited checks without it.
+Core's PR checks and application qualification cover different boundaries.
+Rebuild runtime/application images from the lock and validate the intended
+training topology; an existing image retains its original source revisions.
+Record application validation with the exact image and source pins. The compact
+options snapshot must be regenerated whenever runtime source pins change.

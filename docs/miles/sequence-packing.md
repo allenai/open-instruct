@@ -24,7 +24,7 @@ context limit. Disabling packing restores the previous unpadded one-sample path;
 omit `packing_max_tokens` when disabling. The structured CLI maps both trainer
 fields to Core options. MILES receives `qkv_format=thd` for response-logit slicing.
 
-The packing implementation and the Core actor that uses it live in our MILES fork
+The packing implementation and the Core actor that uses it live in the pinned MILES fork
 under `miles.backends.core_utils`.
 
 The packer greedily combines consecutive samples within each optimizer batch. It
@@ -185,29 +185,18 @@ The historical commands and exact inputs are retained in the [archived qualifica
 A passing fixed-input numerical gate does not establish throughput improvement
 or learning quality on a heterogeneous production workload.
 
-### Observed scope: September 2026
+### Qualification and limits
 
-The [four-GPU EP2 numerical qualification](https://beaker.org/ex/01M2YQ3QAHHT34W6C0XK5XNFWX)
-passed score, replay, gradient and Adam-state comparisons on fixed inputs, within
-the existing numerical tolerances. These are correctness checks, not performance
-or learning guarantees.
+Fixed-input EP2 checks covered scores, replay, gradients and Adam state. A mixed
+workload comparison also checked predicted versus observed dispatch counts and
+periodic scoring agreement. The [archived qualification evidence](https://github.com/allenai/open-instruct/blob/a17d0bf08196c209f3f11b0759dcaeefca5401f4/docs/miles/sequence-packing.md#observed-scope-september-2026)
+retains the experiments, topology, benchmark tables and comparison limitations.
 
-The completed 100-update mixed-workload comparison used eight trainer GPUs
-(DP4/EP2), seven policy engines, one judge, and both router auxiliaries disabled:
-[packing off](https://beaker.org/ex/01M2ZVH6TQVS037NPD2CWKWXBH) versus
-[packing on](https://beaker.org/ex/01M308PE9GNF05CHHETTCBZMRP). All 100 treatment
-updates matched predicted dispatch counts on all eight ranks, and periodic
-standalone/training scoring checks passed. Held-out results showed no consistent
-learning advantage or regression; one trajectory per arm and small evaluation
-panels do not establish equivalence.
-
-During updates 61–100, timed trainer work was 18.50 minutes off versus 15.10
-minutes on, while treatment planning took another 3.08 minutes. Generation
-dominated elapsed time. The control resumed at update 40 and treatment ran fresh,
-with independent asynchronous samples, so these timings are descriptive rather
-than a matched-input causal estimate. Keep this feature off by default until its
-net benefit is measured for the intended topology, batch and workload.
-
+These checks establish correctness only within their tested scope. They do not
+establish a learning advantage or net throughput benefit: planning has a cost,
+and generation can dominate elapsed time. Keep expert-aware packing off by
+default until its net benefit is measured for the intended topology, batch and
+workload.
 
 The archived CPU benchmark accepts a routing-panel JSON file with per-document expert
 histograms (no GPU or new generation required):

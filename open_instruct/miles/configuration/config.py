@@ -371,49 +371,7 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise InputError("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
-        if self.core.forced_exit_positions:
-            if options.get("n_samples_per_prompt", 1) < 2:
-                raise InputError("Forced exits require at least two natural responses per prompt")
-            if self.core.forced_exit_parents > options.get("n_samples_per_prompt", 1):
-                raise InputError("forced_exit_parents cannot exceed natural responses per prompt")
-            if self.core.router_aux_loss_weight or self.core.router_z_loss_weight:
-                raise InputError("Forced exits currently require zero router auxiliary coefficients")
-            if self.core.publication_mode != "barrier" or options.get("fully_async", False):
-                raise InputError("Forced exits currently require synchronous barrier publication")
-            if not self.core.reward_zero_truncated or not self.core.reward_final_answer_only:
-                raise InputError("Forced exits require zero-truncation and final-answer-only rewards")
-            if not self.core.scoring_pass_required:
-                raise InputError("Forced exits require scoring_pass_required=true for the guidance anchor")
-            if options.get("calculate_per_token_loss", False):
-                raise InputError("Forced exits require response-averaged loss for separate closing-token weighting")
-            required = {
-                "rollout_function_path": "open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
-                "loss_type": "custom_loss",
-                "custom_loss_function_path": "miles.backends.core_utils.stopping.policy_loss",
-            }
-            for name, value in required.items():
-                if options.get(name) != value:
-                    raise InputError(f"Forced exits require miles.{name}={value!r}")
-            for name in (
-                "partial_rollout",
-                "group_rm",
-                "use_dynamic_global_batch_size",
-                "use_rollout_logprobs",
-                "custom_generate_function_path",
-                "custom_reward_post_process_path",
-                "custom_convert_samples_to_train_data_path",
-                "rollout_sample_filter_path",
-                "rollout_all_samples_process_path",
-                "recompute_rollout_log_probs",
-            ):
-                if options.get(name):
-                    raise InputError(f"Forced exits do not support miles.{name}")
-            if options.get("advantage_estimator", "grpo") != "grpo":
-                raise InputError("Forced exits require GRPO advantages")
-            if options.get("kl_coef", 0) or options.get("normalize_advantages", False):
-                raise InputError("Forced exits require unmodified group-centered reward advantages")
-            if not options.get("rewards_normalization", True):
-                raise InputError("Forced exits require group-centered rewards")
+        self._validate_forced_exits(options)
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
             raise InputError("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
@@ -566,6 +524,52 @@ class RunConfig:
             self._validate_refresh(options, collection, samples)
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise InputError("Async training requires an explicit positive core.max_policy_lag")
+
+    def _validate_forced_exits(self, options):
+        """Validate the opt-in stopping objective without changing normal GRPO."""
+        if self.core.forced_exit_positions:
+            if options.get("n_samples_per_prompt", 1) < 2:
+                raise InputError("Forced exits require at least two natural responses per prompt")
+            if self.core.forced_exit_parents > options.get("n_samples_per_prompt", 1):
+                raise InputError("forced_exit_parents cannot exceed natural responses per prompt")
+            if self.core.router_aux_loss_weight or self.core.router_z_loss_weight:
+                raise InputError("Forced exits currently require zero router auxiliary coefficients")
+            if self.core.publication_mode != "barrier" or options.get("fully_async", False):
+                raise InputError("Forced exits currently require synchronous barrier publication")
+            if not self.core.reward_zero_truncated or not self.core.reward_final_answer_only:
+                raise InputError("Forced exits require zero-truncation and final-answer-only rewards")
+            if not self.core.scoring_pass_required:
+                raise InputError("Forced exits require scoring_pass_required=true for the guidance anchor")
+            if options.get("calculate_per_token_loss", False):
+                raise InputError("Forced exits require response-averaged loss for separate closing-token weighting")
+            required = {
+                "rollout_function_path": "open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
+                "loss_type": "custom_loss",
+                "custom_loss_function_path": "miles.backends.core_utils.stopping.policy_loss",
+            }
+            for name, value in required.items():
+                if options.get(name) != value:
+                    raise InputError(f"Forced exits require miles.{name}={value!r}")
+            for name in (
+                "partial_rollout",
+                "group_rm",
+                "use_dynamic_global_batch_size",
+                "use_rollout_logprobs",
+                "custom_generate_function_path",
+                "custom_reward_post_process_path",
+                "custom_convert_samples_to_train_data_path",
+                "rollout_sample_filter_path",
+                "rollout_all_samples_process_path",
+                "recompute_rollout_log_probs",
+            ):
+                if options.get(name):
+                    raise InputError(f"Forced exits do not support miles.{name}")
+            if options.get("advantage_estimator", "grpo") != "grpo":
+                raise InputError("Forced exits require GRPO advantages")
+            if options.get("kl_coef", 0) or options.get("normalize_advantages", False):
+                raise InputError("Forced exits require unmodified group-centered reward advantages")
+            if not options.get("rewards_normalization", True):
+                raise InputError("Forced exits require group-centered rewards")
 
     def _validate_engine_drain(self, options, collection, samples):
         if not options.get("fully_async", False):

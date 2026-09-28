@@ -1,4 +1,4 @@
-"""Rolling retention of committed native Core checkpoints."""
+"""CPU configuration checks for native checkpoint retention and writer options."""
 
 from open_instruct.miles.configuration import config
 

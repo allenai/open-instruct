@@ -13,7 +13,7 @@ and olmo-sglang supplies the serving implementation. See
 
 ## Conversion checks
 
-`scripts/miles/validate_hero_conversion.py` accepts explicit `--native` and `--hf`
+`scripts/miles/validate_moe_conversion.py` accepts explicit `--native` and `--hf`
 paths and performs two exhaustive checks:
 
 1. Load the saved native architecture and model weights, including flattened

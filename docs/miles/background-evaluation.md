@@ -171,7 +171,7 @@ committed-image MILES wrapper for training qualification. Use ignored `runs/`
 configs and fresh output paths; leave existing experiments unchanged.
 
 Live GPU results and W&B publication semantics are recorded in the
-[September 21 qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/background-evaluation-20260920.md).
+[archived evaluator qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/background-evaluation-20260920.md).
 
 ## Development gold labels and scoring corrections
 

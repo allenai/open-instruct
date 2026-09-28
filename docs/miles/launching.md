@@ -171,10 +171,8 @@ launcher. Separate tasks with disjoint hostname pools are not an acceptable
 replacement for group scheduling. Other physical node sizes need explicit
 placement support before launching.
 
-The launcher at `f301a8b97` used independent tasks with disjoint hostname pools;
-the September 23 40-update attempt timed out waiting for its second node before
-any training. The current launcher uses native replica groups, with regression
-tests for the scheduling fields and per-replica status. Keep the submitted spec
+The current launcher uses native replica groups, with regression tests for the
+scheduling fields and per-replica status. Keep the submitted spec
 as evidence when checking older launchers; extending rendezvous timeouts or
 polling for idle nodes does not repair a missing group.
 

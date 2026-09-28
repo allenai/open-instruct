@@ -1,4 +1,4 @@
-"""Exercise the real checkpoint reader and conversion gate on tiny hero shapes."""
+"""Exercise the real checkpoint reader and conversion gate on tiny hybrid MoE checkpoints."""
 
 import json
 
@@ -12,7 +12,7 @@ from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
 from safetensors.torch import save_file
-from scripts.miles.validate_hero_conversion import (
+from scripts.miles.validate_moe_conversion import (
     check_architecture,
     cpu_conversion_config,
     load_native_parameters,

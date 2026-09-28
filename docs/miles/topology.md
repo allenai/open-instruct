@@ -88,7 +88,7 @@ training, publication or decode can still determine end-to-end cadence. Compare
 warm update wall time and trainer data waits alongside cache hits and engine
 throughput; a higher engine throughput number alone does not establish a faster run.
 
-A preliminary 20-update comparison reported on September 12 found about **45 cached
+The archived 20-update comparison found about **45 cached
 tokens per sample versus roughly 3,600 generated tokens**. Warm updates 3–20 took
 31.5 minutes with cache off and 32.0 minutes with radix plus cache-aware routing:
 no measurable end-to-end gain in that comparison, despite cache hits and increased

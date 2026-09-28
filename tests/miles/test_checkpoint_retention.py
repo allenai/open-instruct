@@ -1,4 +1,4 @@
-"""Rolling retention of committed native Core checkpoints."""
+"""Runtime retention and pruning of committed native Core checkpoints."""
 
 from miles.backends.core_utils import checkpoint
 

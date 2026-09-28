@@ -230,7 +230,7 @@ GPU launch or count in-memory JIT hits. Publication aggregates those files into
 `group_hit`, `group_miss` and `put` counts; the individual events are not printed
 to application stdout.
 
-The retained September 11 cold trial recorded 138 group misses and 1,112 writes
+The retained cold-cache trial recorded 138 group misses and 1,112 writes
 on one worker: 1,250 local file appends, not 138 compilations or 1,250 log messages.
 A compile can write several artifacts, and group lookup counts need not equal
 kernel-compilation counts. No controlled overhead measurement is available for
@@ -241,7 +241,7 @@ summaries, measure its overhead, and preserve counts from spawned schedulers.
 ## Coverage audit
 
 The following controls were checked against application image
-`open-instruct-miles-core-2aec2d8b0616` on September 23. Coverage refers to the
+`open-instruct-miles-core-2aec2d8b0616`. Coverage refers to the
 ordinary Ray startup lifecycle; the standalone wrapper's larger `FAMILIES` table
 does not enable those families in training.
 

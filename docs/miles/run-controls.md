@@ -5,7 +5,7 @@ See the [workflow guide](workflow.md) for structured sections matching
 olmo-miles and the multi-node Beaker launcher. The original low-level files support
 `plan/validate/train`; the native names below describe their resolved controls.
 `[miles]` expresses the native MILES/SGLang options using underscores. `[core]`
-expresses the settings owned by the OLMo-core adapter. TOML is our integration's
+expresses the settings owned by the OLMo-core adapter. TOML is the MILES integration's
 format; it was not the preexisting open-instruct GRPO configuration format.
 The Python API is the same `RunConfig(CoreConfig(...), {...})` used by the trial harnesses.
 

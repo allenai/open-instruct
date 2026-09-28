@@ -123,10 +123,8 @@ do not stop recovery. Counts are per producer process and reset on a fresh run o
 resume. Detailed request IDs, group IDs, exception types and bounded HTTP error
 bodies stay in logs, rather than becoming W&B metric names.
 
-Both the router's transport-error wrapping and the previously narrower producer
-predicate predated the September 22 upstream migration. Recovery policy changes
-require a rebuilt application image; an already running job keeps its image's
-behavior.
+Recovery policy changes require a rebuilt application image; an already
+running job keeps its image's behavior.
 
 ## Failure triage
 
@@ -247,6 +245,54 @@ structured run, omit `async.async_max_concurrent_samples` to use the existing
 automatic bound: the larger of one rollout collection and two waves of serving
 slots, rounded to whole prompt groups. Measure trainer wait and serving occupancy
 before increasing that budget: more queued work does not add inference capacity.
+
+## Analysis and service checks
+
+Use the prepared run's output directory, containing `workflow.json`, `plan.json`
+and `checkpoints/`. These tools read structured artifacts; preserve the original
+files alongside their reports. Choose a warmup exclusion appropriate to the run
+length. Excluding early updates does not prove that compilation has finished.
+
+| Tool | Purpose and inputs | Interface |
+|---|---|---|
+| `analyze_throughput` | Summarizes completed-run update timing, trainer wait, delivered tokens, stale drops and unused terminal work from driver/rollout reports. Rejects incomplete workflows by default. | CLI; writes `throughput-analysis.json` under the run root and prints JSON. |
+| `capacity_metrics` | Combines the allocation, per-rank training contracts and occupancy into per-update token rates and hardware coverage. | Python helper: `measurements(root, warmup=6)`. |
+| `throughput_occupancy` | Computes time-weighted pipeline, engine and GPU occupancy; reports gaps as missing coverage rather than zero utilization. | Python helper: `analyze(root, warmup=6)`. |
+| `sample_gpu_usage` | Samples `nvidia-smi` utilization and memory on an existing worker node; optionally counts local Triton artifacts. Requires NVIDIA tooling, but creates no CUDA context. | CLI; writes JSONL to the specified path. |
+| `readiness_services` | Sends code-verifier probes through a private loopback fault proxy to check retries, exhaustion and recovery against the supplied service. | CLI; writes a JSON qualification report. |
+
+Run the completed-run CLI from a checkout:
+
+```bash
+python -m scripts.miles.analyze_throughput /path/to/run --warmup 3
+```
+
+The two library helpers can be used together without a GPU runtime:
+
+```python
+import json
+from pathlib import Path
+from scripts.miles import capacity_metrics, throughput_occupancy
+
+root = Path("/path/to/run")
+reports = {
+    "capacity-analysis.json": capacity_metrics.measurements(root, warmup=3),
+    "occupancy-analysis.json": throughput_occupancy.analyze(root, warmup=3),
+}
+for filename, report in reports.items():
+    (root / filename).write_text(json.dumps(report, indent=2) + "\n")
+```
+
+Collect GPU samples on each worker node, using that node's rank in the filename,
+and probe the intended code service explicitly:
+
+```bash
+python -m scripts.miles.sample_gpu_usage /path/to/run/checkpoints/gpu_usage_node0.jsonl --seconds 60 --interval 5
+python -m scripts.miles.readiness_services http://CODE_SERVICE:1234 --output runs/services.json
+```
+
+The service probe makes real code-execution requests. Run it against the service
+being qualified. Use `--help` on the CLI tools for their remaining options.
 
 ## Bounded wall-clock runs
 
