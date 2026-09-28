@@ -71,6 +71,18 @@ def test_mixed_rewards_use_existing_verifier_and_preserve_components(tmp_path):
         asyncio.run(rewards.registered_reward(args, sample))
 
 
+@pytest.mark.parametrize("invalid", [{"name": "missing", "target": "42"}, {"name": "known", "weight": "bad"}])
+def test_all_reward_specs_are_validated_before_any_scoring(monkeypatch, invalid):
+    async def unexpected_score(*args, **kwargs):
+        raise AssertionError("Invalid later verifier must be rejected before scoring starts")
+
+    monkeypatch.setattr(rewards, "_registry", lambda path: {"known": SimpleNamespace(async_call=unexpected_score)})
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config="unused"))
+    sample = SimpleNamespace(metadata={"verifiers": [{"name": "known", "target": "42"}, invalid]})
+    with pytest.raises(ValueError):
+        asyncio.run(rewards.registered_reward(args, sample))
+
+
 def test_dictionary_targets_survive_repeated_and_shared_ifeval_scoring(tmp_path):
     registry = tmp_path / "verifiers.json"
     registry.write_text(json.dumps({"ifeval": {"factory": "open_instruct.ground_truth_utils.IFEvalVerifierOld"}}))

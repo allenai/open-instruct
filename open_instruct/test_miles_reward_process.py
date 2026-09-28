@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.rewards import rewards
 
 
@@ -67,7 +68,7 @@ def test_symbolic_fraction_equivalence_through_async_registry(tmp_path):
             }
         )
     )
-    args = SimpleNamespace(olmo_core=SimpleNamespace(reward_config=str(registry)))
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(registry)))
     samples = [
         SimpleNamespace(
             tokens=[],

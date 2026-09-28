@@ -28,11 +28,11 @@ import requests
 
 from open_instruct import logger_utils
 from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.rewards import service
 
 logger = logger_utils.setup_logger(__name__)
 
 _CODE_BLOCK_PATTERN = re.compile(r"```(?:python)?(.*?)```", re.DOTALL)
-_SESSION: Any = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -52,33 +52,6 @@ def extract_python_code(model_output: str) -> str:
     return matches[-1].strip() if matches else model_output
 
 
-def _float_setting(args: Any, attribute: str, environment: str, default: float) -> float:
-    value = getattr(args, attribute, None)
-    if value is None:
-        value = os.environ.get(environment, default)
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"{environment} must be a finite number") from error
-    if not math.isfinite(parsed):
-        raise ValueError(f"{environment} must be a finite number")
-    return parsed
-
-
-def _bool_setting(args: Any, attribute: str, environment: str, default: bool) -> bool:
-    value = getattr(args, attribute, None)
-    if value is None:
-        value = os.environ.get(environment, str(default))
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{environment} must be a boolean")
-
-
 def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfig:
     """Resolve code verifier settings from compatible args and environment."""
     url = getattr(args, "code_api_url", None) or os.environ.get("OI_MILES_CODE_API_URL")
@@ -89,8 +62,10 @@ def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfi
         if not str(url).endswith("/test_program"):
             raise ValueError("code_stdio requires a code API URL ending in /test_program")
         url = str(url)[: -len("/test_program")] + "/test_program_stdio"
-    max_execution_time = _float_setting(args, "code_max_execution_time", "OI_MILES_CODE_MAX_EXECUTION_TIME", 1.0)
-    threshold = _float_setting(
+    max_execution_time = service.number_setting(
+        args, "code_max_execution_time", "OI_MILES_CODE_MAX_EXECUTION_TIME", 1.0
+    )
+    threshold = service.number_setting(
         args, "code_pass_rate_reward_threshold", "OI_MILES_CODE_PASS_RATE_REWARD_THRESHOLD", 0.0
     )
     if max_execution_time <= 0:
@@ -107,7 +82,9 @@ def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfi
         failure_policy=failure_policy,
         max_execution_time=max_execution_time,
         pass_rate_reward_threshold=threshold,
-        apply_perf_penalty=_bool_setting(args, "code_apply_perf_penalty", "OI_MILES_CODE_APPLY_PERF_PENALTY", False),
+        apply_perf_penalty=service.bool_setting(
+            args, "code_apply_perf_penalty", "OI_MILES_CODE_APPLY_PERF_PENALTY", False
+        ),
     )
 
 
@@ -132,15 +109,7 @@ RETRY_WORST_CASE_SECONDS = (RETRY.total + 1) * 30.0 + sum(
 
 
 def _get_session() -> Any:
-    global _SESSION
-    if _SESSION is not None:
-        return _SESSION
-    session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=RETRY)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    _SESSION = session
-    return session
+    return service.http_session(pool_size=100, retries=RETRY)
 
 
 def _score_response(result: Any, *, config: CodeVerifierConfig) -> float:

@@ -30,85 +30,27 @@ from typing import Any
 
 import requests
 
-from open_instruct import logger_utils
+from open_instruct import judge_utils, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry
+from open_instruct.miles.rewards import judge_registry, service
 
 logger = logger_utils.setup_logger(__name__)
 
-_GENERAL_QUALITY_TEMPLATE = """
-### Task Description
-Please act as an impartial judge and evaluate the quality of the response provided by an
-AI assistant to the user query displayed below.
-
-Notes:
-- Your evaluation should consider factors such as the helpfulness, relevance, accuracy, creativity, appropriate level of detail, and how well the response satisfies the user's explicit constraints or accurately follows their instructions.
-- If there is a system prompt, ensure the AI answer prioritizes following it.
-- Begin your evaluation by providing a short explanation.
-- Be as objective as possible. After providing your short explanation, please output a score on a scale of 1 to 10.
-- Please adhere to the following format.
-
-[Conversation History]
-{input}
-
-[AI Answer]
-{output}
-
-[Your judgement]
-Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}"""
-
-_GENERAL_QUALITY_REF_TEMPLATE = """
-### Task Description
-Please act as an impartial judge and evaluate the quality of the answer provided by an
-AI assistant to the conversation history leading up to the answer displayed below.
-Judge whether the provided answer is good by comparing it to the reference answer.
-
-Notes:
-- Besides comparing to the reference answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, creativity, appropriate level of detail, and how well the response satisfies the user's explicit constraints or accurately follows their instructions.
-- Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
-- If there is a system prompt, ensure the AI answer prioritizes following it.
-- Begin your evaluation by providing a short explanation.
-- Be as objective as possible. After providing your short explanation, please output a score on a scale of 1 to 10.
-- Please adhere to the following format.
-
-[Conversation History]
-{input}
-
-[AI Answer]
-{output}
-
-[Reference Gold Answer]
-{label}
-
-[Your judgement]
-Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}"""
-
-_WEB_INSTRUCT_GENERAL_VERIFIER_TEMPLATE = """User: ### Question: {input}
-
-
-### Ground Truth Answer: {label}
-
-
-### Student Answer: {output}
-
-
-For the above question, please verify if the student's answer is equivalent to the ground truth answer.
-Do not solve the question by yourself; just check if the student's answer is equivalent to the ground truth answer.
-If the student's answer is correct, output "Final Decision: Yes". If the student's answer is incorrect, output Final Decision: No. Assistant:"""
-
 _PROMPTS = {
-    "general-quality": (_GENERAL_QUALITY_TEMPLATE, "dc5690758431cfeb5d5eb308540eddb728a581ef2c341a73ca12fb4beaa6e6b1"),
+    "general-quality": (
+        judge_utils.general_quality_template,
+        "dc5690758431cfeb5d5eb308540eddb728a581ef2c341a73ca12fb4beaa6e6b1",
+    ),
     "general-quality_ref": (
-        _GENERAL_QUALITY_REF_TEMPLATE,
+        judge_utils.general_quality_ref_template,
         "33907cb811254249db7fd78683ebb7c2cc194c9e04dc78472dde0663b0762d4e",
     ),
     "general-web_instruct_general_verifier": (
-        _WEB_INSTRUCT_GENERAL_VERIFIER_TEMPLATE,
+        judge_utils.web_instruct_general_verifier_template,
         "6d14cbfb0909d57f3f607d3dc92f9f35ee98219434f62b3ab7346c95dc29b098",
     ),
 }
-_SESSION: Any = None
 _EXECUTORS: dict[int, ThreadPoolExecutor] = {}
 
 
@@ -128,20 +70,6 @@ class GeneralJudgeConfig:
     check_context: bool = False
 
 
-def _number_setting(args: Any, attribute: str, environment: str, default: int | float) -> int | float:
-    value = getattr(args, attribute, None)
-    if value is None:
-        value = os.environ.get(environment, default)
-    expected_type = int if isinstance(default, int) else float
-    try:
-        parsed = expected_type(value)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"{environment} must be a finite number") from error
-    if isinstance(parsed, float) and not math.isfinite(parsed):
-        raise ValueError(f"{environment} must be a finite number")
-    return parsed
-
-
 def general_judge_config(args: Any) -> GeneralJudgeConfig:
     """Resolve general-judge settings without requiring Open-Instruct or LiteLLM."""
     api_base = (
@@ -158,15 +86,15 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
     model = str(model)
     if model.startswith("hosted_vllm/"):
         model = model.removeprefix("hosted_vllm/")
-    max_tokens = int(_number_setting(args, "llm_judge_max_tokens", "OI_MILES_JUDGE_MAX_TOKENS", 2048))
+    max_tokens = int(service.number_setting(args, "llm_judge_max_tokens", "OI_MILES_JUDGE_MAX_TOKENS", 2048))
     max_context_length = int(
-        _number_setting(args, "llm_judge_max_context_length", "OI_MILES_JUDGE_MAX_CONTEXT_LENGTH", 32768)
+        service.number_setting(args, "llm_judge_max_context_length", "OI_MILES_JUDGE_MAX_CONTEXT_LENGTH", 32768)
     )
-    temperature = float(_number_setting(args, "llm_judge_temperature", "OI_MILES_JUDGE_TEMPERATURE", 1.0))
-    timeout = float(_number_setting(args, "llm_judge_timeout", "OI_MILES_JUDGE_TIMEOUT", 600.0))
-    seed = int(_number_setting(args, "seed", "OI_MILES_JUDGE_SEED", 1))
+    temperature = float(service.number_setting(args, "llm_judge_temperature", "OI_MILES_JUDGE_TEMPERATURE", 1.0))
+    timeout = float(service.number_setting(args, "llm_judge_timeout", "OI_MILES_JUDGE_TIMEOUT", 600.0))
+    seed = int(service.number_setting(args, "seed", "OI_MILES_JUDGE_SEED", 1))
     max_concurrent_calls = int(
-        _number_setting(args, "llm_judge_max_concurrent_calls", "OI_MILES_JUDGE_MAX_CONCURRENT_CALLS", 256)
+        service.number_setting(args, "llm_judge_max_concurrent_calls", "OI_MILES_JUDGE_MAX_CONCURRENT_CALLS", 256)
     )
     if max_tokens < 1 or max_context_length < 1 or timeout <= 0 or max_concurrent_calls < 1:
         raise ValueError("general-judge token limits, timeout, and concurrency must be positive")
@@ -246,15 +174,7 @@ def build_judge_prompt(name: str, *, query: str, prediction: str, target: Any) -
 
 
 def _get_session() -> Any:
-    global _SESSION
-    if _SESSION is not None:
-        return _SESSION
-    session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(pool_connections=256, pool_maxsize=256)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    _SESSION = session
-    return session
+    return service.http_session(pool_size=256)
 
 
 def _get_executor(max_workers: int) -> ThreadPoolExecutor:

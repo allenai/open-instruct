@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.infrastructure import artifacts
 
 
 def poll_round(root, rank, count, member):
@@ -30,9 +31,7 @@ def poll_round(root, rank, count, member):
             members[str(i)] != previous.get("members", {}).get(str(i)) for i in range(count)
         ):
             state["round"] = {"id": uuid.uuid4().hex, "members": dict(members)}
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(state))
-        temporary.replace(path)
+        artifacts.atomic_json(path, state)
         current = state.get("round", {})
         return current.get("id") if current.get("members", {}).get(str(rank)) == member else None
 

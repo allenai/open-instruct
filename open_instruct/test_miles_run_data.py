@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles.datasets import run_data
+from open_instruct.miles.rewards import task_verifiers
 
 
 class Tokenizer:
@@ -260,7 +261,7 @@ def test_prepared_mode_rejects_holdout_overlap(environment, tmp_path):
     ],
 )
 def test_unsupported_preparation_fails_without_runtime_imports(data, monkeypatch):
-    monkeypatch.setattr(run_data.importlib, "import_module", lambda name: pytest.fail(f"Imported {name}"))
+    monkeypatch.setattr(task_verifiers.importlib, "import_module", lambda name: pytest.fail(f"Imported {name}"))
     with pytest.raises(ValueError):
         run_data.validate_data(data)
 
@@ -279,7 +280,9 @@ def test_modern_if_adapts_target_without_mutation(monkeypatch):
             calls.append(label)
             return run_data.RewardResult(0.5)
 
-    monkeypatch.setattr(run_data.importlib, "import_module", lambda name: SimpleNamespace(IFEvalVerifier=Verifier))
+    monkeypatch.setattr(
+        task_verifiers.importlib, "import_module", lambda name: SimpleNamespace(IFEvalVerifier=Verifier)
+    )
     target = {"instruction_id": ["one"], "kwargs": [{"count": None}]}
     before = copy.deepcopy(target)
     result = asyncio.run(run_data.ManifestIFVerifier().async_call([], "text", target))

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request
@@ -22,9 +23,15 @@ from urllib import request
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True))
-    temporary.replace(path)
+    # This file is transported alone; keep publication independent of package imports.
+    temporary = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
+    stream = temporary.open("x")
+    try:
+        with stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def result_directory(receipt):

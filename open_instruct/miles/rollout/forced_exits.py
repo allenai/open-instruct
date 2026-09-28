@@ -37,7 +37,7 @@ def thinking_end(tokens, tokenizer):
     return len(tokens)
 
 
-def uniform_positions(tokens, close_ids, count, max_prefix, tokenizer):
+def uniform_positions(tokens, count, max_prefix, tokenizer):
     """Spread cuts over actual paragraph boundaries, preserving original token IDs."""
     end = min(thinking_end(tokens, tokenizer), max_prefix)
     candidates, tail = [], ""
@@ -133,7 +133,6 @@ class ForcedExitRollout(common.InferenceRolloutFn):
         response_ids = parent.tokens[len(parent.tokens) - parent.response_length :]
         positions = uniform_positions(
             response_ids,
-            close_ids,
             args.olmo_core.forced_exit_positions,
             args.rollout_max_response_len - len(close_ids) - args.olmo_core.forced_exit_answer_tokens,
             state.tokenizer,

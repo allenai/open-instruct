@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles.configuration import topology
+from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import cluster, launch
 from open_instruct.miles.rewards import general_judge, judge_registry, judging, rewards
@@ -229,7 +230,7 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatc
             "verifiers": [{"name": "general-quality", "target": "", "weight": 1}],
         },
     )
-    args = SimpleNamespace(olmo_core=SimpleNamespace(reward_config=str(path)), seed=17)
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path)), seed=17)
     assert asyncio.run(rewards.registered_reward(args, sample)) == 0.8
     request = state["requests"][-1][1]["messages"][0]["content"]
     assert "entire conversation" in request and "last user message" not in request

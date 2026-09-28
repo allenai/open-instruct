@@ -25,7 +25,6 @@ def test_real_http_retry_budget_and_recovery(monkeypatch):
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     monkeypatch.setattr(code_rewards, "RETRY", code_rewards.RETRY.new(backoff_factor=0))
-    monkeypatch.setattr(code_rewards, "_SESSION", None)
     try:
         report = readiness_services.exercise(f"http://127.0.0.1:{server.server_port}")
         assert report["passed"] and len(report["cases"]) == 6
@@ -34,8 +33,8 @@ def test_real_http_retry_budget_and_recovery(monkeypatch):
         assert len(exhausted["attempts"]) == code_rewards.RETRY.total + 1
         assert report["cases"][3]["score"] == 1
     finally:
-        if code_rewards._SESSION is not None:
-            code_rewards._SESSION.close()
+        code_rewards._get_session().close()
+        code_rewards.service.http_session.cache_clear()
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)

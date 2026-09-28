@@ -1,8 +1,6 @@
 """Immutable researcher-run data preparation, independent of sibling repositories."""
 
-import ast
 import copy
-import dataclasses
 import hashlib
 import importlib
 import json
@@ -15,6 +13,14 @@ from pathlib import Path
 
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.rewards import task_verifiers
+
+# Preserve factory paths in existing prepared datasets and reward registries.
+RewardConfig = task_verifiers.RewardConfig
+RewardResult = task_verifiers.RewardResult
+MultiplicationVerifier = task_verifiers.MultiplicationVerifier
+R1FormatVerifier = task_verifiers.R1FormatVerifier
+ManifestIFVerifier = task_verifiers.ManifestIFVerifier
 
 TASKS = {
     "gsm8k": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
@@ -32,72 +38,15 @@ FACTORIES = {
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "strict_math": "open_instruct.ground_truth_utils.StrictMathVerifier",
     "ifeval_old": "open_instruct.ground_truth_utils.IFEvalVerifierOld",
-    "ifeval": "open_instruct.miles.datasets.run_data.ManifestIFVerifier",
-    "multiplication": "open_instruct.miles.datasets.run_data.MultiplicationVerifier",
-    "r1_format": "open_instruct.miles.datasets.run_data.R1FormatVerifier",
+    "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
+    "multiplication": "open_instruct.miles.rewards.task_verifiers.MultiplicationVerifier",
+    "r1_format": "open_instruct.miles.rewards.task_verifiers.R1FormatVerifier",
 }
 ANSWER_PREFIX = (
     "Solve the following problem step by step. The last line of your response should be the answer to "
     "the problem in form Answer: $Answer (without quotes) where $Answer is the answer to the problem."
 )
 ANSWER_SUFFIX = 'Remember to put your answer on its own line after "Answer:"'
-
-
-@dataclasses.dataclass
-class RewardConfig:
-    pass
-
-
-@dataclasses.dataclass
-class RewardResult:
-    score: float
-    cost: float = 0.0
-
-
-class MultiplicationVerifier:
-    """Preserve the baseline's answer-tag numeric scorer."""
-
-    def __init__(self, verifier_config=None):
-        pass
-
-    @classmethod
-    def get_config_class(cls):
-        return RewardConfig
-
-    async def async_call(self, tokens, prediction, label, **kwargs):
-        try:
-            answer = prediction[prediction.find("<answer>") + len("<answer>") : prediction.find("</answer>")]
-            score = float(float(answer.replace(",", "").strip()) == float(_scalar(label)))
-        except (TypeError, ValueError):
-            score = 0.0
-        return RewardResult(score)
-
-
-class R1FormatVerifier(MultiplicationVerifier):
-    async def async_call(self, tokens, prediction, label, **kwargs):
-        return RewardResult(float(re.match(r".*?</think>\s*<answer>.*?</answer>", prediction, re.DOTALL) is not None))
-
-
-class ManifestIFVerifier(MultiplicationVerifier):
-    """Translate canonical baseline constraint targets to OI's legacy list wrapper."""
-
-    async def async_call(self, tokens, prediction, label, **kwargs):
-        target = label
-        if isinstance(target, str):
-            try:
-                target = json.loads(target)
-            except ValueError:
-                target = ast.literal_eval(target)
-        if isinstance(target, list):
-            if len(target) != 1:
-                raise InputError("IF target requires exactly one constraint bundle")
-            target = target[0]
-            if isinstance(target, str):
-                target = json.loads(target)
-        if not isinstance(target, dict) or "instruction_id" not in target or "kwargs" not in target:
-            raise InputError("IF target requires instruction_id and kwargs")
-        factory = importlib.import_module("open_instruct.ground_truth_utils").IFEvalVerifier
-        return await factory().async_call(tokens, prediction, repr([target]), **kwargs)
 
 
 def _encoded(value):
@@ -146,19 +95,6 @@ def _rows(raw, source="Data JSONL"):
             raise InputError(f"{source}: line {line_number}: Data JSONL must contain objects, not arrays or scalars.")
         values.append(row)
     return values
-
-
-def _scalar(target):
-    if isinstance(target, list):
-        if len(target) != 1:
-            raise InputError("Expected a singleton answer")
-        target = target[0]
-    if target is None or not str(target).strip() or isinstance(target, dict):
-        raise InputError("Expected a nonempty scalar answer")
-    normalized = str(target).strip()
-    if normalized.startswith("[") and normalized.endswith("]"):
-        raise InputError("Scalar answer must not be a stringified list")
-    return normalized.replace(",", "")
 
 
 def validate_data(data):
@@ -396,7 +332,7 @@ def _tasks(data, tokenizer, template, seed):
                 json.dumps(target, sort_keys=True) if verifier == "ifeval_old" and isinstance(target, dict) else target
             )
             if verifier in ("gsm8k", "multiplication"):
-                target = _scalar(target)
+                target = task_verifiers.scalar_target(target)
             elif verifier == "math":
                 if isinstance(target, list) and len(target) == 1:
                     target = target[0]

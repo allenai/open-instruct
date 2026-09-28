@@ -43,10 +43,10 @@ def test_positions_use_paragraphs_and_reserve_answer_budget():
         decode=lambda ids, **kw: "".join({1: "work", 2: "\n\n", 3: "next", 8: "</", 9: "think>"}[i] for i in ids)
     )
     tokens = [1, 2, 3, 2, 1, 2, 8, 9]
-    assert forced_exits.uniform_positions(tokens, [8, 9], 5, 100, tokenizer) == [2, 4, 6]
-    assert forced_exits.uniform_positions(tokens, [8, 9], 5, 4, tokenizer) == [2, 4]
-    assert forced_exits.uniform_positions([1, 3], [8, 9], 5, 100, tokenizer) == []
-    assert forced_exits.uniform_positions(tokens, [8, 9], 2, 100, tokenizer) == [4, 6]
+    assert forced_exits.uniform_positions(tokens, 5, 100, tokenizer) == [2, 4, 6]
+    assert forced_exits.uniform_positions(tokens, 5, 4, tokenizer) == [2, 4]
+    assert forced_exits.uniform_positions([1, 3], 5, 100, tokenizer) == []
+    assert forced_exits.uniform_positions(tokens, 2, 100, tokenizer) == [4, 6]
 
 
 def test_cut_groups_do_not_change_natural_advantages():
@@ -360,7 +360,7 @@ def test_bpe_merged_natural_close_is_detected():
         decode=lambda ids, **kw: {1: "work\n\n", 2: ".</", 3: "think", 4: ">\n\n", 5: "42\n\n"}[ids[0]]
     )
     assert forced_exits.thinking_end([1, 2, 3, 4, 5], tokenizer) == 1
-    assert forced_exits.uniform_positions([1, 2, 3, 4, 5], [20, 21, 22], 5, 100, tokenizer) == [1]
+    assert forced_exits.uniform_positions([1, 2, 3, 4, 5], 5, 100, tokenizer) == [1]
 
 
 def test_zero_advantage_cuts_skip_compute_without_reweighting_or_losing_labels():

@@ -23,7 +23,6 @@ from open_instruct.miles.evaluation import evaluation
     [
         ("async_capacity.py", "configuration/async_capacity.py", None),
         ("infra_timeouts.py", "infrastructure/infra_timeouts.py", None),
-        ("publication/policy_versions.py", "datasets/policy_versions.py", None),
         ("publication/state.py", "infrastructure/artifacts.py", {"atomic_json"}),
         ("scoring.py", "configuration/config.py", {"ScoringPass", "scoring_pass"}),
         ("validation.py", "configuration/validation.py", {"integer", "number", "mapping", "fields"}),

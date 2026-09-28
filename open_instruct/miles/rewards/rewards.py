@@ -249,13 +249,20 @@ class _IsolatedVerifier:
         return result
 
 
-@functools.lru_cache(maxsize=32)
-def _instantiate(spec_json):
-    spec = json.loads(spec_json)
+def _resolve_verifier(spec, *, isolate_symbolic=False):
     module, _, symbol = spec["factory"].rpartition(".")
     factory = getattr(importlib.import_module(module), symbol)
     config = factory.get_config_class()(**spec.get("config", {}))
+    if isolate_symbolic and any(f"{base.__module__}.{base.__name__}" in _MATH_FACTORIES for base in factory.__mro__):
+        return _IsolatedVerifier(spec)
     return factory(verifier_config=config, **spec.get("kwargs", {}))
+
+
+@functools.lru_cache(maxsize=32)
+def _instantiate(spec_json):
+    # Only the subprocess worker caches instances by specification. Registry names
+    # retain separate instances even when two names use the same factory/config.
+    return _resolve_verifier(json.loads(spec_json))
 
 
 def _math_worker():
@@ -287,16 +294,7 @@ def _registry(path):
     document = json.loads(Path(path).read_text())
     if not isinstance(document, dict) or not document:
         raise ValueError("reward_config must map verifier names to factory/config objects")
-    result = {}
-    for name, spec in document.items():
-        module, _, symbol = spec["factory"].rpartition(".")
-        factory = getattr(importlib.import_module(module), symbol)
-        config = factory.get_config_class()(**spec.get("config", {}))
-        symbolic = any(f"{base.__module__}.{base.__name__}" in _MATH_FACTORIES for base in factory.__mro__)
-        result[name] = (
-            _IsolatedVerifier(spec) if symbolic else factory(verifier_config=config, **spec.get("kwargs", {}))
-        )
-    return result
+    return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
 
 
 async def _score(args, sample):
@@ -304,16 +302,17 @@ async def _score(args, sample):
     metadata = sample.metadata
     if not isinstance(metadata, dict) or not isinstance(metadata.get("verifiers"), list) or not metadata["verifiers"]:
         raise ValueError("Each sample requires nonempty metadata.verifiers")
+    weighted_specs = []
     for spec in metadata["verifiers"]:
         if spec["name"] not in registry:
             raise ValueError(f"Verifier {spec['name']!r} is absent from the trusted reward registry")
-        _finite(spec.get("weight", 1.0), "weight")
+        weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
     response = sample.response
-    if getattr(args.olmo_core, "reward_zero_truncated", False) and status == "truncated":
+    if args.olmo_core.reward_zero_truncated and status == "truncated":
         reason = "truncated"
-    elif getattr(args.olmo_core, "reward_final_answer_only", False):
+    elif args.olmo_core.reward_final_answer_only:
         _, separator, response = response.rpartition("</think>")
         if not separator or not response.strip():
             reason = "missing_final_answer"
@@ -326,20 +325,17 @@ async def _score(args, sample):
         return 0.0
     components = []
     total = 0.0
-    for spec in metadata["verifiers"]:
+    for spec, weight in weighted_specs:
         name = spec["name"]
-        if name not in registry:
-            raise ValueError(f"Verifier {name!r} is absent from the trusted reward registry")
-        weight = _finite(spec.get("weight", 1.0), "weight")
         # response_length includes tool observations. Their tokens remain in the
         # trajectory, while the policy loss uses the separate MILES loss mask.
         tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
-        if getattr(args.olmo_core, "reward_final_answer_only", False):
+        if args.olmo_core.reward_final_answer_only:
             # Text math verifiers do not use token IDs. Never pass the hidden
             # reasoning's tokens alongside an extracted final-answer string.
             tokens = []
         if judge_registry.bound(name):
-            if getattr(args.olmo_core, "reward_final_answer_only", False):
+            if args.olmo_core.reward_final_answer_only:
                 raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")
             score = await general_judge.general_judge_score(
                 args, sample, name=name, target=copy.deepcopy(spec["target"])

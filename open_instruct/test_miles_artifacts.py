@@ -7,17 +7,20 @@ from pathlib import Path
 
 import pytest
 
+from open_instruct.miles.evaluation import evaluation_runner
 from open_instruct.miles.infrastructure import artifacts as state
 
 
-def test_atomic_json_creates_parent_and_publishes(tmp_path):
+@pytest.mark.parametrize("write", [state.atomic_json, evaluation_runner.write_json])
+def test_atomic_json_creates_parent_and_publishes(tmp_path, write):
     target = tmp_path / "run" / "receipt.json"
-    state.atomic_json(target, {"step": 1})
+    write(target, {"step": 1})
     assert json.loads(target.read_text()) == {"step": 1}
     assert list(target.parent.iterdir()) == [target]
 
 
-def test_atomic_json_concurrent_writers(tmp_path, monkeypatch):
+@pytest.mark.parametrize("write", [state.atomic_json, evaluation_runner.write_json])
+def test_atomic_json_concurrent_writers(tmp_path, monkeypatch, write):
     target = tmp_path / "receipt.json"
     target.write_text('{"step": 0}')
     barrier = threading.Barrier(2)
@@ -32,7 +35,7 @@ def test_atomic_json_concurrent_writers(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "replace", publish)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(state.atomic_json, target, value) for value in values]
+        futures = [pool.submit(write, target, value) for value in values]
         for future in futures:
             future.result(timeout=15)
 
@@ -40,8 +43,12 @@ def test_atomic_json_concurrent_writers(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == [target]
 
 
-@pytest.mark.parametrize("failure", ["serialization", "fsync", "replace"])
-def test_atomic_json_failure_preserves_receipt_and_cleans_temp(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize(
+    "write,failure",
+    [(state.atomic_json, failure) for failure in ("serialization", "fsync", "replace")]
+    + [(evaluation_runner.write_json, failure) for failure in ("serialization", "replace")],
+)
+def test_atomic_json_failure_preserves_receipt_and_cleans_temp(tmp_path, monkeypatch, write, failure):
     target = tmp_path / "receipt.json"
     original = '{"step": 0}'
     target.write_text(original)
@@ -58,9 +65,9 @@ def test_atomic_json_failure_preserves_receipt_and_cleans_temp(tmp_path, monkeyp
         else:
             patch.setattr(Path, "replace", fail)
         with pytest.raises((TypeError, OSError)):
-            state.atomic_json(target, value)
+            write(target, value)
 
     assert target.read_text() == original
     assert list(tmp_path.iterdir()) == [target]
-    state.atomic_json(target, {"step": 2})
+    write(target, {"step": 2})
     assert json.loads(target.read_text()) == {"step": 2}
