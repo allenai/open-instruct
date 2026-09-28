@@ -2,6 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
+
 ### Added
 - Add opt-in MILES GRPO with OLMo-core training, SGLang serving, structured configuration, dataset and reward integration, and dedicated CPU/runtime validation. The pinned MILES fork owns the Core adapter, publication, packing, compiler caches and inference recording. Core is rebased onto upstream main with explicit MILES SwiGLU rounding opt-in and durable runtime source tags. MoE gradient clipping remains optimizer-owned to match the updated Core constructor, with CPU signature regression coverage. Receipt publication uses unique temporary files for concurrent writes and cleans up failed writes. The gsm8k task uses the established dataset; gsm8k-less-noise explicitly selects the informally cleaned variant. Existing training paths and their dependency pins remain unchanged (PR URL pending).
 - Count cached SFT token statistics with Arrow batches instead of materializing a duplicate tokenized dataset (https://github.com/allenai/open-instruct/pull/1904).

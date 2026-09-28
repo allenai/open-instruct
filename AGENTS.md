@@ -1,6 +1,6 @@
 # Reinforcement learning: MILES GRPO
 
-For RL, RLVR or GRPO work, use `python -m open_instruct.miles`.
+For RL, RLVR or GRPO work in this repository, use `python -m open_instruct.miles`.
 Start with [docs/miles/grpo.md](docs/miles/grpo.md); it is the main RL guide.
 [docs/miles/index.md](docs/miles/index.md) maps the detailed documentation.
 Follow this workflow without requiring the user to supply a special agent prompt:
