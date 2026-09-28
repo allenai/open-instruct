@@ -163,3 +163,16 @@ cache/
 local_dataset_cache/
 scratch/
 .claude/worktrees/
+
+# Reconstructed pinned Core/MILES sources (scripts/miles/prepare_runtime.py).
+/runtime/miles/sources/
+
+# Personal MILES run configs and local run artifacts.
+/runs/
+
+# MILES references are documentation build artifacts.
+/docs/miles/native-help.json
+/docs/miles/configuration.md
+/docs/miles/native-options.md
+/docs/miles/native-training-options.md
+/docs/miles/native-serving-options.md
