@@ -1,9 +1,11 @@
 """Check opt-in options reach native MoE constructors and reject dense misuse."""
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
 from miles.backends.core_utils import moe_models, standard_models
+from olmo_core.train.train_module import transformer as train_transformer
 
 from open_instruct.miles.configuration.config import CoreConfig
 
@@ -12,7 +14,11 @@ from open_instruct.miles.configuration.config import CoreConfig
 def test_native_optimizer_and_reduction_options(enabled, monkeypatch):
     captured = {}
 
+    signature = inspect.signature(train_transformer.OLMoDDPTrainModule.__init__)
+
     def constructor(**kwargs):
+        native = {k: v for k, v in kwargs.items() if k not in {"hf_config", "hf_state", "startup_args"}}
+        signature.bind(None, **native)
         captured.update(kwargs)
         return SimpleNamespace()
 
@@ -21,7 +27,11 @@ def test_native_optimizer_and_reduction_options(enabled, monkeypatch):
         olmo_core=CoreConfig(compile_optimizer=enabled, use_reduce_scatter=enabled, expert_parallel_size=2),
         clip_grad=1.0,
     )
-    module = moe_models.build_train_module(args, common={}, optim={"lr": 1e-6}, hf_config=None, hf_state={})
+    common = dict(model=object(), rank_microbatch_size=16, max_sequence_length=16, max_grad_norm=args.clip_grad)
+    module = moe_models.build_train_module(args, common=common, optim={"lr": 1e-6}, hf_config=None, hf_state={})
+    assert "max_grad_norm" not in captured
+    assert captured["optim"].max_grad_norm == args.clip_grad
+    assert common["max_grad_norm"] == args.clip_grad
     assert captured["optim"].compile is enabled
     assert captured["dp_config"].use_reduce_scatter is enabled
     assert captured["ep_config"].degree == 2
