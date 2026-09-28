@@ -1,0 +1,1464 @@
+{
+  "control_experiment": "01M3FX32BWWTQMGJQWKDYD04GF",
+  "treatment_experiment": "01M3G3RPVQAYNP9JFCXR4M23J2",
+  "evaluation_experiment": "01M3MAVQ03VB614CNSEC2PYDQ7",
+  "training_image": "01M3FSKS55QG5150J456R1QDVR",
+  "training_source": "f1b34ccdd159efa21adade77220137c6b1bf595f",
+  "core_source": "3c2ad5989f88f8cfb04c983b4243e1a502e4ea1d",
+  "evaluation_image": "01M3FNHY23PRR3H6XP6ZXVD244",
+  "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+  "evaluation_worker": {
+    "dataset": "01M3FSV26HKB8M3GM7A1VA21JT",
+    "manifest_sha256": "ba21e50da39eb88573c8b1e5cb8104706a20e35b96c725dea9f28de09d377bb8"
+  },
+  "runner_sha256": "8f0f472cac916ac0f1cb489ecf7729cb81ab46b0732c65b2dcfa28770ef2fb42",
+  "tasks": [
+    {
+      "generation": {
+        "do_sample": true,
+        "max_tokens": 16384,
+        "num_samples": 4,
+        "stop_sequences": [],
+        "temperature": 0.8,
+        "top_k": -1,
+        "top_p": 0.95
+      },
+      "interval": 100,
+      "scoring": {},
+      "task": "development"
+    }
+  ],
+  "checkpoint": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/eval-snapshots/update-00000300-recovered/hf",
+  "arms": {
+    "control": {
+      "source": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/evaluation/results/update-00000300-47ae9fc9104a8071",
+      "correction": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/evaluation/corrections/development-gold-v2/update-00000300-47ae9fc9104a8071",
+      "files": {
+        "progress.json": {
+          "arm": "checkpoint",
+          "completed": 2048,
+          "expected": 2048,
+          "seconds": 2611.1187149691395
+        },
+        "evaluation.json": {
+          "status": "complete"
+        },
+        "complete.json": {
+          "arm": "checkpoint",
+          "responses": 2048,
+          "status": "complete"
+        },
+        "provenance.json": {
+          "checkpoint": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/eval-snapshots/update-00000300/hf",
+          "evaluation": {
+            "budget": "ai2/oe-other",
+            "cluster": "ai2/holmes",
+            "final": true,
+            "gpus": 1,
+            "image": "01M3FNHY23PRR3H6XP6ZXVD244",
+            "initial": true,
+            "interval": 500,
+            "mode": "background",
+            "mounts": [
+              {
+                "mount_path": "/weka/oe-training-default",
+                "weka": "oe-training-default"
+              },
+              {
+                "mount_path": "/weka/oe-adapt-default",
+                "weka": "oe-adapt-default"
+              },
+              {
+                "mount_path": "/weka/olmo-3p5-checkpoints",
+                "weka": "olmo-3p5-checkpoints"
+              }
+            ],
+            "name": "hero-math-learning-20260926",
+            "revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+            "root": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926",
+            "secrets": {
+              "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+            },
+            "server_args": [],
+            "submit_timeout": 30,
+            "tasks": [
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 32,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "aime2024"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 32,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "aime2025"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 100,
+                "scoring": {},
+                "task": "development"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "gpqa_diamond"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "gsm8k"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "humaneval"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "ifbench"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "ifeval"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 8,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "math500"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "omega500"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "omega500_out"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "zebralogic"
+              }
+            ],
+            "timeout": "24h",
+            "total_updates": 1000,
+            "worker": {
+              "dataset": "01M3FSV26HKB8M3GM7A1VA21JT",
+              "manifest_sha256": "ba21e50da39eb88573c8b1e5cb8104706a20e35b96c725dea9f28de09d377bb8"
+            },
+            "workspace": "ai2/open-instruct-dev"
+          },
+          "group_id": "47ae9fc9104a8071",
+          "runner_sha256": "8f0f472cac916ac0f1cb489ecf7729cb81ab46b0732c65b2dcfa28770ef2fb42",
+          "schema_version": 1,
+          "status": "pending",
+          "tasks": [
+            {
+              "generation": {
+                "do_sample": true,
+                "max_tokens": 16384,
+                "num_samples": 4,
+                "stop_sequences": [],
+                "temperature": 0.8,
+                "top_k": -1,
+                "top_p": 0.95
+              },
+              "interval": 100,
+              "scoring": {},
+              "task": "development"
+            }
+          ],
+          "training": {
+            "beaker_experiment_id": "01M3FX32BWWTQMGJQWKDYD04GF",
+            "name": "hero-math-learning-20260926",
+            "root": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926",
+            "wandb": {
+              "entity": "ai2-llm",
+              "id": "ys0j38k4",
+              "mode": "online",
+              "project": "olmo-rl-comparison"
+            }
+          },
+          "update": 300
+        },
+        "generation-provenance.json": {
+          "arm": "checkpoint",
+          "checkpoint": {
+            "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/eval-snapshots/update-00000300/hf",
+            "hashes": {
+              "config.json": "473861697f1253facc98fdfa0b9192086c9fed82d2e6afeff1ad95a95f6cf757",
+              "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a",
+              "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+              "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+              "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04"
+            },
+            "tensor_count": 23441,
+            "layout": "single_file",
+            "shards": {
+              "model.safetensors": 24995323880
+            }
+          },
+          "panel": {
+            "sources": {
+              "gsm8k": {
+                "repo": "openai/gsm8k",
+                "config": "main",
+                "split": "test",
+                "revision": "740312add88f781978c0658806c59bc2815b9866",
+                "count": 1319
+              },
+              "ifbench": {
+                "repo": "allenai/IFBench_test",
+                "config": null,
+                "split": "train",
+                "revision": "2e8a48de45ff3bf41242f927254ca81b59ca3ae2",
+                "count": 300
+              },
+              "math500": {
+                "repo": "HuggingFaceH4/MATH-500",
+                "config": null,
+                "split": "test",
+                "revision": "6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be",
+                "count": 500
+              },
+              "humaneval": {
+                "repo": "openai/openai_humaneval",
+                "config": null,
+                "split": "test",
+                "revision": "7dce6050a7d6d172f3cc5c32aa97f52fa1a2e544",
+                "count": 164
+              },
+              "omega500": {
+                "repo": "allenai/omega-500",
+                "revision": "113a7eb896b8c1f7d781eb5f00713972074bae42",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 500,
+                "count": 500,
+                "task": "omega_500:hillclimb"
+              },
+              "omega500_out": {
+                "repo": "allenai/omega-explorative",
+                "revision": "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95",
+                "split": "train",
+                "config": null,
+                "data_files": [
+                  "algebra_func_area/test_out-00000-of-00001.parquet",
+                  "algebra_func_derivative_sign/test_out-00000-of-00001.parquet",
+                  "algebra_func_extrema/test_out-00000-of-00001.parquet",
+                  "algebra_func_extrema_coords/test_out-00000-of-00001.parquet",
+                  "algebra_func_intersection/test_out-00000-of-00001.parquet",
+                  "algebra_func_intersection_coords/test_out-00000-of-00001.parquet",
+                  "algebra_func_zeros/test_out-00000-of-00001.parquet",
+                  "algebra_linear_equation/test_out-00000-of-00001.parquet",
+                  "arithmetic_gcd/test_out-00000-of-00001.parquet",
+                  "arithmetic_list_prime_factors/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_determinant/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_eigenvalues/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_inverse/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_multiplication/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_power/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_rank/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_svd/test_out-00000-of-00001.parquet",
+                  "arithmetic_mixed/test_out-00000-of-00001.parquet",
+                  "combinatory_distribution/test_out-00000-of-00001.parquet",
+                  "combinatory_pattern_matching/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_at_least_n_specific_fixed/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_exactly_n_specific_fixed/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_no_fixed_points/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_no_specific_letter_fixed/test_out-00000-of-00001.parquet",
+                  "geometry_polygon_chords/test_out-00000-of-00001.parquet",
+                  "geometry_polygon_color/test_out-00000-of-00001.parquet",
+                  "geometry_polygon_rotation/test_out-00000-of-00001.parquet",
+                  "logic_gridworld_blocked/test_out-00000-of-00001.parquet",
+                  "logic_puzzles_grid_chip/test_out-00000-of-00001.parquet",
+                  "logic_gridworld_knight_move/test_out-00000-of-00001.parquet",
+                  "logic_gridworld_rookmove/test_out-00000-of-00001.parquet",
+                  "logic_zebralogic/test_out-00000-of-00001.parquet",
+                  "numbertheory_qr_sum/test_out-00000-of-00001.parquet",
+                  "numbertheory_lte_qr/test_out-00000-of-00001.parquet",
+                  "numbertheory_ordered_lte/test_out-00000-of-00001.parquet"
+                ],
+                "source_count": 500,
+                "count": 500,
+                "task": "omega_500_out"
+              },
+              "aime2024": {
+                "repo": "allenai/aime-2022-2025",
+                "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 30,
+                "count": 30,
+                "task": "aime_2024"
+              },
+              "aime2025": {
+                "repo": "allenai/aime-2022-2025",
+                "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 30,
+                "count": 30,
+                "task": "aime_2025"
+              },
+              "gpqa_diamond": {
+                "repo": "Idavidrein/gpqa",
+                "revision": "83022cefff930aea54f654c0b282e74b9eeda5c6",
+                "split": "train",
+                "config": "gpqa_diamond",
+                "data_files": null,
+                "source_count": 198,
+                "count": 198,
+                "task": "gpqa_diamond:cot"
+              },
+              "zebralogic": {
+                "repo": "allenai/ZebraLogicBench-private",
+                "revision": "9f39ef490ae924437376657205025f26c0bd1af3",
+                "split": "test",
+                "config": "grid_mode",
+                "data_files": null,
+                "source_count": 1000,
+                "count": 500,
+                "task": "zebralogic:chat"
+              },
+              "ifeval": {
+                "repo": "google/IFEval",
+                "revision": "966cd89545d6b6acfd7638bc708b98261ca58e84",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 541,
+                "count": 541,
+                "task": "ifeval"
+              }
+            },
+            "panel_sha256": "878557691f64cbbc091fd5b2d6941c99f1e05108c7bafa8e3fe68e7f899b33e4",
+            "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+            "questions": 4582,
+            "completions": 22008,
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "top_k": -1,
+            "max_new_tokens": 16384,
+            "output_score_aggregation": "mean",
+            "context_length": 18432,
+            "note": "Requests frozen before model outputs; benchmark data never enters RL training."
+          },
+          "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+          "smoke": false,
+          "tasks": [
+            "development"
+          ],
+          "source_hashes": {
+            "legacy_score.py": "11d0116894837da6c09bcdea0d92727d02695701450a4482b260e7cea4c16a39",
+            "engine_common.py": "cb672170948bdaf0ab078849eef2db004ded074274faa4491e804169e1d7b387",
+            "score.py": "f51b22a67fc78a21e63193bd41aac7cbf76a2ad12c036e06b396b5f4380600f2",
+            "checkpoint_files.py": "f4422219a0ee608b44fdd52906fc3769346717f3f33f565f4a9f001a62547d05",
+            "worker.py": "d39ca947f362e569b18596eb3ff170ad1cc67fa020e278068e38e4813a715489",
+            "run.py": "79bdd1455a7ca3ff5011392dd470aa9ceb57c74822b46738211ef44e1b9fc97d"
+          }
+        },
+        "server-flags.json": [
+          "--tp-size",
+          "1",
+          "--trust-remote-code",
+          "--context-length",
+          "32768",
+          "--mem-fraction-static",
+          "0.6",
+          "--max-running-requests",
+          "64",
+          "--max-total-tokens",
+          "1179648",
+          "--chunked-prefill-size",
+          "16384",
+          "--max-mamba-cache-size",
+          "1024",
+          "--disable-radix-cache",
+          "--attention-backend",
+          "triton",
+          "--sampling-backend",
+          "pytorch",
+          "--cuda-graph-backend-decode",
+          "full",
+          "--cuda-graph-max-bs",
+          "64",
+          "--cuda-graph-backend-prefill",
+          "disabled",
+          "--skip-server-warmup",
+          "--sampling-defaults",
+          "openai"
+        ],
+        "panel-manifest.json": {
+          "sources": {
+            "gsm8k": {
+              "repo": "openai/gsm8k",
+              "config": "main",
+              "split": "test",
+              "revision": "740312add88f781978c0658806c59bc2815b9866",
+              "count": 1319
+            },
+            "ifbench": {
+              "repo": "allenai/IFBench_test",
+              "config": null,
+              "split": "train",
+              "revision": "2e8a48de45ff3bf41242f927254ca81b59ca3ae2",
+              "count": 300
+            },
+            "math500": {
+              "repo": "HuggingFaceH4/MATH-500",
+              "config": null,
+              "split": "test",
+              "revision": "6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be",
+              "count": 500
+            },
+            "humaneval": {
+              "repo": "openai/openai_humaneval",
+              "config": null,
+              "split": "test",
+              "revision": "7dce6050a7d6d172f3cc5c32aa97f52fa1a2e544",
+              "count": 164
+            },
+            "omega500": {
+              "repo": "allenai/omega-500",
+              "revision": "113a7eb896b8c1f7d781eb5f00713972074bae42",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 500,
+              "count": 500,
+              "task": "omega_500:hillclimb"
+            },
+            "omega500_out": {
+              "repo": "allenai/omega-explorative",
+              "revision": "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95",
+              "split": "train",
+              "config": null,
+              "data_files": [
+                "algebra_func_area/test_out-00000-of-00001.parquet",
+                "algebra_func_derivative_sign/test_out-00000-of-00001.parquet",
+                "algebra_func_extrema/test_out-00000-of-00001.parquet",
+                "algebra_func_extrema_coords/test_out-00000-of-00001.parquet",
+                "algebra_func_intersection/test_out-00000-of-00001.parquet",
+                "algebra_func_intersection_coords/test_out-00000-of-00001.parquet",
+                "algebra_func_zeros/test_out-00000-of-00001.parquet",
+                "algebra_linear_equation/test_out-00000-of-00001.parquet",
+                "arithmetic_gcd/test_out-00000-of-00001.parquet",
+                "arithmetic_list_prime_factors/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_determinant/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_eigenvalues/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_inverse/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_multiplication/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_power/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_rank/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_svd/test_out-00000-of-00001.parquet",
+                "arithmetic_mixed/test_out-00000-of-00001.parquet",
+                "combinatory_distribution/test_out-00000-of-00001.parquet",
+                "combinatory_pattern_matching/test_out-00000-of-00001.parquet",
+                "combinatory_probability_at_least_n_specific_fixed/test_out-00000-of-00001.parquet",
+                "combinatory_probability_exactly_n_specific_fixed/test_out-00000-of-00001.parquet",
+                "combinatory_probability_no_fixed_points/test_out-00000-of-00001.parquet",
+                "combinatory_probability_no_specific_letter_fixed/test_out-00000-of-00001.parquet",
+                "geometry_polygon_chords/test_out-00000-of-00001.parquet",
+                "geometry_polygon_color/test_out-00000-of-00001.parquet",
+                "geometry_polygon_rotation/test_out-00000-of-00001.parquet",
+                "logic_gridworld_blocked/test_out-00000-of-00001.parquet",
+                "logic_puzzles_grid_chip/test_out-00000-of-00001.parquet",
+                "logic_gridworld_knight_move/test_out-00000-of-00001.parquet",
+                "logic_gridworld_rookmove/test_out-00000-of-00001.parquet",
+                "logic_zebralogic/test_out-00000-of-00001.parquet",
+                "numbertheory_qr_sum/test_out-00000-of-00001.parquet",
+                "numbertheory_lte_qr/test_out-00000-of-00001.parquet",
+                "numbertheory_ordered_lte/test_out-00000-of-00001.parquet"
+              ],
+              "source_count": 500,
+              "count": 500,
+              "task": "omega_500_out"
+            },
+            "aime2024": {
+              "repo": "allenai/aime-2022-2025",
+              "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 30,
+              "count": 30,
+              "task": "aime_2024"
+            },
+            "aime2025": {
+              "repo": "allenai/aime-2022-2025",
+              "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 30,
+              "count": 30,
+              "task": "aime_2025"
+            },
+            "gpqa_diamond": {
+              "repo": "Idavidrein/gpqa",
+              "revision": "83022cefff930aea54f654c0b282e74b9eeda5c6",
+              "split": "train",
+              "config": "gpqa_diamond",
+              "data_files": null,
+              "source_count": 198,
+              "count": 198,
+              "task": "gpqa_diamond:cot"
+            },
+            "zebralogic": {
+              "repo": "allenai/ZebraLogicBench-private",
+              "revision": "9f39ef490ae924437376657205025f26c0bd1af3",
+              "split": "test",
+              "config": "grid_mode",
+              "data_files": null,
+              "source_count": 1000,
+              "count": 500,
+              "task": "zebralogic:chat"
+            },
+            "ifeval": {
+              "repo": "google/IFEval",
+              "revision": "966cd89545d6b6acfd7638bc708b98261ca58e84",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 541,
+              "count": 541,
+              "task": "ifeval"
+            }
+          },
+          "panel_sha256": "878557691f64cbbc091fd5b2d6941c99f1e05108c7bafa8e3fe68e7f899b33e4",
+          "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+          "questions": 4582,
+          "completions": 22008,
+          "temperature": 0.8,
+          "top_p": 0.95,
+          "top_k": -1,
+          "max_new_tokens": 16384,
+          "output_score_aggregation": "mean",
+          "context_length": 18432,
+          "note": "Requests frozen before model outputs; benchmark data never enters RL training."
+        }
+      },
+      "corrected": {
+        "complete.json": {
+          "update": 300,
+          "status": "complete"
+        },
+        "provenance.json": {
+          "source": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/evaluation/results/update-00000300-47ae9fc9104a8071",
+          "generation_sha256": "13c7564b94710b5d62f899185fcf84be042bde25705a02d58674e426b804c396",
+          "panel_sha256": "c24fa29a6a70672b7bcd04d5d6b80903fadc9a5d630ce50f0bad3c5c33b51fb5",
+          "scorer_sha256": "4cee25a4af63131f20c6d521c33eed4d8fdcb0d7db7cee566e55de00fca2fe44",
+          "questions": 512,
+          "responses": 2048,
+          "correction": "Flat accepted-gold list; original generations, extraction, and completion gates"
+        },
+        "publication.json": {
+          "run": {
+            "entity": "ai2-llm",
+            "id": "ys0j38k4",
+            "mode": "online",
+            "project": "olmo-rl-comparison"
+          },
+          "status": "published",
+          "update": 300
+        },
+        "metrics.json": {
+          "tasks": [
+            {
+              "task": "development_gold_v2",
+              "instances_saved": 2048,
+              "metrics": {
+                "score": {
+                  "mean": 0.35302734375
+                },
+                "completed_final_score": {
+                  "mean": 0.3486328125
+                },
+                "capped": {
+                  "mean": 0.2216796875
+                },
+                "tokens": {
+                  "mean": 9916.3720703125
+                },
+                "pass_at_1": {
+                  "mean": 0.3486328125
+                },
+                "pass_at_2": {
+                  "mean": 0.4319661458333333
+                },
+                "pass_at_4": {
+                  "mean": 0.515625
+                },
+                "all_four_correct": {
+                  "mean": 0.208984375
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "fp32": {
+      "source": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/evaluation/results/update-00000300-47ae9fc9104a8071",
+      "correction": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/evaluation/corrections/development-gold-v2/update-00000300-47ae9fc9104a8071",
+      "files": {
+        "progress.json": {
+          "arm": "checkpoint",
+          "completed": 2048,
+          "expected": 2048,
+          "seconds": 2570.0325115490123
+        },
+        "evaluation.json": {
+          "status": "complete"
+        },
+        "complete.json": {
+          "arm": "checkpoint",
+          "responses": 2048,
+          "status": "complete"
+        },
+        "provenance.json": {
+          "checkpoint": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/eval-snapshots/update-00000300-recovered/hf",
+          "evaluation": {
+            "budget": "ai2/oe-other",
+            "cluster": "ai2/holmes",
+            "final": true,
+            "gpus": 1,
+            "image": "01M3FNHY23PRR3H6XP6ZXVD244",
+            "initial": true,
+            "interval": 500,
+            "mode": "background",
+            "mounts": [
+              {
+                "mount_path": "/weka/oe-training-default",
+                "weka": "oe-training-default"
+              },
+              {
+                "mount_path": "/weka/oe-adapt-default",
+                "weka": "oe-adapt-default"
+              },
+              {
+                "mount_path": "/weka/olmo-3p5-checkpoints",
+                "weka": "olmo-3p5-checkpoints"
+              }
+            ],
+            "name": "hero-math-learning-fp32-head-20260926",
+            "revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+            "root": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926",
+            "secrets": {
+              "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+            },
+            "server_args": [],
+            "submit_timeout": 30,
+            "tasks": [
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 32,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "aime2024"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 32,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "aime2025"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 100,
+                "scoring": {},
+                "task": "development"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "gpqa_diamond"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "gsm8k"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "humaneval"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "ifbench"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "ifeval"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 8,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "math500"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "omega500"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "omega500_out"
+              },
+              {
+                "generation": {
+                  "do_sample": true,
+                  "max_tokens": 16384,
+                  "num_samples": 4,
+                  "stop_sequences": [],
+                  "temperature": 0.8,
+                  "top_k": -1,
+                  "top_p": 0.95
+                },
+                "interval": 500,
+                "scoring": {},
+                "task": "zebralogic"
+              }
+            ],
+            "timeout": "24h",
+            "total_updates": 1000,
+            "worker": {
+              "dataset": "01M3FSV26HKB8M3GM7A1VA21JT",
+              "manifest_sha256": "ba21e50da39eb88573c8b1e5cb8104706a20e35b96c725dea9f28de09d377bb8"
+            },
+            "workspace": "ai2/open-instruct-dev"
+          },
+          "group_id": "47ae9fc9104a8071",
+          "runner_sha256": "8f0f472cac916ac0f1cb489ecf7729cb81ab46b0732c65b2dcfa28770ef2fb42",
+          "schema_version": 1,
+          "status": "planned",
+          "tasks": [
+            {
+              "generation": {
+                "do_sample": true,
+                "max_tokens": 16384,
+                "num_samples": 4,
+                "stop_sequences": [],
+                "temperature": 0.8,
+                "top_k": -1,
+                "top_p": 0.95
+              },
+              "interval": 100,
+              "scoring": {},
+              "task": "development"
+            }
+          ],
+          "training": {
+            "beaker_experiment_id": "01M3G3RPVQAYNP9JFCXR4M23J2",
+            "name": "hero-math-learning-fp32-head-20260926",
+            "root": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926",
+            "wandb": {
+              "entity": "ai2-llm",
+              "id": "f649wb48",
+              "mode": "online",
+              "project": "olmo-rl-comparison"
+            }
+          },
+          "update": 300
+        },
+        "generation-provenance.json": {
+          "arm": "checkpoint",
+          "checkpoint": {
+            "path": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/eval-snapshots/update-00000300-recovered/hf",
+            "hashes": {
+              "tokenizer.json": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+              "tokenizer_config.json": "2317ca4e61ec1f0d8b0f578cbf621ed6aa42e3299f538a58a67e1a89dd32ab04",
+              "generation_config.json": "426753d51b06097de1404d5bfeeaa14552f25cfda82904dfb36914a643f2c091",
+              "config.json": "473861697f1253facc98fdfa0b9192086c9fed82d2e6afeff1ad95a95f6cf757",
+              "chat_template.jinja": "43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a"
+            },
+            "tensor_count": 23441,
+            "layout": "single_file",
+            "shards": {
+              "model.safetensors": 24995323880
+            }
+          },
+          "panel": {
+            "sources": {
+              "gsm8k": {
+                "repo": "openai/gsm8k",
+                "config": "main",
+                "split": "test",
+                "revision": "740312add88f781978c0658806c59bc2815b9866",
+                "count": 1319
+              },
+              "ifbench": {
+                "repo": "allenai/IFBench_test",
+                "config": null,
+                "split": "train",
+                "revision": "2e8a48de45ff3bf41242f927254ca81b59ca3ae2",
+                "count": 300
+              },
+              "math500": {
+                "repo": "HuggingFaceH4/MATH-500",
+                "config": null,
+                "split": "test",
+                "revision": "6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be",
+                "count": 500
+              },
+              "humaneval": {
+                "repo": "openai/openai_humaneval",
+                "config": null,
+                "split": "test",
+                "revision": "7dce6050a7d6d172f3cc5c32aa97f52fa1a2e544",
+                "count": 164
+              },
+              "omega500": {
+                "repo": "allenai/omega-500",
+                "revision": "113a7eb896b8c1f7d781eb5f00713972074bae42",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 500,
+                "count": 500,
+                "task": "omega_500:hillclimb"
+              },
+              "omega500_out": {
+                "repo": "allenai/omega-explorative",
+                "revision": "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95",
+                "split": "train",
+                "config": null,
+                "data_files": [
+                  "algebra_func_area/test_out-00000-of-00001.parquet",
+                  "algebra_func_derivative_sign/test_out-00000-of-00001.parquet",
+                  "algebra_func_extrema/test_out-00000-of-00001.parquet",
+                  "algebra_func_extrema_coords/test_out-00000-of-00001.parquet",
+                  "algebra_func_intersection/test_out-00000-of-00001.parquet",
+                  "algebra_func_intersection_coords/test_out-00000-of-00001.parquet",
+                  "algebra_func_zeros/test_out-00000-of-00001.parquet",
+                  "algebra_linear_equation/test_out-00000-of-00001.parquet",
+                  "arithmetic_gcd/test_out-00000-of-00001.parquet",
+                  "arithmetic_list_prime_factors/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_determinant/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_eigenvalues/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_inverse/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_multiplication/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_power/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_rank/test_out-00000-of-00001.parquet",
+                  "arithmetic_matrix_svd/test_out-00000-of-00001.parquet",
+                  "arithmetic_mixed/test_out-00000-of-00001.parquet",
+                  "combinatory_distribution/test_out-00000-of-00001.parquet",
+                  "combinatory_pattern_matching/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_at_least_n_specific_fixed/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_exactly_n_specific_fixed/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_no_fixed_points/test_out-00000-of-00001.parquet",
+                  "combinatory_probability_no_specific_letter_fixed/test_out-00000-of-00001.parquet",
+                  "geometry_polygon_chords/test_out-00000-of-00001.parquet",
+                  "geometry_polygon_color/test_out-00000-of-00001.parquet",
+                  "geometry_polygon_rotation/test_out-00000-of-00001.parquet",
+                  "logic_gridworld_blocked/test_out-00000-of-00001.parquet",
+                  "logic_puzzles_grid_chip/test_out-00000-of-00001.parquet",
+                  "logic_gridworld_knight_move/test_out-00000-of-00001.parquet",
+                  "logic_gridworld_rookmove/test_out-00000-of-00001.parquet",
+                  "logic_zebralogic/test_out-00000-of-00001.parquet",
+                  "numbertheory_qr_sum/test_out-00000-of-00001.parquet",
+                  "numbertheory_lte_qr/test_out-00000-of-00001.parquet",
+                  "numbertheory_ordered_lte/test_out-00000-of-00001.parquet"
+                ],
+                "source_count": 500,
+                "count": 500,
+                "task": "omega_500_out"
+              },
+              "aime2024": {
+                "repo": "allenai/aime-2022-2025",
+                "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 30,
+                "count": 30,
+                "task": "aime_2024"
+              },
+              "aime2025": {
+                "repo": "allenai/aime-2022-2025",
+                "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 30,
+                "count": 30,
+                "task": "aime_2025"
+              },
+              "gpqa_diamond": {
+                "repo": "Idavidrein/gpqa",
+                "revision": "83022cefff930aea54f654c0b282e74b9eeda5c6",
+                "split": "train",
+                "config": "gpqa_diamond",
+                "data_files": null,
+                "source_count": 198,
+                "count": 198,
+                "task": "gpqa_diamond:cot"
+              },
+              "zebralogic": {
+                "repo": "allenai/ZebraLogicBench-private",
+                "revision": "9f39ef490ae924437376657205025f26c0bd1af3",
+                "split": "test",
+                "config": "grid_mode",
+                "data_files": null,
+                "source_count": 1000,
+                "count": 500,
+                "task": "zebralogic:chat"
+              },
+              "ifeval": {
+                "repo": "google/IFEval",
+                "revision": "966cd89545d6b6acfd7638bc708b98261ca58e84",
+                "split": "train",
+                "config": null,
+                "data_files": null,
+                "source_count": 541,
+                "count": 541,
+                "task": "ifeval"
+              }
+            },
+            "panel_sha256": "878557691f64cbbc091fd5b2d6941c99f1e05108c7bafa8e3fe68e7f899b33e4",
+            "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+            "questions": 4582,
+            "completions": 22008,
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "top_k": -1,
+            "max_new_tokens": 16384,
+            "output_score_aggregation": "mean",
+            "context_length": 18432,
+            "note": "Requests frozen before model outputs; benchmark data never enters RL training."
+          },
+          "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+          "smoke": false,
+          "tasks": [
+            "development"
+          ],
+          "source_hashes": {
+            "score.py": "f51b22a67fc78a21e63193bd41aac7cbf76a2ad12c036e06b396b5f4380600f2",
+            "checkpoint_files.py": "f4422219a0ee608b44fdd52906fc3769346717f3f33f565f4a9f001a62547d05",
+            "legacy_score.py": "11d0116894837da6c09bcdea0d92727d02695701450a4482b260e7cea4c16a39",
+            "engine_common.py": "cb672170948bdaf0ab078849eef2db004ded074274faa4491e804169e1d7b387",
+            "worker.py": "d39ca947f362e569b18596eb3ff170ad1cc67fa020e278068e38e4813a715489",
+            "run.py": "79bdd1455a7ca3ff5011392dd470aa9ceb57c74822b46738211ef44e1b9fc97d"
+          }
+        },
+        "server-flags.json": [
+          "--tp-size",
+          "1",
+          "--trust-remote-code",
+          "--context-length",
+          "32768",
+          "--mem-fraction-static",
+          "0.6",
+          "--max-running-requests",
+          "64",
+          "--max-total-tokens",
+          "1179648",
+          "--chunked-prefill-size",
+          "16384",
+          "--max-mamba-cache-size",
+          "1024",
+          "--disable-radix-cache",
+          "--attention-backend",
+          "triton",
+          "--sampling-backend",
+          "pytorch",
+          "--cuda-graph-backend-decode",
+          "full",
+          "--cuda-graph-max-bs",
+          "64",
+          "--cuda-graph-backend-prefill",
+          "disabled",
+          "--skip-server-warmup",
+          "--sampling-defaults",
+          "openai"
+        ],
+        "panel-manifest.json": {
+          "sources": {
+            "gsm8k": {
+              "repo": "openai/gsm8k",
+              "config": "main",
+              "split": "test",
+              "revision": "740312add88f781978c0658806c59bc2815b9866",
+              "count": 1319
+            },
+            "ifbench": {
+              "repo": "allenai/IFBench_test",
+              "config": null,
+              "split": "train",
+              "revision": "2e8a48de45ff3bf41242f927254ca81b59ca3ae2",
+              "count": 300
+            },
+            "math500": {
+              "repo": "HuggingFaceH4/MATH-500",
+              "config": null,
+              "split": "test",
+              "revision": "6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be",
+              "count": 500
+            },
+            "humaneval": {
+              "repo": "openai/openai_humaneval",
+              "config": null,
+              "split": "test",
+              "revision": "7dce6050a7d6d172f3cc5c32aa97f52fa1a2e544",
+              "count": 164
+            },
+            "omega500": {
+              "repo": "allenai/omega-500",
+              "revision": "113a7eb896b8c1f7d781eb5f00713972074bae42",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 500,
+              "count": 500,
+              "task": "omega_500:hillclimb"
+            },
+            "omega500_out": {
+              "repo": "allenai/omega-explorative",
+              "revision": "b04ae8d4757a2229e8ed65ac6a923e502d0bbb95",
+              "split": "train",
+              "config": null,
+              "data_files": [
+                "algebra_func_area/test_out-00000-of-00001.parquet",
+                "algebra_func_derivative_sign/test_out-00000-of-00001.parquet",
+                "algebra_func_extrema/test_out-00000-of-00001.parquet",
+                "algebra_func_extrema_coords/test_out-00000-of-00001.parquet",
+                "algebra_func_intersection/test_out-00000-of-00001.parquet",
+                "algebra_func_intersection_coords/test_out-00000-of-00001.parquet",
+                "algebra_func_zeros/test_out-00000-of-00001.parquet",
+                "algebra_linear_equation/test_out-00000-of-00001.parquet",
+                "arithmetic_gcd/test_out-00000-of-00001.parquet",
+                "arithmetic_list_prime_factors/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_determinant/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_eigenvalues/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_inverse/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_multiplication/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_power/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_rank/test_out-00000-of-00001.parquet",
+                "arithmetic_matrix_svd/test_out-00000-of-00001.parquet",
+                "arithmetic_mixed/test_out-00000-of-00001.parquet",
+                "combinatory_distribution/test_out-00000-of-00001.parquet",
+                "combinatory_pattern_matching/test_out-00000-of-00001.parquet",
+                "combinatory_probability_at_least_n_specific_fixed/test_out-00000-of-00001.parquet",
+                "combinatory_probability_exactly_n_specific_fixed/test_out-00000-of-00001.parquet",
+                "combinatory_probability_no_fixed_points/test_out-00000-of-00001.parquet",
+                "combinatory_probability_no_specific_letter_fixed/test_out-00000-of-00001.parquet",
+                "geometry_polygon_chords/test_out-00000-of-00001.parquet",
+                "geometry_polygon_color/test_out-00000-of-00001.parquet",
+                "geometry_polygon_rotation/test_out-00000-of-00001.parquet",
+                "logic_gridworld_blocked/test_out-00000-of-00001.parquet",
+                "logic_puzzles_grid_chip/test_out-00000-of-00001.parquet",
+                "logic_gridworld_knight_move/test_out-00000-of-00001.parquet",
+                "logic_gridworld_rookmove/test_out-00000-of-00001.parquet",
+                "logic_zebralogic/test_out-00000-of-00001.parquet",
+                "numbertheory_qr_sum/test_out-00000-of-00001.parquet",
+                "numbertheory_lte_qr/test_out-00000-of-00001.parquet",
+                "numbertheory_ordered_lte/test_out-00000-of-00001.parquet"
+              ],
+              "source_count": 500,
+              "count": 500,
+              "task": "omega_500_out"
+            },
+            "aime2024": {
+              "repo": "allenai/aime-2022-2025",
+              "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 30,
+              "count": 30,
+              "task": "aime_2024"
+            },
+            "aime2025": {
+              "repo": "allenai/aime-2022-2025",
+              "revision": "73e1eba765ad5847cdb5d1e2e7aaf7b22b585798",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 30,
+              "count": 30,
+              "task": "aime_2025"
+            },
+            "gpqa_diamond": {
+              "repo": "Idavidrein/gpqa",
+              "revision": "83022cefff930aea54f654c0b282e74b9eeda5c6",
+              "split": "train",
+              "config": "gpqa_diamond",
+              "data_files": null,
+              "source_count": 198,
+              "count": 198,
+              "task": "gpqa_diamond:cot"
+            },
+            "zebralogic": {
+              "repo": "allenai/ZebraLogicBench-private",
+              "revision": "9f39ef490ae924437376657205025f26c0bd1af3",
+              "split": "test",
+              "config": "grid_mode",
+              "data_files": null,
+              "source_count": 1000,
+              "count": 500,
+              "task": "zebralogic:chat"
+            },
+            "ifeval": {
+              "repo": "google/IFEval",
+              "revision": "966cd89545d6b6acfd7638bc708b98261ca58e84",
+              "split": "train",
+              "config": null,
+              "data_files": null,
+              "source_count": 541,
+              "count": 541,
+              "task": "ifeval"
+            }
+          },
+          "panel_sha256": "878557691f64cbbc091fd5b2d6941c99f1e05108c7bafa8e3fe68e7f899b33e4",
+          "evaluator_revision": "941ef57b41121ae2887e10bc29a620e83928e689",
+          "questions": 4582,
+          "completions": 22008,
+          "temperature": 0.8,
+          "top_p": 0.95,
+          "top_k": -1,
+          "max_new_tokens": 16384,
+          "output_score_aggregation": "mean",
+          "context_length": 18432,
+          "note": "Requests frozen before model outputs; benchmark data never enters RL training."
+        }
+      },
+      "corrected": {
+        "complete.json": {
+          "update": 300,
+          "status": "complete"
+        },
+        "provenance.json": {
+          "source": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/evaluation/results/update-00000300-47ae9fc9104a8071",
+          "generation_sha256": "57d472b0ae72c71fc1a758781d044e614a630911cbb4fa16e777bb25f28497da",
+          "panel_sha256": "c24fa29a6a70672b7bcd04d5d6b80903fadc9a5d630ce50f0bad3c5c33b51fb5",
+          "scorer_sha256": "4cee25a4af63131f20c6d521c33eed4d8fdcb0d7db7cee566e55de00fca2fe44",
+          "questions": 512,
+          "responses": 2048,
+          "correction": "Flat accepted-gold list; original generations, extraction, and completion gates"
+        },
+        "publication.json": {
+          "run": {
+            "entity": "ai2-llm",
+            "id": "f649wb48",
+            "mode": "online",
+            "project": "olmo-rl-comparison"
+          },
+          "status": "published",
+          "update": 300
+        },
+        "metrics.json": {
+          "tasks": [
+            {
+              "task": "development_gold_v2",
+              "instances_saved": 2048,
+              "metrics": {
+                "score": {
+                  "mean": 0.34521484375
+                },
+                "completed_final_score": {
+                  "mean": 0.34033203125
+                },
+                "capped": {
+                  "mean": 0.24169921875
+                },
+                "tokens": {
+                  "mean": 10008.1904296875
+                },
+                "pass_at_1": {
+                  "mean": 0.34033203125
+                },
+                "pass_at_2": {
+                  "mean": 0.416015625
+                },
+                "pass_at_4": {
+                  "mean": 0.498046875
+                },
+                "all_four_correct": {
+                  "mean": 0.21875
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "evaluation_jobs": [
+    {
+      "id": "01M3MAVQ3WW94NH10RAJ1R1TBQ",
+      "status": {
+        "created": "2026-09-28T15:41:43.299031Z",
+        "scheduled": "2026-09-28T15:42:05.126173Z",
+        "started": "2026-09-28T15:48:45.651201Z",
+        "exited": "2026-09-28T16:35:54.08272Z",
+        "finalized": "2026-09-28T16:36:13.038817Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-28T16:35:54.020922Z",
+        "ready": "2026-09-28T15:48:44.84677Z"
+      }
+    }
+  ],
+  "treatment_stop": {
+    "stop_requested_utc": "2026-09-28T15:42:57.565331+00:00",
+    "training": "01M3G3RPVQAYNP9JFCXR4M23J2",
+    "evaluation": "01M3MAVQ03VB614CNSEC2PYDQ7",
+    "checkpoint": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/eval-snapshots/update-00000300-recovered/hf",
+    "recovery": "Native update300 re-export; original HF snapshot completion interrupted; guard missed shutdown and retry advanced beyond300.",
+    "verified_stopped_utc": "2026-09-28T15:45:13.231018+00:00",
+    "training_job_statuses": {
+      "01M3KJ94953T7SF4TPGY9HS7YT": {
+        "created": "2026-09-28T08:32:08.228095Z",
+        "scheduled": "2026-09-28T10:01:01.099823Z",
+        "started": "2026-09-28T10:07:18.011739Z",
+        "exited": "2026-09-28T15:43:11.226927Z",
+        "finalized": "2026-09-28T15:43:49.120037Z",
+        "exitCode": 143,
+        "canceled": "2026-09-28T15:42:57.452316Z",
+        "canceledFor": "Job 01M3KJ94953T7SF4TPGY9HS7YT has been manually canceled by robertb",
+        "canceledCode": 4,
+        "idleSince": "2026-09-28T15:43:11.122708Z",
+        "ready": "2026-09-28T10:03:40.233582Z"
+      },
+      "01M3KJ945HPNNF677C9HQN6NDX": {
+        "created": "2026-09-28T08:32:08.228095Z",
+        "scheduled": "2026-09-28T10:00:59.288584Z",
+        "started": "2026-09-28T10:07:17.815318Z",
+        "exited": "2026-09-28T15:43:11.498144Z",
+        "finalized": "2026-09-28T15:43:27.587206Z",
+        "exitCode": 143,
+        "canceled": "2026-09-28T15:42:57.452316Z",
+        "canceledFor": "Job 01M3KJ945HPNNF677C9HQN6NDX has been manually canceled by robertb",
+        "canceledCode": 4,
+        "idleSince": "2026-09-28T15:43:11.381473Z",
+        "ready": "2026-09-28T10:06:03.085531Z"
+      },
+      "01M3KJ94DTZW5794XNCJAK1X05": {
+        "created": "2026-09-28T08:32:08.228095Z",
+        "scheduled": "2026-09-28T10:01:00.516757Z",
+        "started": "2026-09-28T10:07:18.198772Z",
+        "exited": "2026-09-28T15:43:14.359268Z",
+        "finalized": "2026-09-28T15:44:02.967731Z",
+        "exitCode": 143,
+        "canceled": "2026-09-28T15:42:57.452316Z",
+        "canceledFor": "Job 01M3KJ94DTZW5794XNCJAK1X05 has been manually canceled by robertb",
+        "canceledCode": 4,
+        "idleSince": "2026-09-28T15:43:14.256309Z",
+        "ready": "2026-09-28T10:03:40.246512Z"
+      }
+    }
+  }
+}

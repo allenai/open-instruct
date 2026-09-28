@@ -1,0 +1,329 @@
+{
+  "paths": [
+    "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/eval-snapshots/update-00000300/hf/model.safetensors",
+    "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/eval-snapshots/update-00000300-recovered/hf/model.safetensors"
+  ],
+  "groups": {
+    "lm_head.weight": {
+      "tensors": 1,
+      "differing_tensors": 1,
+      "elements": 102684672,
+      "differing_elements": 1920562,
+      "max_abs": 0.000244140625,
+      "sum_abs": 26.547065785918676
+    },
+    "model.embed_norm.weight": {
+      "tensors": 1,
+      "differing_tensors": 1,
+      "elements": 1024,
+      "differing_elements": 471,
+      "max_abs": 3.0517578125e-05,
+      "sum_abs": 0.0042724609375
+    },
+    "model.embed_tokens.weight": {
+      "tensors": 1,
+      "differing_tensors": 1,
+      "elements": 102684672,
+      "differing_elements": 1491419,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 14.759300622845558
+    },
+    "mlp.down_proj.weight": {
+      "tensors": 1,
+      "differing_tensors": 1,
+      "elements": 8388608,
+      "differing_elements": 404141,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 7.029385863133484
+    },
+    "mlp.gate_proj.weight": {
+      "tensors": 1,
+      "differing_tensors": 1,
+      "elements": 8388608,
+      "differing_elements": 322616,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 5.167275377832993
+    },
+    "mlp.up_proj.weight": {
+      "tensors": 1,
+      "differing_tensors": 1,
+      "elements": 8388608,
+      "differing_elements": 387645,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 6.569858353614109
+    },
+    "post_attention_layernorm.weight": {
+      "tensors": 16,
+      "differing_tensors": 14,
+      "elements": 16384,
+      "differing_elements": 657,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.022032558917999268
+    },
+    "post_feedforward_layernorm.weight": {
+      "tensors": 16,
+      "differing_tensors": 16,
+      "elements": 16384,
+      "differing_elements": 455,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.017334461212158203
+    },
+    "pre_attention_layernorm.weight": {
+      "tensors": 16,
+      "differing_tensors": 1,
+      "elements": 16384,
+      "differing_elements": 1,
+      "max_abs": 1.5497207641601562e-06,
+      "sum_abs": 1.5497207641601562e-06
+    },
+    "pre_feedforward_layernorm.weight": {
+      "tensors": 16,
+      "differing_tensors": 0,
+      "elements": 16384,
+      "differing_elements": 0,
+      "max_abs": 0.0,
+      "sum_abs": 0.0
+    },
+    "self_attn.A_log": {
+      "tensors": 14,
+      "differing_tensors": 4,
+      "elements": 112,
+      "differing_elements": 4,
+      "max_abs": 3.0517578125e-05,
+      "sum_abs": 5.7220458984375e-05
+    },
+    "self_attn.beta_proj.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 114688,
+      "differing_elements": 5612,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.11126574501395226
+    },
+    "self_attn.dt_bias": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 14336,
+      "differing_elements": 622,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.012254766188561916
+    },
+    "self_attn.f_proj_1.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 3670016,
+      "differing_elements": 100014,
+      "max_abs": 0.000244140625,
+      "sum_abs": 1.7961175566488237
+    },
+    "self_attn.f_proj_2.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 3670016,
+      "differing_elements": 138627,
+      "max_abs": 0.000244140625,
+      "sum_abs": 2.5187990534468554
+    },
+    "self_attn.g_proj_1.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 3670016,
+      "differing_elements": 109516,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 2.072857791557908
+    },
+    "self_attn.g_proj_2.bias": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 28672,
+      "differing_elements": 944,
+      "max_abs": 0.000244140625,
+      "sum_abs": 0.01964506134390831
+    },
+    "self_attn.g_proj_2.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 7340032,
+      "differing_elements": 314340,
+      "max_abs": 0.000244140625,
+      "sum_abs": 5.8733532531769015
+    },
+    "self_attn.k_conv1d.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 57344,
+      "differing_elements": 14097,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.14264709607232362
+    },
+    "self_attn.k_proj.weight": {
+      "tensors": 16,
+      "differing_tensors": 16,
+      "elements": 15728640,
+      "differing_elements": 826676,
+      "max_abs": 0.000244140625,
+      "sum_abs": 15.605577686124889
+    },
+    "self_attn.o_norm.weight": {
+      "tensors": 14,
+      "differing_tensors": 3,
+      "elements": 3584,
+      "differing_elements": 3,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.00030517578125
+    },
+    "self_attn.o_proj.weight": {
+      "tensors": 16,
+      "differing_tensors": 16,
+      "elements": 31457280,
+      "differing_elements": 1685521,
+      "max_abs": 0.000244140625,
+      "sum_abs": 32.13142487428195
+    },
+    "self_attn.q_conv1d.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 57344,
+      "differing_elements": 17441,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.1534172947431216
+    },
+    "self_attn.q_proj.weight": {
+      "tensors": 16,
+      "differing_tensors": 16,
+      "elements": 16777216,
+      "differing_elements": 871876,
+      "max_abs": 0.000244140625,
+      "sum_abs": 16.2162256881129
+    },
+    "self_attn.v_conv1d.weight": {
+      "tensors": 14,
+      "differing_tensors": 14,
+      "elements": 114688,
+      "differing_elements": 24207,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 0.2597036315128207
+    },
+    "self_attn.v_proj.weight": {
+      "tensors": 16,
+      "differing_tensors": 16,
+      "elements": 30408704,
+      "differing_elements": 1695686,
+      "max_abs": 0.000244140625,
+      "sum_abs": 32.55707166486536
+    },
+    "mlp.experts.*.down_proj.weight": {
+      "tensors": 7680,
+      "differing_tensors": 7680,
+      "elements": 4026531840,
+      "differing_elements": 141674887,
+      "max_abs": 0.000244140625,
+      "sum_abs": 1931.8976503614808
+    },
+    "mlp.experts.*.gate_proj.weight": {
+      "tensors": 7680,
+      "differing_tensors": 7680,
+      "elements": 4026531840,
+      "differing_elements": 134325247,
+      "max_abs": 0.000244140625,
+      "sum_abs": 1784.061220282449
+    },
+    "mlp.experts.*.up_proj.weight": {
+      "tensors": 7680,
+      "differing_tensors": 7680,
+      "elements": 4026531840,
+      "differing_elements": 143779040,
+      "max_abs": 0.000244140625,
+      "sum_abs": 1941.9874257892884
+    },
+    "mlp.latent_down_proj.weight": {
+      "tensors": 15,
+      "differing_tensors": 15,
+      "elements": 7864320,
+      "differing_elements": 311335,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 6.1486743901332375
+    },
+    "mlp.latent_up_proj.weight": {
+      "tensors": 15,
+      "differing_tensors": 15,
+      "elements": 7864320,
+      "differing_elements": 438173,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 8.616012396931183
+    },
+    "mlp.router.gate.weight": {
+      "tensors": 15,
+      "differing_tensors": 15,
+      "elements": 7864320,
+      "differing_elements": 384193,
+      "max_abs": 0.000244140625,
+      "sum_abs": 7.250583741493756
+    },
+    "mlp.shared_expert.down_proj.weight": {
+      "tensors": 15,
+      "differing_tensors": 15,
+      "elements": 15728640,
+      "differing_elements": 991303,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 19.280400030456804
+    },
+    "mlp.shared_expert.gate_proj.weight": {
+      "tensors": 15,
+      "differing_tensors": 15,
+      "elements": 15728640,
+      "differing_elements": 866637,
+      "max_abs": 0.000244140625,
+      "sum_abs": 16.373956438874302
+    },
+    "mlp.shared_expert.up_proj.weight": {
+      "tensors": 15,
+      "differing_tensors": 15,
+      "elements": 15728640,
+      "differing_elements": 701114,
+      "max_abs": 0.000244140625,
+      "sum_abs": 13.342320241747075
+    },
+    "self_attn.g_proj.weight": {
+      "tensors": 2,
+      "differing_tensors": 2,
+      "elements": 2097152,
+      "differing_elements": 57816,
+      "max_abs": 0.0001220703125,
+      "sum_abs": 1.0687915340531617
+    },
+    "self_attn.k_norm.weight": {
+      "tensors": 2,
+      "differing_tensors": 2,
+      "elements": 1024,
+      "differing_elements": 4,
+      "max_abs": 1.6948183510607676e-32,
+      "sum_abs": 3.014080362966024e-32
+    },
+    "self_attn.q_norm.weight": {
+      "tensors": 2,
+      "differing_tensors": 2,
+      "elements": 2048,
+      "differing_elements": 7,
+      "max_abs": 2.86102294921875e-06,
+      "sum_abs": 2.86102294921875e-06
+    },
+    "self_attn.ssmax_scale": {
+      "tensors": 2,
+      "differing_tensors": 0,
+      "elements": 16,
+      "differing_elements": 0,
+      "max_abs": 0.0,
+      "sum_abs": 0.0
+    },
+    "model.norm.weight": {
+      "tensors": 1,
+      "differing_tensors": 0,
+      "elements": 1024,
+      "differing_elements": 0,
+      "max_abs": 0.0,
+      "sum_abs": 0.0
+    }
+  },
+  "seconds": 46.99078268499579
+}

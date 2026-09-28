@@ -11,6 +11,10 @@ the implementation. This comparison uses independently generated training
 rollouts, so its numerical percentages also reflect different tokens and policy
 trajectories. It does not establish long-run RL quality.
 
+The [matched follow-up through update 300](H1-fp32-head-20260928/README.md)
+also found no established learning-quality benefit. It records the final comparison,
+confidence intervals, recovery provenance and decision to retain the BF16 default.
+
 ## Implementation and provenance
 
 Set `trainer.fp32_lm_head=true` in a structured MILES run, or

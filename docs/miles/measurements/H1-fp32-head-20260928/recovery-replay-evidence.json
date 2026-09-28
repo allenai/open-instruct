@@ -1,0 +1,51 @@
+{
+  "timing_rows": [
+    {
+      "stage": "training",
+      "rollout_id": 298,
+      "started_unix": 1790581922.3697436,
+      "seconds": 67.02216628799215,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 275,
+      "started_unix": 1790591123.1572413,
+      "seconds": 172.713498191908,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 276,
+      "started_unix": 1790591436.3216677,
+      "seconds": 58.65454636816867,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 277,
+      "started_unix": 1790591621.0589318,
+      "seconds": 62.89752738503739,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 298,
+      "started_unix": 1790596068.3527892,
+      "seconds": 64.39436381217092,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 299,
+      "started_unix": 1790596281.639816,
+      "seconds": 54.73265013308264,
+      "passed": true
+    }
+  ],
+  "resume_log_lines": [
+    "\u001b[36m(RolloutExecutor pid=754)\u001b[0m wandb: Resuming run hero-math-learning-20260926_wi9xl2j0-RANK_0\n",
+    "\u001b[36m(OLMoCoreTrainRayActor pid=2874)\u001b[0m wandb: Resuming run hero-math-learning-20260926_wi9xl2j0-RANK_0\n"
+  ],
+  "native300_mtime": "2026-09-28T11:53:48.443643+00:00"
+}

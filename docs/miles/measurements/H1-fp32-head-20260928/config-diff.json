@@ -1,0 +1,27 @@
+[
+  {
+    "path": "conversion.hf_output",
+    "control": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/prepared/hf",
+    "treatment": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/prepared/hf"
+  },
+  {
+    "path": "name",
+    "control": "hero-math-learning-20260926",
+    "treatment": "hero-math-learning-fp32-head-20260926"
+  },
+  {
+    "path": "output.hf_dir",
+    "control": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926/export-hf",
+    "treatment": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926/export-hf"
+  },
+  {
+    "path": "output.root",
+    "control": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-20260926",
+    "treatment": "/weka/oe-training-default/robertb/open-instruct/runs/hero-math-learning-fp32-head-20260926"
+  },
+  {
+    "path": "trainer.fp32_lm_head",
+    "control": null,
+    "treatment": true
+  }
+]
