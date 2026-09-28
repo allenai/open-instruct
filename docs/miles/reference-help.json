@@ -208,7 +208,7 @@
     "data.tasks": "Nonempty array of unique task tables; cannot combine with another data selector.",
     "data.tasks[].eval_count": "Positive integer number of held-out prompts; omit for no held-out rows from this task.",
     "data.tasks[].prompt_wrapper": "Task rendering wrapper: none, auto or open_instruct_rlzero_answer; default none. See data guide.",
-    "data.tasks[].task": "Required named task: gsm8k, math, ifeval or multiplication.",
+    "data.tasks[].task": "Required named task: gsm8k, gsm8k-less-noise (informally cleaned, not rigorously validated), gsm8k_original (compatibility alias), math, ifeval or multiplication.",
     "data.tasks[].train_count": "Positive integer number of training prompts. At least one task must select training data.",
     "judges.NAME.backend": "Managed only: sglang (default and only supported value).",
     "judges.NAME.chat_template": "Managed only: qwen3-no-thinking (default and only supported template).",

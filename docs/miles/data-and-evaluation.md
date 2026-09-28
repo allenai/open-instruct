@@ -15,15 +15,29 @@ Choose exactly one mode under `[data]`:
 | `prompt_data` | Prepared JSONL; supply reward_config and optional alternating dataset-name/eval-path entries |
 | `recipe` | Rejected: the olmo-miles named recipe catalog is not ported |
 
-Current named tasks are `gsm8k`, `gsm8k_original`, `math`, legacy `ifeval`, and
+Current named tasks are `gsm8k`, `gsm8k-less-noise`, `gsm8k_original`, `math`, legacy `ifeval`, and
 generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
 
-`gsm8k` uses [`techarb/gsm8k-cleaner`](https://huggingface.co/datasets/techarb/gsm8k-cleaner),
-the `ai2-adapt-dev/rlvr_gsm8k_zs` train split with reviewed labels. It has 39 corrected
-targets and omits 93 ambiguous or unreliable problems, leaving 7,380 rows. Each prepared
-row records `metadata.original_row`, its index in the original dataset. Use
-`gsm8k_original` to reproduce runs prepared before this change. Row sampling differs
-between the two tasks, so equal seeds do not select the same problems.
+`gsm8k` uses the established `ai2-adapt-dev/rlvr_gsm8k_zs` train split. The maintained
+examples select this task. `gsm8k_original` remains a compatibility alias for the
+same pinned dataset, retaining its historical sampling seed convention.
+
+`gsm8k-less-noise` explicitly selects
+[`techarb/gsm8k-cleaner`](https://huggingface.co/datasets/techarb/gsm8k-cleaner), an
+**informally cleaned variant that has not been rigorously validated**. It has 39
+corrected targets and omits 93 problems judged ambiguous or unreliable, leaving
+7,380 rows. Each prepared row records `metadata.original_row`, its index in the
+original dataset. TODO: finish reviewing and cleaning examples observed to be
+consistently answered incorrectly, then publish under a team-owned namespace and
+update the pinned revision.
+
+For fresh preparations that previously selected the cleaned data as `gsm8k`, use
+`task = "gsm8k-less-noise"`. It preserves that variant's previous row selection
+and ordering for the same seed and counts; task names and prepared sample IDs
+now identify it explicitly. Equal seeds across the original and cleaned datasets
+do not select the same problems. Existing prepared runs retain their immutable
+data on resume; keep their original configuration rather than renaming the task
+inside an existing preparation contract.
 The [multitask example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/medium.toml) mixes
 GSM8K and math; it is not the complete published Olmo 3 mixture.
 Use manifest adoption and the [mixed-task qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/mixture-qualification.md)

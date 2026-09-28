@@ -143,21 +143,61 @@ def test_named_tasks_strip_reference_answers_and_select_disjoint(environment, mo
     assert len(environment[2].rendered) == 8
 
 
-def test_gsm8k_uses_cleaned_source_and_original_remains_available(environment, monkeypatch):
-    assert run_data.TASKS["gsm8k"][0] == "techarb/gsm8k-cleaner"
-    assert run_data.TASKS["gsm8k_original"][0] == "ai2-adapt-dev/rlvr_gsm8k_zs"
-    assert run_data.TASKS["gsm8k"][2] == run_data.TASKS["gsm8k_original"][2] == "gsm8k"
+@pytest.mark.parametrize(
+    "task,dataset",
+    [
+        ("gsm8k", "ai2-adapt-dev/rlvr_gsm8k_zs"),
+        ("gsm8k_original", "ai2-adapt-dev/rlvr_gsm8k_zs"),
+        ("gsm8k-less-noise", "techarb/gsm8k-cleaner"),
+    ],
+)
+def test_gsm8k_variants_share_verifier_and_record_distinct_sources(environment, monkeypatch, task, dataset):
+    assert run_data.TASKS[task][0] == dataset
+    assert run_data.TASKS[task][2] == "gsm8k"
+    assert run_data.TASKS["gsm8k_original"] == run_data.TASKS["gsm8k"]
     rows = [
         {"messages": [{"role": "user", "content": f"Question {i}"}], "ground_truth": [str(i)], "original_row": 10 + i}
         for i in range(4)
     ]
     loaded = []
     monkeypatch.setattr(run_data, "_source_rows", lambda name: loaded.append(name) or rows)
-    result = prepare(environment, {"tasks": [{"task": "gsm8k", "train_count": 4}]})
+    result = prepare(environment, {"tasks": [{"task": task, "train_count": 4}]})
     train = [json.loads(line) for line in Path(result["prompt_data"]).read_text().splitlines()]
-    assert loaded == ["gsm8k"]
+    assert loaded == [task]
     assert {row["metadata"]["original_row"] - row["metadata"]["source_row"] for row in train} == {10}
-    assert {row["metadata"]["source_dataset"] for row in train} == {"techarb/gsm8k-cleaner"}
+    assert {row["metadata"]["source_dataset"] for row in train} == {dataset}
+    assert all(row["metadata"]["prepared_sample_id"].startswith(f"{task}:train:") for row in train)
+    registry = json.loads(Path(result["reward_config"]).read_text())
+    assert registry == {"gsm8k": {"factory": run_data.FACTORIES["gsm8k"]}}
+
+
+def test_less_noise_preserves_historical_cleaned_sampling(environment, monkeypatch):
+    rows = [{"question": f"Question {i}", "ground_truth": str(i), "original_row": 100 + i} for i in range(12)]
+    monkeypatch.setattr(run_data, "_source_rows", lambda name: rows)
+    result = prepare(environment, {"tasks": [{"task": "gsm8k-less-noise", "train_count": 5, "eval_count": 3}]})
+    # Historical cleaned gsm8k order with seed 17, including split shuffling.
+    for path, indices in [(result["prompt_data"], [6, 5, 0, 10, 7]), (result["eval_prompt_data"][1], [1, 9, 4])]:
+        prepared = [json.loads(line) for line in Path(path).read_text().splitlines()]
+        assert [row["metadata"]["source_row"] for row in prepared] == indices
+        assert [row["metadata"]["original_row"] for row in prepared] == [100 + i for i in indices]
+        assert [row["label"] for row in prepared] == [str(i) for i in indices]
+
+
+def test_prepared_cleaned_gsm8k_resumes_without_changing_dataset(environment, monkeypatch):
+    monkeypatch.setattr(run_data, "_source_rows", lambda name: [{"question": "Question", "ground_truth": "42"}])
+    data = {"tasks": [{"task": "gsm8k", "train_count": 1}]}
+    with monkeypatch.context() as historical:
+        historical.setitem(run_data.TASKS, "gsm8k", run_data.TASKS["gsm8k-less-noise"])
+        result = prepare(environment, data)
+    before = Path(result["prompt_data"]).read_bytes()
+
+    def unexpected_download(name):
+        raise AssertionError("Resume must reuse the immutable prepared dataset")
+
+    monkeypatch.setattr(run_data, "_source_rows", unexpected_download)
+    assert prepare(environment, data) == result
+    assert Path(result["prompt_data"]).read_bytes() == before
+    assert json.loads(before)["metadata"]["source_dataset"] == "techarb/gsm8k-cleaner"
 
 
 def test_generated_multiplication_is_reproducible_and_preserves_reward_weights(environment, tmp_path):

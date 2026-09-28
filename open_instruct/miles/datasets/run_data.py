@@ -17,10 +17,11 @@ from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
 
 TASKS = {
-    # Label-cleaned rlvr_gsm8k_zs: 39 corrected targets, 93 ambiguous/unreliable rows removed.
+    "gsm8k": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
+    # Informally cleaned, not rigorously validated: 39 corrected targets and 93 removed rows.
     # TODO: Finish reviewing and cleaning examples observed to be consistently answered
     # incorrectly, then publish the reviewed dataset under a team-owned namespace and repin here.
-    "gsm8k": ("techarb/gsm8k-cleaner", "3a4e9e3e600ea2854a6d2d0483721b3cd68580ce", "gsm8k"),
+    "gsm8k-less-noise": ("techarb/gsm8k-cleaner", "3a4e9e3e600ea2854a6d2d0483721b3cd68580ce", "gsm8k"),
     "gsm8k_original": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
     "math": ("ai2-adapt-dev/rlvr_open_reasoner_math", "2cdc4f9e67b426a693d19f11dcc05f1cb8f44793", "math"),
     "ifeval": ("allenai/RLVR-IFeval", "47c03c73621c4aab2b824b7818681117d662770e", "ifeval_old"),
@@ -365,7 +366,9 @@ def _tasks(data, tokenizer, template, seed):
         train_count, eval_count = task.get("train_count") or 0, task.get("eval_count") or 0
         total = train_count + eval_count
         source, revision, verifier = TASKS[name]
-        rng = random.Random(f"{seed}:{name}")
+        # Preserve the cleaned dataset's row selection from when it was named gsm8k.
+        sampling_name = "gsm8k" if name == "gsm8k-less-noise" else name
+        rng = random.Random(f"{seed}:{sampling_name}")
         if name == "multiplication":
             if total > 8100:
                 raise InputError("Generated multiplication supports at most 8100 unique ordered two-digit pairs")
