@@ -18,6 +18,8 @@ from open_instruct.miles.errors import InputError
 
 TASKS = {
     # Label-cleaned rlvr_gsm8k_zs: 39 corrected targets, 93 ambiguous/unreliable rows removed.
+    # TODO: Finish reviewing and cleaning examples observed to be consistently answered
+    # incorrectly, then publish the reviewed dataset under a team-owned namespace and repin here.
     "gsm8k": ("techarb/gsm8k-cleaner", "3a4e9e3e600ea2854a6d2d0483721b3cd68580ce", "gsm8k"),
     "gsm8k_original": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
     "math": ("ai2-adapt-dev/rlvr_open_reasoner_math", "2cdc4f9e67b426a693d19f11dcc05f1cb8f44793", "math"),
