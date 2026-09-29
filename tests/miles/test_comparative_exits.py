@@ -100,7 +100,16 @@ def test_continue_suppresses_only_first_token_and_restores_budget():
         tokens=[10, 1, 2],
         response="prefix",
         response_length=2,
-        metadata={"comparative_continue_ids": [8, 9]},
+        metadata={
+            "comparative_continue_ids": comparative_exits.continuation_blocked_ids(
+                SimpleNamespace(
+                    get_vocab=lambda: {"</": 8, "eos": 9},
+                    decode=lambda ids, **kw: "</" if ids == [8] else "eos",
+                    eos_token_id=9,
+                ),
+                {},
+            )
+        },
         status=Sample.Status.PENDING,
     )
 
@@ -126,7 +135,8 @@ def test_continue_suppresses_only_first_token_and_restores_budget():
     assert seen[1] == {"max_new_tokens": 100}
 
 
-def test_comparison_attaches_separate_centered_branch_groups():
+@pytest.mark.parametrize("coefficient", [0, 1])
+def test_comparison_attaches_separate_centered_branch_groups(coefficient):
     worker = object.__new__(comparative_exits.ComparativeExitRollout)
     core = SimpleNamespace(
         forced_exit_initial_updates=4,
@@ -134,6 +144,7 @@ def test_comparison_attaches_separate_centered_branch_groups():
         forced_exit_trials=2,
         forced_exit_tie_bonus=0.01,
         forced_exit_tie_min_accuracy=0.5,
+        forced_exit_branch_coefficient=coefficient,
     )
     worker.state = SimpleNamespace(
         args=SimpleNamespace(olmo_core=core, reward_key=None, n_samples_per_prompt=4),
@@ -160,9 +171,20 @@ def test_comparison_attaches_separate_centered_branch_groups():
     probe = asyncio.run(worker._score(parent, Sample(), 1, 0, 0))
     assert probe["advantage"] == -0.5
     assert probe["tie_bonus"] == 0
-    assert [b["advantage"] for b in probe["training_branches"]] == [0.5, -0.5, 0, 0]
+    assert [b["advantage"] for b in probe["training_branches"]] == ([0.5, -0.5, 0, 0] if coefficient else [])
     assert all(b["group_denominator"] == 4 for b in probe["training_branches"])
     assert probe["parent_weight"] == 4
+
+
+@pytest.mark.parametrize("eos", [None, 9, [9, 10]])
+def test_continue_blocks_eos_and_configured_terminal_ids(eos):
+    tokenizer = SimpleNamespace(
+        get_vocab=lambda: {"</": 8, "word": 7},
+        decode=lambda ids, **kw: "</" if ids == [8] else "word",
+        eos_token_id=eos,
+    )
+    expected = {8, 11} | (set(eos) if isinstance(eos, list) else {eos} if eos is not None else set())
+    assert set(comparative_exits.continuation_blocked_ids(tokenizer, {"stop_token_ids": [11]})) == expected
 
 
 def test_continue_rejects_failed_suppression():

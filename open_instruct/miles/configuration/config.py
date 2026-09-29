@@ -29,7 +29,7 @@ class CoreConfig:
     forced_exit_guidance: str = "full_tag"
     forced_exit_initial_trials: int = 128
     forced_exit_initial_updates: int = 4
-    forced_exit_branch_coefficient: float = 1.0
+    forced_exit_branch_coefficient: float = 0.0
     forced_exit_tie_bonus: float = 0.0
     forced_exit_tie_min_accuracy: float = 0.5
     forced_exit_parent_probability: float = 0.125
@@ -146,9 +146,7 @@ class CoreConfig:
             "forced_exit_tie_bonus",
         ):
             validation.number(getattr(self, name), f"core.{name}", minimum=0, maximum=1)
-        validation.number(
-            self.forced_exit_branch_coefficient, "core.forced_exit_branch_coefficient", exclusive_min=True
-        )
+        validation.number(self.forced_exit_branch_coefficient, "core.forced_exit_branch_coefficient", minimum=0)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -588,6 +586,11 @@ class RunConfig:
                 raise InputError("Comparative stopping requires one parent per prompt and positive sampling rates")
             if self.core.forced_exit_trials < 2 or self.core.forced_exit_initial_trials < self.core.forced_exit_trials:
                 raise InputError("Comparative stopping requires initial_trials >= trials >= 2")
+            if (
+                options.get("rollout_batch_size", 1) * self.core.forced_exit_parent_probability
+                > self.core.forced_exit_max_parents_per_update
+            ):
+                raise InputError("Comparative parent cap must cover rollout_batch_size * parent_probability")
             if (
                 self.core.forced_exit_risk_min_parents < 2
                 or self.core.forced_exit_audit_window < self.core.forced_exit_audit_interval

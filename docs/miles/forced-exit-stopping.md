@@ -62,9 +62,10 @@ The existing custom stopping loss hook remains in place. The matching MILES
 runtime must include conditional branch training; older images are incompatible.
 
 The rollout samples fresh stop and continue groups at the same prefix, under
-the same policy and total response cap. Continue suppresses tokens containing
-`</` for exactly one generated token, then restores normal generation. This
-includes alternate merged closing-token spellings and also suppresses unrelated
+the same policy and total response cap. For exactly one generated token, continue
+suppresses tokens containing `</`, plus EOS and configured stop-token IDs, then
+restores normal generation. This includes alternate merged closing-token
+spellings and also suppresses unrelated
 closing markup for that one token. The suppressed-choice token is masked from
 branch training; no `Wait` text is inserted.
 
@@ -74,9 +75,11 @@ adds a fixed bonus only when observed successes tie exactly, stop accuracy meets
 `forced_exit_tie_min_accuracy`, and mean total remaining tokens favor stopping.
 This empirical tie is not proof of equal true accuracy. The default bonus is zero.
 
-Both action groups also train their sampled completions with separately centered
-rewards. The inherited prefix and forced delimiter are masked; continue's first
-constrained token is also masked. The remaining continuation tokens, including
+With `forced_exit_branch_coefficient > 0`, both action groups also train their
+sampled completions with separately centered rewards. The default is zero, which
+keeps branches grade-only while retaining comparative closing guidance. The
+inherited prefix and forced delimiter are masked; continue's first constrained
+token is also masked. The remaining continuation tokens, including
 thinking, are trained. Constant-reward action groups have zero answer advantage.
 The native prompt GRPO groups and main batch denominator are unchanged. Auxiliary
 branch loss averages over each action group, cuts and selected parents; its
@@ -86,9 +89,13 @@ token behavior scores only, and routed expert replay is retained for completions
 Parent selection mixes uniform and capped thinking-length weights. A separate
 stop-only screen selects one candidate, and another is random. Fresh scoring
 samples use distinct seeds. Candidate paragraph locations currently follow the
-parent's paragraph quantiles. A hard per-update parent limit bounds ordinary
-probing; uniform natural-close audits occur separately, once per represented
-task on each audit round. These audits are independent of outcomes and may skip
+parent's paragraph quantiles. The number of ordinary parents is stochastically
+rounded from prompt-group count times the requested rate, then groups are chosen
+uniformly without replacement. Each group retains the requested marginal rate.
+Validation requires the hard parent cap to cover the initial expected count;
+the controller cannot raise the rate above that initial value. Uniform natural-close
+audits occur separately, once per represented task on each audit round. These
+audits are independent of outcomes and may skip
 parents that never closed.
 
 The rate halves every configured interval to a floor. A one-sided normal screen

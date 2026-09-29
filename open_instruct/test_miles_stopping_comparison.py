@@ -1,6 +1,7 @@
 """CPU checks for the experiment's estimator, tie rule and acquisition controller."""
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,6 +52,23 @@ def test_parent_weighting_is_capped_and_keeps_short_parents():
     assert weights[0] > 0.25 / 3
 
 
+def test_acquisition_rate_scales_at_the_parent_cap():
+    for rate, expected in [(1 / 16, 4), (1 / 32, 2), (1 / 64, 1)]:
+        selections = [
+            comparison.select_groups(
+                16,
+                rate,
+                1,
+                SimpleNamespace(random=lambda q=quantile: q, sample=lambda population, n: list(population)[:n]),
+            )
+            for quantile in (0.125, 0.375, 0.625, 0.875)
+        ]
+        assert sum(map(len, selections)) == expected
+        assert all(len(selected) <= 1 for selected in selections)
+    with pytest.raises(ValueError, match="cap"):
+        comparison.select_groups(16, 0.125, 1, None)
+
+
 def test_comparative_config_is_explicit_and_rejects_filtering():
     config = configuration()
     core = dataclasses.replace(
@@ -67,8 +85,12 @@ def test_comparative_config_is_explicit_and_rejects_filtering():
         | {"rollout_function_path": "open_instruct.miles.rollout.comparative_exits.ComparativeExitRollout"},
     )
     config.validate()
+    assert core.forced_exit_branch_coefficient == 0
+    dataclasses.replace(config, core=dataclasses.replace(core, forced_exit_branch_coefficient=1)).validate()
     with pytest.raises(ValueError, match="zero-std"):
         dataclasses.replace(config, core=dataclasses.replace(core, filter_zero_std_groups=True)).validate()
+    with pytest.raises(ValueError, match="parent cap"):
+        dataclasses.replace(config, miles=config.miles | {"rollout_batch_size": 32}).validate()
 
 
 @pytest.mark.parametrize(
@@ -81,6 +103,7 @@ def test_comparative_config_is_explicit_and_rejects_filtering():
         {"forced_exit_parent_probability": 0},
         {"forced_exit_risk_min_parents": 1},
         {"forced_exit_tie_bonus": -0.1},
+        {"forced_exit_branch_coefficient": -0.1},
     ],
 )
 def test_comparative_invalid_config(changes):

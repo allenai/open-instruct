@@ -42,6 +42,16 @@ def tapered_rate(step, initial, interval, floor_fraction):
     return initial * max(floor_fraction, 2.0 ** -(step // interval))
 
 
+def select_groups(count, rate, cap, rng):
+    """Preserve each group's marginal acquisition rate without overflowing the cap."""
+    expected = count * rate
+    if expected > cap:
+        raise ValueError("Parent cap cannot cover the requested acquisition rate")
+    whole = math.floor(expected)
+    selected = whole + (rng.random() < expected - whole)
+    return rng.sample(range(count), selected)
+
+
 def risk_detected(deltas, *, minimum_parents, margin):
     """Parent-level one-sided normal screen; affects acquisition, never cut labels."""
     if len(deltas) < minimum_parents:

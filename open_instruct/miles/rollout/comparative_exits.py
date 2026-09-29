@@ -19,8 +19,21 @@ from open_instruct.miles.rollout import forced_exits, stopping_comparison
 logger = logger_utils.setup_logger(__name__)
 
 
+def continuation_blocked_ids(tokenizer, sampling_params):
+    blocked = {
+        token
+        for token in set(tokenizer.get_vocab().values())
+        if "</" in tokenizer.decode([token], skip_special_tokens=False)
+    }
+    eos = tokenizer.eos_token_id
+    if eos is not None:
+        blocked.update(eos if isinstance(eos, (list, tuple)) else [eos])
+    blocked.update(sampling_params.get("stop_token_ids") or [])
+    return sorted(blocked)
+
+
 async def generate_continuation(input):
-    """Mask closing for exactly one token; this constrained token is not trained."""
+    """Mask closing and termination for one token; this constrained token is not trained."""
     sample = input.sample
     before = sample.response_length
     blocked = sample.metadata["comparative_continue_ids"]
@@ -30,9 +43,9 @@ async def generate_continuation(input):
     if sample.response_length != before + 1:
         raise RuntimeError("Continue intervention must generate exactly one token")
     if sample.tokens[-1] in blocked:
-        raise RuntimeError("Closing-token suppression failed")
+        raise RuntimeError("Closing/termination-token suppression failed")
     sample.loss_mask = [0] * sample.response_length
-    # EOS after the first token is a genuine terminal outcome, not a request to resume.
+    # Honor other terminal conditions (e.g. stop strings); never resume a completed request.
     if sample.status == Sample.Status.COMPLETED:
         return output
     sample.status = Sample.Status.PENDING
@@ -58,11 +71,7 @@ class ComparativeExitRollout(forced_exits.ForcedExitRollout):
         super().__init__(input)
         tokenizer = self.state.tokenizer
         self.close_ids = tokenizer.encode(forced_exits.CLOSING_TEXT, add_special_tokens=False)
-        self.blocked_ids = sorted(
-            token
-            for token in set(tokenizer.get_vocab().values())
-            if "</" in tokenizer.decode([token], skip_special_tokens=False)
-        )
+        self.blocked_ids = continuation_blocked_ids(tokenizer, self.state.sampling_params)
         if not self.close_ids or self.close_ids[0] not in self.blocked_ids:
             raise ValueError("Cannot identify the tokenizer's closing decision")
 
@@ -118,11 +127,13 @@ class ComparativeExitRollout(forced_exits.ForcedExitRollout):
             tie_min_accuracy=core.forced_exit_tie_min_accuracy,
         )
         training = []
-        for group, outcomes in zip((stop, continuation), rewards, strict=True):
-            training.extend(
-                branch_record(s, a, 2 * n)
-                for s, a in zip(group, stopping_comparison.centered_rewards(outcomes), strict=True)
-            )
+        # Zero keeps branches grade-only; completion/tree-rollout reuse is explicitly opt-in.
+        if core.forced_exit_branch_coefficient > 0:
+            for group, outcomes in zip((stop, continuation), rewards, strict=True):
+                training.extend(
+                    branch_record(s, a, 2 * n)
+                    for s, a in zip(group, stopping_comparison.centered_rewards(outcomes), strict=True)
+                )
         prompt_length = len(parent.tokens) - parent.response_length
         end = forced_exits.thinking_end(parent.tokens[prompt_length:], self.state.tokenizer)
         return {
@@ -217,9 +228,7 @@ class ComparativeExitRollout(forced_exits.ForcedExitRollout):
                 for pristine in pristine_groups
             ]
         )
-        chosen = [i for i in range(len(groups)) if rng.random() < rate]
-        rng.shuffle(chosen)
-        chosen = chosen[: core.forced_exit_max_parents_per_update]
+        chosen = stopping_comparison.select_groups(len(groups), rate, core.forced_exit_max_parents_per_update, rng)
         work = []
         for i in chosen:
             weights = stopping_comparison.parent_weights(
@@ -286,6 +295,7 @@ class ComparativeExitRollout(forced_exits.ForcedExitRollout):
             "forced_exit/parent_probability": rate,
             "forced_exit/next_probability": next_rate,
             "forced_exit/risk": int(risky),
+            "forced_exit/selected_parents": len(chosen),
             "forced_exit/probed_positions": len(records),
             "forced_exit/tie_bonuses": sum(p["tie_bonus"] > 0 for p in records),
             "forced_exit/probe_tokens": sum(p["generated_tokens"] for p in records),
