@@ -69,8 +69,6 @@ def plan(spec):
                 nodes.append({"trainer_gpus": 0, "rollout_gpus": 0, "ray_gpus": 0, "judges": {}})
             nodes[-1]["judges"][name] = count
         allocated = capacity
-    if len(nodes) > 1 and not str(spec.output["root"]).startswith("/weka/"):
-        raise InputError("Multi-node rendezvous requires output.root on shared WEKA")
     return {
         "replicas": len(nodes),
         "gpus_per_replica": allocated,

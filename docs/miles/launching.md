@@ -209,6 +209,18 @@ execution timeout and WEKA mounts, and try **ai2/saturn** first. If scheduler
 events show it cannot schedule, cancel that attempt before trying **ai2/jupiter**.
 Do not use Holmes for CPU-only WEKA work.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.
+Multi-node runs and background evaluation require `output.root` inside one of
+these shared mounts: replicas coordinate through files there, and evaluation
+jobs read saved snapshots and write results there. The mount path can be any
+absolute directory, such as `/shared/training`; it need not start with `/weka/`.
+The Beaker launcher checks mount coverage at submission; `plan` and `validate`
+check configuration and GPU allocation without assuming a storage provider.
+
+The coordination code requires the same shared directory on every replica,
+cross-node file locking, atomic renames and visibility of other replicas' writes.
+The current Beaker launcher provisions WEKA mounts; other shared filesystems and
+launchers have not been validated.
+
 See [topology](topology.md) for replica and engine counts and
 [managed judges](managed-judges.md) for preparation and placement.
 

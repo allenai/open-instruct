@@ -47,10 +47,14 @@ def specification(image, spec, *, hostnames=None):
             )
 
     check_mounts(spec.to_dict())
-    if spec.evaluation["mode"] == "background" and not any(
-        Path(spec.output["root"]).is_relative_to(mount["mount_path"]) for mount in mounts
+    if (layout["replicas"] > 1 or spec.evaluation["mode"] == "background") and not any(
+        Path(os.path.normpath(spec.output["root"])).is_relative_to(os.path.normpath(mount["mount_path"]))
+        for mount in mounts
     ):
-        raise InputError("Background evaluation requires output.root on shared launch.weka_mounts")
+        raise InputError(
+            "Beaker multi-node runs and background evaluation require output.root inside a shared "
+            "launch.weka_mounts entry"
+        )
     sensitive = [
         name
         for name in spec.launch["env"]

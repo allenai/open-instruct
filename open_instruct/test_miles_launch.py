@@ -109,6 +109,50 @@ def test_multinode_partial_allocations_rejected(tmp_path):
         launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b"])
 
 
+@pytest.mark.parametrize("mode", ["multinode", "background"])
+@pytest.mark.parametrize(
+    "output_root,covered",
+    [
+        ("/shared/training/run", True),
+        ("/shared/training-other/run", False),
+        ("/shared/training/../other/run", False),
+        ("/weka/unmounted/run", False),
+        ("/tmp/local-run", False),
+    ],
+)
+def test_shared_output_requires_a_declared_mount_not_a_path_prefix(tmp_path, mode, output_root, covered):
+    sections = (
+        {"trainer": {"gpus": 4}, "inference": {"placement_mode": "disaggregated", "gpus": 12}}
+        if mode == "multinode"
+        else {
+            "data": {"tasks": [{"task": "gsm8k", "train_count": 32}]},
+            "evaluation": {
+                "mode": "background",
+                "image": IMAGE_ID,
+                "revision": "a" * 40,
+                "tasks": [{"task": "gsm8k"}],
+            },
+        }
+    )
+    run = spec(tmp_path, output={"root": output_root}, **sections)
+    run.launch["weka_mounts"].append({"weka": "training-store", "mount_path": "/shared/training"})
+    if not covered:
+        with pytest.raises(ValueError, match="launch.weka_mounts"):
+            launch.specification(IMAGE_ID, run)
+        return
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert {"mountPath": "/shared/training", "source": {"weka": "training-store"}} in task["datasets"]
+    assert payload(task["arguments"][0])["output"]["root"] == output_root
+    if mode == "multinode":
+        assert task["replicas"] == 2
+
+
+def test_single_node_without_background_evaluation_accepts_local_output(tmp_path):
+    run = spec(tmp_path, model={"source": "model"}, output={"root": "/tmp/run"}, launch={"weka_mounts": []})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert task["datasets"] == []
+
+
 @pytest.mark.parametrize("section", ["data", "conversion", "compiler_cache", "miles"])
 def test_every_weka_input_and_output_requires_mount_coverage(tmp_path, section):
     value = {

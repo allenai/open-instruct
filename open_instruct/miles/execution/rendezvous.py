@@ -13,7 +13,7 @@ from open_instruct.miles.infrastructure import artifacts
 def poll_round(root, rank, count, member):
     """Require a new process identity from every replica before a new round.
 
-    Serialize membership changes on WEKA. A restarted replica cannot consume
+    Serialize membership changes on the shared filesystem. A restarted replica cannot consume
     old readiness/failure/completion files while waiting for peers to restart.
     """
     root = Path(root)

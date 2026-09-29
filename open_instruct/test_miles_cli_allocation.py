@@ -4,22 +4,19 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 from open_instruct.miles import __main__ as cli
 from open_instruct.miles.configuration.run_spec import RunSpec
 
 
-def test_validate_rejects_nonshared_multinode_output(tmp_path, monkeypatch, capsys):
+def test_validate_multinode_does_not_assume_a_storage_provider(tmp_path, monkeypatch, capsys):
     root = Path(__file__).resolve().parents[1]
     payload = RunSpec.load(root / "configs/miles/examples/medium.toml").to_dict()
-    payload["output"]["root"] = str(tmp_path / "not-shared")
+    payload["output"]["root"] = "/shared/training/run"
+    payload["launch"]["weka_mounts"] = []
     config = tmp_path / "run.json"
     config.write_text(json.dumps(payload))
-    # Trainer settings alone accept this; the physical allocation does not.
+    # Planning validates GPU allocation; Beaker submission checks shared mounts.
     RunSpec.load(config).compile().arguments()
     monkeypatch.setattr(sys, "argv", ["miles", "validate", str(config)])
-    with pytest.raises(SystemExit) as error:
-        cli.main()
-    assert error.value.code == 2
-    assert "Multi-node rendezvous requires output.root on shared WEKA" in capsys.readouterr().err
+    cli.main()
+    assert "Run schema, topology and MILES/Core options validated" in capsys.readouterr().out
