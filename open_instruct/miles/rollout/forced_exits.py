@@ -181,6 +181,7 @@ class ForcedExitRollout(common.InferenceRolloutFn):
                     "parent_index": parent.index,
                     "prompt_id": parent.metadata.get("prepared_sample_id"),
                     "cut": cut,
+                    "guidance": getattr(args.olmo_core, "forced_exit_guidance", "full_tag"),
                     "close_ids": close_ids,
                     "position": position,
                     "thinking_length": thinking_end(response_ids, state.tokenizer),

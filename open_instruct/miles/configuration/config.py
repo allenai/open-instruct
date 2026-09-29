@@ -25,6 +25,25 @@ class CoreConfig:
     forced_exit_answer_tokens: int = 1024
     forced_exit_coefficient: float = 0.1
     forced_exit_probe_interval: int = 0
+    forced_exit_mode: str = "trace"
+    forced_exit_guidance: str = "full_tag"
+    forced_exit_initial_trials: int = 128
+    forced_exit_initial_updates: int = 4
+    forced_exit_branch_coefficient: float = 1.0
+    forced_exit_tie_bonus: float = 0.0
+    forced_exit_tie_min_accuracy: float = 0.5
+    forced_exit_parent_probability: float = 0.125
+    forced_exit_max_parents_per_update: int = 2
+    forced_exit_halving_interval: int = 32
+    forced_exit_floor_fraction: float = 0.0625
+    forced_exit_uniform_share: float = 0.25
+    forced_exit_length_cap: int = 8192
+    forced_exit_screen_positions: int = 5
+    forced_exit_screen_trials: int = 4
+    forced_exit_audit_interval: int = 16
+    forced_exit_audit_window: int = 64
+    forced_exit_risk_min_parents: int = 4
+    forced_exit_risk_margin: float = 0.02
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
@@ -103,6 +122,33 @@ class CoreConfig:
         validation.integer(self.forced_exit_trials, "core.forced_exit_trials", minimum=1)
         validation.integer(self.forced_exit_answer_tokens, "core.forced_exit_answer_tokens", minimum=1)
         validation.number(self.forced_exit_coefficient, "core.forced_exit_coefficient", exclusive_min=True)
+        validation.choice(self.forced_exit_mode, "core.forced_exit_mode", ("trace", "comparative"))
+        validation.choice(self.forced_exit_guidance, "core.forced_exit_guidance", ("full_tag", "first_token"))
+        for name in (
+            "forced_exit_initial_trials",
+            "forced_exit_max_parents_per_update",
+            "forced_exit_halving_interval",
+            "forced_exit_length_cap",
+            "forced_exit_screen_positions",
+            "forced_exit_screen_trials",
+            "forced_exit_audit_interval",
+            "forced_exit_audit_window",
+            "forced_exit_risk_min_parents",
+        ):
+            validation.integer(getattr(self, name), f"core.{name}", minimum=1)
+        validation.integer(self.forced_exit_initial_updates, "core.forced_exit_initial_updates", minimum=0)
+        for name in (
+            "forced_exit_tie_min_accuracy",
+            "forced_exit_parent_probability",
+            "forced_exit_floor_fraction",
+            "forced_exit_uniform_share",
+            "forced_exit_risk_margin",
+            "forced_exit_tie_bonus",
+        ):
+            validation.number(getattr(self, name), f"core.{name}", minimum=0, maximum=1)
+        validation.number(
+            self.forced_exit_branch_coefficient, "core.forced_exit_branch_coefficient", exclusive_min=True
+        )
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -304,7 +350,11 @@ class RunConfig:
         elif hook == EXPERT_SCHEDULE:
             raise InputError("The expert schedule hook requires core.expert_balanced_packing=true")
         if not self.core.forced_exit_positions and (
-            options.get("rollout_function_path") == "open_instruct.miles.rollout.forced_exits.ForcedExitRollout"
+            options.get("rollout_function_path")
+            in (
+                "open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
+                "open_instruct.miles.rollout.comparative_exits.ComparativeExitRollout",
+            )
             or options.get("custom_loss_function_path") == "miles.backends.core_utils.stopping.policy_loss"
         ):
             raise InputError(
@@ -527,6 +577,24 @@ class RunConfig:
 
     def _validate_forced_exits(self, options):
         """Validate the opt-in stopping objective without changing normal GRPO."""
+        if self.core.forced_exit_mode == "comparative":
+            if self.core.forced_exit_positions != 2 or self.core.forced_exit_guidance != "first_token":
+                raise InputError("Comparative stopping requires two cuts and first_token guidance")
+            if (
+                self.core.forced_exit_parents != 1
+                or not self.core.forced_exit_parent_probability
+                or not self.core.forced_exit_floor_fraction
+            ):
+                raise InputError("Comparative stopping requires one parent per prompt and positive sampling rates")
+            if self.core.forced_exit_trials < 2 or self.core.forced_exit_initial_trials < self.core.forced_exit_trials:
+                raise InputError("Comparative stopping requires initial_trials >= trials >= 2")
+            if (
+                self.core.forced_exit_risk_min_parents < 2
+                or self.core.forced_exit_audit_window < self.core.forced_exit_audit_interval
+            ):
+                raise InputError("Comparative audit requires at least two parents and a window covering an audit")
+            if self.core.forced_exit_tie_bonus and not 0 < self.core.forced_exit_tie_min_accuracy < 1:
+                raise InputError("Tie guidance requires a positive, non-perfect sharpening threshold")
         if self.core.forced_exit_positions:
             if options.get("n_samples_per_prompt", 1) < 2:
                 raise InputError("Forced exits require at least two natural responses per prompt")
@@ -542,8 +610,13 @@ class RunConfig:
                 raise InputError("Forced exits require scoring_pass_required=true for the guidance anchor")
             if options.get("calculate_per_token_loss", False):
                 raise InputError("Forced exits require response-averaged loss for separate closing-token weighting")
+            rollout = (
+                "open_instruct.miles.rollout.comparative_exits.ComparativeExitRollout"
+                if self.core.forced_exit_mode == "comparative"
+                else "open_instruct.miles.rollout.forced_exits.ForcedExitRollout"
+            )
             required = {
-                "rollout_function_path": "open_instruct.miles.rollout.forced_exits.ForcedExitRollout",
+                "rollout_function_path": rollout,
                 "loss_type": "custom_loss",
                 "custom_loss_function_path": "miles.backends.core_utils.stopping.policy_loss",
             }
@@ -570,6 +643,15 @@ class RunConfig:
                 raise InputError("Forced exits require unmodified group-centered reward advantages")
             if not options.get("rewards_normalization", True):
                 raise InputError("Forced exits require group-centered rewards")
+            if self.core.forced_exit_mode == "comparative":
+                if self.core.filter_zero_std_groups:
+                    raise InputError(
+                        "Comparative stopping retains all natural prompt groups; disable zero-std filtering"
+                    )
+                if options.get("rollout_temperature", 1) != 1 or options.get("rollout_top_p", 1) != 1:
+                    raise InputError("Comparative branch training requires temperature=1 and top_p=1")
+                if options.get("rollout_top_k", -1) != -1:
+                    raise InputError("Comparative branch training requires top_k=-1")
 
     def _validate_engine_drain(self, options, collection, samples):
         if not options.get("fully_async", False):
