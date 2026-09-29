@@ -96,6 +96,6 @@ def specification(image, spec):
     return {
         "version": "v2",
         "budget": spec.launch["budget"],
-        "description": f"Miles Megatron OPD: {spec.name}",
+        "description": f"Miles Megatron {spec.document['training']['algorithm'].upper()}: {spec.name}",
         "tasks": [task],
     }

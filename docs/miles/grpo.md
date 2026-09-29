@@ -97,3 +97,29 @@ special prompt is needed. Follow the [documentation index](index.md) for model
 support, configuration, data, parallelism and operations. The dated
 [consolidation record](measurements/sharing-20260913/README.md#consolidation-decisions-september-13)
 tracks which branches supplied the current implementation.
+
+## Experimental Megatron verifier-GRPO qualification
+
+The structured module also accepts `training.algorithm = "grpo"` with
+`trainer.backend = "megatron"` for a **synchronous, teacher-free Qwen3-1.7B
+mechanics qualification**. This adapter is experimental; CPU validation does
+not establish GPU support, objective parity, throughput or learning quality.
+Use an immutable local original HF checkpoint, pre-rendered `data.prompt_data`,
+`data.eval_prompt_data` and a trusted `data.reward_config` registry. Do not add
+a teacher or distillation section.
+
+The initial contract owns one optimizer update and weight publication per
+rollout, within-prompt centered verifier rewards, explicit PPO clipping and
+Adam settings, and a response or token loss denominator. It scores the
+pre-update policy in Megatron; no rollout-logprob substitution or reference KL
+is enabled. The workflow retains verifier evidence, checks mixed-reward groups
+and trainer advantages, saves native state, completes the HF export and loads
+it in a fresh SGLang process. A mechanics run must pass those checks before
+advancing to performance comparisons. Graphs and radix caching default off.
+Async, colocation and offloading remain gated until separately qualified.
+
+Keep output and asset directories separate and fresh, retain checkpoints
+(`training.keep_checkpoints = 0`), and run `plan` and `validate` before the
+committed-image `run` workflow. Use a native Megatron/SGLang image with the
+pushed source overlay for this adapter, rather than the Core-only image.
+This path does not establish Qwen3.5 support in OLMo-core.

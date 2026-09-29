@@ -2,12 +2,17 @@
 
 import copy
 
-from open_instruct.miles import opd_config, run_spec, validation
+from open_instruct.miles import megatron_grpo_config, opd_config, run_spec, validation
 
 
 def from_dict(document, *, config_path=None, overrides=None):
     document = copy.deepcopy(document)
     run_spec._apply_overrides(document, overrides)
+    if (
+        document.get("training", {}).get("algorithm") == "grpo"
+        and document.get("trainer", {}).get("backend") == "megatron"
+    ):
+        return megatron_grpo_config.MegatronGRPORunSpec.from_dict(document, config_path=config_path or "run.toml")
     kind = (
         opd_config.OPDRunSpec
         if document.get("training", {}).get("algorithm") == "opd"

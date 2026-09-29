@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from open_instruct.miles import opd_config, specs, validation
+from open_instruct.miles import megatron_grpo_config, opd_config, specs, validation
 from open_instruct.miles.config import RunConfig
 from open_instruct.miles.errors import InputError
 
@@ -52,6 +52,14 @@ def execute(parser, options):
             launch.run(options.config, options.overrides)
         else:
             print(json.dumps(launch.status(config), indent=2))
+        return
+    if isinstance(config, megatron_grpo_config.MegatronGRPORunSpec):
+        if options.command == "validate":
+            print(
+                "Teacher-free Megatron GRPO schema/allocation validated; runtime mechanics and objective parity pending qualification"
+            )
+        else:
+            importlib.import_module("open_instruct.miles.megatron_grpo_runtime").execute(config)
         return
     if isinstance(config, opd_config.OPDRunSpec):
         if options.command == "validate":
