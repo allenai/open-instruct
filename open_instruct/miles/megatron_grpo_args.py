@@ -8,8 +8,8 @@ from open_instruct.miles import options
 def conversion_command(executable, miles_root, architecture, model, checkpoint, tensor_parallel):
     """Keep conversion on the same TP-only mesh as the GRPO trainer.
 
-    The native converter otherwise infers pipeline stages from the torchrun
-    world size, which makes TP2/PP2 require four ranks in a two-rank conversion.
+    The native converter overrides even explicit PP1 under world size > 1.
+    The managed entry point guards that inference when tensor parallelism is used.
     """
     return [
         executable,
@@ -17,6 +17,9 @@ def conversion_command(executable, miles_root, architecture, model, checkpoint, 
         "torch.distributed.run",
         "--standalone",
         f"--nproc-per-node={tensor_parallel}",
+        "-m",
+        "open_instruct.miles.megatron_grpo_convert",
+        "--native-script",
         str(Path(miles_root) / "tools/convert_hf_to_torch_dist.py"),
         *architecture,
         "--hf-checkpoint",

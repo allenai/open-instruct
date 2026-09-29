@@ -1,6 +1,8 @@
 """Teacher-free contract, native objective mapping and verifier reward centering."""
 
+import ast
 import asyncio
+import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ from open_instruct.miles import (
     megatron_grpo_args,
     megatron_grpo_audit,
     megatron_grpo_config,
+    megatron_grpo_convert,
     megatron_grpo_hooks,
     specs,
 )
@@ -220,3 +223,61 @@ def test_conversion_tp_only_mesh_matches_trainer():
     assert command[command.index("--pipeline-model-parallel-size") + 1] == "1"
     assert command[command.index("--hf-checkpoint") + 1] == "/original/qwen3"
     assert command[command.index("--save") + 1] == "/converted/tp2"
+
+
+CONVERTER_ARGS = """
+def get_args():
+    args = parse_args(None)
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if args.pipeline_model_parallel_size == 1 and world_size > 1:
+        args.pipeline_model_parallel_size = world_size
+        args.decoder_last_pipeline_num_layers = args.num_layers // world_size
+    validate_args(args)
+    return args
+"""
+
+
+def exercise_converter(source, tp, patched):
+    tree = megatron_grpo_convert.converter_tree(source, "native-converter") if patched else ast.parse(source)
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "get_args")
+    namespace = {
+        "parse_args": lambda _: SimpleNamespace(
+            tensor_model_parallel_size=tp,
+            pipeline_model_parallel_size=1,
+            num_layers=28,
+            decoder_last_pipeline_num_layers=None,
+        ),
+        "set_default_megatron_args": lambda args: args,
+        "add_convertion_args": None,
+        "os": SimpleNamespace(environ={"WORLD_SIZE": "2"}),
+    }
+
+    def validate(args):
+        assert 2 % (args.tensor_model_parallel_size * args.pipeline_model_parallel_size) == 0
+
+    namespace["validate_args"] = validate
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "native-converter", "exec"), namespace)
+    return namespace["get_args"]()
+
+
+def test_converter_override_reproduced_and_guarded():
+    with pytest.raises(AssertionError):
+        exercise_converter(CONVERTER_ARGS, tp=2, patched=False)
+    args = exercise_converter(CONVERTER_ARGS, tp=2, patched=True)
+    assert args.pipeline_model_parallel_size == 1 and args.decoder_last_pipeline_num_layers is None
+    args = exercise_converter(CONVERTER_ARGS, tp=1, patched=True)
+    assert args.pipeline_model_parallel_size == 2 and args.decoder_last_pipeline_num_layers == 14
+    with pytest.raises(ValueError, match="guard changed"):
+        megatron_grpo_convert.converter_tree(CONVERTER_ARGS.replace("world_size > 1", "world_size > 2"), "changed")
+
+
+def test_pinned_native_converter_tp_only():
+    native = importlib.util.find_spec("miles")
+    if native is None or native.origin is None:
+        pytest.skip("Pinned native converter is supplied by the GPU runtime image")
+    path = Path(native.origin).resolve().parents[1] / "tools/convert_hf_to_torch_dist.py"
+    source = path.read_text()
+    with pytest.raises(AssertionError):
+        exercise_converter(source, tp=2, patched=False)
+    args = exercise_converter(source, tp=2, patched=True)
+    assert args.pipeline_model_parallel_size == 1 and args.decoder_last_pipeline_num_layers is None
