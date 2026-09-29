@@ -95,21 +95,9 @@ def execute(spec):
             conversion_env = environment | {
                 "CUDA_VISIBLE_DEVICES": ",".join(visible[i] for i in layout["roles"]["trainer"][:tp])
             }
-            command = [
-                sys.executable,
-                "-m",
-                "torch.distributed.run",
-                "--standalone",
-                f"--nproc-per-node={tp}",
-                str(miles_root / "tools/convert_hf_to_torch_dist.py"),
-                *architecture,
-                "--hf-checkpoint",
-                model,
-                "--save",
-                str(checkpoint),
-                "--tensor-model-parallel-size",
-                str(tp),
-            ]
+            command = megatron_grpo_args.conversion_command(
+                sys.executable, miles_root, architecture, model, checkpoint, tp
+            )
             with (root / "conversion.log").open("w") as stream:
                 subprocess.run(
                     command, env=conversion_env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=1800

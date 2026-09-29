@@ -209,3 +209,14 @@ def test_audit_requires_centered_reward_signal_in_trainer_dumps(tmp_path, monkey
         assert result["passed"] and result["teacher"] is None
         assert [row["mixed_groups"] for row in result["rollouts"]] == [1, 1]
         assert result["export"]["changed_tensors"] == 1
+
+
+def test_conversion_tp_only_mesh_matches_trainer():
+    command = megatron_grpo_args.conversion_command(
+        "/usr/bin/python", "/native/miles", ["--num-layers", "28"], "/original/qwen3", "/converted/tp2", 2
+    )
+    assert "--nproc-per-node=2" in command
+    assert command[command.index("--tensor-model-parallel-size") + 1] == "2"
+    assert command[command.index("--pipeline-model-parallel-size") + 1] == "1"
+    assert command[command.index("--hf-checkpoint") + 1] == "/original/qwen3"
+    assert command[command.index("--save") + 1] == "/converted/tp2"
