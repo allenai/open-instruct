@@ -5,19 +5,11 @@ logging and allocation together. The section names follow `olmo-miles` examples;
 the resolved training backend here is OLMo-core. Existing `[core]` / `[miles]`
 TOMLs and the `RunConfig` Python interface remain available for low-level work.
 
-The maintained [examples](../../configs/miles/examples/README.md) have four roles:
-
-| File | Purpose |
-|---|---|
-| `dev.toml` | One-GPU tiny-model colocation and plumbing check. |
-| `small.toml` | Two-GPU disaggregated GSM8K mechanics check. |
-| `medium.toml` | Mixed-workload MoE training: 8 trainers, 7 inference engines and 1 judge. |
-| `large.toml` | Unqualified production proposal: 16 trainers, 32 inference engines and 1 judge. |
-
-Copy the chosen example into ignored `runs/` before customizing it. Historical
-qualification configurations live in Git history and local run archives, not in
-the maintained menu. See [throughput evidence](throughput-profiles.md) for the
-measurements behind the settings and their limits.
+Choose a maintained [starting point](../../configs/miles/examples/README.md),
+then copy it into ignored `runs/` before customizing it. The
+[generated recipe tables](configuration.md#example-recipes) describe the current
+allocations and batch geometry. Historical measurements are linked from the
+feature guides and do not override the maintained TOMLs.
 
 Replace `YOUR_USERNAME` and the checkpoint path before launching. A model source
 must include the compatible architecture, tokenizer and chat template. Keep the
@@ -50,8 +42,8 @@ Use `train` inside an allocation. `run` launches the config-driven Beaker
 workflow and `status` inspects the submitted run:
 
 ```bash
-python -m open_instruct.miles run configs/miles/examples/medium.toml
-python -m open_instruct.miles status configs/miles/examples/medium.toml
+python -m open_instruct.miles run runs/my-run.toml
+python -m open_instruct.miles status runs/my-run.toml
 ```
 
 See the complete [laptop and Beaker-session launch guide](launching.md).
@@ -83,11 +75,9 @@ checkpoint when one exists. Without a completed checkpoint, training begins
 from the initial model again. A killed process may leave the last recorded
 workflow state; consult the Beaker attempt status when checking liveness.
 
-The launch defaults in the examples are high priority,
-`ai2/open-instruct-dev`, `ai2/holmes`, and a one-hour minimum runtime. The
-100-update examples allow eight hours before timeout, including preparation,
-evaluation and synchronous saves. CPU-only
-jobs that need WEKA belong on `ai2/saturn`.
+Review the copied run's scheduling settings and rendered Beaker spec before
+launching. See the [scheduling contract](launching.md#distributed-scheduling-contract)
+for GPU placement, protected runtime and the separate CPU-job rules.
 
 All commands accept repeatable TOML overrides, for example:
 
@@ -130,21 +120,9 @@ prove that a model fits the selected GPUs.
 
 ## Configuration sections
 
-| Section | What belongs here |
-| --- | --- |
-| `[model]` | Input checkpoint and format. HF input loads directly into Core; native Core input needs its compatible HF template for export. No Megatron conversion is involved. |
-| `[data]` and `[[data.tasks]]` | Named tasks with train/eval counts and prompt wrappers, prepared JSONL, or a supported `rl_manifest`. Seed and shuffle are recorded with preparation; the baseline `data.recipe` catalog is not ported. |
-| `[output]` | Run root and optional final HF export. |
-| `[launch]` | Workspace, cluster, priority, minimum runtime, GPU allocation, WEKA mounts, environment, secret names and timeout. Mount every WEKA volume containing model/template/data/cache/output paths. |
-| `[training]` | Rollout count, initial/periodic evaluation and checkpoint cadence. |
-| `[trainer]` | Trainer GPUs/nodes, expert parallelism, microbatch size, recomputation and attention backend. |
-| `[inference]` | Colocation, engine topology, batch geometry, lengths and SGLang admission/cache/graph controls. |
-| `[optimizer]` | LR, schedule, Adam, clipping, KL and entropy coefficients. |
-| `[async]` | Scheduling, allowed weight age, buffer capacity and off-policy correction. |
-| `[judges]`, `[rubrics]`, `[judging]` | Named fixed-weight SGLang services, versioned grading profiles and prepared-verifier bindings. |
-| `[tracking]` | W&B mode/project/group/team. Examples retain offline files without requiring credentials. |
-| `[runtime]`, `[compiler_cache]` | Core runtime selection and compiler-cache policy. |
-| `[core]`, `[miles]` | Explicit adapter/native options without a structured alias. Unknown or unsupported controls fail validation. |
+Use [which section to edit](configuration.md#which-section-to-edit) for the
+section map and [workflow fields](configuration.md#workflow-fields) for accepted
+values. `plan` shows how structured aliases resolve into Core and native MILES options.
 
 Data preparation uses open-instruct's task and reward machinery. A familiar
 section name does not imply that every olmo-miles catalog entry or external
@@ -156,12 +134,12 @@ alone does not establish identical datasets.
 
 ## Collection and policy settings
 
-The [first-run guide](grpo.md) uses `small.toml`: **4 prompts × 2 responses =
-8 samples**, global batch 8, and synchronous barrier publication. Each collection
-produces one optimizer update. The medium and large examples use mixed-policy
-refresh; see [policy lag and TIS](async-pipeline.md#policy-lag-and-tis) for the
-current default and its limits. Router replay, auxiliary losses and reference
-KL are independent settings; consult the copied run file for their values.
+A collection contains `rollout_batch_size × n_samples_per_prompt` responses;
+`global_batch_size` determines responses per optimizer update. Their ratio is
+the number of updates per collection. See the
+[generated recipe tables](configuration.md#example-recipes) for each starter and
+[policy lag and TIS](async-pipeline.md#policy-lag-and-tis) when changing that ratio.
+Router replay, auxiliary losses and reference KL are independent settings.
 
 ## Trainer mappings that need care
 
@@ -170,7 +148,7 @@ settings have a narrower meaning here:
 
 | olmo-miles concept | Core meaning or limitation |
 | --- | --- |
-| `trainer.gpus`, `trainer_num_nodes`, `expert_parallel_size` | `trainer.gpus` is GPUs per trainer node; total trainer GPUs are `gpus × trainer_num_nodes`. `expert_parallel_size` sets the expert process group. EP2 has the principal learning evidence; the async starter now requests EP8. Consult the topology guide for qualification limits. |
+| `trainer.gpus`, `trainer_num_nodes`, `expert_parallel_size` | `trainer.gpus` is GPUs per trainer node; total trainer GPUs are `gpus × trainer_num_nodes`. `expert_parallel_size` sets the expert process group. Consult the topology guide for supported placement and qualification limits. |
 | `activation_recompute` | Core activation checkpointing; it does not promise the same recomputation granularity as Megatron. |
 | `micro_batch_size` | Core microbatch size is one. Optional document-isolated packing combines samples within an optimizer partition; see [packing](sequence-packing.md). |
 | `trainer_flash_attention_version=4` | Core `flash_4`; the exercised full-SFT runtime is B300. A matching number does not establish H100 qualification. |
@@ -179,17 +157,7 @@ settings have a narrower meaning here:
 | `async_save` | Unsupported; native Core saves are synchronous. Final HF export is a separate post-training operation. |
 | Megatron conversion/layout settings | Do not apply to Core. The HF descriptor and native Core checkpoint have distinct roles. |
 
-The examples retain the measured dedicated-engine limits together: client and
-engine concurrency 64, decode graph size 64, recurrent cache 128, token pool
-524288 and static memory fraction 0.6. Evaluation shares those limits. The
-runtime's actual memory allocation and long-tail response lengths determine
-throughput; these settings are not a guarantee of a particular evaluation time.
-
-For the exact bounded workflow exercise, see
-[`workflow-async-gsm8k.toml`](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/qualification/workflow-async-gsm8k.toml):
-four updates, the previously prepared full-SFT checkpoint, fresh named-task
-GSM8K preparation, heldout evaluation, async TIS and 8 × 8 sampling. It disables
-checkpoint saving and final export to isolate the configuration-to-training
-path. This is a workflow check, not a new 100-update learning comparison.
-
-The [completed exercise and independent sample audit](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/researcher-workflow-20260911.md) passed: four updates, 256 training responses, and 12/16 held-out answers correct both initially and finally. The report records the exact scope and observed TIS clipping.
+Size serving concurrency, graph capture and memory pools together using the
+[admission guidance](throughput-profiles.md#size-engine-admission-from-memory).
+The [archived workflow exercise](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/researcher-workflow-20260911.md)
+retains its original recipe, image and sample audit.

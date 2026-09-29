@@ -95,32 +95,14 @@ for current changes, then exercise the selected model and topology.
 | `barrier` | Low-level default, used by dev and small mechanics examples. Does not continue mixed-policy responses across publication. |
 | `engine_drain` | Independent engine drain: finish requests on their admitted version before swapping weights. This mode is distinct from mixed-policy refresh; see [engine drain](engine-drain.md). |
 
-The `small` starter uses one trainer and one TP1 engine with barrier publication,
-four prompts × two responses and eight samples per update. The `medium` refresh
-template uses **EP8 + seven TP1 engines + one judge**, 64 prompts × four responses,
-256 samples per update, FIFO groups, lag at most six optimizer updates, and TIS.
-See [policy lag and TIS](async-pipeline.md#policy-lag-and-tis) for defaults,
-overrides and qualification limits.
-In refresh mode, lag is measured from the oldest token's policy version. Original sampled-token
-log probabilities remain the behavior denominator; trainer scoring supplies the
-PPO anchor. Replay routes describe the final forward that rebuilt the route table,
-not the historical expert choice for every previously sampled token.
-
-Refresh requires resident disaggregated TP1 engines, one optimizer update per
-collection, the managed single-turn producer, MILES router metadata and TIS.
-Keep `use_rollout_logprobs=false`; it is independent of retaining original behavior
-probabilities for TIS. Full decode CUDA graphs or disabled graphs are accepted;
-prefill graphs, speculative decoding, serving prefill/decode disaggregation and
-automatic engine fault tolerance are rejected. Sampling qualification requires
-temperature/top-p 1 and top-k -1. See [configuration](configuration.md),
-[async queues](async-pipeline.md) and [throughput settings](throughput-profiles.md).
-A configured refresh mode does not prove a particular short run actually crossed
-a policy boundary; inspect retained token spans and `refresh_scores` observations.
+The [generated recipe tables](configuration.md#example-recipes) show each
+starter's allocation, batch geometry, publication mode and lag limit. Read
+[refresh requirements](async-pipeline.md#mixed-policy-refresh) and
+[policy lag and TIS](async-pipeline.md#policy-lag-and-tis) before changing the
+async recipe.
 
 ## Documentation and agent entry point
 
-Agents discover this workflow from the repository README and AGENTS.md; no
+Agents discover this workflow through AGENTS.md; no
 special prompt is needed. Follow the [documentation index](index.md) for model
-support, configuration, data, parallelism and operations. The dated
-[consolidation record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/sharing-20260913/README.md#consolidation-decisions-september-13)
-tracks which branches supplied the current implementation.
+support, configuration, data, parallelism and operations.

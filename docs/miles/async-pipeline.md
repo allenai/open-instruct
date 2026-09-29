@@ -55,6 +55,23 @@ logs further capped running requests to five per engine for that trial's state
 pool. Neither allocating more nodes nor increasing only the FIFO changes those
 other limits.
 
+## Mixed-policy refresh
+
+Original sampled-token log probabilities remain the behavior denominator;
+trainer scoring supplies the PPO anchor. Replay routes describe the final forward that rebuilt the route table,
+not the historical expert choice for every previously sampled token.
+
+Refresh requires resident disaggregated TP1 engines, one optimizer update per
+collection, the managed single-turn producer, MILES router metadata and TIS.
+Keep `use_rollout_logprobs=false`; it is independent of retaining original behavior
+probabilities for TIS. Full decode CUDA graphs or disabled graphs are accepted;
+prefill graphs, speculative decoding, serving prefill/decode disaggregation and
+automatic engine fault tolerance are rejected. Sampling qualification requires
+temperature/top-p 1 and top-k -1. See [configuration](configuration.md) and
+[throughput settings](throughput-profiles.md).
+A configured refresh mode does not prove a particular short run actually crossed
+a policy boundary; inspect retained token spans and `refresh_scores` observations.
+
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted

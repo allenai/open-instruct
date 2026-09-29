@@ -30,14 +30,9 @@ throughput qualification of the current image or the 32K medium template.
 
 ## Choose a profile
 
-Use the four [maintained starters](../../configs/miles/examples/README.md).
-
-| Profile | Trainer / inference / judge GPUs | Role |
-|---|---|---|
-| dev | 1 shared / — | Tiny-model colocation mechanics |
-| small | 1 / 1 / 0 | Disaggregated GSM8K mechanics |
-| medium | 8 / 7 / 1 | Mixed-workload 32K training starting point |
-| large | 16 / 32 / 1 | Production proposal; reserves 56 GPUs, not qualified |
+Choose among the four [maintained starters](../../configs/miles/examples/README.md).
+Their [generated recipe tables](configuration.md#example-recipes) show GPU
+allocations and batch geometry from the current TOMLs.
 
 The measurements below describe historical 4K experiments. Their labels such as
 “small” and “large” are historical campaign names, not the current starter sizes.

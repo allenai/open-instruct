@@ -72,9 +72,19 @@ vocabulary must match the checkpoint's; the Olmo 3.5 tokenizer is vocabulary-ide
 to the base dolma2 tokenizer, so only the template changes. Both the trainer's scoring
 and the serving engines read the staged directory, so prompts, stop tokens and
 log-probabilities all follow the override. Runs prepared under different templates are
-different conditions: compare them only through a fresh evaluation, which
-`scripts/miles/gsm8k_test_eval.py --tokenizer DIR` renders and serves with the same
-override.
+different conditions: compare them through a fresh evaluation with an explicit
+rendering and scoring protocol.
+
+The standalone `scripts/miles/gsm8k_test_eval.py --tokenizer DIR` compares HF
+checkpoints on the official GSM8K test split and applies that tokenizer override
+to both prompt rendering and serving. It uses fixed serving settings from
+`SERVER_FLAGS`, including a 6,144-token context and TP1 engines; it does not read
+the training TOML or inherit its cache, graph or admission settings. It reports
+greedy accuracy and optional temperature-one sampling with the training
+`GSM8KVerifier`, rather than the background olmo-eval scoring protocol.
+Use it only when that evaluation protocol fits the checkpoint and hardware;
+`--reference-eval` checks prompt rendering against prepared rows, not serving
+configuration equivalence.
 
 ```toml
 [model]

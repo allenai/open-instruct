@@ -1,9 +1,9 @@
 # Topology and capacity
 
-Start with [structured examples](../../configs/miles/examples/README.md) and inspect
-`plan` before allocating GPUs. The full async starter is **one EP8 trainer node
-plus seven TP1 rollout engines and one judge on a second node**, not the historical EP2 + one
-engine study. Recommended configuration and measured qualification are distinct.
+Start with a [maintained example](../../configs/miles/examples/README.md) and
+inspect `plan` before allocating GPUs. The
+[generated recipe tables](configuration.md#example-recipes) show current
+allocations. This guide explains how those counts map to physical nodes.
 
 | Control | Meaning |
 |---|---|
@@ -28,22 +28,12 @@ a native Beaker replica group and full eight-GPU nodes; see the
 own fixed-weight service. Plan reports unused slots. Consult
 [managed judges](managed-judges.md) for current placement restrictions.
 
-## Publication and recipe selection
-
-The [four maintained examples](../../configs/miles/examples/README.md) separate
-mechanics from training. Dev uses one colocated GPU; small uses one trainer and
-one inference GPU. Medium uses EP8 + seven engines + one judge, mixed-policy
-refresh, 64 prompts × 4 responses and batch 256 with provisional lag six. Large is an
-unqualified two-node trainer / 32-engine production proposal. Inspect `plan`
-for physical allocation, including the judge node's unused slots.
-
 ## Collections, optimization and async
 
-`small.toml` collects **4 prompts × 2 responses = 8 samples**, with global batch
-8 for one optimizer update per collection. Smaller global batches introduce
-multiple optimizer updates and change policy lag requirements. Core microbatch
-size remains one; optional [packing](sequence-packing.md) groups original samples
-into document-isolated forwards within an optimizer partition.
+Collection size and optimizer batch size determine how many updates each
+collection produces; see [batch geometry](workflow.md#collection-and-policy-settings).
+Core microbatch size remains one. Optional [packing](sequence-packing.md) groups
+original samples into document-isolated forwards within an optimizer partition.
 
 Async requires resident disaggregated engines. Staleness counts optimizer steps,
 not elapsed seconds or collections. Multiple optimizer steps per collection
@@ -59,11 +49,11 @@ Do not infer an eightfold speedup from eight rollout GPUs.
 ## Serving and memory
 
 Set client concurrency, engine maximum running requests, decode graph size,
-full-attention token capacity and recurrent-state cache capacity together. The
-medium and large starters expose concurrency 64 per engine, sized from memory as in
-[admission sizing](throughput-profiles.md#size-engine-admission-from-memory); dev/small use 8; shared-engine held-out evaluation uses those same
-limits. Context includes prompt plus response; response caps alone do not bound
-prompt memory. Trainer pack budget and serving context are different controls.
+full-attention token capacity and recurrent-state cache capacity together. Use
+[admission sizing](throughput-profiles.md#size-engine-admission-from-memory) to
+choose compatible limits; shared-engine held-out evaluation uses those same limits.
+Context includes prompt plus response; response caps alone do not bound prompt
+memory. Trainer pack budget and serving context are different controls.
 
 Measure actual allocated KV/recurrent pools, memory after optimizer creation and
 graph capture, retractions, response tails, tokens/second and tokens/GPU-second.
@@ -88,15 +78,9 @@ training, publication or decode can still determine end-to-end cadence. Compare
 warm update wall time and trainer data waits alongside cache hits and engine
 throughput; a higher engine throughput number alone does not establish a faster run.
 
-The archived 20-update comparison found about **45 cached
-tokens per sample versus roughly 3,600 generated tokens**. Warm updates 3–20 took
-31.5 minutes with cache off and 32.0 minutes with radix plus cache-aware routing:
-no measurable end-to-end gain in that comparison, despite cache hits and increased
-reported engine throughput. This is a training-phase observation; both arms lost
-final evaluation to a code-service error. Matching mean trainer/behavior log-prob
-gaps (0.0241) do not establish tokenwise numerical identity. The [completed three-arm report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/radix-cache-ab-20260912.md)
-retains the mixed-chunk result and node/timing confounds. Its historical default
-suggestion does not override the current example TOMLs.
+The [archived radix-cache comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/radix-cache-ab-20260912.md)
+records the workload, timing and failure limits of that experiment. Its
+historical default suggestion does not override the current example TOMLs.
 
 Treat radix caching as workload-dependent tuning, particularly worth measuring
 when substantial prefixes repeat. Keep the example defaults until a representative

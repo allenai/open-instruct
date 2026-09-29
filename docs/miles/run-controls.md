@@ -17,12 +17,11 @@ accounts for every `MilesSmokeConfig` field, including controls that belong to
 preparation, launch, or diagnostics rather than training arguments. Native parser
 acceptance does not establish backend support or GPU qualification.
 
-Start with the [colocated dev/test and disaggregated training profiles](../../configs/miles/README.md).
-The medium and large starters expose 64 concurrent requests per engine and size
-decode graphs, KV tokens and KDA state slots with them; see
-[admission sizing](throughput-profiles.md#size-engine-admission-from-memory).
-Async uses trainer-scored old logprobs plus TIS and a completed-buffer factor of one. The combined
-config-driven exercise passed four updates with independently audited samples; previous measured configs remain frozen.
+Start with a [maintained example](../../configs/miles/examples/README.md).
+Use the [generated recipe tables](configuration.md#example-recipes) for its current
+settings, [admission sizing](throughput-profiles.md#size-engine-admission-from-memory)
+for serving budgets, and [async defaults](async-pipeline.md#structured-defaults-and-overrides)
+for producer and completed-buffer capacity.
 
 ## Editing and inspecting a run
 

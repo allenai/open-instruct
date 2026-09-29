@@ -1,9 +1,10 @@
 """Score HF policy checkpoints on the official GSM8K test split with SGLang engines.
 
 For every ``--checkpoint NAME=HF_DIR`` this serves the checkpoint on ``--gpus`` TP1
-engines with the training run's serving settings, then scores all 1,319 test
+engines with the fixed settings in SERVER_FLAGS, then scores all 1,319 test
 questions greedily and with ``--sampled-n`` temperature-1 samples each, using the
-same ``GSM8KVerifier`` the training run used. Prompts are rendered with the
+training ``GSM8KVerifier``. This tool does not read a training configuration or
+inherit its serving settings. Prompts are rendered with the
 checkpoint's own chat template exactly as run preparation renders them; when
 ``--reference-eval`` points at a prepared ``eval.jsonl`` the rendering is checked
 against every one of its rows before any generation.

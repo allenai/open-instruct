@@ -123,23 +123,36 @@ def render(native_help=None):
         ["Field", "Replacement or limitation"], sorted(run_spec.UNSUPPORTED_FIELDS.items())
     )
     text += "\n## Example recipes\n\nGenerated from the actual structured TOMLs. These are recipe choices, not universal defaults or production qualification. GPU columns distinguish per-node trainers from total rollout GPUs.\n\n"
-    rows = []
+    allocations = []
+    recipes = []
     for path in sorted((ROOT / "configs/miles/examples").glob("*.toml")):
         spec = run_spec.RunSpec.load(path)
         resolved = spec.compile()
         m = resolved.miles
-        rows.append(
+        allocation = spec.plan()["allocation"]
+        allocations.append(
             (
                 path.name,
                 f"{m['actor_num_nodes']} × {m['actor_num_gpus_per_node']}",
                 m["rollout_num_gpus"],
                 m["colocate"],
+                allocation["judge_gpus"],
+                allocation["replicas"],
+                allocation["allocated_gpus"],
+                allocation["unused_gpus"],
+            )
+        )
+        recipes.append(
+            (
+                path.name,
                 f"{m['rollout_batch_size']} × {m['n_samples_per_prompt']}",
                 m["global_batch_size"],
+                m["num_rollout"],
+                resolved.core.publication_mode,
                 m["fully_async"],
+                resolved.core.max_policy_lag,
                 m["use_tis"],
                 resolved.core.sequence_packing,
-                m["num_rollout"],
             )
         )
     text += table(
@@ -148,14 +161,27 @@ def render(native_help=None):
             "Trainer GPUs",
             "Rollout GPUs",
             "Colocated",
+            "Judge GPUs",
+            "Replicas",
+            "Allocated GPUs",
+            "Unused GPUs",
+        ],
+        allocations,
+    )
+    text += "\nAllocated GPUs include unused slots and managed judges, but exclude independent background evaluator jobs. Inspect `plan` for the evaluator schedule and per-job resources.\n\n"
+    text += table(
+        [
+            "Example",
             "Prompts × responses",
             "Global batch",
+            "Collections",
+            "Publication",
             "Async",
+            "Max policy lag (updates)",
             "TIS",
             "Packing",
-            "Collections",
         ],
-        rows,
+        recipes,
     )
     result[DOCS / "configuration.md"] = text
     constraints = source_constraints()
