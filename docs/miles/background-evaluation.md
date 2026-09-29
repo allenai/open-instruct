@@ -173,7 +173,7 @@ configs and fresh output paths; leave existing experiments unchanged.
 Live GPU results and W&B publication semantics are recorded in the
 [archived evaluator qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/background-evaluation-20260920.md).
 
-## Development gold labels and scoring corrections
+## Development gold labels and scoring
 
 Use `scripts/miles/development_eval.py` for custom math/GSM8K development
 scoring. Prepared math labels can be lists of acceptable strings. Preserve that
@@ -195,19 +195,3 @@ Include this module in the custom worker's content manifest and import its
 `score_one(row, item)` for development tasks. Qualify the actual panel's label
 schema, not just synthetic scalar-label canaries. Version corrected bundles;
 never modify a running experiment's immutable dataset in place.
-
-For a running campaign using an older frozen bundle,
-`scripts/miles/reconcile_development_eval.py` can watch saved four-sample
-development generations and publish corrected results as
-`eval/development_gold_v2/*`, with the original checkpoint update as the axis.
-Run it as a CPU-only, unallocated task in the pinned evaluator image, supplying
-the training evaluation receipt and the matching `evaluation_runner.py` as
-`--receipt` and `--publisher`. It preserves original results, waits for complete
-question/replicate coverage, records generation and scorer hashes, retries
-publication failures, and skips completed corrections across restarts. Its
-default watch window is 96 hours. A shared W&B writer does not finish the
-training run. Stop this companion when campaign evaluation is complete.
-
-The active trainer keeps its original in-memory configuration; a companion
-correction is not a hot replacement of that frozen worker. New launches must
-reference the corrected bundle and manifest explicitly.
