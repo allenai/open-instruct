@@ -1,4 +1,8 @@
-"""Distributed serving groups must retire while both peers still exist."""
+"""Distributed serving groups must retire while both peers still exist.
+
+Mocked workers never compile kernels or load checkpoints, so disable compiler
+caching explicitly instead of depending on the absence of a WEKA mount.
+"""
 
 import asyncio
 import json
@@ -82,7 +86,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         check_weight_update_allow_quant_error=False,
         check_weight_update_selector=None,
         check_weight_update_skip_list=[],
-        olmo_core=CoreConfig(diagnostic_interval=diagnostic_interval),
+        olmo_core=CoreConfig(compiler_cache=False, diagnostic_interval=diagnostic_interval),
         save_trigger_sentinel=None,
         save_interval=None,
         update_weights_interval=1,
@@ -206,7 +210,7 @@ def test_failed_periodic_comparison_aborts_before_resume_or_next_generation(monk
         check_weight_update_allow_quant_error=False,
         check_weight_update_selector="all",
         check_weight_update_skip_list=["ignored_buffer"],
-        olmo_core=CoreConfig(diagnostic_interval=1),
+        olmo_core=CoreConfig(compiler_cache=False, diagnostic_interval=1),
         save_trigger_sentinel=None,
         save_interval=None,
         update_weights_interval=1,
@@ -309,7 +313,7 @@ def test_rolling_checkpoint_does_not_wait_for_groups_waiting_for_one_step_lag(mo
         fully_async=True,
         offload_rollout=False,
         check_weight_update_equal=False,
-        olmo_core=CoreConfig(publication_mode="engine_drain", max_policy_lag=1),
+        olmo_core=CoreConfig(compiler_cache=False, publication_mode="engine_drain", max_policy_lag=1),
         save_trigger_sentinel=None,
         save_interval=1,
         update_weights_interval=1,
@@ -355,7 +359,9 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
         fully_async=True,
         offload_rollout=False,
         check_weight_update_equal=False,
-        olmo_core=CoreConfig(publication_mode="refresh", engine_drain_timeout=900, engine_update_timeout=180),
+        olmo_core=CoreConfig(
+            compiler_cache=False, publication_mode="refresh", engine_drain_timeout=900, engine_update_timeout=180
+        ),
         eval_interval=None,
         start_rollout_id=0,
         num_rollout=0,
@@ -444,7 +450,7 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
         fully_async=True,
         offload_rollout=False,
         check_weight_update_equal=False,
-        olmo_core=CoreConfig(publication_mode="refresh"),
+        olmo_core=CoreConfig(compiler_cache=False, publication_mode="refresh"),
         save_trigger_sentinel=None,
         save_interval=1,
         update_weights_interval=1,
