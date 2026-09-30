@@ -382,10 +382,13 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = self.policy.parameters()
         # ZeRO-Offload requires DeepSpeedCPUAdam (deepspeed hard-errors on a
         # client torch AdamW); mirror the value-model optimizer selection.
+        policy_adam = grpo_utils.policy_adam_kwargs(args)
         if args.deepspeed_offload_optimizer:
-            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate)
+            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate, **policy_adam)
         else:
-            self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+            self.optimizer = torch.optim.AdamW(
+                optim_params, lr=args.learning_rate, fused=args.fused_optimizer, **policy_adam
+            )
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(

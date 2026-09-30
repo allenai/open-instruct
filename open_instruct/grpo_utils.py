@@ -138,6 +138,32 @@ class DPPODivergenceType(enum.StrEnum):
     kl = "kl"
 
 
+def policy_adam_kwargs(config: Any) -> dict[str, Any]:
+    """Opt-in policy Adam controls for the authorized historical DeepSpeed reproduction.
+
+    All four values must be declared together. An absent override preserves the
+    installed optimizer defaults, including historical OPD behavior. This is an
+    optimizer construction contract, not proof of distributed runtime parity.
+    """
+    names = ("policy_adam_beta1", "policy_adam_beta2", "policy_adam_eps", "policy_adam_weight_decay")
+    values = [getattr(config, name, None) for name in names]
+    if all(value is None for value in values):
+        return {}
+    if any(value is None for value in values):
+        raise ValueError("Historical policy Adam override requires all four controls")
+    if any(type(value) not in (float, int) or not math.isfinite(value) for value in values):
+        raise ValueError("Historical policy Adam controls must be finite numbers")
+    beta1, beta2, eps, weight_decay = values
+    if not (0 <= beta1 < 1 and 0 <= beta2 < 1 and eps > 0 and weight_decay >= 0):
+        raise ValueError("Invalid historical policy Adam betas, epsilon or weight decay")
+    if (
+        getattr(config, "set_weight_decay_on_bias_and_norm", False)
+        and getattr(config, "weight_decay", None) != weight_decay
+    ):
+        raise ValueError("Explicit policy Adam decay must agree with configured parameter-group decay")
+    return {"betas": (beta1, beta2), "eps": eps, "weight_decay": weight_decay}
+
+
 @dataclass
 class GRPOExperimentConfig(
     olmo_core_utils.ExperimentConfig,
@@ -148,6 +174,15 @@ class GRPOExperimentConfig(
     # Optimizer
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
+
+    policy_adam_beta1: float | None = None
+    """Optional historical DeepSpeed policy Adam beta1; set all four controls together."""
+    policy_adam_beta2: float | None = None
+    """Optional historical DeepSpeed policy Adam beta2; None preserves installed defaults."""
+    policy_adam_eps: float | None = None
+    """Optional historical DeepSpeed policy Adam epsilon; value optimizer is unaffected."""
+    policy_adam_weight_decay: float | None = None
+    """Optional historical policy Adam default decay; explicit parameter-group decay takes precedence."""
 
     # Batch sizes
     total_episodes: int = 100000
@@ -446,6 +481,7 @@ class GRPOExperimentConfig(
     """Skip the initial policy-to-vLLM sync when eval-only vLLM already loaded the exact policy weights."""
 
     def __post_init__(self):
+        policy_adam_kwargs(self)
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
