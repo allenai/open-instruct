@@ -53,6 +53,7 @@ from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUB
 # isort: on
 import asyncio
 import dataclasses
+import json
 import logging
 import math
 import random
@@ -1139,6 +1140,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
+        selected_work = None
+        if os.getenv("OI_PACKING_AUDIT", "0") == "1":
+            selected_work = rl_utils.summarize_response_work(
+                data_BT.response_masks, data_BT.rollout_sample_ids, shifted=True
+            )
+
         # Build a per-sample FLA CP context for Qwen3.5 hybrid linear attention
         # under Ulysses SP.  Under SP=1 or on non-linear-attention models we
         # fall through to a list of ``None``.
@@ -1823,6 +1830,23 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics[key] = value
 
             batch_metrics = batch_data["metrics"]
+            if selected_work is not None:
+                logger.info(
+                    "[TrainerResponseWork] %s",
+                    json.dumps(
+                        {
+                            "training_step": training_step,
+                            "rank": self.rank,
+                            "sequence_parallel_size": self.args.sequence_parallel_size,
+                            "completed_epochs": self.args.num_epochs,
+                            "selected_work": selected_work,
+                        },
+                        sort_keys=True,
+                    ),
+                )
+                # Local counts: sum across DP ranks, accounting for SP replication.
+                self.local_metrics["packing/local_trainer_selected_response_tokens"] = selected_work["tokens"]
+                self.local_metrics["packing/local_trainer_selected_responses"] = len(selected_work["sample_ids"])
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
                 if tis_mask_enabled:

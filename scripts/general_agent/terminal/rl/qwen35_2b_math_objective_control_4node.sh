@@ -136,6 +136,7 @@ fi
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --env VLLM_DISABLE_COMPILE_CACHE=1 \
     --env VLLM_USE_V1=1 \
+    --env OI_PACKING_AUDIT="${OI_PACKING_AUDIT:-0}" \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --auto_checkpoint_state_dir "$MASON_CHECKPOINT_STATE_DIR" \
     --no_auto_dataset_cache \

@@ -22,6 +22,35 @@ _rollout_save_lock = threading.Lock()
 ROLLOUT_SHARD_SIZE = 10000
 
 
+def summarize_response_work(
+    response_masks: list[torch.Tensor], rollout_sample_ids: list[torch.Tensor], *, shifted: bool = False
+) -> dict[str, Any]:
+    """Count selected response tokens and IDs, excluding prompts, tools and padding.
+
+    ``shifted`` counts the trainer's next-token loss positions. Counts describe
+    the supplied masks, not whether an optimizer accepted the resulting update.
+    """
+    if len(response_masks) != len(rollout_sample_ids):
+        raise ValueError("Response masks and rollout IDs must have equal lengths")
+    tokens = 0
+    packs = 0
+    sample_ids: set[int] = set()
+    for mask, ids in zip(response_masks, rollout_sample_ids, strict=True):
+        if mask.shape != ids.shape:
+            raise ValueError("Response mask and rollout ID shapes must match")
+        packs += 1 if mask.ndim == 1 else mask.shape[0]
+        if shifted:
+            mask, ids = mask[..., 1:], ids[..., 1:]
+        active = mask > 0
+        tokens += int(active.sum())
+        # Each response occupies contiguous positions; transfer bounded IDs,
+        # rather than a Python entry for every response token.
+        sample_ids.update(torch.unique_consecutive(ids[active]).cpu().tolist())
+    if any(sample_id < 0 for sample_id in sample_ids):
+        raise ValueError("Active response tokens must have nonnegative rollout IDs")
+    return {"tokens": tokens, "packs": packs, "sample_ids": sorted(sample_ids)}
+
+
 def _json_default(obj):
     if is_dataclass(obj):
         return asdict(obj)

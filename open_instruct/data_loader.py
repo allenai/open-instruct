@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import os
 import threading
@@ -52,6 +53,7 @@ from open_instruct.rl_utils import (
     save_filtered_rollouts_to_disk,
     save_rollout_metadata,
     save_rollouts_to_disk,
+    summarize_response_work,
 )
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics, repeat_each
@@ -2088,6 +2090,39 @@ class DataPreparationActor:
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
             )
 
+            packing_metrics = {}
+            if _env_flag("OI_PACKING_AUDIT", False):
+                received = summarize_response_work(
+                    packed_sequences.response_masks, packed_sequences.rollout_sample_ids
+                )
+                prepared = summarize_response_work(
+                    [mask for worker in collated_data for mask in worker.response_masks],
+                    [ids for worker in collated_data for ids in worker.rollout_sample_ids],
+                )
+                dropped_ids = sorted(set(received["sample_ids"]) - set(prepared["sample_ids"]))
+                packing_metrics = {
+                    "packing/received_active_response_tokens": received["tokens"],
+                    "packing/prepared_active_response_tokens": prepared["tokens"],
+                    "packing/dropped_active_response_tokens": received["tokens"] - prepared["tokens"],
+                    "packing/received_responses": len(received["sample_ids"]),
+                    "packing/prepared_responses": len(prepared["sample_ids"]),
+                    "packing/dropped_responses": len(dropped_ids),
+                    "packing/prepared_packs": prepared["packs"],
+                    "packing/dropped_packs": received["packs"] - prepared["packs"],
+                }
+                logger.info(
+                    "[PackingRetention] %s",
+                    json.dumps(
+                        {
+                            "data_step": step,
+                            "received": received,
+                            "prepared": prepared,
+                            "dropped_sample_ids": dropped_ids,
+                        },
+                        sort_keys=True,
+                    ),
+                )
+
             if len(result.responses) == 0:
                 step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}
             else:
@@ -2181,6 +2216,7 @@ class DataPreparationActor:
                 step_metrics["val/actor_tokens_per_second"] = total_tokens / result.token_statistics.generation_time
                 step_metrics["time/getting_response"] = result.token_statistics.generation_time
 
+            step_metrics.update(packing_metrics)
             with self.lock:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
