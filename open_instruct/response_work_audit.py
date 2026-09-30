@@ -16,9 +16,19 @@ _WRITE_LOCK = threading.Lock()
 
 
 def engine_counters(engine):
-    """Read available native counters without invoking or changing the engine."""
+    """Read counters and the native last-step flag without advancing the engine.
+
+    DeepSpeed global_steps advances at a boundary even on overflow. Its public
+    was_step_applied query reports the engine's decision, not measured tensor
+    movement. Missing queries remain unknown for older installed engines.
+    """
     optimizer = getattr(engine, "optimizer", None)
+    query = getattr(engine, "was_step_applied", None)
+    applied = query() if callable(query) else None
+    if applied is not None and type(applied) is not bool:
+        raise TypeError("Native was_step_applied must return bool or unknown")
     values = {
+        "native_step_applied": applied,
         "global_steps": getattr(engine, "global_steps", None),
         "skipped_steps": getattr(engine, "skipped_steps", None),
         "optimizer_overflow": getattr(optimizer, "overflow", None),

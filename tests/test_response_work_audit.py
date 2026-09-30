@@ -68,9 +68,10 @@ def test_preparation_and_selection_are_distinct_from_acceptance(audit, tmp_path)
     persisted = rows(tmp_path / "response-work-audit")
     assert len(persisted) == 2 and all("accepted" not in row for row in persisted)
     assert next(row for row in persisted if row["event"] == "packing-retention")["dropped_sample_ids"] == [1]
-    assert counters == {"global_steps": 4, "skipped_steps": 1, "optimizer_overflow": True}
+    assert counters == {"global_steps": 4, "skipped_steps": 1, "optimizer_overflow": True, "native_step_applied": None}
     assert engine.global_steps == 4 and engine.skipped_steps == 1
     assert audit.engine_counters(SimpleNamespace()) == {
+        "native_step_applied": None,
         "global_steps": None,
         "skipped_steps": None,
         "optimizer_overflow": None,
@@ -139,3 +140,28 @@ def test_native_training_and_preparation_keep_durable_hooks():
         and node.args[1].value == "packing-retention"
         for node in ast.walk(data)
     )
+
+
+@pytest.mark.parametrize("applied,overflow,skipped", [(True, False, 0), (False, True, 1), (False, False, 0)])
+def test_native_last_step_query_distinguishes_boundary_overflow_and_noop(audit, applied, overflow, skipped):
+    calls = []
+
+    def query():
+        calls.append("query")
+        return applied
+
+    engine = SimpleNamespace(
+        global_steps=5, skipped_steps=skipped, optimizer=SimpleNamespace(overflow=overflow), was_step_applied=query
+    )
+    counters = audit.engine_counters(engine)
+    assert counters["native_step_applied"] is applied
+    assert counters["optimizer_overflow"] is overflow
+    assert counters["global_steps"] == 5  # A global-step value alone never establishes acceptance.
+    assert calls == ["query"] and engine.global_steps == 5
+
+
+@pytest.mark.parametrize("invalid", [1, "true", []])
+def test_native_applied_flag_rejects_unexpected_types(audit, invalid):
+    engine = SimpleNamespace(was_step_applied=lambda: invalid)
+    with pytest.raises(TypeError, match="must return bool"):
+        audit.engine_counters(engine)
