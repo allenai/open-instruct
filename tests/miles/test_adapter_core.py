@@ -79,7 +79,7 @@ def test_router_replay_keeps_experts_and_router_gradients(recompute):
     assert router.replay_expert_indices is None
 
 
-@pytest.mark.parametrize("hf_cls", [LlamaConfig, Qwen2Config, Qwen3Config, Olmo2Config])
+@pytest.mark.parametrize("hf_cls", [LlamaConfig, Qwen3Config, Olmo2Config])
 def test_hf_core_logits_and_roundtrip(hf_cls):
     torch.manual_seed(13)
     hf = hf_cls(
@@ -112,6 +112,12 @@ def test_hf_core_logits_and_roundtrip(hf_cls):
     assert set(exported) == set(reference.state_dict())
     for key, value in exported.items():
         torch.testing.assert_close(value, reference.state_dict()[key], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("hf", [Qwen2Config(), LlamaConfig(attention_bias=True)])
+def test_hf_core_rejects_unsupported_biased_attention(hf):
+    with pytest.raises(ValueError, match="No verified Core HF factory|biased attention projections"):
+        model_config_from_hf(hf, CoreConfig(attention_backend="torch"))
 
 
 def test_interrupted_checkpoint_can_be_retried_without_replacing_committed_data(tmp_path):
