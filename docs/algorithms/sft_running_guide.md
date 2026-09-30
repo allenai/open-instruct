@@ -51,10 +51,10 @@ Wait for this job to reach exit 0 before launching step 2.
 
 What a healthy run looks like: 1,723 steps for the epoch, CE from ~1.20 down to
 ~0.65, smooth, with no instability after the LR peaks around step 52. Step count is
-a function of the mixture and chat template, not a constant — `olmo123` resolves to
-the tokenizer's own template, which prepends a function-calling system block to every
-conversation without a system message, so rows average 840 tokens rather than the
-~643 you get under the `olmo_thinker` templates.
+a function of the mixture and chat template, not a constant — `tokenizer_default`
+resolves to the tokenizer's own template, which prepends a function-calling system
+block to every conversation without a system message, so rows average 840 tokens
+rather than the ~643 you get under the `olmo_thinker` templates.
 
 Checkpoints are written every 345 steps — five per epoch, which is what the eval
 table below covers — into the directory the job logs as `CHECKPOINT_OUTPUT_DIR`.
