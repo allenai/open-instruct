@@ -35,7 +35,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, padding_free_collator, response_work_audit, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -1683,6 +1683,7 @@ class DataPreparationActor:
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
+        self._audit_output_dir = work_dir
         self.base_env_config = base_env_config
         self.image_prewarm_actors = image_prewarm_actors or []
 
@@ -2110,18 +2111,15 @@ class DataPreparationActor:
                     "packing/prepared_packs": prepared["packs"],
                     "packing/dropped_packs": received["packs"] - prepared["packs"],
                 }
-                logger.info(
-                    "[PackingRetention] %s",
-                    json.dumps(
-                        {
-                            "data_step": step,
-                            "received": received,
-                            "prepared": prepared,
-                            "dropped_sample_ids": dropped_ids,
-                        },
-                        sort_keys=True,
-                    ),
-                )
+                packing_record = {
+                    "data_step": step,
+                    "received": received,
+                    "prepared": prepared,
+                    "dropped_sample_ids": dropped_ids,
+                    "scope": "Prepared masks/IDs; may include prefetched work never used by an optimizer.",
+                }
+                response_work_audit.record(self._audit_output_dir, "packing-retention", packing_record)
+                logger.info("[PackingRetention] %s", json.dumps(packing_record, sort_keys=True))
 
             if len(result.responses) == 0:
                 step_metrics = {"time/generation_idle_waiting_for_trainer": generation_idle_wait_time}

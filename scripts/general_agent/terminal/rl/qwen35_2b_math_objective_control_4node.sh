@@ -38,6 +38,8 @@ if [[ -n "$PATCH_DATASET" ]]; then
         /patch/open_instruct/vllm_utils.py
         /stage/open_instruct/
         '&&'
+        'if [ -f /patch/open_instruct/response_work_audit.py ]; then cp /patch/open_instruct/response_work_audit.py /stage/open_instruct/; fi'
+        '&&'
     )
 fi
 
@@ -137,6 +139,7 @@ fi
     --env VLLM_DISABLE_COMPILE_CACHE=1 \
     --env VLLM_USE_V1=1 \
     --env OI_PACKING_AUDIT="${OI_PACKING_AUDIT:-0}" \
+    --env OI_PACKING_AUDIT_RESULT_DIR="${OI_PACKING_AUDIT_RESULT_DIR:-/output/response-work-audit}" \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --auto_checkpoint_state_dir "$MASON_CHECKPOINT_STATE_DIR" \
     --no_auto_dataset_cache \

@@ -45,7 +45,7 @@ with contextlib.suppress(Exception):
     pass
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, grpo_utils, utils
+from open_instruct import data_types, grpo_utils, response_work_audit, utils
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
@@ -1141,6 +1141,7 @@ class PolicyTrainerRayProcess(RayProcess):
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
 
         selected_work = None
+        optimizer_call_records = []
         if os.getenv("OI_PACKING_AUDIT", "0") == "1":
             selected_work = rl_utils.summarize_response_work(
                 data_BT.response_masks, data_BT.rollout_sample_ids, shifted=True
@@ -1594,8 +1595,24 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.cuda.empty_cache()
                         self.model.backward(loss)
                         if is_accumulation_boundary:
+                            before = (
+                                response_work_audit.engine_counters(self.model) if selected_work is not None else None
+                            )
                             self.model.step()
                             grad_norms.append(float(self.model.get_global_grad_norm()))
+                            if selected_work is not None:
+                                call_record = {
+                                    "training_step": training_step,
+                                    "local_step": local_step,
+                                    "before": before,
+                                    "after": response_work_audit.engine_counters(self.model),
+                                    "grad_norm": grad_norms[-1],
+                                    "scope": "Native engine observations; not independent optimizer acceptance or weight movement proof.",
+                                }
+                                response_work_audit.record(
+                                    self.args.output_dir, "optimizer-call", call_record, rank=self.rank
+                                )
+                                optimizer_call_records.append(call_record)
                         local_step += 1
                         # Bound inter-iteration drift from async backward/ZeRO work
                         # before this rank starts the next sample.
@@ -1762,8 +1779,22 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                     self.model.backward(loss)
                     if is_accumulation_boundary:
+                        before = response_work_audit.engine_counters(self.model) if selected_work is not None else None
                         self.model.step()
                         grad_norms.append(float(self.model.get_global_grad_norm()))
+                        if selected_work is not None:
+                            call_record = {
+                                "training_step": training_step,
+                                "local_step": local_step,
+                                "before": before,
+                                "after": response_work_audit.engine_counters(self.model),
+                                "grad_norm": grad_norms[-1],
+                                "scope": "Native engine observations; not independent optimizer acceptance or weight movement proof.",
+                            }
+                            response_work_audit.record(
+                                self.args.output_dir, "optimizer-call", call_record, rank=self.rank
+                            )
+                            optimizer_call_records.append(call_record)
                     local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
@@ -1831,19 +1862,19 @@ class PolicyTrainerRayProcess(RayProcess):
 
             batch_metrics = batch_data["metrics"]
             if selected_work is not None:
-                logger.info(
-                    "[TrainerResponseWork] %s",
-                    json.dumps(
-                        {
-                            "training_step": training_step,
-                            "rank": self.rank,
-                            "sequence_parallel_size": self.args.sequence_parallel_size,
-                            "completed_epochs": self.args.num_epochs,
-                            "selected_work": selected_work,
-                        },
-                        sort_keys=True,
-                    ),
+                trainer_record = {
+                    "training_step": training_step,
+                    "rank": self.rank,
+                    "sequence_parallel_size": self.args.sequence_parallel_size,
+                    "completed_epochs": self.args.num_epochs,
+                    "selected_work": selected_work,
+                    "optimizer_call_records": optimizer_call_records,
+                    "scope": "Selected masks/IDs and native counters; optimizer acceptance is a separate audit.",
+                }
+                response_work_audit.record(
+                    self.args.output_dir, "trainer-response-work", trainer_record, rank=self.rank
                 )
+                logger.info("[TrainerResponseWork] %s", json.dumps(trainer_record, sort_keys=True))
                 # Local counts: sum across DP ranks, accounting for SP replication.
                 self.local_metrics["packing/local_trainer_selected_response_tokens"] = selected_work["tokens"]
                 self.local_metrics["packing/local_trainer_selected_responses"] = len(selected_work["sample_ids"])
@@ -1981,6 +2012,17 @@ class PolicyTrainerRayProcess(RayProcess):
             old_mpu = self.mpu
             self.model.mpu = None
         self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
+        response_work_audit.record(
+            self.args.output_dir,
+            "native-state-save-returned",
+            {
+                "client_training_step": client_state.get("training_step"),
+                "checkpoint_state_dir": checkpoint_state_dir,
+                "engine_counters": response_work_audit.engine_counters(self.model),
+                "scope": "Native save returned; does not prove checkpoint readability or optimizer restore.",
+            },
+            rank=self.rank,
+        )
 
         # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
         if self.rank == 0:
