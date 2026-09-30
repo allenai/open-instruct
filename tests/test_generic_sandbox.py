@@ -4,7 +4,12 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
 
-from open_instruct.environments.backends import ExecutionResult, SandboxBackend
+from open_instruct.environments.backends import (
+    ExecutionResult,
+    SandboxBackend,
+    SandboxContainerLostError,
+    SandboxOOMError,
+)
 from open_instruct.environments.base import EnvCall, StepResult
 from open_instruct.environments.generic_sandbox import GenericSandboxEnv
 
@@ -22,7 +27,7 @@ class MockBackend(SandboxBackend):
         self._files = {}
         self._cwd = "/testbed"
 
-    def run_command(self, command: str) -> ExecutionResult:
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
         if "which git" in command:
             return ExecutionResult(stdout="", stderr="", exit_code=1)
         if "mkdir -p" in command:
@@ -102,7 +107,6 @@ def _step(env: GenericSandboxEnv, name: str, args: dict) -> StepResult:
 
 
 class TestGenericSandboxReset(unittest.TestCase):
-
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_reset_returns_observation_and_tools(self, _mock):
         env = GenericSandboxEnv(backend="docker")
@@ -145,7 +149,6 @@ class TestGenericSandboxReset(unittest.TestCase):
 
 
 class TestExecuteBash(unittest.TestCase):
-
     def test_successful_command(self):
         env = _make_env()
         result = _step(env, "execute_bash", {"command": "echo hello"})
@@ -175,150 +178,142 @@ class TestExecuteBash(unittest.TestCase):
         self.assertIn("'command' parameter is required", result.result)
         self.assertEqual(result.reward, -0.05)
 
+    def test_oom_killed_sandbox_ends_the_episode(self):
+        # Without done=True the rollout keeps stepping and every later command
+        # re-trips the same dead container, burning the step budget for nothing.
+        env = _make_env()
+        backend = env._backend
+        assert backend is not None
+        with patch.object(backend, "run_command", side_effect=SandboxOOMError("container abc123 was OOM-killed")):
+            result = _step(env, "execute_bash", {"command": "echo hello"})
+
+        self.assertTrue(result.done)
+        self.assertEqual(result.reward, -0.05)
+        self.assertIn("OOM-killed", result.result)
+        self.assertEqual(result.metadata["sandbox_terminated"], "SandboxOOMError")
+
+    def test_lost_container_ends_the_episode(self):
+        env = _make_env()
+        backend = env._backend
+        assert backend is not None
+        error = SandboxContainerLostError("container abc123 disappeared")
+        with patch.object(backend, "run_command", side_effect=error):
+            result = _step(env, "execute_bash", {"command": "echo hello"})
+
+        self.assertTrue(result.done)
+        self.assertEqual(result.reward, -0.05)
+        self.assertEqual(result.metadata["sandbox_terminated"], "SandboxContainerLostError")
+
 
 class TestStrReplaceEditor(unittest.TestCase):
-
     def test_create_file(self):
         env = _make_env()
-        result = _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/hello.py",
-            "file_text": "print('hello')\n",
-        })
+        result = _step(
+            env,
+            "str_replace_editor",
+            {"command": "create", "path": "/testbed/hello.py", "file_text": "print('hello')\n"},
+        )
 
         self.assertIn("File created successfully", result.result)
         self.assertEqual(result.reward, 0.0)
 
     def test_create_existing_file_errors(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/exists.py",
-            "file_text": "original",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/exists.py",
-            "file_text": "overwrite",
-        })
+        _step(env, "str_replace_editor", {"command": "create", "path": "/testbed/exists.py", "file_text": "original"})
+        result = _step(
+            env, "str_replace_editor", {"command": "create", "path": "/testbed/exists.py", "file_text": "overwrite"}
+        )
 
         self.assertIn("already exists", result.result)
         self.assertIn("ERROR", result.result)
 
     def test_create_without_file_text(self):
         env = _make_env()
-        result = _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/no_content.py",
-        })
+        result = _step(env, "str_replace_editor", {"command": "create", "path": "/testbed/no_content.py"})
 
         self.assertIn("'file_text' parameter is required", result.result)
 
     def test_view_file(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/view_me.txt",
-            "file_text": "line one\nline two\nline three\n",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "view",
-            "path": "/testbed/view_me.txt",
-        })
+        _step(
+            env,
+            "str_replace_editor",
+            {"command": "create", "path": "/testbed/view_me.txt", "file_text": "line one\nline two\nline three\n"},
+        )
+        result = _step(env, "str_replace_editor", {"command": "view", "path": "/testbed/view_me.txt"})
 
         self.assertIn("str_replace_editor", result.result)
         self.assertIn("line one", result.result)
 
     def test_view_nonexistent_file(self):
         env = _make_env()
-        result = _step(env, "str_replace_editor", {
-            "command": "view",
-            "path": "/testbed/nope.txt",
-        })
+        result = _step(env, "str_replace_editor", {"command": "view", "path": "/testbed/nope.txt"})
 
         self.assertIn("ERROR", result.result)
 
     def test_str_replace(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/edit.py",
-            "file_text": "x = 1\ny = 2\nz = 3\n",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "str_replace",
-            "path": "/testbed/edit.py",
-            "old_str": "y = 2",
-            "new_str": "y = 42",
-        })
+        _step(
+            env,
+            "str_replace_editor",
+            {"command": "create", "path": "/testbed/edit.py", "file_text": "x = 1\ny = 2\nz = 3\n"},
+        )
+        result = _step(
+            env,
+            "str_replace_editor",
+            {"command": "str_replace", "path": "/testbed/edit.py", "old_str": "y = 2", "new_str": "y = 42"},
+        )
 
         self.assertIn("has been edited", result.result)
 
     def test_str_replace_not_found(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/sr.py",
-            "file_text": "a = 1\n",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "str_replace",
-            "path": "/testbed/sr.py",
-            "old_str": "not here",
-            "new_str": "replacement",
-        })
+        _step(env, "str_replace_editor", {"command": "create", "path": "/testbed/sr.py", "file_text": "a = 1\n"})
+        result = _step(
+            env,
+            "str_replace_editor",
+            {"command": "str_replace", "path": "/testbed/sr.py", "old_str": "not here", "new_str": "replacement"},
+        )
 
         self.assertIn("old_str not found", result.result)
 
     def test_str_replace_multiple_matches(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/dup.py",
-            "file_text": "x = 1\nx = 1\n",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "str_replace",
-            "path": "/testbed/dup.py",
-            "old_str": "x = 1",
-            "new_str": "x = 2",
-        })
+        _step(
+            env, "str_replace_editor", {"command": "create", "path": "/testbed/dup.py", "file_text": "x = 1\nx = 1\n"}
+        )
+        result = _step(
+            env,
+            "str_replace_editor",
+            {"command": "str_replace", "path": "/testbed/dup.py", "old_str": "x = 1", "new_str": "x = 2"},
+        )
 
         self.assertIn("found 2 times", result.result)
 
     def test_insert(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/ins.py",
-            "file_text": "line 1\nline 3\n",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "insert",
-            "path": "/testbed/ins.py",
-            "insert_line": 1,
-            "new_str": "line 2",
-        })
+        _step(
+            env,
+            "str_replace_editor",
+            {"command": "create", "path": "/testbed/ins.py", "file_text": "line 1\nline 3\n"},
+        )
+        result = _step(
+            env,
+            "str_replace_editor",
+            {"command": "insert", "path": "/testbed/ins.py", "insert_line": 1, "new_str": "line 2"},
+        )
 
         self.assertIn("has been edited", result.result)
 
     def test_insert_missing_params(self):
         env = _make_env()
-        _step(env, "str_replace_editor", {
-            "command": "create",
-            "path": "/testbed/ins2.py",
-            "file_text": "content\n",
-        })
-        result = _step(env, "str_replace_editor", {
-            "command": "insert",
-            "path": "/testbed/ins2.py",
-        })
+        _step(env, "str_replace_editor", {"command": "create", "path": "/testbed/ins2.py", "file_text": "content\n"})
+        result = _step(env, "str_replace_editor", {"command": "insert", "path": "/testbed/ins2.py"})
 
         self.assertIn("'insert_line' parameter is required", result.result)
 
 
 class TestUnknownTool(unittest.TestCase):
-
     def test_unknown_tool_name(self):
         env = _make_env()
         result = _step(env, "nonexistent_tool", {"arg": "val"})
@@ -328,7 +323,6 @@ class TestUnknownTool(unittest.TestCase):
 
 
 class TestMetricsAndState(unittest.TestCase):
-
     def test_step_count_increments(self):
         env = _make_env()
         self.assertEqual(env.get_metrics()["step_count"], 0.0)
@@ -346,7 +340,6 @@ class TestMetricsAndState(unittest.TestCase):
 
 
 class TestConfigurablePenalty(unittest.TestCase):
-
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_custom_penalty(self, _mock):
         env = GenericSandboxEnv(backend="docker", penalty=-0.1)
@@ -360,7 +353,6 @@ class TestConfigurablePenalty(unittest.TestCase):
 
 
 class TestCloseAndShutdown(unittest.TestCase):
-
     @patch(_MOCK_BACKEND_PATCH, side_effect=_mock_create_backend)
     def test_close(self, _mock):
         env = GenericSandboxEnv(backend="docker")
