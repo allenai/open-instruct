@@ -82,6 +82,17 @@ restricted source EMO metadata for testing the explicit full-pool preparation
 path. Its optional synthetic reward callback exercises nonzero policy gradients;
 these fixtures do not measure model quality.
 
+The first GPU smoke, [Holmes EP1 barrier](https://beaker.org/ex/01M3TAMBAHVCXHNEE5D4246H6H),
+used application revision `102ab85f6` and image `01M3TAD1AR2DQMVYKG595WQ9QV`.
+It passed preparation, serving construction, initial weight publication and
+rollout capture. All eight samples replayed exactly during Core scoring; the
+new detailed diagnostics reported 100% fresh/replayed set agreement across 368
+captured tokens. It **failed before the first optimizer update** because the
+mean train/rollout log-probability gap was 0.191425, above the unchanged 0.05
+threshold. Backward, updated publication and export remain unqualified.
+`scripts/miles/emo_numerics.py` isolates cached decode, full-prefill rescoring,
+native Core and the HF reference using identical token sequences.
+
 ## Existing support and integration work
 
 The inspection baseline is the Open Instruct [runtime lock](../../runtime/miles/runtime.lock.json):
