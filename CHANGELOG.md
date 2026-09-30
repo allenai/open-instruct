@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add explicit full-pool EMO preparation, Core router replay, serving validation and preserved checkpoint provenance to MILES. GPU qualification remains pending.
+- Add explicit full-pool EMO preparation, Core router replay, serving validation preserved checkpoint provenance, and opt-in per-document router behavior diagnostics to MILES. GPU qualification remains pending.
 - Resume preempted background evaluations safely: validate output provenance, retain and skip completed tasks, isolate partial attempts, and enable Beaker auto-resume (https://github.com/allenai/open-instruct/pull/1924).
 - Give the MILES router a 60-second idle keep-alive window around HTTPX's five-second reuse policy, with a real-connection regression test and documented local transport-race measurements (https://github.com/allenai/open-instruct/pull/1924).
 - Check MILES container network-interface overrides before initialization; warn and fall back to NCCL automatic selection for an unavailable `ib` override in single-node bridge-networked jobs (addresses https://github.com/allenai/open-instruct/issues/1927).

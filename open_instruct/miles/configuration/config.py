@@ -25,6 +25,7 @@ class CoreConfig:
     diagnostic_interval: int = 0
     pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
+    router_diagnostics: bool = False
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     publication_mode: str = "barrier"
@@ -156,6 +157,7 @@ class CoreConfig:
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
             "replay_diagnostics",
+            "router_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",
             "fp32_lm_head",
@@ -488,6 +490,8 @@ class RunConfig:
             raise InputError(
                 "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
             )
+        if self.core.router_diagnostics and not self.core.replay_diagnostics:
+            raise InputError("core.router_diagnostics requires core.replay_diagnostics=true")
         if self.core.replay_diagnostics and not options.get("use_rollout_routing_replay", False):
             raise InputError(
                 "core.replay_diagnostics requires rollout routing replay; set miles.use_rollout_routing_replay=true and miles.use_miles_router=true, or disable replay_diagnostics."

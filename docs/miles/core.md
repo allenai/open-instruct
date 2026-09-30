@@ -318,3 +318,37 @@ completed 32 updates per arm: observed warmed logprob mismatch fell 34%, trainer
 time rose about 1%, and peak rank-zero allocation rose 1.87 GiB. It did not show a
 held-out answer-quality improvement. Rollouts differ between arms; the frozen-token
 study isolates the component more directly.
+
+## Detailed router behavior diagnostics
+
+For a correctness run, enable both `core.replay_diagnostics=true` and
+`core.router_diagnostics=true`. The latter adds `router_behavior` events to each
+rank's `training_contract_rank*.jsonl`, alongside the exact replay assertions.
+It synchronizes the device and is disabled by default; do not use these runs for
+throughput comparisons. These events are retained artifacts, not new W&B curves.
+
+Each event identifies the rollout, layer, scoring/training phase, invocation,
+and whether it is a repeated forward during recomputation. It includes:
+
+- Per-expert assignment counts and normalized mixing mass, globally within the
+  microbatch and separately for each document; unique experts and load CV.
+- Full-gate entropy, selected-weight entropy, top-one mixing mass, and the
+  full-gate probability mass covered by the selected experts.
+- Fresh/replayed top-k set overlap and exact set agreement; mean/minimum
+  kth-versus-(k+1)th selection margin (probabilities for softmax, logits for
+  top-k softmax; null when every expert is selected).
+- The first 16 eligible token positions, actual expert IDs and weights, and
+  fresh expert IDs, per layer/invocation.
+
+Document boundaries come from MILES sample lengths, including packed samples
+without EOS. Every document's synthetic final replay row is excluded. Counts
+include prompt and response tokens; they are not restricted to the policy-loss
+mask. Rank-local records must not be summed indiscriminately across expert-parallel
+replicas. Existing `train/moe/*` load summaries retain their own reduction rules.
+
+Fresh preferences use the actual current forward scores on replay-conditioned
+hidden states. They are not a second model execution with fresh routes in every
+layer, and differences from recorded routes can reflect policy updates. Detailed
+selection diagnostics currently require unbiased softmax or top-k softmax with
+no grouped, random, or uniform routing. The v1 EMO full-pool configuration meets
+this restriction. Restricted-pool specialization is outside v1's scope.

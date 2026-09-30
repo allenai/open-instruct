@@ -13,7 +13,8 @@ from torch.utils.checkpoint import checkpoint
 
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 @pytest.mark.parametrize("corrupt", [False, True])
-def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt, device):
+@pytest.mark.parametrize("detailed", [False, True])
+def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt, device, detailed):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA required for CPU-route/GPU-router regression")
     router = MoERouterConfigV2(d_model=8, num_experts=4, top_k=2).build()
@@ -23,7 +24,10 @@ def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt, devi
     model.blocks["0"].routed_experts_router = router
     model.to(device)
     module = SimpleNamespace(model=model)
-    actor = SimpleNamespace(args=None, clock=SimpleNamespace(next_rollout_id=0))
+    actor = SimpleNamespace(
+        args=SimpleNamespace(olmo_core=SimpleNamespace(router_diagnostics=detailed)),
+        clock=SimpleNamespace(next_rollout_id=0),
+    )
     batch = {
         "tokens": torch.tensor([[1, 2, 3]], device=device),
         "rollout_routed_experts": [torch.tensor([[[1, 3]], [[2, 3]]])],
@@ -52,6 +56,11 @@ def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt, devi
         assert rows[0]["mismatches"] == 0
         counts = rows[0]["layers"]["blocks.0.routed_experts_router"]
         assert counts == {"entered": 2, "returned": 2, "grad_enabled": 1}
+        observations = [row for row in rows if row["event"] == "router_behavior"]
+        assert len(observations) == (2 if detailed else 0)
+        if detailed:
+            assert [row["recomputation"] for row in observations] == [False, True]
+            assert all(row["tokens"] == 2 for row in observations)
         assert torch.isfinite(router.weight.grad).all() and router.weight.grad.abs().sum() > 0
     assert not router._forward_hooks and not router._forward_pre_hooks
     assert router.replay_expert_indices is None

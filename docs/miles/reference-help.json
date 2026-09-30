@@ -31,6 +31,7 @@
     "model_config": "Optional Core model factory configuration path for supported construction.",
     "packing_max_tokens": "Maximum tokens per pack; null uses context limit. Must cover max_sequence_length; samples are never split.",
     "publication_mode": "barrier (low-level default) synchronously publishes the fleet; engine_drain finishes admitted TP1 requests before independent publication; refresh (current full-model starters) preserves sampled tokens/behavior logprobs across publication and continues decoding with policy-span metadata. Refresh requires managed disaggregated TP1 async GRPO, one optimizer step per collection, MILES router, TIS, and use_rollout_logprobs=false; consult docs/miles/grpo.md for scope.",
+    "router_diagnostics": "Record detailed rank-local per-layer/document routing statistics and bounded token samples; requires replay_diagnostics. Synchronizes devices; use for qualification only.",
     "replay_diagnostics": "Retain expert-ID replay diagnostics; does not enable replay itself.",
     "reward_config": "Trusted verifier registry path; structured workflow preparation supplies it.",
     "router_aux_loss_weight": "Coefficient for Core router balancing loss; zero disables its gradient contribution. Grouping, reduction and count source are configured independently.",
