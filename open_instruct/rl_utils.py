@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import datetime
 import json
 import os
@@ -154,8 +155,20 @@ def save_rollouts_to_disk(
         total_samples_written: Total samples written so far, used for sharding.
     """
     shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
+    # The worker runs after this returns, while the caller may go on to rebind fields of `result`
+    # (e.g. the truncation filter reassigns `responses` and `finish_reasons`). Snapshot the
+    # field bindings now so the saver sees the result as it was when traces were requested.
+    result_snapshot = copy.copy(result)
     _rollout_executor.submit(
-        _save_rollouts, save_path, run_name, step, batch, result, advantages, num_samples_per_prompt, shard_idx
+        _save_rollouts,
+        save_path,
+        run_name,
+        step,
+        batch,
+        result_snapshot,
+        advantages,
+        num_samples_per_prompt,
+        shard_idx,
     )
 
 

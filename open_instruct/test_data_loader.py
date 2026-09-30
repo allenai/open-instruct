@@ -1,11 +1,15 @@
+import json
+import os
 import tempfile
 import unittest
+from unittest import mock
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
-from open_instruct import data_loader
+from open_instruct import data_loader, data_types, model_utils, rl_utils
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
@@ -113,6 +117,103 @@ class TestResultIsStale(unittest.TestCase):
                 replenish_prompts=False,
                 max_result_age_steps=4,
             )
+
+
+def _make_result_and_batch(scores: list[float], finish_reasons: list[str]):
+    n = len(scores)
+    result = data_types.GenerationResult(
+        responses=[[i] for i in range(n)],
+        finish_reasons=list(finish_reasons),
+        masks=[[1] for _ in range(n)],
+        request_info=data_types.RequestInfo(
+            num_calls=[0] * n,
+            timeouts=[0] * n,
+            tool_errors=[""] * n,
+            tool_outputs=[""] * n,
+            tool_runtimes=[0.0] * n,
+            tool_calleds=[False] * n,
+        ),
+        index=None,
+        prompt_id=None,
+        logprobs=[[0.0] for _ in range(n)],
+    )
+    batch = model_utils.Batch(
+        queries=[[0] for _ in range(n)],
+        ground_truths=[[0] for _ in range(n)],
+        datasets=["d"] * n,
+        raw_queries=None,
+        decoded_responses=None,
+        indices=list(range(n)),
+        scores=list(scores),
+        model_steps=[0] * n,
+    )
+    return result, batch
+
+
+class TestMaskTruncatedCompletions(unittest.TestCase):
+    # Two prompts, four samples each: A = [1, 1, 0, 1], B = [0, 0, 1, 0].
+    SCORES = [1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+    R, S = 1 / np.sqrt(3), np.sqrt(3)
+
+    @parameterized.parameterized.expand(
+        [
+            # 6 survivors don't fill whole groups of 4; regrouping them can't even be reshaped.
+            (
+                "uneven_survivors",
+                ["stop", "length", "stop", "stop", "stop", "stop", "stop", "length"],
+                [R, -S, R, -R, -R, S],
+            ),
+            # 4 survivors would reshape into one group, pooling prompt A's and prompt B's rewards.
+            (
+                "pooled_survivors",
+                ["stop", "length", "length", "stop", "stop", "length", "stop", "length"],
+                [R, R, -R, S],
+            ),
+        ]
+    )
+    def test_advantages_keep_full_prompt_groups(self, _name, finish_reasons, expected):
+        result, batch = _make_result_and_batch(self.SCORES, finish_reasons)
+        advantages = data_loader.compute_group_advantages(np.array(self.SCORES), 4, "standard")
+
+        batch, advantages = data_loader.maybe_mask_truncated_completions(result, batch, advantages, enabled=True)
+
+        kept = [i for i, fr in enumerate(finish_reasons) if fr == "stop"]
+        np.testing.assert_allclose(advantages, expected, rtol=1e-6)
+        self.assertEqual(batch.scores, [self.SCORES[i] for i in kept])
+        self.assertEqual(result.responses, [[i] for i in kept])
+        self.assertEqual(result.finish_reasons, ["stop"] * len(kept))
+
+    def test_disabled_keeps_everything(self):
+        finish_reasons = ["stop", "length"] * 4
+        result, batch = _make_result_and_batch(self.SCORES, finish_reasons)
+        advantages = data_loader.compute_group_advantages(np.array(self.SCORES), 4, "centered")
+
+        new_batch, new_advantages = data_loader.maybe_mask_truncated_completions(
+            result, batch, advantages, enabled=False
+        )
+
+        self.assertIs(new_batch, batch)
+        self.assertIs(new_advantages, advantages)
+        self.assertEqual(result.finish_reasons, finish_reasons)
+
+    def test_saved_traces_ignore_later_truncation_filter(self):
+        finish_reasons = ["stop", "length", "stop", "stop", "stop", "stop", "stop", "length"]
+        result, batch = _make_result_and_batch(self.SCORES, finish_reasons)
+        advantages = data_loader.compute_group_advantages(np.array(self.SCORES), 4, "standard")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rl_utils._rollout_executor, "submit") as submit:
+            rl_utils.save_rollouts_to_disk(tmp, "run", 0, batch, result, advantages, 4, 0)
+            data_loader.maybe_mask_truncated_completions(result, batch, advantages, enabled=True)
+            # The saver runs asynchronously, i.e. after the filter above has mutated `result`.
+            fn, *args = submit.call_args.args
+            fn(*args)
+
+            with open(os.path.join(tmp, "run_rollouts_000000.jsonl")) as f:
+                records = [json.loads(line) for line in f]
+
+        self.assertEqual(len(records), 8)
+        self.assertEqual([r["finish_reason"] for r in records], finish_reasons)
+        self.assertEqual([r["response_tokens"] for r in records], [[i] for i in range(8)])
 
 
 if __name__ == "__main__":
