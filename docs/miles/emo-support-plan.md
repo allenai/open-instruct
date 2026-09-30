@@ -76,11 +76,11 @@ pre-existing diagnostics in the OPD modules, reproduced on the base branch.
 These CPU checks do not qualify actual SGLang capture, GPU graphs, KDA kernels,
 EP2 policy training, publication or fresh-process RL recovery.
 
-The runtime lock points to the implementation dependency commits. Until their
-feature branches are published, materialize them from local Git caches with
-`scripts/miles/prepare_runtime.py --cache olmo-core=... --cache miles=...
---cache olmo-sglang=... DESTINATION`; a remote-only image build cannot fetch
-unpublished commits.
+The runtime lock points to published implementation dependency commits.
+`scripts/miles/emo_smoke.py` creates a tiny deterministic checkpoint with active,
+restricted source EMO metadata for testing the explicit full-pool preparation
+path. Its optional synthetic reward callback exercises nonzero policy gradients;
+these fixtures do not measure model quality.
 
 ## Existing support and integration work
 
