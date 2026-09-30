@@ -68,3 +68,5 @@ and check it with `python -m scripts.miles.generate_docs --check`. See
 
 See [publication modes](grpo.md#publication-modes) for current mixed-policy
 refresh, barrier controls and independent [engine drain](engine-drain.md).
+
+- [Experimental Megatron OPD](opd.md): integration boundaries and controlled-exposure qualification.

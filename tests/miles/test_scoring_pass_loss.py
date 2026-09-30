@@ -65,3 +65,38 @@ def test_skip_preserves_tis_and_reference_kl(tmp_path, rollout_anchor, token_ave
     finally:
         parallel.set_parallel_state(previous)
         dist.destroy_process_group()
+
+
+@pytest.mark.parametrize("token_average", [False, True])
+def test_rollout_anchor_does_not_hide_current_forward_disagreement(tmp_path, token_average):
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/group", rank=0, world_size=1)
+    previous = parallel._parallel_state
+    try:
+        group = GroupInfo(rank=0, size=1, group=dist.group.WORLD, gloo_group=dist.group.WORLD)
+        trivial = GroupInfo(rank=0, size=1, group=None)
+        parallel.set_parallel_state(
+            parallel.ParallelState(
+                intra_dp=group,
+                intra_dp_cp=group,
+                cp=trivial,
+                tp=trivial,
+                pp=trivial,
+                ep=trivial,
+                etp=trivial,
+                indep_dp=trivial,
+            )
+        )
+        initial, samples = fixture_data()
+        args = loss_args(token_average)
+        batch = batch_for(samples, list(range(4)))
+        # The PPO anchor and stored rollout scores are identical. The current
+        # forward is deliberately different, so a self-comparison would be zero.
+        _, _, metrics = miles_loss.loss_function(
+            args, batch, 1, initial.clone().requires_grad_(), apply_megatron_loss_scaling=False
+        )
+        metrics = dict(zip(metrics["keys"], metrics["values"][1:], strict=True))
+        assert metrics["train_rollout_logprob_abs_diff"] > 0.05
+        assert metrics["train_rollout_kl"] > 0
+    finally:
+        parallel.set_parallel_state(previous)
+        dist.destroy_process_group()

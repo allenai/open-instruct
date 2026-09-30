@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.configuration import specs
 from open_instruct.miles.execution import launch
 
 
@@ -16,11 +16,11 @@ def main():
     parser.add_argument("--render-only", action="store_true")
     options = parser.parse_args()
     spec = (
-        RunSpec.from_dict(
+        specs.from_dict(
             json.loads(options.config.read_text()), config_path=options.config, overrides=options.overrides
         )
         if options.config.suffix == ".json"
-        else RunSpec.load(options.config, options.overrides)
+        else specs.load(options.config, options.overrides)
     )
     if options.render_only:
         print(json.dumps(launch.specification(options.image, spec), indent=2))

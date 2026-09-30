@@ -30,6 +30,11 @@ def write_json(path, document):
 
 
 def fingerprint(document):
+    # OPD checkpoint retention is operational, and its empty native override
+    # table was historically optional. Preserve that run identity on resume.
+    if isinstance(document, dict) and document.get("training", {}).get("algorithm") == "opd":
+        document = {key: value for key, value in document.items() if not (key == "miles" and value == {})}
+        document["training"] = {key: value for key, value in document["training"].items() if key != "keep_checkpoints"}
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 
