@@ -1,12 +1,15 @@
+import json
+import os
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
-from open_instruct import data_loader, data_types, model_utils
+from open_instruct import data_loader, data_types, model_utils, rl_utils
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
@@ -192,6 +195,25 @@ class TestMaskTruncatedCompletions(unittest.TestCase):
         self.assertIs(new_batch, batch)
         self.assertIs(new_advantages, advantages)
         self.assertEqual(result.finish_reasons, finish_reasons)
+
+    def test_saved_traces_ignore_later_truncation_filter(self):
+        finish_reasons = ["stop", "length", "stop", "stop", "stop", "stop", "stop", "length"]
+        result, batch = _make_result_and_batch(self.SCORES, finish_reasons)
+        advantages = data_loader.compute_group_advantages(np.array(self.SCORES), 4, "standard")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rl_utils._rollout_executor, "submit") as submit:
+            rl_utils.save_rollouts_to_disk(tmp, "run", 0, batch, result, advantages, 4, 0)
+            data_loader.maybe_mask_truncated_completions(result, batch, advantages, enabled=True)
+            # The saver runs asynchronously, i.e. after the filter above has mutated `result`.
+            fn, *args = submit.call_args.args
+            fn(*args)
+
+            with open(os.path.join(tmp, "run_rollouts_000000.jsonl")) as f:
+                records = [json.loads(line) for line in f]
+
+        self.assertEqual(len(records), 8)
+        self.assertEqual([r["finish_reason"] for r in records], finish_reasons)
+        self.assertEqual([r["response_tokens"] for r in records], [[i] for i in range(8)])
 
 
 if __name__ == "__main__":
