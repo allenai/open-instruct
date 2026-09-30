@@ -65,9 +65,9 @@ mode = "background"
 interval = 50
 initial = true
 final = true
-# Published tiny-MoE mechanics image; full-policy/task qualification is still required.
-image = "01M31EGDWC2D57T1ZC2S19241V"
-revision = "55461d9bf09c6ff7027d7a977f4ae45b8a07bbcf"
+# Evaluator with GSM8K-Platinum; full-policy/task qualification is still required.
+image = "01M3RMHHC89VZ9NHVNSK72G3BF"
+revision = "eac110dad2bb85e116f505bed2a976bb0dbdfaf8"
 gpus = 1 # Additional allocation per task group, outside the 56-GPU training layout.
 cluster = "ai2/holmes"
 submit_timeout = 30
@@ -78,6 +78,11 @@ server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--conte
 task = "gsm8k"
 # Independent 8K evaluation budget; training still uses 32K responses.
 # Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "gsm8k:platinum"
 generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 

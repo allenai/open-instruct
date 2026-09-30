@@ -9,9 +9,9 @@ interrupt submission. Snapshot export is a synchronous trainer collective;
 checkpoint/collective failures still fail training.
 
 The [large example](../../configs/miles/examples/large.toml) opts into background
-evaluation with the published image, separate one-GPU jobs and starter GSM8K/IFBench
-tasks. Dev, small and medium retain shared-engine evaluation, which also remains
-the low-level default. The large template is provisional, not full-model
+evaluation with the published image, separate one-GPU jobs and starter GSM8K,
+GSM8K-Platinum and IFBench tasks. Dev, small and medium retain shared-engine
+evaluation, which also remains the low-level default. The large template is provisional, not full-model
 qualification. Remove explicit shared
 settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
 `n_samples_per_eval_prompt`, `data.eval_prompt_data`, positive task `eval_count`)
@@ -34,8 +34,13 @@ server_args = ["--attention-backend", "triton", "--disable-cuda-graph"]
 
 [[evaluation.tasks]]
 task = "gsm8k"
-generation = { temperature = 0.0, max_tokens = 2048 }
-scoring = { limit = 128 }
+generation = { temperature = 0.0, max_tokens = 2048, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "gsm8k:platinum"
+generation = { temperature = 0.0, max_tokens = 2048, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "ifeval_ood" # IFBench; the pinned revision has no plain "ifeval" task.
@@ -58,6 +63,10 @@ submitter needs Beaker credentials in the trainer allocation; evaluator jobs do
 not inherit its Beaker token. Outputs and snapshots must be on a WEKA mount
 accessible to both jobs. Inherit the main run's W&B entity, project and actual run
 ID; never configure a separate evaluation run.
+
+`gsm8k:platinum` uses olmo-eval's pinned GSM8K-Platinum dataset variant. The
+large example evaluates it alongside `gsm8k` with the same zero-shot, greedy
+settings and per-task limit. Both retain separate scores and predictions.
 
 Generation overrides map to olmo-eval's flat per-task sampling overrides
 (for example `-o max_tokens=2048`, not a nested `sampling_params` table); scoring maps to
@@ -158,10 +167,13 @@ private SGLang server. It does not launch vLLM. The runner checks the olmo-eval
 revision before starting. Build dependencies at image construction, never during
 an evaluation job. Publish the image to Beaker and configure its immutable ID.
 
-The tiny Olmo MoE qualification uses trainer image
-`01M32D2NFAGYNWQK1MSFYNN1BW`, evaluator image `01M31EGDWC2D57T1ZC2S19241V`, and
-olmo-eval revision `55461d9bf09c6ff7027d7a977f4ae45b8a07bbcf`. The updated trainer
-image is required for the common chart schema across all training writers.
+The large example pins evaluator image `01M3RMHHC89VZ9NHVNSK72G3BF` with
+olmo-eval revision `eac110dad2bb85e116f505bed2a976bb0dbdfaf8`, which includes
+`gsm8k:platinum`. Its serving base is the Open Instruct `e347bb6d4` runtime.
+CPU checks cover task resolution, GSM8K/Platinum dataset loading and answer
+extraction, the generated CLI command and separate task metric names. This image
+has not yet had a GPU evaluation run; the archived tiny-MoE evaluation below used
+an earlier evaluator revision and image.
 
 Compatibility must be qualified for the exported architecture, serving backend,
 task and image; an OpenAI-compatible endpoint alone does not prove loglikelihood
