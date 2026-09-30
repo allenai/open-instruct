@@ -10,6 +10,7 @@ import time
 import urllib.error
 from pathlib import Path
 
+from open_instruct import logger_utils
 from open_instruct.miles import (
     megatron_grpo_args,
     megatron_grpo_audit,
@@ -19,6 +20,8 @@ from open_instruct.miles import (
     workflow,
 )
 from open_instruct.miles.errors import InputError
+
+logger = logger_utils.setup_logger(__name__)
 
 
 def execute(spec):
@@ -120,9 +123,9 @@ def execute(spec):
                 sys.executable, miles_root, architecture, model, checkpoint, tp
             )
             with (root / "conversion.log").open("w") as stream:
-                subprocess.run(
-                    command, env=conversion_env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=1800
-                )
+                logger.info("Starting TP%s/PP1 learner conversion; retained log: %s", tp, root / "conversion.log")
+                megatron_grpo_convert.run_conversion(command, conversion_env, stream)
+                logger.info("Learner conversion completed")
         arguments = megatron_grpo_args.native_arguments(spec, prepared, checkpoint, architecture)
         workflow.write_json(root / "native-arguments.json", arguments)
         preflight = "from miles.utils.arguments import parse_args; from miles.rollout.data_source import RolloutDataSourceWithBuffer; a=parse_args(); assert not a.use_opd and a.opd_kl_coef == 0 and not a.fully_async and a.kl_coef == 0 and not a.use_kl_loss and not a.use_rollout_logprobs and not a.normalize_advantages and a.rewards_normalization and a.loss_type == 'policy_loss' and a.advantage_estimator == 'grpo'; RolloutDataSourceWithBuffer(a)"
