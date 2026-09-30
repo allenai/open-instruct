@@ -17,6 +17,7 @@ from pathlib import Path
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.execution import emo
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -105,6 +106,8 @@ def prepare_model(spec):
         raise InputError("Prepared model output must not be inside its read-only source")
     template = spec.model.get("hf_template")
     identity = dict(source=model_identity(source), format=spec.model["format"], conversion=spec.conversion)
+    if spec.model.get("emo_routing_mode") is not None:
+        identity["emo_routing_mode"] = spec.model["emo_routing_mode"]
     if template:
         template_path = Path(template)
         if not template_path.exists():
@@ -158,6 +161,15 @@ def prepare_model(spec):
                     shutil.copy2(path, destination)
         else:
             _convert_native(spec, staging)
+        config_path = staging / "config.json"
+        source_config = json.loads(config_path.read_text())
+        resolved_config = emo.resolve_hf(source_config, spec.model.get("emo_routing_mode"))
+        if resolved_config != source_config:
+            write_json(config_path, resolved_config)
+        if resolved_config.get("emo_routing_mode"):
+            logger.info(
+                "EMO execution: full_pool (all %s routed experts eligible)", resolved_config["n_routed_experts"]
+            )
         if template:
             template_path = Path(template)
             if template_path.is_dir():
@@ -204,7 +216,7 @@ def _convert_native(spec, target):
     converter.convert_checkpoint_to_hf(
         spec.model["source"],
         target,
-        copy.deepcopy(saved["model"]),
+        emo.resolve_native(saved["model"], spec.model.get("emo_routing_mode")),
         copy.deepcopy(saved["dataset"]["tokenizer"]),
         dtype=core_config.DType(spec.conversion.get("dtype", "bfloat16")),
         max_sequence_length=spec.compile().core.max_sequence_length,

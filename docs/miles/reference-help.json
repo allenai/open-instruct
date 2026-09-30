@@ -237,6 +237,7 @@
     "launch.weka_mounts[].weka": "WEKA filesystem name; unique per mount.",
     "launch.workspace": "Beaker workspace string; default ai2/open-instruct-dev.",
     "model.format": "hf (default) or olmo_core. Megatron checkpoint inputs are rejected.",
+    "model.emo_routing_mode": "Optional full_pool: explicitly resolve EMO source settings to causal token routing over all experts. Requires rollout routing replay and zero router auxiliary coefficients. Retains source metadata; restricted pools are unsupported.",
     "model.hf_template": "Required only for native olmo_core input; compatible HF architecture/tokenizer template path.",
     "model.reference_hf": "Rejected baseline conversion-validation field; use miles.ref_load for a frozen KL reference.",
     "model.source": "Required checkpoint path, resolved relative to the run file; input remains read-only.",

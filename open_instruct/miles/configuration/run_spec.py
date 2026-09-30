@@ -213,7 +213,11 @@ class RunSpec:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
             raise InputError("name must contain only letters, digits, dots, underscores and hyphens")
         base = path.parent
-        model = _table(document, "model", {"source", "format", "hf_template", "reference_hf"}, required=True)
+        model = _table(
+            document, "model", {"source", "format", "hf_template", "reference_hf", "emo_routing_mode"}, required=True
+        )
+        if "emo_routing_mode" in model and model["emo_routing_mode"] != "full_pool":
+            raise InputError("model.emo_routing_mode supports only full_pool; restricted pools are outside v1")
         model["source"] = _path(model.get("source"), base, "model.source")
         if model.get("reference_hf") is not None:
             raise InputError(
@@ -822,6 +826,13 @@ class RunSpec:
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
         result = RunConfig(CoreConfig(**core), miles)
+        if self.model.get("emo_routing_mode") == "full_pool":
+            if not miles.get("use_rollout_routing_replay"):
+                raise InputError("EMO RL v1 requires trainer.use_rollout_routing_replay=true")
+            if result.core.router_aux_loss_weight or result.core.router_z_loss_weight:
+                raise InputError("EMO RL v1 requires zero router_aux_loss_weight and router_z_loss_weight")
+            if result.core.router_aux_count_source != "dispatch":
+                raise InputError("EMO RL v1 requires router_aux_count_source='dispatch'")
         result.validate()
         return result
 
