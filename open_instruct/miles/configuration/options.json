@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sources": {"miles":{"private":true,"repository":"https://github.com/allenai/miles.git","revision":"1117524731ef5401ba2491a8da40ccb44c6e9620"},"olmo-core":{"repository":"https://github.com/allenai/OLMo-core.git","revision":"d6a08226f4a0ab53bed13fda680df969504fcb34"},"olmo-sglang":{"private":true,"repository":"https://github.com/allenai/olmo-sglang.git","revision":"b3a795f33e048dac401c89bb5823381146181ac6"}},
+  "sources": {"miles":{"private":true,"repository":"https://github.com/allenai/miles.git","revision":"a01dc21a80b7bdef0a10f2eba8143f46f02015f7"},"olmo-core":{"repository":"https://github.com/allenai/OLMo-core.git","revision":"d6a08226f4a0ab53bed13fda680df969504fcb34"},"olmo-sglang":{"private":true,"repository":"https://github.com/allenai/olmo-sglang.git","revision":"b3a795f33e048dac401c89bb5823381146181ac6"}},
   "options": [
   {"dest":"config","type":"str"},
   {"dest":"optimizer","type":"str"},

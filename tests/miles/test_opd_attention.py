@@ -30,7 +30,7 @@ def test_native_packed_qwen_attention_forward_backward(monkeypatch):
     padded = batch["tokens"].numel()
     assert packed.cu_seqlens_q.tolist() == [0, length, padded]
     assert packed.pad_between_seqs is False
-    assert batch["full_loss_masks"][0, length:].count_nonzero() == 0
+    assert batch["input_loss_masks"][0, length:].count_nonzero() == 0
     q = torch.randn(padded, heads, dimension, device="cuda", dtype=torch.bfloat16, requires_grad=True)
     k = torch.randn(padded, kv_heads, dimension, device="cuda", dtype=torch.bfloat16, requires_grad=True)
     v = torch.randn(padded, kv_heads, dimension, device="cuda", dtype=torch.bfloat16, requires_grad=True)

@@ -4,9 +4,11 @@ import importlib.util
 import shlex
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 from megatron.training import arguments as megatron_arguments
+from miles.backends.megatron_utils import parallel
 from miles.utils import arguments
 from transformers import Qwen3_5Config
 
@@ -66,3 +68,12 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
     assert parsed.world_size == 4
     assert parsed.lr == 1e-6
     assert parsed.use_opd and parsed.opd_kl_coef == 1.0
+
+
+def test_opd_packed_attention_declares_separate_padding_sequence():
+    batch = {"cu_seqlens": torch.tensor([0, 319, 512], dtype=torch.int32), "max_seqlen": 319}
+    packed = parallel.get_packed_seq_params(
+        batch, SimpleNamespace(qkv_format="thd", use_opd=True, context_parallel_size=1)
+    )
+    assert packed.cu_seqlens_q.tolist() == [0, 319, 512]
+    assert packed.pad_between_seqs is False

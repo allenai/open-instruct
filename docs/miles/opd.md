@@ -55,6 +55,9 @@ This is a control for exposure and policy age, not async throughput.
   uses stored rollout scores as its anchor. This correction changes observation,
   not the loss or optimizer.
 - Pre-rendered text remains text when Qwen supplies a multimodal processor.
+- CP1 packed attention retains the separate padding-sequence layout needed
+  by the Qwen/Blackwell FlashAttention path. The GPU test uses the current
+  input-aligned loss-mask field.
 - OPD evaluation calls the shared verifier with the historical whole-answer,
   nonzero-truncation protocol explicitly, independently of GRPO reward defaults.
 
