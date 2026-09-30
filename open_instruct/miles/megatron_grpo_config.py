@@ -5,11 +5,11 @@ import dataclasses
 import re
 from pathlib import Path
 
-from open_instruct.miles import opd_config, options, run_spec, validation
+from open_instruct.miles import megatron_grpo_assets, opd_config, options, run_spec, validation
 from open_instruct.miles.errors import InputError
 
 DEFAULTS = {
-    "model": {"source": "", "architecture": "qwen3-1.7B"},
+    "model": {"source": "", "architecture": "qwen3-1.7B", "native_checkpoint": {}},
     "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo"},
     "trainer": dict(opd_config.DEFAULTS["trainer"]),
     "inference": {**opd_config.DEFAULTS["inference"], "max_prompt_length": 2048, "max_context_length": 4096},
@@ -153,6 +153,7 @@ class MegatronGRPORunSpec:
         root, assets = (Path(document["output"][k]) for k in ("root", "assets"))
         if root == assets or root in assets.parents or assets in root.parents:
             raise InputError("output.root and output.assets must be separate non-nested directories")
+        megatron_grpo_assets.validate(model["native_checkpoint"], model, trainer, document["output"])
         data = run_spec.RunSpec._data(document.get("data", {}), base.parent)
         if not data.get("prompt_data") or not data.get("eval_prompt_data") or not data.get("reward_config"):
             raise InputError(

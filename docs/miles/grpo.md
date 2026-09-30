@@ -123,3 +123,21 @@ Keep output and asset directories separate and fresh, retain checkpoints
 committed-image `run` workflow. Use a native Megatron/SGLang image with the
 pushed source overlay for this adapter, rather than the Core-only image.
 This path does not establish Qwen3.5 support in OLMo-core.
+
+
+A previously completed, independently load-audited **initial TP2/PP1 native
+release** can be supplied as an inline `[model.native_checkpoint]` provenance
+table. The table must retain the original HF source/revision/config hash,
+architecture and argument fingerprint, TP/PP, native converter hash, release metadata hash, exact five-file
+size/mtime inventory, save/load Beaker identities and UTC load audit. Its
+`checkpoint_path` must remain separate from both fresh output directories.
+For this initial qualification, the original HF source directory must retain the
+first 12 characters of its pinned revision as a suffix.
+The runtime verifies the bindings before native preflight, uses the old asset
+read-only instead of conversion, and checks the file inventory again after the
+training/export/reload workflow. Mismatches fail without automatic reconversion.
+Retained `checkpoint-reuse.json` and `conversion-control.json` distinguish reuse
+from conversion. This bounded provenance check uses metadata/config hashes and
+shard size/mtime, not full shard checksums or independent Hub revision resolution.
+It is neither training resume nor optimizer/cursor restoration; the same complete
+verifier-update/checkpoint/export/reload qualification remains required.

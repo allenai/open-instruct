@@ -13,6 +13,7 @@ from pathlib import Path
 from open_instruct import logger_utils
 from open_instruct.miles import (
     megatron_grpo_args,
+    megatron_grpo_assets,
     megatron_grpo_audit,
     megatron_grpo_convert,
     opd_runtime,
@@ -95,6 +96,7 @@ def execute(spec):
                     "no:cacheprovider",
                     "-q",
                     "/opt/core-rl/tests/miles/test_megatron_grpo.py",
+                    "/opt/core-rl/tests/miles/test_megatron_grpo_assets.py",
                 ],
                 env=environment,
                 stdout=stream,
@@ -114,7 +116,14 @@ def execute(spec):
         checkpoint = Path(spec.output["assets"]) / (
             "learner-tp" + str(tp) + "-" + workflow.fingerprint(architecture)[:12]
         )
-        if not (checkpoint / "latest_checkpointed_iteration.txt").exists():
+        provenance = spec.document["model"]["native_checkpoint"]
+        if provenance:
+            checkpoint, reuse_audit = megatron_grpo_assets.reuse(
+                provenance, spec.model, trainer, spec.output, model, converter_sha, architecture
+            )
+            workflow.write_json(root / "checkpoint-reuse.json", reuse_audit)
+            logger.info("Using read-only completed native initial checkpoint: %s", checkpoint)
+        elif not (checkpoint / "latest_checkpointed_iteration.txt").exists():
             conversion_env = environment | {
                 "CONVERT_KEEP_PP1": "1",
                 "CUDA_VISIBLE_DEVICES": ",".join(visible[i] for i in layout["roles"]["trainer"][:tp]),
@@ -126,6 +135,17 @@ def execute(spec):
                 logger.info("Starting TP%s/PP1 learner conversion; retained log: %s", tp, root / "conversion.log")
                 megatron_grpo_convert.run_conversion(command, conversion_env, stream)
                 logger.info("Learner conversion completed")
+        workflow.write_json(
+            root / "conversion-control.json",
+            {
+                "native_source_sha256": converter_sha,
+                "CONVERT_KEEP_PP1": "1",
+                "tensor_parallel_size": tp,
+                "pipeline_parallel_size": 1,
+                "mode": "reuse" if provenance else "conversion-cache",
+                "checkpoint_path": str(checkpoint),
+            },
+        )
         arguments = megatron_grpo_args.native_arguments(spec, prepared, checkpoint, architecture)
         workflow.write_json(root / "native-arguments.json", arguments)
         preflight = "from miles.utils.arguments import parse_args; from miles.rollout.data_source import RolloutDataSourceWithBuffer; a=parse_args(); assert not a.use_opd and a.opd_kl_coef == 0 and not a.fully_async and a.kl_coef == 0 and not a.use_kl_loss and not a.use_rollout_logprobs and not a.normalize_advantages and a.rewards_normalization and a.loss_type == 'policy_loss' and a.advantage_estimator == 'grpo'; RolloutDataSourceWithBuffer(a)"
@@ -229,6 +249,9 @@ def execute(spec):
                         "note": "Fresh-process reload, not numerical equivalence.",
                     },
                 )
+            if provenance:
+                megatron_grpo_assets.verify_checkpoint(provenance, spec.output)
+                workflow.write_json(root / "checkpoint-reuse-final.json", {"unchanged": True, "path": str(checkpoint)})
             workflow.write_json(
                 root / "result.json",
                 {
