@@ -44,6 +44,7 @@ The main things we are looking for are:
 """
 
 import copy
+import difflib
 import hashlib
 import json
 import multiprocessing
@@ -61,11 +62,13 @@ from datasets import Dataset, concatenate_datasets, load_dataset
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
-from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
+from tokenizers import Tokenizer
+from transformers import GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils import chat_template_utils
 from transformers.utils.hub import extract_commit_hash
 
-from open_instruct import launch_utils, logger_utils
+from open_instruct import dataset_statistics as token_statistics
+from open_instruct import launch_utils, logger_utils, tokenizer_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -676,18 +679,42 @@ CHAT_TEMPLATES = {
 }
 
 
+def _validate_chat_template_name(name: str | None) -> None:
+    if name is None or name == "tokenizer_default" or name in CHAT_TEMPLATES:
+        return
+    suggestions = difflib.get_close_matches(name, CHAT_TEMPLATES, n=3, cutoff=0.4)
+    hint = f" Did you mean {', '.join(repr(s) for s in suggestions)}?" if suggestions else ""
+    raise ValueError(
+        f"Unknown chat template name {name!r}. Use one of {sorted(CHAT_TEMPLATES)} or 'tokenizer_default'.{hint}"
+    )
+
+
+def _set_chat_template(tc: "TokenizerConfig", tokenizer: PreTrainedTokenizer) -> None:
+    name = tc.chat_template_name
+    _validate_chat_template_name(name)
+    if name is None or name == "tokenizer_default":
+        if tokenizer.chat_template is None:
+            raise ValueError(f"Tokenizer {tc.tokenizer_name_or_path!r} does not define a chat template.")
+    else:
+        tokenizer.chat_template = CHAT_TEMPLATES[name]
+
+
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
-    tokenizer = AutoTokenizer.from_pretrained(
+    _validate_chat_template_name(tc.chat_template_name)
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
     )
+    if tc.chat_template_name is not None:
+        _set_chat_template(tc, tokenizer)
     return tokenizer
 
 
 def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
-    tokenizer = AutoTokenizer.from_pretrained(
+    _validate_chat_template_name(tc.chat_template_name)
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -724,15 +751,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
-            ).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -748,7 +767,8 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
-    tokenizer = AutoTokenizer.from_pretrained(
+    _validate_chat_template_name(tc.chat_template_name)
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -790,17 +810,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name is None:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
-            ).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
-    elif tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
-        raise ValueError(f"Could not find chat template for {tc.chat_template_name}.")
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -816,9 +826,10 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
+    _validate_chat_template_name(tc.chat_template_name)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in str(tc.tokenizer_name_or_path).lower():
-        if tc.chat_template_name is None:
+        if tc.chat_template_name is None or tc.chat_template_name == "tokenizer_default":
             pass  # just assume the user knows what they're doing
         elif "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
@@ -826,7 +837,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
 
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = tokenizer_utils.load_tokenizer(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
@@ -845,7 +856,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if tc.chat_template_name is None or "olmo" not in tc.chat_template_name:
+                if tc.chat_template_name not in (None, "tokenizer_default") and "olmo" not in tc.chat_template_name:
                     assert tc.add_bos, (
                         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
                         "if using an older chat template."
@@ -870,15 +881,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
-            ).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -891,6 +894,112 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
 
     return tokenizer
+
+
+# ----------------------------------------------------------------------------
+# Reserved-slot token promotion
+
+RESERVED_SLOT_RE = re.compile(r"<\|extra_id_\d+\|>")
+"""Vocabulary entries the Olmo tokenizers set aside unused, for later use."""
+
+
+@dataclass(frozen=True)
+class PromotedToken:
+    """A string made into a single token by taking over an unused reserved vocabulary slot."""
+
+    content: str
+    token_id: int
+    source_ids: tuple[int, ...]
+    """The ids `content` tokenized into before promotion, to initialize its embedding row from."""
+
+
+def promote_tokens_into_reserved_slots(tokenizer: PreTrainedTokenizer, tokens: Sequence[str]) -> list[PromotedToken]:
+    """Make each of `tokens` a single token by renaming an unused reserved slot in place.
+
+    A multi-token tag is unreachable at inference whenever its last piece merges with the text
+    that follows it. `<think>` is `<th` `ink` `>`, and the Olmo BPE merges that `>` with what
+    comes next: a newline gives `>Ċ`, a blank line gives `>ĊĊ`, and `></` is one token. A
+    generation prompt ending in `<think>` therefore leaves the model in a state it was never
+    trained to continue from for any turn whose reasoning starts on the next line, or whose
+    think block is empty -- 27% of Dolci-Think traces and every Instruct turn under the olmo35
+    template. Promotion removes the merge: an added token is split out before BPE runs, under
+    either pre-tokenizer the same vocabulary may be loaded with
+    (https://github.com/allenai/open-instruct/issues/1896).
+
+    Renaming a reserved slot rather than appending keeps `vocab_size` and olmo-core's
+    `padded_vocab_size()` unchanged, so no checkpoint is resized and no embedding matrix changes
+    shape. This follows the precedent of `<functions>`/`<function_calls>`, which hold
+    `<|extra_id_1|>`..`<|extra_id_4|>`'s ids in `olmo-3-tokenizer-instruct-dev`.
+
+    The promoted tokens are deliberately *not* marked special: `skip_special_tokens=True` is the
+    default for vLLM detokenization, and the verifiers in `ground_truth_utils` split decoded
+    rollouts on a literal `</think>`.
+
+    Strings already registered as added tokens -- promoted earlier, or native to the tokenizer --
+    are skipped, so this is idempotent. A string that is one *ordinary* BPE token raises: it can
+    still merge with what follows it (`>` is one token, and so is `>\n`), and renaming a slot
+    would leave its trained id in use. Returns what it promoted, lowest slot id first.
+    """
+    added = set(tokenizer.get_added_vocab())
+    pending = []
+    for token in tokens:
+        if token in added:
+            continue
+        if len(tokenizer.encode(token, add_special_tokens=False)) == 1:
+            raise ValueError(
+                f"{token!r} is already one ordinary BPE token, which can still merge with what follows it; "
+                "--reserved_slot_tokens only makes multi-token strings atomic"
+            )
+        pending.append(token)
+    if not pending:
+        return []
+    source_ids = {token: tuple(tokenizer.encode(token, add_special_tokens=False)) for token in pending}
+
+    spec = json.loads(tokenizer.backend_tokenizer.to_str())
+    vocab = spec["model"]["vocab"]
+    # A slot already referenced by the chat template is load-bearing, whatever it is named.
+    # str() because a tokenizer may carry a dict of named templates rather than one string.
+    template = str(tokenizer.chat_template or "")
+    in_use = set(tokenizer.all_special_tokens) | set(RESERVED_SLOT_RE.findall(template))
+    free = [
+        entry
+        for entry in sorted(spec["added_tokens"], key=lambda entry: entry["id"])
+        if RESERVED_SLOT_RE.fullmatch(entry["content"]) and entry["content"] not in in_use
+    ]
+    if len(free) < len(pending):
+        raise ValueError(
+            f"Cannot promote {pending} in {tokenizer.name_or_path}: it has {len(free)} unused reserved "
+            f"slots but {len(pending)} are needed. Appending to the vocabulary instead would change "
+            "vocab_size, which resizes every checkpoint's embedding matrix and breaks the equality "
+            "olmo-core's padded_vocab_size() reload path depends on."
+        )
+
+    vocab_size_before, length_before = tokenizer.vocab_size, len(tokenizer)
+    promoted = []
+    for entry, content in zip(free, pending):
+        # The reserved token is usually in the BPE vocab as well as in added_tokens; rename it
+        # there too so the two agree on which id the slot holds.
+        slot_id = vocab.pop(entry["content"], None)
+        if slot_id is not None:
+            vocab[content] = slot_id
+        entry.update(content=content, special=False, normalized=False, lstrip=False, rstrip=False, single_word=False)
+        promoted.append(PromotedToken(content=content, token_id=entry["id"], source_ids=source_ids[content]))
+    tokenizer._tokenizer = Tokenizer.from_str(json.dumps(spec))
+
+    if (tokenizer.vocab_size, len(tokenizer)) != (vocab_size_before, length_before):
+        raise RuntimeError(
+            f"Promoting {pending} changed the vocabulary size from "
+            f"{(vocab_size_before, length_before)} to {(tokenizer.vocab_size, len(tokenizer))}; it must "
+            "only rename slots in place."
+        )
+    for token in promoted:
+        encoded = tokenizer.encode(token.content, add_special_tokens=False)
+        if encoded != [token.token_id]:
+            raise RuntimeError(
+                f"Promoted {token.content!r} into slot {token.token_id} but it still encodes to {encoded}."
+            )
+    logger.info(f"Promoted into reserved vocabulary slots: {[(t.content, t.token_id) for t in promoted]}")
+    return promoted
 
 
 GET_TOKENIZER_FN = {
@@ -912,9 +1021,17 @@ class TokenizerConfig:
     tokenizer_revision: str | None = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str | None = None  # default to using the tokenizer chat template
+    chat_template_name: str | None = (
+        None  # CHAT_TEMPLATES key, or tokenizer_default / None for the tokenizer's own. Unknown names raise.
+    )
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
+    reserved_slot_tokens: list[str] | None = None
+    """Strings to make single tokens by renaming unused `<|extra_id_N|>` reserved vocabulary
+    entries in place, e.g. `--reserved_slot_tokens '<think>' '</think>'`. Leaving this unset
+    keeps the historical tokenization, and keeps the dataset cache key unchanged. See
+    `promote_tokens_into_reserved_slots` for why a multi-token tag is a training/inference
+    mismatch: https://github.com/allenai/open-instruct/issues/1869"""
 
     # for tracking purposes
     tokenizer_files_hash: list[str] | None = None
@@ -931,12 +1048,6 @@ class TokenizerConfig:
     def tokenizer(self):
         if self.tokenizer_name_or_path is None:
             raise ValueError("tokenizer_name_or_path must be set")
-        files_hash = get_files_hash_if_exists(
-            self.tokenizer_name_or_path,
-            self.tokenizer_revision,
-            filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
-        )
-        self.tokenizer_files_hash = files_hash
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
             if self.tokenizer_name != self.tokenizer_name_or_path:
                 raise ValueError(
@@ -944,7 +1055,22 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        # After the getter, so the chat template is set and can be scanned for slots it uses.
+        tokenizer.promoted_reserved_slot_tokens = (
+            promote_tokens_into_reserved_slots(tokenizer, self.reserved_slot_tokens)
+            if self.reserved_slot_tokens
+            else []
+        )
+        # Hash the tokenizer files only after loading the tokenizer: the hash
+        # helper only looks in the local HF cache, so on a fresh machine the
+        # files are present only after from_pretrained has downloaded them.
+        self.tokenizer_files_hash = get_files_hash_if_exists(
+            self.tokenizer_name_or_path,
+            self.tokenizer_revision,
+            filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
+        )
+        return tokenizer
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
@@ -980,6 +1106,9 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
+# v8: preserve the serialized GPT-2 pre-tokenizer, including Dolma 2's Split regex, when
+# loading tokenizer-only repositories. v9: SFT and DPO derive assistant labels from
+# explicit generation ranges.
 DATASET_CACHE_VERSION = "v9"
 
 
@@ -2153,15 +2282,17 @@ class DatasetConfig:
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         else:
-            # commit hash only works for hf datasets
-            self.dataset_commit_hash = get_commit_hash(
-                self.dataset_name, self.dataset_revision, "README.md", "dataset"
-            )
             dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,
                 revision=self.dataset_revision,
                 num_proc=max_num_processes(),
+            )
+            # Commit hash only works for hf datasets. Resolve it only after
+            # load_dataset: the lookup is cache-only, so on a fresh machine it
+            # returns None until the download has populated the HF hub cache.
+            self.dataset_commit_hash = get_commit_hash(
+                self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
         assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
         self.dataset = dataset
@@ -2314,15 +2445,35 @@ def _get_serializable_dataset_config_dict(dc: DatasetConfig, exclude_none: bool 
     return d
 
 
+def _get_chat_template_metadata(tc: TokenizerConfig) -> dict[str, str | None]:
+    name = tc.chat_template_name
+    template = getattr(tc.tokenizer, "chat_template", None)
+    try:
+        template_str = json.dumps(template, sort_keys=True)
+    except TypeError:
+        template_str = str(template)
+    source = (
+        f"tokenizer:{tc.tokenizer_name_or_path}" if name is None or name == "tokenizer_default" else f"registry:{name}"
+    )
+    return {
+        "chat_template_name": name,
+        "chat_template_source": source,
+        "chat_template_hash": hashlib.sha256(template_str.encode()).hexdigest(),
+    }
+
+
 def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching.
 
     The hash includes DATASET_CACHE_VERSION to invalidate old caches when
     transformation logic changes significantly.
     """
+    # Resolve the tokenizer before snapshotting tc: loading it populates
+    # tc.tokenizer_files_hash, so hashing a pristine tc would give a different
+    # result than hashing the same tc after any tc.tokenizer access.
+    chat_template = getattr(tc.tokenizer, "chat_template", None)
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-    chat_template = getattr(tc.tokenizer, "chat_template", None)
     try:
         chat_template_str = json.dumps(chat_template, sort_keys=True)
     except TypeError:
@@ -2473,6 +2624,9 @@ class LocalDatasetTransformationCache:
             if os.path.exists(stats_path):
                 with open(stats_path) as f:
                     statistics = json.load(f)
+                for key in ("chat_template_name", "chat_template_source", "chat_template_hash"):
+                    if key not in statistics:
+                        statistics[key] = None
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached
@@ -2509,17 +2663,9 @@ class LocalDatasetTransformationCache:
 
             # Count tokens if the dataset has been tokenized
             if INPUT_IDS_KEY in dataset.column_names:
-                total_tokens = 0
-                trainable_tokens = 0
-
-                def count_tokens(sample):
-                    token_count = len(sample[INPUT_IDS_KEY])
-                    trainable_tokens = sum(1 for label in sample[LABELS_KEY] if label != MASKED_TOKEN_VALUE)
-                    return {"token_count": token_count, "label_token_count": trainable_tokens}
-
-                token_count_dataset = dataset.map(count_tokens, batched=False)
-                total_tokens = sum(token_count_dataset["token_count"])
-                trainable_tokens = sum(token_count_dataset["label_token_count"])
+                total_tokens, trainable_tokens = token_statistics.count_tokens(
+                    dataset, INPUT_IDS_KEY, LABELS_KEY, MASKED_TOKEN_VALUE
+                )
                 stats["total_tokens"] = total_tokens
                 stats["trainable_tokens"] = trainable_tokens
                 stats["avg_tokens_per_instance"] = total_tokens / len(dataset) if len(dataset) > 0 else 0
@@ -2533,8 +2679,11 @@ class LocalDatasetTransformationCache:
             combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
-        # Prepare return statistics
-        all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
+        all_statistics = {
+            "per_dataset_stats": dataset_statistics,
+            "dataset_order": dataset_order,
+            **_get_chat_template_metadata(tc),
+        }
 
         if dataset_skip_cache:
             return combined_dataset, all_statistics

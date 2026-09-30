@@ -1,8 +1,12 @@
 """Unit tests for cache-validation and checkpoint-detection helpers."""
 
+import json
 import os
+import shlex
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from parameterized import parameterized
 
@@ -13,6 +17,12 @@ def _touch(path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w"):
         pass
+
+
+def _write(path: str, contents: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as handle:
+        handle.write(contents)
 
 
 class NumpyDirIsPopulatedTest(unittest.TestCase):
@@ -48,10 +58,23 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
 
 
 class IsHfCheckpointTest(unittest.TestCase):
-    def test_local_dir_with_config_json_is_hf(self) -> None:
+    def test_local_dir_with_hf_config_json_is_hf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            _touch(os.path.join(tmp, "config.json"))
+            _write(os.path.join(tmp, "config.json"), json.dumps({"model_type": "olmo3"}))
             self.assertTrue(olmo_core_utils.is_hf_checkpoint(tmp))
+
+    def test_local_dir_with_olmo_core_config_json_is_olmo_core(self) -> None:
+        # An olmo-core checkpoint directory also has a config.json (the experiment
+        # config), so presence alone must not mark it as HF.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "config.json"), json.dumps({"model": {"d_model": 4096}}))
+            os.makedirs(os.path.join(tmp, "model_and_optim"))
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
+
+    def test_local_dir_with_unreadable_config_json_is_olmo_core(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "config.json"), "not json{")
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
 
     def test_local_dir_without_config_json_is_olmo_core(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -78,6 +101,12 @@ class IsHfCheckpointTest(unittest.TestCase):
         # Path doesn't exist on disk, but contains '-hf'.
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
+    def test_gs_url_is_olmo_core(self) -> None:
+        self.assertFalse(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3/step100/model_and_optim"))
+
+    def test_gs_url_with_hf_marker_is_hf(self) -> None:
+        self.assertTrue(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3-hf/step100"))
+
 
 class TestCheckpointerDefaults(unittest.TestCase):
     def test_default_intervals_build_a_checkpointer(self) -> None:
@@ -96,3 +125,50 @@ class TestCheckpointerDefaults(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WriteProvenanceReadmeTest(unittest.TestCase):
+    def test_writes_readme_with_tracking_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            olmo_core_utils.write_provenance_readme(
+                output_dir=tmp,
+                run_name="my-run",
+                model_name_or_path="/weka/some/base/step63802",
+                tracking_url="https://github.com/allenai/open-instruct/issues/1859",
+                wandb_project="open_instruct_internal",
+            )
+            with open(os.path.join(tmp, "README.md")) as f:
+                content = f.read()
+            self.assertIn("# my-run", content)
+            self.assertIn("https://github.com/allenai/open-instruct/issues/1859", content)
+            self.assertIn("/weka/some/base/step63802", content)
+            self.assertIn("ai2-llm/open_instruct_internal", content)
+
+    def test_command_is_shell_quoted(self) -> None:
+        """A pasted command must re-parse to the original argv, even with spaces or `;`."""
+        argv = ["olmo_core_finetune.py", "--run_name", "kda think; seed 1", "--output_dir", "/weka/a b/out"]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(sys, "argv", argv):
+            olmo_core_utils.write_provenance_readme(
+                output_dir=tmp, run_name="r", model_name_or_path="base", tracking_url=None
+            )
+            with open(os.path.join(tmp, "README.md")) as f:
+                content = f.read()
+        command = content.split("```")[1].strip()
+        self.assertEqual(shlex.split(command), argv)
+        self.assertNotIn("\n" + " ".join(argv) + "\n", content)
+
+    def test_does_not_overwrite_existing_readme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "README.md")
+            with open(path, "w") as f:
+                f.write("hand-written notes\n")
+            olmo_core_utils.write_provenance_readme(
+                output_dir=tmp, run_name="my-run", model_name_or_path="base", tracking_url=None
+            )
+            with open(path) as f:
+                self.assertEqual(f.read(), "hand-written notes\n")
+
+    def test_unwritable_output_dir_does_not_raise(self) -> None:
+        olmo_core_utils.write_provenance_readme(
+            output_dir="/nonexistent-dir/for-sure", run_name="r", model_name_or_path="b", tracking_url=None
+        )
