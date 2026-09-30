@@ -229,7 +229,7 @@ CONVERTER_ARGS = """
 def get_args():
     args = parse_args(None)
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    if args.pipeline_model_parallel_size == 1 and world_size > 1:
+    if args.pipeline_model_parallel_size == 1 and world_size > 1 and not os.environ.get("CONVERT_KEEP_PP1"):
         args.pipeline_model_parallel_size = world_size
         args.decoder_last_pipeline_num_layers = args.num_layers // world_size
     validate_args(args)
@@ -238,7 +238,9 @@ def get_args():
 
 
 def exercise_converter(source, tp, patched):
-    tree = megatron_grpo_convert.converter_tree(source, "native-converter") if patched else ast.parse(source)
+    if patched:
+        megatron_grpo_convert.verify_keep_pp1(source, "native-converter")
+    tree = ast.parse(source)
     function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "get_args")
     namespace = {
         "parse_args": lambda _: SimpleNamespace(
@@ -248,8 +250,9 @@ def exercise_converter(source, tp, patched):
             decoder_last_pipeline_num_layers=None,
         ),
         "set_default_megatron_args": lambda args: args,
+        "add_conversion_args": None,
         "add_convertion_args": None,
-        "os": SimpleNamespace(environ={"WORLD_SIZE": "2"}),
+        "os": SimpleNamespace(environ={"WORLD_SIZE": "2", **({"CONVERT_KEEP_PP1": "1"} if patched else {})}),
     }
 
     def validate(args):
@@ -265,10 +268,10 @@ def test_converter_override_reproduced_and_guarded():
         exercise_converter(CONVERTER_ARGS, tp=2, patched=False)
     args = exercise_converter(CONVERTER_ARGS, tp=2, patched=True)
     assert args.pipeline_model_parallel_size == 1 and args.decoder_last_pipeline_num_layers is None
-    args = exercise_converter(CONVERTER_ARGS, tp=1, patched=True)
+    args = exercise_converter(CONVERTER_ARGS, tp=1, patched=False)
     assert args.pipeline_model_parallel_size == 2 and args.decoder_last_pipeline_num_layers == 14
-    with pytest.raises(ValueError, match="guard changed"):
-        megatron_grpo_convert.converter_tree(CONVERTER_ARGS.replace("world_size > 1", "world_size > 2"), "changed")
+    with pytest.raises(ValueError, match="guard differs"):
+        megatron_grpo_convert.verify_keep_pp1(CONVERTER_ARGS.replace("world_size > 1", "world_size > 2"), "changed")
 
 
 def test_pinned_native_converter_tp_only():

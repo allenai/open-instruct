@@ -9,7 +9,7 @@ def conversion_command(executable, miles_root, architecture, model, checkpoint, 
     """Keep conversion on the same TP-only mesh as the GRPO trainer.
 
     The native converter overrides even explicit PP1 under world size > 1.
-    The managed entry point guards that inference when tensor parallelism is used.
+    The runtime verifies and enables the native CONVERT_KEEP_PP1 switch.
     """
     return [
         executable,
@@ -17,9 +17,6 @@ def conversion_command(executable, miles_root, architecture, model, checkpoint, 
         "torch.distributed.run",
         "--standalone",
         f"--nproc-per-node={tensor_parallel}",
-        "-m",
-        "open_instruct.miles.megatron_grpo_convert",
-        "--native-script",
         str(Path(miles_root) / "tools/convert_hf_to_torch_dist.py"),
         *architecture,
         "--hf-checkpoint",

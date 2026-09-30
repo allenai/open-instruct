@@ -10,7 +10,14 @@ import time
 import urllib.error
 from pathlib import Path
 
-from open_instruct.miles import megatron_grpo_args, megatron_grpo_audit, opd_runtime, run_data, workflow
+from open_instruct.miles import (
+    megatron_grpo_args,
+    megatron_grpo_audit,
+    megatron_grpo_convert,
+    opd_runtime,
+    run_data,
+    workflow,
+)
 from open_instruct.miles.errors import InputError
 
 
@@ -62,6 +69,19 @@ def execute(spec):
                 "OI_GRPO_REWARD_CONFIG": prepared["data"]["reward_config"],
             }
         )
+        converter_path = miles_root / "tools/convert_hf_to_torch_dist.py"
+        converter_source = converter_path.read_text()
+        (root / "native-converter.py").write_text(converter_source)
+        converter_sha = megatron_grpo_convert.verify_keep_pp1(converter_source, str(converter_path))
+        workflow.write_json(
+            root / "conversion-control.json",
+            {
+                "native_source_sha256": converter_sha,
+                "CONVERT_KEEP_PP1": "1",
+                "tensor_parallel_size": trainer["tensor_parallel_size"],
+                "pipeline_parallel_size": 1,
+            },
+        )
         with (root / "runtime-tests.log").open("w") as stream:
             subprocess.run(
                 [
@@ -93,7 +113,8 @@ def execute(spec):
         )
         if not (checkpoint / "latest_checkpointed_iteration.txt").exists():
             conversion_env = environment | {
-                "CUDA_VISIBLE_DEVICES": ",".join(visible[i] for i in layout["roles"]["trainer"][:tp])
+                "CONVERT_KEEP_PP1": "1",
+                "CUDA_VISIBLE_DEVICES": ",".join(visible[i] for i in layout["roles"]["trainer"][:tp]),
             }
             command = megatron_grpo_args.conversion_command(
                 sys.executable, miles_root, architecture, model, checkpoint, tp
