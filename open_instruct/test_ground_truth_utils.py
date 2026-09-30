@@ -281,6 +281,8 @@ class TestRewardConfigNonAdditiveFormatGate(unittest.TestCase):
             ("half_reward_matching", 0.5, MATCHING, 10.0),
             ("half_reward_non_matching", 0.5, NON_MATCHING, 0.0),
             ("double_reward_matching", 2.0, MATCHING, 10.0),
+            ("zero_reward_matching", 0.0, MATCHING, 10.0),
+            ("zero_reward_non_matching", 0.0, NON_MATCHING, 0.0),
         ]
     )
     def test_format_gate(self, _name, format_reward, response, expected_score):
@@ -288,6 +290,10 @@ class TestRewardConfigNonAdditiveFormatGate(unittest.TestCase):
 
     def test_mixed_batch(self):
         scores = self._scores(0.5, [self.MATCHING, self.NON_MATCHING, self.MATCHING])
+        self.assertEqual(scores, [10.0, 0.0, 10.0])
+
+    def test_mixed_batch_zero_scale(self):
+        scores = self._scores(0.0, [self.MATCHING, self.NON_MATCHING, self.MATCHING])
         self.assertEqual(scores, [10.0, 0.0, 10.0])
 
 

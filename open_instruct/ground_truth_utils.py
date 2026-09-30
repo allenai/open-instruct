@@ -1353,9 +1353,13 @@ class RewardConfig:
             scores = [0.0] * len(decoded_responses)
             metrics: dict[str, Any] = {}
             format_scores: list[float] = []
+            format_valid: list[bool] = []
 
             if self.apply_r1_style_format_reward:
                 format_scores = soft_format_reward_func(decoded_responses, self.r1_style_format_reward)
+                # Validity is kept apart from the reward magnitude, so the non-additive gate still
+                # checks the format when r1_style_format_reward is 0.0 (or any other value).
+                format_valid = [score > 0 for score in soft_format_reward_func(decoded_responses, 1.0)]
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
@@ -1391,7 +1395,7 @@ class RewardConfig:
                         if self.apply_r1_style_format_reward and self.additive_format_reward:
                             scores[i] = raw_score + scores[i]
                         elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = raw_score if format_scores[i] == self.r1_style_format_reward else 0
+                            scores[i] = raw_score if format_valid[i] else 0
                         else:
                             scores[i] = raw_score
 
