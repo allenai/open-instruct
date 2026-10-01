@@ -36,6 +36,17 @@ This will build an image and launch it. You can also check out the beaker link t
 1. Modifying the launch scripts to remove the stuff attached to the [`mason.py`](https://github.com/allenai/open-instruct/blob/main/mason.py) command
 2. Setting up your own cluster with the requisite number of {H,A}100 nodes, connected together via Ray.
 
+## RL Zero chat templates
+
+The RL Zero scripts on `main` do not all select the chat template that the released checkpoints were trained with (see [#1899](https://github.com/allenai/open-instruct/issues/1899)).
+
+- The released RL Zero Code, IF, General and Mix checkpoints ship a `chat_template.jinja` that is byte-identical to `olmo_thinker` as defined in [`dataset_transformation.py` at `d928a7c`](https://github.com/allenai/open-instruct/blob/d928a7cd29c2610af04300f817494c8e6dba977d/open_instruct/dataset_transformation.py), the commit listed in the table above. This is the `<|im_start|>` chat format with `<think>` opening the assistant turn. The Code and IF wandb runs record `chat_template_name=olmo_thinker`.
+- `olmo_thinker_rlzero` and `olmo_thinker_code_rlzero` are simple task-specific prompts that were added after those runs, in [#1216](https://github.com/allenai/open-instruct/pull/1216). `7b_rlzero_code.sh`, `7b_rlzero_instruction_following.sh`, `7b_rlzero_math.sh` and `7b_rlzero_mix.sh` now select them, so launching those scripts from `main` trains a later simple-template variant and not the released recipe.
+- `olmo_thinker` itself has changed on `main` since `d928a7c`. To reproduce a released checkpoint, check out the commit from the table as described above. Changing only `--chat_template_name` on `main` is not enough.
+- The released RL Zero Math checkpoint is the exception: it ships a simple prompt template (the `olmo_thinker_rlzero` prompt, with "math problem" in place of "problem").
+
+For inference with a released checkpoint, use the chat template that ships with it.
+
 ## Wandb reports
 
 We also have a bunch of Wandb reports for each stage, which contains the same information as above, in a slightly different format: 

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# The released Olmo-3-7B-RL-Zero-IF checkpoint was trained with the olmo_thinker
+# template at commit d928a7c, not olmo_thinker_rlzero as selected below.
+# See "RL Zero chat templates" in scripts/train/olmo3/README.md.
+
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-IF-7B 1.0"
 
