@@ -78,6 +78,7 @@ def test_trace_checks_fused_weight_layout_and_exact_tokens(tmp_path):
         router_weights, router_ids = mlp_module.router(outputs["mlp_input"])
         router_logits = torch.nn.functional.linear(outputs["mlp_input"].float(), mlp_module.router.gate.weight.float())
     trace["inputs"] = {mlp[:-1]: outputs["mlp_input"].squeeze(0)}
+    trace["input_capture"] = "before_forward"
     trace["routers"] = {
         mlp[:-1]: {
             "weights": router_weights.squeeze(0),
@@ -146,6 +147,33 @@ def test_router_comparison_aligns_weights_by_expert_identity():
     )
     assert result["expert_set_agreement"] == 0
     assert result["mixing_by_expert"]["max_abs"] == pytest.approx(0.7)
+
+
+def test_trace_copies_inputs_before_inplace_operations(monkeypatch, tmp_path):
+    path = tmp_path / "trace.pt"
+    monkeypatch.setenv("EMO_NUMERICS_TRACE", str(path))
+
+    class Inplace(torch.nn.Module):
+        def forward(self, value):
+            return value.add_(1)
+
+    class Base(torch.nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            self.mutate = Inplace()
+
+        def forward(self, input_ids, positions, forward_batch, input_embeds=None):
+            return self.mutate(input_ids.clone())
+
+    class Model(TraceMixin, Base):
+        pass
+
+    model = Model(SimpleNamespace(hidden_size=4, num_hidden_layers=1, n_routed_experts=2))
+    tokens = torch.tensor([1, 3, 4])
+    model.forward(tokens, None, None)
+    trace = torch.load(path, weights_only=True)
+    assert torch.equal(trace["inputs"]["mutate"], tokens)
+    assert torch.equal(trace["outputs"]["mutate"], tokens + 1)
 
 
 def test_control_serving_rescores_exact_record_without_generating(monkeypatch):

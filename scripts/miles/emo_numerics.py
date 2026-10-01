@@ -178,7 +178,11 @@ def trace_comparisons(reference, tokens, trace_path, native=None):
     for name, actual in serving_trace.get("routers", {}).items():
         # First compare routing on identical *serving* hidden states, isolating
         # the router from errors already present in upstream attention/norms.
-        hidden = serving_trace["inputs"][name].to(tokens.device).unsqueeze(0)
+        input_name = name if serving_trace.get("input_capture") == "before_forward" else name + ".topk"
+        # Older traces captured module inputs after forward. FusedMoE can mutate
+        # those tensors, but TopK's snapshot predates expert dispatch. This probe
+        # only supports the full-width fixture (no latent projection).
+        hidden = serving_trace["inputs"][input_name].to(tokens.device).unsqueeze(0)
         layer = int(name.split(".")[2])
         router = reference.model.layers[layer].mlp.router
         with torch.no_grad():
@@ -206,7 +210,12 @@ def trace_comparisons(reference, tokens, trace_path, native=None):
                     serving_trace["outputs"][name + ".shared_expert"].float(), shared.cpu().float()
                 )
         routers[name]["serving"] = {key: value.tolist() for key, value in actual.items()}
-    return {"layers": comparisons, "parameters": weight_comparisons, "routers": routers}
+    return {
+        "layers": comparisons,
+        "parameters": weight_comparisons,
+        "routers": routers,
+        "router_input_capture": serving_trace.get("input_capture", "legacy_topk_snapshot"),
+    }
 
 
 def models(path, record, trace_path=None):
