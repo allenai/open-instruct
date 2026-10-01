@@ -144,6 +144,19 @@ def get_args():
         default=[],
     )
     parser.add_argument(
+        "--extra_weka_buckets",
+        nargs="*",
+        help="""Extra WEKA buckets to mount at `/weka/[bucket]`, in addition to
+        `oe-adapt-default` and `oe-training-default`. Only honored when every requested
+        cluster is a WEKA cluster. Opt-in because a bucket that a cluster does not export
+        cannot be detected before launch: Beaker has no bucket listing, and a bad
+        reference fails the job at mount time. For example, the Olmo 3.5 hero checkpoints
+        live in `olmo-3p5-checkpoints`.
+        """,
+        type=str,
+        default=[],
+    )
+    parser.add_argument(
         "--description",
         type=str,
         help="Optionally, a description for this job in Beaker.",
@@ -353,18 +366,17 @@ def get_env_vars(
     return env_vars
 
 
-def get_datasets(beaker_datasets, cluster: list[str], mount_docker_socket: bool = False):
+def get_datasets(
+    beaker_datasets, cluster: list[str], mount_docker_socket: bool = False, extra_weka_buckets: list[str] | None = None
+):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
     if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
+        buckets = ["oe-adapt-default", "oe-training-default", *(extra_weka_buckets or [])]
         res = [
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
-            ),
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
-            ),
+            beaker.BeakerDataMount(source=beaker.BeakerDataSource(weka=bucket), mount_path=f"/weka/{bucket}")
+            for bucket in dict.fromkeys(buckets)
         ]
     if mount_docker_socket:
         res.append(
@@ -381,6 +393,21 @@ def get_datasets(beaker_datasets, cluster: list[str], mount_docker_socket: bool 
     return res
 
 
+# A tag-like argument such as `<think>`, `</answer>`, `<|im_end|>` or `<tool name="search">`. A bare
+# redirection (`>`, `2>&1`, `<input.txt`) has no closing `>` after its `<` and so does not match.
+TAG_ARG_PATTERN = re.compile(r"<[^<>]*>")
+
+
+def quote_literal_args(command: list[str]) -> list[str]:
+    """Shell-quote the args that must reach the job verbatim before the command is joined for `bash -c`.
+
+    The rest of the command is passed through untouched, since launch scripts rely on `&&`, `cd` and `$VARS`.
+    Unquoted, `<think>` is a redirection and `{"a": 1}` loses its double quotes.
+    """
+    # `</` alone is kept from the original rule, so a closing-tag prefix such as `</tool_call` stays literal.
+    return [shlex.quote(arg) if "{" in arg or "</" in arg or TAG_ARG_PATTERN.search(arg) else arg for arg in command]
+
+
 def make_internal_command(command: list[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
     # pass through WANDB_ENTITY and WANDB_PROJECT
     if "WANDB_ENTITY" in os.environ:
@@ -389,12 +416,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
     if "WANDB_TAGS" in os.environ:
         command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
-
-    # escape the command (e.g., --stop_strings "</answer>")
-    for i in range(len(command)):
-        if "</" in command[i]:
-            command[i] = f"'{command[i]}'"
-    # breakpoint()
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
@@ -527,13 +548,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         "3. in the training command, use a `--output_dir` that starts with `/weka/`"
                     )
 
-    # special logic to deal with escape like
-    # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
-    # we need to wrap the json string with single quote
-    for idx in range(len(command)):
-        if "{" in command[idx]:
-            command[idx] = "'" + command[idx] + "'"
-    joined_command = " ".join(command)
+    joined_command = " ".join(quote_literal_args(command))
     if args.num_nodes > 1:
         if "--num_processes" not in joined_command and "accelerate" in joined_command:
             raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
@@ -584,7 +599,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         command=["/bin/bash", "-c"],
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
+        datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket, args.extra_weka_buckets),
         context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
         ),

@@ -319,6 +319,36 @@ def load_hf_weights_into_model(model: torch.nn.Module, model_name_or_path: str, 
     model.load_state_dict(model_state_dict)
 
 
+def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
+    """Seed the rows of reserved-slot-promoted tokens on the olmo-core path.
+
+    Call this once the base weights are in place and before the first step -- and only when the
+    run is not resuming. `pre_train` looks like the natural hook but fires after a resume load
+    too, so a callback would re-seed on every restart and throw away what those rows learned.
+
+    By this point `parallelize_model` has sharded the embedding on the vocabulary dimension, so
+    the rows being read and the row being written generally live on different ranks;
+    `model_utils.seed_embedding_rows` handles that. A no-op when the tokenizer promoted nothing.
+    Returns the number of rows written per matrix.
+    """
+    rows = model_utils.promoted_token_rows(tokenizer)
+    if not rows:
+        return 0
+
+    model = train_module.model
+    matrices = [model.embeddings.weight]
+    # The olmo2/olmo3 presets leave tie_word_embeddings False, so the head is a second matrix
+    # that needs the same seed. The qwen3 presets tie it, where writing the one parameter twice
+    # would feed the row just written back in as one of its own sources.
+    if not model.tie_word_embeddings and model.lm_head is not None:
+        matrices.append(model.lm_head.w_out.weight)
+    for weight in matrices:
+        model_utils.seed_embedding_rows(weight, rows)
+
+    logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
+    return len(rows)
+
+
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF weights into a parallelized train_module.
 
@@ -607,6 +637,11 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
 _MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
 
 
+def _set_hf_export_generation_config(hf_model, tokenizer: transformers.PreTrainedTokenizerBase) -> None:
+    if model_utils.uses_olmo3_generation_config(None, tokenizer, hf_model):
+        hf_model.generation_config = model_utils.get_olmo3_generation_config(tokenizer)
+
+
 def save_state_dict_as_hf(
     state_dict: dict[str, torch.Tensor],
     save_dir: str,
@@ -627,6 +662,7 @@ def save_state_dict_as_hf(
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict(converted, assign=True)
+    _set_hf_export_generation_config(hf_model, tokenizer)
 
     os.makedirs(save_dir, exist_ok=True)
     model_type = getattr(hf_config, "model_type", None)
