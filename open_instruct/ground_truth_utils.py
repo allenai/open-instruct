@@ -24,6 +24,7 @@ import numpy as np
 import requests
 
 from open_instruct import context_window_checker, logger_utils
+from open_instruct.answer_utils import extract_final_answer
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
@@ -37,7 +38,6 @@ from open_instruct.math_utils import (
 )
 from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
-from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
