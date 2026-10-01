@@ -126,6 +126,40 @@ bodies stay in logs, rather than becoming W&B metric names.
 Recovery policy changes require a rebuilt application image; an already
 running job keeps its image's behavior.
 
+### HTTP keep-alive margin
+
+The pinned MILES router uses a **60-second server idle keep-alive timeout**.
+HTTPX clients retain their default **five-second idle connection reuse window**.
+This gives the client time to retire a connection before the router closes it.
+The server timeout applies between requests; it is not a generation deadline,
+does not change admission limits, and does not hold an inference slot open.
+Idle sockets can remain open longer. Keep concurrency at its independently
+qualified setting; transport errors alone do not establish engine overload.
+
+A local CPU experiment on 2026-09-30 used the real MILES router, a synthetic
+HTTP worker, HTTPX 0.28.1/httpcore 1.0.9/Uvicorn 0.40.0, and 64 concurrent
+connections. After a response, clients waited 4.8 seconds, selected a connection,
+then deliberately delayed writing request headers by 400 ms:
+
+| Server idle timeout | Client idle expiry | Injected delay | Failed requests | New connections for those requests |
+|---|---|---|---|---|
+| 5 s | 5 s | None | 0 / 64 | 0 |
+| 5 s | 5 s | 400 ms | 64 / 64 (`ReadError`) | 0 |
+| 60 s | 5 s | 400 ms | 0 / 64 | 0 |
+| 5 s | 2 s | 400 ms | 0 / 64 | 64 |
+
+Both server settings also completed 1,024 ordinary requests without errors.
+Longer server keep-alive was selected because it removed this injected failure
+without the extra connection churn of earlier client expiry. A real-socket
+regression test checks that the actual router entrypoint retains an idle
+connection beyond the old five-second boundary.
+
+This reproduces a mechanism and the same exception class seen in H1; it does
+**not** prove that every H1 transport error had this cause. Compare failed group
+attempts and request exceptions after deployment. Preserve error reporting and
+whole-group recovery; do not silently retry ambiguous generation requests at
+the HTTP layer. A new image is required to deploy the change.
+
 ## Failure triage
 
 Trainer workers and serving engines use private `HF_MODULES_CACHE` directories

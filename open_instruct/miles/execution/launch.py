@@ -27,6 +27,7 @@ def receipt_path(spec):
 def specification(image, spec, *, hostnames=None):
     config = spec.compile()
     layout = topology.plan(spec)
+    host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])
     allocated = layout["gpus_per_replica"]
     mounts = spec.launch["weka_mounts"]
 
@@ -73,17 +74,18 @@ def specification(image, spec, *, hostnames=None):
             f"python -m open_instruct.miles.execution.preflight_attention --backend {config.core.attention_backend}\n"
         )
     cleanup = "status=$?; python -c " + shlex.quote(collect) + ' || true; exit "$status"'
+    workload = preflight + (
+        "python -m open_instruct.miles.execution.cluster /output/submitted-run.json"
+        if host_networking
+        else "python -m open_instruct.miles train /output/submitted-run.json"
+    )
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
         f"python -c {shlex.quote(setup)}\n"
         f"trap {shlex.quote(cleanup)} EXIT\n"
-        + preflight
-        + (
-            "python -m open_instruct.miles.execution.cluster /output/submitted-run.json"
-            if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]
-            else "python -m open_instruct.miles train /output/submitted-run.json"
-        )
-        + " 2>&1 | tee /output/run.log\n"
+        "python -m open_instruct.miles.execution.preflight_network "
+        f"--replicas {layout['replicas']} --network-mode {'host' if host_networking else 'bridge'} "
+        "-- bash -euo pipefail -c " + shlex.quote(workload) + " 2>&1 | tee /output/run.log\n"
     )
     env = {
         "OI_MILES_LAUNCH_ID": uuid.uuid4().hex,
@@ -115,7 +117,7 @@ def specification(image, spec, *, hostnames=None):
     # Cluster bootstrap advertises the physical node IP for Ray and judges,
     # including single-node runs with judge bindings. That address requires
     # host networking; bridge networking can strand local GCS clients.
-    if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]:
+    if host_networking:
         task["hostNetworking"] = True
     if layout["replicas"] > 1:
         # The supported multi-node hardware has eight GPUs per physical node.

@@ -70,8 +70,9 @@ checks the ID, but does **not** prove source compatibility with your checkout.
 The submitted config is carried into the job; your local Python changes are not.
 Use an image built from the intended source revision. The launch receipt records
 the submitting revision and selected image separately. In particular, the job
-now calls `open_instruct.miles.execution.preflight_attention`; an older image
-with only the scripts entrypoint must be rebuilt.
+now calls `open_instruct.miles.execution.preflight_network` and
+`open_instruct.miles.execution.preflight_attention`; older images missing these
+entrypoints must be rebuilt.
 
 To deploy source changes, commit them and build the source overlay instead.
 Read the immutable base identity from the lock and pull it into local Docker:
@@ -200,6 +201,17 @@ for multi-node or managed-judge jobs: its cluster bootstrap coordinates ranks,
 Ray and services. Do not manually start one independent `train` on each node.
 The submitted workflow runs the attention preflight for the supported torch/FA4
 selection before training.
+
+Before attention checks or model/data preparation, each submitted container checks
+`NCCL_SOCKET_IFNAME` against its visible interface names, honoring NCCL prefix,
+exact-match and exclusion selectors. An unmatched selector fails immediately,
+except for exactly `NCCL_SOCKET_IFNAME=ib` in a single-replica job using bridge
+networking: that case logs a warning and removes the override so NCCL selects an
+interface automatically. The updated environment is inherited by attention checks
+and training. Host-networked jobs (including single-node jobs with judge bindings)
+and multi-node jobs never use this fallback. Prefer leaving the variable unset for
+single-node runs. This check verifies interface names, not connectivity or NCCL
+collective health; local `validate` cannot inspect the future container's network.
 
 ## Placement, secrets and results
 

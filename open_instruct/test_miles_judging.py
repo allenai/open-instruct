@@ -96,6 +96,7 @@ def test_single_node_judge_bootstrap_uses_host_networking(document):
     assert len(tasks) == 1
     assert tasks[0]["resources"]["gpuCount"] == 5
     assert tasks[0]["hostNetworking"] is True
+    assert "--replicas 1 --network-mode host" in tasks[0]["arguments"][0]
     assert "open_instruct.miles.execution.cluster" in tasks[0]["arguments"][0]
 
 

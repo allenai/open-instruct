@@ -53,6 +53,8 @@ def test_payload_is_exact_resolved_spec_with_quoted_paths_and_overrides(tmp_path
     assert payload(command)["optimizer"]["learning_rate"] == 3e-6
     assert task["image"] == {"beaker": IMAGE_ID}
     assert "python -m open_instruct.miles.execution.preflight_attention" in command
+    assert command.index("preflight_network") < command.index("preflight_attention")
+    assert "--replicas 1 --network-mode bridge -- bash -euo pipefail -c" in command
     subprocess.run(["bash", "-n"], input=command, text=True, check=True)
     assert not (tmp_path / "should-not-exist").exists()
 
@@ -87,6 +89,7 @@ def test_multinode_native_replica_group(tmp_path, monkeypatch):
         task[key] is True for key in ("leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption")
     )
     assert task["synchronizedStartTimeout"] == "60m"
+    assert "--replicas 2 --network-mode host" in task["arguments"][0]
     assert task["context"]["minRuntime"] == "4h"
     assert task["constraints"] == {"cluster": ["ai2/holmes"]}
     assert not any("REPLICA_" in entry["name"] for entry in task["envVars"])
