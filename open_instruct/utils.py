@@ -73,6 +73,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
+from open_instruct.answer_utils import extract_final_answer as extract_final_answer
 from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -1667,34 +1668,6 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
         user_query = conversation
 
     return user_query
-
-
-def extract_final_answer(prediction: str) -> str:
-    """
-    Extract the substring between <answer> and </answer>.
-    If no match is found, extract the substring after </think>.
-    If neither condition matches, clean the prediction by removing the <|assistant|> tag.
-    If none of the above applies, return the original string.
-
-    Args:
-        prediction (str): The input string.
-
-    Returns:
-        str: The extracted substring or the cleaned/original string.
-    """
-    answer_match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-
-    think_match = re.search(r"</think>(.*)", prediction, re.DOTALL)
-    if think_match:
-        return think_match.group(1).strip()
-
-    cleaned = re.sub(r"<\|assistant\|>", "", prediction)
-    if cleaned != prediction:
-        return cleaned.strip()
-
-    return prediction
 
 
 # ---- Runtime leak detection -----------------------------------------------------------------
