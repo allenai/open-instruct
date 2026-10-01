@@ -21,7 +21,7 @@ class TraceMixin:
         # SGLang calls model.forward directly, bypassing root nn.Module hooks.
         self._trace = None
         if 1 < input_ids.numel() <= 128:
-            self._trace = {"tokens": input_ids.detach().cpu().clone(), "outputs": {}}
+            self._trace = {"tokens": input_ids.detach().cpu().clone(), "outputs": {}, "inputs": {}, "routers": {}}
         try:
             output = super().forward(input_ids, positions, forward_batch, input_embeds)
             self._finish()
@@ -33,6 +33,14 @@ class TraceMixin:
         def capture(module, args, output):
             if self._trace is None:
                 return
+            if args and isinstance(args[0], torch.Tensor):
+                self._trace["inputs"][name] = args[0].detach().cpu().clone()
+            if name.endswith(".topk") and hasattr(output, "topk_ids"):
+                self._trace["routers"][name.removesuffix(".topk")] = {
+                    "logits": args[1].detach().cpu().clone(),
+                    "weights": output.topk_weights.detach().cpu().clone(),
+                    "ids": output.topk_ids.detach().cpu().clone(),
+                }
             if isinstance(output, tuple):
                 output = output[0]
             if isinstance(output, torch.Tensor):
