@@ -962,6 +962,10 @@ class LLMRayActor:
                 "vLLM engine loop thread has died. Check logs for errors in EngineCore or async engine."
             )
 
+    def flush_graph_work_audit(self):
+        """Durably report the engine-loop cutoff before the main process exits."""
+        return self._run_async(vllm_graph_work_audit.flush_boundary())
+
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
         kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))

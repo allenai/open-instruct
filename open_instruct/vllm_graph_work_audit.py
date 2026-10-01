@@ -73,8 +73,13 @@ class Journal:
         self.flush_every = flush_every
         self.pending = []
         self.lock = threading.Lock()
+        self.record_count = 0
+        self.busy_execution_count = 0
 
-    def append(self, payload):
+    def _append(self, payload):
+        self.record_count += 1
+        if "scheduled_tokens" in payload:
+            self.busy_execution_count += 1
         line = (
             json.dumps(
                 payload
@@ -84,14 +89,18 @@ class Journal:
                     "process_id": os.getpid(),
                     "hostname": socket.gethostname(),
                     "beaker_job_id": os.environ.get("BEAKER_JOB_ID"),
+                    "journal_record": self.record_count,
                 },
                 sort_keys=True,
                 allow_nan=False,
             )
             + "\n"
         )
+        self.pending.append(line)
+
+    def append(self, payload):
         with self.lock:
-            self.pending.append(line)
+            self._append(payload)
             if len(self.pending) >= self.flush_every or payload.get("status") == "error":
                 self._flush()
 
@@ -106,6 +115,23 @@ class Journal:
     def flush(self):
         with self.lock:
             self._flush()
+
+    def boundary(self, name):
+        """Persist a numbered cutoff; future in-flight work remains outside it."""
+        if name != "post-final-model-save":
+            raise ValueError("Unsupported graph journal boundary")
+        with self.lock:
+            report = {
+                "status": "boundary-flushed",
+                "boundary": name,
+                "busy_execution_count": self.busy_execution_count,
+                "prior_journal_records": self.record_count,
+                "path": str(self.path),
+                "scope": "Completed host execute_model calls through this cutoff; later/in-flight work not covered.",
+            }
+            self._append(report)
+            self._flush()
+            return report
 
 
 def instrument(runner_class, graph_class, graph_module, journal):
@@ -203,3 +229,12 @@ def install(*, tensor_parallel_size, multiprocessing, executor_backend="uni"):
     atexit.register(journal.flush)
     _INSTALLED = journal
     return journal
+
+
+async def flush_boundary():
+    """Run on the engine loop between model executions; no CUDA synchronization."""
+    if os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT", "0") != "1":
+        return {"status": "disabled"}
+    if _INSTALLED is None:
+        raise RuntimeError("Graph observer was not installed in this engine process")
+    return _INSTALLED.boundary("post-final-model-save")

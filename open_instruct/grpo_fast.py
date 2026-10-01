@@ -45,7 +45,7 @@ with contextlib.suppress(Exception):
     pass
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, grpo_utils, response_work_audit, utils
+from open_instruct import data_types, grpo_utils, hf_weight_slice_audit, response_work_audit, utils
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
@@ -62,6 +62,7 @@ import sys
 import threading
 import time
 from dataclasses import asdict
+from pathlib import Path
 from queue import Empty, Full, Queue
 from typing import Any
 
@@ -3161,6 +3162,47 @@ def maybe_evaluate(
         return False
 
 
+def flush_graph_work_cutoffs(args, vllm_engines, training_step):
+    """Persist completed engine work through an explicit post-save cutoff."""
+    if os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT", "0") != "1":
+        return
+    graph_cutoffs, _ = ray_get_with_progress(
+        [engine.flush_graph_work_audit.remote() for engine in vllm_engines],
+        desc="Flushing graph work audit cutoffs",
+        timeout=120,
+    )
+    if len(graph_cutoffs) != len(vllm_engines) or any(
+        cutoff.get("status") != "boundary-flushed" for cutoff in graph_cutoffs
+    ):
+        raise RuntimeError("Missing engine graph work cutoff")
+    response_work_audit.record(
+        args.output_dir, "graph-work-cutoffs", {"training_step": training_step, "engine_cutoffs": graph_cutoffs}
+    )
+
+
+def audit_final_weight_slices(args, model_config):
+    """Read the pinned cached original and final export without loading a model."""
+    if os.environ.get("OI_FINAL_WEIGHT_AUDIT", "0") != "1":
+        return
+    if (
+        os.environ.get("OI_PACKING_AUDIT", "0") != "1"
+        or model_config.model_name_or_path != "Qwen/Qwen3.5-2B"
+        or model_config.model_revision != "15852e8c16360a2fea060d615a32b45270f8a8fc"
+    ):
+        raise ValueError("Final weight audit requires durable records and the pinned OPD student")
+    original = snapshot_download(
+        model_config.model_name_or_path, revision=model_config.model_revision, local_files_only=True
+    )
+    if Path(original).name != model_config.model_revision:
+        raise ValueError("Cached original does not bind the pinned snapshot revision")
+    if not (Path(args.output_dir) / CHECKPOINT_COMPLETE_MARKER).is_file():
+        raise ValueError("Final export completion marker absent")
+    report = hf_weight_slice_audit.compare(original, args.output_dir, cache_links=True)
+    response_work_audit.record(args.output_dir, "final-weight-slices", report)
+    if not report["sampled_weight_movement"]:
+        raise RuntimeError("Final weight movement not established by the bounded sample")
+
+
 def save_final_model(
     args: grpo_utils.GRPOExperimentConfig,
     policy_group: ModelGroup,
@@ -3666,6 +3708,7 @@ def run_training(
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+    flush_graph_work_cutoffs(args, vllm_engines, training_step)
 
 
 def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
@@ -4041,6 +4084,7 @@ def main(
             checkpoint_state,
             base_env_config,
         )
+        audit_final_weight_slices(args, model_config)
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
             push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)

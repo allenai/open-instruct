@@ -1,5 +1,7 @@
 """CPU observations; no vLLM imports, CUDA execution or acceptance claims."""
 
+import ast
+import asyncio
 import importlib.util
 import json
 from pathlib import Path
@@ -147,3 +149,61 @@ def test_journal_buffer_flush_and_absolute_path(audit, tmp_path):
     rows = [json.loads(line) for line in journal.path.read_text().splitlines()]
     assert len(rows) == 31 and not journal.pending
     assert [r["number"] for r in rows] == list(range(31))
+
+
+def test_boundary_flush_has_numbered_cutoff_without_claiming_later_work(audit, tmp_path, monkeypatch):
+    journal = audit.Journal(tmp_path)
+    journal.append({"status": "returned", "scheduled_tokens": 2})
+    journal.append({"status": "returned", "scheduled_tokens": 4})
+    monkeypatch.setenv("OI_VLLM_GRAPH_WORK_AUDIT", "1")
+    audit._INSTALLED = journal
+    result = asyncio.run(audit.flush_boundary())
+    assert result["busy_execution_count"] == 2 and result["prior_journal_records"] == 2
+    rows = [json.loads(line) for line in journal.path.read_text().splitlines()]
+    assert [r["journal_record"] for r in rows] == [1, 2, 3]
+    assert rows[-1]["status"] == "boundary-flushed" and not journal.pending
+    journal.append({"status": "returned", "scheduled_tokens": 1})
+    assert journal.busy_execution_count == 3 and len(journal.pending) == 1
+    assert len(journal.path.read_text().splitlines()) == 3  # Later work is outside the cutoff.
+    with pytest.raises(ValueError):
+        journal.boundary("invented")
+
+
+def test_enabled_boundary_without_installed_observer_fails(audit, monkeypatch):
+    monkeypatch.setenv("OI_VLLM_GRAPH_WORK_AUDIT", "1")
+    with pytest.raises(RuntimeError, match="not installed"):
+        asyncio.run(audit.flush_boundary())
+
+
+def test_main_cutoffs_use_native_results_times_tuple_and_all_engines(monkeypatch):
+    source = Path(__file__).resolve().parents[1] / "open_instruct/grpo_fast.py"
+    tree = ast.parse(source.read_text())
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "flush_graph_work_cutoffs")
+    captured = []
+    records = []
+    native = SimpleNamespace(environ={"OI_VLLM_GRAPH_WORK_AUDIT": "1"})
+
+    def wait(refs, **kwargs):
+        captured.append((refs, kwargs))
+        return refs, [0.1] * len(refs)
+
+    namespace = {
+        "os": native,
+        "ray_get_with_progress": wait,
+        "response_work_audit": SimpleNamespace(record=lambda *args: records.append(args)),
+    }
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"), namespace)
+    fn = namespace[node.name]
+    engines = [
+        SimpleNamespace(flush_graph_work_audit=SimpleNamespace(remote=lambda: {"status": "boundary-flushed"}))
+        for _ in range(5)
+    ]
+    fn(SimpleNamespace(output_dir="output"), engines, 2)
+    assert len(captured[0][0]) == 5 and captured[0][1]["timeout"] == 120
+    assert len(records[0][2]["engine_cutoffs"]) == 5
+    namespace["ray_get_with_progress"] = lambda *args, **kwargs: ([{"status": "disabled"}], [0.1])
+    with pytest.raises(RuntimeError, match="Missing"):
+        fn(SimpleNamespace(output_dir="output"), engines, 2)
+    native.environ.clear()
+    fn(SimpleNamespace(output_dir="output"), engines, 2)
+    assert len(records) == 1

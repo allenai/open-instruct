@@ -40,6 +40,10 @@ if [[ -n "$PATCH_DATASET" ]]; then
         '&&'
         'if [ -f /patch/open_instruct/response_work_audit.py ]; then cp /patch/open_instruct/response_work_audit.py /stage/open_instruct/; fi'
         '&&'
+        'if [ -f /patch/open_instruct/vllm_graph_work_audit.py ]; then cp /patch/open_instruct/vllm_graph_work_audit.py /stage/open_instruct/; fi'
+        '&&'
+        'if [ -f /patch/open_instruct/hf_weight_slice_audit.py ]; then cp /patch/open_instruct/hf_weight_slice_audit.py /stage/open_instruct/; fi'
+        '&&'
     )
 fi
 
@@ -140,6 +144,9 @@ fi
     --env VLLM_USE_V1=1 \
     --env OI_PACKING_AUDIT="${OI_PACKING_AUDIT:-0}" \
     --env OI_PACKING_AUDIT_RESULT_DIR="${OI_PACKING_AUDIT_RESULT_DIR:-/output/response-work-audit}" \
+    --env OI_VLLM_GRAPH_WORK_AUDIT="${OI_VLLM_GRAPH_WORK_AUDIT:-0}" \
+    --env OI_VLLM_GRAPH_WORK_AUDIT_DIR="${OI_VLLM_GRAPH_WORK_AUDIT_DIR:-/output/graph-work-audit}" \
+    --env OI_FINAL_WEIGHT_AUDIT="${OI_FINAL_WEIGHT_AUDIT:-0}" \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --auto_checkpoint_state_dir "$MASON_CHECKPOINT_STATE_DIR" \
     --no_auto_dataset_cache \
