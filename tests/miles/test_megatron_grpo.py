@@ -18,6 +18,7 @@ from open_instruct.miles import (
     megatron_grpo_config,
     megatron_grpo_convert,
     megatron_grpo_hooks,
+    opd_config,
     specs,
 )
 from open_instruct.miles.errors import InputError
@@ -82,7 +83,7 @@ def test_reject_opd_and_silent_objective_changes(field, value):
         lambda d: d["inference"].update(samples_per_prompt=1),
         lambda d: d["trainer"].update(gpus=3),
         lambda d: d["launch"].update(gpus_per_replica=8),
-        lambda d: d["model"].update(architecture="qwen3.5-2B"),
+        lambda d: d["model"].update(architecture="qwen3.5-4B"),
         lambda d: d["output"].update(assets="/run/fresh/assets"),
     ],
 )
@@ -117,6 +118,86 @@ def test_native_mapping_has_real_grpo_no_teacher(tmp_path):
     assert "--use-opd" not in args and "--rm-url" not in args and "--opd-type" not in args
     assert "--use-rollout-logprobs" not in args and "--disable-grpo-std-normalization" in args
     assert "--use-kl-loss" not in args and "--normalize-advantages" not in args
+    assert value("--loss-type") == "policy_loss" and "--custom-loss-function-path" not in args
+    assert "--data-source-path" not in args and spec.dppo_settings() is None
+    assert "assert (a.fully_async, a.use_rollout_logprobs, a.loss_type) == (False, False, 'policy_loss')" in (
+        megatron_grpo_args.preflight_code(spec)
+    )
+
+
+def qwen35_async_dppo():
+    """The Open Instruct teacher recipe's objective: DPPO-TV 0.1 on rollout log-probs, token mean, async."""
+    doc = document()
+    doc["model"]["architecture"] = "qwen3.5-2B"
+    doc["training"]["loss_aggregation"] = "token"
+    doc["objective"] = {"policy_loss": "dppo", "use_rollout_logprobs": True}
+    doc["miles"] = {"fully_async": True, "max_weight_staleness": 5}
+    return doc
+
+
+def test_qwen35_async_dppo_maps_to_custom_loss_rollout_logprobs_and_async_ledger(tmp_path):
+    doc = qwen35_async_dppo()
+    doc["output"]["root"] = str(tmp_path / "root")
+    spec = specs.from_dict(doc)
+    assert specs.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
+    args = megatron_grpo_args.native_arguments(
+        spec,
+        {
+            "model": "/prepared/model",
+            "data": {"prompt_data": "/prepared/prompts", "eval_prompt_data": ["aime", "/prepared/eval"]},
+        },
+        "/converted/native",
+        [],
+    )
+
+    def value(flag):
+        return args[args.index(flag) + 1]
+
+    assert value("--loss-type") == "custom_loss"
+    assert value("--custom-loss-function-path") == "open_instruct.miles.dppo_loss.policy_loss"
+    assert value("--data-source-path") == opd_config.ASYNC_SOURCE
+    assert value("--custom-async-data-buffer-path") == opd_config.ASYNC_BUFFER
+    assert value("--max-weight-staleness") == "5" and "--fully-async" in args
+    assert "--use-rollout-logprobs" in args and "--calculate-per-token-loss" in args
+    assert "--disable-grpo-std-normalization" in args and "--use-tis" not in args
+    assert spec.dppo_settings().environment() == {"OI_DPPO_DIVERGENCE_TYPE": "tv", "OI_DPPO_THRESHOLD": "0.1"}
+    assert "== (True, True, 'custom_loss')" in megatron_grpo_args.preflight_code(spec)
+    warnings = " ".join(spec.plan()["warnings"])
+    assert "qwen3.5-2B" in warnings and "DPPO" in warnings and "Async" in warnings
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (lambda d: d["objective"].update(use_rollout_logprobs=False), "use_rollout_logprobs"),
+        (lambda d: d["objective"].update(policy_loss="grpo"), "policy_loss"),
+        (lambda d: d["objective"].update(dppo_threshold=0.0), "dppo_threshold"),
+        (lambda d: d["objective"].update(dppo_divergence_type="js"), "divergence type"),
+        (lambda d: d["inference"].update(top_p=0.9), "top_p"),
+        (lambda d: d["miles"].pop("max_weight_staleness"), "max_weight_staleness"),
+        (lambda d: d["miles"].update(max_weight_staleness=0), "max_weight_staleness"),
+        (lambda d: d["miles"].update(fully_async=False), "only with miles.fully_async"),
+        (lambda d: d["miles"].update(pause_generation_mode="abort"), "abort"),
+        (lambda d: d["miles"].update(data_source_path="other.Source"), "owned"),
+        (lambda d: d["miles"].update(use_tis=True), "owned"),
+        (lambda d: d["miles"].update(loss_type="policy_loss"), "objective.policy_loss"),
+        (lambda d: d["training"].update(optimizer_steps_per_rollout=2), "one optimizer step"),
+    ],
+)
+def test_reject_unqualified_async_or_dppo_settings(change, message):
+    doc = qwen35_async_dppo()
+    change(doc)
+    with pytest.raises(InputError, match=message):
+        specs.from_dict(doc)
+
+
+def test_async_requires_rollout_logprobs_even_with_ppo():
+    doc = qwen35_async_dppo()
+    doc["objective"] = {"use_rollout_logprobs": False}
+    with pytest.raises(InputError, match="Async Megatron GRPO requires objective.use_rollout_logprobs"):
+        specs.from_dict(doc)
+    doc["objective"]["use_rollout_logprobs"] = True
+    assert specs.from_dict(doc).dppo_settings() is None
 
 
 def test_native_hook_uses_same_registered_verifier(monkeypatch):
@@ -152,6 +233,7 @@ def test_center_rewards_before_native_grpo_and_preserve_evidence(tmp_path, monke
     assert raw == [0.0, 1.0, 0.0, 0.0] and centered == [-0.5, 0.5, 0.0, 0.0]
     records = [json.loads(line) for line in (tmp_path / "verifier-rewards.jsonl").read_text().splitlines()]
     assert [row["reward"] for row in records] == raw
+    assert [row["group_index"] for row in records] == [0, 0, 1, 1]
     args.grpo_std_normalization = True
     assert megatron_grpo_hooks.post_process(args, samples)[1] == pytest.approx([-0.70710578, 0.70710578, 0, 0])
     samples[1].tokens = [9, 2, 4]

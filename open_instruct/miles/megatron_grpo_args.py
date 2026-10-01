@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from open_instruct.miles import options
+from open_instruct.miles import megatron_grpo_config, opd_config, options
 
 
 def conversion_command(executable, miles_root, architecture, model, checkpoint, tensor_parallel):
@@ -30,10 +30,28 @@ def conversion_command(executable, miles_root, architecture, model, checkpoint, 
     ]
 
 
+def preflight_code(spec):
+    """Parse the native arguments and assert the objective the run file selected reached Miles."""
+    objective = spec.document["objective"]
+    selected = (
+        bool(spec.document["miles"].get("fully_async", False)),
+        objective["use_rollout_logprobs"],
+        "custom_loss" if objective["policy_loss"] == "dppo" else "policy_loss",
+    )
+    return (
+        "from miles.utils.arguments import parse_args; "
+        "from miles.rollout.data_source import RolloutDataSourceWithBuffer; a=parse_args(); "
+        "assert not a.use_opd and a.opd_kl_coef == 0 and a.kl_coef == 0 and not a.use_kl_loss "
+        "and not a.normalize_advantages and a.rewards_normalization and a.advantage_estimator == 'grpo'; "
+        f"assert (a.fully_async, a.use_rollout_logprobs, a.loss_type) == {selected!r}; "
+        "RolloutDataSourceWithBuffer(a)"
+    )
+
+
 def native_arguments(spec, prepared, checkpoint, architecture):
     doc, root = spec.document, Path(spec.output["root"])
-    inf, training, trainer, opt, tracking = (
-        doc[k] for k in ("inference", "training", "trainer", "optimizer", "tracking")
+    inf, training, trainer, opt, tracking, objective = (
+        doc[k] for k in ("inference", "training", "trainer", "optimizer", "tracking", "objective")
     )
     values = {
         "train-backend": "megatron",
@@ -76,7 +94,7 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         "sglang-sampling-backend": "pytorch",
         "advantage-estimator": "grpo",
         "opd-kl-coef": 0.0,
-        "loss-type": "policy_loss",
+        "loss-type": "custom_loss" if objective["policy_loss"] == "dppo" else "policy_loss",
         "custom-rm-path": "open_instruct.miles.megatron_grpo_hooks.reward",
         "custom-reward-post-process-path": "open_instruct.miles.megatron_grpo_hooks.post_process",
         "eval-interval": training["eval_interval"] or training["num_rollouts"],
@@ -114,6 +132,14 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         "wandb-group": spec.name,
         "wandb-dir": str(root / "wandb"),
     }
+    if objective["policy_loss"] == "dppo":
+        # DPPO replaces the clipped surrogate; the eps-clip values above are then unused.
+        values["custom-loss-function-path"] = megatron_grpo_config.DPPO_LOSS
+    if doc["miles"].get("fully_async", False):
+        # The async OPD restart ledger and measured buffer; megatron_grpo_train installs the
+        # producer (opd_async.VerifierAsyncRollout) after native parsing.
+        values["data-source-path"] = opd_config.ASYNC_SOURCE
+        values["custom-async-data-buffer-path"] = opd_config.ASYNC_BUFFER
     if opt["lr_decay_style"] != "constant":
         values["lr-decay-iters"] = training["num_rollouts"]
     if training["keep_checkpoints"]:
@@ -139,6 +165,8 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         args.append("--disable-grpo-std-normalization")
     if training["loss_aggregation"] == "token":
         args.append("--calculate-per-token-loss")
+    if objective["use_rollout_logprobs"]:
+        args.append("--use-rollout-logprobs")
     if resume:
         args.append("--use-checkpoint-opt-param-scheduler")
     if tracking["wandb_mode"] != "disabled":

@@ -15,6 +15,7 @@ from open_instruct.miles import (
     megatron_grpo_args,
     megatron_grpo_assets,
     megatron_grpo_audit,
+    megatron_grpo_config,
     megatron_grpo_convert,
     opd_runtime,
     run_data,
@@ -30,8 +31,12 @@ def execute(spec):
     with workflow.run_directory(spec) as (_, state):
         model = workflow.prepare_model(spec)
         descriptor = json.loads((Path(model) / "config.json").read_text())
-        if descriptor.get("model_type") != "qwen3":
-            raise InputError("Megatron GRPO qualification requires the dense Qwen3 model family")
+        architecture_name = spec.document["model"]["architecture"]
+        if descriptor.get("model_type") != megatron_grpo_config.ARCHITECTURES[architecture_name]:
+            raise InputError(
+                f"model.architecture={architecture_name} requires an HF model_type of "
+                f"{megatron_grpo_config.ARCHITECTURES[architecture_name]!r}; got {descriptor.get('model_type')!r}"
+            )
         inf, trainer, training = (spec.document[k] for k in ("inference", "trainer", "training"))
         data_key = workflow.fingerprint(
             {
@@ -61,16 +66,19 @@ def execute(spec):
         if native is None or native.origin is None:
             raise InputError("Use the qualified native Megatron/SGLang image with committed code overlay")
         miles_root = Path(native.origin).resolve().parents[1]
+        fully_async = bool(spec.document["miles"].get("fully_async", False))
+        dppo = spec.dppo_settings()
         environment = dict(os.environ)
         environment.pop("SGLANG_EXTERNAL_MODEL_PACKAGE", None)
         environment.update(
             {
                 "PYTHONPATH": "/src/Megatron-LM:" + environment.get("PYTHONPATH", ""),
-                "MILES_USE_LEGACY_ROLLOUT_V1": "1",
+                "MILES_USE_LEGACY_ROLLOUT_V1": "0" if fully_async else "1",
                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
                 "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
                 "OI_GRPO_OUTPUT": str(root),
                 "OI_GRPO_REWARD_CONFIG": prepared["data"]["reward_config"],
+                **(dppo.environment() if dppo else {}),
             }
         )
         converter_path = miles_root / "tools/convert_hf_to_torch_dist.py"
@@ -97,6 +105,10 @@ def execute(spec):
                     "-q",
                     "/opt/core-rl/tests/miles/test_megatron_grpo.py",
                     "/opt/core-rl/tests/miles/test_megatron_grpo_assets.py",
+                    # The packed FlashAttention check the Qwen3.5 OPD route runs (8 heads, 2 groups, dim 256).
+                    *(["/opt/core-rl/tests/miles/test_opd_attention.py"] if architecture_name == "qwen3.5-2B" else []),
+                    *(["/opt/core-rl/tests/miles/test_dppo_math.py"] if dppo else []),
+                    *(["/opt/core-rl/tests/miles/test_opd_async.py"] if fully_async else []),
                 ],
                 env=environment,
                 stdout=stream,
@@ -148,7 +160,7 @@ def execute(spec):
         )
         arguments = megatron_grpo_args.native_arguments(spec, prepared, checkpoint, architecture)
         workflow.write_json(root / "native-arguments.json", arguments)
-        preflight = "from miles.utils.arguments import parse_args; from miles.rollout.data_source import RolloutDataSourceWithBuffer; a=parse_args(); assert not a.use_opd and a.opd_kl_coef == 0 and not a.fully_async and a.kl_coef == 0 and not a.use_kl_loss and not a.use_rollout_logprobs and not a.normalize_advantages and a.rewards_normalization and a.loss_type == 'policy_loss' and a.advantage_estimator == 'grpo'; RolloutDataSourceWithBuffer(a)"
+        preflight = megatron_grpo_args.preflight_code(spec)
         with (root / "native-preflight.log").open("w") as stream:
             subprocess.run(
                 [sys.executable, "-c", preflight, *arguments],

@@ -5,16 +5,34 @@ import dataclasses
 import re
 from pathlib import Path
 
-from open_instruct.miles import megatron_grpo_assets, opd_config, options, run_spec, validation
+from open_instruct.miles import dppo_math, megatron_grpo_assets, opd_config, options, run_spec, validation
 from open_instruct.miles.errors import InputError
 
+# Megatron profile -> the HF ``model_type`` its learner checkpoint must declare.
+ARCHITECTURES = {"qwen3-1.7B": "qwen3", "qwen3.5-2B": "qwen3_5"}
+# ``ppo``: Miles' clipped policy loss. ``dppo``: Open Instruct's DPPO trust-region mask
+# (open_instruct.miles.dppo_loss), which needs the rollout engine's behavior log-probs.
+POLICY_LOSSES = ("ppo", "dppo")
+DPPO_LOSS = "open_instruct.miles.dppo_loss.policy_loss"
+ASYNC_ROLLOUT = "open_instruct.miles.opd_async.VerifierAsyncRollout"
 DEFAULTS = {
     "model": {"source": "", "architecture": "qwen3-1.7B", "native_checkpoint": {}},
     "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo"},
     "trainer": dict(opd_config.DEFAULTS["trainer"]),
     "inference": {**opd_config.DEFAULTS["inference"], "max_prompt_length": 2048, "max_context_length": 4096},
     "optimizer": {**opd_config.DEFAULTS["optimizer"], "adam_beta2": 0.95, "adam_eps": 1e-8, "clip_grad": 1.0},
-    "objective": {"eps_clip": 0.2, "eps_clip_high": 0.28, "eps_clip_c": 3.0, "std_normalization": False},
+    "objective": {
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "eps_clip_c": 3.0,
+        "std_normalization": False,
+        "policy_loss": "ppo",
+        # Score the PPO/DPPO ratio against the rollout engine's sampled-token log-probs (Open
+        # Instruct's --use_vllm_logprobs) instead of the trainer's pre-update forward pass.
+        "use_rollout_logprobs": False,
+        "dppo_divergence_type": "tv",
+        "dppo_threshold": 0.1,
+    },
     "output": dict(opd_config.DEFAULTS["output"]),
     "tracking": {**opd_config.DEFAULTS["tracking"], "wandb_project": "rl-backend-comparison"},
 }
@@ -41,13 +59,17 @@ OWNED = {
     "clip_grad": "optimizer.clip_grad",
     "skip_actor_forward_only": "pre-update trainer-scored PPO anchor",
     "rollout_max_prompt_len": "inference.max_prompt_length",
-    "data_source_path": "native fixed-fanout input source",
+    "data_source_path": "native fixed-fanout input source (the async ledger under miles.fully_async)",
+    "custom_async_data_buffer_path": "the async verifier route",
     "rollout_function_path": "native synchronous rollout",
     "custom_convert_samples_to_train_data_function_path": "native GRPO data conversion",
     "reward_key": "numeric registered verifier reward",
     "eval_reward_key": "numeric registered verifier reward",
     "update_weights_interval": "one publication per optimizer update",
-    "use_tis": "initial synchronous mechanics qualification",
+    "use_tis": "rollout log-probs are the PPO anchor; no importance-sampling correction",
+    "use_rollout_logprobs": "objective.use_rollout_logprobs",
+    "loss_type": "objective.policy_loss",
+    "custom_loss_function_path": "objective.policy_loss",
     "use_opsm": "no additional policy mask",
     "reset_optimizer_states": "persistent optimizer state",
     "custom_advantage_function_path": "native GRPO advantages",
@@ -82,7 +104,7 @@ class MegatronGRPORunSpec:
         if not opd_config.is_local(validation.text(model["source"], "model.source")):
             raise InputError("Megatron GRPO qualification requires a pinned local HF model.source")
         model["source"] = run_spec._path(model["source"], base.parent, "model.source")
-        validation.choice(model["architecture"], "model.architecture", ("qwen3-1.7B",))
+        validation.choice(model["architecture"], "model.architecture", tuple(ARCHITECTURES))
         training, trainer, inf, opt = (document[k] for k in ("training", "trainer", "inference", "optimizer"))
         validation.choice(training["phase"], "training.phase", ("prepare", "train"))
         validation.boolean(training["resume"], "training.resume")
@@ -147,7 +169,19 @@ class MegatronGRPORunSpec:
         validation.choice(opt["lr_decay_style"], "optimizer.lr_decay_style", opd_config.LR_DECAY_STYLES)
         for key in ("eps_clip", "eps_clip_high", "eps_clip_c"):
             validation.number(document["objective"][key], f"objective.{key}", exclusive_min=True)
-        validation.boolean(document["objective"]["std_normalization"], "objective.std_normalization")
+        objective = document["objective"]
+        validation.boolean(objective["std_normalization"], "objective.std_normalization")
+        validation.boolean(objective["use_rollout_logprobs"], "objective.use_rollout_logprobs")
+        validation.choice(objective["policy_loss"], "objective.policy_loss", POLICY_LOSSES)
+        validation.number(objective["dppo_threshold"], "objective.dppo_threshold", exclusive_min=True)
+        try:
+            dppo_math.Settings(objective["dppo_divergence_type"], objective["dppo_threshold"])
+        except (TypeError, ValueError) as error:
+            raise InputError(f"objective.dppo_*: {error}") from None
+        if objective["policy_loss"] == "dppo" and not objective["use_rollout_logprobs"]:
+            raise InputError("objective.policy_loss=dppo requires objective.use_rollout_logprobs=true")
+        if objective["use_rollout_logprobs"] and inf["top_p"] != 1.0:
+            raise InputError("inference.top_p must be 1.0 when the rollout log-probs anchor the policy ratio")
         for key in ("root", "assets"):
             document["output"][key] = run_spec._path(document["output"][key], base.parent, f"output.{key}")
         root, assets = (Path(document["output"][k]) for k in ("root", "assets"))
@@ -164,11 +198,29 @@ class MegatronGRPORunSpec:
         for key in native:
             if key in OWNED or key.startswith("opd_"):
                 raise InputError(f"miles.{key} is owned by {OWNED.get(key, 'teacher-free GRPO')}")
-        for key in ("fully_async", "colocate", "offload_train", "offload_rollout", "partial_rollout"):
+        for key in ("colocate", "offload_train", "offload_rollout", "partial_rollout"):
             if native.get(key, False):
-                raise InputError(f"Initial synchronous Megatron GRPO qualification does not support miles.{key}")
+                raise InputError(f"Megatron GRPO does not support miles.{key}")
         if native.get("update_weights_interval", 1) != 1:
             raise InputError("One weight publication per optimizer update is required")
+        validation.boolean(native.get("fully_async", False), "miles.fully_async")
+        if native.get("fully_async", False):
+            # The OPD async producer and restart ledger (opd_async), under the same contract as
+            # async OPD: one update per rollout (above), a publication after every update, and
+            # behavior log-probs from the engine version that sampled each token.
+            validation.integer(native.get("max_weight_staleness"), "miles.max_weight_staleness", minimum=1)
+            if not objective["use_rollout_logprobs"]:
+                raise InputError("Async Megatron GRPO requires objective.use_rollout_logprobs=true")
+            if native.get("pause_generation_mode", "in_place") == "abort":
+                raise InputError("Async Megatron GRPO cannot abort generations during weight publication")
+            if "async_max_concurrent_samples" in native:
+                validation.integer(native["async_max_concurrent_samples"], "miles.async_max_concurrent_samples")
+            factor = native.get("async_data_buffer_capacity_factor", 2.0)
+            validation.number(factor, "miles.async_data_buffer_capacity_factor", exclusive_min=True)
+            if int(factor * inf["rollout_batch_size"]) < 1:
+                raise InputError("Async Megatron GRPO completed buffer must hold at least one group")
+        elif "max_weight_staleness" in native:
+            raise InputError("miles.max_weight_staleness applies only with miles.fully_async=true")
         document["miles"] = native
         launch = run_spec.RunSpec._launch(
             {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent
@@ -224,7 +276,23 @@ class MegatronGRPORunSpec:
             "roles": {"trainer": list(range(trainer)), "student": list(range(trainer, trainer + student))},
         }
 
+    def dppo_settings(self):
+        """DPPO settings for the custom loss, forwarded to the trainers as ``OI_DPPO_*`` environment."""
+        objective = self.document["objective"]
+        if objective["policy_loss"] != "dppo":
+            return None
+        return dppo_math.Settings(objective["dppo_divergence_type"], objective["dppo_threshold"])
+
     def plan(self):
+        warnings = [
+            "Teacher-free verifier GRPO adapter is experimental; runtime mechanics and objective parity must qualify before throughput/learning comparisons."
+        ]
+        if self.document["model"]["architecture"] != "qwen3-1.7B":
+            warnings.append(f"{self.document['model']['architecture']} has not run on the Megatron GRPO route.")
+        if self.document["objective"]["policy_loss"] == "dppo":
+            warnings.append("The DPPO custom loss is unit-tested against Open Instruct but has not trained.")
+        if self.document["miles"].get("fully_async", False):
+            warnings.append("Async verifier GRPO reuses the async OPD producer; it has not run for verifier rewards.")
         return {
             "name": self.name,
             "backend": "megatron",
@@ -232,7 +300,5 @@ class MegatronGRPORunSpec:
             "allocation": self.allocation(),
             "runtime_validated": False,
             "spec": self.to_dict(),
-            "warnings": [
-                "Teacher-free verifier GRPO adapter is experimental; runtime mechanics and objective parity must qualify before throughput/learning comparisons."
-            ],
+            "warnings": warnings,
         }

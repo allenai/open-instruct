@@ -32,6 +32,7 @@ def post_process(args, samples, **kwargs):
                 json.dumps(
                     {
                         "sample_index": sample.index,
+                        "group_index": getattr(sample, "group_index", None),
                         "tokens": sample.tokens,
                         "response_length": sample.response_length,
                         "response": sample.response,

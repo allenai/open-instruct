@@ -38,6 +38,9 @@ class OPDAsyncDataSource(data_source.DashboardDrainingRolloutDataSource):
 class OPDAsyncRollout(async_rollout.ManagedFullyAsyncRolloutFn):
     """Use the managed producer without changing the sampled-token OPD objective."""
 
+    # The reward hook that scores held-out prompts; it never sees the training reward hook.
+    eval_reward_path = "open_instruct.miles.opd_hooks.eval_reward"
+
     async def __call__(self, input):
         if input.evaluation:
             return await super().__call__(input)
@@ -76,7 +79,7 @@ class OPDAsyncRollout(async_rollout.ManagedFullyAsyncRolloutFn):
         self._producer_resumed.clear()
         state = copy.copy(input.generate_state or self.state)
         state.args = copy.copy(state.args)
-        state.args.custom_rm_path = "open_instruct.miles.opd_hooks.eval_reward"
+        state.args.custom_rm_path = self.eval_reward_path
         state.args.custom_reward_post_process_path = None
         final = input.rollout_id >= self.args.num_rollout - 1
         try:
@@ -87,3 +90,10 @@ class OPDAsyncRollout(async_rollout.ManagedFullyAsyncRolloutFn):
             else:
                 self._producer_resumed.set()
         return output
+
+
+class VerifierAsyncRollout(OPDAsyncRollout):
+    """The same producer, restart ledger and optimizer-step age budget for teacher-free verifier
+    GRPO; held-out prompts use the training verifier without its group-centering post-process."""
+
+    eval_reward_path = "open_instruct.miles.megatron_grpo_hooks.reward"
