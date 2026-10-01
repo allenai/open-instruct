@@ -30,6 +30,7 @@ except Exception:
     pass
 # isort: on
 import dataclasses
+import datetime
 import functools
 import importlib
 import json
@@ -998,14 +999,18 @@ def get_beaker_experiment_info(experiment_id: str) -> dict | None:
     if process.returncode != 0:
         print(f"Failed to get Beaker experiment: {stderr}")
         return None
-    return json.loads(stdout)[0]
+    try:
+        return json.loads(stdout)[0]
+    except (json.JSONDecodeError, IndexError, TypeError):
+        logger.warning(f"Could not parse `beaker experiment get {experiment_id}` output: {stdout!r}")
+        return None
 
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
-    num_replicas = experiment["jobs"][0]["execution"]["spec"].get("replicas", 1)
-    if not experiment:
+    if not experiment or not experiment.get("jobs"):
         return False
+    num_replicas = experiment["jobs"][0].get("execution", {}).get("spec", {}).get("replicas", 1)
     pprint(experiment)
     finalizeds = [
         "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
@@ -1027,7 +1032,12 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> list[str] | None:
     experiment = get_beaker_experiment_info(experiment_id)
     if not experiment:
         return None
-    result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
+    # A queued or interactive job has no result dataset yet; skip it rather than raising.
+    result_ids = [
+        job["result"]["beaker"]
+        for job in experiment.get("jobs", [])
+        if isinstance(job.get("result"), dict) and job["result"].get("beaker")
+    ]
     dataset_infos = []
     for result_id in result_ids:
         get_dataset_command = f"beaker dataset get {result_id} --format json"
@@ -1036,22 +1046,26 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> list[str] | None:
         if process.returncode != 0:
             print(f"Failed to get Beaker dataset: {stderr}")
             return None
-        datasets = json.loads(stdout)
-        dataset_infos.extend(
-            [
+        try:
+            datasets = json.loads(stdout)
+        except json.JSONDecodeError:
+            logger.warning(f"Could not parse `beaker dataset get {result_id}` output: {stdout!r}")
+            return None
+        for dataset in datasets:
+            total_size = (dataset.get("storage") or {}).get("totalSize")
+            dataset_infos.append(
                 DatasetInfo(
                     id=dataset["id"],
-                    committed=dataset["committed"],
-                    non_empty=(
-                        False if dataset["storage"]["totalSize"] is None else dataset["storage"]["totalSize"] > 0
-                    ),
+                    committed=dataset.get("committed"),
+                    non_empty=total_size is not None and total_size > 0,
                 )
-                for dataset in datasets
-            ]
-        )
+            )
     if sort:
-        # sort based on empty, then commited
-        dataset_infos.sort(key=lambda x: (x.non_empty, parser.parse(x.committed)))
+        # Sort based on empty, then commited. An uncommitted dataset sorts first, using the same
+        # "never" instant Beaker itself reports (0001-01-01T00:00:00Z). It must be timezone-aware:
+        # committed timestamps carry a UTC offset, and comparing those to a naive datetime raises.
+        never_committed = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+        dataset_infos.sort(key=lambda x: (x.non_empty, parser.parse(x.committed) if x.committed else never_committed))
     pprint(dataset_infos)
     return [dataset.id for dataset in dataset_infos]
 
@@ -1083,7 +1097,7 @@ def maybe_get_beaker_config():
         beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
         beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
         beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
-        beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
+        beaker_dataset_ids=beaker_dataset_ids,
         beaker_dataset_id_urls=beaker_dataset_id_urls,
     )
 
