@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from parameterized import parameterized
 
 from open_instruct import ground_truth_utils
+from open_instruct.IFEvalG import instructions_registry
 from open_instruct.ground_truth_utils import (
     F1Verifier,
     GSM8KVerifier,
@@ -239,6 +240,64 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestIFEvalGWordCounting(unittest.TestCase):
+    """Regression tests: `count:counting_composition` and `count:count_unique` used
+    nltk.word_tokenize, which emits punctuation (".", ",") as standalone tokens. That
+    made "exactly N words per sentence" off by one and any multi-sentence response look
+    like it had duplicate words. The checkers now count only word tokens (instructions_util.word_tokens)."""
+
+    def setUp(self):
+        self.cc = instructions_registry.INSTRUCTION_DICT["count:counting_composition"]("count:counting_composition")
+        self.cu = instructions_registry.INSTRUCTION_DICT["count:count_unique"]("count:count_unique")
+
+    def test_counting_composition_compliant_with_spaced_divider(self):
+        # 3 paragraphs, 3 sentences each, 2 words each, using the "* * *" divider the prompt asks for.
+        self.cc.build_description(n_sent=3, n_words=2)
+        response = (
+            "Cats run. Dogs jump. Birds fly.\n\n* * *\n\n"
+            "Fish swim. Foxes leap. Owls hoot.\n\n* * *\n\n"
+            "Apes climb. Bats hang. Eels glide."
+        )
+        self.assertTrue(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_spaceless_divider(self):
+        # The instruction specifies the "* * *" divider; a "***" response does not follow it.
+        self.cc.build_description(n_sent=3, n_words=2)
+        response = (
+            "Cats run. Dogs jump. Birds fly.\n\n***\n\n"
+            "Fish swim. Foxes leap. Owls hoot.\n\n***\n\n"
+            "Apes climb. Bats hang. Eels glide."
+        )
+        self.assertFalse(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_wrong_word_count(self):
+        self.cc.build_description(n_sent=3, n_words=2)
+        response = (
+            "Cats run fast. Dogs jump. Birds fly.\n\n* * *\n\n"  # first sentence has 3 words
+            "Fish swim. Foxes leap. Owls hoot.\n\n* * *\n\n"
+            "Apes climb. Bats hang. Eels glide."
+        )
+        self.assertFalse(self.cc.check_following(response))
+
+    def test_count_unique_allows_unique_multi_sentence(self):
+        self.cu.build_description()
+        self.assertTrue(self.cu.check_following("Alpha beta gamma. Delta epsilon zeta."))
+
+    def test_count_unique_rejects_repeated_word(self):
+        self.cu.build_description()
+        self.assertFalse(self.cu.check_following("The sun is hot. The moon is cold."))  # "The"/"is" repeat
+
+    def test_count_unique_via_ifeval_verifier(self):
+        verifier = ground_truth_utils.IFEvalVerifier()
+        label = str([{"instruction_id": ["count:count_unique"], "kwargs": [None]}])
+        result = verifier(
+            tokenized_prediction=[1, 2, 3],
+            prediction="Alpha beta gamma. Delta epsilon zeta.",
+            label=label,
+        )
+        self.assertEqual(result.score, 1.0)
 
 
 if __name__ == "__main__":
