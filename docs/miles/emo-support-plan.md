@@ -2,8 +2,9 @@
 
 Status: full-pool implementation added September 30, 2026. CPU checks cover
 configuration, export round-trips, replay weights/gradients and packed route
-alignment. GPU serving, distributed training and lifecycle qualification remain
-open. This document does not extend the current [support matrix](feature-parity.md).
+alignment. Tiny EP1 GPU serving and barrier training passed October 1; distributed
+training, asynchronous refresh and recovery qualification remain open. This
+document does not extend the current [support matrix](feature-parity.md).
 
 ## Selecting the implemented mode
 
@@ -162,6 +163,37 @@ confirms the overwrite fix and full-pool same-token equivalence for this tiny
 fixture; it does not qualify cached decode after the fix, GPU graphs, performance,
 backward, updated publication, export, recovery or real-checkpoint execution.
 Those lifecycle and broader serving gates remain open.
+
+The [rebased four-update barrier smoke](https://beaker.org/ex/01M3W2FX22XKQBAQM2G776Z4SQ)
+at application revision `ba05dc19a`, image `01M3W2EAA5A0X65YMBQRFG8SDQ`, passed
+October 1 on one unallocated Holmes node with two B300s at high priority. It used
+the original seed-173 fixture, one EP1 trainer and one TP1 serving engine, with
+synthetic mixed rewards, activation recomputation, detailed router diagnostics,
+zero router auxiliary losses and the unchanged 0.05 mean-gap guard. The rebased
+MILES pin `104a39b26e` includes both EMO replay and the router keep-alive fix.
+
+The job exited zero, completed all four optimizer updates and 32 responses, and
+reported final HF export completion. The saved-contract audit passed all 64
+scoring/training microbatches: zero replay-ID mismatches across 1,463 captured
+tokens per phase, with two returned router invocations for every training
+microbatch, including backward recomputation. Every update had finite, nonzero
+router/expert gradients and nonzero sampled router/expert parameter changes.
+Router gradient L2 norms ranged from 0.007204 to 0.045232; expert norms ranged
+from 0.536659 to 0.662539. These are local pre-optimizer norms, not global EP norms.
+
+Across 1,015 scored response tokens, per-update mean rollout/Core gaps were
+0.000750611, 0.000769746, 0.000763083 and 0.000733532; the maximum token gap was
+0.004035950. Exact serving-weight comparisons passed at initialization and after
+each update, covering versions 0 through 4. Fresh/replayed expert-set agreement
+was 100% on the replay-conditioned hidden states. Scoring-only expert counts,
+excluding synthetic tail rows, were `[148, 1400, 4, 0, 1, 0, 1245, 128]`; these
+describe the tiny random fixture and do not establish useful expert balance.
+
+This qualifies the exercised tiny EP1 barrier mechanics. Native checkpoint
+save/resume, fresh-process reload of the final export, EP2/EP4, packed distributed
+training, graphs/cache combinations, mixed-policy refresh and the intended real
+checkpoint still need their own evidence before H1-emo. The run disabled native
+checkpoint saving and did not measure learning quality or production throughput.
 
 ## Existing support and integration work
 
