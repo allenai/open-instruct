@@ -1,0 +1,577 @@
+"""CPU launch contracts, including isolated shell dispatch and syntax checks."""
+
+import ast
+import base64
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import launch, submit, workflow
+
+IMAGE_ID = "01M2931KARFP3Y2W2FPADGRFEP"
+
+
+def spec(tmp_path, **sections):
+    document = {
+        "schema_version": 1,
+        "name": "researcher-trial",
+        "model": {"source": "/weka/oe-training-default/model with 'quotes' $(touch should-not-exist)"},
+        "output": {"root": "/weka/oe-training-default/run with spaces"},
+        "data": {"tasks": [{"task": "gsm8k", "train_count": 32, "eval_count": 16}]},
+    }
+    return RunSpec.from_dict(document | sections, config_path=tmp_path / "run.toml")
+
+
+def payload(command):
+    setup = next(line for line in command.splitlines() if line.startswith("python -c "))
+    source = shlex.split(setup)[2]
+    tree = ast.parse(source)
+    call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "b64decode"
+    )
+    return json.loads(base64.b64decode(ast.literal_eval(call.args[0])))
+
+
+def test_payload_is_exact_resolved_spec_with_quoted_paths_and_overrides(tmp_path):
+    original = spec(tmp_path)
+    run = RunSpec.from_dict(
+        original.to_dict(),
+        config_path=tmp_path / "other" / "config.json",
+        overrides=["optimizer.learning_rate=0.000003", 'tracking.wandb_run_name="literal `x` $HOME \\"q\\""'],
+    )
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    command = task["arguments"][0]
+    assert payload(command) == run.to_dict()
+    assert payload(command)["optimizer"]["learning_rate"] == 3e-6
+    assert task["image"] == {"beaker": IMAGE_ID}
+    assert "python -m open_instruct.miles.execution.preflight_attention" in command
+    assert command.index("preflight_network") < command.index("preflight_attention")
+    assert "--replicas 1 --network-mode bridge -- bash -euo pipefail -c" in command
+    subprocess.run(["bash", "-n"], input=command, text=True, check=True)
+    assert not (tmp_path / "should-not-exist").exists()
+
+
+@pytest.mark.parametrize("placement,serving,gpus", [("colocated", 2, 2), ("disaggregated", 1, 3)])
+def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
+    run = spec(tmp_path, inference={"placement_mode": placement, "gpus": serving})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert task["resources"]["gpuCount"] == gpus
+    assert task["constraints"]["cluster"] == ["ai2/holmes"]
+    assert task["context"]["priority"] == "high"
+    assert task["context"]["minRuntime"] == "0s"
+
+
+@pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])
+def test_multinode_native_replica_group(tmp_path, monkeypatch, minimum):
+    def no_inventory(*args, **kwargs):
+        raise AssertionError("Rendering a native replica group must not query free nodes")
+
+    monkeypatch.setattr(launch.subprocess, "check_output", no_inventory)
+    run = spec(
+        tmp_path,
+        trainer={"gpus": 4},
+        inference={"placement_mode": "disaggregated", "gpus": 12},
+        launch={"gpus_per_replica": 8, "min_runtime": minimum, "timeout": "6h"},
+    )
+    tasks = launch.specification(IMAGE_ID, run)["tasks"]
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task["replicas"] == 2
+    assert task["replicas"] * task["resources"]["gpuCount"] == 16
+    assert all(
+        task[key] is True for key in ("leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption")
+    )
+    assert task["synchronizedStartTimeout"] == "60m"
+    assert "--replicas 2 --network-mode host" in task["arguments"][0]
+    assert task["context"]["minRuntime"] == ("4h" if minimum == "4h" else "0s")
+    assert payload(task["arguments"][0])["launch"]["min_runtime"] == task["context"]["minRuntime"]
+    assert task["constraints"] == {"cluster": ["ai2/holmes"]}
+    assert not any("REPLICA_" in entry["name"] for entry in task["envVars"])
+    filtered = launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b", "host-c"])
+    assert len(filtered["tasks"]) == 1
+    assert filtered["tasks"][0]["constraints"] == {"hostname": ["host-a", "host-b", "host-c"]}
+    for hosts in (["host-a"], ["host-a", "host-a"]):
+        with pytest.raises(ValueError, match="distinct physical hostnames"):
+            launch.specification(IMAGE_ID, run, hostnames=hosts)
+
+
+def test_multinode_partial_allocations_rejected(tmp_path):
+    run = spec(
+        tmp_path,
+        trainer={"gpus": 2},
+        inference={"placement_mode": "disaggregated", "gpus": 2},
+        launch={"gpus_per_replica": 3},
+    )
+    with pytest.raises(ValueError, match="full eight-GPU nodes"):
+        launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b"])
+
+
+@pytest.mark.parametrize("mode", ["multinode", "background"])
+@pytest.mark.parametrize(
+    "output_root,covered",
+    [
+        ("/shared/training/run", True),
+        ("/shared/training-other/run", False),
+        ("/shared/training/../other/run", False),
+        ("/weka/unmounted/run", False),
+        ("/tmp/local-run", False),
+    ],
+)
+def test_shared_output_requires_a_declared_mount_not_a_path_prefix(tmp_path, mode, output_root, covered):
+    sections = (
+        {"trainer": {"gpus": 4}, "inference": {"placement_mode": "disaggregated", "gpus": 12}}
+        if mode == "multinode"
+        else {
+            "data": {"tasks": [{"task": "gsm8k", "train_count": 32}]},
+            "evaluation": {
+                "mode": "background",
+                "image": IMAGE_ID,
+                "revision": "a" * 40,
+                "tasks": [{"task": "gsm8k"}],
+            },
+        }
+    )
+    run = spec(tmp_path, output={"root": output_root}, **sections)
+    run.launch["weka_mounts"].append({"weka": "training-store", "mount_path": "/shared/training"})
+    if not covered:
+        with pytest.raises(ValueError, match="launch.weka_mounts"):
+            launch.specification(IMAGE_ID, run)
+        return
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert {"mountPath": "/shared/training", "source": {"weka": "training-store"}} in task["datasets"]
+    assert payload(task["arguments"][0])["output"]["root"] == output_root
+    if mode == "multinode":
+        assert task["replicas"] == 2
+
+
+def test_single_node_without_background_evaluation_accepts_local_output(tmp_path):
+    run = spec(tmp_path, model={"source": "model"}, output={"root": "/tmp/run"}, launch={"weka_mounts": []})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert task["datasets"] == []
+
+
+@pytest.mark.parametrize("section", ["data", "conversion", "compiler_cache", "miles"])
+def test_every_weka_input_and_output_requires_mount_coverage(tmp_path, section):
+    value = {
+        "data": {"rl_manifest": "/weka/other-data/task/rl-manifest.json"},
+        "conversion": {"hf_output": "/weka/other-data/hf"},
+        "compiler_cache": {"enabled": True, "shared_root": "/weka/other-data/tmp-30d/cache"},
+        "miles": {"load": "/weka/other-data/checkpoints"},
+    }[section]
+    run = spec(tmp_path, **{section: value})
+    with pytest.raises(ValueError, match="weka_mounts"):
+        launch.specification(IMAGE_ID, run)
+    run.launch["weka_mounts"].append({"weka": "other-data", "mount_path": "/weka/other-data"})
+    assert len(launch.specification(IMAGE_ID, run)["tasks"][0]["datasets"]) == 2
+
+
+def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "PRIVATE-VALUE-SENTINEL")
+    run = spec(tmp_path, launch={"secrets": {"HF_TOKEN": "test_hf_secret"}, "env": {"DEBUG_LABEL": "visible"}})
+    document = launch.specification(IMAGE_ID, run)
+    env = document["tasks"][0]["envVars"]
+    assert {"name": "HF_TOKEN", "secret": "test_hf_secret"} in env
+    assert not any(value["name"] == "HF_TOKEN" and "value" in value for value in env)
+    assert "PRIVATE-VALUE-SENTINEL" not in json.dumps(document)
+    run.launch["env"]["WANDB_API_KEY"] = "should-not-print"
+    with pytest.raises(ValueError, match="launch.secrets") as error:
+        launch.specification(IMAGE_ID, run)
+    assert "should-not-print" not in str(error.value)
+
+
+def test_run_freezes_overrides_before_required_build_wrapper(tmp_path, monkeypatch):
+    path = tmp_path / "run.toml"
+    path.write_text(
+        'schema_version=1\nname="freeze-test"\n[model]\nsource="/weka/oe-training-default/hf"\n[output]\nroot="/weka/oe-training-default/run"\n[data]\n[[data.tasks]]\ntask="multiplication"\ntrain_count=8\n'
+    )
+    expected = RunSpec.load(path, ["optimizer.learning_rate=0.000004"]).to_dict()
+    calls = []
+
+    def run(command, **kwargs):
+        assert command[:3] == ["bash", "./scripts/train/build_image_and_launch.sh", "--miles"]
+        frozen = Path(command[3])
+        assert frozen != path and frozen.suffix == ".json"
+        assert json.loads(frozen.read_text()) == expected
+        path.write_text("changed while image builds")
+        assert json.loads(frozen.read_text()) == expected
+        assert kwargs == {"cwd": launch.ROOT, "check": True}
+        calls.append(command)
+
+    monkeypatch.setattr(launch.subprocess, "run", run)
+    launch.run(path, ["optimizer.learning_rate=0.000004"])
+    assert len(calls) == 1 and not Path(calls[0][3]).exists()
+
+
+def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
+    run = spec(tmp_path)
+    submitted = []
+
+    def check_output(command, **kwargs):
+        if command[:3] == ["beaker", "image", "get"]:
+            assert command[3] == "test-user/image-alias"
+            return json.dumps([{"id": IMAGE_ID}])
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            assert kwargs["cwd"] == launch.ROOT
+            return "source-revision\n"
+        assert command[:3] == ["beaker", "experiment", "create"]
+        assert command[4:] == ["--workspace", "ai2/open-instruct-dev", "--format", "json"]
+        submitted.append(json.loads(Path(command[3]).read_text()))
+        return json.dumps([{"id": f"experiment-{len(submitted)}"}])
+
+    monkeypatch.setattr(launch.subprocess, "check_output", check_output)
+    first = launch.submit("test-user/image-alias", run)
+    assert first["image"] == IMAGE_ID and first["requested_image"] == "test-user/image-alias"
+    assert first["revision"] == "source-revision"
+    assert first["spec_sha256"] == workflow.fingerprint(run.to_dict())
+    assert payload(submitted[0]["tasks"][0]["arguments"][0]) == first["spec"]
+    assert submitted[0]["tasks"][0]["image"]["beaker"] == IMAGE_ID
+    second = launch.submit("test-user/image-alias", run)
+    assert json.loads(launch.receipt_path(run).read_text()) == second
+    assert len(list((tmp_path / "receipts").glob("*.json"))) == 2
+
+
+def test_status_uses_actual_beaker_top_level_job_shape_and_latest_attempt(tmp_path, monkeypatch):
+    # Shape and timestamp fields verified against retained replay-reaudit
+    # experiment 01M295HY6X4NMBGB8R0JW24EBQ (no live Beaker request).
+    monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
+    run = spec(tmp_path)
+    workflow.write_json(
+        launch.receipt_path(run), {"experiment_id": "experiment", "spec_sha256": workflow.fingerprint(run.to_dict())}
+    )
+    experiment = {
+        "id": "experiment",
+        "jobs": [
+            {
+                "kind": "execution",
+                "id": "new",
+                "status": {
+                    "created": "2026-09-11T21:21:39.549634Z",
+                    "started": "2026-09-11T21:22:06.583836Z",
+                    "exitCode": 0,
+                },
+            },
+            {"kind": "execution", "id": "old", "status": {"created": "2026-09-11T20:00:00Z", "exitCode": 143}},
+        ],
+    }
+    monkeypatch.setattr(launch.subprocess, "check_output", lambda *args, **kwargs: json.dumps([experiment]))
+    result = launch.status(run)
+    assert result["latest_job"]["id"] == "new"
+    assert [job["id"] for job in result["attempts"]] == ["old", "new"]
+    assert result["config_matches_submission"] is True
+    run.data["seed"] += 1
+    assert launch.status(run)["config_matches_submission"] is False
+
+
+@pytest.fixture
+def status_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
+    run = spec(tmp_path)
+    receipt = {
+        "experiment_id": "experiment",
+        "spec_sha256": workflow.fingerprint(run.to_dict()),
+        "spec": run.to_dict(),
+        "allocation": {"replicas": 1},
+    }
+    jobs = []
+    monkeypatch.setattr(launch.subprocess, "check_output", lambda *args, **kwargs: json.dumps([{"jobs": jobs}]))
+
+    def read_status():
+        workflow.write_json(launch.receipt_path(run), receipt)
+        return launch.status(run)
+
+    return jobs, receipt, run, read_status
+
+
+@pytest.mark.parametrize(
+    ("details", "state", "reason"),
+    [
+        ({"exitCode": 0}, "complete", None),
+        ({"exitCode": 1, "message": "training failed"}, "failed", "training failed"),
+        ({"failed": "2", "message": "image pull failed"}, "failed", "image pull failed"),
+        ({"failed": "2", "exitCode": 0}, "failed", None),
+        ({"started": "1", "canceled": "2", "canceledCode": 4, "canceledFor": "manual"}, "canceled", "manual"),
+        ({"started": "1", "canceled": "2", "canceledCode": 5, "canceledFor": "timeout"}, "canceled", "timeout"),
+        ({"canceled": "2", "exitCode": 0, "canceledCode": 4}, "canceled", None),
+        (
+            {"canceled": "2", "canceledCode": 7, "canceledFor": "impossible to schedule"},
+            "canceled",
+            "impossible to schedule",
+        ),
+        ({"canceled": "2", "canceledCode": 999, "canceledFor": "unknown reason"}, "canceled", "unknown reason"),
+        ({"failedSchedulingMessage": "no free slots"}, "pending", "no free slots"),
+        ({"started": "1"}, "running", None),
+        ({"started": "1", "exited": "2"}, "stopped", None),
+        ({"finalized": "2"}, "stopped", None),
+        ({}, "pending", None),
+    ],
+)
+def test_status_reports_observed_outcome_and_preserves_beaker_details(status_jobs, details, state, reason):
+    jobs, _, _, read_status = status_jobs
+    jobs.append({"id": "job", "status": details})
+    result = read_status()
+    assert result["state"] == state
+    current = result["current_jobs"][0]
+    assert current["state"] == ("succeeded" if state == "complete" else state)
+    assert current["reason"] == reason
+    assert current["status"] == details
+    assert result["latest_job"] == current == result["attempts"][0]
+
+
+@pytest.mark.parametrize("auto_resume", [False, True])
+@pytest.mark.parametrize("code", [1, 2, 9, "CANCELATION_CODE_SYSTEM_PREEMPTION"])
+def test_status_preemption_precedes_exit_code_and_retry_replaces_current_attempt(status_jobs, auto_resume, code):
+    jobs, receipt, run, read_status = status_jobs
+    receipt["spec"]["launch"]["auto_resume"] = auto_resume
+    # The submitted setting, not a subsequently edited run file, is reported.
+    run.launch["auto_resume"] = not auto_resume
+    # Numeric code + exit 143 matches real Beaker preemption JSON.
+    jobs.append(
+        {
+            "id": "old",
+            "execution": {"task": "training", "replicaRank": 0},
+            "status": {
+                "created": "1",
+                "started": "2",
+                "canceled": "3",
+                "exited": "4",
+                "finalized": "5",
+                "exitCode": 143,
+                "canceledCode": code,
+                "canceledFor": "preempted by higher priority work",
+            },
+        }
+    )
+    result = read_status()
+    assert result["state"] == "preempted"
+    assert result["auto_resume"] is auto_resume
+    assert result["current_jobs"][0]["reason"] == "preempted by higher priority work"
+    jobs.append({"id": "retry", "execution": {"task": "training", "replicaRank": 0}, "status": {"created": "6"}})
+    assert read_status()["state"] == "pending"
+    jobs[-1]["status"]["started"] = "7"
+    result = read_status()
+    assert result["state"] == "running"
+    assert [job["id"] for job in result["current_jobs"]] == ["retry"]
+    assert [job["state"] for job in result["attempts"]] == ["preempted", "running"]
+    jobs[-1]["status"]["exitCode"] = 0
+    assert read_status()["state"] == "complete"
+
+
+@pytest.mark.parametrize("cause", ["NODE_UNAVAILABLE", "HEALTHCHECK_FAILED", "SIBLING_TASK_RETRY"])
+@pytest.mark.parametrize("numeric", [True, False])
+def test_status_reports_group_interruption_until_all_replicas_restart(status_jobs, cause, numeric):
+    jobs, receipt, _, read_status = status_jobs
+    receipt["allocation"]["replicas"] = 2
+    code = {"NODE_UNAVAILABLE": 6, "HEALTHCHECK_FAILED": 10, "SIBLING_TASK_RETRY": 11}[cause]
+    jobs.extend(
+        [
+            {
+                "id": "old",
+                "execution": {"task": "training", "replicaRank": 0},
+                "status": {
+                    "created": "1",
+                    "canceled": "2",
+                    "exitCode": 143,
+                    "canceledCode": code if numeric else f"CANCELATION_CODE_{cause}",
+                    "canceledFor": cause,
+                },
+            },
+            {
+                "id": "sibling",
+                "execution": {"task": "training", "replicaRank": 1},
+                "status": {
+                    "created": "1",
+                    "canceled": "2",
+                    "exitCode": 143,
+                    "canceledCode": 11,
+                    "canceledFor": "sibling task retry",
+                },
+            },
+        ]
+    )
+    result = read_status()
+    assert result["state"] == "interrupted"
+    assert [job["state"] for job in result["current_jobs"]] == ["interrupted", "interrupted"]
+    assert [job["reason"] for job in result["current_jobs"]] == [cause, "sibling task retry"]
+    for rank in (0, 1):
+        jobs.append(
+            {
+                "id": f"retry-{rank}",
+                "execution": {"task": "training", "replicaRank": rank},
+                "status": {"created": "3", "started": "4"},
+            }
+        )
+        assert read_status()["state"] == ("interrupted" if rank == 0 else "running")
+
+
+def test_status_reports_failed_replica_and_canceled_sibling(status_jobs):
+    jobs, receipt, _, read_status = status_jobs
+    receipt["allocation"]["replicas"] = 2
+    jobs.extend(
+        [
+            {"id": "failed", "execution": {"task": "training", "replicaRank": 0}, "status": {"exitCode": 1}},
+            {
+                "id": "sibling",
+                "execution": {"task": "training", "replicaRank": 1},
+                "status": {"canceled": "2", "exitCode": 143, "canceledCode": 8, "canceledFor": "sibling task failed"},
+            },
+        ]
+    )
+    result = read_status()
+    assert result["state"] == "failed"
+    assert {job["id"]: job["state"] for job in result["current_jobs"]} == {"failed": "failed", "sibling": "canceled"}
+
+
+def test_result_collection_reads_only_small_reports_and_prunes_weight_trees(tmp_path, monkeypatch):
+    root, destination = tmp_path / "run", tmp_path / "result"
+    (root / "checkpoints/step1/model").mkdir(parents=True)
+    (root / "prepared/hf").mkdir(parents=True)
+    (root / "metrics").mkdir()
+    (root / "workflow.json").write_text("{}")
+    (root / "checkpoints/step1/complete.json").write_text("{}")
+    (root / "checkpoints/step1/model/large.json").write_text("must not read")
+    (root / "prepared/hf/config.json").write_text("must not read")
+    large = root / "metrics/too-large.jsonl"
+    with large.open("wb") as stream:
+        stream.truncate(33 * 1024 * 1024)
+    (root / "metrics/train.jsonl").write_text('{"step":1}\n')
+    (root / "metrics/link.json").symlink_to(root / "prepared/hf/config.json")
+    original = Path.read_bytes
+
+    def read(path):
+        assert path not in (large, root / "prepared/hf/config.json", root / "checkpoints/step1/model/large.json")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    result = launch.collect_results(root, destination)
+    assert set(result) == {"workflow.json", "checkpoints/step1/complete.json", "metrics/train.jsonl"}
+    with pytest.raises(ValueError, match="outside"):
+        launch.collect_results(root, root / "recursive")
+
+
+def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
+    run = spec(tmp_path)
+    path = tmp_path / "frozen.json"
+    path.write_text(json.dumps(run.to_dict()))
+    calls = []
+    monkeypatch.setattr(submit.launch, "submit", lambda image, actual: calls.append((image, actual.to_dict())))
+    monkeypatch.setattr(
+        submit.argparse.ArgumentParser,
+        "parse_args",
+        lambda parser: type("Args", (), {"image": IMAGE_ID, "config": path, "overrides": [], "render_only": False})(),
+    )
+    submit.main()
+    assert calls == [(IMAGE_ID, run.to_dict())]
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_status_requires_every_replica_and_ignores_older_attempts(tmp_path, monkeypatch, native):
+    monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
+    run = spec(tmp_path)
+    workflow.write_json(
+        launch.receipt_path(run),
+        {"experiment_id": "multi", "allocation": {"replicas": 2}, "spec_sha256": workflow.fingerprint(run.to_dict())},
+    )
+    jobs = [
+        {"id": "old", "name": "replica-0", "status": {"created": "0", "exitCode": 143}},
+        {"id": "new", "name": "replica-0", "status": {"created": "1", "exitCode": 0}},
+    ]
+    if native:
+        for job in jobs:
+            job.update(name="training", execution={"task": "task", "replicaRank": 0})
+    monkeypatch.setattr(launch.subprocess, "check_output", lambda *args, **kwargs: json.dumps([{"jobs": jobs}]))
+    assert launch.status(run)["state"] == "pending"
+    jobs.append({"id": "other", "name": "replica-1", "status": {"created": "2", "started": "3"}})
+    if native:
+        jobs[-1].update(name="training", execution={"task": "task", "replicaRank": 1})
+    assert launch.status(run)["state"] == "running"
+    jobs[-1]["status"]["exitCode"] = 0
+    result = launch.status(run)
+    assert result["state"] == "complete" and {job["id"] for job in result["current_jobs"]} == {"new", "other"}
+    if native:
+        assert {job["execution"]["replicaRank"] for job in result["current_jobs"]} == {0, 1}
+    jobs[-1]["status"]["exitCode"] = 1
+    assert launch.status(run)["state"] == "failed"
+
+
+@pytest.mark.parametrize("cuda", [["--cuda-version", "12"], ["--cuda-version=13"]])
+@pytest.mark.parametrize("miles_first", [True, False])
+def test_image_wrapper_rejects_mixed_runtime_flags_before_external_commands(tmp_path, cuda, miles_first):
+    flags = ["--miles", *cuda] if miles_first else [*cuda, "--miles"]
+    result = subprocess.run(
+        ["/bin/bash", str(launch.ROOT / "scripts/train/build_image_and_launch.sh"), *flags, "run.toml"],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "Error: --miles cannot be combined with --cuda-version; MILES uses its own pinned runtime."
+    )
+
+
+@pytest.mark.parametrize("failure", [None, "dirty", "alias", "mismatch"])
+def test_image_wrapper_dispatches_to_package_without_a_debug_script(tmp_path, failure):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    received = tmp_path / "submission.json"
+    immutable_image = IMAGE_ID if failure != "alias" else "test-user/image-alias"
+    resolved = "different-image" if failure == "mismatch" else IMAGE_ID
+    programs = {
+        "git": "import sys\nprint(' M file' if sys.argv[1] == 'status' and "
+        + repr(failure == "dirty")
+        + " else '')\n",
+        "beaker": "import json, sys\nassert sys.argv[1:] == ['image', 'get', "
+        + repr(IMAGE_ID)
+        + ", '--format', 'json']\nprint(json.dumps([{'id': "
+        + repr(resolved)
+        + "}]))\n",
+        "python": "import json, os, sys\nfrom pathlib import Path\n"
+        + "if sys.argv[1:3] == ['-m', 'open_instruct.miles.execution.submit']:\n"
+        + "    Path("
+        + repr(str(received))
+        + ").write_text(json.dumps(sys.argv[1:]))\n"
+        + "else:\n    os.execv("
+        + repr(sys.executable)
+        + ", ["
+        + repr(sys.executable)
+        + ", *sys.argv[1:]])\n",
+    }
+    for name, program in programs.items():
+        path = tools / name
+        path.write_text(f"#!{sys.executable}\n{program}")
+        path.chmod(0o755)
+    # The wrapper must forward paths and overrides as literal arguments.
+    frozen = tmp_path / "run with 'quotes' $(touch should-not-exist).json"
+    overrides = ["--set", 'tracking.wandb_run_name="literal $HOME `x`"']
+    result = subprocess.run(
+        ["bash", "./scripts/train/build_image_and_launch.sh", "--miles", str(frozen), *overrides],
+        cwd=launch.ROOT,
+        env={**os.environ, "PATH": str(tools) + os.pathsep + os.defpath, "MILES_EXISTING_IMAGE": immutable_image},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if failure:
+        assert result.returncode != 0
+        assert not received.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert json.loads(received.read_text()) == [
+            "-m",
+            "open_instruct.miles.execution.submit",
+            IMAGE_ID,
+            str(frozen),
+            *overrides,
+        ]
+    assert not (launch.ROOT / "should-not-exist").exists()

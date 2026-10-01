@@ -1,0 +1,471 @@
+"""CPU-only checks of researcher sections, workflow boundaries and runtime translation."""
+
+import copy
+import json
+from pathlib import Path
+
+import pytest
+
+from open_instruct.miles.configuration.run_spec import RunSpec
+
+
+def document(tmp_path):
+    return {
+        "schema_version": 1,
+        "name": "researcher-trial",
+        "model": {"source": "model", "format": "hf"},
+        "output": {"root": str(tmp_path / "run")},
+        "data": {"tasks": [{"task": "gsm8k", "train_count": 32, "eval_count": 16}]},
+    }
+
+
+def spec(tmp_path, **sections):
+    return RunSpec.from_dict(document(tmp_path) | sections, config_path=tmp_path / "run.toml")
+
+
+def test_async_defaults_are_real_tis_and_eight_by_eight(tmp_path):
+    config = spec(tmp_path, **{"async": {"fully_async": True}}).compile()
+    assert config.miles["use_tis"] is True
+    assert config.miles["use_rollout_logprobs"] is False
+    assert config.miles["async_data_buffer_capacity_factor"] == 2
+    assert config.miles["colocate"] is False
+    assert config.miles["rollout_batch_size"] == config.miles["n_samples_per_prompt"] == 8
+    assert config.miles["global_batch_size"] == 64
+    assert config.core.max_policy_lag == 6
+    assert "--use-tis" in config.arguments()
+    assert "--use-rollout-logprobs" not in config.arguments()
+
+
+@pytest.mark.parametrize("expert_packing", [False, True])
+@pytest.mark.parametrize("balance_data", [None, False, True])
+def test_expert_packing_and_native_length_balancing_are_mutually_exclusive(tmp_path, expert_packing, balance_data):
+    miles = {"use_rollout_routing_replay": True, "use_miles_router": True}
+    if balance_data is not None:
+        miles["balance_data"] = balance_data
+
+    def compile_config():
+        return spec(
+            tmp_path,
+            trainer={
+                "gpus": 4,
+                "expert_parallel_size": 2,
+                "sequence_packing": True,
+                "trainer_flash_attention_version": 4,
+                "expert_balanced_packing": expert_packing,
+                "router_aux_loss_weight": 0.0,
+            },
+            inference={"placement_mode": "disaggregated", "gpus": 1},
+            miles=miles,
+        ).compile()
+
+    if expert_packing and balance_data:
+        with pytest.raises(
+            ValueError, match=r"expert_balanced_packing and miles\.balance_data are mutually exclusive"
+        ):
+            compile_config()
+    else:
+        config = compile_config()
+        assert config.core.expert_balanced_packing is expert_packing
+        assert bool(config.miles.get("balance_data", False)) is bool(balance_data)
+
+
+def test_colocation_and_launch_defaults(tmp_path):
+    run = spec(tmp_path)
+    config = run.compile()
+    assert config.miles["colocate"] is True
+    assert config.miles["offload_train"] is False
+    assert config.miles["rollout_num_gpus"] == config.miles["actor_num_gpus_per_node"] == 2
+    assert run.launch["priority"] == "high"
+    assert run.launch["min_runtime"] == "0s"
+    assert run.launch["workspace"] == "ai2/open-instruct-dev"
+    assert run.plan()["runtime_validated"] is False
+    assert config.miles["use_tis"] is False
+    assert config.core.max_policy_lag == 0
+
+
+@pytest.mark.parametrize(
+    ("launch", "match"),
+    [
+        ({"min_runtime": "4hr"}, "min_runtime must be a duration"),
+        ({"min_runtime": "-1h"}, "min_runtime must be a duration"),
+        ({"timeout": "-1h"}, "timeout must be a duration"),
+        ({"min_runtime": 0.0}, 'min_runtime must be a duration:.*integer 0.*"3600s" or "1h"'),
+        ({"min_runtime": 3600}, 'min_runtime must be a duration:.*"3600s" or "1h"'),
+        ({"timeout": 3600}, 'timeout must be a duration:.*"3600s" or "1h"'),
+    ],
+)
+def test_launch_durations_are_validated(tmp_path, launch, match):
+    with pytest.raises(ValueError, match=match):
+        spec(tmp_path, launch=launch)
+
+
+def test_launch_durations_accept_compound_values(tmp_path):
+    run = spec(tmp_path, launch={"min_runtime": "1h30m", "timeout": "1.5h"})
+    assert run.launch["min_runtime"] == "1h30m"
+
+
+@pytest.mark.parametrize("minimum", [0, "0", "0s", "", "  ", None])
+def test_zero_or_blank_minimum_runtime_is_unallocated(tmp_path, minimum):
+    run = spec(tmp_path, launch={"min_runtime": minimum})
+    assert run.plan()["launch"]["min_runtime"] == "0s"
+    restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "run.json")
+    assert restored.to_dict() == run.to_dict()
+
+
+def test_timeout_can_be_shorter_than_minimum_runtime(tmp_path):
+    run = spec(tmp_path, launch={"min_runtime": "1h", "timeout": "30m"})
+    assert run.launch["timeout"] == "30m"
+    assert run.plan()["launch_warnings"] == []
+
+
+@pytest.mark.parametrize("timeout", [0, "0", "0s"])
+def test_zero_timeout_is_accepted_and_warns_about_preemption(tmp_path, timeout):
+    run = spec(tmp_path, launch={"timeout": timeout})
+    assert run.launch["timeout"] == "0s"
+    assert any("loses training progress" in warning for warning in run.plan()["launch_warnings"])
+
+
+def test_long_minimum_runtime_warns_without_failing(tmp_path):
+    run = spec(tmp_path, launch={"min_runtime": "12h", "timeout": "12h"}, training={"save_interval": 10})
+    warnings = run.plan()["launch_warnings"]
+    assert len(warnings) == 1 and "usual 8h limit" in warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("training", "launch", "warned"),
+    [
+        ({}, {}, True),
+        ({"save_interval": 10}, {}, False),
+        ({"save_interval": 10}, {"auto_resume": False}, True),
+        ({}, {"min_runtime": "3h", "timeout": "3h"}, False),
+    ],
+)
+def test_preemptible_tail_warns_without_periodic_checkpoints(tmp_path, training, launch, warned):
+    warnings = spec(tmp_path, training=training, launch=launch).plan()["launch_warnings"]
+    assert any("loses training progress" in warning for warning in warnings) is warned
+
+
+@pytest.mark.parametrize("lag", [1, 2, 6])
+def test_explicit_async_lag_survives_default(tmp_path, lag):
+    config = spec(tmp_path, **{"async": {"fully_async": True, "max_weight_staleness": lag}}).compile()
+    assert config.core.max_policy_lag == lag
+
+
+@pytest.mark.parametrize(
+    "section,field", [("async", "max_weight_staleness"), ("core", "max_policy_lag"), ("miles", "max_weight_staleness")]
+)
+@pytest.mark.parametrize("asynchronous,lag", [(False, 0), (False, 3), (True, 3)])
+def test_policy_lag_aliases_compile_identically(tmp_path, section, field, asynchronous, lag):
+    sections = {"async": {"fully_async": asynchronous}}
+    expected = spec(
+        tmp_path, **(sections | {"async": {"fully_async": asynchronous, "max_weight_staleness": lag}})
+    ).compile()
+    sections.setdefault(section, {})[field] = lag
+    actual = spec(tmp_path, **sections).compile()
+    assert actual == expected
+
+
+@pytest.mark.parametrize("first,second", [("async", "core"), ("async", "miles"), ("core", "miles")])
+def test_policy_lag_alias_conflicts_name_both_sources(tmp_path, first, second):
+    fields = {"async": "max_weight_staleness", "core": "max_policy_lag", "miles": "max_weight_staleness"}
+    sections = {first: {fields[first]: 0}, second: {fields[second]: 3}}
+    with pytest.raises(
+        ValueError, match=rf"Conflicting settings.*{first}\.{fields[first]}.*{second}\.{fields[second]}"
+    ):
+        spec(tmp_path, **sections).compile()
+
+
+def test_matching_policy_lag_aliases_are_accepted(tmp_path):
+    config = spec(
+        tmp_path,
+        **{
+            "async": {"fully_async": True, "max_weight_staleness": 3},
+            "core": {"max_policy_lag": 3},
+            "miles": {"max_weight_staleness": 3},
+        },
+    ).compile()
+    assert config.core.max_policy_lag == 3
+
+
+def test_section_translation_and_consistent_direct_overrides(tmp_path):
+    run = spec(
+        tmp_path,
+        trainer={"gpus": 2, "expert_parallel_size": 2, "trainer_flash_attention_version": 4},
+        inference={"placement_mode": "disaggregated", "gpus": 1, "max_context_length": 6144},
+        optimizer={"learning_rate": 2e-6},
+        training={"num_rollouts": 4, "collect_dashboard": True},
+        tracking={"wandb_mode": "offline"},
+        runtime={"row_specialization": "dynamic"},
+        core={"row_specialization": "dynamic"},
+        miles={"lr": 2e-6, "sglang_json_model_override_args": {"max_position_embeddings": 6144}},
+    )
+    config = run.compile()
+    assert config.miles["lr"] == 2e-6
+    assert config.miles["num_rollout"] == 4
+    assert config.miles["use_miles_dashboard"] is True
+    assert config.miles["use_wandb"] is True
+    assert config.miles["num_gpus_per_node"] == 3
+    assert config.core.attention_backend == "flash_4"
+    assert config.core.max_sequence_length == config.miles["sglang_context_length"] == 6144
+
+
+@pytest.mark.parametrize(
+    "sections",
+    [
+        {"optimizer": {"learning_rate": 1e-6}, "miles": {"lr": 2e-6}},
+        {"runtime": {"row_specialization": "dynamic"}, "core": {"row_specialization": "static"}},
+        {"inference": {"placement_mode": "colocated"}, "miles": {"colocate": False}},
+        {"inference": {"radix_cache": True}, "miles": {"sglang_disable_radix_cache": True}},
+        {"training": {"save_checkpoints": False, "save_interval": 4}},
+        {"inference": {"max_context_length": 6144}, "core": {"max_sequence_length": 8192}},
+    ],
+)
+def test_duplicate_semantic_options_conflict(tmp_path, sections):
+    with pytest.raises(ValueError, match="[Cc]onflict"):
+        spec(tmp_path, **sections)
+
+
+def test_prepared_payload_changes_only_artifact_bindings(tmp_path):
+    run = spec(tmp_path)
+    prepared = {
+        "hf_checkpoint": "/prepared/hf",
+        "prompt_data": "/prepared/train.jsonl",
+        "eval_prompt_data": ["gsm8k", "/prepared/heldout.jsonl"],
+        "reward_config": "/prepared/rewards.json",
+        "manifest": "/prepared/manifest.json",
+    }
+    config = run.compile(prepared)
+    assert config.miles["hf_checkpoint"] == prepared["hf_checkpoint"]
+    assert config.miles["prompt_data"] == prepared["prompt_data"]
+    assert config.miles["eval_prompt_data"] == prepared["eval_prompt_data"]
+    assert config.core.reward_config == prepared["reward_config"]
+    assert config.miles["global_batch_size"] == 64
+    assert run.compile().miles["prompt_data"] != prepared["prompt_data"]
+    assert config.miles["save"].endswith("run/checkpoints")
+
+
+def test_serialization_keeps_paths_and_does_not_mutate_input(tmp_path):
+    payload = document(tmp_path)
+    payload["miles"] = {"load": "previous", "wandb_dir": "wandb"}
+    original = copy.deepcopy(payload)
+    run = RunSpec.from_dict(payload, config_path=tmp_path / "config.toml")
+    serialized = json.loads(json.dumps(run.to_dict()))
+    restored = RunSpec.from_dict(serialized, config_path="/unrelated/job/run.toml")
+    assert run.compile().arguments() == restored.compile().arguments()
+    assert payload == original
+    serialized["model"]["source"] = "other"
+    assert run.model["source"] == str(tmp_path / "model")
+
+
+def test_repeatable_toml_overrides_before_compilation(tmp_path):
+    path = tmp_path / "run.toml"
+    path.write_text(
+        'schema_version=1\nname="test"\n[model]\nsource="model"\n[output]\nroot="run"\n'
+        '[[data.tasks]]\ntask="gsm8k"\ntrain_count=8\neval_count=4\n'
+    )
+    run = RunSpec.load(
+        path, ["async.fully_async=true", "optimizer.learning_rate=2e-6", "optimizer.learning_rate=3e-6"]
+    )
+    assert run.compile().miles["lr"] == 3e-6
+    assert run.compile().miles["use_tis"] is True
+    with pytest.raises(ValueError, match="quote strings"):
+        RunSpec.load(path, ["model.source=unquoted"])
+
+
+@pytest.mark.parametrize(
+    "sections,match",
+    [
+        ({"schema_version": 2}, "schema_version"),
+        ({"model": {"source": "model", "format": "megatron"}}, "Megatron"),
+        ({"model": {"source": "model", "format": "olmo_core"}}, "hf_template"),
+        ({"conversion_validation": {"min_logit_cosine": 0.99}}, "parity"),
+        ({"conversion": {"output": "megatron"}}, "conversion"),
+        ({"trainer": {"trainer_backend": "optimized"}}, "Megatron"),
+        ({"trainer": {"recompute_mode": "selective"}}, "selective"),
+        ({"training": {"async_save": True}}, "async_save"),
+        ({"training": {"save_retain_interval": 20}}, "retention"),
+        ({"runtime": {"fla_prewarm": True}}, "prewarming"),
+        ({"async": {"off_policy_correction": "icepop"}}, "qualified"),
+        ({"async": {"policy_drift_action": "warn"}}, "warn"),
+        ({"data": {"recipe": "not-ported"}}, "recipes"),
+        ({"data": {"tasks": [{"task": "bad", "train_count": 8}]}}, "Unsupported task"),
+        ({"data": {"rl_manifest": "manifest.json", "tasks": []}}, "exactly one"),
+        ({"data": {"prompt_data": "train.jsonl"}}, "reward_config"),
+        ({"inference": {"max_response_length": 6144, "max_context_length": 6144}}, "smaller"),
+        ({"trainer": {"gpus": True}}, "expects int"),
+        ({"launch": {"priority": "urgent", "auto_resume": "true"}}, "boolean"),
+        ({"launch": {"max_retries": -2}}, "max_retries"),
+        ({"launch": {"max_retries": "3"}}, "max_retries"),
+        ({"launch": {"max_retries": 1.5}}, "max_retries"),
+        ({"launch": {"max_retries": True}}, "max_retries"),
+        ({"miles": {"unknown_option": 1}}, "Unknown MILES option"),
+    ],
+)
+def test_unsupported_or_ambiguous_workflows_fail_before_execution(tmp_path, sections, match):
+    with pytest.raises(ValueError, match=match):
+        spec(tmp_path, **sections)
+
+
+def test_native_source_template_and_final_export_are_explicit(tmp_path):
+    run = spec(
+        tmp_path,
+        model={"source": "native/step100", "format": "olmo_core", "hf_template": "template"},
+        conversion={"hf_output": "converted"},
+        output={"root": str(tmp_path / "run"), "export_hf": True},
+    )
+    assert run.compile().miles["hf_checkpoint"] == str(tmp_path / "converted")
+    assert run.model["hf_template"] == str(tmp_path / "template")
+    assert run.plan()["stages"][-1] == "export_hf"
+    assert "save_hf" not in run.compile().miles
+
+
+def test_disabled_checkpoint_cadence_and_empty_heldout(tmp_path):
+    run = spec(tmp_path, training={"save_checkpoints": False}, data={"tasks": [{"task": "gsm8k", "train_count": 8}]})
+    config = run.compile({"eval_prompt_data": []})
+    assert "save_interval" not in config.miles
+    assert "eval_interval" not in config.miles
+    assert "save" in config.miles  # Root remains available to cursor/diagnostics.
+
+
+def test_model_context_and_multiple_optimizer_steps_need_consistent_contracts(tmp_path):
+    with pytest.raises(ValueError, match="max_policy_lag"):
+        spec(tmp_path, inference={"global_batch_size": 32})
+    config = spec(tmp_path, inference={"global_batch_size": 32}, **{"async": {"fully_async": True}}).compile()
+    assert config.plan()["shape"]["optimizer_steps_per_collection"] == 2
+    with pytest.raises(ValueError, match="cannot both"):
+        spec(tmp_path, **{"async": {"fully_async": True}, "miles": {"use_tis": True, "use_rollout_logprobs": True}})
+
+
+def test_explicit_prepared_input_and_tracking_disable(tmp_path):
+    run = spec(
+        tmp_path,
+        data={"prompt_data": "train.jsonl", "reward_config": "verifiers.json", "eval_prompt_data": []},
+        tracking={"wandb_mode": "offline"},
+        miles={"use_wandb": False},
+    )
+    config = run.compile()
+    assert config.miles["prompt_data"] == str(tmp_path / "train.jsonl")
+    assert config.core.reward_config == str(tmp_path / "verifiers.json")
+    assert config.miles["use_wandb"] is False
+
+
+def test_all_researcher_examples_compile_to_native_arguments():
+    root = Path(__file__).parents[1] / "configs" / "miles"
+    paths = sorted((root / "examples").glob("*.toml"))
+    assert {path.stem for path in paths} == {"dev", "small", "medium", "large"}
+    for path in paths:
+        run = RunSpec.load(path)
+        config = run.compile()
+        assert config.arguments()
+        assert config.miles["rollout_batch_size"] == run.sections["inference"].get("rollout_batch_size", 8)
+        assert config.miles["n_samples_per_prompt"] == run.sections["inference"].get("samples_per_prompt", 8)
+        # Packed examples need document-boundary attention; Torch rejects it on
+        # the first scoring/training forward even though argument parsing works.
+        if config.core.sequence_packing:
+            assert config.core.attention_backend == "flash_4"
+        else:
+            assert config.core.attention_backend == "torch"
+        if config.miles["fully_async"]:
+            assert config.miles["use_tis"] is True
+            assert config.miles["use_rollout_logprobs"] is False
+            assert config.core.publication_mode == "refresh"
+            assert config.core.max_policy_lag == 6
+        else:
+            assert config.core.publication_mode == "barrier"
+            assert config.core.filter_zero_std_groups is False
+
+
+@pytest.mark.parametrize(
+    "sections",
+    [
+        {"inference": {"rollout_batch_size": "8"}},
+        {"inference": {"samples_per_prompt": False}},
+        {"inference": {"sglang_max_running_requests": "64"}},
+        {"core": {"max_sequence_length": "6144"}},
+    ],
+)
+def test_types_fail_before_topology_arithmetic(tmp_path, sections):
+    with pytest.raises(ValueError):
+        spec(tmp_path, **sections)
+
+
+def test_model_config_path_roundtrips_from_runtime_section(tmp_path):
+    run = spec(tmp_path, runtime={"model_config": "native-model.json"}, miles={"ref_load": "reference"})
+    restored = RunSpec.from_dict(run.to_dict(), config_path="/elsewhere/run.toml")
+    assert run.compile().arguments() == restored.compile().arguments()
+    assert run.compile().core.model_config == str(tmp_path / "native-model.json")
+
+
+@pytest.mark.parametrize(
+    "launch,match",
+    [
+        ({"env": {"WANDB_API_KEY": "literal"}, "secrets": {"WANDB_API_KEY": "secret-name"}}, "overlap"),
+        ({"env": {"INVALID-NAME": "x"}}, "identifiers"),
+        ({"secrets": {"RAY_ADDRESS": "other-ray"}}, "runtime owns"),
+        ({"env": {"PYTHONPATH": "/other/code"}}, "runtime owns"),
+        (
+            {"weka_mounts": [{"weka": "a", "mount_path": "/weka/a"}, {"weka": "b", "mount_path": "/weka/a/child"}]},
+            "nonoverlapping",
+        ),
+        ({"weka_mounts": [{"weka": "a", "mount_path": "/weka/a"}, {"weka": "a", "mount_path": "/weka/b"}]}, "repeat"),
+        ({"weka_mounts": [{"weka": "a", "mount_path": "/"}]}, "filesystem root"),
+    ],
+)
+def test_mount_and_environment_ownership(tmp_path, launch, match):
+    with pytest.raises(ValueError, match=match):
+        spec(tmp_path, launch=launch)
+
+
+def test_conversion_reference_is_not_silently_reinterpreted_as_kl_reference(tmp_path):
+    with pytest.raises(ValueError, match="conversion validation"):
+        spec(tmp_path, model={"source": "model", "reference_hf": "reference"})
+    run = spec(tmp_path, optimizer={"kl_loss_coef": 0.01}, miles={"ref_load": "reference"})
+    assert run.compile().miles["ref_load"] == str(tmp_path / "reference")
+    assert run.compile().miles["use_kl_loss"] is True
+
+
+def test_checkpoint_retention_defaults_to_one_and_accepts_milestones(tmp_path):
+    config = spec(tmp_path).compile()
+    assert config.core.checkpoint_keep_last == 1
+    assert config.core.checkpoint_keep_every is None
+    config = spec(tmp_path, core={"checkpoint_keep_last": 3, "checkpoint_keep_every": 50}).compile()
+    assert (config.core.checkpoint_keep_last, config.core.checkpoint_keep_every) == (3, 50)
+    with pytest.raises(ValueError, match="checkpoint_keep_every"):
+        spec(tmp_path, core={"checkpoint_keep_every": 0}).compile()
+
+
+def test_max_retries_defaults_to_no_cap(tmp_path):
+    """Nothing changes for runs that do not set it, which is every existing configuration."""
+    assert spec(tmp_path).launch["max_retries"] == -1
+    assert spec(tmp_path, launch={"max_retries": 0}).launch["max_retries"] == 0
+    assert spec(tmp_path, launch={"max_retries": 5}).launch["max_retries"] == 5
+
+
+def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
+    default = spec(tmp_path).compile().core
+    assert default.compiler_cache_max_storage_bytes == 8 * 1024**3
+    assert default.compiler_cache_publish_interval_seconds == 600
+    run = spec(tmp_path, compiler_cache={"max_storage_bytes": 1024, "publish_interval_seconds": 30})
+    config = run.compile().core
+    assert config.compiler_cache_max_storage_bytes == 1024
+    assert config.compiler_cache_publish_interval_seconds == 30
+    restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "other.toml").compile().core
+    assert restored == config
+    assert spec(tmp_path, compiler_cache={"max_storage_bytes": 0}).compile().core.compiler_cache_max_storage_bytes == 0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("max_storage_bytes", -1),
+        ("max_storage_bytes", True),
+        ("max_storage_bytes", 1.5),
+        ("publish_interval_seconds", 0),
+        ("publish_interval_seconds", -1),
+        ("publish_interval_seconds", True),
+        ("publish_interval_seconds", float("nan")),
+    ],
+)
+def test_invalid_cache_publication_controls_are_rejected(tmp_path, field, value):
+    with pytest.raises(ValueError, match=field):
+        spec(tmp_path, compiler_cache={field: value}).compile()

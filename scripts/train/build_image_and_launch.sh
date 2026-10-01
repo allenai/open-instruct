@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--miles" ]]; then
+  shift
+  if [[ "${1:-}" == "--cuda-version" || "${1:-}" == --cuda-version=* ]]; then
+    echo "Error: --miles cannot be combined with --cuda-version; MILES uses its own pinned runtime." >&2
+    exit 1
+  fi
+  exec bash scripts/miles/build_and_launch.sh "$@"
+fi
+
 cuda_version=12
 if [[ "${1:-}" == "--cuda-version" ]]; then
   if [[ $# -lt 2 ]]; then
@@ -12,6 +21,11 @@ if [[ "${1:-}" == "--cuda-version" ]]; then
 elif [[ "${1:-}" == --cuda-version=* ]]; then
   cuda_version="${1#*=}"
   shift
+fi
+
+if [[ "${1:-}" == "--miles" ]]; then
+  echo "Error: --miles cannot be combined with --cuda-version; MILES uses its own pinned runtime." >&2
+  exit 1
 fi
 
 if [[ "$cuda_version" != "12" && "$cuda_version" != "13" ]]; then
