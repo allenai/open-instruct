@@ -141,8 +141,27 @@ reduces its mean score gap against the recorded Core result from 0.204724 to
 0.000892 (maximum 0.002025). This reconstruction is causal evidence, not a fresh
 GPU qualification. The serving fix explicitly sets `inplace=False`; its ownership
 regression fails with the original setting and passes with the fix, both with and
-without a shared expert. A fixed-image GPU rerun and the RL lifecycle gates remain
-required before declaring the implementation qualified.
+without a shared expert.
+
+The [fixed-image confirmation](https://beaker.org/ex/01M3TRAW7VCCNDDHFANA4JVEMF)
+at application revision `e5a64729e`, olmo-sglang `71fe9ba`, image
+`01M3TR4PXAS96TS4VASCEQSKGF`, completed on one unallocated Holmes B300 at high
+priority with exit code zero. All 35 focused tests passed. On the identical
+47-token sequence (32 scored response tokens), the Core/serving mean absolute
+log-probability gap fell from 0.204724 to **0.000892416**, with maximum
+**0.002025127**. The job enforced the unchanged 0.05 mean-gap gate and exact
+EMO-on/off agreement; Core, HF and serving each produced bit-identical scores
+between those two arms.
+
+With inputs captured before execution, both HF and Core EMO routers on the
+serving hidden states matched serving logits, mixing weights and expert sets
+exactly; logits and mixing weights were FP32. The shared expert also matched
+exactly on identical inputs. The independent HF comparison retains its earlier
+outlier: Core/HF maximum 0.182628 and serving/HF maximum 0.180651. This probe
+confirms the overwrite fix and full-pool same-token equivalence for this tiny
+fixture; it does not qualify cached decode after the fix, GPU graphs, performance,
+backward, updated publication, export, recovery or real-checkpoint execution.
+Those lifecycle and broader serving gates remain open.
 
 ## Existing support and integration work
 
