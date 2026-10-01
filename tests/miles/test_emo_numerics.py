@@ -46,9 +46,19 @@ def test_trace_checks_fused_weight_layout_and_exact_tokens(tmp_path):
     tokens = torch.tensor([[1, 3, 4]])
     outputs = {}
     handle = model.model.norm.register_forward_hook(lambda module, args, output: outputs.update(norm=output.detach()))
+    mlp_module = model.model.layers[0].mlp
+    mlp_hook = mlp_module.register_forward_pre_hook(lambda module, args: outputs.update(mlp_input=args[0].detach()))
+    expert_hook = mlp_module.experts.register_forward_hook(
+        lambda module, args, output: outputs.update(experts=output.detach())
+    )
+    shared_hook = mlp_module.shared_expert.register_forward_hook(
+        lambda module, args, output: outputs.update(shared=output.detach())
+    )
     with torch.no_grad():
         model(tokens, use_cache=False)
     handle.remove()
+    for hook in (mlp_hook, expert_hook, shared_hook):
+        hook.remove()
     state = model.state_dict()
     attn = "model.layers.0.self_attn."
     mlp = "model.layers.0.mlp."
@@ -64,11 +74,26 @@ def test_trace_checks_fused_weight_layout_and_exact_tokens(tmp_path):
         "model.norm.weight": state["model.norm.weight"],
     }
     trace = {"tokens": tokens.flatten(), "parameters": weights, "outputs": {"model.norm": outputs["norm"].squeeze(0)}}
+    with torch.no_grad():
+        router_weights, router_ids = mlp_module.router(outputs["mlp_input"])
+        router_logits = torch.nn.functional.linear(outputs["mlp_input"].float(), mlp_module.router.gate.weight.float())
+    trace["inputs"] = {mlp[:-1]: outputs["mlp_input"].squeeze(0)}
+    trace["routers"] = {
+        mlp[:-1]: {
+            "weights": router_weights.squeeze(0),
+            "ids": router_ids.squeeze(0),
+            "logits": router_logits.squeeze(0),
+        }
+    }
+    trace["outputs"].update({mlp + "experts": outputs["experts"], mlp + "shared_expert": outputs["shared"].squeeze(0)})
     path = tmp_path / "trace.pt"
     torch.save(trace, path)
     result = emo_numerics.trace_comparisons(model, tokens, path)
     assert all(value["max_abs"] == 0 for value in result["parameters"].values())
     assert result["layers"]["model.norm"]["max_abs"] == 0
+    assert result["routers"][mlp[:-1]]["hf_on_serving_input"]["mixing_by_expert"]["max_abs"] == 0
+    assert result["routers"][mlp[:-1]]["experts_on_serving_input_and_routes"]["max_abs"] == 0
+    assert result["routers"][mlp[:-1]]["shared_expert_on_serving_input"]["max_abs"] == 0
     weights[attn + "qkv_proj.weight"][0, 0] += 1
     torch.save(trace, path)
     result = emo_numerics.trace_comparisons(model, tokens, path)
@@ -102,3 +127,52 @@ def test_serving_trace_handles_direct_forward_and_preserves_prefill(monkeypatch,
     assert torch.equal(saved["tokens"], tokens)
     assert torch.equal(saved["outputs"]["model"], expected)
     assert torch.equal(saved["parameters"]["model.weight"], model.model.weight)
+
+
+def test_router_comparison_aligns_weights_by_expert_identity():
+    actual = {
+        "ids": torch.tensor([[2, 0]]),
+        "weights": torch.tensor([[0.7, 0.3]]),
+        "logits": torch.tensor([[1.0, -2.0, 3.0]]),
+    }
+    result = emo_numerics.route_difference(
+        actual, torch.tensor([[[0.3, 0.7]]]), torch.tensor([[[0, 2]]]), actual["logits"]
+    )
+    assert result["mixing_by_expert"]["max_abs"] == 0
+    assert result["expert_set_agreement"] == 1
+    assert result["serving_logits_dtype"] == "torch.float32"
+    result = emo_numerics.route_difference(
+        actual, torch.tensor([[[0.5, 0.5]]]), torch.tensor([[[0, 1]]]), actual["logits"]
+    )
+    assert result["expert_set_agreement"] == 0
+    assert result["mixing_by_expert"]["max_abs"] == pytest.approx(0.7)
+
+
+def test_control_serving_rescores_exact_record_without_generating(monkeypatch):
+    record = {"tokens": [1, 3, 3, 7, 4], "prompt_length": 3}
+    calls = []
+
+    class Engine:
+        def __init__(self, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            assert kwargs["input_ids"] == record["tokens"]
+            assert kwargs["sampling_params"]["max_new_tokens"] == 1
+            return {
+                "meta_info": {
+                    "input_token_logprobs": [
+                        [None if i == 0 else -float(i), token] for i, token in enumerate(record["tokens"])
+                    ]
+                }
+            }
+
+        def shutdown(self):
+            calls.append("shutdown")
+
+    monkeypatch.setattr(emo_numerics, "Engine", Engine)
+    monkeypatch.setattr(emo_numerics, "register", lambda: None)
+    actual = emo_numerics.serving("unused", token_record=record)
+    assert actual == {**record, "serving_prefill": [-3.0, -4.0]}
+    assert len(calls) == 2 and calls[-1] == "shutdown"
