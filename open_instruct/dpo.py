@@ -200,9 +200,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
 
     if args.packing:
         logger.info("Using packing/padding-free collation")
-        collator = TensorDataCollatorWithFlatteningDPO(
-            return_position_ids=True, return_flash_attn_kwargs=True, max_seq_length=args.max_seq_length
-        )
+        collator = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
@@ -219,6 +217,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         device=device,
         drop_last=True,
         fs_local_rank=global_rank,
+        max_seq_length=args.max_seq_length,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size
@@ -239,6 +238,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         # We need to process every example to cache reference logprobs, so we can't drop the last batch.
         drop_last=False,
         fs_local_rank=global_rank,
+        max_seq_length=args.max_seq_length,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo

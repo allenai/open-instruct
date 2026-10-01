@@ -4,8 +4,6 @@ from typing import Any
 import torch
 from transformers import DefaultDataCollator
 
-from open_instruct import tensor_utils
-
 
 def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     shifted_labels = torch.full_like(labels, -100)
@@ -86,7 +84,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     return_position_ids: bool = True
     return_seq_idx: bool = True
     separator_id: int = -100
-    max_seq_length: int | None = None
 
     def __call__(self, features, return_tensors=None, separator_id=None):
         if return_tensors is None:
@@ -110,43 +107,12 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         if self.return_seq_idx:
             ret["seq_idx"] = torch.cat(seq_idx, dim=0)[None]
 
-        if self.max_seq_length is not None:
-            ret["input_ids"] = tensor_utils.pad_to_length(ret["input_ids"], self.max_seq_length, pad_value=0)
-            ret["labels"] = tensor_utils.pad_to_length(ret["labels"], self.max_seq_length, pad_value=-100)
-            if "position_ids" in ret:
-                ret["position_ids"] = tensor_utils.pad_to_length(ret["position_ids"], self.max_seq_length, pad_value=0)
-            if "seq_idx" in ret:
-                ret["seq_idx"] = tensor_utils.pad_to_length(ret["seq_idx"], self.max_seq_length, pad_value=-1)
         return ret
-
-
-def count_features_within_token_budget(features: list[dict[str, Any]], max_seq_length: int | None) -> int:
-    """Count how many DPO features fit within the packed-token budget.
-
-    Iterates through features in order, accumulating chosen and rejected token
-    counts. Stops before the first feature that would cause either branch to
-    exceed ``max_seq_length``. Always keeps at least one feature.
-
-    The caller is responsible for carrying unconsumed features to the next batch
-    (see ``HFDataLoader._iter_batches``).
-    """
-    if max_seq_length is None:
-        return len(features)
-    chosen_total = 0
-    rejected_total = 0
-    for i, f in enumerate(features):
-        chosen_total += len(f["chosen_input_ids"])
-        rejected_total += len(f["rejected_input_ids"])
-        if i > 0 and (chosen_total > max_seq_length or rejected_total > max_seq_length):
-            return i
-    return len(features)
 
 
 @dataclass
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
     def __call__(self, features, return_tensors=None, separator_id=None):
-        keep = count_features_within_token_budget(features, self.max_seq_length)
-        features = features[:keep]
         chosen_features = super().__call__(
             _filter_feature_dicts(features, "chosen_"), return_tensors=return_tensors, separator_id=separator_id
         )
