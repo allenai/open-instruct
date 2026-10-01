@@ -144,6 +144,86 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
+class BeakerCliHelpersTest(unittest.TestCase):
+    """The Beaker CLI helpers return None on failure; malformed output must not raise instead."""
+
+    @staticmethod
+    def _completed(stdout: str, returncode: int = 0):
+        """Stand in for subprocess.Popen, whose .communicate() returns (stdout, stderr)."""
+        proc = mock.Mock()
+        proc.communicate.return_value = (stdout, b"")
+        proc.returncode = returncode
+        return proc
+
+    def test_experiment_info_returns_none_on_malformed_json(self):
+        with mock.patch.object(utils.subprocess, "Popen", return_value=self._completed("not json{")):
+            self.assertIsNone(utils.get_beaker_experiment_info("01TEST"))
+
+    def test_experiment_info_returns_none_on_empty_list(self):
+        with mock.patch.object(utils.subprocess, "Popen", return_value=self._completed("[]")):
+            self.assertIsNone(utils.get_beaker_experiment_info("01TEST"))
+
+    def test_experiment_succeeded_is_false_when_info_unavailable(self):
+        """The None check used to sit below a subscript of the same value, so this raised TypeError."""
+        with mock.patch.object(utils, "get_beaker_experiment_info", return_value=None):
+            self.assertFalse(utils.beaker_experiment_succeeded("01TEST"))
+
+    def test_experiment_succeeded_is_false_when_there_are_no_jobs(self):
+        with mock.patch.object(utils, "get_beaker_experiment_info", return_value={"jobs": []}):
+            self.assertFalse(utils.beaker_experiment_succeeded("01TEST"))
+
+    def test_dataset_ids_skips_jobs_without_a_result(self):
+        """A queued or interactive job has no result dataset; it must be skipped, not raise."""
+        experiment = {"jobs": [{"result": None}, {}, {"result": {}}]}
+        with mock.patch.object(utils, "get_beaker_experiment_info", return_value=experiment):
+            self.assertEqual(utils.get_beaker_dataset_ids("01TEST"), [])
+
+    def test_dataset_ids_tolerates_missing_storage_and_committed(self):
+        experiment = {"jobs": [{"result": {"beaker": "ds-1"}}]}
+        datasets = json.dumps([{"id": "ds-1"}, {"id": "ds-2", "storage": None, "committed": None}])
+        with (
+            mock.patch.object(utils, "get_beaker_experiment_info", return_value=experiment),
+            mock.patch.object(utils.subprocess, "Popen", return_value=self._completed(datasets)),
+        ):
+            self.assertEqual(utils.get_beaker_dataset_ids("01TEST"), ["ds-1", "ds-2"])
+
+    def test_dataset_ids_sorts_committed_alongside_uncommitted(self):
+        """Committed timestamps are timezone-aware, so the uncommitted sentinel must be too."""
+        experiment = {"jobs": [{"result": {"beaker": "ds-1"}}]}
+        datasets = json.dumps(
+            [
+                {"id": "committed", "storage": {"totalSize": 10}, "committed": "2024-09-16T19:03:02.31502Z"},
+                {"id": "uncommitted", "storage": {"totalSize": 10}, "committed": None},
+            ]
+        )
+        with (
+            mock.patch.object(utils, "get_beaker_experiment_info", return_value=experiment),
+            mock.patch.object(utils.subprocess, "Popen", return_value=self._completed(datasets)),
+        ):
+            self.assertEqual(utils.get_beaker_dataset_ids("01TEST", sort=True), ["uncommitted", "committed"])
+
+    def test_dataset_ids_returns_none_on_malformed_dataset_json(self):
+        experiment = {"jobs": [{"result": {"beaker": "ds-1"}}]}
+        with (
+            mock.patch.object(utils, "get_beaker_experiment_info", return_value=experiment),
+            mock.patch.object(utils.subprocess, "Popen", return_value=self._completed("not json{")),
+        ):
+            self.assertIsNone(utils.get_beaker_dataset_ids("01TEST"))
+
+    def test_beaker_config_looks_up_dataset_ids_once(self):
+        """The lookup shells out per job result; it used to run the whole thing twice."""
+        env = {"BEAKER_JOB_ID": "j", "BEAKER_WORKLOAD_ID": "01TEST", "BEAKER_NODE_HOSTNAME": "node-1"}
+        with (
+            mock.patch.dict(utils.os.environ, env, clear=False),
+            mock.patch.object(utils, "get_beaker_dataset_ids", return_value=["ds-1"]) as lookup,
+        ):
+            config = utils.maybe_get_beaker_config()
+
+        lookup.assert_called_once()
+        self.assertEqual(config.beaker_dataset_ids, ["ds-1"])
+        self.assertEqual(config.beaker_dataset_id_urls, ["https://beaker.org/ds/ds-1"])
+
+
 class CombineDatasetTest(unittest.TestCase):
     """Exercises combine_dataset end-to-end against local jsonl fixtures (no network)."""
 
