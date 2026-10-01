@@ -269,8 +269,8 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
-        "${TOKENIZER_REVISION_FLAGS[@]}" \
-        "${RESERVED_SLOT_FLAGS[@]}" \
+        ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
+        ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
         --max_seq_length "$SEQ" \
         --mixer_list $MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
@@ -302,8 +302,8 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
-        "${TOKENIZER_REVISION_FLAGS[@]}" \
-        "${RESERVED_SLOT_FLAGS[@]}" \
+        ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
+        ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
         --max_seq_length "$SEQ" \
         --mixer_list $FULL_MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
@@ -408,8 +408,8 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
-        "${TOKENIZER_REVISION_FLAGS[@]}" \
-        "${RESERVED_SLOT_FLAGS[@]}" \
+        ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
+        ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
         --max_seq_length "$SEQ" \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps $GRAD_ACCUM \
