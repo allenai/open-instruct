@@ -64,6 +64,12 @@ markdown_extensions:
   # - pymdownx.tabbed
 
 
+exclude_docs: |
+  /miles/configuration-intro.md
+
+hooks:
+  - scripts/miles/docs_site.py
+
 plugins:
   - search
 nav:
@@ -88,6 +94,8 @@ nav:
     - algorithms/reward_modeling.md
     - verify-tokenization.md
     - slack-alerts.md
+  - Integrations:
+    - MILES: miles/index.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md
 

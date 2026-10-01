@@ -44,7 +44,7 @@ def test_router_uses_explicit_bind_configuration(monkeypatch):
     monkeypatch.setattr(router, "MilesRouter", lambda *a, **kw: SimpleNamespace(app=app))
     monkeypatch.setattr(router.uvicorn, "run", lambda *a, **kw: calls.append((a, kw)))
     router.run_router(SimpleNamespace(host="127.0.0.1", port=1234))
-    assert calls == [((app,), dict(host="127.0.0.1", port=1234, log_level="info"))]
+    assert calls == [((app,), dict(host="127.0.0.1", port=1234, log_level="info", timeout_keep_alive=60))]
 
 
 @pytest.mark.asyncio
