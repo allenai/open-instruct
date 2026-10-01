@@ -44,6 +44,8 @@ if [[ -n "$PATCH_DATASET" ]]; then
         '&&'
         'if [ -f /patch/open_instruct/hf_weight_slice_audit.py ]; then cp /patch/open_instruct/hf_weight_slice_audit.py /stage/open_instruct/; fi'
         '&&'
+        'if [ -f /patch/open_instruct/native_state_metadata_audit.py ]; then cp /patch/open_instruct/native_state_metadata_audit.py /stage/open_instruct/; fi'
+        '&&'
     )
 fi
 
@@ -147,6 +149,7 @@ fi
     --env OI_VLLM_GRAPH_WORK_AUDIT="${OI_VLLM_GRAPH_WORK_AUDIT:-0}" \
     --env OI_VLLM_GRAPH_WORK_AUDIT_DIR="${OI_VLLM_GRAPH_WORK_AUDIT_DIR:-/output/graph-work-audit}" \
     --env OI_FINAL_WEIGHT_AUDIT="${OI_FINAL_WEIGHT_AUDIT:-0}" \
+    --env OI_NATIVE_STATE_AUDIT="${OI_NATIVE_STATE_AUDIT:-0}" \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --auto_checkpoint_state_dir "$MASON_CHECKPOINT_STATE_DIR" \
     --no_auto_dataset_cache \

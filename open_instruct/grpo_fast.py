@@ -45,7 +45,14 @@ with contextlib.suppress(Exception):
     pass
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, grpo_utils, hf_weight_slice_audit, response_work_audit, utils
+from open_instruct import (
+    data_types,
+    grpo_utils,
+    hf_weight_slice_audit,
+    native_state_metadata_audit,
+    response_work_audit,
+    utils,
+)
 from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
@@ -3180,6 +3187,26 @@ def flush_graph_work_cutoffs(args, vllm_engines, training_step):
     )
 
 
+def audit_native_checkpoint_metadata(args):
+    """Read our opted-in final native checkpoint without restoring its state."""
+    if os.environ.get("OI_NATIVE_STATE_AUDIT", "0") != "1":
+        return
+    if os.environ.get("OI_PACKING_AUDIT", "0") != "1" or args.checkpoint_state_dir is None:
+        raise ValueError("Native metadata audit requires durable work and a native state root")
+    try:
+        report = native_state_metadata_audit.inspect(
+            args.checkpoint_state_dir, args.world_size, args.num_training_steps
+        )
+    except Exception as error:
+        response_work_audit.record(
+            args.output_dir,
+            "native-state-metadata",
+            {"status": "error", "error": str(error), "restore_verified": False},
+        )
+        raise
+    response_work_audit.record(args.output_dir, "native-state-metadata", report)
+
+
 def audit_final_weight_slices(args, model_config):
     """Read the pinned cached original and final export without loading a model."""
     if os.environ.get("OI_FINAL_WEIGHT_AUDIT", "0") != "1":
@@ -4084,6 +4111,7 @@ def main(
             checkpoint_state,
             base_env_config,
         )
+        audit_native_checkpoint_metadata(args)
         audit_final_weight_slices(args, model_config)
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
