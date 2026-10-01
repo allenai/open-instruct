@@ -6,6 +6,7 @@ RL acceptance threshold. Run in the pinned MILES image with one CUDA device.
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -15,6 +16,7 @@ from olmo_core.nn.moe.v2.hf import configuration_olmo3moe, modeling_olmo3moe
 from olmo_sglang import register
 from safetensors.torch import load_file
 from sglang import Engine
+from sglang.srt.models import registry
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import emo
@@ -33,8 +35,12 @@ def selected_scores(logits, ids, prompt_length):
     return logits.log_softmax(-1).gather(-1, ids[0, prompt_length:, None]).flatten().cpu().tolist()
 
 
-def serving(path):
+def serving(path, trace_path=None):
     register()
+    if trace_path is not None:
+        os.environ["EMO_NUMERICS_TRACE"] = str(trace_path)
+        os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "scripts.miles.emo_trace_models"
+        registry.ModelRegistry.register("scripts.miles.emo_trace_models", overwrite=True, strict=True)
     engine = Engine(
         model_path=str(path),
         trust_remote_code=True,
@@ -79,7 +85,72 @@ def serving(path):
         engine.shutdown()
 
 
-def models(path, record):
+def trace_comparisons(reference, tokens, trace_path):
+    """Compare actual common layer outputs and every loaded parameter on CPU."""
+    serving_trace = torch.load(trace_path, map_location="cpu", weights_only=True)
+    if not torch.equal(serving_trace["tokens"].flatten(), tokens.cpu().flatten()):
+        raise ValueError("Layer trace token IDs do not match the numerical probe")
+    outputs, handles = {}, []
+
+    def capture(name):
+        def hook(module, args, output):
+            if isinstance(output, tuple):
+                output = output[0]
+            if isinstance(output, torch.Tensor):
+                outputs[name] = output.detach().cpu().clone()
+
+        return hook
+
+    for name, module in reference.named_modules():
+        if name:
+            handles.append(module.register_forward_hook(capture(name)))
+    try:
+        with torch.no_grad():
+            reference(tokens, use_cache=False)
+    finally:
+        for handle in handles:
+            handle.remove()
+    # SGLang combines Q/K/V and gate/up GEMMs. Reconstruct their HF outputs.
+    for name in list(outputs):
+        for source, target, parts in (
+            ("q_proj", "qkv_proj", ("q_proj", "k_proj", "v_proj")),
+            ("gate_proj", "gate_up_proj", ("gate_proj", "up_proj")),
+        ):
+            if name.endswith("." + source):
+                prefix = name[: -len(source)]
+                outputs[prefix + target] = torch.cat([outputs[prefix + part] for part in parts], dim=-1)
+    comparisons = {}
+    for name, actual in serving_trace["outputs"].items():
+        expected = outputs.get(name)
+        if expected is not None and expected.numel() == actual.numel():
+            comparisons[name] = difference(actual.float(), expected.reshape_as(actual).float())
+    parameters = reference.state_dict()
+    weight_comparisons = {}
+    for name, actual in serving_trace["parameters"].items():
+        if name.endswith("experts.w13_weight"):
+            prefix = name.removesuffix("w13_weight")
+            expected = torch.stack(
+                [
+                    torch.cat([parameters[f"{prefix}{i}.{part}.weight"] for part in ("gate_proj", "up_proj")])
+                    for i in range(actual.shape[0])
+                ]
+            )
+        elif name.endswith("experts.w2_weight"):
+            prefix = name.removesuffix("w2_weight")
+            expected = torch.stack([parameters[f"{prefix}{i}.down_proj.weight"] for i in range(actual.shape[0])])
+        elif name.endswith("qkv_proj.weight"):
+            prefix = name.removesuffix("qkv_proj.weight")
+            expected = torch.cat([parameters[prefix + part + ".weight"] for part in ("q_proj", "k_proj", "v_proj")])
+        elif name.endswith("gate_up_proj.weight"):
+            prefix = name.removesuffix("gate_up_proj.weight")
+            expected = torch.cat([parameters[prefix + part + ".weight"] for part in ("gate_proj", "up_proj")])
+        else:
+            expected = parameters[name]
+        weight_comparisons[name] = difference(actual.float(), expected.detach().cpu().float())
+    return {"layers": comparisons, "parameters": weight_comparisons}
+
+
+def models(path, record, trace_path=None):
     hf = configuration_olmo3moe.Olmo3MoeConfig.from_pretrained(path)
     options = CoreConfig(router_aux_loss_weight=0, router_z_loss_weight=0, activation_checkpointing=False)
     config = moe_models.model_config_from_hf(hf, options)
@@ -105,6 +176,8 @@ def models(path, record):
             ("core", "hf_reference"),
         )
     }
+    if trace_path is not None:
+        record["trace"] = trace_comparisons(reference, tokens, trace_path)
     return record
 
 
@@ -112,14 +185,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument(
+        "--trace", action="store_true", help="Capture actual serving layers and compare to HF (tiny only)"
+    )
     args = parser.parse_args()
     metadata = json.loads((args.checkpoint / "config.json").read_text())
     if emo.resolve_hf(metadata, "full_pool") != metadata:
         raise ValueError("Use the explicitly prepared full-pool checkpoint")
-    record = serving(args.checkpoint)
+    trace_path = args.output.with_suffix(".pt") if args.trace else None
+    record = serving(args.checkpoint, trace_path)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(record, indent=2) + "\n")
-    record = models(args.checkpoint, record)
+    record = models(args.checkpoint, record, trace_path)
     args.output.write_text(json.dumps(record, indent=2, allow_nan=False) + "\n")
     print(json.dumps(record["comparisons"], indent=2))
 

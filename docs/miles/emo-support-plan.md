@@ -93,6 +93,27 @@ threshold. Backward, updated publication and export remain unqualified.
 `scripts/miles/emo_numerics.py` isolates cached decode, full-prefill rescoring,
 native Core and the HF reference using identical token sequences.
 
+The [same-token diagnostic](https://beaker.org/ex/01M3TCCR73D312WMVM9B5KGHZG)
+at revision `d550f9b36`, image `01M3TCBD3AKN5XXMB4MZBGPYMD`, completed on one
+unallocated Holmes B300 at high priority. All 28 focused tests passed with no
+skips, including CUDA replay and router diagnostics. Over 32 generated tokens:
+
+| Comparison | Mean absolute log-probability difference | Maximum |
+|---|---:|---:|
+| SGLang cached decode vs full prefill | 0.000000075 | 0.000000477 |
+| Native Core vs SGLang full prefill | 0.204724 | 0.428023 |
+| HF reference vs SGLang full prefill | 0.203639 | 0.431070 |
+| Native Core vs HF reference | 0.007125 | 0.182628 |
+
+This probe implicates the serving computation rather than cached decoding for
+this fixture; it does not identify the faulty operation or qualify training.
+The Core/HF maximum is also retained for investigation. The diagnostic command
+reports differences without an acceptance assertion, so its successful exit is
+not a numerical parity pass. The original RL threshold remains 0.05.
+Its optional `--trace` records actual serving layer outputs and loaded weights,
+then compares matching HF layers and reconstructed fused parameter layouts.
+Tracing is limited to tiny checkpoints and disabled in ordinary serving.
+
 ## Existing support and integration work
 
 The inspection baseline is the Open Instruct [runtime lock](../../runtime/miles/runtime.lock.json):
