@@ -166,6 +166,9 @@ class TestGSM8KVerifier(unittest.TestCase):
             ("negative_decimal", "Final answer: -3.5", "-3.5", 1.0),
             ("boxed_negative_integer", r"The result is \\boxed{-3}", "-3", 1.0),
             ("wrong_sign", "Therefore the answer is 3", "-3", 0.0),
+            ("explicit_plus_equivalent", "The answer is +7", "7", 1.0),
+            ("decimal_equivalent", "The answer is 42.0", "42", 1.0),
+            ("negative_decimal_equivalent", "The answer is -3.0", "-3", 1.0),
         ]
     )
     def test_signed_number_extraction(self, _name, prediction, label, expected_score):
