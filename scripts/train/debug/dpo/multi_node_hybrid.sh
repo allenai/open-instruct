@@ -49,7 +49,7 @@ uv run python mason.py \
     --beta 5 \
     --packing \
     --activation_memory_budget 0.5 \
-    --chat_template_name olmo123 \
+    --chat_template_name tokenizer_default \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \
