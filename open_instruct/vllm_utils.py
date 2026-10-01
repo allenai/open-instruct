@@ -53,7 +53,7 @@ from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
 
-from open_instruct import logger_utils, utils
+from open_instruct import logger_utils, utils, vllm_graph_work_audit
 from open_instruct.data_types import (
     EnvConfig,
     EnvConfigEntry,
@@ -759,6 +759,11 @@ class LLMRayActor:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in ray.get_gpu_ids())
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
+        vllm_graph_work_audit.install(
+            tensor_parallel_size=kwargs.get("tensor_parallel_size", 1),
+            multiprocessing=os.environ.get("VLLM_ENABLE_V1_MULTIPROCESSING"),
+            executor_backend=kwargs.get("distributed_executor_backend"),
+        )
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
