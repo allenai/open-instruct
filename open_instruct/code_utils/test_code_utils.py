@@ -4,6 +4,7 @@ import gc
 import json
 import multiprocessing
 import pathlib
+import time
 import unittest
 
 import parameterized
@@ -310,6 +311,45 @@ class ReliabilityGuardModuleImportTests(BaseCodeTestCase):
         """Test that safe imports are allowed."""
         result, _ = code_utils.get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
         self.assertEqual(result, [1])
+
+
+class ExecutionTimeoutBudgetTests(BaseCodeTestCase):
+    """`max_execution_time` must bound the graded code, not worker-process creation."""
+
+    def test_fast_code_passes_with_budget_below_process_startup_cost(self):
+        """Trivially-correct code must not fail just because spawning the worker is slow.
+
+        Under the "spawn" start method (default on macOS/Windows) creating a child costs ~0.2s.
+        When that was charged against max_execution_time, this scored 0 even though the test body
+        runs in microseconds.
+        """
+        result, _ = code_utils.get_successful_tests_fast(
+            program="import json\ndata = json.dumps({'a': 1})",
+            tests=["assert data == '{\"a\": 1}'"],
+            max_execution_time=0.05,
+        )
+        self.assertEqual(result, [1])
+
+    def test_slow_code_still_times_out(self):
+        """The budget must still be enforced against the graded code itself."""
+        start = time.time()
+        result, _ = code_utils.get_successful_tests_fast(
+            program=SIMPLE_PROGRAM, tests=[TIMEOUT_TEST], max_execution_time=0.5
+        )
+        elapsed = time.time() - start
+
+        self.assertEqual(result, [0])
+        # TIMEOUT_TEST sleeps for 10s; it must be killed rather than run to completion.
+        self.assertLess(elapsed, 5.0)
+
+    def test_budget_discriminates_either_side_of_the_limit(self):
+        """A test under the budget passes; one over it fails."""
+        for sleep_seconds, expected in ((0.1, [1]), (2.0, [0])):
+            with self.subTest(sleep_seconds=sleep_seconds):
+                result, _ = code_utils.get_successful_tests_fast(
+                    program=SIMPLE_PROGRAM, tests=[f"import time\ntime.sleep({sleep_seconds})"], max_execution_time=1.0
+                )
+                self.assertEqual(result, expected)
 
 
 class ReliabilityGuardEdgeCaseTests(BaseCodeTestCase):
