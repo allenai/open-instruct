@@ -1,0 +1,62 @@
+"""CPU-only packing configuration checks."""
+
+import pytest
+
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+
+
+def test_options_compile_to_concatenated_loss_layout():
+    config = RunConfig(
+        CoreConfig(sequence_packing=True, attention_backend="flash_4", max_sequence_length=16),
+        {"hf_checkpoint": "/hf", "global_batch_size": 4},
+    )
+    argv = config.arguments()
+    assert argv[argv.index("--qkv-format") + 1] == "thd"
+    with pytest.raises(ValueError, match="requires qkv_format"):
+        RunConfig(config.core, {**config.miles, "qkv_format": "bshd"}).validate()
+    with pytest.raises(ValueError, match="requires sequence_packing"):
+        RunConfig(CoreConfig(packing_max_tokens=8192), config.miles).validate()
+    with pytest.raises(ValueError, match="must cover"):
+        RunConfig(
+            CoreConfig(
+                sequence_packing=True, attention_backend="flash_4", packing_max_tokens=8, max_sequence_length=16
+            ),
+            config.miles,
+        ).validate()
+
+
+def test_researcher_trainer_section_accepts_packing(tmp_path):
+    path = tmp_path / "run.toml"
+    path.write_text("""schema_version = 1
+name = "packing"
+[model]
+source = "/model"
+format = "hf"
+[output]
+root = "/output"
+[data]
+prompt_data = "/data/train.jsonl"
+reward_config = "/data/rewards.json"
+[trainer]
+sequence_packing = true
+trainer_flash_attention_version = 4
+packing_max_tokens = 8192
+""")
+    spec = RunSpec.load(path)
+    # plan is intentionally CPU safe; the compiled core fields preserve the knobs.
+    core = spec.compile().core
+    assert core.sequence_packing and core.packing_max_tokens == 8192
+
+
+@pytest.mark.parametrize("backend", ["flash_2", "flash_3", "flash_4", "te"])
+def test_packing_preserves_other_attention_backend_choices(backend):
+    config = RunConfig(
+        CoreConfig(sequence_packing=True, attention_backend=backend), {"hf_checkpoint": "/hf", "global_batch_size": 4}
+    )
+    assert config.plan()["core"]["attention_backend"] == backend
+
+
+def test_torch_attention_remains_valid_without_packing():
+    config = RunConfig(CoreConfig(attention_backend="torch"), {"hf_checkpoint": "/hf", "global_batch_size": 4})
+    assert config.plan()["core"]["sequence_packing"] is False

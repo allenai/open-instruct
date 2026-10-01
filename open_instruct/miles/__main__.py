@@ -1,0 +1,101 @@
+"""Run with python -m open_instruct.miles {plan,validate,train,run,status} CONFIG.toml.
+
+Inference-record tools use their own arguments:
+python -m open_instruct.miles records summarize STORE --output DIR
+python -m open_instruct.miles records select STORE --skip all_zero --output TABLE.json
+"""
+
+import argparse
+import importlib
+import json
+import sys
+from pathlib import Path
+
+from open_instruct.miles.configuration import validation
+from open_instruct.miles.configuration.config import RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.errors import InputError
+
+
+def main() -> None:
+    if sys.argv[1:2] == ["records"]:
+        module = (
+            "open_instruct.miles.datasets.record_selection"
+            if sys.argv[2:3] == ["select"]
+            else "miles.utils.record_summary"
+        )
+        try:
+            command = importlib.import_module(module)
+        except ModuleNotFoundError as error:
+            if error.name == "miles":
+                raise SystemExit(
+                    "Record analysis requires the MILES package; run it in the pinned runtime."
+                ) from error
+            raise
+        command.main(sys.argv[3:] if sys.argv[2:3] == ["select"] else sys.argv[2:])
+        return
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("plan", "validate", "train", "run", "status"))
+    parser.add_argument("config", type=Path)
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="Override a setting with a TOML value; repeatable, quote strings",
+    )
+    parser.add_argument("--debug", action="store_true", help="Show a full traceback for input errors")
+    options = parser.parse_args()
+    try:
+        execute(parser, options)
+    except InputError as error:
+        if options.debug:
+            raise
+        parser.error(f"{options.config}: {error}")
+
+
+def execute(parser, options):
+    payload = validation.read_document(options.config)
+    structured = "schema_version" in payload or "model" in payload
+    config = (
+        RunSpec.from_dict(payload, config_path=options.config, overrides=options.overrides)
+        if structured
+        else RunConfig.from_dict(payload, options.overrides)
+    )
+    if options.command == "plan":
+        print(json.dumps(config.plan(), indent=2))
+        return
+    if options.command in ("run", "status"):
+        if not structured:
+            parser.error("run/status require a schema_version=1 run file; raw configs support plan/validate/train")
+        launch = importlib.import_module("open_instruct.miles.execution.launch")
+        if options.command == "run":
+            launch.run(options.config, options.overrides)
+        else:
+            print(json.dumps(launch.status(config), indent=2))
+        return
+    workflow = importlib.import_module("open_instruct.miles.execution.workflow")
+    if options.command == "validate":
+        if structured:
+            config.plan()  # Validate physical allocation as well as trainer options.
+            compiled = config.compile()
+            compiled.arguments()
+            planned = compiled.plan()
+            for warning in planned["async_capacity"]["warnings"]:
+                print(f"Warning: {warning}", file=sys.stderr)
+            for warning in planned["throughput"]["warnings"]:
+                print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
+            print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
+        else:
+            workflow.parse_runtime(config)
+            print("MILES arguments validated for OLMo-core")
+        return
+    if structured:
+        workflow.execute(config)
+    else:
+        workflow.train_config(config)
+
+
+if __name__ == "__main__":
+    main()
