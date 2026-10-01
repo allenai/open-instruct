@@ -759,11 +759,7 @@ class LLMRayActor:
             os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in ray.get_gpu_ids())
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
-        vllm_graph_work_audit.install(
-            tensor_parallel_size=kwargs.get("tensor_parallel_size", 1),
-            multiprocessing=os.environ.get("VLLM_ENABLE_V1_MULTIPROCESSING"),
-            executor_backend=kwargs.get("distributed_executor_backend"),
-        )
+        graph_work_audit = vllm_graph_work_audit.configure_engine_kwargs(kwargs)
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
@@ -786,12 +782,17 @@ class LLMRayActor:
         self.llm_engine = None
         self.client = None
         self.server_port = None
+        self.graph_work_activation = None
 
         async def _init_engine_and_server():
             running_loop = asyncio.get_running_loop()
             assert running_loop == self.loop, f"Loop mismatch! running={running_loop}, actor.loop={self.loop}"
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+            if graph_work_audit:
+                # Activate inside the spawned EngineCore worker before the server accepts requests.
+                self.graph_work_activation = await vllm_graph_work_audit.activate_engine(engine_client)
+                logger.info(f"Graph work observer activated: {self.graph_work_activation}")
 
             tokenizer = engine_client.tokenizer
             inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
@@ -963,8 +964,8 @@ class LLMRayActor:
             )
 
     def flush_graph_work_audit(self):
-        """Durably report the engine-loop cutoff before the main process exits."""
-        return self._run_async(vllm_graph_work_audit.flush_boundary())
+        """Durably report the activated worker's cutoff before the main process exits."""
+        return self._run_async(vllm_graph_work_audit.cutoff_engine(self.llm_engine, self.graph_work_activation))
 
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""

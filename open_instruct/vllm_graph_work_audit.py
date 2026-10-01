@@ -2,6 +2,11 @@
 
 Scheduler tokens are scheduled model work, not generated or delivered responses.
 Replay observations mean the native replay call returned, not device completion.
+
+AsyncLLM always runs EngineCore, and with the uni executor its only worker, in a
+spawned child of the actor regardless of VLLM_ENABLE_V1_MULTIPROCESSING. The observer
+is therefore activated and cut off inside that child through a vLLM worker extension
+and collective_rpc; the actor only validates the child's acknowledgments.
 """
 
 import atexit
@@ -21,7 +26,22 @@ SOURCE_HASHES = {
     "vllm.compilation.cuda_graph": "0f98ae0ea90424eb697e9ea0bdc0bcbbbecdc8637f4a89bfbfcc2ba28b40476d",
     "vllm.v1.worker.gpu_model_runner": "3afc290d3df1be3df1b89b9b35942695f5896c7729f608d6c44580899212c301",
 }
+WORKER_EXTENSION = "open_instruct.vllm_graph_work_audit.GraphWorkAuditWorkerExtension"
+ACTIVATE_RPC = "oi_graph_audit_activate"
+CUTOFF_RPC = "oi_graph_audit_cutoff"
 _INSTALLED = None
+_ACTIVATION = None
+
+
+def enabled():
+    return os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT", "0") == "1"
+
+
+def output_directory():
+    directory = os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT_DIR")
+    if not directory:
+        raise ValueError("Graph audit output directory must be explicit")
+    return directory
 
 
 def verify_sources(modules):
@@ -194,23 +214,41 @@ def instrument(runner_class, graph_class, graph_module, journal):
         setattr(runner_class, name, suppress(original))
 
 
-def install(*, tensor_parallel_size, multiprocessing, executor_backend="uni"):
-    """This integration is supported only for current in-process TP1 engines."""
-    global _INSTALLED
-    if os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT", "0") != "1":
-        return None
-    if tensor_parallel_size != 1 or multiprocessing != "0" or executor_backend != "uni":
-        raise ValueError("Graph audit requires in-process uni TP1 and VLLM_ENABLE_V1_MULTIPROCESSING=0")
-    directory = os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT_DIR")
-    if not directory:
-        raise ValueError("Graph audit output directory must be explicit")
-    if _INSTALLED is not None:
-        if _INSTALLED.path.parent != Path(directory):
-            raise ValueError("Cannot change installed graph journal output")
-        return _INSTALLED
+def configure_engine_kwargs(kwargs):
+    """In the actor, before engine construction: require uni TP1 and register the worker extension."""
+    if not enabled():
+        return False
+    if kwargs.get("tensor_parallel_size", 1) != 1 or kwargs.get("distributed_executor_backend") != "uni":
+        raise ValueError("Graph audit requires a uni-executor TP1 engine")
+    output_directory()
+    if kwargs.get("worker_extension_cls") not in (None, "", WORKER_EXTENSION):
+        raise ValueError("Graph audit cannot replace an existing vLLM worker extension")
+    kwargs["worker_extension_cls"] = WORKER_EXTENSION
+    return True
+
+
+def activate(worker, actor_process_id):
+    """In the EngineCore worker process: verify the live V1 runner and sources, then instrument."""
+    global _INSTALLED, _ACTIVATION
+    if not enabled():
+        raise RuntimeError("Graph audit flag did not reach the vLLM worker process")
+    if type(actor_process_id) is not int or os.getpid() == actor_process_id:
+        raise RuntimeError("Graph observer must activate in the spawned worker, not the actor process")
+    if os.getppid() != actor_process_id:
+        raise RuntimeError("Graph observer worker is not a direct child of the requesting actor")
+    directory = output_directory()
+    if _ACTIVATION is not None:
+        if _ACTIVATION["actor_process_id"] != actor_process_id:
+            raise RuntimeError("Graph observer already activated for another actor")
+        return _ACTIVATION
+    parallel = worker.vllm_config.parallel_config
+    if (parallel.world_size, parallel.tensor_parallel_size, parallel.distributed_executor_backend) != (1, 1, "uni"):
+        raise ValueError("Graph audit requires a uni-executor TP1 worker")
     modules = {name: importlib.import_module(name) for name in SOURCE_HASHES}
     verify_sources(modules)
     runner = modules["vllm.v1.worker.gpu_model_runner"].GPUModelRunner
+    if importlib.import_module("vllm.envs").VLLM_USE_V2_MODEL_RUNNER or type(worker.model_runner) is not runner:
+        raise ValueError("Graph audit supports only the live V1 GPUModelRunner")
     graph_module = modules["vllm.compilation.cuda_graph"]
     for cls, name in (
         (runner, "execute_model"),
@@ -224,17 +262,84 @@ def install(*, tensor_parallel_size, multiprocessing, executor_backend="uni"):
             raise ValueError("Native graph audit method already replaced")
     journal = Journal(directory)
     instrument(runner, graph_module.CUDAGraphWrapper, graph_module, journal)
-    journal.append({"status": "installed", "source_hashes": SOURCE_HASHES, "buffer_limit_executions": 31})
+    activation = {
+        "status": "activated",
+        "process_id": os.getpid(),
+        "parent_process_id": os.getppid(),
+        "actor_process_id": actor_process_id,
+        "hostname": socket.gethostname(),
+        "runner_class": f"{runner.__module__}.{runner.__qualname__}",
+        "source_hashes": SOURCE_HASHES,
+        "journal_path": str(journal.path),
+    }
+    journal.append(activation | {"status": "installed", "buffer_limit_executions": 31})
     journal.flush()
     atexit.register(journal.flush)
-    _INSTALLED = journal
-    return journal
+    _INSTALLED, _ACTIVATION = journal, activation
+    return activation
 
 
-async def flush_boundary():
-    """Run on the engine loop between model executions; no CUDA synchronization."""
-    if os.environ.get("OI_VLLM_GRAPH_WORK_AUDIT", "0") != "1":
+def cutoff(actor_process_id):
+    """In the activated worker, between model executions; no CUDA synchronization."""
+    if _INSTALLED is None or _ACTIVATION is None:
+        raise RuntimeError("Graph observer was not activated in this worker process")
+    if os.getpid() != _ACTIVATION["process_id"] or actor_process_id != _ACTIVATION["actor_process_id"]:
+        raise RuntimeError("Graph cutoff requested from a different actor or process")
+    return _INSTALLED.boundary("post-final-model-save") | {
+        "process_id": os.getpid(),
+        "actor_process_id": actor_process_id,
+    }
+
+
+class GraphWorkAuditWorkerExtension:
+    """Mixed into vLLM's worker class; collective_rpc runs these in the EngineCore process."""
+
+    def oi_graph_audit_activate(self, actor_process_id):
+        return activate(self, actor_process_id)
+
+    def oi_graph_audit_cutoff(self, actor_process_id):
+        return cutoff(actor_process_id)
+
+
+def _single(results, kind):
+    if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
+        raise RuntimeError(f"Expected one graph audit {kind} acknowledgment from the TP1 worker")
+    return results[0]
+
+
+def validate_activation(results, actor_process_id):
+    ack = _single(results, "activation")
+    process_id = ack.get("process_id")
+    if (
+        ack.get("status") != "activated"
+        or type(process_id) is not int
+        or process_id == actor_process_id
+        or ack.get("parent_process_id") != actor_process_id
+        or ack.get("actor_process_id") != actor_process_id
+    ):
+        raise RuntimeError("Graph observer activation was not acknowledged by a spawned worker of this actor")
+    return ack
+
+
+def validate_cutoff(results, activation):
+    report = _single(results, "cutoff")
+    if report.get("status") != "boundary-flushed" or report.get("process_id") != activation["process_id"]:
+        raise RuntimeError("Graph cutoff did not come from the activated worker process")
+    return report
+
+
+async def activate_engine(engine_client):
+    """In the actor, after engine construction and before serving requests."""
+    actor_process_id = os.getpid()
+    results = await engine_client.collective_rpc(ACTIVATE_RPC, args=(actor_process_id,))
+    return validate_activation(results, actor_process_id)
+
+
+async def cutoff_engine(engine_client, activation):
+    """In the actor; the worker records the cutoff between its model executions."""
+    if not enabled():
         return {"status": "disabled"}
-    if _INSTALLED is None:
-        raise RuntimeError("Graph observer was not installed in this engine process")
-    return _INSTALLED.boundary("post-final-model-save")
+    if activation is None:
+        raise RuntimeError("Graph observer was not activated for this engine")
+    results = await engine_client.collective_rpc(CUTOFF_RPC, args=(activation["actor_process_id"],))
+    return validate_cutoff(results, activation)
