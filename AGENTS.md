@@ -1,3 +1,69 @@
+# Reinforcement learning: MILES GRPO
+
+For RL, RLVR or GRPO work in this repository, use `python -m open_instruct.miles`.
+Start with [docs/miles/grpo.md](docs/miles/grpo.md); it is the main RL guide.
+[docs/miles/index.md](docs/miles/index.md) maps the detailed documentation.
+Follow this workflow without requiring the user to supply a special agent prompt:
+
+1. Read the guide, model/topology support and launch instructions before choosing a run.
+2. For a first exercise, copy `configs/miles/examples/small.toml` to
+   Git-ignored `runs/my-grpo.toml`. Keep tracked templates unchanged. Set the user's
+   run name, fresh output path and a compatible tiny checkpoint. Keep barrier
+   publication and offline W&B for this two-GPU mechanics check unless requested
+   otherwise. Use `medium.toml` for mixed-policy refresh after preparing its
+   full-policy, dataset, verifier and judge inputs.
+3. Use the documented compatible image and Python 3.12 submission environment.
+   Check Beaker resource access; supply credentials only where required by the
+   selected inputs or tracking mode. Example model/data paths are placeholders.
+   Do not install the local CUDA training stack just to submit a job.
+4. Run `plan` and `validate`. When the user requests a run, launch through the MILES
+   committed-image wrapper. Before submission, inspect the rendered Beaker spec
+   against the distributed scheduling requirements below; `plan` and `validate`
+   alone do not check them. Follow completion using the operations guide.
+   Report the configuration, image, experiment link and validation outcomes.
+
+For new asynchronous runs, start with **six optimizer updates of policy lag**
+(`async.max_weight_staleness = 6`, compiled to `core.max_policy_lag = 6`). This
+is the structured async default and the explicit setting in `medium.toml` and
+`large.toml`. When writing a low-level `[core]`/`[miles]` async configuration,
+set `core.max_policy_lag = 6` explicitly. Preserve explicit user overrides and
+historical reproduction settings; synchronous mechanics runs retain zero lag.
+Use [policy lag and TIS](docs/miles/async-pipeline.md#policy-lag-and-tis) for the
+semantics and monitoring guidance, and [development defaults](docs/miles/development-defaults.md)
+for the other starting settings. Six is the starting point, not a claim of an
+optimal lag for every learning rate, group size or response length.
+
+`open_instruct/grpo.py` and `open_instruct/grpo_fast.py` are **deprecated**.
+Their presence, tests and launch scripts support existing runs and historical
+reproduction; they are not alternatives to recommend for new GRPO work. Do not
+create new recipes or features on those paths unless the user's task explicitly
+targets legacy behavior. If MILES lacks a required capability, report the specific
+support gap instead of silently switching backends. Existing user instructions to
+maintain or reproduce a legacy run still apply.
+
+MILES has its own Core adapter and uses SGLang. The deprecated Core/vLLM path in
+`grpo.py` is separate, even though both use OLMo-core. Dated measurements/plans
+are evidence, not defaults. [Legacy GRPO reference](docs/algorithms/grpo.md)
+contains the old CLI and reproduction instructions.
+
+# Beaker scheduling and distributed launches
+
+Before submitting MILES work, read and follow the full
+[distributed scheduling contract](docs/miles/launching.md#distributed-scheduling-contract).
+Distributed GPU work requires one task with grouped replicas and leader selection,
+host networking and failure/preemption propagation. Minimum runtime is the user's
+scheduling choice: omitted, zero or blank selects unallocated work, including for replica groups.
+Inspect the rendered spec and verify replica grouping and placement after submission.
+Do not replace group scheduling with separate tasks or hostname polling.
+
+CPU-only jobs are unallocated: omit `context.minRuntime`, retain an execution
+timeout and required WEKA mounts. Try Saturn first, then Jupiter if scheduler
+events show Saturn cannot schedule; stop the superseded job before replacement.
+Do not launch CPU-only WEKA jobs on Holmes.
+
+GPU training defaults to high priority; urgent remains available when appropriate.
+Priority is separate from minimum runtime and checkpoint/resume settings.
+
 # Bash commands
 - `uv run pytest`: Run the tests.
 - `make style && make quality` run the linter + formatter.
@@ -12,9 +78,9 @@
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
-- To run `./scripts/train/build_image_and_launch.sh`, you must first commit all current changes. The launcher supports `--cuda-version 12|13` before the script path; CUDA 13 images are intended for compatible clusters such as `ai2/holmes`.
-- To launch experiment scripts, use the `build_image_and_launch.sh` script, like this: `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13] $SOME_SCRIPT`.
-- For GRPO, we have three test scripts:
+- To run `./scripts/train/build_image_and_launch.sh`, first commit all changes. The ordinary launcher supports `--cuda-version 12|13` before the script path; CUDA 13 images are intended for compatible clusters such as `ai2/holmes`. MILES uses the separate `--miles` dispatch and pinned runtime.
+- Launch experiment scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13] $SOME_SCRIPT`.
+- For the deprecated vLLM GRPO implementation only, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
   - `scripts/train/debug/large_test_script.sh`: two 8x GPU nodes, no tools (~32 minutes).
@@ -25,8 +91,8 @@
   - `scripts/train/debug/dpo/local.sh`: local single GPU (no Beaker).
   - `scripts/train/debug/dpo/single_gpu.sh`: single GPU on Beaker.
   - `scripts/train/debug/dpo/multi_node.sh`: two 8x GPU nodes on Beaker.
-- Launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
-- Launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
+- For legacy vLLM GRPO maintenance, launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
+- For legacy vLLM GRPO maintenance, launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
 - Launch OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh`.
 - Launch multi-node OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_multinode.sh`.
 - Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.
@@ -36,7 +102,7 @@
 - When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
 - If you are given a Beaker URL (`beaker.org` or `beaker.allen.ai`), use the Beaker CLI tool to interact with it.
 - When a Beaker job stays queued or pending, run `beaker job events <job-id>` before diagnosing why — it prints the scheduler's own reason; don't infer one from cluster documentation. If that reason is the workspace slot limit, it applies to every cluster at once: wait or request fewer GPUs rather than relaunching elsewhere.
-- A Beaker experiment can hold several jobs when a preempted one is retried. Read status from the most recently created job, not `jobs[0]`, or a successful retry looks like a failure.
+- A Beaker experiment can hold several jobs when a preempted one is retried. Read the most recently created attempt for each task and replica rank, not `jobs[0]` or one latest job for the entire experiment, or a successful retry looks like a failure and missing replicas can be overlooked.
 - Mason currently exposes only the deprecated `--preemptible` switch, not Beaker's finer-grained `minRuntime` and `autoResume` settings. The switch maps to `minRuntime: 0` and `autoResume: true`; on strict-priority clusters, such unallocated jobs run only as backfill and may wait indefinitely. Omitting it maps to an eight-hour protected, non-resumable job. Call out this trade-off before launching instead of silently copying a checked-in script's choice.
 - Experiment launch scripts that call `mason.py` must include `--no_auto_dataset_cache` (before the `--` separator) because vllm is not installed locally on macOS. Without this flag, mason.py tries to cache the dataset locally which fails on the `import vllm` in `data_loader.py`.
 - The `oe-eval-internal` directory is required in the Docker image for experiments that use `--try_launch_beaker_eval_jobs_on_weka`. If it's missing (e.g. in a fresh clone or worktree), clone it with: `git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal`.
@@ -64,3 +130,10 @@ To verify that documentation changes don't alter the generated output:
 2. Switch to main branch and build: `cd /path/to/main && uv run mkdocs build`
 3. Compare the builds: `diff -rq site-branch /path/to/main/site`
 4. If no output, the docs are identical. If differences exist, review with: `diff -r site-branch /path/to/main/site`
+
+# MILES configuration examples
+- `configs/miles/examples/` is the maintained user-facing starting point, containing only `dev.toml`, `small.toml`, `medium.toml`, and `large.toml`.
+- Do not add configurations there without an explicit, distinct user-facing purpose and user agreement; update the existing tier when appropriate.
+- Put one-off runs, sweeps, debugging, qualification, and personal overrides in Git-ignored `runs/`. Copy an example there before editing it for a run.
+- For disposable runs that do not need checkpoint/resume testing or saved weights, set `training.save_checkpoints = false` and `output.export_hf = false`, and remove any explicit `save_interval`. Rollout capture defaults off; set `output.rollout_sample_rate` explicitly when sampled whole-group captures are needed for analysis (1 keeps every group). Only enable checkpoint saving or HF export when the run has a specific need for those artifacts.
+- Keep historical run provenance in measurement reports and immutable run artifacts, not additional maintained example configs. Tests must not depend on untracked `runs/` files.

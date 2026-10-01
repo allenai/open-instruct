@@ -181,7 +181,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=oe-eval-internal/"
+addopts = "--ignore=oe-eval-internal/ --ignore=runtime/miles/sources/"
 filterwarnings = [
     "ignore:.*sentry_sdk.Hub.*:DeprecationWarning",
     "ignore:builtin type SwigPy.*:DeprecationWarning",
@@ -245,6 +245,7 @@ exclude = [
     "decontamination/",
     "human_eval/",
     "open_instruct/test_*.py",
+    "tests/miles/",
     "test_*.py",
     "open_instruct/IFEvalG/instructions.py",
     "open_instruct/dpo.py",
