@@ -3,11 +3,15 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
+import shlex
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import accelerate
+import safetensors
 import torch
 import torch.distributed as dist
 import transformers
@@ -29,7 +33,7 @@ from olmo_core.train.train_module.transformer import (
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 
-from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
+from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -100,6 +104,10 @@ class TrainingConfig:
     """Maximum gradient norm for clipping. None means no clipping."""
     max_seq_length: int = 4096
     """The maximum total input sequence length after tokenization."""
+    over_length_strategy: str = "keep"
+    """What to do with a conversation that `max_seq_length` truncation cut short: `keep` leaves it
+    unterminated, `terminate` ends it with a trainable EOS, `drop` discards it. The default leaves
+    existing dataset cache hashes untouched."""
     lr_scheduler_type: str = "linear"
     """The scheduler type to use for learning rate adjustment."""
     max_train_steps: int | None = None
@@ -236,7 +244,7 @@ class CheckpointConfig:
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
-    """If the training should continue from a checkpoint folder."""
+    """Continue from a checkpoint in a *different* directory (resuming this run needs only ``output_dir``)."""
 
 
 def build_checkpointer_callback(
@@ -286,6 +294,54 @@ def build_scheduler(lr_scheduler_type: str, warmup_ratio: float, num_training_st
     raise ValueError(f"Unknown lr_scheduler_type: {lr_scheduler_type!r}")
 
 
+def load_hf_weights_into_olmo_core(
+    model_state_dict: dict[str, Any], model_name_or_path: str, work_dir: str | None = None
+) -> None:
+    """Load HF weights into an olmo-core state dict in place, dispatching on model type.
+
+    olmo-core's converter has no ``olmo_hybrid`` case, so the generic branch falls
+    through to the llama-style key templates. For hybrid that raises, since nothing
+    maps the GDN ``linear_attn.*`` keys, but the general failure is quiet:
+    ``load_hf_model`` writes back only the keys its converter produced, leaving
+    anything unmapped at whatever the model was initialized with.
+    """
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        olmo_core_hybrid.load_hf_hybrid_model(model_name_or_path, model_state_dict)
+    else:
+        load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
+
+
+def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
+    """Seed the rows of reserved-slot-promoted tokens on the olmo-core path.
+
+    Call this once the base weights are in place and before the first step -- and only when the
+    run is not resuming. `pre_train` looks like the natural hook but fires after a resume load
+    too, so a callback would re-seed on every restart and throw away what those rows learned.
+
+    By this point `parallelize_model` has sharded the embedding on the vocabulary dimension, so
+    the rows being read and the row being written generally live on different ranks;
+    `model_utils.seed_embedding_rows` handles that. A no-op when the tokenizer promoted nothing.
+    Returns the number of rows written per matrix.
+    """
+    rows = model_utils.promoted_token_rows(tokenizer)
+    if not rows:
+        return 0
+
+    model = train_module.model
+    matrices = [model.embeddings.weight]
+    # The olmo2/olmo3 presets leave tie_word_embeddings False, so the head is a second matrix
+    # that needs the same seed. The qwen3 presets tie it, where writing the one parameter twice
+    # would feed the row just written back in as one of its own sources.
+    if not model.tie_word_embeddings and model.lm_head is not None:
+        matrices.append(model.lm_head.w_out.weight)
+    for weight in matrices:
+        model_utils.seed_embedding_rows(weight, rows)
+
+    logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
+    return len(rows)
+
+
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF weights into a parallelized train_module.
 
@@ -294,7 +350,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
-    load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    load_hf_weights_into_olmo_core(sd, model_name_or_path, work_dir=work_dir)
     train_module.model.load_state_dict(sd)
 
 
@@ -333,14 +389,30 @@ def is_hf_checkpoint(path: str) -> bool:
     """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
 
     Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
-    containing config.json, and paths with a '-hf' component. Returns False for
-    olmo-core distributed checkpoints.
+    holding an HF config.json, and paths with a '-hf' component. Returns False for
+    olmo-core distributed checkpoints, including remote URLs (e.g. gs://) without
+    an '-hf' marker.
     """
     if os.path.isdir(path):
-        return os.path.isfile(os.path.join(path, "config.json"))
+        config_path = os.path.join(path, "config.json")
+        if not os.path.isfile(config_path):
+            return False
+        # An olmo-core checkpoint directory also contains a config.json -- the full
+        # experiment config -- so its presence alone does not identify the format.
+        # HF configs always carry a top-level "model_type"; olmo-core's never does.
+        try:
+            with open(config_path) as config_file:
+                config = json.load(config_file)
+        except (OSError, ValueError):
+            return False
+        return isinstance(config, dict) and "model_type" in config
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
+    # A remote URL (gs://, s3://, ...) without an '-hf' marker is an olmo-core
+    # checkpoint: transformers cannot read from it, olmo-core's io layer can.
+    if "://" in path:
+        return False
     return not os.path.isabs(path)
 
 
@@ -350,6 +422,9 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "allenai/OLMo-2-1124-13B": "olmo2_13B",
     "allenai/OLMo-2-0325-32B": "olmo2_32B",
     "allenai/Olmo-3-1025-7B": "olmo3_7B",
+    "allenai/Olmo-Hybrid-7B": "olmo3_hybrid_7B",
+    "allenai/Olmo-Hybrid-Instruct-SFT-7B": "olmo3_hybrid_7B",
+    "allenai/Olmo-Hybrid-Think-SFT-7B": "olmo3_hybrid_7B",
     "allenai/OLMoE-1B-7B-0924": "olmoe_1B_7B",
     "Qwen/Qwen3-0.6B": "qwen3_0_6B",
     "Qwen/Qwen3-0.6B-Base": "qwen3_0_6B",
@@ -380,11 +455,16 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     if config_name is None:
         config_name = model_name_or_config
 
+    local_config = olmo_core_hybrid.LOCAL_TRANSFORMER_CONFIGS.get(config_name)
+    if local_config is not None:
+        return local_config(vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend))
+
     if not hasattr(TransformerConfig, config_name):
         available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
         available_configs = [
             name for name in dir(TransformerConfig) if name.startswith(("olmo", "qwen")) and not name.startswith("_")
         ]
+        available_configs += olmo_core_hybrid.LOCAL_TRANSFORMER_CONFIGS
         raise ValueError(
             f"Model/config '{model_name_or_config}' not found. "
             f"Available models: {available_models}. "
@@ -500,6 +580,21 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+def convert_olmo_core_state_to_hf(hf_config: transformers.PretrainedConfig, state_dict: dict[str, Any]) -> dict:
+    """Convert an olmo-core state dict to HF format, dispatching on model type.
+
+    Both the pre-training export check and the actual save go through here, so they
+    cannot disagree about which converter a model needs. olmo-core's converter has
+    no ``olmo_hybrid`` case and falls through to the llama-style key templates,
+    where it raises on every GDN parameter.
+    """
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        return olmo_core_hybrid.convert_hybrid_state_to_hf(
+            state_dict, olmo_core_hybrid.layer_types_from_hf_config(hf_config)
+        )
+    return olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+
+
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -511,7 +606,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+    converted = convert_olmo_core_state_to_hf(hf_config, olmo_core_state)
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -532,6 +627,16 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     )
 
 
+#: Model types whose released checkpoints use transformers' in-memory weight naming, so
+#: save_pretrained must not apply its conversion_mapping in reverse on the way out.
+_MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
+
+
+def _set_hf_export_generation_config(hf_model, tokenizer: transformers.PreTrainedTokenizerBase) -> None:
+    if model_utils.uses_olmo3_generation_config(None, tokenizer, hf_model):
+        hf_model.generation_config = model_utils.get_olmo3_generation_config(tokenizer)
+
+
 def save_state_dict_as_hf(
     state_dict: dict[str, torch.Tensor],
     save_dir: str,
@@ -546,16 +651,36 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    converted = convert_olmo_core_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict(converted, assign=True)
+    _set_hf_export_generation_config(hf_model, tokenizer)
 
     os.makedirs(save_dir, exist_ok=True)
-    hf_model.save_pretrained(save_dir)
+    model_type = getattr(hf_config, "model_type", None)
+    hf_model.save_pretrained(save_dir, save_original_format=model_type not in _MODERN_NAMING_MODEL_TYPES)
     tokenizer.save_pretrained(save_dir)
+
+    index_path = os.path.join(save_dir, "model.safetensors.index.json")
+    if os.path.isfile(index_path):
+        with open(index_path) as index_file:
+            saved = set(json.load(index_file)["weight_map"])
+    else:
+        # Reads only the header, not the tensors.
+        with safetensors.safe_open(os.path.join(save_dir, "model.safetensors"), framework="pt") as shard:
+            saved = set(shard.keys())
+    missing = sorted(set(converted) - saved)
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} converted tensors are absent from the saved checkpoint "
+            f"(e.g. {missing[:5]}); it will not load. Check whether transformers renamed "
+            f"them on save: the file contains {sorted(saved - set(converted))[:5]}. "
+            f"If model_type {model_type!r} publishes its checkpoints in the in-memory "
+            f"naming, add it to _MODERN_NAMING_MODEL_TYPES."
+        )
 
 
 def doc_lens_from_attention_mask(attention_mask_BS: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
@@ -596,3 +721,46 @@ def doc_lens_from_cu_seq_lens(cu_seq_lens_k_D1: torch.Tensor, seq_len: int) -> t
     doc_lens_BD = seq_lens_D.unsqueeze(0)
     max_doc_lens_B = [int(doc_lens_BD.max().item())]
     return doc_lens_BD, max_doc_lens_B
+
+
+def write_provenance_readme(
+    output_dir: str,
+    run_name: str,
+    model_name_or_path: str,
+    tracking_url: str | None,
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+) -> None:
+    """Drop a README.md into output_dir so any copy of the checkpoint traces back to its run.
+
+    Never overwrites an existing README (a resume must not clobber notes added
+    by hand) and never raises: provenance is not worth killing a run over.
+    """
+    path = os.path.join(output_dir, "README.md")
+    if os.path.exists(path):
+        return
+    try:
+        lines = [f"# {run_name}", ""]
+        if tracking_url:
+            lines.append(f"Tracking: {tracking_url}")
+        beaker_url = utils.get_beaker_experiment_url()
+        if beaker_url:
+            lines.append(f"Beaker experiment: {beaker_url}")
+        if wandb_project:
+            lines.append(f"W&B: {wandb_entity or 'ai2-llm'}/{wandb_project}, run name {run_name}")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        lines += [
+            f"Base model: {model_name_or_path}",
+            f"Written at {timestamp}",
+            "",
+            "Command:",
+            "```",
+            # shlex.join, not " ".join: a run name or path with a space (or a `;`) would
+            # otherwise re-parse into different arguments when someone pastes this back.
+            shlex.join(sys.argv),
+            "```",
+        ]
+        with open(path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:
+        logger.warning(f"Could not write provenance README to {output_dir}", exc_info=True)
