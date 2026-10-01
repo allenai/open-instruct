@@ -1,11 +1,13 @@
 import tempfile
 import unittest
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
 from open_instruct import data_loader
+from open_instruct.data_types import GenerationResult, RequestInfo
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
@@ -113,6 +115,73 @@ class TestResultIsStale(unittest.TestCase):
                 replenish_prompts=False,
                 max_result_age_steps=4,
             )
+
+
+class TestMaskTruncatedCompletions(unittest.TestCase):
+    def _make_result(self, finish_reasons: list[str]) -> GenerationResult:
+        n = len(finish_reasons)
+        return GenerationResult(
+            responses=[[i] for i in range(n)],
+            finish_reasons=finish_reasons,
+            masks=[[1] for _ in range(n)],
+            request_info=RequestInfo(
+                num_calls=[0] * n,
+                timeouts=[0] * n,
+                tool_errors=[""] * n,
+                tool_outputs=[""] * n,
+                tool_runtimes=[0.0] * n,
+                tool_calleds=[False] * n,
+            ),
+            index=None,
+            prompt_id="0",
+            logprobs=[[0.0] for _ in range(n)],
+        )
+
+    def _make_batch(self, n: int) -> data_loader.Batch:
+        return data_loader.Batch(
+            queries=[[0]] * n,
+            ground_truths=[[0]] * n,
+            datasets=["ds"] * n,
+            raw_queries=["q"] * n,
+            decoded_responses=["r"] * n,
+            indices=[0] * n,
+            scores=[1.0] * n,
+            model_steps=[0] * n,
+        )
+
+    def test_disabled_is_a_no_op(self):
+        finish_reasons = ["stop", "length", "stop"]
+        result = self._make_result(finish_reasons)
+        batch = self._make_batch(3)
+        advantages = np.array([1.0, 2.0, 3.0])
+
+        new_batch, new_advantages = data_loader.maybe_mask_truncated_completions(
+            result, batch, advantages, enabled=False
+        )
+
+        self.assertEqual(len(new_batch.scores), 3)
+        self.assertTrue(np.array_equal(new_advantages, advantages))
+
+    def test_filters_batch_and_advantages_by_the_same_surviving_indices(self):
+        # 2 prompts x 2 samples; the second sample of the first prompt is truncated.
+        finish_reasons = ["stop", "length", "stop", "stop"]
+        result = self._make_result(finish_reasons)
+        batch = self._make_batch(4)
+        # Pre-filter, group-computed advantages (as the caller now builds them before masking).
+        advantages = np.array([-1.0, 1.0, -0.5, 0.5])
+
+        new_batch, new_advantages = data_loader.maybe_mask_truncated_completions(
+            result, batch, advantages, enabled=True
+        )
+
+        # Index 1 (the truncated sample) is dropped; the rest survive in order.
+        self.assertEqual(len(result.responses), 3)
+        self.assertEqual(len(new_batch.scores), 3)
+        self.assertTrue(np.array_equal(new_advantages, np.array([-1.0, -0.5, 0.5])))
+        # advantages must stay index-aligned with the filtered batch/result for every caller
+        # downstream (lookup_advantages, save_rollouts_to_disk, val/advantages_* metrics).
+        self.assertEqual(len(new_advantages), len(new_batch.scores))
+        self.assertEqual(len(new_advantages), len(result.responses))
 
 
 if __name__ == "__main__":
