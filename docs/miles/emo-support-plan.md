@@ -114,6 +114,36 @@ Its optional `--trace` records actual serving layer outputs and loaded weights,
 then compares matching HF layers and reconstructed fused parameter layouts.
 Tracing is limited to tiny checkpoints and disabled in ordinary serving.
 
+The [layer trace and matched control](https://beaker.org/ex/01M3THNNCZNB3GQPZ4EKAZCRAS)
+at application revision `d0317c817`, image `01M3THM7194F31554BATNMK1WV`,
+completed with 32 focused GPU tests passing. Removing only EMO metadata produced
+bit-identical scores in SGLang, Core and HF on the same weights and token sequence.
+All loaded serving weights matched their reconstructed HF layouts exactly.
+
+The large divergence originates in the ordinary SGLang `FusedMoE` path. Its
+default `inplace=True` overwrites the routed expert input. With no latent
+projection, that tensor also backs the shared-expert input and decoder residual.
+The trace confirms both consumed the routed output instead of the original hidden
+states. Mean activation differences against HF grew from 0.00017 at routed expert
+output to 0.17172 at the shared-expert gate/up projection, 0.44060 after the final
+feedforward norm, and 0.92161 after residual addition. The historical 4T runs used
+the separate rounding-compatible expert implementation.
+
+On the original pre-dispatch hidden states, router logits agree with an independent
+FP32 projection to a maximum error of 5.96e-8; mixing weights agree to 1.19e-7,
+with 100% expert-set agreement. The first trace captured generic inputs with
+post-forward hooks, so its automated router-isolation section used mutated inputs.
+These corrected checks use the saved TopK input, captured before dispatch. The
+tracer now copies inputs in pre-forward hooks to prevent that ambiguity.
+
+Reconstructing the corrected final block on CPU from captured GPU activations
+reduces its mean score gap against the recorded Core result from 0.204724 to
+0.000892 (maximum 0.002025). This reconstruction is causal evidence, not a fresh
+GPU qualification. The serving fix explicitly sets `inplace=False`; its ownership
+regression fails with the original setting and passes with the fix, both with and
+without a shared expert. A fixed-image GPU rerun and the RL lifecycle gates remain
+required before declaring the implementation qualified.
+
 ## Existing support and integration work
 
 The inspection baseline is the Open Instruct [runtime lock](../../runtime/miles/runtime.lock.json):

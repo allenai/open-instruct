@@ -15,13 +15,20 @@ class TraceMixin:
         self._trace_path = Path(os.environ["EMO_NUMERICS_TRACE"])
         for name, module in self.named_modules():
             if name:
+                module.register_forward_pre_hook(self._capture_input(name))
                 module.register_forward_hook(self._capture(name))
 
     def forward(self, input_ids, positions, forward_batch, input_embeds=None):
         # SGLang calls model.forward directly, bypassing root nn.Module hooks.
         self._trace = None
         if 1 < input_ids.numel() <= 128:
-            self._trace = {"tokens": input_ids.detach().cpu().clone(), "outputs": {}, "inputs": {}, "routers": {}}
+            self._trace = {
+                "tokens": input_ids.detach().cpu().clone(),
+                "outputs": {},
+                "inputs": {},
+                "routers": {},
+                "input_capture": "before_forward",
+            }
         try:
             output = super().forward(input_ids, positions, forward_batch, input_embeds)
             self._finish()
@@ -29,12 +36,19 @@ class TraceMixin:
         finally:
             self._trace = None
 
-    def _capture(self, name):
-        def capture(module, args, output):
+    def _capture_input(self, name):
+        def capture(module, args):
             if self._trace is None:
                 return
             if args and isinstance(args[0], torch.Tensor):
                 self._trace["inputs"][name] = args[0].detach().cpu().clone()
+
+        return capture
+
+    def _capture(self, name):
+        def capture(module, args, output):
+            if self._trace is None:
+                return
             if name.endswith(".topk") and hasattr(output, "topk_ids"):
                 self._trace["routers"][name.removesuffix(".topk")] = {
                     "logits": args[1].detach().cpu().clone(),
