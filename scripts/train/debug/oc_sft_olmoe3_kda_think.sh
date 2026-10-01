@@ -140,8 +140,18 @@ if [[ "$MODEL" =~ ^/weka/([^/]+)/ ]]; then
         EXTRA_BUCKET_FLAGS="--extra_weka_buckets $bucket"
     fi
 fi
-TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
-CHAT_TEMPLATE=olmo123
+# H038: the tokenizer, its revision and the template name are overridable so the Olmo 3.5
+# tokenizer (allenai/dolma2-tokenizer-olmo35, generation-annotated template) can carry the
+# tool-use mixtures. All three are tokenization cache keys. A template name that is not in
+# CHAT_TEMPLATES keeps the tokenizer's own template; it must contain "olmo" (no add_bos).
+TOKENIZER="${TOKENIZER:-allenai/olmo-3-tokenizer-instruct-dev}"
+CHAT_TEMPLATE="${CHAT_TEMPLATE:-olmo123}"
+TOKENIZER_REVISION_FLAGS=()
+if [[ -n "${TOKENIZER_REVISION:-}" ]]; then
+    TOKENIZER_REVISION_FLAGS=(--tokenizer_revision "$TOKENIZER_REVISION")
+fi
+# The full-corpus mixer for tokenize_full and train; H038 appends its tool sets here.
+FULL_MIXER="${FULL_MIXER:-allenai/Dolci-Think-SFT 1.0}"
 # H015: THINK_TOKENS=1 makes <think> and </think> single tokens by renaming reserved
 # <|extra_id_N|> slots (#1911). It is part of the tokenization cache key, so every mode
 # that names the cache passes it identically. An array, so the tags stay literal words.
@@ -237,7 +247,7 @@ case "$MODE" in
         MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
         DESC="Tokenize Dolci-Think-SFT $SUBSET_FRAC subset (seq $SEQ, olmo123) for the KDA MoE think gate"
     else
-        MIXER="allenai/Dolci-Think-SFT 1.0"
+        MIXER="$FULL_MIXER"
         DESC="Tokenize Dolci-Think-SFT full (seq $SEQ, olmo123) for the KDA MoE think baseline"
     fi
     $PY mason.py \
@@ -259,6 +269,7 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
+        "${TOKENIZER_REVISION_FLAGS[@]}" \
         "${RESERVED_SLOT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
         --mixer_list $MIXER \
@@ -291,9 +302,10 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
+        "${TOKENIZER_REVISION_FLAGS[@]}" \
         "${RESERVED_SLOT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
-        --mixer_list allenai/Dolci-Think-SFT 1.0 \
+        --mixer_list $FULL_MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
         --seed $SEED \
         --output_dir /tmp/discover
@@ -315,7 +327,7 @@ case "$MODE" in
         STEPS="${STEPS:-300}"
         DESC="KDA MoE think LR screen: lr=$LR, $STEPS steps, 1x8, seq $SEQ" ;;
       train)
-        NNODES="${NNODES:-2}"; MIXER="allenai/Dolci-Think-SFT 1.0"
+        NNODES="${NNODES:-2}"; MIXER="$FULL_MIXER"
         DESC="KDA MoE LC + Dolci-Think SFT: $STEPS steps, ${NNODES}x8, seq $SEQ, lr=$LR" ;;
     esac
     # NPROC exists for the gate specifically. The gate asks a per-rank memory
@@ -396,6 +408,7 @@ case "$MODE" in
         --config_name $CONFIG_NAME \
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
+        "${TOKENIZER_REVISION_FLAGS[@]}" \
         "${RESERVED_SLOT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
         --per_device_train_batch_size 1 \

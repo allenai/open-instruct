@@ -34,7 +34,30 @@ case "$ARM" in
                 echo "THINK_CACHE=$ARM_CACHE is a flag-off cache; the think arm needs its own" >&2; exit 1 ;;
         esac
         ;;
-    *) echo "Unknown arm: $ARM (expected aligned, legacy or think)" >&2; exit 1 ;;
+    # H038: Dolci-Think on the Olmo 3.5 tokenizer, alone (the control) or with tool-use sets.
+    # THINK_TOKENS stays 0: the olmo35 template emits <think> from reasoning_content and the
+    # tags are ordinary BPE pieces, as in the H028 anchors. The cache hash is known only once
+    # the tokenize job has run; pass it as H038_CACHE. Steps come from the cache token count
+    # (0.5 epoch of the union), passed as TRAIN_FULL_STEPS.
+    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both)
+        IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE="${H038_CACHE:-}"
+        export TOKENIZER=allenai/dolma2-tokenizer-olmo35
+        export TOKENIZER_REVISION=8b9717061fae09d5be814373d189919a62a9a00d
+        export CHAT_TEMPLATE=olmo35
+        case "$ARM" in
+            olmo35) FULL_MIXER="allenai/Dolci-Think-SFT 1.0" ;;
+            olmo35-simfc) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0" ;;
+            olmo35-nemotron) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
+            olmo35-both) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
+        esac
+        export FULL_MIXER
+        export PROBE_MIXER="$FULL_MIXER"
+        case "$ARM_CACHE" in
+            062b8a3d20-6068a350|15bfc110a1-6068a350|3f12323c3b-6068a350)
+                echo "H038_CACHE=$ARM_CACHE is an olmo123 cache; the olmo35 arms need their own" >&2; exit 1 ;;
+        esac
+        ;;
+    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both])" >&2; exit 1 ;;
 esac
 case "$MODE" in
     train)
@@ -48,7 +71,10 @@ case "$MODE" in
         # schedule-matched. The H008 anchor ran 11768 steps in 6.02 h on 2x8;
         # 9h of timeout leaves room for a slow start without reaching the 8 h
         # minRuntime shield's preemption window unnecessarily early.
-        export STEPS=11768 NNODES=2 NPROC=8 CKPT_STEPS=5884 EPHEMERAL_STEPS=1024
+        # TRAIN_FULL_STEPS (H038) moves the step count with the mixture's token count; the
+        # mid-run checkpoint stays at the half-way step.
+        export STEPS="${TRAIN_FULL_STEPS:-11768}" NNODES=2 NPROC=8 EPHEMERAL_STEPS=1024
+        export CKPT_STEPS=$(( STEPS / 2 ))
         export JOB_TIMEOUT="${JOB_TIMEOUT:-9h}"
         # RUN_TAG keeps the run name and output dir distinct from the 3072-update
         # arm, whose dir already exists; MODE itself must read "train" downstream.
@@ -90,6 +116,9 @@ case "$MODE" in
             # The tokenizer saved in the think cache carries the promoted slots, and the
             # export must ship that one.
             CACHE="${THINK_CACHE:?set THINK_CACHE to the think arm numpy cache dir name}"
+        elif [[ "$ARM" == olmo35* ]]; then
+            # The olmo35 cache's tokenizer dir carries the Olmo 3.5 template the arm trained on.
+            CACHE="${H038_CACHE:?set H038_CACHE to the olmo35 arm numpy cache dir name}"
         else
             CACHE=062b8a3d20-6068a350
         fi
@@ -105,7 +134,7 @@ export THINK_TOKENS
 if [[ -n "$ARM_CACHE" ]]; then
     export EXPECTED_NUMPY_CACHE="$ARM_CACHE"
 elif [[ "$MODE" == "train" || "$MODE" == "gate" ]]; then
-    echo "set THINK_CACHE to the think arm numpy cache dir name" >&2; exit 1
+    echo "set THINK_CACHE (think) or H038_CACHE (olmo35 arms) to the arm's numpy cache dir name" >&2; exit 1
 else
     unset EXPECTED_NUMPY_CACHE
 fi

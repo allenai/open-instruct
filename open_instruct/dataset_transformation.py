@@ -1059,6 +1059,45 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 DATASET_CACHE_VERSION = "v8"
 
 
+def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse JSON-string `tool_calls[].function.arguments` into mappings before rendering.
+
+    Arrow cannot hold a struct whose field types vary across rows, so datasets prepared for
+    open-instruct SFT (allenai/simfc-thinking-qwen35, allenai/nemotron-sft-agentic-v2-tool-calling-oi)
+    store each call's `arguments` as a JSON string. Chat templates that iterate the arguments
+    as a mapping (the Olmo 3.5 template's `| items`) reject the string, so decode it here.
+    Rows without tool calls, and calls whose arguments are already a mapping, pass through
+    unchanged; a string that does not decode to a JSON object is an error, not a silent drop.
+    Messages are shallow-copied where they change so the dataset row itself is not mutated.
+    """
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if not tool_calls:
+            out.append(message)
+            continue
+        new_calls = []
+        changed = False
+        for call in tool_calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            arguments = function.get("arguments") if isinstance(function, dict) else None
+            if isinstance(arguments, str):
+                try:
+                    decoded = json.loads(arguments)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"tool_calls[].function.arguments is not valid JSON: {arguments!r}") from exc
+                if decoded is None:
+                    decoded = {}
+                if not isinstance(decoded, dict):
+                    raise ValueError(f"tool_calls[].function.arguments must decode to an object, got: {arguments!r}")
+                new_calls.append({**call, "function": {**function, "arguments": decoded}})
+                changed = True
+            else:
+                new_calls.append(call)
+        out.append({**message, "tool_calls": new_calls} if changed else message)
+    return out
+
+
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
     """Normalize dataset tool schemas before passing them to chat templates."""
     # pandas/CSV-backed datasets may represent a missing object cell as float('nan').
@@ -1614,6 +1653,7 @@ def _tokenize_row_or_mask_out(
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
+    messages = _normalize_tool_call_arguments(messages)
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     try:
         input_ids, attention_mask, labels, truncated = _tokenize_tulu_sft_with_assistant_labels(

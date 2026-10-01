@@ -346,6 +346,42 @@ def _mask_all_but_last(idx, _msg, msgs):
     return idx < len(msgs) - 1
 
 
+class TestNormalizeToolCallArguments(unittest.TestCase):
+    def test_json_string_arguments_become_mappings(self):
+        messages = [
+            {"role": "user", "content": "hi", "tool_calls": None},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "call it",
+                "tool_calls": [
+                    {"id": "c0", "type": "function", "function": {"name": "f", "arguments": '{"q": "Paris", "days": 5}'}},
+                    {"id": "c1", "type": "function", "function": {"name": "g", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "h", "arguments": {"already": 1}}},
+                ],
+            },
+        ]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(messages)
+        self.assertIs(out[0], messages[0])
+        calls = out[1]["tool_calls"]
+        self.assertEqual(calls[0]["function"]["arguments"], {"q": "Paris", "days": 5})
+        self.assertEqual(calls[1]["function"]["arguments"], {})
+        self.assertEqual(calls[2]["function"]["arguments"], {"already": 1})
+        # the row's own messages are untouched
+        self.assertEqual(messages[1]["tool_calls"][0]["function"]["arguments"], '{"q": "Paris", "days": 5}')
+
+    def test_null_json_becomes_empty_mapping_and_bad_json_raises(self):
+        ok = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "null"}}]}]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(ok)
+        self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {})
+        bad = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "{not json"}}]}]
+        with self.assertRaises(ValueError):
+            open_instruct.dataset_transformation._normalize_tool_call_arguments(bad)
+        scalar = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "[1, 2]"}}]}]
+        with self.assertRaises(ValueError):
+            open_instruct.dataset_transformation._normalize_tool_call_arguments(scalar)
+
+
 class TestMaskLabels(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
