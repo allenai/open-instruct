@@ -18,9 +18,10 @@ def prompt(name):
     return f"<user>{name}</user>"
 
 
-def record(tmp_path, run, groups, *, deterministic=False, policy=None):
+def record(tmp_path, run, groups, *, deterministic=False, policy=None, rollout_seed=17):
     args = make_args(tmp_path, run=run, policy=policy or checkpoint(tmp_path))
     args.sglang_enable_deterministic_inference = deterministic
+    args.rollout_seed = rollout_seed
     recorder = recording.create_recorder(args)
     for name, rewards, versions in groups:
         responses = [sample(i, reward, prompt=prompt(name), versions=versions) for i, reward in enumerate(rewards)]
@@ -73,6 +74,58 @@ def test_deterministic_attempts_with_one_seed_are_one_unit(tmp_path):
         record(tmp_path, run, [("hard", [0.0, 0.0], ("0",))] * 8, deterministic=True, policy=policy)
     table = record_selection.build(tmp_path / "records", skip=["all_zero"], readmit_fraction=0.0)
     assert table["excluded"] == []
+
+
+@pytest.mark.parametrize("min_observations", [1, 16])
+def test_repeated_deterministic_draws_cannot_qualify_a_prompt(tmp_path, min_observations):
+    for run, seed in (("first", 100), ("second", 102)):
+        record(tmp_path, run, [("hard", [0.0] * 4, ("0",))] * 8, deterministic=True, rollout_seed=seed)
+    table = record_selection.build(
+        tmp_path / "records", skip=["all_zero"], min_observations=min_observations, readmit_fraction=0.0
+    )
+    # 64 records contain only six distinct draws. Even with the minimum relaxed,
+    # their confidence bound is too high to exclude the prompt.
+    assert table["excluded"] == []
+
+
+@pytest.mark.parametrize("deterministic,observations", [(True, 16), (False, 48)])
+def test_overlapping_seeds_count_once_per_prompt(tmp_path, deterministic, observations):
+    for run, seed in (("first", 100), ("second", 102), ("third", 108)):
+        groups = [(name, [0.0] * 8, ("0",)) for name in ("hard", "solved")] * 2
+        record(tmp_path, run, groups, deterministic=deterministic, rollout_seed=seed)
+    table = record_selection.build(tmp_path / "records", skip=["all_zero"], readmit_fraction=0.0)
+    assert excluded_prompts(table) == ["hard", "solved"]
+    for item in table["excluded"]:
+        assert item["observations"] == observations
+        assert item["units"] == 3
+        assert item["deviation_upper_bound"] == pytest.approx(1 - 0.05 ** (1 / observations))
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_repeated_seed_with_conflicting_reward_prevents_exclusion(tmp_path, reverse):
+    groups = [("hard", [0.0] * 8, ("0",)), ("hard", [1.0] + [0.0] * 7, ("0",))]
+    record(tmp_path, "first", groups[::-1] if reverse else groups, deterministic=True, rollout_seed=100)
+    record(tmp_path, "second", [("hard", [0.0] * 8, ("0",))], deterministic=True, rollout_seed=108)
+    table = record_selection.build(tmp_path / "records", skip=["all_zero"], readmit_fraction=0.0)
+    assert table["excluded"] == []
+
+
+def test_deterministic_seeds_remain_distinct_across_later_policies(tmp_path):
+    for run in ("first", "second"):
+        groups = [("hard", [0.0] * 4, (version,)) for version in ("1", "2")] * 2
+        record(tmp_path, run, groups, deterministic=True)
+    table = record_selection.build(
+        tmp_path / "records", skip=["all_zero"], scopes=("run_version",), min_units=1, readmit_fraction=0.0
+    )
+    [item] = table["excluded"]
+    assert item["observations"] == 16  # Four seeds under four different policies.
+
+
+@pytest.mark.parametrize("seed", [None, "17"])
+def test_deterministic_counting_requires_a_known_seed(tmp_path, seed):
+    record(tmp_path, "first", [("hard", [0.0] * 16, ("0",))], deterministic=True, rollout_seed=seed)
+    with pytest.raises(InputError, match="integer rollout_seed"):
+        record_selection.build(tmp_path / "records", skip=["all_zero"])
 
 
 def test_readmission_is_resolved_into_the_table(tmp_path):

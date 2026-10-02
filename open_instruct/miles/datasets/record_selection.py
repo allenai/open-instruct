@@ -14,7 +14,7 @@ Evidence rules are deliberately conservative:
   widened; later versions are specific to one run's trajectory.
 - A prompt needs ``min_observations`` valid responses from ``min_units``
   independent attempts. With deterministic inference, attempts sharing a rollout
-  seed are one unit.
+  seed are one unit, and each effective response seed counts only once per policy.
 - A prompt is excluded only when every valid response has the same reward and
   the one-sided upper confidence bound on the rate of any other reward,
   ``1 - (1 - confidence) ** (1 / n)`` for zero deviations in n draws, is below
@@ -73,16 +73,40 @@ def evidence(loaded, *, lineage, protocol, scopes):
         unit = (
             f"seed:{attempt.get('rollout_seed')}" if deterministic else f"{run['name']}-{run['id']}:{run['attempt']}"
         )
-        for response in row["responses"]:
+        for sibling, response in enumerate(row["responses"]):
             value = record_summary.reward_value(response["reward"])
             if response["policy_scope"] not in scopes or response["validity"]["valid"] is not True or value is None:
                 continue
             entry = table.setdefault(
                 row["input_key"],
-                {"task_key": row["task_key"], "domain": record_summary.domain(row), "rewards": [], "units": set()},
+                {
+                    "task_key": row["task_key"],
+                    "domain": record_summary.domain(row),
+                    "rewards": [],
+                    "units": set(),
+                    "draws": set(),
+                    "observations": 0,
+                },
             )
+            # Keep contrary rewards even when the draw was already counted.
             entry["rewards"].append(value)
             entry["units"].add(unit)
+            if deterministic:
+                seed = attempt.get("rollout_seed")
+                if type(seed) is not int:
+                    raise InputError("Deterministic inference records require an integer rollout_seed")
+                # The pinned generator seeds the ordered siblings with base + position.
+                # Later policy versions are local to a run, unlike the shared start checkpoint.
+                policy = (
+                    ()
+                    if response["policy_scope"] == "start_checkpoint"
+                    else (run["name"], run["id"], tuple(response["policy_versions"]))
+                )
+                draw = (policy, seed + sibling)
+                if draw in entry["draws"]:
+                    continue
+                entry["draws"].add(draw)
+            entry["observations"] += 1
     return table
 
 
@@ -120,15 +144,16 @@ def build(
     for key in sorted(candidates):
         entry = candidates[key]
         rewards, units = entry["rewards"], len(entry["units"])
+        observations = entry["observations"]
         counts[entry["domain"]]["candidates"] += 1
         values = set(rewards)
-        if len(rewards) < min_observations or units < min_units or len(values) != 1:
+        if observations < min_observations or units < min_units or len(values) != 1:
             continue
         value = rewards[0]
         mode = "all_zero" if value == 0 else "all_full" if value == full_reward else "zero_variance"
         if mode not in skip and "zero_variance" not in skip:
             continue
-        bound = upper_bound_zero_deviations(len(rewards), confidence)
+        bound = upper_bound_zero_deviations(observations, confidence)
         if bound >= max_deviation_rate:
             continue
         item = {
@@ -137,7 +162,7 @@ def build(
             "domain": entry["domain"],
             "mode": mode,
             "reward": value,
-            "observations": len(rewards),
+            "observations": observations,
             "units": units,
             "deviation_upper_bound": bound,
         }

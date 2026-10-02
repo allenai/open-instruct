@@ -240,6 +240,14 @@ Only responses with `validity.valid = true` count. At a true success rate of
 10%, 16 draws show no success 19% of the time, so the default bound still
 excludes some solvable prompts. Raise `--min-observations` when that matters.
 
+With deterministic inference, the observation count and confidence bound count
+each effective response seed only once per prompt and policy. The seed is
+reconstructed from the recorded rollout seed plus the response's sibling position;
+repeated groups and overlapping seed ranges do not add duplicate evidence.
+Conflicting rewards still prevent constant-reward exclusion. Nondeterministic
+responses count separately. The record and table formats are unchanged; rebuild
+existing selection tables to apply the corrected counts.
+
 **2. Pin the table in the run:**
 
 ```toml
