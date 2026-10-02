@@ -4,10 +4,10 @@
 
 For normal runs start with the [configuration guide](configuration.md). Native flags use underscores under [miles]. This appendix includes every pinned parser action, including aliases and inherited backend options. It does not claim every parser option is implemented by the Core trainer.
 
-- [MILES options](native-training-options.md): 980 actions.
+- [MILES options](native-training-options.md): 981 actions.
 - [SGLang options](native-serving-options.md): 487 actions.
 
-Help and raw defaults were captured from the actual parser in immutable Docker image `sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f`. The capture verified all action definitions against options.json; schema SHA-256: `a43b6400d09cf1ea6851b6890bfe342457b698be7dcc836f0b7e03f508e141a4`. This certifies the parser snapshot, not the image as a recommended training release.
+Help and raw defaults were captured from the actual parser in immutable Docker image `sha256:a6b007f5ea02e8d21f3e7715632fdbd66349e5fbd02c13e3e785011a2472f7f2`. The capture verified all action definitions against options.json; schema SHA-256: `cd2bcbf13d1bb7ebdb7f13afd1b31c1176290046a8136de82adbe727006e185d`. This certifies the parser snapshot, not the image as a recommended training release.
 
 Refresh inside the matching pinned runtime, from a writable checkout:
 

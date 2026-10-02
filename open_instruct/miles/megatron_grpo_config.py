@@ -293,6 +293,11 @@ class MegatronGRPORunSpec:
             warnings.append("The DPPO custom loss is unit-tested against Open Instruct but has not trained.")
         if self.document["miles"].get("fully_async", False):
             warnings.append("Async verifier GRPO reuses the async OPD producer; it has not run for verifier rewards.")
+        if self.document["miles"].get("keep_inflight_requests_on_weight_update", False):
+            warnings.append(
+                "Responses continue across weight publications and may span policy versions; age is measured "
+                "from the oldest version, and mixed-version training has not been validated."
+            )
         return {
             "name": self.name,
             "backend": "megatron",

@@ -164,6 +164,21 @@ def test_qwen35_async_dppo_maps_to_custom_loss_rollout_logprobs_and_async_ledger
     assert "== (True, True, 'custom_loss')" in megatron_grpo_args.preflight_code(spec)
     warnings = " ".join(spec.plan()["warnings"])
     assert "qwen3.5-2B" in warnings and "DPPO" in warnings and "Async" in warnings
+    assert "--keep-inflight-requests-on-weight-update" not in args and "span policy versions" not in warnings
+
+
+def test_async_keep_inflight_requests_passes_through_with_warning(tmp_path):
+    doc = qwen35_async_dppo()
+    doc["output"]["root"] = str(tmp_path / "root")
+    doc["miles"]["keep_inflight_requests_on_weight_update"] = True
+    spec = specs.from_dict(doc)
+    prepared = {
+        "model": "/prepared/model",
+        "data": {"prompt_data": "/prepared/prompts", "eval_prompt_data": ["aime", "/prepared/eval"]},
+    }
+    args = megatron_grpo_args.native_arguments(spec, prepared, "/converted/native", [])
+    assert "--keep-inflight-requests-on-weight-update" in args
+    assert "span policy versions" in " ".join(spec.plan()["warnings"])
 
 
 @pytest.mark.parametrize(

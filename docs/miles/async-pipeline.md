@@ -130,3 +130,22 @@ Do not divide tokens by idle seconds and call it efficiency: the units and async
 overlap differ. Trainer wait, discard fraction, useful throughput, and publication
 seconds should be inspected together. Mixed-policy refresh improves suffix age;
 it does not erase the historical prefix's age for the current conservative filter.
+
+## In-flight requests at publication
+
+By default the runtime aborts every in-flight request when it publishes a weight
+version (`/update_weight_version` with `abort_all_requests`). The aborted
+response's group is discarded and counted with the aborted groups, and its
+generation work is lost. With long responses and a publication after every
+update, this can discard most of the in-flight work.
+
+`keep_inflight_requests_on_weight_update = true` under `[miles]` keeps those
+requests. With `pause_generation_mode = "retract"`, SGLang keeps the generated
+tokens and their sampled log-probabilities, frees the KV cache and recurrent
+state, and re-prefills the request with the new weights before it continues. The
+finished response then spans policy versions. `weight_versions` lists each
+version that sampled part of it, so `oldest_weight_version` is the first one, and
+both the completed-queue age filter and the consumer age check use it.
+`weight_version/mixed_version_ratio` reports the fraction of such responses.
+Mixed-version training has not been validated; planning warns when the option is
+set.

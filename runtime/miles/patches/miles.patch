@@ -374,15 +374,18 @@ index 43373c45aa5ba6ad9a6035ba538cc53fbba1799a..640ec2420af0bee770c3363507ccc3c0
          """Frozen vision/audio tower tensors to append to every base sync (see
          __init__ comment). Returns None when the run has no MM towers. EVERY
 diff --git a/miles/backends/sglang_utils/sglang_engine.py b/miles/backends/sglang_utils/sglang_engine.py
-index 817a64c4fb13f24a9ea2f3fd0e1253ee650f9ed7..4afabc54fb5f8a1bac767370cc5b38fad67c4eab 100644
+index 817a64c4fb13f24a9ea2f3fd0e1253ee650f9ed7..54a8d3e0eee87bac7121410d0b1617f25f4210fb 100644
 --- a/miles/backends/sglang_utils/sglang_engine.py
 +++ b/miles/backends/sglang_utils/sglang_engine.py
-@@ -711,7 +711,7 @@ class SGLangEngine(RayActor):
+@@ -711,7 +711,10 @@ class SGLangEngine(RayActor):
      def update_weight_version(self, weight_version: str):
          return self._make_request(
              "update_weight_version",
 -            {"new_version": weight_version, "abort_all_requests": False},
-+            {"new_version": weight_version, "abort_all_requests": True},
++            {
++                "new_version": weight_version,
++                "abort_all_requests": not self.args.keep_inflight_requests_on_weight_update,
++            },
          )
  
      def start_profile(
@@ -949,7 +952,7 @@ index 8782e63383e781af09cb46fe365407a3babd45fb..27b4bfdb68e130f43c0918c162f04b90
          """Mark the request to the given URL as finished"""
          assert url in self.worker_request_counts, f"URL {url} not recognized"
 diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
-index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366eb7396dd1 100644
+index f0be5b7a17534c2f2eee230188f6febdf872f90e..95540b445849a029ff73b17de079a715adc76208 100644
 --- a/miles/utils/arguments.py
 +++ b/miles/utils/arguments.py
 @@ -71,6 +71,21 @@ def _resolve_rollout_functions(args) -> None:
@@ -1000,7 +1003,23 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
              parser.add_argument(
                  "--update-weights-interval",
                  type=int,
-@@ -2693,6 +2718,13 @@ def parse_args(add_custom_arguments=None):
+@@ -795,6 +820,15 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+                     "'in_place' freezes requests and resumes with existing KV cache."
+                 ),
+             )
++            parser.add_argument(
++                "--keep-inflight-requests-on-weight-update",
++                action="store_true",
++                help=(
++                    "Let in-flight requests continue across weight-version updates instead of "
++                    "aborting them. A response can then span policy versions, and its "
++                    "weight_versions record every version that sampled part of it."
++                ),
++            )
+             parser.add_argument(
+                 "--keep-old-actor",
+                 action="store_true",
+@@ -2693,6 +2727,13 @@ def parse_args(add_custom_arguments=None):
          args.rank = 0
          args.world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
          args = set_default_megatron_args(args)
@@ -1014,7 +1033,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
      else:
          from miles.backends.fsdp_utils.arguments import load_fsdp_args
  
-@@ -2729,7 +2761,7 @@ def parse_args(add_custom_arguments=None):
+@@ -2729,7 +2770,7 @@ def parse_args(add_custom_arguments=None):
                  "decoder_first_pipeline_num_layers and decoder_last_pipeline_num_layers should be None when "
                  "pipeline_model_parallel_size is 1."
              )
@@ -1023,7 +1042,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
          from miles.backends.fsdp_utils.arguments import validate_hybrid_shard_args
  
          validate_hybrid_shard_args(args)
-@@ -2792,6 +2824,15 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
+@@ -2792,6 +2833,15 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
      return eval_datasets
  
  
@@ -1039,7 +1058,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
  _FT_DEFAULT_COMPONENTS: list[str] = ["rollout"]
  
  
-@@ -3037,7 +3078,11 @@ def miles_validate_args(args):
+@@ -3037,7 +3087,11 @@ def miles_validate_args(args):
              raise ValueError("--opd-teacher-urls is set but --use-opd is not enabled. Please add --use-opd flag.")
  
      # TODO: During loading, we need to set the start_rollout_id here.
@@ -1052,7 +1071,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
          # Fresh runs pass a not-yet-created `--load` dir; fall back to the reference
          # weights (loaded via the HF bridge) instead of asserting in load_checkpoint.
          # Mirrors the non-bridge branch below.
-@@ -3063,7 +3108,7 @@ def miles_validate_args(args):
+@@ -3063,7 +3117,7 @@ def miles_validate_args(args):
              args.start_rollout_id = 0
  
      if args.eval_interval is not None:
@@ -1061,7 +1080,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366e
  
      if args.eval_num_gpus > 0:
          assert args.eval_num_gpus % args.eval_num_gpus_per_engine == 0, (
-@@ -3525,7 +3570,7 @@ def miles_validate_args(args):
+@@ -3525,7 +3579,7 @@ def miles_validate_args(args):
      ), "sglang_config and prefill_num_servers are mutually exclusive. Use server_groups in the YAML config instead."
  
      if args.qkv_format == "bshd":
@@ -1154,6 +1173,23 @@ index c421525851be1e1a2c5ee6f6217ad2484add5148..364265373ddfde821616ad95c31d1673
  
  
  class TensorboardBackend(TrackingBackend):
+diff --git a/miles/utils/types.py b/miles/utils/types.py
+index 78d24e49f100315a907ea26ecfe96f8725f25464..01cb6db4b8952286a681d869a28e2c5680f60d8f 100644
+--- a/miles/utils/types.py
++++ b/miles/utils/types.py
+@@ -285,7 +285,11 @@ class Sample:
+         # Collect prefix cache statistics
+         self.prefix_cache_info.add(meta_info=meta_info)
+ 
+-        if "weight_version" in meta_info:
++        if spans := meta_info.get("weight_versions"):
++            # SGLang reports one span per policy version when a request continues across a
++            # weight update; keep them all so oldest_weight_version is the first sampler.
++            self.weight_versions.extend(span["version"] for span in spans)
++        elif "weight_version" in meta_info:
+             self.weight_versions.append(meta_info["weight_version"])
+ 
+         match meta_info["finish_reason"]["type"]:
 diff --git a/miles_plugins/megatron_bridge/__init__.py b/miles_plugins/megatron_bridge/__init__.py
 index 6521214011dbe9dc2d939f33fa2e650ab7d1cb49..4d90a39aa647313511b99f0b5b3d2324de51235f 100644
 --- a/miles_plugins/megatron_bridge/__init__.py
@@ -1397,25 +1433,31 @@ index c2e166c6c9ba047606e7f2854c484d1422b96c34..fb54404a7539bb9408b128b897b42a9b
  @patch(f"{_MODULE}.ray")
  def test_success_path_releases_lock_and_clears_tensors(mock_ray, mock_update):
 diff --git a/tests/fast/backends/sglang_utils/test_sglang_engine.py b/tests/fast/backends/sglang_utils/test_sglang_engine.py
-index a5b6c138e90f6364ee91398aec58d71295f96921..3fd11d56723979f8cdbb94f52f2c5f1551c546ef 100644
+index a5b6c138e90f6364ee91398aec58d71295f96921..76fcacd612f07c4ee80e3da1990e27a24e783f91 100644
 --- a/tests/fast/backends/sglang_utils/test_sglang_engine.py
 +++ b/tests/fast/backends/sglang_utils/test_sglang_engine.py
-@@ -4,6 +4,20 @@ import pytest
+@@ -1,9 +1,26 @@
+ import time
++from types import SimpleNamespace
+ 
+ import pytest
  import requests
  
  
-+def test_weight_version_update_aborts_inflight_requests() -> None:
-+    """Do not allow a rollout trajectory to cross policy versions."""
++@pytest.mark.parametrize("keep_inflight", [False, True])
++def test_weight_version_update_aborts_inflight_requests_unless_kept(keep_inflight) -> None:
++    """By default a trajectory never crosses policy versions; the flag lets it continue."""
 +    pytest.importorskip("sglang")
 +    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
 +
 +    calls = []
 +    engine = SGLangEngine.__new__(SGLangEngine)
++    engine.args = SimpleNamespace(keep_inflight_requests_on_weight_update=keep_inflight)
 +    engine._make_request = lambda endpoint, payload: calls.append((endpoint, payload))
 +
 +    engine.update_weight_version("7")
 +
-+    assert calls == [("update_weight_version", {"new_version": "7", "abort_all_requests": True})]
++    assert calls == [("update_weight_version", {"new_version": "7", "abort_all_requests": not keep_inflight})]
 +
 +
  def test_flush_cache_sleeps_between_pending_request_retries(monkeypatch):
@@ -1818,7 +1860,7 @@ index 0000000000000000000000000000000000000000..d4d02467acb60587748a427d2384e2aa
 +
 +    asyncio.run(exercise())
 diff --git a/tests/fast/utils/test_arguments.py b/tests/fast/utils/test_arguments.py
-index 1fce1f9de197afe231342e5c4d897d7406615cba..231a5a61db1fceff37ba52ddde2fe696c65380e9 100644
+index 1fce1f9de197afe231342e5c4d897d7406615cba..f9eedbef032c61f662ca9953d2ee3dd1ecaeab77 100644
 --- a/tests/fast/utils/test_arguments.py
 +++ b/tests/fast/utils/test_arguments.py
 @@ -12,6 +12,7 @@ from miles.utils.arguments import (
@@ -1857,6 +1899,55 @@ index 1fce1f9de197afe231342e5c4d897d7406615cba..231a5a61db1fceff37ba52ddde2fe696
  def make_class_with_add_arguments():
      class MyFn:
          @classmethod
+@@ -171,6 +193,7 @@ def test_fully_async_rejects_abort_pause_mode():
+         recompute_logprobs_via_prefill=False,
+         rollout_all_samples_process_path=None,
+         eval_num_gpus=0,
++        train_backend="megatron",
+     )
+ 
+     with pytest.raises(AssertionError, match="pause-generation-mode abort"):
+diff --git a/tests/fast/utils/test_types.py b/tests/fast/utils/test_types.py
+index 1d45dc93935da45b9ac30748dc2c568164cb8a00..a188768f06c98f22fbc21447f7a65bad92b56680 100644
+--- a/tests/fast/utils/test_types.py
++++ b/tests/fast/utils/test_types.py
+@@ -1,4 +1,4 @@
+-"""Unit tests for Sample.strip_last_output_tokens."""
++"""Unit tests for Sample.strip_last_output_tokens and update_from_meta_info."""
+ 
+ from unittest.mock import MagicMock
+ 
+@@ -105,3 +105,30 @@ class TestStripLastOutputTokens:
+         original_tokens = list(s.tokens)
+         s.strip_last_output_tokens(-1, tokenizer)
+         assert s.tokens == original_tokens
++
++
++class TestUpdateFromMetaInfo:
++    ARGS = MagicMock(sglang_speculative_algorithm=None)
++
++    def test_single_version_response(self):
++        s = Sample()
++        s.update_from_meta_info(self.ARGS, {"weight_version": "4", "finish_reason": {"type": "stop"}})
++        assert s.weight_versions == ["4"]
++        assert s.oldest_weight_version == 4
++        assert s.status == Sample.Status.COMPLETED
++
++    def test_response_continued_across_weight_updates_keeps_every_version(self):
++        s = Sample()
++        meta_info = {
++            "weight_version": "5",
++            "weight_versions": [
++                {"version": "3", "start": 0, "end": 10},
++                {"version": "4", "start": 10, "end": 25},
++                {"version": "5", "start": 25, "end": 40},
++            ],
++            "finish_reason": {"type": "length"},
++        }
++        s.update_from_meta_info(self.ARGS, meta_info)
++        assert s.weight_versions == ["3", "4", "5"]
++        assert s.oldest_weight_version == 3
++        assert s.status == Sample.Status.TRUNCATED
 diff --git a/train.py b/train.py
 index 4e42fe292b3f3ea84738c4ce53416a3f98ffba01..93d0ea52ea3229e991449ccef46adac4d83afef8 100644
 --- a/train.py

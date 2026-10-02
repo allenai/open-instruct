@@ -1,5 +1,5 @@
 {
-  "image": "sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f",
+  "image": "sha256:a6b007f5ea02e8d21f3e7715632fdbd66349e5fbd02c13e3e785011a2472f7f2",
   "options": [
     {
       "default": null,
@@ -935,6 +935,14 @@
         "--pause-generation-mode"
       ],
       "help": "How SGLang pauses in-flight requests during weight updates. 'abort' immediately terminates all requests (previous default). 'retract' moves running requests back to the waiting queue and recomputes KV cache after update. 'in_place' freezes requests and resumes with existing KV cache."
+    },
+    {
+      "default": false,
+      "dest": "keep_inflight_requests_on_weight_update",
+      "flags": [
+        "--keep-inflight-requests-on-weight-update"
+      ],
+      "help": "Let in-flight requests continue across weight-version updates instead of aborting them. A response can then span policy versions, and its weight_versions record every version that sampled part of it."
     },
     {
       "default": false,
@@ -11926,5 +11934,5 @@
       "help": null
     }
   ],
-  "schema_sha256": "a43b6400d09cf1ea6851b6890bfe342457b698be7dcc836f0b7e03f508e141a4"
+  "schema_sha256": "cd2bcbf13d1bb7ebdb7f13afd1b31c1176290046a8136de82adbe727006e185d"
 }
