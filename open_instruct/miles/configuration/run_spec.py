@@ -774,8 +774,8 @@ class RunSpec:
                 raise InputError("EMO RL v1 requires trainer.use_rollout_routing_replay=true")
             if result.core.router_aux_loss_weight or result.core.router_z_loss_weight:
                 raise InputError("EMO RL v1 requires zero router_aux_loss_weight and router_z_loss_weight")
-            if result.core.router_aux_count_source != "dispatch":
-                raise InputError("EMO RL v1 requires router_aux_count_source='dispatch'")
+            if result.core.router_aux_count_source != "executed":
+                raise InputError("EMO RL v1 requires router_aux_count_source='executed'")
         result.validate()
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
             raise InputError(

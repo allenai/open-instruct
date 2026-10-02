@@ -116,7 +116,7 @@ def test_plan_reports_execution_and_rejects_unqualified_training(tmp_path):
         ("use_rollout_routing_replay", False),
         ("router_aux_loss_weight", 0.01),
         ("router_z_loss_weight", 1e-5),
-        ("router_aux_count_source", "current"),
+        ("router_aux_count_source", "router_selected"),
     ):
         changed = copy.deepcopy(payload)
         changed["trainer"][key] = value
