@@ -2,7 +2,8 @@
 
 Status: full-pool implementation added September 30, 2026. CPU checks cover
 configuration, export round-trips, replay weights/gradients and packed route
-alignment. Tiny EP1 GPU serving and barrier training passed October 1; distributed
+alignment. Tiny EP1 GPU serving and barrier training passed October 1 and the PR-rebased
+runtime passed October 2; distributed
 training, asynchronous refresh and recovery qualification remain open. This
 document does not extend the current [support matrix](feature-parity.md).
 
@@ -209,10 +210,50 @@ optional-dependency cases skipped), and 78 focused Core construction/export,
 replay and custom-objective tests. The runtime tests used the rebased source
 checkouts in the cached binary runtime with no GPU devices. Ruff, application
 type checks, regenerated option-schema checks and the documentation build passed.
-The committed application image built successfully; the prepared four-update EP1
-barrier repeat uses the unchanged seed-173 fixture and 0.05 numerical guard.
-A new GPU run has not yet been submitted, so the October 1 GPU evidence above
-remains historical and does not qualify the rebased runtime.
+The [four-update EP1 barrier repeat](https://beaker.org/ex/01M3YWGRVDW84MDN266PHBG3SC)
+passed on October 2 using image `01M3YWCBRCADTBVZY25N98PG86`, the unchanged
+seed-173 fixture and 0.05 numerical guard. The job ran on two B300 GPUs on one
+Holmes node at high priority, unallocated, without automatic resume and with a
+45-minute execution timeout. It exited zero after all four optimizer updates,
+32 responses and final HF export.
+
+The saved-contract audit passed all 64 scoring/training microbatches, with zero
+replay-ID mismatches across 1,463 captured tokens per phase and 100% fresh/replayed
+expert-set agreement. Router and expert gradients were finite and nonzero at
+every update, as were sampled parameter changes. Over 1,015 scored response
+tokens, per-update mean absolute log-probability gaps were 0.000750611,
+0.000848733, 0.000741675 and 0.000661163; the maximum token gap was 0.004825592.
+All five exact serving-weight checks passed (initialization and versions 1–4).
+This qualifies the rebased tiny EP1 barrier path. Native save/resume, fresh export
+reload, distributed EMO training, async refresh and active-metadata real-checkpoint
+execution remain unqualified by this smoke.
+
+## Comparison with H037 real-checkpoint RL
+
+[Open Instruct issue #1927](https://github.com/allenai/open-instruct/issues/1927)
+records Abhishek's H037 runs on the H028 EMO-descended and non-EMO SFT exports.
+The [launch recipes](https://github.com/allenai/olmo-post-training-ledger/tree/main/experiments/h037)
+were added on ledger branch `h037-runs`, merged through ledger PR #92. They used
+Open Instruct `ea00acebc` and the existing MILES image
+`01M3NGXX2AZGTQ79JH5TPF0V9W`, with no separate EMO loader implementation.
+
+The EMO source was
+`/weka/oe-adapt-default/abhishekr/checkpoints/hero-sft-4t/h028-anchor-emo-s34521-step11768-hf`.
+Its [seed-17 run](https://beaker.org/ex/01M3TE3X1H47DN1Z1YBGBZ1Z72)
+exited zero; the retained workflow confirms 100 completed collections and final
+HF export, and trainer logs show ordinary `MoERouterV2` layers with 512 experts.
+The issue explicitly records EMO routing as inactive: EMO denotes pretraining
+ancestry. This is real-model evidence for the ordinary-routing path, using EP2
+training, six TP1 serving engines, packing, refresh publication, lag six and
+routing replay. It does not exercise import of active source EMO metadata or the
+EMO router's full-pool/replay implementation added on this branch.
+
+These H028 exports can use the ordinary MILES path without `emo_routing_mode`.
+The explicit `full_pool` option is for sources that still carry EMO settings;
+inspect the actual descriptor before choosing it. H037's recipe uses real math
+rewards, 16K responses and 100 updates, whereas our tiny synthetic fixture checks
+mechanics and numerical agreement. Its quality findings and sampling protocol
+remain in issue #1927 and the ledger rather than becoming runtime defaults.
 
 ## Existing support and integration work
 
