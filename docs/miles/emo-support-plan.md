@@ -195,6 +195,25 @@ training, graphs/cache combinations, mixed-policy refresh and the intended real
 checkpoint still need their own evidence before H1-emo. The run disabled native
 checkpoint saving and did not measure learning quality or production throughput.
 
+## October 2 PR rebase validation
+
+The EMO branch was rebased onto the local committed tip of PR #1924,
+`742343539` (including its prompt-selection fix). Uncommitted PR work was not
+included. Application revision `699a77556` pins Core `722aae428`, MILES
+`fe954e2f96` and olmo-sglang `71fe9bae`. The Core and MILES EMO extensions were
+rebased onto the PR's dependencies, and both application and adapter EMO guards
+now require the renamed `router_aux_count_source="executed"`.
+
+Validation passed 663 application CPU tests, 522 runtime tests (59 GPU or
+optional-dependency cases skipped), and 78 focused Core construction/export,
+replay and custom-objective tests. The runtime tests used the rebased source
+checkouts in the cached binary runtime with no GPU devices. Ruff, application
+type checks, regenerated option-schema checks and the documentation build passed.
+The committed application image built successfully; the prepared four-update EP1
+barrier repeat uses the unchanged seed-173 fixture and 0.05 numerical guard.
+A new GPU run has not yet been submitted, so the October 1 GPU evidence above
+remains historical and does not qualify the rebased runtime.
+
 ## Existing support and integration work
 
 The inspection baseline is the Open Instruct [runtime lock](../../runtime/miles/runtime.lock.json):
