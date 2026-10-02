@@ -121,7 +121,7 @@ def test_trainer_rejects_unqualified_emo_before_model_build(failure):
     elif failure == "z":
         args.olmo_core = replace(args.olmo_core, router_z_loss_weight=1e-5)
     elif failure == "counts":
-        args.olmo_core = replace(args.olmo_core, router_aux_count_source="current")
+        args.olmo_core = replace(args.olmo_core, router_aux_count_source="router_selected")
     elif failure == "native":
         hf.emo_routing_mode = None
     elif failure == "custom":

@@ -34,7 +34,7 @@ Exports already carrying the full-pool mode can be loaded without another
 selection. Ancestry-only SFT exports with absent/null EMO fields keep their
 ordinary routing path and need no EMO option. Changing the option invalidates
 prepared-model reuse and same-run recovery. The v1 trainer requires replay,
-zero auxiliary coefficients and the default `router_aux_count_source="dispatch"`.
+zero auxiliary coefficients and the default `router_aux_count_source="executed"`.
 Fresh reference scoring uses full-pool selection without replay.
 
 The synthetic final replay row still uses IDs `0..k-1`, which are valid in the
