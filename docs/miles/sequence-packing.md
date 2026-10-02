@@ -6,9 +6,8 @@ examples use Torch attention without packing; enabling packing in a copy also
 requires changing that backend. Torch attention rejects intra-document masking.
 `plan` and `validate` reject packing with Torch attention before runtime startup.
 
-Basic sequence packing is available in this adapter. Historical small GPU
-numerical and live async audits are linked below with their source identities.
-The medium example enables packing; it remains opt-in for other configurations.
+Basic sequence packing is available in this adapter. The medium example enables
+packing; it remains opt-in for other configurations.
 
 ```toml
 [trainer]
@@ -48,19 +47,18 @@ computed over the tokens in each packed forward. It is not equivalent to summing
 per-response balancing losses. Policy-only gradient comparisons therefore disable
 auxiliary coefficients; combined-objective checks require finite, nonzero updates
 and correct replay/normalization, not equality to the old auxiliary gradients.
-No new auxiliary-loss implementation is required. The companion Core branch fixes
-the FlashAttention 4 variable-length call to bind sequence metadata by keyword;
-the pinned API inserts an optional `qv` argument ahead of that metadata.
+The pinned Core branch binds FlashAttention 4 variable-length sequence metadata
+by keyword, because the pinned API inserts an optional `qv` argument ahead of it.
 
 Packing events in `training_contract_rank*.jsonl` record samples, packs, real
 tokens, maximum pack size and fill fraction. W&B step metrics include pack count,
 samples/tokens per pack and rank-zero peak allocated memory. Compare warmed
 trainer time and memory on identical samples; raw two-step wall time includes
-cold compilation and startup. EP8 throughput and larger pack budgets require
-separate measurement after the small gate. Packing reduces the number of forwards
+cold compilation and startup. Measure throughput separately for larger expert
+parallel sizes and pack budgets. Packing reduces the number of forwards
 and can improve kernel utilization; the existing unpadded path already processes
 only real tokens. It does not eliminate variable expert row counts or replace
-the dynamic-row SwiGLU specialization fix.
+the dynamic-row SwiGLU specialization.
 
 ## Validation
 
@@ -68,30 +66,18 @@ Host tests cover pack schedules, identity, replay tails, overflow and CLI mappin
 Pinned-runtime fixed-logit tests compare losses and gradients for token/response
 reduction, TIS, KL, scoring skip, interior masks and completely masked responses.
 
-The historical tiny KDA/full-attention/latent-MoE model gate is preserved with its evidence:
-
-The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
-
-The historical gate used two Holmes GPUs with random local weights and no
-external datasets. It exercises EP1/EP2 with recomputation
+For GPU validation, follow [architecture and development](architecture.md#local-development).
+A useful GPU check uses a tiny KDA/full-attention/latent-MoE model with random
+local weights and no external datasets, and exercises EP1/EP2 with recomputation
 on/off, fixed replay, document-isolation perturbations, two updates (checked then
 skipped scoring), policy-only gradient/Adam comparisons and the combined
-objective. Per-rank reports and contracts are retained even on failure. This was followed by a passing small real SGLang/Core async exercise and
-independent retained-data audit.
-
-
-Numerical results and run identities are recorded in
-[the measurement notes](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/sequence-packing-20260912/README.md).
-The recorded small real-model follow-up used EP2 plus one TP1 SGLang engine,
-three async updates, 8 prompts × 2 responses, replay/recomputation, and a 4096-token
-pack budget. This tests plumbing, not GSM8K learning with its short generation cap.
+objective. A small real-model async run tests plumbing, not learning.
 
 ## Replay-informed expert-aware packing (experimental)
 
-**Experimental, opt-in, and disabled by default.** The planner has passed
-correctness qualification on the tested configurations. Net throughput benefit
-and effects on learning across workloads and topologies remain unestablished;
-planning overhead can offset the trainer-time savings. Measure total planning and
+**Experimental, opt-in, and disabled by default.** Net throughput benefit and
+effects on learning across workloads and topologies are unknown; planning
+overhead can offset the trainer-time savings. Measure total planning and
 training time on your workload before enabling it for a production run.
 
 The implementation includes bounded swap search. All maintained examples
@@ -99,7 +85,7 @@ leave it disabled. This option is separate from ordinary sequence packing, which
 can remain enabled while expert-aware scheduling is off.
 
 Set `trainer.expert_balanced_packing=true` to reorder complete optimizer batches
-before MILES partitions samples by rank. The first implementation targets
+before MILES partitions samples by rank. The implementation targets
 **multiple complete expert sets**: trainer world size must exceed the expert
 parallel degree, and that degree must exceed one. For example, four trainer GPUs
 with EP2 provide two complete expert sets. Set `router_aux_loss_weight=0`, enable
@@ -150,9 +136,9 @@ and do not certify an optimal partition except when attained.
 A stable seed is derived from the block's original sample IDs. A fixed attempt
 budget is reproducible; a deadline can truncate at a machine-dependent point.
 Logs retain the seed, completed attempts, selected local-index permutation,
-acceptance counts, scoring paths, bounds and stop reason. The current managed
-hook still runs synchronously at collection drain; this pass does not introduce
-an asynchronous planning actor or pre-arrival histogram transport.
+acceptance counts, scoring paths, bounds and stop reason. The managed hook
+runs synchronously at collection drain; there is no asynchronous planning actor
+or pre-arrival histogram transport.
 
 `trainer.expert_balance_layer_stride=1` counts every routed layer (dense layers
 are excluded). Larger values sample routed layers and reduce histogram work;
@@ -176,37 +162,20 @@ W&B exposes `packing/expert_dispatch_skew_mean` and
 `packing/expert_dispatch_skew_max`. The work proxy sums the busiest destination
 across groups at each pack/layer; it is a count proxy, not predicted wall time.
 
-The archived dedicated qualification allocated four GPUs and exercises EP2, replay,
-per-sample scores, two policy-only updates, full gradients/Adam state, and
-activation recomputation on/off:
+A fixed-input check of this option should cover EP2, replay, per-sample scores,
+two policy-only updates, full gradients/Adam state, and activation recomputation
+on/off. Passing it does not establish throughput improvement or learning quality
+on a heterogeneous production workload.
 
-The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
+### Limits
 
-A passing fixed-input numerical gate does not establish throughput improvement
-or learning quality on a heterogeneous production workload.
-
-### Qualification and limits
-
-Fixed-input EP2 checks covered scores, replay, gradients and Adam state. A mixed
-workload comparison also checked predicted versus observed dispatch counts and
-periodic scoring agreement. The [archived qualification evidence](https://github.com/allenai/open-instruct/blob/a17d0bf08196c209f3f11b0759dcaeefca5401f4/docs/miles/sequence-packing.md#observed-scope-september-2026)
-retains the experiments, topology, benchmark tables and comparison limitations.
-
-These checks establish correctness only within their tested scope. They do not
-establish a learning advantage or net throughput benefit: planning has a cost,
-and generation can dominate elapsed time. Keep expert-aware packing off by
-default until its net benefit is measured for the intended topology, batch and
-workload.
-
-The archived CPU benchmark accepts a routing-panel JSON file with per-document expert
-histograms (no GPU or new generation required):
-
-The historical commands and exact inputs are retained in the [archived qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/sequence-packing.md). For current validation, follow [architecture and development](architecture.md#local-development).
-
-It compares greedy-only and bounded search on task/general panels, verifies each
-returned result with a full rescore, and records the input checksum. Panel
-histograms need not reproduce a live rollout's final synthetic replay rows;
-these are offline scheduling measurements on the supplied counts.
+Correctness checks do not establish a learning advantage or net throughput
+benefit: planning has a cost, and generation can dominate elapsed time. Keep
+expert-aware packing off by default until its net benefit is measured for the
+intended topology, batch and workload (see
+[development defaults](development-defaults.md)). When comparing, check predicted
+versus observed dispatch counts and periodic scoring agreement as well as
+end-to-end update time.
 
 Related work: [ReLibra](https://arxiv.org/html/2605.08639v1) uses incremental
 swap search and an LSE surrogate for expert placement, followed by sample-locality

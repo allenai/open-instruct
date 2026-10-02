@@ -5,7 +5,7 @@
 | [dev.toml](dev.toml) | Tiny-model colocation mechanics |
 | [small.toml](small.toml) | Disaggregated GSM8K mechanics; the recommended first run |
 | [medium.toml](medium.toml) | Mixed math, instruction-following, code and general-task MoE training |
-| [large.toml](large.toml) | Provisional multi-node trainer layout with background evaluation; not qualified |
+| [large.toml](large.toml) | Provisional multi-node trainer layout with background evaluation; adapt before use |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -71,7 +71,6 @@ protocol, outputs and limits.
 
 For either learning template, check model memory and service capacity before
 scaling. The [throughput guide](../../../docs/miles/throughput-profiles.md) explains
-the model-specific memory budgets and measured limits; its historical results do
-not qualify a new model, image or topology. Follow the
+how to size memory budgets and engine admission for a model. Follow the
 [completion checks](../../../docs/miles/operations.md) to verify training,
 checkpoint and export outputs.

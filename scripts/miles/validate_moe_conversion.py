@@ -193,7 +193,7 @@ def validate(native_path, hf_path):
     checkpoint = native_path / "model_and_optim"
     parameter_sources = validate_native_parameter_sources(model, checkpoint)
     model.to_empty(device="cpu")
-    with TemporaryDirectory(prefix="hero-model-load-") as work:
+    with TemporaryDirectory(prefix="moe-model-load-") as work:
         load_native_parameters(model, checkpoint, work)
     with SafeTensorState(hf_path) as reference:
         native_result = compare_stream(

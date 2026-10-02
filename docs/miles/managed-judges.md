@@ -3,9 +3,8 @@
 Distributed disaggregated runs require a Beaker replica group on distinct physical
 nodes. Trainer GPU count, rollout GPU count and judge GPU count are independent.
 See the [scheduling contract](launching.md#distributed-scheduling-contract)
-before submitting a multi-node run.
-The initial two-node exercise and later four-update combined async exercise are
-recorded below; short execution gates do not establish mixture learning quality.
+before submitting a multi-node run. Short execution checks do not establish
+mixture learning quality.
 
 Start from [medium.toml](../../configs/miles/examples/medium.toml), copying it to
 `runs/` before changing policy, dataset, verifier and judge inputs. Run `plan` and
@@ -36,7 +35,8 @@ allocation launcher could avoid those unused GPUs. Increasing inference capacity
 is already expressible with `inference.gpus`; engines must fit within a node and
 tensor parallelism must divide the node capacity. Multi-node colocation, separate
 evaluation GPU pools, cross-node serving TP and automatic coordinated restart
-remain unsupported. Restarting a run that carries a managed judge is not qualified: the [multi-node resume qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md) covers a two-replica trainer and engine with no judge in the allocation.
+remain unsupported. Restarting a run that carries a managed judge is untested;
+multi-node resume has been tested only without a judge in the allocation.
 
 The launcher submits one task with native replicas, leader selection and
 synchronized start. Multi-node launches require full eight-GPU nodes; partial-node
@@ -52,20 +52,20 @@ policy weights or a trainer rank from landing on a judge device.
 
 ## Named services, rubrics and bindings
 
-The schema follows olmo-miles: `[judges.NAME]` declares serving, `[rubrics.NAME]`
+The schema follows the Megatron implementation: `[judges.NAME]` declares serving, `[rubrics.NAME]`
 declares grading, and `[judging.bindings.VERIFIER]` maps prepared verifier names to
 both. Two rubrics can use one fixed service. Only bound services consume GPUs.
-The qualification file demonstrates `general-quality` and `general-quality_ref`.
+The medium and large examples bind `general-quality` and `general-quality_ref`.
 
-Managed services currently use the pinned training image's SGLang and a cached,
-revision-pinned Qwen model with the qualified `qwen3-no-thinking` template. Model
+Managed services use the pinned training image's SGLang and a cached,
+revision-pinned Qwen model with the `qwen3-no-thinking` template. Model
 weights are prepared before GPU allocation. `max_context_length`,
 `max_concurrent_calls`, `timeout`, and grading output/temperature are independent
 of policy generation settings. Existing unauthenticated OpenAI-compatible services
 can use `mode="external"`, `endpoint`, `model`, and the same context/concurrency
 settings; their lifecycle and context enforcement remain externally owned.
 Independent vLLM allocations, credentialed external judges and custom rubric files
-from the broader olmo-miles surface have not been ported yet; unsupported keys fail.
+available in the Megatron implementation are not supported yet; unsupported keys fail.
 
 For long policy responses, budget the complete grading request in **judge**
 tokens: question, candidate answer, optional reference, rubric, chat framing and
@@ -76,20 +76,19 @@ Qwen's documented factor-4 YaRN configuration (original context 32768), passed a
 a serving override without rewriting prepared weights. The native default stays
 unchanged; unsupported models, double scaling and limits above 131072 fail.
 This changes judge computation, so compare runs using the same judge setting and
-qualify long grading requests before using it for a benchmark. See the
-[qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/learning-confidence-20260914/README.md).
+check long grading requests before using it for a benchmark.
 
-The judge client was ported from olmo-miles `afbdd6f`. It uses the same rubric
+The judge client matches the Megatron implementation. It uses the same rubric
 text/digests and answer extraction, keeps `metadata.judge_query` and reference
 labels, tokenizes the full grading request plus its output reservation, and
-rejects overflow without truncating evidence. Incomplete/invalid grades and
+rejects overflow without truncating the request. Incomplete/invalid grades and
 exhausted transport errors fail the run. Raw replies, reasoning, rubric/model
 identity, retries and latency are retained in `metadata.verifier_diagnostics`.
 Named bindings use the sample-aware reward bridge; they never import code selected
 by data. Deterministic verifiers keep the existing Open Instruct path. Code uses
 the baseline HTTP payload and strict transport error handling.
 
-## Lifecycle and evidence
+## Lifecycle and audit artifacts
 
 A unique submission UUID isolates coordination records under
 `OUTPUT/cluster/UUID`. Each replica supervises its local Ray/judge process groups
@@ -105,22 +104,15 @@ The driver checks model discovery and known-good versus known-bad answers throug
 each named binding before training. Inspect `placement-*.json`, `ray-layout.json`,
 `judge-canaries.json`, `registry.json`, `complete.json` and `cleanup-*.json`, alongside
 Core optimizer/publication/replay contracts and retained rollout metadata.
-`driver-RANK.log` and `judge-NAME-RANK.log` stay on WEKA. Tiny exercise success must
+`driver-RANK.log` and `judge-NAME-RANK.log` stay on WEKA. A successful tiny run must
 include finite optimizer steps, policy refresh and actual judge replies; process
 exit alone is insufficient. Startup controls do not establish judge calibration
-or throughput for a production mixture.
-
-Implementation status: the two-node, two-update EP2 mixed-task exercise passed
-with the native MILES router and both named judge bindings; its retained-sample
-audit also passed. See the [results](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-judges-20260912.md).
-The later [EP2 + three engines + one judge exercise](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/colleague-20260913/README.md)
-also passed async/TIS, replay/packing, saves and actual prefix-cache hits. Neither
-establishes the full EP8 judged combination, 32K judged responses or sustained
-multi-node performance.
+or throughput for a production mixture. The full EP8 judged combination, 32K
+judged responses and sustained multi-node performance are untested.
 
 ## Policy-engine health
 
-The pinned MILES fork now owns the raw-JSON router fix ported from olmo-miles.
+The pinned MILES fork owns the raw-JSON router handling.
 Open Instruct uses its native spawn target without a startup hook or subclass.
 Generation and health have independent HTTP connection pools: saturating the
 generation pool must not prevent probes from reaching healthy engines. Native
@@ -130,7 +122,5 @@ Health failure logs include the exception class.
 
 Quarantine remains sticky until explicit worker registration; HTTP recovery alone
 cannot prove an engine has current policy weights. Registration epochs reject
-late probe results from retired incarnations. This fix does not independently
-qualify engine replacement or enable fault tolerance. The bounded named-judge
-exercise and its failed attempts are recorded in the
-[measurement note](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-judges-20260912.md).
+late probe results from retired incarnations. Engine replacement is untested,
+and this does not enable fault tolerance.

@@ -7,7 +7,7 @@ preparation, placement and submission should come from one file.
 
 | Layer | Owns |
 |---|---|
-| Open Instruct wrapper | Config validation, preparation, verifiers, launch/receipts, retained evidence |
+| Open Instruct wrapper | Config validation, preparation, verifiers, launch/receipts, run artifacts |
 | MILES runtime | Rollout actors, SGLang engines, sample/advantage/loss machinery, shared transport helpers |
 | Core adapter (in MILES) | Model construction, document/replay alignment, scoring/training forward, gradient synchronization, optimizer/checkpoints and tensor export |
 | OLMo-core | Model and distributed-training primitives, attention/expert execution |
@@ -31,7 +31,7 @@ The ordinary Open Instruct environment keeps its own dependency versions.
 
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
-require a qualified new binary base. The Dockerfile separates a `runtime-base`
+require a new, validated binary base. The Dockerfile separates a `runtime-base`
 stage (locked dependency sources and verifier packages) from `application`
 (Open Instruct, tests, scripts, configs and MILES docs). Build the former with
 `build_image.py --target runtime-base` to reuse the prepared layer. Ordinary builds
@@ -48,8 +48,8 @@ The build needs read access to the private `allenai/miles` and `allenai/olmo-sgl
 credential, passed through a temporary BuildKit secret. It is not stored in image
 layers or Git URLs. For standalone source preparation, pass
 `--github-token-file PATH` or use `--cache olmo-sglang=/path/to/clone`.
-Existing published images retain their original sources; rebuild before using
-this pin.
+Existing published images retain their original sources; rebuild after changing
+the lock.
 
 prepare_runtime refuses to replace existing source directories. Its --cache
 arguments can use local clones as fetch sources; they do not select uncommitted
@@ -86,27 +86,16 @@ bash scripts/miles/test_runtime.sh -q
 This command fails if runtime dependencies are missing. Without the explicit
 runtime flag, ordinary CPU collection omits `tests/miles/` when MILES or SGLang
 is absent. CUDA numerical cases skip when no GPU is visible. A passing CPU run
-therefore does not qualify GPU kernels, distributed gradients or publication.
+therefore does not check GPU kernels, distributed gradients or publication.
 The ordinary Open Instruct GPU CI image does not include the private MILES
 runtime; dedicated runtime checks are a separate maintainer validation step.
 
 For a training lifecycle check, copy [small.toml](../../configs/miles/examples/small.toml)
 to `runs/`, select a compatible tiny checkpoint, and follow the
 [committed-image launcher](launching.md). Verify the rendered replica group and
-retain image, config and completion artifacts. Exercise refresh separately when
+retain image, config and completion artifacts. Test refresh separately when
 changing publication behavior; a tiny mechanics check does not establish learning
-quality. Archived research harnesses and their tests live at the
-[pre-cleanup revision](https://github.com/allenai/open-instruct/tree/813bd5988beb16be5b4d879ee3e2c49d8d859ee5)
-on `archive/miles-before-main-cleanup-20260926`. That snapshot retains the dated
-launchers, experiment payloads, reports and their campaign-specific tests. Use
-a separate checkout of the archived revision to reproduce those experiments.
-
-The narrower GSM8K `audit_workflow.py` and its tests are preserved at the
-[later cleanup snapshot](https://github.com/allenai/open-instruct/tree/8ae0e322f89d5f8dd00ef407c59f577e8e739cad)
-on `archive/miles-before-provenance-cleanup-20260927`. They assumed a fresh run,
-one optimizer step per collection, rank-strided sample distribution and
-per-step diagnostics. Current runtime contract tests and the lifecycle checks
-above cover the maintained path; this historical auditor is not part of it.
+quality.
 
 ## Documentation checks
 
@@ -146,8 +135,8 @@ model-dependent resolved defaults. To inspect Markdown separately, run
 `python -m scripts.miles.generate_docs --output-dir runs/miles-docs` (optionally
 with `--native-help runs/native-help.json`). `--check` validates the reference
 inputs without writing files. Edit source definitions and reviewed descriptions,
-not generated output. Do not copy measurement settings into maintained examples
-without a deliberate recipe change.
+not generated output. Change maintained examples only as a deliberate recipe
+change; see [development defaults](development-defaults.md).
 
 ### Type checking the moved adapter
 
@@ -158,7 +147,7 @@ ty check /path/to/miles/miles/backends/core_utils --extra-search-path /path/to/O
 ```
 
 Open Instruct's CPU checks do not fetch the private MILES repository. The committed
-application image and runtime tests exercise both repositories together.
+application image and runtime tests check both repositories together.
 
 ## Adapter package layout
 
@@ -182,13 +171,12 @@ CPU-only, model backends loaded on demand, and package initializers minimal.
 MILES `backends/core_utils/data.py` adapts samples to the trainer; `rollout/data_source.py` owns
 runtime data-source behavior; `datasets/run_data.py` prepares researcher inputs.
 
-Python integration imports now use these package paths, for example
+Python integration imports use these package paths, for example
 `from open_instruct.miles.configuration.run_spec import RunSpec`. The pinned
 AllenAI MILES fork must use the matching trainer and rollout hook paths. Rebuild
 the application image when updating this layout and its runtime pin together;
 existing images retain their original code. Custom verifier factories and saved
-native options containing old Python paths need the corresponding package prefix
-before use with a new image. Historical run artifacts retain their original paths.
+native options must reference these package paths.
 
 The CPU CLI checks in `open_instruct/test_miles_package_layout.py` run without
 site-packages. `tests/miles/test_package_layout.py` resolves hooks supplied by
@@ -212,18 +200,17 @@ throughput arithmetic.
 
 ## Core runtime compatibility
 
-The runtime lock pins Core `b1a2703d73493bb7f8ca2b91b200f3e3394a5f74`, retained by
-the durable [`miles-runtime-20260927-ci1` tag](https://github.com/allenai/OLMo-core/tree/miles-runtime-20260927-ci1).
-The adapter interfaces are proposed in [OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888).
-The previous pin remains available as `miles-runtime-pre-main-3c2ad5989` for
-historical reproduction.
+The `olmo-core` revision in
+[`runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the Core source used
+by the runtime. The adapter interfaces it relies on are proposed upstream in
+[OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888).
 
 Core's routed-expert `match_eager_rounding` defaults to false. The pinned MILES
 adapter explicitly enables it for policy scoring and accepts legacy MILES
-checkpoint manifests with equivalent scoring semantics. Existing Core users
-retain the default behavior.
+checkpoint manifests with equivalent scoring semantics. Other Core users keep
+the default behavior.
 
-Core's PR checks and application qualification cover different boundaries.
+Core's PR checks and application validation cover different boundaries.
 Rebuild runtime/application images from the lock and validate the intended
 training topology; an existing image retains its original source revisions.
 Record application validation with the exact image and source pins. The compact

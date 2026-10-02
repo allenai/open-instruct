@@ -1,4 +1,4 @@
-"""Named services and rubric bindings, following the olmo-miles run-file contract."""
+"""Named services and rubric bindings, following the Megatron implementation's run-file contract."""
 
 import copy
 import re

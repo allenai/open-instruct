@@ -12,9 +12,9 @@ checkpoint/collective failures still fail training.
 The [large example](../../configs/miles/examples/large.toml) opts into background
 evaluation with the published image, separate one-GPU jobs and starter GSM8K,
 GSM8K-Platinum and IFBench tasks. Dev, small and medium retain shared-engine
-evaluation, which also remains the low-level default. The large template is provisional, not full-model
-qualification. Remove explicit shared
-settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
+evaluation, which also remains the low-level default. The large template is
+provisional; check evaluator compatibility for the full model. Remove explicit
+shared settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
 `n_samples_per_eval_prompt`, `data.eval_prompt_data`, positive task `eval_count`)
 when selecting background mode. Evaluation tasks are independent of training
 `data.tasks`; no evaluation-only dataset needs to be added to the training mix.
@@ -25,7 +25,7 @@ mode = "background"
 interval = 20                 # Completed optimizer updates, not collections
 initial = true
 final = true
-image = "IMMUTABLE_BEAKER_IMAGE_ID" # Replace with a qualified evaluator image
+image = "IMMUTABLE_BEAKER_IMAGE_ID" # Replace with a compatible evaluator image
 revision = "FULL_40_CHARACTER_OLMO_EVAL_COMMIT"
 gpus = 1                     # Separate allocation; never training GPUs
 cluster = "ai2/holmes"
@@ -121,9 +121,8 @@ A fully completed group validates and reuses its results without loading the
 model. A restart after the last task but before the group completion record also
 finishes without loading the model. Publication may be retried, so duplicate
 W&B points remain possible. Existing flat, completed result directories are
-accepted only after the same artifact/coverage checks. These changes apply to
-new submissions carrying the updated runner; retrying an old Beaker spec still
-runs its old embedded runner.
+accepted only after the same artifact/coverage checks. The runner is embedded in
+each Beaker spec, so retrying a spec runs the runner it was submitted with.
 
 The runner rejects missing prediction files and empty `model_output` lists before
 declaring evaluation complete. Some evaluator provider failures can otherwise
@@ -185,33 +184,27 @@ Do not delete snapshots while jobs are pending or running. Keep small receipts
 and results as provenance. Initial checkpoint reuse additionally depends on the
 original HF source remaining available.
 
-## Evaluator image and qualification
+## Evaluator image and compatibility
 
 `runtime/miles/Dockerfile.evaluator` builds a separate evaluator image from a
-qualified MILES serving image and a pinned olmo-eval revision. It retains the
+MILES serving image and a pinned olmo-eval revision. It retains the
 Olmo MoE SGLang architecture extension, installs olmo-eval in a separate CPU
 virtual environment, and connects olmo-eval's `vllm_server` API client to its own
 private SGLang server. It does not launch vLLM. The runner checks the olmo-eval
 revision before starting. Build dependencies at image construction, never during
 an evaluation job. Publish the image to Beaker and configure its immutable ID.
 
-The large example pins evaluator image `01M3RMHHC89VZ9NHVNSK72G3BF` with
-olmo-eval revision `eac110dad2bb85e116f505bed2a976bb0dbdfaf8`, which includes
-`gsm8k:platinum`. Its serving base is the Open Instruct `e347bb6d4` runtime.
-CPU checks cover task resolution, GSM8K/Platinum dataset loading and answer
-extraction, the generated CLI command and separate task metric names. This image
-has not yet had a GPU evaluation run; the archived tiny-MoE evaluation below used
-an earlier evaluator revision and image.
+The large example sets `image` to the published evaluator image
+`01M3RMHHC89VZ9NHVNSK72G3BF` and `revision` to olmo-eval
+`eac110dad2bb85e116f505bed2a976bb0dbdfaf8`, which includes `gsm8k:platinum`.
+Change both together when building a new evaluator image.
 
-Compatibility must be qualified for the exported architecture, serving backend,
-task and image; an OpenAI-compatible endpoint alone does not prove loglikelihood
-or task correctness. Use generation tasks for the initial tiny MoE check. A
-successful mechanics check is not evidence of model quality. Follow the normal
-committed-image MILES wrapper for training qualification. Use ignored `runs/`
-configs and fresh output paths; leave existing experiments unchanged.
-
-Live GPU results and W&B publication semantics are recorded in the
-[archived evaluator qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/background-evaluation-20260920.md).
+Check compatibility for the exported architecture, serving backend, task and
+image; an OpenAI-compatible endpoint alone does not prove loglikelihood or task
+correctness. Use generation tasks for an initial tiny MoE check. A successful
+mechanics check says nothing about model quality. Launch training through the
+normal committed-image MILES wrapper. Use ignored `runs/` configs and fresh
+output paths; leave existing experiments unchanged.
 
 ## Development gold labels and scoring
 
@@ -232,6 +225,6 @@ custom evaluator bundles; a missing scoring module fails collection when
 olmo-eval is installed. Without olmo-eval, ordinary CPU collection skips them.
 
 Include this module in the custom worker's content manifest and import its
-`score_one(row, item)` for development tasks. Qualify the actual panel's label
+`score_one(row, item)` for development tasks. Check the actual panel's label
 schema, not just synthetic scalar-label canaries. Version corrected bundles;
 never modify a running experiment's immutable dataset in place.

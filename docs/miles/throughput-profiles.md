@@ -3,42 +3,23 @@
 Use the trainer size and **desired optimization batch** to choose a starting
 profile, then provision inference to keep completed-group waiting near zero.
 Measure decode CUDA graphs, engine admission and trainer wait together. Faster
-training can shift the bottleneck to rollout supply. The [archived throughput
-qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md)
-and [packed controls](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/packed-capacity-results-20260914.md)
-retain the measured configurations and results.
+training can shift the bottleneck to rollout supply.
 
-These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
-GSM8K-style responses capped at 4096 tokens, and Holmes B300 GPUs. They are a
-measured starting point, not a universal fit or learning-quality guarantee. The
-hybrid MoE checkpoint, dense/FSDP trainer, judges, code execution and longer contexts
-need their own capacity checks. See [measurements and figures](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/throughput-20260913.md)
-and the [chronological campaign log](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/throughput-campaign-20260913.md).
-
-## Runtime image
-
-For the maintained examples, use the current image and qualification boundaries
-in the [MILES GRPO guide](grpo.md). Its [archived router qualification record](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/router-controls-20260918.md)
-distinguishes completed tiny-model checks from the full-policy checks still in progress.
-
-The historical throughput results below used application source `2c477efd5`
-and image `01M2F1RKZFZVJYAS0XQGEC3SEJ`, with the exact qualification overlays
-recorded in [the original report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md).
-That runtime passed 113 packaged CPU tests; the EP8 mixed-task attempt stopped
-after one update on an HTTP transport error. These measurements are not a new
-throughput qualification of the current image or the 32K medium template.
+Throughput depends on the model architecture, response lengths, GPU type,
+trainer backend and any judges or code execution in the reward path. Treat the
+guidance here as a starting point and check capacity for each new combination.
+[Development defaults](development-defaults.md) summarizes the recommended
+starting values.
 
 ## Choose a profile
 
 Choose among the four [maintained starters](../../configs/miles/examples/README.md).
 Their [generated recipe tables](configuration.md#example-recipes) show GPU
-allocations and batch geometry from the current TOMLs.
-
-The measurements below describe historical 4K experiments. Their labels such as
-“small” and “large” are historical campaign names, not the current starter sizes.
-Do not transfer the 4K no-recomputation setting to 32K packs without measuring
-memory. The maintained medium and large use recomputation and engine admission 64,
-sized as described below.
+allocations and batch geometry from the current TOMLs. For the runtime image, see
+the [MILES GRPO guide](grpo.md). Do not transfer a short-context
+no-recomputation setting to long packs without checking memory; the maintained
+medium and large use recomputation and engine admission 64, sized as described
+below.
 
 ## Size engine admission from memory
 
@@ -50,17 +31,19 @@ and the two memory pools below. Decode throughput grows with batch size until th
 GPU saturates, so an admission set below what memory allows leaves throughput
 unused whenever training waits for batches.
 
-For the 18.5B-total KDA/latent MoE served on one GPU per engine:
+As a worked example, consider a hybrid MoE served on one GPU per engine whose
+weights occupy 34.5 GiB, with 4 full-attention layers × 8 KV heads × 128 dims and
+16 recurrent (KDA) layers × 16 heads × 128 × 256 state:
 
-| Pool | Size per unit | Source |
+| Pool | Size per unit | Derivation |
 |---|---|---|
-| Weights | 34.5 GiB | `Load weight end ... mem usage=34.52 GB` |
-| Full-attention KV cache | 16 KiB per token: 2 (K, V) × 4 attention layers × 8 KV heads × 128 dims × 2 bytes | `KV Cache is allocated ... #tokens: 786432, K size: 6.00 GB, V size: 6.00 GB` |
-| KDA recurrent state | About 32 MiB per slot (16 KDA layers × 16 heads × 128 × 256, FP32) | Pool allocation minus KV: 45 GiB for 1,024 slots and 786,432 tokens |
+| Weights | 34.5 GiB | Engine log `Load weight end ... mem usage` |
+| Full-attention KV cache | 16 KiB per token | 2 (K, V) × 4 layers × 8 KV heads × 128 dims × 2 bytes |
+| KDA recurrent state | About 32 MiB per slot | 16 layers × 16 heads × 128 × 256, FP32 |
 
-SGLang reports these values in GiB although its logs print “GB”. The sources are
-engine logs from the archived mixed 32K runs on Holmes B300, where each engine
-saw 266.9 GiB and kept 187.3 GiB free after all pools and graphs were allocated.
+Read the actual sizes for your model from the engine startup logs (`Load weight
+end`, `KV Cache is allocated`). SGLang reports these values in GiB although its
+logs print “GB”.
 
 To choose admission `R` for context length `C` (`inference.max_context_length`):
 
@@ -70,81 +53,61 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    request at full context, so KV capacity never forces a retraction.
 3. Keep `sglang_max_mamba_cache_size` above `5 × R` with the KDA radix cache (the
    validator enforces this), or at least `R` with radix caching off.
-4. Check that weights + `R × C × 16 KiB` + slots × 32 MiB fits within
-   `sglang_mem_fraction_static` × visible GPU memory. At 0.7 on a B300 the budget
-   is about 187 GiB.
+4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
+   slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
 5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to
    `max(collection, 2 × engines × R)` samples, which keeps every engine refilled
    without a long upstream queue.
 
-Worked budget at `C = 34,816` with 1,024 state slots (32 GiB):
+For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 
-| `R` | KV pool | Weights + KV + state | Fits in 187 GiB? |
-|---|---|---|---|
-| 16 | 8.5 GiB | 75 GiB | Yes |
-| 32 | 17 GiB | 84 GiB | Yes |
-| 64 | 34 GiB | 101 GiB | Yes: maintained medium and large |
-| 128 | 68 GiB | 135 GiB | Yes, but see the router limit below |
+| `R` | KV pool | Weights + KV + state |
+|---|---|---|
+| 16 | 8.5 GiB | 75 GiB |
+| 32 | 17 GiB | 84 GiB |
+| 64 | 34 GiB | 101 GiB |
+| 128 | 68 GiB | 135 GiB |
 
-On B300, memory stops binding well before the other limits. The 4K live refresh
-runs at 128 and 256 concurrency failed after 8 and 6 updates with MILES-router `ReadError`/503
-transport errors, without evidence of an out-of-memory failure
-([packed capacity results](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/packed-capacity-results-20260914.md)).
-Keep `R ≤ 64` until that failure is understood. On a smaller GPU, run the same
-arithmetic before lowering anything: an 80 GiB GPU at static fraction 0.7 leaves
-about 21 GiB after weights, so reduce `R` or the state-slot count to fit that.
+On a large-memory GPU, memory may stop binding well before other limits such as
+router and transport capacity. Keep `R ≤ 64` as the starting point (see
+[development defaults](development-defaults.md)) and raise it only while the
+router and engines stay healthy. On a smaller GPU, run the same arithmetic before
+lowering anything: an 80 GiB GPU at static fraction 0.7 leaves about 21 GiB after
+the example weights, so reduce `R` or the state-slot count to fit that.
 
 After launch, confirm the setting from the engine metrics:
 
 - `#running-req` should sit near `R` while the trainer waits for batches.
 - `token usage` should stay below 1, with few retractions.
-- Per-engine generation throughput should rise over the admission-16 baseline of
-  about 1,730 tokens/s.
+- Per-engine generation throughput should rise over a lower-admission baseline.
 
 If requests run at the cap with KV usage far below one half while training waits,
-admission is too low. The archived mixed 32K run showed this at `R = 16`: 15.6
-of 16 running, 24% KV usage, and training waiting for batches for 78% of the
-workflow. The throughput gain from 16 to 64 at 32K has not yet been measured live. The fixed-policy single-engine benchmark, with
-2,048-token responses, rose from 4,749 to 6,171 tokens/s between 32 and 64
-concurrent sequences and was still rising at 512.
+admission is too low.
 
-## Settings in the historical 4K measurements
+## Other serving and training settings
 
 * Enable **full decode CUDA graphs** through the configured request admission;
-  keep prefill graphs disabled for this qualified refresh path. The historical EP2 experiment
-  used 32 HTTP/running slots per engine and capture through batch 32.
-* Keep radix caching with the `extra_buffer` KDA strategy and static memory
-  fraction 0.6. The historical small profile used 786432 token slots and 1024
-  recurrent-state slots per engine; the historical large profile used
-  131072/128 pools at concurrency 16. These are requested
-  limits; inspect the engine's resolved capacities and memory after capture.
+  keep prefill graphs disabled on the refresh path.
+* Requested pool sizes are limits; inspect the engine's resolved capacities and
+  memory after graph capture.
 * Use dynamic-row Core kernels and persistent Triton caching. Cache namespaces
   include source/configuration identity; new configurations can still start cold.
-* Publish every optimizer step using flattened 1-GiB buckets and per-expert
-  export. Warm publication was about three to four seconds in these trials.
-* The historical EP2 profile enabled 6144-token trainer packing, disabled
-  activation recomputation and used guarded scoring skip. The full-SFT EP2 live test passed
-  all 24 updates, with an initial bit-exact scoring check. It used about 197 GiB
-  per trainer GPU in the matched screen; restore recomputation for smaller memory
-  budgets. See [qualification and the larger baseline](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/full-sft-basket-20260914.md).
-* Keep the completed FIFO to one collection. The historical small profile used a
-  512-sample producer budget; it can retain substantial work at shutdown.
-  The automatic producer default, when not overridden, is
-  one collection or two waves of requested serving admission, whichever is larger.
-  It is a starting heuristic, not an instruction to produce as far ahead as possible.
+* Publish every optimizer step using flattened 1-GiB buckets and per-expert export.
+* Disabling activation recomputation can help short contexts when memory allows;
+  restore it for long contexts or smaller memory budgets.
+* Keep the completed FIFO to one collection. A large explicit producer budget can
+  retain substantial work at shutdown. The automatic producer default, when not
+  overridden, is one collection or two waves of requested serving admission,
+  whichever is larger. It is a starting heuristic, not an instruction to produce
+  as far ahead as possible.
 * Enable pipeline observations and serving metrics to see where work waits.
-  Detailed route replay diagnostics were enabled in graph qualification; starter
-  files leave that extra audit disabled. Ordinary shape/probability/version and
-  optimizer checks remain active.
+  Starter files leave detailed route replay diagnostics disabled. Ordinary
+  shape/probability/version and optimizer checks remain active.
 
 The examples prepare a normal train/eval task split and retain evaluation, native
-saves and optional final HF export. The throughput basket used frozen prepared
-GSM8K inputs and disabled eval/saves/export to isolate normal cycles. Its timing
-numbers therefore do not predict total wall time with those additional stages.
-Do not infer resume or export qualification from this basket.
-
-See the [capacity dashboard guide](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/capacity-dashboard.md) for rate definitions,
-trainer tuning controls and the reusable W&B report publisher.
+saves and optional final HF export. Disable eval, saves and export when isolating
+normal training cycles, and remember that such timings do not predict total wall
+time with those stages.
 
 ## Read the right measurements
 
@@ -169,8 +132,9 @@ visible rather than hiding the tradeoff by raising it.
 
 Sampled engine admission and queue counts show occupancy. NVML GPU activity shows
 kernel activity, not SM occupancy or achieved FLOPs. High HTTP occupancy alone
-is not proof of an efficient serving engine: the graphs-off runs occupied their
-request slots while showing much lower device activity and useful throughput.
+does not mean an efficient serving engine: without decode CUDA graphs, engines can
+occupy their request slots while showing much lower device activity and useful
+throughput.
 
 ## Warmup and a short comparison procedure
 
@@ -187,13 +151,11 @@ request slots while showing much lower device activity and useful throughput.
    state-pool and capture limits. If engines are efficiently busy, add inference.
    If training is supplied and drops grow, reduce ahead-of-training work.
 5. Confirm all trainer ranks completed the intended optimizer sequence and the
-   workflow shut down successfully before recording a passing qualification.
+   workflow shut down successfully before recording a result.
 
-The observed two-trainer and eight-trainer training times generally settled by updates four to six,
-with earlier outliers and cold first steps lasting several minutes. This is a
-**timing-based** warmup criterion, not proof that no further kernel compilation
-can occur. The separate compiler-cache tests cover cache reuse; this topology
-basket is not a cache hit-rate experiment.
+Cold first steps can last several minutes. Excluding early updates is a
+**timing-based** warmup criterion, not a guarantee that no further kernel
+compilation can occur.
 
 ## How the limits interact
 
@@ -237,10 +199,7 @@ python -m open_instruct.miles run /path/to/run.toml
 ```
 
 Follow the [launch guide](launching.md) to build the runtime from this branch's
-pinned sources. Qualification reused an older immutable image with a recorded,
-committed source overlay; that base image alone is not the complete qualified
-runtime. The lock and patches include the corresponding MILES changes for a
-normal build. Use a new output root for each configuration.
+pinned sources. Use a new output root for each configuration.
 
 `plan` includes `runtime.throughput` and `runtime.async_capacity`. Invalid geometry
 and nonpositive limits fail validation; advisories explain undersupplied engines,
@@ -251,6 +210,6 @@ ownership, semaphore, retry and lifecycle semantics.
 The examples use high-priority Holmes placement in `ai2/open-instruct-dev`
 and explicit GPU allocation. Minimum runtimes vary by tier; see
 [placement guidance](launching.md#placement-secrets-and-results), including the
-separate CPU scheduling policy. Multi-node auto-resume is qualified for the restart path in
-[multi-node resume](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md); forced preemption, and restarts of runs
-carrying a managed judge, are not.
+separate CPU scheduling policy. Multi-node auto-resume covers the ordinary
+restart path; forced preemption, and restarts of runs carrying a managed judge,
+are not yet supported paths.

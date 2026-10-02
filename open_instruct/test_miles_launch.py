@@ -66,10 +66,11 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     assert task["resources"]["gpuCount"] == gpus
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
     assert task["context"]["priority"] == "high"
-    assert task["context"]["minRuntime"] == "1h"
+    assert task["context"]["minRuntime"] == "0s"
 
 
-def test_multinode_native_replica_group(tmp_path, monkeypatch):
+@pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])
+def test_multinode_native_replica_group(tmp_path, monkeypatch, minimum):
     def no_inventory(*args, **kwargs):
         raise AssertionError("Rendering a native replica group must not query free nodes")
 
@@ -78,7 +79,7 @@ def test_multinode_native_replica_group(tmp_path, monkeypatch):
         tmp_path,
         trainer={"gpus": 4},
         inference={"placement_mode": "disaggregated", "gpus": 12},
-        launch={"gpus_per_replica": 8, "min_runtime": "4h"},
+        launch={"gpus_per_replica": 8, "min_runtime": minimum, "timeout": "6h"},
     )
     tasks = launch.specification(IMAGE_ID, run)["tasks"]
     assert len(tasks) == 1
@@ -90,7 +91,8 @@ def test_multinode_native_replica_group(tmp_path, monkeypatch):
     )
     assert task["synchronizedStartTimeout"] == "60m"
     assert "--replicas 2 --network-mode host" in task["arguments"][0]
-    assert task["context"]["minRuntime"] == "4h"
+    assert task["context"]["minRuntime"] == ("4h" if minimum == "4h" else "0s")
+    assert payload(task["arguments"][0])["launch"]["min_runtime"] == task["context"]["minRuntime"]
     assert task["constraints"] == {"cluster": ["ai2/holmes"]}
     assert not any("REPLICA_" in entry["name"] for entry in task["envVars"])
     filtered = launch.specification(IMAGE_ID, run, hostnames=["host-a", "host-b", "host-c"])

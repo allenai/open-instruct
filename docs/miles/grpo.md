@@ -2,8 +2,8 @@
 
 Use MILES GRPO for reinforcement learning through Open Instruct, with OLMo-core
 training and SGLang inference. This guide covers setup, the pinned runtime
-and a first run. [Support and boundaries](feature-parity.md) remain specific to the
-model and topology; retain each run's image, configuration and checkpoint identity.
+and a first run. See [support and limits](feature-parity.md) for what is available
+and [development defaults](development-defaults.md) for starting settings.
 
 ## Run MILES GRPO
 
@@ -25,25 +25,20 @@ currently requires access to private AI2 source repositories and the pinned
 binary base; this integration is not a self-contained public training install.
 See [image setup](launching.md#laptop-choose-or-build-an-image).
 
-The [support matrix](feature-parity.md) and [measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md)
-distinguish short lifecycle checks, learning-path evidence and longer experiments.
-Use those recorded boundaries when choosing a model, topology or recipe.
-
 ## Router auxiliary losses in the examples
 
 The four maintained examples set both router balancing and z-loss coefficients
-to zero. This matches the current RL investigation recipe; low-level API defaults
-remain unchanged. Re-enable either coefficient explicitly for an auxiliary-loss
-experiment. Mixed-workload quality and throughput evidence remains in progress.
+to zero; low-level API defaults remain nonzero. Re-enable either coefficient
+explicitly to train with auxiliary losses. See
+[router auxiliary objectives](core.md#router-auxiliary-objectives) for the controls.
 
 ## Experimental expert-aware packing
 
 Replay-informed expert-aware packing is **experimental and disabled by default**
 in all maintained examples. Opt in with `trainer.expert_balanced_packing=true`
-only on a supported topology. Correctness qualification has passed for the tested
-configurations; planning overhead can offset training savings, and a learning
-benefit has not been established. See [requirements, controls and measured
-scope](sequence-packing.md#replay-informed-expert-aware-packing-experimental).
+only on a supported topology. Planning overhead can offset training savings;
+measure end-to-end update time before adopting it. See [requirements and
+controls](sequence-packing.md#replay-informed-expert-aware-packing-experimental).
 
 ## Online filtering default
 
@@ -53,13 +48,6 @@ correctness preprocessing can still be applied. The tiny `dev`/`small` mechanics
 examples explicitly disable filtering to permit all-zero-reward checks. See
 [data and evaluation](data-and-evaluation.md#online-group-filtering) for metrics,
 batch semantics and the opt-out.
-
-This default and its refresh/engine-drain support require an application image
-built from the updated source, including async retry-ledger retirement. The older
-images preceding the filtering qualification do not include this change. The
-[small filtering qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/online-filtering-20260919.md) passed
-with barrier and refresh publication. Local source changes are not overlaid onto
-an existing application image.
 
 ## Excluding truncated responses
 
@@ -76,16 +64,13 @@ Truncated responses then get zero advantage and a zeroed loss mask, and each gro
 baseline uses only its finished responses. Raw reward metrics are unchanged. With
 response-averaged loss, excluded responses still count in the batch denominator.
 
-## Runtime and qualification
+## Runtime images
 
 Build an application image from the source revision you intend to run, using the
 [locked runtime](architecture.md#runtime-sources-and-images). Reusing an image
 runs its original code; local Python edits are not submitted with the TOML.
-
-Historical [qualification records](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md)
-record their own model, image, topology and limits. They do not qualify subsequent
-source changes or every maintained template. Use the [validation procedure](architecture.md#local-development)
-for current changes, then exercise the selected model and topology.
+Use the [validation procedure](architecture.md#local-development) for source
+changes, then try the selected model and topology on a small run.
 
 ## Publication modes
 

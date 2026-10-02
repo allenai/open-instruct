@@ -1,7 +1,7 @@
 # Launching MILES runs
 
 This guide covers the current **config-driven launcher**. It does not require
-sibling olmo-miles, MILES or Core worktrees. The selected runtime image contains
+sibling MILES or Core worktrees. The selected runtime image contains
 the training dependencies and adapter sources. See [architecture](architecture.md)
 for building and updating that image.
 
@@ -57,7 +57,7 @@ Supply model/data paths and any secrets needed by your run. Beaker resource
 permissions are required.
 
 For an **already built compatible image**, obtain its immutable ID and source
-provenance from its maintainer or qualification record. Inspect its metadata:
+provenance from its maintainer. Inspect its metadata:
 
 ```bash
 beaker image get IMMUTABLE_IMAGE_ID --format json
@@ -70,8 +70,8 @@ checks the ID, but does **not** prove source compatibility with your checkout.
 The submitted config is carried into the job; your local Python changes are not.
 Use an image built from the intended source revision. The launch receipt records
 the submitting revision and selected image separately. In particular, the job
-now calls `open_instruct.miles.execution.preflight_network` and
-`open_instruct.miles.execution.preflight_attention`; older images missing these
+calls `open_instruct.miles.execution.preflight_network` and
+`open_instruct.miles.execution.preflight_attention`; an image missing these
 entrypoints must be rebuilt.
 
 To deploy source changes, commit them and build the source overlay instead.
@@ -94,8 +94,7 @@ Both modes require a clean, committed checkout and delegate through
 `scripts/train/build_image_and_launch.sh --miles`. `run` performs launch checks
 before building, including mount coverage. The MILES image wrapper passes the
 frozen configuration directly to `open_instruct.miles.execution.submit`; no
-debug launch script is involved. It does not implement olmo-miles'
-`--skip-local-gate` option or its image-preflight contract.
+debug launch script is involved.
 
 ## Distributed scheduling contract
 
@@ -127,7 +126,17 @@ tasks:
 This is a scheduling excerpt, not a complete submission. It requests 16 GPUs
 as a group. A positive `minRuntime` selects allocated scheduling and provides a
 preemption-protected window; it neither groups independent tasks nor promises an
-immediate start. `timeout` bounds execution. Synchronized start bounds the wait
+immediate start. Set `launch.min_runtime = 0` (without units), `"0"`, `"0s"`, or
+`""` for unallocated scheduling; blank and zero inputs are submitted as `"0s"`.
+This is allowed for both single-node and distributed runs. Omitting the field
+also selects unallocated scheduling (`"0s"`); a protected window must be explicit.
+
+`timeout` independently bounds execution and may be shorter than `min_runtime`;
+zero requests no explicit execution timeout, subject to Beaker's cluster policy.
+`plan` and `validate` check duration syntax and report scheduling warnings without
+requiring a protected minimum runtime. Beaker enforces its scheduling limits.
+Jobs that can outlive their protected window warn when periodic checkpoints and
+auto-resume are not both enabled. Synchronized start bounds the wait
 for replica startup and is separate from application rendezvous. Beaker supplies
 `BEAKER_REPLICA_RANK` and `BEAKER_REPLICA_COUNT` to the replicas.
 
@@ -148,34 +157,34 @@ PY
 
 Verify the replica group, `replicas * resources.gpuCount`, context, placement,
 mounts and immutable image. `plan` and `validate` alone do not verify Beaker
-scheduling. After submission, retain `beaker experiment spec EXPERIMENT_ID` with
-the run evidence. Its YAML expands replicas into separate task entries and omits
-the group fields; do not infer grouping from the exported task count. Verify
-the latest jobs' metadata instead:
+scheduling. After submission, `beaker experiment spec EXPERIMENT_ID` expands
+replicas into separate task entries and omits the group fields; do not infer
+grouping from the exported task count. Verify the newest job attempt for each
+task and replica rank instead (`python -m open_instruct.miles status` reports
+the same per-replica view):
 
 ```bash
-beaker experiment get EXPERIMENT_ID --format json | jq '.[0].jobs[] | {
-  id, status,
-  group: .execution.replicaGroupID,
-  rank: .execution.replicaRank,
-  leaderSelection: .execution.spec.leaderSelection
-}'
+beaker experiment get EXPERIMENT_ID --format json | jq '.[0].jobs
+  | group_by([.execution.task, .execution.replicaRank])
+  | map(max_by(.status.created) | {
+      id, status,
+      group: .execution.replicaGroupID,
+      rank: .execution.replicaRank,
+      leaderSelection: .execution.spec.leaderSelection
+    })'
 ```
 
-All current replicas must share a nonempty group ID, cover ranks `0..N-1`, and
-have leader selection enabled. Inspect scheduler events for each current job.
+Earlier attempts of a retried replica are superseded and can be ignored. All
+current replicas must share a nonempty group ID, cover ranks `0..N-1`, and have
+leader selection enabled. Inspect scheduler events for each current job.
 
 Distinct-host placement is an additional requirement of the MILES bootstrap.
 Multi-node launches currently require `launch.gpus_per_replica=8` and eight-GPU
 physical nodes. Partial-node replicas may share a host and are rejected by the
 launcher. Separate tasks with disjoint hostname pools are not an acceptable
 replacement for group scheduling. Other physical node sizes need explicit
-placement support before launching.
-
-The current launcher uses native replica groups, with regression tests for the
-scheduling fields and per-replica status. Keep the submitted spec
-as evidence when checking older launchers; extending rendezvous timeouts or
-polling for idle nodes does not repair a missing group.
+placement support before launching. Extending rendezvous timeouts or polling
+for idle nodes does not repair a missing group.
 
 ## From a Beaker session
 
@@ -215,11 +224,11 @@ collective health; local `validate` cannot inspect the future container's networ
 
 ## Placement, secrets and results
 
-GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and minimum runtimes of one hour for dev/small, four hours for
-medium and eight hours for large. CPU-only preparation is unallocated: omit `context.minRuntime`, retain the
-execution timeout and WEKA mounts, and try **ai2/saturn** first. If scheduler
-events show it cannot schedule, cancel that attempt before trying **ai2/jupiter**.
-Do not use Holmes for CPU-only WEKA work.
+At AI2, GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and
+minimum runtimes of one hour (dev/small), four hours (medium) or eight hours
+(large). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
+timeout and mounts) and run on Saturn, falling back to Jupiter after canceling
+an unschedulable attempt; not on Holmes.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.
 Multi-node runs and background evaluation require `output.root` inside one of
 these shared mounts: replicas coordinate through files there, and evaluation
@@ -230,8 +239,8 @@ check configuration and GPU allocation without assuming a storage provider.
 
 The coordination code requires the same shared directory on every replica,
 cross-node file locking, atomic renames and visibility of other replicas' writes.
-The current Beaker launcher provisions WEKA mounts; other shared filesystems and
-launchers have not been validated.
+The Beaker launcher provisions WEKA mounts; other shared filesystems and
+launchers are untested.
 
 See [topology](topology.md) for replica and engine counts and
 [managed judges](managed-judges.md) for preparation and placement.

@@ -5,9 +5,9 @@
 Use `python -m open_instruct.miles status run.toml`, then inspect all current
 Beaker attempts, taking the latest for each task and replica rank. A zero exit
 status, completed workflow state, expected update/eval/checkpoint counts and
-retained audit evidence together establish what
-finished. A run appearing in W&B or generating responses does not prove updates,
-weight publication or clean shutdown succeeded.
+retained audit artifacts together establish what finished. A run appearing in
+W&B or generating responses does not prove updates, weight publication or clean
+shutdown succeeded.
 
 | Artifact | What to inspect |
 |---|---|
@@ -46,7 +46,7 @@ With mixed-policy refresh, retained token spans identify historical behavior
 versions, while routes describe the final forward that rebuilt the route table.
 Inspect `refresh_scores` for mixed-response counts and historical-prefix versus
 latest-forward gaps/TIS clipping; those gaps include actual policy age.
-See [implementation contracts](core.md) for exact semantics and evidence limits.
+See [implementation contracts](core.md) for exact semantics and limits.
 
 Core MoE runs report router load every optimizer update, including with auxiliary
 losses and expert-aware packing disabled. W&B keys under `train/moe/` include
@@ -90,8 +90,7 @@ does not re-register engines or bypass weight-readiness checks.
 There is one serving-error stop rule: **stop if at least 50% of completed group
 attempts fail for five continuous minutes**. The fraction uses a trailing
 five-minute window; its sustained-failure timer resets when the fraction falls
-below 50% or the window becomes empty. This replaces the eight-consecutive-failure
-limit. A group counts once, even if multiple sibling requests fail; retried groups
+below 50% or the window becomes empty. A group counts once, even if multiple sibling requests fail; retried groups
 are new attempts. Cancellations for lifecycle operations, pending requests, and
 reward-based filtering are not serving failures. Successful attempts count before
 reward filtering. A short error burst cannot become fatal just because no more
@@ -123,8 +122,8 @@ do not stop recovery. Counts are per producer process and reset on a fresh run o
 resume. Detailed request IDs, group IDs, exception types and bounded HTTP error
 bodies stay in logs, rather than becoming W&B metric names.
 
-Recovery policy changes require a rebuilt application image; an already
-running job keeps its image's behavior.
+Recovery policy is part of the application image; an already running job keeps
+its image's behavior.
 
 ### HTTP keep-alive margin
 
@@ -133,32 +132,15 @@ HTTPX clients retain their default **five-second idle connection reuse window**.
 This gives the client time to retire a connection before the router closes it.
 The server timeout applies between requests; it is not a generation deadline,
 does not change admission limits, and does not hold an inference slot open.
-Idle sockets can remain open longer. Keep concurrency at its independently
-qualified setting; transport errors alone do not establish engine overload.
+Idle sockets can remain open longer. Transport errors alone do not establish
+engine overload.
 
-A local CPU experiment on 2026-09-30 used the real MILES router, a synthetic
-HTTP worker, HTTPX 0.28.1/httpcore 1.0.9/Uvicorn 0.40.0, and 64 concurrent
-connections. After a response, clients waited 4.8 seconds, selected a connection,
-then deliberately delayed writing request headers by 400 ms:
-
-| Server idle timeout | Client idle expiry | Injected delay | Failed requests | New connections for those requests |
-|---|---|---|---|---|
-| 5 s | 5 s | None | 0 / 64 | 0 |
-| 5 s | 5 s | 400 ms | 64 / 64 (`ReadError`) | 0 |
-| 60 s | 5 s | 400 ms | 0 / 64 | 0 |
-| 5 s | 2 s | 400 ms | 0 / 64 | 64 |
-
-Both server settings also completed 1,024 ordinary requests without errors.
-Longer server keep-alive was selected because it removed this injected failure
-without the extra connection churn of earlier client expiry. A real-socket
-regression test checks that the actual router entrypoint retains an idle
-connection beyond the old five-second boundary.
-
-This reproduces a mechanism and the same exception class seen in H1; it does
-**not** prove that every H1 transport error had this cause. Compare failed group
-attempts and request exceptions after deployment. Preserve error reporting and
-whole-group recovery; do not silently retry ambiguous generation requests at
-the HTTP layer. A new image is required to deploy the change.
+If the server idle timeout equals the client reuse window, a client can select a
+pooled connection just as the server closes it; the request written to that
+connection then fails with a transport `ReadError`. A server timeout well above the
+client window removes this race without the extra connection churn of a shorter
+client expiry. Preserve error reporting and whole-group recovery; do not silently
+retry ambiguous generation requests at the HTTP layer.
 
 ## Failure triage
 
@@ -171,7 +153,7 @@ processes; sharing a cold module cache can expose a partially written module
 during concurrent startup.
 
 For a publication stall, set `launch.env.OI_MILES_PUBLICATION_DIAGNOSTICS="1"`
-on a fresh run using an image containing this instrumentation. Trainer actors
+on a fresh run. Trainer actors
 log connection, export, bucket synchronization, broadcast and engine-load progress,
 and dump their Python thread stacks every 60 seconds while `update_weights` is
 active. Progress logs identify trainer GPU UUIDs and engine addresses, including
@@ -188,9 +170,7 @@ every 30 seconds until completion or failure. This covers Core publication/drain
 refresh requests, router control and health requests, readiness, judge transport,
 coordination, evaluation submission and cleanup. It does not multiply polling
 intervals, verifier execution budgets or the run duration. SGLang watchdog and
-trainer distributed deadlines remain explicit MILES run options. See the
-[hybrid MoE run timeout table](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/hero-long-startup-20260924.md#replacement-timeout-policy)
-for concrete values and evidence. Longer waits preserve cancellation and hard
+trainer distributed deadlines remain explicit MILES run options. Longer waits preserve cancellation and hard
 deadlines; idempotent router readiness confirmation alone retries transport errors.
 
 | Symptom | Next check |
@@ -244,10 +224,8 @@ sampling trajectory. Work admitted after the snapshot is reached again through
 the restored dataset cursor.
 
 Evaluation on shared engines, final export and shutdown still have their own
-lifecycle boundaries. Removing the checkpoint drain does not qualify those paths
-for nonblocking operation. The native trainer write is still synchronous with
-training; this change allows inference to continue during it.
-
+lifecycle boundaries and are not nonblocking. The native trainer write is
+synchronous with training; inference continues during it.
 
 ## Evaluation admission in mixed-policy refresh
 
@@ -273,9 +251,7 @@ semaphore; they are not requests already running on SGLang. The drain timeout
 still bounds active calls, including requests already submitted to a server but
 waiting there, so long responses can still delay evaluation.
 
-This behavior requires an application image built with the admission-gate change;
-older immutable images continue to drain all producer-owned generations. For a
-structured run, omit `async.async_max_concurrent_samples` to use the existing
+For a structured run, omit `async.async_max_concurrent_samples` to use the
 automatic bound: the larger of one rollout collection and two waves of serving
 slots, rounded to whole prompt groups. Measure trainer wait and serving occupancy
 before increasing that budget: more queued work does not add inference capacity.
@@ -293,7 +269,7 @@ length. Excluding early updates does not prove that compilation has finished.
 | `capacity_metrics` | Combines the allocation, per-rank training contracts and occupancy into per-update token rates and hardware coverage. | Python helper: `measurements(root, warmup=6)`. |
 | `throughput_occupancy` | Computes time-weighted pipeline, engine and GPU occupancy; reports gaps as missing coverage rather than zero utilization. | Python helper: `analyze(root, warmup=6)`. |
 | `sample_gpu_usage` | Samples `nvidia-smi` utilization and memory on an existing worker node; optionally counts local Triton artifacts. Requires NVIDIA tooling, but creates no CUDA context. | CLI; writes JSONL to the specified path. |
-| `readiness_services` | Sends code-verifier probes through a private loopback fault proxy to check retries, exhaustion and recovery against the supplied service. | CLI; writes a JSON qualification report. |
+| `readiness_services` | Sends code-verifier probes through a private loopback fault proxy to check retries, exhaustion and recovery against the supplied service. | CLI; writes a JSON readiness report. |
 
 Run the completed-run CLI from a checkout:
 
@@ -326,7 +302,7 @@ python -m scripts.miles.readiness_services http://CODE_SERVICE:1234 --output run
 ```
 
 The service probe makes real code-execution requests. Run it against the service
-being qualified. Use `--help` on the CLI tools for their remaining options.
+being checked. Use `--help` on the CLI tools for their remaining options.
 
 ## Bounded wall-clock runs
 

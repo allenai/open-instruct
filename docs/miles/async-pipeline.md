@@ -47,13 +47,12 @@ than the next two updates can consume. Planning warns about this combined
 headroom. It is an upper bound, not a predicted discard rate: generation times,
 refresh boundaries and ongoing consumption determine actual age.
 
-The refresh trial's explicit limit of 32 meant **eight producer groups × four
-responses**. It was a small qualification setting, not a universal capacity or a
-training-queue limit. Two engines with server concurrency 8 gave 16 HTTP slots;
-the completed FIFO held four groups/16 responses with buffer factor 1. The engine
-logs further capped running requests to five per engine for that trial's state
-pool. Neither allocating more nodes nor increasing only the FIFO changes those
-other limits.
+The limits are independent. For example, a producer limit of 32 with four
+responses per prompt means **eight producer groups × four responses**; two engines
+with server concurrency 8 give 16 HTTP slots; a buffer factor of 1 with a
+collection of four groups holds 16 completed responses; and the engine's state
+pool can cap running requests further. Neither allocating more nodes nor
+increasing only the FIFO changes the other limits.
 
 ## Mixed-policy refresh
 
@@ -66,7 +65,7 @@ collection, the managed single-turn producer, MILES router metadata and TIS.
 Keep `use_rollout_logprobs=false`; it is independent of retaining original behavior
 probabilities for TIS. Full decode CUDA graphs or disabled graphs are accepted;
 prefill graphs, speculative decoding, serving prefill/decode disaggregation and
-automatic engine fault tolerance are rejected. Sampling qualification requires
+automatic engine fault tolerance are rejected. Sampling must use
 temperature/top-p 1 and top-k -1. See [configuration](configuration.md) and
 [throughput settings](throughput-profiles.md).
 A configured refresh mode does not prove a particular short run actually crossed
@@ -82,10 +81,8 @@ and requires a positive allowance when enabling async explicitly.
 
 Use six as the starting point for new async training, including explicitly
 setting `core.max_policy_lag = 6` in low-level configurations. It reduces
-premature rejection of slow groups; it is not an established learning optimum.
-The [comparison and duration report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/policy-lag-20260925.md)
-contains the measurements supporting this default. Those measurements do not
-establish equal learning quality at other lag limits or qualify other workloads.
+premature rejection of slow groups; it is not an established learning optimum
+(see [development defaults](development-defaults.md)).
 
 For refresh, group age uses the oldest sampled-token policy version across all
 responses. Rebuilding a prefix under new weights does not resample its tokens
@@ -111,7 +108,7 @@ effective sample size of the trainer/behavior TIS weights.
 
 ## Structured defaults and overrides
 
-For structured async run files, omission of `async_max_concurrent_samples` now
+For structured async run files, omission of `async_max_concurrent_samples`
 resolves at compile time to:
 
 ```
@@ -175,12 +172,10 @@ are captured before retry resets sample fields. No full text or response tensors
 are retained by this accounting. These metrics exclude put-time abort/dynamic
 filters, interrupted requests, and shutdown leftovers; they specifically measure
 completed-queue decisions. Existing aborted/rejected-group metrics remain separate.
-The short qualification runs had W&B disabled; these are newly added measurements,
-not retrospectively available W&B series for those runs.
 
 Keep discard fractions near zero while reducing consumer wait. Use the per-length
 fractions, not just raw drop counts, to detect disproportionate loss of long work.
 Do not divide tokens by idle seconds and call it efficiency: the units and async
 overlap differ. Trainer wait, discard fraction, useful throughput, and publication
 seconds should be inspected together. Mixed-policy refresh improves suffix age;
-it does not erase the historical prefix's age for the current conservative filter.
+it does not erase the earlier prefix's age for the current conservative filter.

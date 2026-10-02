@@ -20,7 +20,8 @@ supported; inference TP is a separate engine setting. Router replay does not
 change those parallelism limits.
 
 Core keeps the trainer resident. The tiny colocated example is a development
-check; full-model optimizer/engine coexistence has not been qualified by it.
+check; it does not establish that a full model's optimizer and engines fit
+together on shared GPUs.
 Multi-node jobs fill spare GPUs on the final trainer node with whole inference
 engines, keeping trainer ranks first in GPU order. Distributed launches require
 a native Beaker replica group and full eight-GPU nodes; see the
@@ -60,7 +61,7 @@ graph capture, retractions, response tails, tokens/second and tokens/GPU-second.
 For prefix-cache policy see [run controls](run-controls.md); do not assume ordinary
 radix caching is interchangeable with KDA recurrent-state caching.
 
-For length-specific budgets, controls and qualification evidence, see
+For length-specific budgets and controls, see
 [long sequences](long-sequences.md).
 
 ## When radix caching is useful
@@ -78,17 +79,12 @@ training, publication or decode can still determine end-to-end cadence. Compare
 warm update wall time and trainer data waits alongside cache hits and engine
 throughput; a higher engine throughput number alone does not establish a faster run.
 
-The [archived radix-cache comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/radix-cache-ab-20260912.md)
-records the workload, timing and failure limits of that experiment. Its
-historical default suggestion does not override the current example TOMLs.
-
 Treat radix caching as workload-dependent tuning, particularly worth measuring
 when substantial prefixes repeat. Keep the example defaults until a representative
 comparison supports changing them. See [run controls](run-controls.md) for the
 radix switch and retain the model-specific KDA recurrent-cache requirements.
 
-The current evidence includes B300 EP1/EP2 numerical and lifecycle checks,
-full-SFT async/admission runs and small multi-node exercises. EP8 packing throughput,
-full-SFT MoE colocation, new architectures and other GPU types require their own
-qualification. See [measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md); old EP2 timing is not an
-EP8 capacity claim. FlashAttention backend names alone do not establish H100 support.
+Capacity does not transfer between topologies: timing at one expert-parallel
+size does not predict another, and new architectures, other GPU types and
+full-model MoE colocation need their own capacity checks. FlashAttention backend
+names alone do not establish support on a given GPU.

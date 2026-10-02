@@ -14,25 +14,27 @@ switching to a deprecated backend.
 ## Start here
 
 1. Start with the [MILES GRPO guide](grpo.md) for setup, the runtime image and a first run.
-2. Check [model support](models-and-checkpoints.md) and [topology limits](topology.md).
+2. Check [support and limits](feature-parity.md), [model support](models-and-checkpoints.md)
+   and [topology](topology.md), and read the [development defaults](development-defaults.md).
 3. Copy a [structured example](../../configs/miles/examples/README.md).
 4. Read the [workflow](workflow.md), then follow the [launch guide](launching.md)
    for your host. Planning does not require GPUs or mounted checkpoints.
-5. Use [operations](operations.md) to check completion and inspect retained evidence.
+5. Use [operations](operations.md) to check completion and inspect run artifacts.
 
 ## Documentation map
 
 | Document | Use it when |
 |---|---|
 | [MILES GRPO](grpo.md) | Setting up MILES GRPO, selecting its runtime image and launching a first run |
-| [Support matrix](feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
+| [Support and limits](feature-parity.md) | Checking what the integration supports and its current limits |
+| [Development defaults](development-defaults.md) | Choosing starting settings and what to weigh when changing them |
 | [Workflow](workflow.md) | Editing one TOML from preparation through training and export |
 | [Launching](launching.md) | Submitting from a laptop or Beaker session, or executing in an allocation |
 | [Configuration reference](configuration.md) | Looking up fields, defaults, aliases, restrictions and overrides |
 | [Native option appendix](native-options.md) | Looking up an advanced MILES/SGLang flag or its original help |
 | [Models and checkpoints](models-and-checkpoints.md) | Selecting a supported checkpoint, converting, saving, resuming or exporting |
 | [Core-compatible serving](core-compatible-serving.md) | Choosing the scoped fused-rounding default, opt-out and numerical reference modes |
-| [Throughput starting profiles](throughput-profiles.md) | Choosing a measured trainer/inference allocation and understanding queues, waste and warmup |
+| [Throughput](throughput-profiles.md) | Sizing trainer/inference allocation and engine admission, and reading queue, waste and warmup measurements |
 | [Async queues and discard metrics](async-pipeline.md) | Sizing producer and completed buffers, tracing waits, and measuring discarded work |
 | [Topology and capacity](topology.md) | Choosing GPU placement, async scheduling, batch geometry and serving capacity |
 | [Data and evaluation](data-and-evaluation.md) | Selecting tasks, importing mixtures and retaining held-out generations |
@@ -40,26 +42,19 @@ switching to a deprecated backend.
 | [Managed judges](managed-judges.md) | Binding named rubrics and placing fixed-weight judge services |
 | [Operations](operations.md) | Reading metrics, diagnosing failures and establishing run completion |
 | [Architecture and development](architecture.md) | Understanding adapter ownership, runtime images and local checks |
-| [Long sequences](long-sequences.md) | Choosing prompt/response budgets, admission, memory controls and interpreting length qualification |
-| [Packing](sequence-packing.md) | Understanding document isolation, loss semantics and qualification |
+| [Long sequences](long-sequences.md) | Choosing prompt/response budgets, admission and memory controls |
+| [Packing](sequence-packing.md) | Understanding document isolation and loss semantics |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
 | [Inference records](inference-records.md) | Recording every scored group's outcome by prompt and checkpoint for later selection and analysis |
-| [Run-control semantics](run-controls.md) | Comparing Core controls with olmo-miles/Megatron terminology |
+| [Run-control semantics](run-controls.md) | Comparing Core controls with the Megatron implementation's terminology |
 | [Router auxiliary objectives](core.md#router-auxiliary-objectives) | Selecting grouping, averaging, count source and coefficients |
 | [Implementation contracts](core.md) | Reviewing detailed trainer, replay and publication checks |
-| [Measurements](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/index.md) | Finding point-in-time evidence, configurations and limitations |
-| [Historical plans](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/plans/index.md) | Understanding previous proposals, not selecting operating defaults |
 
 ## Authority and maintenance
 
 Current instructions live in this directory. Example TOMLs express starting
-recipes; they are not frozen evidence. Configuration code, the pinned native
-parser snapshot, and `runtime/miles/runtime.lock.json` define accepted settings
-and runtime provenance. A branch name or a dated study is not a runtime pin.
-
-Measurements establish only their recorded model, hardware, topology and feature
-combination. A small execution check is not a learning comparison or a production
-capacity qualification. Keep historical runs unchanged when updating starters.
+recipes. Configuration code, the pinned native parser snapshot, and
+`runtime/miles/runtime.lock.json` define accepted settings and runtime provenance.
 
 Maintain the generated reference with `python -m scripts.miles.generate_docs`
 and check it with `python -m scripts.miles.generate_docs --check`. See

@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Fixed
+- Default MILES launches to unallocated scheduling when minimum runtime is omitted; also accept zero or blank on any topology and allow execution timeouts shorter than the protected window (https://github.com/allenai/open-instruct/pull/1924).
 - Count distinct deterministic response seeds when building MILES prompt-exclusion tables, preventing repeated draws from inflating observation counts and statistical confidence (https://github.com/allenai/open-instruct/pull/1924).
 - `mason.py` now shell-quotes every tag-like argument (`<think>`, `<|im_end|>`, `<tool name="search">`, not only ones containing `</`), so an opening tag no longer reaches the job as a redirection. Quoting moved to just before the command is joined, so the local dataset-cache run no longer tokenizes (and hashes) `</...>` args with literal quote marks (https://github.com/allenai/open-instruct/pull/1913).
 - Preserve custom GPT-2 pre-tokenizers from tokenizer.json under transformers 5, including Dolma 2 tokenization, and invalidate stale dataset caches (https://github.com/allenai/open-instruct/pull/1901).

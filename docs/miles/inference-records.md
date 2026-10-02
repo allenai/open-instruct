@@ -7,12 +7,7 @@ prompts repeatedly fail, and choose prompts for later runs.
 Inference records keep the outcome of **every scored training group**, whether
 the online filter passed it or not, and whether training later consumed it. They
 live in a shared store that later runs and analyses read. Recording never changes
-admission, filtering or training.
-
-Recording, [summaries](#summarize-a-store) and [prompt selection](#select-prompts)
-follow the [archived design](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/plans/inference-records-20260921.md).
-The starter configurations leave recording off until a reliability qualification
-is recorded.
+admission, filtering or training. The starter configurations leave recording off.
 
 Recording requires a fully async run (`[async] fully_async = true`), because it
 lives in the completed-group buffer. `validate` rejects `records.enabled` in a
@@ -21,8 +16,7 @@ synchronous run.
 The writer and summary reader live in the pinned MILES fork
 (`miles.utils.inference_records` and `miles.utils.record_summary`). Open Instruct
 supplies checkpoint identity through `datasets/recording.py` and retains prompt
-selection and filtering policy. The record format and the commands below are
-unchanged. Record analysis requires the MILES package (the reader itself uses
+selection and filtering policy. Record analysis requires the MILES package (the reader itself uses
 only Python's standard library); run it in the pinned image or a checkout with
 MILES available. `plan` and `validate` do not require MILES.
 
@@ -31,7 +25,7 @@ MILES available. `plan` and `validate` do not require MILES.
 ```toml
 [records]
 enabled = true
-root = "/weka/oe-training-default/open-instruct-inference-records"
+root = "/weka/YOUR_BUCKET/YOUR_USERNAME/inference-records"
 responses = "off"            # off, all, or sample
 # response_sample_rate = 0.02  # required with, and only with, responses = "sample"
 ```
@@ -234,7 +228,7 @@ afterwards.
 | `--min-observations` | 16 | Valid responses required |
 | `--min-units` | 2 | Independent attempts required. With deterministic inference, attempts sharing a rollout seed count once |
 | `--confidence`, `--max-deviation-rate` | 0.95, 0.2 | Exclude only if the one-sided upper confidence bound on the rate of any other reward is below the rate. With zero deviations in n draws the bound is `1 - 0.05^(1/n)`: 0.17 at n = 16, 0.09 at n = 32 |
-| `--readmit-fraction`, `--seed` | 0.05, 0 | Deterministic share of qualifying prompts kept anyway, so the evidence can be refreshed |
+| `--readmit-fraction`, `--seed` | 0.05, 0 | Deterministic share of otherwise excluded prompts kept anyway, so the evidence can be refreshed |
 
 Only responses with `validity.valid = true` count. At a true success rate of
 10%, 16 draws show no success 19% of the time, so the default bound still
@@ -245,8 +239,7 @@ each effective response seed only once per prompt and policy. The seed is
 reconstructed from the recorded rollout seed plus the response's sibling position;
 repeated groups and overlapping seed ranges do not add duplicate evidence.
 Conflicting rewards still prevent constant-reward exclusion. Nondeterministic
-responses count separately. The record and table formats are unchanged; rebuild
-existing selection tables to apply the corrected counts.
+responses count separately.
 
 **2. Pin the table in the run:**
 

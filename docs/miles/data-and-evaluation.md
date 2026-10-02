@@ -11,9 +11,9 @@ Choose exactly one mode under `[data]`:
 | Mode | Contract |
 |---|---|
 | `[[data.tasks]]` | Named tasks with train/eval counts and optional prompt wrapper |
-| `rl_manifest` | Adopt an immutable prepared olmo-miles-compatible manifest and supported verifier bindings |
+| `rl_manifest` | Adopt an immutable prepared manifest and supported verifier bindings |
 | `prompt_data` | Prepared JSONL; supply reward_config and optional alternating dataset-name/eval-path entries |
-| `recipe` | Rejected: the olmo-miles named recipe catalog is not ported |
+| `recipe` | Rejected: named recipes are not supported |
 
 Current named tasks are `gsm8k`, `gsm8k-less-noise`, `gsm8k_original`, `math`, legacy `ifeval`, and
 generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
@@ -27,26 +27,23 @@ same pinned dataset, retaining its historical sampling seed convention.
 **informally cleaned variant that has not been rigorously validated**. It has 39
 corrected targets and omits 93 problems judged ambiguous or unreliable, leaving
 7,380 rows. Each prepared row records `metadata.original_row`, its index in the
-original dataset. TODO: finish reviewing and cleaning examples observed to be
-consistently answered incorrectly, then publish under a team-owned namespace and
-update the pinned revision.
+original dataset.
 
 For fresh preparations that previously selected the cleaned data as `gsm8k`, use
 `task = "gsm8k-less-noise"`. It preserves that variant's previous row selection
 and ordering for the same seed and counts; task names and prepared sample IDs
-now identify it explicitly. Equal seeds across the original and cleaned datasets
+identify it explicitly. Equal seeds across the original and cleaned datasets
 do not select the same problems. Existing prepared runs retain their immutable
 data on resume; keep their original configuration rather than renaming the task
 inside an existing preparation contract.
-The [multitask example](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/examples/medium.toml) mixes
+The [multitask example](../../configs/miles/examples/medium.toml) mixes
 GSM8K and math; it is not the complete published Olmo 3 mixture.
-Use manifest adoption and the [mixed-task qualification](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/mixture-qualification.md)
-for broader data. Unsupported task/verifier contracts fail rather than silently
-substituting a different judge or reward.
+Use manifest adoption for broader data. Unsupported task/verifier contracts fail
+rather than silently substituting a different judge or reward.
 
 The trusted verifier registry names factories and configurations; individual
-samples select registered names, targets and weights. See
-[prepared fixtures](https://github.com/allenai/open-instruct/blob/fe4d9f2bdc994adb35f839718d86e420d8481e12/configs/miles/verifiers.json). Code verification may
+samples select registered names, targets and weights. Preparation writes the
+resolved registry to `prepared/data/verifiers.json`. Code verification may
 need an externally provisioned service. GPU judges have an explicit preparation,
 service and rubric contract in [managed judges](managed-judges.md); launch does not
 automatically supply every Olmo 3 external service.
@@ -126,9 +123,7 @@ implementation. Examine paired answer changes rather than just aggregate scores.
 
 Rollout dumps are trusted tensor artifacts on WEKA; do not load arbitrary external
 pickle files. The small Beaker reports are an index into the larger retained
-artifacts, not a replacement for per-sample auditing. See [operations](operations.md)
-and [comparison evidence](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/gsm8k-results-20260911.md).
-
+artifacts, not a replacement for per-sample auditing. See [operations](operations.md).
 
 ## Code-service failure policy
 
@@ -158,8 +153,8 @@ Symbolic math runs in a bounded subprocess pool. An individual request exceeding
 retains `verifier_diagnostics` with `kind=math`, `status=timeout` and elapsed time;
 `rollout/math_verifier/timeouts` and `timeout_fraction` count these separately from
 ordinary incorrect answers. Set `OI_MILES_MATH_TIMEOUT_POLICY=raise` for strict
-qualification. Configuration errors, unexpected worker failures and cancellation
-still propagate. A timeout-zero is an ungraded sample, not evidence of a wrong
+handling. Configuration errors, unexpected worker failures and cancellation
+still propagate. A timeout-zero is an ungraded sample, not proof of a wrong
 mathematical answer; include the timeout rate when interpreting benchmark scores.
 
 ## Independent background evaluation

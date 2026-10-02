@@ -78,8 +78,11 @@ disaggregation. Structured async enables TIS unless rollout log probabilities ar
 explicitly the anchor. TIS and use_rollout_logprobs cannot both be enabled. Async
 derives the omitted producer budget from engine count and request capacity; see
 [async queues and discard metrics](async-pipeline.md). It uses buffer factor 2,
-retry, group submissions, and requires an explicit valid Core
-lag allowance. The maintained async example selects lag one. KL > 0 enables the
+retry, group submissions, and requires a positive policy lag. Structured async
+defaults `async.max_weight_staleness` to six optimizer updates (compiled to
+`core.max_policy_lag`), and the medium and large examples set six explicitly;
+low-level async files must set `core.max_policy_lag` themselves. See
+[development defaults](development-defaults.md). KL > 0 enables the
 reference pass with the prepared starting model unless ref_load is supplied.
 
 Saving defaults to the final collection; save_checkpoints=false disables cadence

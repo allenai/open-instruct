@@ -48,6 +48,25 @@ def text(value, name):
     return value
 
 
+DURATION_UNITS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "μs": 1e-6, "ms": 1e-3, "s": 1, "m": 60, "h": 3600}
+
+
+def duration(value, name, *, allow_blank=False):
+    """Return the seconds in a Beaker (Go-style) duration such as "45m", "4h" or "2h30m"."""
+    if type(value) is int and value == 0:
+        return 0.0
+    if allow_blank and (value is None or (isinstance(value, str) and not value.strip())):
+        return 0.0
+    text(value, name)
+    if value in ("0", "+0", "-0"):
+        return 0.0
+    value = value.removeprefix("+")
+    parts = re.findall(r"(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)", value)
+    if not parts or "".join(number + unit for number, unit in parts) != value:
+        raise InputError(f'{name} must be a duration such as 0, "45m", "4h" or "2h30m"; got {value!r}.')
+    return sum(float(number) * DURATION_UNITS[unit] for number, unit in parts)
+
+
 def choice(value, name, choices):
     if value not in choices:
         raise InputError(f"{name} must be one of {', '.join(map(repr, choices))}; got {value!r}.")
@@ -194,7 +213,7 @@ KDA_RADIX_STATE_SLOTS_PER_RUNNING_REQUEST = 5
 
 
 def inference_capacity(values):
-    """Port of olmo-miles' radix-cache and router capacity rules for the resolved options.
+    """Port of the Megatron implementation's radix-cache and router capacity rules for the resolved options.
 
     Only explicit values are checked; the pinned runtime supplies its own defaults
     for anything absent.

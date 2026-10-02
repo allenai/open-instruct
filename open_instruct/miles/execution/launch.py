@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -181,6 +182,8 @@ def run(path, overrides):
     spec = RunSpec.load(path, overrides)
     # Validate launch feasibility before spending time building an image.
     specification("pending-build", spec)
+    for warning in spec.launch_warnings(spec.compile().miles):
+        print(f"Warning: {warning}", file=sys.stderr)
     with tempfile.TemporaryDirectory(prefix="miles-submitted-run-") as directory:
         frozen = Path(directory) / "run.json"
         workflow.write_json(frozen, spec.to_dict())

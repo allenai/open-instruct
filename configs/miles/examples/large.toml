@@ -1,9 +1,9 @@
-# LARGE: PROVISIONAL production layout, not qualified; do not submit unchanged.
+# LARGE: provisional multi-node layout; review and adapt before submitting.
 # 16 trainers (2 nodes x 8, EP8 with DP2), 32 TP1 engines, and one judge GPU.
 # Current whole-node launcher allocates 7 x 8 = 56 GPUs: 49 used, 7 idle on the judge node.
-# Training settings are placeholders pending workload/topology qualification.
+# Training settings are placeholders; tune them for your workload and topology.
 # Evaluations run on separate Beaker GPUs; snapshot export still occupies the trainer.
-# Use a trainer image containing background evaluation and qualify the full-model evaluator.
+# Use a trainer image containing background evaluation; check the evaluator on your model first.
 schema_version = 1
 name = "large"
 
@@ -65,7 +65,7 @@ mode = "background"
 interval = 50
 initial = true
 final = true
-# Evaluator with GSM8K-Platinum; full-policy/task qualification is still required.
+# Evaluator image with GSM8K-Platinum support.
 image = "01M3RMHHC89VZ9NHVNSK72G3BF"
 revision = "eac110dad2bb85e116f505bed2a976bb0dbdfaf8"
 gpus = 1 # Additional allocation per task group, outside the 56-GPU training layout.
@@ -98,7 +98,7 @@ expert_parallel_size = 8
 micro_batch_size = 1
 sequence_packing = true
 packing_max_tokens = 34816
-# Keep recomputation for 32K packs. The measured 4K no-recompute win is not a 32K qualification.
+# Keep recomputation for 32K packs; disabling it is only reasonable for short contexts.
 activation_recompute = true
 trainer_flash_attention_version = 4
 

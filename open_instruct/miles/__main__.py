@@ -78,7 +78,9 @@ def execute(parser, options):
     workflow = importlib.import_module("open_instruct.miles.execution.workflow")
     if options.command == "validate":
         if structured:
-            config.plan()  # Validate physical allocation as well as trainer options.
+            planned_spec = config.plan()  # Validate physical allocation as well as trainer options.
+            for warning in planned_spec["launch_warnings"]:
+                print(f"Warning: {warning}", file=sys.stderr)
             compiled = config.compile()
             compiled.arguments()
             planned = compiled.plan()

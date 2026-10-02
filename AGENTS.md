@@ -29,7 +29,8 @@ is the structured async default and the explicit setting in `medium.toml` and
 set `core.max_policy_lag = 6` explicitly. Preserve explicit user overrides and
 historical reproduction settings; synchronous mechanics runs retain zero lag.
 Use [policy lag and TIS](docs/miles/async-pipeline.md#policy-lag-and-tis) for the
-evidence and monitoring guidance. Six is the starting point, not a claim of an
+semantics and monitoring guidance, and [development defaults](docs/miles/development-defaults.md)
+for the other starting settings. Six is the starting point, not a claim of an
 optimal lag for every learning rate, group size or response length.
 
 `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` are **deprecated**.
@@ -50,7 +51,8 @@ contains the old CLI and reproduction instructions.
 Before submitting MILES work, read and follow the full
 [distributed scheduling contract](docs/miles/launching.md#distributed-scheduling-contract).
 Distributed GPU work requires one task with grouped replicas and leader selection,
-a positive minimum runtime, host networking and failure/preemption propagation.
+host networking and failure/preemption propagation. Minimum runtime is the user's
+scheduling choice: omitted, zero or blank selects unallocated work, including for replica groups.
 Inspect the rendered spec and verify replica grouping and placement after submission.
 Do not replace group scheduling with separate tasks or hostname polling.
 

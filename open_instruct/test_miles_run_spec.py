@@ -76,11 +76,70 @@ def test_colocation_and_launch_defaults(tmp_path):
     assert config.miles["offload_train"] is False
     assert config.miles["rollout_num_gpus"] == config.miles["actor_num_gpus_per_node"] == 2
     assert run.launch["priority"] == "high"
-    assert run.launch["min_runtime"] == "1h"
+    assert run.launch["min_runtime"] == "0s"
     assert run.launch["workspace"] == "ai2/open-instruct-dev"
     assert run.plan()["runtime_validated"] is False
     assert config.miles["use_tis"] is False
     assert config.core.max_policy_lag == 0
+
+
+@pytest.mark.parametrize(
+    ("launch", "match"),
+    [
+        ({"min_runtime": "4hr"}, "min_runtime must be a duration"),
+        ({"min_runtime": "-1h"}, "min_runtime must be a duration"),
+        ({"timeout": "-1h"}, "timeout must be a duration"),
+    ],
+)
+def test_launch_durations_are_validated(tmp_path, launch, match):
+    with pytest.raises(ValueError, match=match):
+        spec(tmp_path, launch=launch)
+
+
+def test_launch_durations_accept_compound_values(tmp_path):
+    run = spec(tmp_path, launch={"min_runtime": "1h30m", "timeout": "1.5h"})
+    assert run.launch["min_runtime"] == "1h30m"
+
+
+@pytest.mark.parametrize("minimum", [0, "0", "0s", "", "  ", None])
+def test_zero_or_blank_minimum_runtime_is_unallocated(tmp_path, minimum):
+    run = spec(tmp_path, launch={"min_runtime": minimum})
+    assert run.plan()["launch"]["min_runtime"] == "0s"
+    restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "run.json")
+    assert restored.to_dict() == run.to_dict()
+
+
+def test_timeout_can_be_shorter_than_minimum_runtime(tmp_path):
+    run = spec(tmp_path, launch={"min_runtime": "1h", "timeout": "30m"})
+    assert run.launch["timeout"] == "30m"
+    assert run.plan()["launch_warnings"] == []
+
+
+@pytest.mark.parametrize("timeout", [0, "0", "0s"])
+def test_zero_timeout_is_accepted_and_warns_about_preemption(tmp_path, timeout):
+    run = spec(tmp_path, launch={"timeout": timeout})
+    assert run.launch["timeout"] == "0s"
+    assert any("loses training progress" in warning for warning in run.plan()["launch_warnings"])
+
+
+def test_long_minimum_runtime_warns_without_failing(tmp_path):
+    run = spec(tmp_path, launch={"min_runtime": "12h", "timeout": "12h"}, training={"save_interval": 10})
+    warnings = run.plan()["launch_warnings"]
+    assert len(warnings) == 1 and "usual 8h limit" in warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("training", "launch", "warned"),
+    [
+        ({}, {}, True),
+        ({"save_interval": 10}, {}, False),
+        ({"save_interval": 10}, {"auto_resume": False}, True),
+        ({}, {"min_runtime": "3h", "timeout": "3h"}, False),
+    ],
+)
+def test_preemptible_tail_warns_without_periodic_checkpoints(tmp_path, training, launch, warned):
+    warnings = spec(tmp_path, training=training, launch=launch).plan()["launch_warnings"]
+    assert any("loses training progress" in warning for warning in warnings) is warned
 
 
 @pytest.mark.parametrize("lag", [1, 2, 6])

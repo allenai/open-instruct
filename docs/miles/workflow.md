@@ -1,15 +1,14 @@
 # MILES researcher workflow
 
 A run file describes the checkpoint, data, trainer, serving engines, objective,
-logging and allocation together. The section names follow `olmo-miles` examples;
+logging and allocation together. The section names follow the Megatron implementation;
 the resolved training backend here is OLMo-core. Existing `[core]` / `[miles]`
 TOMLs and the `RunConfig` Python interface remain available for low-level work.
 
 Choose a maintained [starting point](../../configs/miles/examples/README.md),
 then copy it into ignored `runs/` before customizing it. The
 [generated recipe tables](configuration.md#example-recipes) describe the current
-allocations and batch geometry. Historical measurements are linked from the
-feature guides and do not override the maintained TOMLs.
+allocations and batch geometry.
 
 Replace `YOUR_USERNAME` and the checkpoint path before launching. A model source
 must include the compatible architecture, tokenizer and chat template. Keep the
@@ -19,9 +18,9 @@ establish full-SFT colocation support.
 
 HF inputs must contain `config.json`, safetensors weights and a usable tokenizer
 with a chat template. Native Core conversion exports checkpoint metadata and
-weights using the Core converter with forward validation disabled. It is not
-a new numerical or routing-parity qualification; architecture-specific
-conversion and serving checks remain separate. HF staging references source
+weights using the Core converter with forward validation disabled, so it is
+not a numerical or routing-parity check; architecture-specific conversion and
+serving checks remain separate. HF staging references source
 weights, so retain the original checkpoint for the life of the run.
 
 ## One configuration, inspection through launch
@@ -58,8 +57,12 @@ host needs the Beaker CLI and credentials, plus Docker when building.
 The config launcher supports single-node runs and replicated disaggregated
 allocations with independent trainer, rollout and named-judge GPU counts.
 See [multi-node placement and managed judges](managed-judges.md) for the
-ownership rules, limits and tiny qualification configuration. `plan` reports
-per-node assignments and unused GPUs; multi-node runs may keep `launch.auto_resume=true`: a restart into the same output root resumes from the newest native checkpoint and continues the rollout cursor without repeating or skipping an update, qualified in [multi-node resume](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-resume-20260922.md). Forced multi-node preemption, and restarts of runs carrying a managed judge, remain unqualified.
+ownership rules, limits and a tiny example configuration. `plan` reports
+per-node assignments and unused GPUs. Multi-node runs may keep
+`launch.auto_resume=true`: a restart into the same output root resumes from the
+newest native checkpoint and continues the rollout cursor without repeating or
+skipping an update. Forced multi-node preemption, and restarts of runs carrying
+a managed judge, are untested.
 
 `status` reports the latest Beaker attempt, all experiment details and whether
 the current config matches the submitted config. Receipts live under
@@ -125,7 +128,7 @@ section map and [workflow fields](configuration.md#workflow-fields) for accepted
 values. `plan` shows how structured aliases resolve into Core and native MILES options.
 
 Data preparation uses open-instruct's task and reward machinery. A familiar
-section name does not imply that every olmo-miles catalog entry or external
+section name does not imply that every Megatron-implementation catalog entry or external
 service is available. Named recipe selection is rejected; express the supported
 task mix with `[[data.tasks]]` or adopt an immutable manifest. Reusing an immutable prepared manifest is the most direct
 way to keep prompts, splits, rendering and reward configuration fixed between
@@ -146,18 +149,16 @@ Router replay, auxiliary losses and reference KL are independent settings.
 Most optimizer, sampling and SGLang names carry through directly. These trainer
 settings have a narrower meaning here:
 
-| olmo-miles concept | Core meaning or limitation |
+| Megatron concept | Core meaning or limitation |
 | --- | --- |
-| `trainer.gpus`, `trainer_num_nodes`, `expert_parallel_size` | `trainer.gpus` is GPUs per trainer node; total trainer GPUs are `gpus × trainer_num_nodes`. `expert_parallel_size` sets the expert process group. Consult the topology guide for supported placement and qualification limits. |
+| `trainer.gpus`, `trainer_num_nodes`, `expert_parallel_size` | `trainer.gpus` is GPUs per trainer node; total trainer GPUs are `gpus × trainer_num_nodes`. `expert_parallel_size` sets the expert process group. Consult the [topology guide](topology.md) for supported placement and limits. |
 | `activation_recompute` | Core activation checkpointing; it does not promise the same recomputation granularity as Megatron. |
 | `micro_batch_size` | Core microbatch size is one. Optional document-isolated packing combines samples within an optimizer partition; see [packing](sequence-packing.md). |
-| `trainer_flash_attention_version=4` | Core `flash_4`; the exercised full-SFT runtime is B300. A matching number does not establish H100 qualification. |
+| `trainer_flash_attention_version=4` | Core `flash_4`; before loading the policy, the submitted job's attention preflight compares its forward and backward pass with a reference on the allocated GPU. |
 | `trainer_backend="optimized"` | No equivalent preset: use explicit Core attention, row-specialization and other supported controls. |
-| Trainer offload during colocation | Core stays resident. Full-model olmo-miles colocation memory fractions cannot be copied safely. |
+| Trainer offload during colocation | Core stays resident. Full-model Megatron colocation memory fractions cannot be copied safely. |
 | `async_save` | Unsupported; native Core saves are synchronous. Final HF export is a separate post-training operation. |
 | Megatron conversion/layout settings | Do not apply to Core. The HF descriptor and native Core checkpoint have distinct roles. |
 
 Size serving concurrency, graph capture and memory pools together using the
 [admission guidance](throughput-profiles.md#size-engine-admission-from-memory).
-The [archived workflow exercise](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/researcher-workflow-20260911.md)
-retains its original recipe, image and sample audit.

@@ -1,7 +1,7 @@
 # Hybrid MoE checkpoint support
 
 The specialized Core adapter supports config-driven KDA/full-attention layouts,
-latent MoE, per-head Q/K gains and scalable softmax. The measured 12.5B profile
+latent MoE, per-head Q/K gains and scalable softmax. The 12.5B profile
 has 16 blocks (14 KDA and two full-attention), hidden width 1024, latent width
 512, 512 experts and top-16 routing. These are checkpoint properties, not
 constants in the adapter.
@@ -28,7 +28,7 @@ pass may trim only embedding/LM-head vocabulary padding, using the saved sizes.
 Reports retain tensor/config hashes, dtype casts and packing metadata. This check
 loads no optimizer moments and does not establish generation parity.
 
-Tiny runtime tests exercise multiple widths and expert counts, distinct non-unit
+Tiny runtime tests cover multiple widths and expert counts, distinct non-unit
 attention gains/scales and the real distributed-checkpoint reader. For a full
 checkpoint, use a CPU-only unallocated job with the required WEKA mounts: omit
 `context.minRuntime`, try Saturn first, and use Jupiter after checking scheduler
@@ -45,24 +45,20 @@ applies. Positions must be local to each request, including chunked prefill and
 decode. Publication includes these parameters and copies into existing storage
 so captured graphs retain valid pointers.
 
-## Qualification limits
+## Current limits
 
-Two corrected-tokenizer SFT checkpoints passed a four-update synchronous barrier
-mechanics check with H100 EP4 training, TP1 fused-rounding serving, nonzero
-gradients and exact live publication. That result does not qualify learning
-quality, mixed-policy refresh, long context or save/resume for this profile.
+Synchronous barrier publication with EP4 training and TP1 fused-rounding serving
+is supported for this profile. Mixed-policy refresh, long context and save/resume
+are untested for it.
 
-Earlier full-checkpoint HF-reference probability gates failed despite matching
-greedy tokens. Later Core-reference investigation and bounded training checks do
-not retroactively turn those failures into passes. Use Core's actual scoring
-policy for rollout comparisons and retain both token and probability checks.
+Matching greedy tokens does not imply matching probabilities against an HF
+reference. Use Core's actual scoring policy for rollout comparisons and retain
+both token and probability checks.
 
-Before extending the profile, exercise cached generation, mixed request lengths,
+Before extending the profile, test cached generation, mixed request lengths,
 chunked prefill, graph replay with changing positions and publication of changed
 gains/scales. Larger tensor parallelism and different model geometries need their
-own qualification. Dense Olmo 3 uses a separate FSDP adapter; results do not
-transfer between the two paths.
+own checks. Dense Olmo 3 uses a separate FSDP adapter; results do not transfer
+between the two paths.
 
-The [archived support record](https://github.com/allenai/open-instruct/blob/7a477910405a65d914b48096f83c13a6c61a60ad/docs/miles/hero-support.md)
-retains checkpoint lineages, source revisions, measurements and experiment IDs.
 See the [support matrix](feature-parity.md) for the other supported paths.

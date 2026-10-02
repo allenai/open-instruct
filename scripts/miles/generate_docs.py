@@ -119,10 +119,10 @@ def render(native_help=None):
         ["Field", "Type", "CoreConfig default", "Meaning"],
         [("core." + f.name, str(f.type), literal(f.default), help_data["core"][f.name]) for f in fields],
     )
-    text += "\n## Unsupported olmo-miles controls\n\n" + table(
+    text += "\n## Unsupported Megatron-implementation controls\n\n" + table(
         ["Field", "Replacement or limitation"], sorted(run_spec.UNSUPPORTED_FIELDS.items())
     )
-    text += "\n## Example recipes\n\nGenerated from the actual structured TOMLs. These are recipe choices, not universal defaults or production qualification. GPU columns distinguish per-node trainers from total rollout GPUs.\n\n"
+    text += "\n## Example recipes\n\nGenerated from the actual structured TOMLs. These are starting recipes, not universal defaults; see [development defaults](development-defaults.md). GPU columns distinguish per-node trainers from total rollout GPUs.\n\n"
     allocations = []
     recipes = []
     for path in sorted((ROOT / "configs/miles/examples").glob("*.toml")):
@@ -218,7 +218,7 @@ def render(native_help=None):
         result[DOCS / (name + ".md")] = (
             f"# {'SGLang' if 'serving' in name else 'MILES'} native option reference\n\n"
             + GENERATED
-            + "\nUse these names under [miles]. Defaults below come from the pinned parser **before** structured, backend and model-dependent resolution. Some inherited options are inapplicable to Core; see the restrictions column and [run controls](run-controls.md). Parser acceptance is not qualification. Source help describes the upstream runtime, which may mention other backends.\n\n[Reference index and provenance](native-options.md).\n\n"
+            + "\nUse these names under [miles]. Defaults below come from the pinned parser **before** structured, backend and model-dependent resolution. Some inherited options are inapplicable to Core; see the restrictions column and [run controls](run-controls.md). Parser acceptance does not mean the Core trainer implements an option. Source help describes the upstream runtime, which may mention other backends.\n\n[Reference index and provenance](native-options.md).\n\n"
             + provenance
             + "\n\n"
             + table(

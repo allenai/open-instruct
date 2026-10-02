@@ -1,6 +1,6 @@
 """CPU-safe researcher run specifications around the MILES/Core runtime facade.
 
-The section names follow olmo-miles. Preparation, launch and export are explicit
+The section names follow the Megatron implementation. Preparation, launch and export are explicit
 workflow stages; this module only validates and compiles their desired state.
 """
 
@@ -21,6 +21,7 @@ from open_instruct.miles.rewards import judging
 RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "tracking", "runtime")
 WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache", "records", "selection"}
 CORE_FIELDS = {field.name for field in dataclasses.fields(CoreConfig)}
+BEAKER_MIN_RUNTIME_LIMIT_SECONDS = 8 * 3600
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
     "trainer_num_nodes": "miles.actor_num_nodes",
@@ -42,7 +43,7 @@ FIELD_MAP = {
     "max_weight_staleness": "core.max_policy_lag",
     "max_train_rollout_logprob_abs_diff": "core.max_train_rollout_logprob_abs_diff",
     "comparison_id": "miles.wandb_group",
-    # Serving prefix cache and request routing, named as in olmo-miles.
+    # Serving prefix cache and request routing, named as in the Megatron implementation.
     "mamba_radix_cache_strategy": "miles.sglang_mamba_radix_cache_strategy",
     "router_policy": "miles.sglang_router_policy",
     "router_cache_threshold": "miles.router_cache_threshold",
@@ -410,7 +411,7 @@ class RunSpec:
             budget="ai2/oe-other",
             cluster="ai2/holmes",
             priority="high",
-            min_runtime="1h",
+            min_runtime="0s",
             auto_resume=True,
             max_retries=-1,
             shared_memory="200 GiB",
@@ -423,8 +424,13 @@ class RunSpec:
         for key, default in (("startup_timeout", 1200), ("heartbeat_timeout", 120)):
             coordination.setdefault(key, default)
             _positive(coordination[key], f"launch.coordination.{key}")
-        for key in ("workspace", "budget", "cluster", "priority", "min_runtime", "shared_memory", "timeout"):
+        for key in ("workspace", "budget", "cluster", "priority", "shared_memory"):
             _text(launch[key], f"launch.{key}")
+        for key in ("min_runtime", "timeout"):
+            seconds = validation.duration(launch[key], f"launch.{key}", allow_blank=key == "min_runtime")
+            if seconds == 0:
+                # Freeze equivalent zero/blank inputs as a Beaker-compatible duration.
+                launch[key] = "0s"
         if launch["priority"] not in ("low", "normal", "high", "urgent"):
             raise InputError("launch.priority must be low, normal, high or urgent")
         _boolean(launch["auto_resume"], "launch.auto_resume")
@@ -825,8 +831,33 @@ class RunSpec:
         result.validate()
         return result
 
+    def launch_warnings(self, miles) -> list[str]:
+        warnings = []
+        min_runtime = validation.duration(self.launch["min_runtime"], "launch.min_runtime")
+        timeout = validation.duration(self.launch["timeout"], "launch.timeout")
+        if min_runtime > BEAKER_MIN_RUNTIME_LIMIT_SECONDS:
+            warnings.append(
+                f"launch.min_runtime={self.launch['min_runtime']} exceeds Beaker's usual 8h limit; "
+                "submission fails unless the workspace has been granted a longer minimum runtime."
+            )
+        periodic = miles.get("save_interval", miles["num_rollout"]) < miles["num_rollout"]
+        if (timeout == 0 or timeout > min_runtime) and not (periodic and self.launch["auto_resume"]):
+            execution_limit = (
+                f"may run until launch.timeout={self.launch['timeout']}"
+                if timeout
+                else "has no explicit execution timeout"
+            )
+            warnings.append(
+                f"The job can be preempted after launch.min_runtime={self.launch['min_runtime']} and "
+                f"{execution_limit}; without periodic checkpoints "
+                "(training.save_interval below the collection count) and launch.auto_resume, "
+                "a preemption after that window loses training progress."
+            )
+        return warnings
+
     def plan(self) -> dict[str, Any]:
-        runtime = self.compile().plan()
+        compiled = self.compile()
+        runtime = compiled.plan()
         return {
             "schema_version": 1,
             "name": self.name,
@@ -836,11 +867,12 @@ class RunSpec:
             "data": self.data,
             "output": self.output,
             "launch": self.launch,
+            "launch_warnings": self.launch_warnings(compiled.miles),
             "compiler_cache": self.compiler_cache,
             "records": self.records,
             "selection": self.selection,
             "runtime": runtime,
-            "evaluation": evaluation.plan(self, self.compile().miles),
+            "evaluation": evaluation.plan(self, compiled.miles),
             **self.judges,
             "allocation": topology.plan(self),
             "runtime_validated": False,

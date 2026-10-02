@@ -1,10 +1,10 @@
 # MILES with an OLMo-core trainer
 
 Use the [operating guide](index.md) for new GRPO runs and the
-[support matrix](feature-parity.md) for qualified boundaries. The adapter replaces
+[support matrix](feature-parity.md) for supported boundaries. The adapter replaces
 the MILES Megatron trainer actor, while retaining MILES rollout actors, samples,
 advantages, PPO loss helpers and transport primitives. Open Instruct supplies
-configuration, data/verifiers, lifecycle coordination and retained evidence.
+configuration, data/verifiers, lifecycle coordination and run artifacts.
 
 ## Trainer hookup
 
@@ -30,12 +30,9 @@ checkpoint planning and streaming HF interchange, including the inherited
 per-head attention and hybrid configuration export support.
 
 Local checks cover model/configuration roundtrips, checkpoint planning, adapter
-contracts and a single-GPU hybrid-MoE scoring/backward/optimizer step. The
-[FP32-head comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/trainable-fp32-head-math-20260926.md) additionally
-exercises the full non-EMO SFT policy with EP2, B300 kernels, packing and async
-publication on this pin. Broader topologies and feature combinations need their
-own qualification. Earlier reports describe their original source and image pins.
-Use the [runtime lock and build procedure](architecture.md#runtime-sources-and-images)
+contracts and a single-GPU hybrid-MoE scoring/backward/optimizer step. Validate
+other topologies and feature combinations before relying on them. Use the
+[runtime lock and build procedure](architecture.md#runtime-sources-and-images)
 to reproduce the current source.
 
 ## Samples, scoring and objectives
@@ -71,11 +68,8 @@ recomputation. Each sample's final unscored token has an explicit synthetic tail
 that convention is not a claim of Megatron auxiliary-loss equivalence.
 Expert-parallel ranks receive the routing information needed by their local
 forward; trainer PP/TP/CP greater than one are rejected, not implicitly supported.
-
-[Full-model replay](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-replay-full-sft-20260911.md) and the later
-[packed async restart](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/colleague-20260913/README.md) passed their
-retained-route audits. A replay match verifies supplied assignments; it does not
-measure what the trainer would have selected without replay.
+A replay match verifies supplied assignments; it does not measure what the trainer
+would have selected without replay.
 
 ## Checkpoints and publication
 
@@ -87,7 +81,7 @@ per-expert slices. Dense export gathers parameters through its FSDP backend.
 The normal disaggregated transport broadcasts flattened NCCL buckets; colocation
 uses IPC. Current full-model starters use mixed-policy `refresh`; low-level
 `barrier` and independent [engine drain](engine-drain.md) remain distinct modes.
-[Publication contracts](grpo.md#publication-modes) explain historical behavior
+[Publication contracts](grpo.md#publication-modes) explain recorded behavior
 probabilities, final-forward replay routes and oldest-token lag checks.
 
 Native checkpoints include model/optimizer/scheduler and rank RNG state. Schema-2
@@ -105,7 +99,7 @@ See [model/checkpoint operations](models-and-checkpoints.md).
 
 ## Training contract checks
 
-Every real training step now records `training_contract_rankN.jsonl` beneath
+Every real training step records `training_contract_rankN.jsonl` beneath
 `miles.save`, when supplied, and emits the same records to logs. Records include:
 
 - Actual global sample, active-token and model-token counts; policy and auxiliary
@@ -131,7 +125,7 @@ snapshot the **current** serving state, reset tensors, republish the same traine
 version, and compare exactly when quantization tolerance is disabled, over the
 non-skipped tensors. This catches missing or inconsistent transfers;
 it is not an independent proof of the export mapping for changed weights.
-Logprob checks and the initial HF comparison supply separate evidence. The
+Logprob checks and the initial HF comparison are separate checks. The
 round trip adds a second full transfer, with `repeated_version=true` in the
 publication log; include both transfers when measuring diagnostic overhead.
 The async producer remains paused until the check completes.
@@ -139,7 +133,7 @@ The interval defaults to zero, leaving these periodic probes disabled. The maint
 examples explicitly keep `core.diagnostic_interval=0` and
 `check_weight_update_equal=true`: the full weight audit runs at startup, including
 resume, and does not run after ordinary training updates. Reserve a positive
-interval for qualification or investigating publication correctness. This interval
+interval for investigating publication correctness. This interval
 also controls the extra gradient-norm and sampled-parameter-update diagnostics;
 setting it to zero does not disable the separate policy-version, logprob, replay,
 or scoring-pass checks. Upstream MILES supplies the optional startup check; the
@@ -148,22 +142,18 @@ periodic same-version round trip is implemented by the MILES Core driver.
 Runtime failures include non-finite active inputs/rewards, empty effective
 batches, inconsistent rank schedules, stale policy versions, non-finite losses,
 scheduler/clock disagreement and skipped optimizer steps. All ranks agree on
-skip status before any policy clock advances. The existing mean score-drift guard
-remains configurable; tail distributions are measured without inventing an
-unqualified universal cutoff. A skip aborts the run; this is not transactional
-rollback of ranks that already performed an optimizer update.
+skip status before any policy clock advances. The mean score-drift guard is
+configurable; tail distributions are recorded but have no fixed failure cutoff.
+A skip aborts the run; this is not transactional rollback of ranks that already
+performed an optimizer update.
 
-
-## Numerical evidence and development checks
+## Development checks
 
 The independent fixed-batch reference checks next-token slicing, masks, unequal
 lengths, PPO clipping, entropy, KL and loss reduction without reusing the loss
 helpers it is testing. Tiny native EP1/EP2 comparisons cover policy-only,
 auxiliary-only and combined gradients/Adam state, with recomputation on/off.
 These are native consistency checks, not full-model Megatron equality.
-[Contract report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-contract-final-20260910.json) and
-[native EP report](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/core-native-ep-20260910.json) retain thresholds
-and measured errors. Current test counts belong to each image's qualification.
 
 Run the current packaged regression suite inside the pinned application image:
 
@@ -171,19 +161,14 @@ Run the current packaged regression suite inside the pinned application image:
 bash scripts/miles/test_runtime.sh -q
 ```
 
-The [archived distributed qualification procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/core.md#numerical-evidence-and-development-checks)
-retains the original EP gate and its inputs. Those distributed experiments are
-separate from the packaged unit suite.
-
-The [historical local MoE procedure](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/implementation-history/core-before-sharing-20260913.md#local-moe-task-and-restart-check)
-records the original fixture/debug workflow. Use the current structured examples
-for new runs; old trial commands and then-pending gates are not current defaults.
+The packaged suite does not run distributed experiments; use the structured
+examples for end-to-end checks.
 
 ## Router auxiliary objectives
 
 These optional controls change the MoE router's auxiliary losses. They are
 independent of the RL policy loss's token-versus-response normalization and of
-whether routing replay is enabled. Existing defaults remain unchanged.
+whether routing replay is enabled.
 
 | Field under `[core]` | Default | Alternative and meaning |
 |---|---|---|
@@ -259,8 +244,8 @@ router_aux_count_source = "router_selected"
 ```
 
 Set either coefficient to `0.0` to disable that auxiliary loss; set both to zero
-to disable both. These are experimental objective choices, not recommended new
-recipe defaults.
+to disable both. These are experimental objective choices; see
+[development defaults](development-defaults.md) for the example settings.
 
 ### Supported scope and runtime
 
@@ -271,17 +256,15 @@ recomputation. They require one unpadded instance per forward (which can contain
 multiple packed documents), trainer TP=CP=1, `compile_model=false`, and no global
 balancing or router orthogonal loss. Packed and unpacked execution are supported.
 
-Current counts additionally require plain softmax, local balancing, and no EMO
-routing, routing biases, expert groups, or uniform/random assignment overrides.
+Router-selected counts additionally require plain softmax, local balancing, and
+no routing biases, expert groups, or uniform/random assignment overrides.
+EMO routing with router-selected balancing counts is not yet supported.
 Unsupported native routing combinations fail during model construction. Router
 objective controls require the Core MoE backend.
 
-The Core commit pinned in `runtime/miles/runtime.lock.json` includes the router
-controls originally introduced at `ab64c3069`.
-Build a new application/runtime image from this checkout to use the combined
-controls; the earlier image in the GRPO guide does not contain them. Selecting
-current counts with an older Core dependency fails explicitly. This source merge
-does not promote a new default image.
+The Core commit pinned in `runtime/miles/runtime.lock.json` includes these
+controls; images built from an older lock do not. Selecting router-selected counts
+with an older Core dependency fails explicitly.
 
 `open_instruct/test_miles_router_objective.py` checks losses and gradients against
 an independent reference for every grouping/averaging/count-source combination,
@@ -289,7 +272,7 @@ with and without activation recomputation. It also checks unchanged replay
 outputs and policy gradients. The pinned Core source includes native count-source
 regressions. `tests/miles/router_objective_contract.py` supplies GPU training and
 repacking checks; its `--count-source` option selects either count source. CPU
-checks do not establish distributed GPU qualification for every combination.
+checks do not cover distributed GPU execution of every combination.
 
 ## FP32-output vocabulary head
 
@@ -297,7 +280,7 @@ Opt in with `trainer.fp32_lm_head=true` in a structured run, or
 `core.fp32_lm_head=true` in the low-level configuration. This sets Core's
 `LMHeadConfig.fp32_output` and SGLang's `enable_fp32_lm_head` together.
 An explicit conflicting serving false value is rejected. Default is false.
-Rebuild the runtime from the updated lock; old images do not gain this option.
+Images built from an older runtime lock do not include this option.
 
 CUDA BF16/FP16 projections retain FP32 output instead of rounding logits to the
 operand dtype. Weights remain in their original storage dtype. A custom backward
@@ -308,13 +291,7 @@ The native Core option currently supports the default head and default loss,
 without tensor-parallel wrapping. Its low-precision CUDA path supports first-order
 gradients; higher-order derivatives and fused-linear cross entropy are excluded.
 
-The [frozen-weight study](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/selective-precision-20260926.md) motivates
-the option but does not establish an RL learning benefit. FP32 logits double
-that output tensor's storage; measure training memory and step cost for the
-chosen token/vocabulary sizes.
-
-The [short math comparison](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/trainable-fp32-head-math-20260926.md)
-completed 32 updates per arm: observed warmed logprob mismatch fell 34%, trainer
-time rose about 1%, and peak rank-zero allocation rose 1.87 GiB. It did not show a
-held-out answer-quality improvement. Rollouts differ between arms; the frozen-token
-study isolates the component more directly.
+The option targets training-versus-serving probability mismatch; its effect on
+learning is not established. FP32 logits double that output tensor's storage;
+measure training memory and step cost for the chosen token/vocabulary sizes. See
+[development defaults](development-defaults.md#opt-in-features).

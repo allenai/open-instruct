@@ -1,6 +1,6 @@
 # MEDIUM: mixed math/IF/code/general training on 16 B300 GPUs: EP8 + 7 engines + 1 judge.
-# Packing, dynamic rows, guarded score skip, replay and decode graphs follow our measured work.
-# Engine admission 64 is sized from measured B300 memory; its 32K throughput gain over 16 is not yet measured.
+# Uses packing, dynamic rows, guarded score skip, replay and decode graphs.
+# Engine admission 64 is sized from B300 memory; see docs/miles/throughput-profiles.md.
 # Supply prepared immutable data/verifiers, policy and judge paths; see README.md.
 schema_version = 1
 name = "medium"
@@ -70,7 +70,7 @@ expert_parallel_size = 8
 micro_batch_size = 1
 sequence_packing = true
 packing_max_tokens = 34816
-# Keep recomputation for 32K packs. The measured 4K no-recompute win is not a 32K qualification.
+# Keep recomputation for 32K packs; disabling it is only reasonable for short contexts.
 activation_recompute = true
 trainer_flash_attention_version = 4
 

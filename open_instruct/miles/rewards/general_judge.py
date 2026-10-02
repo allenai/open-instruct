@@ -13,7 +13,7 @@
 
 # ruff: noqa: E501
 
-"""Judge rewards ported from olmo-miles afbdd6f (rl/general_judge.py)."""
+"""Judge rewards ported from the Megatron implementation."""
 
 from __future__ import annotations
 
@@ -180,7 +180,7 @@ def _get_session() -> Any:
 def _get_executor(max_workers: int) -> ThreadPoolExecutor:
     executor = _EXECUTORS.get(max_workers)
     if executor is None:
-        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="olmo-miles-general-judge")
+        executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="miles-general-judge")
         _EXECUTORS[max_workers] = executor
     return executor
 
