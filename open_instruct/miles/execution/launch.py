@@ -237,6 +237,51 @@ def submit(image, spec):
     return receipt
 
 
+def _job_summary(job):
+    summary = {key: job[key] for key in ("id", "name", "execution", "status", "node", "requests") if key in job}
+    details = job.get("status", {})
+    code = details.get("exitCode")
+    if details.get("canceled"):
+        # Beaker CLI emits numeric cancellation codes. Also accept protobuf JSON names.
+        cancellation = details.get("canceledCode")
+        if cancellation in (
+            1,
+            2,
+            9,
+            "CANCELATION_CODE_SYSTEM_PREEMPTION",
+            "CANCELATION_CODE_USER_PREEMPTION",
+            "CANCELATION_CODE_SIBLING_TASK_PREEMPTION",
+        ):
+            state = "preempted"
+        elif cancellation in (
+            6,
+            10,
+            11,
+            "CANCELATION_CODE_NODE_UNAVAILABLE",
+            "CANCELATION_CODE_HEALTHCHECK_FAILED",
+            "CANCELATION_CODE_SIBLING_TASK_RETRY",
+        ):
+            state = "interrupted"
+        else:
+            state = "canceled"
+        reason = details.get("canceledFor") or details.get("message")
+    else:
+        reason = details.get("message") or details.get("failedSchedulingMessage")
+        if details.get("failed") or (code is not None and code != 0):
+            state = "failed"
+        elif code == 0:
+            state = "succeeded"
+        elif details.get("exited") or details.get("finalized"):
+            # Stopped, but Beaker has not supplied a success/failure outcome.
+            state = "stopped"
+        elif details.get("started"):
+            state = "running"
+        else:
+            # A scheduling blocker can be temporary; it does not imply a terminal failure.
+            state = "pending"
+    return {**summary, "state": state, "reason": reason}
+
+
 def status(spec):
     target = receipt_path(spec)
     if not target.is_file():
@@ -255,6 +300,7 @@ def status(spec):
     if not jobs:
         jobs = [job for task in experiment.get("tasks", []) for job in task.get("jobs", [])]
     jobs.sort(key=lambda job: (job.get("status", {}).get("created", job.get("created", "")), job.get("id", "")))
+    jobs = [_job_summary(job) for job in jobs]
     latest_by_replica = {}
     for job in jobs:
         execution = job.get("execution", {})
@@ -262,31 +308,25 @@ def status(spec):
         latest_by_replica[key] = job
     current = list(latest_by_replica.values())
     expected = receipt.get("allocation", {}).get("replicas", 1)
-    codes = [job.get("status", {}).get("exitCode") for job in current]
-    if any(code is not None and code != 0 for code in codes):
-        state = "failed"
-    elif len(current) == expected and all(code == 0 for code in codes):
+    states = {job["state"] for job in current}
+    if len(current) == expected and states == {"succeeded"}:
         state = "complete"
-    elif any(
-        job.get("status", {}).get("started") and job.get("status", {}).get("exitCode") is None for job in current
-    ):
-        state = "running"
     else:
-        state = "pending"
-    current = [
-        {key: job[key] for key in ("id", "name", "execution", "status", "node", "requests") if key in job}
-        for job in current
-    ]
-    jobs = [
-        {key: job[key] for key in ("id", "name", "execution", "status", "node", "requests") if key in job}
-        for job in jobs
-    ]
+        state = next(
+            (
+                candidate
+                for candidate in ("failed", "canceled", "preempted", "interrupted", "stopped", "running")
+                if candidate in states
+            ),
+            "pending",
+        )
     return dict(
         receipt=str(target),
         experiment_id=receipt["experiment_id"],
         url=f"https://beaker.org/ex/{receipt['experiment_id']}",
         config_matches_submission=receipt["spec_sha256"] == workflow.fingerprint(spec.to_dict()),
         state=state,
+        auto_resume=receipt.get("spec", {}).get("launch", {}).get("auto_resume"),
         expected_replicas=expected,
         current_jobs=current,
         latest_job=jobs[-1] if jobs else None,

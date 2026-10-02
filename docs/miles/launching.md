@@ -264,6 +264,13 @@ beaker job logs JOB_ID
 
 `status` uses receipts in `~/.cache/open-instruct/miles/launches`; override with
 `MILES_LAUNCH_RECEIPTS`. Keep that directory when switching submitter hosts.
+Each attempt includes a `state` and `reason` alongside Beaker's raw `status`.
+Cancellation takes precedence over exit codes, so preemption is reported as
+`preempted` even when the process exits nonzero. Node unavailability, failed health
+checks and sibling task retries are reported as `interrupted`. `auto_resume` reports
+the submitted setting (or `null` for older receipts without it); neither `preempted`
+nor `interrupted` promises a retry. `stopped` means Beaker reports an exited or finalized attempt without a
+success/failure outcome. Scheduling blockers remain `pending`, with their reason.
 Inspect the latest attempt for **each task and replica rank**, not the first job of a retried
 experiment. Scheduler events explain pending jobs. Small reports/logs are copied
 to Beaker results; checkpoints and rollout tensors remain on WEKA. See

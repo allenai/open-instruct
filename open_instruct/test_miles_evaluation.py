@@ -152,6 +152,37 @@ def test_busy_worker_drops_without_waiting(run, monkeypatch):
         manager.worker.join(2)
 
 
+def test_collection_batch_submits_all_milestones_and_drops_next_busy_batch(run, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    submitted = []
+
+    def submit(receipt, path):
+        submitted.append(receipt["update"])
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(evaluation, "submit", submit)
+    manager = coordinator(run)
+    try:
+        manager.dispatch_batch([(2, "snapshot-2"), (3, "snapshot-3")])
+        assert entered.wait(1)
+        manager.dispatch_batch([(4, "snapshot-4"), (6, "snapshot-6")])
+        receipts = [json.loads(p.read_text()) for p in (Path(run.output["root"]) / "evaluation").glob("*.json")]
+        assert {r["update"]: r["status"] for r in receipts} == {
+            2: "pending",
+            3: "pending",
+            4: "skipped_busy",
+            6: "skipped_busy",
+        }
+    finally:
+        release.set()
+        manager.worker.join(2)
+    assert submitted == [2, 3]
+    # Neither accepted nor dropped claims are retried after a driver restart.
+    coordinator(run).dispatch_batch([(2, "snapshot-2"), (3, "snapshot-3"), (4, "snapshot-4"), (6, "snapshot-6")])
+    assert submitted == [2, 3]
+
+
 @pytest.mark.parametrize(
     "error",
     [subprocess.TimeoutExpired("beaker", 30), subprocess.CalledProcessError(1, "beaker"), ValueError("bad JSON")],
@@ -250,8 +281,11 @@ def test_evaluator_command_keeps_task_overrides(run):
     assert "--save-predictions" in args
 
 
-@pytest.mark.parametrize("stop_mode", ("complete", "deadline", "debug"))
-def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode):
+@pytest.mark.parametrize("stop_mode", ("complete", "deadline", "deadline_off_cadence", "debug"))
+@pytest.mark.parametrize("initial", [False, True])
+@pytest.mark.parametrize("export_hf", [None, "final-hf"])
+def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode, initial, export_hf):
+    deadline_stop = stop_mode.startswith("deadline")
     # Import the real driver with CPU stand-ins for the external actor runtime.
     imported = {}
 
@@ -331,14 +365,16 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     monkeypatch.setattr(evaluation, "submit", blocked_submit)
 
     async def train_step(rollout_id, batch):
-        target = evaluation.snapshot(run.output["root"], (rollout_id + 1) * 2)
-        target.mkdir(parents=True)
-        (target / ".complete").touch()
+        for update in range(rollout_id * 4 + 1, (rollout_id + 1) * 4 + 1):
+            target = evaluation.training_snapshot(args, update)
+            if target:
+                Path(target).mkdir(parents=True)
+                (Path(target) / ".complete").touch()
 
     learner.train.side_effect = train_step
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
-            publication_mode="barrier", diagnostic_interval=0, max_run_seconds=1 if stop_mode == "deadline" else None
+            publication_mode="barrier", diagnostic_interval=0, max_run_seconds=1 if deadline_stop else None
         ),
         background_evaluation=evaluation.runtime(run, run.compile().miles),
         fully_async=False,
@@ -352,7 +388,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         num_rollout=2,
         rollout_batch_size=8,
         n_samples_per_prompt=8,
-        global_batch_size=32,
+        global_batch_size=16,
         hf_checkpoint="initial",
         save_trigger_sentinel=None,
         save="native-checkpoints",
@@ -360,30 +396,40 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         update_weights_interval=1,
         debug_exit_after_rollout=1 if stop_mode == "debug" else None,
     )
+    args.background_evaluation.update(initial=initial, total_updates=8)
+    if stop_mode == "deadline_off_cadence":
+        for task, interval in zip(args.background_evaluation["tasks"], (3, 5)):
+            task["interval"] = interval
     try:
-        result = asyncio.run(driver.train(args, export_hf="final-hf"))
+        result = asyncio.run(driver.train(args, export_hf=export_hf))
         assert entered.wait(1)
         assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
         expected = [0, 1] if stop_mode == "complete" else [0]
         assert result["completed_rollout_ids"] == expected
         assert learner.train.await_count == len(expected)
-        assert result["stopped_for_time"] == (stop_mode == "deadline")
-        if stop_mode == "deadline":
+        assert result["stopped_for_time"] == deadline_stop
+        if deadline_stop:
             manager.save.remote.assert_awaited_once_with(0)
             learner.save_model.assert_awaited_once_with(0, force_sync=True)
             learner.finalize_checkpoint.assert_awaited_once_with(0)
-        if stop_mode == "debug":
+        if stop_mode == "deadline_off_cadence" and export_hf is None:
+            learner.export_hf.assert_awaited_once_with(0, str(evaluation.snapshot(run.output["root"], 4)))
+        elif stop_mode == "debug" or export_hf is None:
             learner.export_hf.assert_not_awaited()
         else:
             learner.export_hf.assert_awaited_once_with(expected[-1], "final-hf")
-        update = 4 if stop_mode == "complete" else 2
-        skipped = list((Path(run.output["root"]) / "evaluation").glob(f"update-{update:08d}-*.json"))
-        assert skipped and json.loads(skipped[0].read_text())["status"] == "skipped_busy"
-        if stop_mode == "deadline":
-            final = [
-                json.loads(p.read_text()) for p in skipped if json.loads(p.read_text())["checkpoint"] == "final-hf"
-            ]
+        receipts = [json.loads(p.read_text()) for p in (Path(run.output["root"]) / "evaluation").glob("*.json")]
+        for update in (3, 4) if stop_mode == "deadline_off_cadence" else (2, 3, 4):
+            milestone = [r for r in receipts if r["update"] == update]
+            assert len(milestone) == 1
+            assert milestone[0]["status"] == ("skipped_busy" if initial else "pending")
+        if stop_mode == "complete":
+            assert all(r["status"] == "skipped_busy" for r in receipts if r["update"] > 4)
+            assert any(r["update"] == 8 for r in receipts)
+        if deadline_stop:
+            final = [r for r in receipts if r["update"] == 4]
             assert len(final) == 1
+            assert final[0]["checkpoint"] == (export_hf or str(evaluation.snapshot(run.output["root"], 4)))
             assert {t["task"] for t in final[0]["tasks"]} == {"gsm8k", "arc_easy"}
         shared.assert_not_called()
     finally:

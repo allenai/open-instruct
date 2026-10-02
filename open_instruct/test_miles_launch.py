@@ -271,6 +271,165 @@ def test_status_uses_actual_beaker_top_level_job_shape_and_latest_attempt(tmp_pa
     assert launch.status(run)["config_matches_submission"] is False
 
 
+@pytest.fixture
+def status_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
+    run = spec(tmp_path)
+    receipt = {
+        "experiment_id": "experiment",
+        "spec_sha256": workflow.fingerprint(run.to_dict()),
+        "spec": run.to_dict(),
+        "allocation": {"replicas": 1},
+    }
+    jobs = []
+    monkeypatch.setattr(launch.subprocess, "check_output", lambda *args, **kwargs: json.dumps([{"jobs": jobs}]))
+
+    def read_status():
+        workflow.write_json(launch.receipt_path(run), receipt)
+        return launch.status(run)
+
+    return jobs, receipt, run, read_status
+
+
+@pytest.mark.parametrize(
+    ("details", "state", "reason"),
+    [
+        ({"exitCode": 0}, "complete", None),
+        ({"exitCode": 1, "message": "training failed"}, "failed", "training failed"),
+        ({"failed": "2", "message": "image pull failed"}, "failed", "image pull failed"),
+        ({"failed": "2", "exitCode": 0}, "failed", None),
+        ({"started": "1", "canceled": "2", "canceledCode": 4, "canceledFor": "manual"}, "canceled", "manual"),
+        ({"started": "1", "canceled": "2", "canceledCode": 5, "canceledFor": "timeout"}, "canceled", "timeout"),
+        ({"canceled": "2", "exitCode": 0, "canceledCode": 4}, "canceled", None),
+        (
+            {"canceled": "2", "canceledCode": 7, "canceledFor": "impossible to schedule"},
+            "canceled",
+            "impossible to schedule",
+        ),
+        ({"canceled": "2", "canceledCode": 999, "canceledFor": "unknown reason"}, "canceled", "unknown reason"),
+        ({"failedSchedulingMessage": "no free slots"}, "pending", "no free slots"),
+        ({"started": "1"}, "running", None),
+        ({"started": "1", "exited": "2"}, "stopped", None),
+        ({"finalized": "2"}, "stopped", None),
+        ({}, "pending", None),
+    ],
+)
+def test_status_reports_observed_outcome_and_preserves_beaker_details(status_jobs, details, state, reason):
+    jobs, _, _, read_status = status_jobs
+    jobs.append({"id": "job", "status": details})
+    result = read_status()
+    assert result["state"] == state
+    current = result["current_jobs"][0]
+    assert current["state"] == ("succeeded" if state == "complete" else state)
+    assert current["reason"] == reason
+    assert current["status"] == details
+    assert result["latest_job"] == current == result["attempts"][0]
+
+
+@pytest.mark.parametrize("auto_resume", [False, True])
+@pytest.mark.parametrize("code", [1, 2, 9, "CANCELATION_CODE_SYSTEM_PREEMPTION"])
+def test_status_preemption_precedes_exit_code_and_retry_replaces_current_attempt(status_jobs, auto_resume, code):
+    jobs, receipt, run, read_status = status_jobs
+    receipt["spec"]["launch"]["auto_resume"] = auto_resume
+    # The submitted setting, not a subsequently edited run file, is reported.
+    run.launch["auto_resume"] = not auto_resume
+    # Numeric code + exit 143 matches real Beaker preemption JSON.
+    jobs.append(
+        {
+            "id": "old",
+            "execution": {"task": "training", "replicaRank": 0},
+            "status": {
+                "created": "1",
+                "started": "2",
+                "canceled": "3",
+                "exited": "4",
+                "finalized": "5",
+                "exitCode": 143,
+                "canceledCode": code,
+                "canceledFor": "preempted by higher priority work",
+            },
+        }
+    )
+    result = read_status()
+    assert result["state"] == "preempted"
+    assert result["auto_resume"] is auto_resume
+    assert result["current_jobs"][0]["reason"] == "preempted by higher priority work"
+    jobs.append({"id": "retry", "execution": {"task": "training", "replicaRank": 0}, "status": {"created": "6"}})
+    assert read_status()["state"] == "pending"
+    jobs[-1]["status"]["started"] = "7"
+    result = read_status()
+    assert result["state"] == "running"
+    assert [job["id"] for job in result["current_jobs"]] == ["retry"]
+    assert [job["state"] for job in result["attempts"]] == ["preempted", "running"]
+    jobs[-1]["status"]["exitCode"] = 0
+    assert read_status()["state"] == "complete"
+
+
+@pytest.mark.parametrize("cause", ["NODE_UNAVAILABLE", "HEALTHCHECK_FAILED", "SIBLING_TASK_RETRY"])
+@pytest.mark.parametrize("numeric", [True, False])
+def test_status_reports_group_interruption_until_all_replicas_restart(status_jobs, cause, numeric):
+    jobs, receipt, _, read_status = status_jobs
+    receipt["allocation"]["replicas"] = 2
+    code = {"NODE_UNAVAILABLE": 6, "HEALTHCHECK_FAILED": 10, "SIBLING_TASK_RETRY": 11}[cause]
+    jobs.extend(
+        [
+            {
+                "id": "old",
+                "execution": {"task": "training", "replicaRank": 0},
+                "status": {
+                    "created": "1",
+                    "canceled": "2",
+                    "exitCode": 143,
+                    "canceledCode": code if numeric else f"CANCELATION_CODE_{cause}",
+                    "canceledFor": cause,
+                },
+            },
+            {
+                "id": "sibling",
+                "execution": {"task": "training", "replicaRank": 1},
+                "status": {
+                    "created": "1",
+                    "canceled": "2",
+                    "exitCode": 143,
+                    "canceledCode": 11,
+                    "canceledFor": "sibling task retry",
+                },
+            },
+        ]
+    )
+    result = read_status()
+    assert result["state"] == "interrupted"
+    assert [job["state"] for job in result["current_jobs"]] == ["interrupted", "interrupted"]
+    assert [job["reason"] for job in result["current_jobs"]] == [cause, "sibling task retry"]
+    for rank in (0, 1):
+        jobs.append(
+            {
+                "id": f"retry-{rank}",
+                "execution": {"task": "training", "replicaRank": rank},
+                "status": {"created": "3", "started": "4"},
+            }
+        )
+        assert read_status()["state"] == ("interrupted" if rank == 0 else "running")
+
+
+def test_status_reports_failed_replica_and_canceled_sibling(status_jobs):
+    jobs, receipt, _, read_status = status_jobs
+    receipt["allocation"]["replicas"] = 2
+    jobs.extend(
+        [
+            {"id": "failed", "execution": {"task": "training", "replicaRank": 0}, "status": {"exitCode": 1}},
+            {
+                "id": "sibling",
+                "execution": {"task": "training", "replicaRank": 1},
+                "status": {"canceled": "2", "exitCode": 143, "canceledCode": 8, "canceledFor": "sibling task failed"},
+            },
+        ]
+    )
+    result = read_status()
+    assert result["state"] == "failed"
+    assert {job["id"]: job["state"] for job in result["current_jobs"]} == {"failed": "failed", "sibling": "canceled"}
+
+
 def test_result_collection_reads_only_small_reports_and_prunes_weight_trees(tmp_path, monkeypatch):
     root, destination = tmp_path / "run", tmp_path / "result"
     (root / "checkpoints/step1/model").mkdir(parents=True)

@@ -4,10 +4,16 @@ Opt in with `evaluation.mode="background"`. Training captures frozen HF weights,
 then one driver submits independent Beaker jobs in a daemon worker. Evaluation
 never borrows, drains or pauses rollout engines, and shutdown never joins the
 submitter or waits for evaluator jobs. Missing points are expected: a busy
-submitter drops new milestones, submission failures are not retried, and preemption can
+submitter drops milestones from the next collection, submission failures are not retried, and preemption can
 interrupt submission. Submitted evaluator jobs automatically restart after
 preemption. Snapshot export is a synchronous trainer collective;
 checkpoint/collective failures still fail training.
+
+Ready milestones from one collection are submitted as one batch, so they do not
+compete with each other for the submission worker. A wall-clock-stop final
+evaluation joins the last collection's batch, merging periodic and final tasks at
+the same update. The worker submits accepted receipts sequentially; it does not
+queue additional collections or wait at shutdown.
 
 The [large example](../../configs/miles/examples/large.toml) opts into background
 evaluation with the published image, separate one-GPU jobs and starter GSM8K,

@@ -270,15 +270,35 @@ class Coordinator:
         self.worker = None
 
     def dispatch(self, update, checkpoint, *, final=False):
+        self.dispatch_batch([(update, checkpoint)], final=final)
+
+    def dispatch_batch(self, milestones, *, final=False):
+        """Accept one collection together; final includes all tasks at its last update."""
         try:
-            self._dispatch(update, checkpoint, final=final)
+            self._dispatch_batch(milestones, final=final)
         except Exception as error:
             # Local receipt/submission preparation is independent of trainer health.
-            logger.warning(
-                "BACKGROUND EVALUATION GAP at update %s: cannot record/submit (%s)", update, type(error).__name__
-            )
+            logger.warning("BACKGROUND EVALUATION GAP: cannot record/submit collection (%s)", type(error).__name__)
 
-    def _dispatch(self, update, checkpoint, *, final=False):
+    def _dispatch_batch(self, milestones, *, final=False):
+        busy = self.worker is not None and self.worker.is_alive()
+        receipts = []
+        for index, (update, checkpoint) in enumerate(milestones):
+            try:
+                receipts.extend(
+                    self._receipts(update, checkpoint, busy=busy, final=final and index == len(milestones) - 1)
+                )
+            except Exception as error:
+                logger.warning(
+                    "BACKGROUND EVALUATION GAP at update %s: cannot record (%s)", update, type(error).__name__
+                )
+        if receipts:
+            self.worker = threading.Thread(
+                target=self._submit, args=(receipts,), daemon=True, name="miles-evaluation-submit"
+            )
+            self.worker.start()
+
+    def _receipts(self, update, checkpoint, *, busy, final=False):
         if update == 0:
             state.atomic_json(
                 snapshot(self.config["root"], 0).parent / "reference.json",
@@ -308,17 +328,13 @@ class Coordinator:
                     Path(__file__).with_name("evaluation_runner.py").read_bytes()
                 ).hexdigest(),
             )
-            if self.worker is not None and self.worker.is_alive():
+            if busy:
                 receipt.update(status="skipped_busy", diagnostic="Submission worker busy; milestone dropped")
                 logger.warning("BACKGROUND EVALUATION GAP at update %s: submission worker busy", update)
             state.atomic_json(path, receipt)
             if receipt["status"] == "pending":
                 receipts.append((receipt, path))
-        if receipts:
-            self.worker = threading.Thread(
-                target=self._submit, args=(receipts,), daemon=True, name="miles-evaluation-submit"
-            )
-            self.worker.start()
+        return receipts
 
     @staticmethod
     def _submit(receipts):

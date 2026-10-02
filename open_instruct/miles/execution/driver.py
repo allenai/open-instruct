@@ -103,6 +103,7 @@ async def train(args, *, export_hf=None):
         background = getattr(args, "background_evaluation", None)
         evaluation = None if background else EvalDispatcher(args, learner, manager)
         coordinator = None
+        collection_snapshots = []
         if background:
             tracking = {
                 "id": getattr(args, "wandb_run_id", None),
@@ -150,11 +151,12 @@ async def train(args, *, export_hf=None):
                 # disabled. This schedules bounded background CPU work, not a save.
                 startup_cache.publish_progress(args, rollout_id)
                 if coordinator is not None and background is not None:
+                    collection_snapshots = []
                     per_collection = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
                     for update in range(rollout_id * per_collection + 1, (rollout_id + 1) * per_collection + 1):
                         target = background_eval.snapshot(background["root"], update)
                         if (target / HF_EXPORT_COMPLETE_MARKER).is_file():
-                            coordinator.dispatch(update, target)
+                            collection_snapshots.append((update, target))
                 if rolling is not None:
                     await rolling.optimizer_step_completed()
             finally:
@@ -193,6 +195,10 @@ async def train(args, *, export_hf=None):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
+            if coordinator is not None and background is not None and not (stopped_for_time and background["final"]):
+                coordinator.dispatch_batch(collection_snapshots)
+                collection_snapshots = []
+            if stopped_for_time:
                 break
             if (
                 args.debug_exit_after_rollout is not None
@@ -220,7 +226,10 @@ async def train(args, *, export_hf=None):
             ):
                 with stage(args, "final_evaluation_export"):
                     await learner.export_hf(last, target)
-            coordinator.dispatch(update, target, final=True)
+            # Merge the periodic and final task sets at this update before claiming receipts.
+            collection_snapshots = [(step, path) for step, path in collection_snapshots if step != update]
+            collection_snapshots.append((update, target))
+            coordinator.dispatch_batch(collection_snapshots, final=True)
     except BaseException as error:
         failure = error
         raise
