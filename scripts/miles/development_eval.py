@@ -5,10 +5,16 @@ a flat list of acceptable answers; malformed labels are errors, never zero rewar
 """
 
 import re
+from decimal import Decimal, InvalidOperation
 
-from olmo_eval.common.scorers import MinervaMathScorer
-from olmo_eval.common.types import Instance, LMOutput
-from olmo_eval.evals.extract import MathExtractor
+try:
+    from olmo_eval.common.scorers import MinervaMathScorer
+    from olmo_eval.common.types import Instance, LMOutput
+    from olmo_eval.evals.extract import MathExtractor
+except ModuleNotFoundError as error:
+    if error.name != "olmo_eval":
+        raise
+    MinervaMathScorer = Instance = LMOutput = MathExtractor = None
 
 NUMBER = re.compile(r"[-+]?\d*\.\d+|[-+]?\d+")
 
@@ -20,10 +26,28 @@ def gold_answers(label):
     return answers
 
 
+def _exact_number(text):
+    try:
+        value = Decimal(text.strip().replace(",", ""))
+    except InvalidOperation:
+        return None
+    return value if value.is_finite() else None
+
+
+def gsm8k_matches(answer, label):
+    """Mirror MILES numeric comparison without requiring open_instruct in evaluator bundles."""
+    found, expected = _exact_number(answer), _exact_number(label)
+    if found is not None and expected is not None:
+        return found == expected
+    return answer.lower() == label.lower()
+
+
 def score_one(row, item):
     gold = gold_answers(item["label"])
     text = row["text"].split("</think>")[-1].strip().removeprefix("<answer>").removesuffix("</answer>").strip()
     if item["verifier"] == "math":
+        if MinervaMathScorer is None:
+            raise ImportError("Math development scoring requires the olmo-eval environment")
         answers = MathExtractor.extract_answer(text)
         output = LMOutput(text=text, extracted_answer=answers[0] if answers else None)
         output.metadata["all_extracted_answers"] = answers
@@ -31,9 +55,10 @@ def score_one(row, item):
             Instance(question=item["prompt"], gold_answer=gold[0], metadata={"all_gold_answers": gold}), output
         )
     elif item["verifier"] == "gsm8k":
-        matches = NUMBER.findall(re.sub(r"(?<=\d),(?=\d)", "", text))
+        response = re.sub(r"(\d),(\d)", r"\1\2", text)
+        matches = NUMBER.findall(response)
         answers = matches[-1] if matches else None
-        score = float(answers in gold)
+        score = float(any(gsm8k_matches(answers if answers is not None else response, label) for label in gold))
     else:
         raise ValueError(f"Unsupported development verifier: {item['verifier']}")
     closed = "</think>" in row["text"] and bool(row["text"].rsplit("</think>", 1)[1].strip())

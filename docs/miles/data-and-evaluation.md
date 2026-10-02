@@ -18,11 +18,11 @@ Choose exactly one mode under `[data]`:
 Current named tasks are `gsm8k`, `gsm8k-less-noise`, `gsm8k_original`, `math`, legacy `ifeval`, and
 generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
 
-`gsm8k` uses the established `ai2-adapt-dev/rlvr_gsm8k_zs` train split. The maintained
-examples select this task. `gsm8k_original` remains a compatibility alias for the
-same pinned dataset, retaining its historical sampling seed convention.
+`gsm8k` uses the established `ai2-adapt-dev/rlvr_gsm8k_zs` train split.
+`gsm8k_original` remains a compatibility alias for the same pinned dataset,
+retaining its historical sampling seed convention.
 
-`gsm8k-less-noise` explicitly selects
+The maintained dev and small examples use `gsm8k-less-noise`, which selects
 [`techarb/gsm8k-cleaner`](https://huggingface.co/datasets/techarb/gsm8k-cleaner), an
 **informally cleaned variant that has not been rigorously validated**. It has 39
 corrected targets and omits 93 problems judged ambiguous or unreliable, leaving

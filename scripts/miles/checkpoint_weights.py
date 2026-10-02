@@ -107,7 +107,7 @@ def compare_stream(stream, reference, *, native_vocab_size=None, hf_vocab_size=N
             error = (actual.float() - expected.float()).abs().max().item()
             raise ValueError(f"Value mismatch for {name}: max_abs_error={error}")
         digest.update(json.dumps([name, list(actual.shape), str(actual.dtype)]).encode())
-        digest.update(actual.view(torch.uint8).numpy().tobytes())
+        digest.update(actual.reshape(-1).view(torch.uint8).numpy().tobytes())
         total_bytes += actual.numel() * actual.element_size()
         if name.endswith((".q_norm.weight", ".k_norm.weight", ".ssmax_scale")):
             special[name] = list(actual.shape)

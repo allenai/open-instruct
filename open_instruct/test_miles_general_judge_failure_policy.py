@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import requests
@@ -67,6 +68,27 @@ def test_context_or_programming_errors_do_not_become_zero(monkeypatch, request_s
     monkeypatch.setattr(general_judge, "_request", fail)
     with pytest.raises(RuntimeError, match="context overflow"):
         run_score(request_setup)
+
+
+@pytest.mark.parametrize("policy", ["zero", "raise"])
+def test_context_overflow_fails_once_without_submission_or_retry(monkeypatch, request_setup, policy):
+    monkeypatch.setenv("OI_MILES_JUDGE_CHECK_CONTEXT", "true")
+    monkeypatch.setenv("OI_MILES_JUDGE_MAX_CONTEXT_LENGTH", "100")
+    monkeypatch.setenv("OI_MILES_JUDGE_MAX_TOKENS", "10")
+    count = Mock(return_value=95)
+    session = Mock(side_effect=AssertionError("Overflow must fail before generation"))
+    delay = AsyncMock()
+    monkeypatch.setattr(general_judge, "count_prompt_tokens", count)
+    monkeypatch.setattr(general_judge, "_get_session", session)
+    monkeypatch.setattr(general_judge.asyncio, "sleep", delay)
+    with pytest.raises(general_judge.JudgeContextOverflow, match="95 prompt \\+ 10 output > 100"):
+        run_score(request_setup, policy)
+    count.assert_called_once()
+    session.assert_not_called()
+    delay.assert_not_awaited()
+    diagnostics = request_setup.metadata["verifier_diagnostics"]["general-quality"]
+    assert len(diagnostics["attempts"]) == 1
+    assert "fallback_reward" not in diagnostics
 
 
 def test_request_timeout_is_classified_as_recoverable(monkeypatch):

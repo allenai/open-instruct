@@ -218,6 +218,9 @@ Use `scripts/miles/development_eval.py` for custom math/GSM8K development
 scoring. Prepared math labels can be lists of acceptable strings. Preserve that
 flat list rather than wrapping it again: `['42']` must not become `[['42']]`.
 The scorer rejects malformed labels instead of silently recording zero.
+GSM8K uses the training reward's exact decimal comparison, so `18.00`, `+18`
+and `18` are equivalent. Its parity tests run in the normal CPU suite without
+olmo-eval; math scoring still requires the olmo-eval environment.
 Regression tests cover scalar/list/multiple gold answers and completion gates:
 
 ```bash

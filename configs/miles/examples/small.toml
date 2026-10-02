@@ -1,4 +1,5 @@
 # SMALL: exercise disaggregated GSM8K at small scale: one trainer + one engine.
+# Checkpoint saving and HF export are intentional parts of this mechanics check.
 # Use a small checkpoint that fits one trainer GPU; tiny/random models test plumbing.
 # Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
 schema_version = 1
@@ -32,7 +33,7 @@ shuffle = true
 
 # GSM8K on a tiny random MoE is a mechanics check, not an accuracy run.
 [[data.tasks]]
-task = "gsm8k"
+task = "gsm8k-less-noise"
 train_count = 32
 eval_count = 8
 

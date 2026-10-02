@@ -246,7 +246,6 @@ exclude = [
     "human_eval/",
     "open_instruct/test_*.py",
     "tests/miles/",
-    # These adapters require the separate Core pin; checked by the MILES workflow.
     "test_*.py",
     "open_instruct/IFEvalG/instructions.py",
     "open_instruct/dpo.py",

@@ -32,7 +32,7 @@ shuffle = true
 
 # GSM8K on a tiny random MoE is a mechanics check, not an accuracy run.
 [[data.tasks]]
-task = "gsm8k"
+task = "gsm8k-less-noise"
 train_count = 32
 eval_count = 8
 

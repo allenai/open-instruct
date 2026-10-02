@@ -20,6 +20,9 @@ All notable changes to this project will be documented in this file.
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Fixed
+- Fail immediately on detected MILES judge context overflow and support scalar tensors in checkpoint weight comparisons (https://github.com/allenai/open-instruct/pull/1924).
+- Use `gsm8k-less-noise` in the MILES dev/small training examples while retaining all supported GSM8K task options (https://github.com/allenai/open-instruct/pull/1924).
+- Align the MILES development GSM8K scorer with the training reward's exact decimal comparison and text fallback, preventing formatting-only accuracy differences (https://github.com/allenai/open-instruct/pull/1924).
 - Batch MILES background-evaluation milestones per collection, including wall-clock-stop final evaluation, so milestones from the same collection do not drop each other as busy (https://github.com/allenai/open-instruct/pull/1924).
 - Distinguish MILES job cancellation, preemption, infrastructure interruption and failure, preserving per-attempt reasons and keeping temporary scheduling blockers pending (https://github.com/allenai/open-instruct/pull/1924).
 - Default MILES launches to unallocated scheduling when minimum runtime is omitted; also accept zero or blank on any topology and allow execution timeouts shorter than the protected window (https://github.com/allenai/open-instruct/pull/1924).

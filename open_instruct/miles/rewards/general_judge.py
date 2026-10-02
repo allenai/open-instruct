@@ -202,6 +202,10 @@ def count_prompt_tokens(config: GeneralJudgeConfig, prompt: str) -> int:
     return count
 
 
+class JudgeContextOverflow(RuntimeError):
+    """The unchanged request cannot fit; retrying cannot recover."""
+
+
 class JudgeResponseError(RuntimeError):
     """Keep bounded response evidence without accepting an invalid grade."""
 
@@ -215,7 +219,7 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
         if config.check_context:
             count = count_prompt_tokens(config, prompt)
             if count + config.max_tokens > config.max_context_length:
-                raise RuntimeError(
+                raise JudgeContextOverflow(
                     f"judge context overflow: {count} prompt + {config.max_tokens} output > "
                     f"{config.max_context_length}; request was not truncated"
                 )
@@ -256,7 +260,7 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
         if not isinstance(content, str):
             raise TypeError("response content is not a string")
         return content
-    except JudgeResponseError:
+    except (JudgeResponseError, JudgeContextOverflow):
         raise
     except (requests.RequestException, KeyError, IndexError, TypeError, ValueError) as error:
         raise JudgeResponseError(
@@ -318,7 +322,7 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
                 "failure_policy": policy,
                 "attempts": list(failed_attempts),
             }
-            if attempt == 2:
+            if attempt == 2 or isinstance(error, JudgeContextOverflow):
                 diagnostics = metadata["verifier_diagnostics"][name]
                 if policy == "zero" and isinstance(error, JudgeResponseError):
                     diagnostics.update(status="judge_error", fallback_reward=0.0)

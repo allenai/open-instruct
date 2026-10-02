@@ -63,7 +63,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
 @pytest.mark.parametrize("profile,gpus", [("dev", 1), ("small", 2), ("medium", 16), ("large", 56)])
 def test_self_contained_example_plans(profile, gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
-    assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k"
+    assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k-less-noise"
     assert spec.plan()["allocation"]["allocated_gpus"] == gpus
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
     assert spec.compile().core.max_policy_lag == (6 if profile in ("medium", "large") else 0)
