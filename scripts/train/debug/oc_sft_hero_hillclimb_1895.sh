@@ -56,6 +56,17 @@ case "$ARM" in
             olmo35-kimik3) FULL_MIXER="allenai/Dolci-Think-SFT-7B-KimiK3-Early 1.0" ;;
             olmo35-origearly) FULL_MIXER="allenai/Dolci-Think-SFT-7B-Original-Early 1.0" ;;
         esac
+        # H040 takes the reserved-slot tags, against the comment above, because its
+        # two arms tokenize the <think> boundary differently as ordinary BPE pieces:
+        # every Kimi trace starts on a new line, so the closing ">" always merges
+        # into ">\n" and is always supervised (100% of runs), while the original
+        # completions mostly start with a space and leave ">" masked (26.55%). The
+        # eval prompt ends in a plain ">", which the Kimi arm would then never have
+        # trained on. One token per tag removes the merge and makes the arms
+        # symmetric by construction. Measured by Beaker 01M3YR4XS5TBY4CK5YD4G0N9EN.
+        case "$ARM" in
+            olmo35-kimik3|olmo35-origearly) THINK_TOKENS=1 ;;
+        esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
         case "$ARM_CACHE" in
