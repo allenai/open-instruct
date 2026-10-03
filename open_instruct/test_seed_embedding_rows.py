@@ -149,6 +149,45 @@ class TestOlmoCoreSeeding(unittest.TestCase):
         self.assertEqual(olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer([])), 0)
         torch.testing.assert_close(train_module.model.embeddings.weight, original)
 
+    def test_first_piece_output_init_changes_only_the_named_head_row(self):
+        train_module = _StubTrainModule(tie_word_embeddings=False)
+        olmo_core_utils.initialize_promoted_token_embeddings(
+            train_module, _StubTokenizer(self.CHAINED), output_init_from_first_piece=["<t3>"]
+        )
+        reference = reference_matrix()
+        torch.testing.assert_close(train_module.model.lm_head.w_out.weight[3], reference[0])
+        torch.testing.assert_close(train_module.model.embeddings.weight[3], reference[[0, 1]].mean(dim=0))
+        torch.testing.assert_close(train_module.model.lm_head.w_out.weight[7], reference[[3, 2]].mean(dim=0))
+
+    def test_step0_hashes_differ_only_in_the_first_piece_seeded_head_row(self):
+        hashes = {}
+        for flag in ((), ("<t3>",)):
+            train_module = _StubTrainModule(tie_word_embeddings=False)
+            tokenizer = _StubTokenizer(self.CHAINED)
+            olmo_core_utils.initialize_promoted_token_embeddings(train_module, tokenizer, flag)
+            matrices = olmo_core_utils.promoted_token_matrices(train_module.model)
+            hashes[flag] = olmo_core_utils.promoted_row_hashes(matrices, tokenizer)
+        off, on = hashes[()], hashes[("<t3>",)]
+        self.assertEqual(off[0], on[0])
+        self.assertEqual(off[1]["rest"], on[1]["rest"])
+        self.assertEqual(off[1]["rows"]["<t7>"], on[1]["rows"]["<t7>"])
+        self.assertNotEqual(off[1]["rows"]["<t3>"], on[1]["rows"]["<t3>"])
+        self.assertEqual(on[1]["rows"]["<t3>"], on[1]["first_pieces"]["<t3>"])
+
+    def test_first_piece_output_init_with_tied_weights_raises(self):
+        train_module = _StubTrainModule(tie_word_embeddings=True)
+        with self.assertRaisesRegex(ValueError, "untied"):
+            olmo_core_utils.initialize_promoted_token_embeddings(
+                train_module, _StubTokenizer(self.CHAINED), output_init_from_first_piece=["<t3>"]
+            )
+
+    def test_first_piece_output_init_of_an_unpromoted_token_raises(self):
+        train_module = _StubTrainModule(tie_word_embeddings=False)
+        with self.assertRaisesRegex(ValueError, "name no promoted"):
+            olmo_core_utils.initialize_promoted_token_embeddings(
+                train_module, _StubTokenizer(self.CHAINED), output_init_from_first_piece=["</think>"]
+            )
+
 
 class _StubDDPOptimizer:
     """An OLMoDDPOptimizer's bf16 layout: fp32 main copies that are separate from the params.

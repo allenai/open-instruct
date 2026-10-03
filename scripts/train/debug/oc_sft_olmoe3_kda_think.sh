@@ -149,6 +149,12 @@ RESERVED_SLOT_FLAGS=()
 if [[ "${THINK_TOKENS:-0}" == "1" ]]; then
     RESERVED_SLOT_FLAGS=(--reserved_slot_tokens "<think>" "</think>")
 fi
+# H031: OUTPUT_INIT_FIRST_PIECE='</think>' seeds that token's lm_head row from its first piece
+# (`</`) instead of the mean of its pieces. Not a cache key, so only the training block reads it.
+OUTPUT_INIT_FLAGS=()
+if [[ -n "${OUTPUT_INIT_FIRST_PIECE:-}" ]]; then
+    OUTPUT_INIT_FLAGS=(--promoted_token_output_init_from_first_piece "$OUTPUT_INIT_FIRST_PIECE")
+fi
 # 32768 is the cache's native tokenisation length (no re-tokenize) and cuts
 # mid-trace truncation to 1.95%; 16384 would show the LC base the same data as
 # the midtrain base.
@@ -397,6 +403,7 @@ case "$MODE" in
         --tokenizer_name_or_path $TOKENIZER \
         --chat_template_name $CHAT_TEMPLATE \
         "${RESERVED_SLOT_FLAGS[@]}" \
+        "${OUTPUT_INIT_FLAGS[@]}" \
         --max_seq_length "$SEQ" \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps $GRAD_ACCUM \
