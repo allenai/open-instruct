@@ -126,6 +126,10 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
+    promoted_token_output_init_from_first_piece: list[str] | None = None
+    """Promoted reserved-slot tokens whose output (lm_head) row is copied from their first piece
+    instead of the mean of their pieces, e.g. `'</think>'` seeds from `</` (H031). The input row
+    is unchanged. Kept out of TokenizerConfig so the dataset cache key does not move."""
 
 
 @dataclasses.dataclass
@@ -421,7 +425,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # rows have been trained since they were seeded.
     if not resumed:
         row_check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, tc.tokenizer)
-        olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
+        olmo_core_utils.initialize_promoted_token_embeddings(
+            train_module, tc.tokenizer, args.sft.promoted_token_output_init_from_first_piece or ()
+        )
         if row_check is not None:
             row_check.record_seeded()
             trainer.add_callback("promoted_row_step_check", row_check)

@@ -236,9 +236,20 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
-def promoted_token_rows(tokenizer) -> list[tuple[int, tuple[int, ...]]]:
-    """(slot id, piece ids) for each token the tokenizer promoted into a reserved slot."""
-    return [(token.token_id, token.source_ids) for token in getattr(tokenizer, "promoted_reserved_slot_tokens", [])]
+def promoted_token_rows(tokenizer, first_piece_only: Sequence[str] = ()) -> list[tuple[int, tuple[int, ...]]]:
+    """(slot id, piece ids) for each token the tokenizer promoted into a reserved slot.
+
+    Tokens named in `first_piece_only` keep only their first piece (`</` for `</think>`).
+    Naming a token that was not promoted raises, so a typo cannot silently fall back to the mean.
+    """
+    promoted = getattr(tokenizer, "promoted_reserved_slot_tokens", [])
+    unknown = sorted(set(first_piece_only) - {token.content for token in promoted})
+    if unknown:
+        raise ValueError(f"{unknown} name no promoted reserved-slot token; promoted: {[t.content for t in promoted]}")
+    return [
+        (token.token_id, token.source_ids[:1] if token.content in first_piece_only else token.source_ids)
+        for token in promoted
+    ]
 
 
 def _write_row_means(matrix: torch.Tensor, rows: Sequence[tuple[int, Sequence[int]]]) -> None:
@@ -275,7 +286,9 @@ def seed_embedding_rows(weight: torch.Tensor, rows: Sequence[tuple[int, Sequence
             _write_row_means(data, rows)
 
 
-def initialize_promoted_token_embeddings(model: torch.nn.Module, tokenizer) -> int:
+def initialize_promoted_token_embeddings(
+    model: torch.nn.Module, tokenizer, output_init_from_first_piece: Sequence[str] = ()
+) -> int:
     """Seed the embedding (and output) rows of reserved-slot-promoted tokens from their pieces.
 
     A promoted token takes over a slot the pretraining data never emitted, so its row holds
@@ -284,22 +297,27 @@ def initialize_promoted_token_embeddings(model: torch.nn.Module, tokenizer) -> i
     somewhere the model already associates with the tag, so a short SFT budget measures the
     tokenization change rather than the cost of learning an embedding from scratch.
 
+    Tokens named in `output_init_from_first_piece` have their output row copied from their first
+    piece instead of the mean; their input row is still the mean.
+
     A no-op when the tokenizer promoted nothing. Returns the number of rows written.
     """
     rows = promoted_token_rows(tokenizer)
+    output_rows = promoted_token_rows(tokenizer, first_piece_only=output_init_from_first_piece)
     if not rows:
         return 0
 
     input_embeddings = model.get_input_embeddings()
     output_embeddings = model.get_output_embeddings()
     # Tied weights are the same tensor; seeding it twice would read back the row just written.
-    matrices = [input_embeddings.weight]
-    if output_embeddings is not None and output_embeddings.weight is not input_embeddings.weight:
-        matrices.append(output_embeddings.weight)
-    for weight in matrices:
-        seed_embedding_rows(weight, rows)
+    tied = output_embeddings is None or output_embeddings.weight is input_embeddings.weight
+    if tied and output_init_from_first_piece:
+        raise ValueError("output_init_from_first_piece needs an output head untied from the input embedding")
+    seed_embedding_rows(input_embeddings.weight, rows)
+    if not tied:
+        seed_embedding_rows(output_embeddings.weight, output_rows)
 
-    logger.info(f"Seeded {len(rows)} promoted token embedding row(s) from their pieces: {rows}")
+    logger.info(f"Seeded {len(rows)} promoted token row(s); input from {rows}, output from {output_rows}")
     return len(rows)
 
 

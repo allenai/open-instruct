@@ -321,6 +321,9 @@ class FlatArguments:
 
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    promoted_token_output_init_from_first_piece: list[str] | None = None
+    """Promoted reserved-slot tokens whose output (lm_head) row is copied from their first piece
+    instead of the mean of their pieces, e.g. `'</think>'` seeds from `</`. The input row is unchanged."""
     packing: bool = field(
         default=False,
         metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
@@ -634,7 +637,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if output_embeddings is not None and output_embeddings.weight is not embeddings.weight:
         embedding_params.append(output_embeddings.weight)
     with deepspeed.zero.GatheredParameters(embedding_params, modifier_rank=0):
-        model_utils.initialize_promoted_token_embeddings(model, tokenizer)
+        model_utils.initialize_promoted_token_embeddings(
+            model, tokenizer, args.promoted_token_output_init_from_first_piece or ()
+        )
 
     if args.use_lora:
         if args.use_qlora:

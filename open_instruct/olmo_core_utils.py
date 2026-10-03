@@ -3,10 +3,12 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import hashlib
 import json
 import os
 import shlex
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -329,6 +331,32 @@ def promoted_token_matrices(model) -> list[torch.Tensor]:
     return matrices
 
 
+def _sha(tensor: torch.Tensor) -> str:
+    return hashlib.sha256(tensor.detach().contiguous().cpu().view(torch.uint8).numpy().tobytes()).hexdigest()[:16]
+
+
+def promoted_row_hashes(matrices: list[torch.Tensor], tokenizer) -> list[dict[str, Any]]:
+    """Per matrix: a hash of every row but the promoted ones, and of each promoted row and its first piece.
+
+    Two runs from the same base that seed differently must agree on `rest`; a promoted row
+    seeded from its first piece must hash like that piece's row (H031).
+    """
+    promoted = getattr(tokenizer, "promoted_reserved_slot_tokens", [])
+    hashes = []
+    for weight in matrices:
+        data = weight.data.full_tensor() if isinstance(weight.data, DTensor) else weight.data
+        keep = torch.ones(data.shape[0], dtype=torch.bool, device=data.device)
+        keep[[token.token_id for token in promoted]] = False
+        hashes.append(
+            {
+                "rest": _sha(data[keep]),
+                "rows": {token.content: _sha(data[token.token_id]) for token in promoted},
+                "first_pieces": {token.content: _sha(data[token.source_ids[0]]) for token in promoted},
+            }
+        )
+    return hashes
+
+
 def _rows(weight: torch.Tensor, ids: list[int]) -> torch.Tensor:
     data = weight.data.full_tensor() if isinstance(weight.data, DTensor) else weight.data
     return data[ids].detach().float().cpu().clone()
@@ -380,7 +408,9 @@ class PromotedRowStepCheck(train_callbacks.Callback):
                 )
 
 
-def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
+def initialize_promoted_token_embeddings(
+    train_module, tokenizer, output_init_from_first_piece: Sequence[str] = ()
+) -> int:
     """Seed the rows of reserved-slot-promoted tokens on the olmo-core path.
 
     Call this once the base weights are in place and before the first step -- and only when the
@@ -389,19 +419,28 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
 
     By this point `parallelize_model` has sharded the embedding on the vocabulary dimension, so
     the rows being read and the row being written generally live on different ranks;
-    `model_utils.seed_embedding_rows` handles that. A no-op when the tokenizer promoted nothing.
-    Returns the number of rows written per matrix.
+    `model_utils.seed_embedding_rows` handles that. Tokens named in `output_init_from_first_piece`
+    have their head row copied from their first piece instead of the mean. A no-op when the
+    tokenizer promoted nothing. Returns the number of rows written per matrix.
     """
     rows = model_utils.promoted_token_rows(tokenizer)
+    output_rows = model_utils.promoted_token_rows(tokenizer, first_piece_only=output_init_from_first_piece)
     if not rows:
         return 0
 
     matrices = promoted_token_matrices(train_module.model)
-    for weight in matrices:
-        model_utils.seed_embedding_rows(weight, rows)
+    if len(matrices) == 1 and output_init_from_first_piece:
+        raise ValueError("output_init_from_first_piece needs an output head untied from the input embedding")
+    for weight, weight_rows in zip(matrices, [rows, output_rows]):
+        model_utils.seed_embedding_rows(weight, weight_rows)
     sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
 
-    logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
+    logger.info(
+        f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices; "
+        f"input from {rows}, output from {output_rows}"
+    )
+    for index, hashes in enumerate(promoted_row_hashes(matrices, tokenizer)):
+        logger.info(f"Step-0 hashes, matrix {index}: {hashes}")
     return len(rows)
 
 

@@ -292,6 +292,32 @@ class TestInitializePromotedTokenEmbeddings(unittest.TestCase):
         self.assertEqual(model_utils.initialize_promoted_token_embeddings(self.model, build_tokenizer()), 0)
         torch.testing.assert_close(self.model.embed.weight, before)
 
+    def test_first_piece_output_init_seeds_the_head_row_from_the_first_piece(self):
+        close, other = self.tokenizer.promoted_reserved_slot_tokens[1], self.tokenizer.promoted_reserved_slot_tokens[0]
+        self.assertEqual(close.content, "</think>")
+        head_first_piece = self.model.lm_head.weight[close.source_ids[0]].clone()
+        embed_mean = self.model.embed.weight[list(close.source_ids)].mean(dim=0).clone()
+        other_head_mean = self.model.lm_head.weight[list(other.source_ids)].mean(dim=0).clone()
+        model_utils.initialize_promoted_token_embeddings(
+            self.model, self.tokenizer, output_init_from_first_piece=["</think>"]
+        )
+        torch.testing.assert_close(self.model.lm_head.weight[close.token_id], head_first_piece)
+        torch.testing.assert_close(self.model.embed.weight[close.token_id], embed_mean)
+        torch.testing.assert_close(self.model.lm_head.weight[other.token_id], other_head_mean)
+
+    def test_first_piece_output_init_with_tied_weights_raises(self):
+        model = TinyModel(vocab_size=len(self.tokenizer), tie_weights=True)
+        with self.assertRaisesRegex(ValueError, "untied"):
+            model_utils.initialize_promoted_token_embeddings(
+                model, self.tokenizer, output_init_from_first_piece=["</think>"]
+            )
+
+    def test_first_piece_output_init_of_an_unpromoted_token_raises(self):
+        with self.assertRaisesRegex(ValueError, "name no promoted"):
+            model_utils.initialize_promoted_token_embeddings(
+                self.model, build_tokenizer(), output_init_from_first_piece=["</think>"]
+            )
+
     def test_raises_when_the_slot_is_outside_the_embedding_matrix(self):
         model = TinyModel(vocab_size=4)
         with self.assertRaisesRegex(ValueError, "the matrix has only 4 rows"):
