@@ -43,7 +43,7 @@ with that pin. Image metadata records the application Git revision. Reusing an i
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
 
-The build needs read access to the private `allenai/miles` and `allenai/olmo-sglang` repositories.
+The build needs read access to the private `allenai/miles-olmo-core` and `allenai/olmo-sglang` repositories.
 `build_image.py` uses `GH_TOKEN`, `GITHUB_TOKEN`, or the active `gh auth login`
 credential, passed through a temporary BuildKit secret. It is not stored in image
 layers or Git URLs. For standalone source preparation, pass

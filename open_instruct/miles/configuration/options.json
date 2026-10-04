@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sources": {"miles":{"private":true,"repository":"https://github.com/allenai/miles.git","revision":"a01dc21a80b7bdef0a10f2eba8143f46f02015f7"},"olmo-core":{"repository":"https://github.com/allenai/OLMo-core.git","revision":"d6a08226f4a0ab53bed13fda680df969504fcb34"},"olmo-sglang":{"private":true,"repository":"https://github.com/allenai/olmo-sglang.git","revision":"b3a795f33e048dac401c89bb5823381146181ac6"}},
+  "sources": {"miles":{"private":true,"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"e50a01af44760bbb30c16785204c780760bbceb8"},"olmo-core":{"repository":"https://github.com/allenai/OLMo-core.git","revision":"d6a08226f4a0ab53bed13fda680df969504fcb34"},"olmo-sglang":{"private":true,"repository":"https://github.com/allenai/olmo-sglang.git","revision":"b3a795f33e048dac401c89bb5823381146181ac6"}},
   "options": [
   {"dest":"config","type":"str"},
   {"dest":"optimizer","type":"str"},
@@ -73,7 +73,6 @@
   {"const":true,"default":false,"dest":"rematerialize_param_from_master_weight","kind":"switch","nargs":0},
   {"const":true,"default":false,"dest":"check_rematerialize_param_from_master_weight","kind":"switch","nargs":0},
   {"choices":["bridge","raw"],"dest":"megatron_to_hf_mode"},
-  {"choices":["megatron","tilelang"],"dest":"dsa_attention_backend"},
   {"dest":"extra_high_precision_layers_hf","nargs":"*","type":"str"},
   {"dest":"extra_high_precision_layers_megatron","nargs":"*","type":"str"},
   {"dest":"custom_model_provider_path","type":"str"},
@@ -1419,7 +1418,7 @@
   {"dest":"session_server_workers","type":"int"},
   {"dest":"session_server_ip","type":"str"},
   {"dest":"session_server_port","type":"int"},
-  {"choices":["deepseekv32","deepseekv4","default","glm47","glm53","inkling","kimi25","kimi26","minimax_m25","minimax_m27","nemotron3","qwen3","qwen35","qwen36","qwen38small","qwen4exp","qwennext"],"dest":"tito_model","type":"str"},
+  {"choices":["deepseekv4","default","glm47","glm53","inkling","kimi25","kimi26","minimax_m25","minimax_m27","nemotron3","qwen3","qwen35","qwen36","qwen38small","qwen4exp","qwennext"],"dest":"tito_model","type":"str"},
   {"dest":"session_message_matcher","type":"str"},
   {"dest":"session_sample_picker_path","type":"str"},
   {"dest":"session_sample_postprocessor_path","type":"str"},
@@ -1459,7 +1458,6 @@
   {"dest":"ci_load_grad_norm","type":"str"},
   {"const":true,"default":false,"dest":"ci_save_model_hash","kind":"switch","nargs":0},
   {"const":true,"default":false,"dest":"ci_check_model_hash","kind":"switch","nargs":0},
-  {"choices":["megatron","miles"],"dest":"dsv4_impl","type":"str"},
   {"const":true,"default":false,"dest":"freeze_indexer","kind":"switch","nargs":0},
   {"dest":"custom_megatron_init_path","type":"str"},
   {"dest":"custom_megatron_before_log_prob_hook_path","type":"str"},
