@@ -46,7 +46,7 @@ from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, model_utils, sft_loss_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
@@ -418,7 +418,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
-            num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
+            num_steps=args.gradient_accumulation_steps,
+            sync_each_batch=args.sync_each_batch,
+            sync_with_dataloader=False,
         ),
     )
 
@@ -732,6 +734,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         model, optimizer, train_dataloader, lr_scheduler
     )
 
+    # DataLoaderShard's device controls automatic input placement. Buffer on CPU,
+    # then move one microbatch in the training loop. Keep the Ulysses wrapper's
+    # device unchanged: its shard collectives still need to run on the GPU.
+    getattr(train_dataloader, "dl", train_dataloader).device = None
+
+    gradient_divisor = sft_loss_utils.gradient_reduction_divisor(accelerator, args.sequence_parallel_size)
+
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
@@ -805,6 +814,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         getattr(train_dataloader, "dl", train_dataloader).set_epoch(epoch)
         total_loss = 0
         total_aux_loss = 0
+        total_loss_tokens = 0
+        total_microbatches = 0
         if last_checkpoint_path and resume_batch_idx and not skipped_batches:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint.
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_batch_idx)
@@ -812,7 +823,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             skipped_batches = True
         else:
             active_dataloader = train_dataloader
-        for batch in active_dataloader:
+        for (
+            batch,
+            pred_tokens_in_batch,
+            global_window_tokens,
+            is_last_microbatch,
+            num_microbatches,
+        ) in sft_loss_utils.iter_token_normalized_batches(
+            active_dataloader, accelerator, args.gradient_accumulation_steps
+        ):
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
             if args.sequence_parallel_size > 1 and "shift_labels" not in batch:
                 raise ValueError(
@@ -821,7 +840,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 )
             if "shift_labels" in batch and "labels" not in batch:
                 batch["labels"] = batch["shift_labels"]
-            pred_tokens_in_batch = (batch["labels"] != -100).sum()
             if "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
                 total_token_including_padding += batch["attention_mask"].numel()
@@ -838,35 +856,35 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             local_pred_tokens += pred_tokens_in_batch
             local_pred_tokens_this_log_period += pred_tokens_in_batch
 
-            with accelerator.accumulate(model):
+            batch = sft_loss_utils.prepare_empty_causal_lm_batch(batch, pred_tokens_in_batch)
+            with sft_loss_utils.accumulate_token_window(accelerator, model, is_last_microbatch, args.sync_each_batch):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
                     total_aux_loss += outputs.aux_loss.detach().float()
                 else:
                     outputs = model(**batch, use_cache=False)
 
-                loss = outputs.loss
+                aux_loss = getattr(outputs, "aux_loss", None)
+                aux_loss_coefficient = getattr(config, "router_aux_loss_coef", 0.0)
+                mean_loss = sft_loss_utils.mean_causal_lm_loss(
+                    outputs.loss, pred_tokens_in_batch, aux_loss, aux_loss_coefficient
+                )
+                loss = sft_loss_utils.token_normalized_loss(
+                    mean_loss,
+                    pred_tokens_in_batch,
+                    global_window_tokens,
+                    accelerator,
+                    num_microbatches,
+                    args.sequence_parallel_size,
+                    aux_loss,
+                    aux_loss_coefficient,
+                    gradient_divisor,
+                )
+                total_loss += mean_loss.detach().float() * pred_tokens_in_batch
+                total_loss_tokens += pred_tokens_in_batch
+                total_microbatches += 1
                 del outputs
-
-                if args.sequence_parallel_size > 1:
-                    sp_group = accelerator.torch_device_mesh["sp"].get_group()
-                    losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
-                    labels_for_counting = batch["shift_labels"]
-                    good_tokens = (labels_for_counting != -100).view(-1).sum().float()
-                    good_tokens_per_rank = torch.distributed.nn.functional.all_gather(
-                        good_tokens.unsqueeze(0), group=sp_group
-                    )
-                    total_loss_sp = sum(
-                        losses_per_rank[rank] * good_tokens_per_rank[rank]
-                        for rank in range(args.sequence_parallel_size)
-                        if good_tokens_per_rank[rank] > 0
-                    )
-                    total_good_tokens = sum(good_tokens_per_rank)
-                    loss = total_loss_sp / torch.clamp(total_good_tokens, min=1)
-
-                # We keep track of the loss at each logged step
-                total_loss += loss.detach().float()
-                accelerator.backward(loss)
+                sft_loss_utils.backward_token_normalized_loss(accelerator, loss)
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -929,26 +947,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         / 2**30,
                     }
 
-                    # [Loss Reporting]
-                    #
-                    # It is useful to handle loss-reporting for the "mean" and "sum" loss cases
-                    # differently.  Cases:
-                    #
-                    # 1) "mean" loss: `sum_loss` takes individual losses which were *averaged* over
-                    #    the toks in their sequence and sums them over all fwd passes in the logging
-                    #    period.  We instead want the avg over these passes. Report avg_loss =
-                    #    sum_loss / total_fwd_passes, which is roughly independent of global batch
-                    #    size.
-                    #
-                    # 2) "sum" loss: `sum_loss` takes individual losses which were *summed* over the
-                    #    toks in their sequence and sums them over all fwd passes in the logging
-                    #    period.  We want the avg over each optimizer step (which scales with the
-                    #    global batch size), and the average loss per token and per prediction
-                    #    token (which are roughly independent of global batch size).
-                    total_fwd_passes = (
-                        args.logging_steps * args.gradient_accumulation_steps * accelerator.num_processes
-                    )
-                    avg_loss = sum_loss / total_fwd_passes
+                    # Report the same token mean used for CE optimization, including
+                    # uneven ranks/microbatches and short final accumulation windows.
+                    loss_tokens = accelerator.reduce(
+                        torch.tensor(total_loss_tokens, dtype=torch.int64, device=accelerator.device), reduction="sum"
+                    ).item()
+                    avg_loss = sum_loss / loss_tokens
                     metrics_to_log["train_loss"] = avg_loss
                     if args.verbose:
                         sec_per_step = (time.perf_counter() - start_time) / (completed_steps - resume_step)
@@ -959,11 +963,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         )
 
                     if args.load_balancing_loss:
-                        avg_aux_loss = (
-                            accelerator.gather(total_aux_loss).mean().item()
-                            / args.gradient_accumulation_steps
-                            / args.logging_steps
-                        )
+                        avg_aux_loss = accelerator.gather(total_aux_loss).mean().item() / total_microbatches
                         logger.info(
                             f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.perf_counter() - start_time)}"
                         )
@@ -986,6 +986,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     )
                     total_loss = 0
                     total_aux_loss = 0
+                    total_loss_tokens = 0
+                    total_microbatches = 0
 
                 if isinstance(checkpointing_steps, int) and completed_steps % checkpointing_steps == 0:
                     output_dir = f"step_{completed_steps}"

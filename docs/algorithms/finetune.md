@@ -83,6 +83,21 @@ This implementation has the following key features:
 
 ![finetune](finetune/finetune_debug.png)
 
+### Loss normalization
+
+Cross-entropy is averaged over all supervised causal tokens in an optimizer update,
+including its accumulation microbatches and distributed ranks. The count excludes
+ignored labels and the first label, which causal prediction does not use. Sequence
+shards use the labels that Ulysses already shifted before sharding. A short final
+accumulation window uses its actual token count. SP supports ZeRO-1/2 and ZeRO-3
+with `reduce_scatter=true`. ZeRO-3 SP with `reduce_scatter=false` is rejected
+because DeepSpeed mixes gradient divisors depending on bucket size.
+
+This token mean has a different scale from the historical summed loss used for
+Tulu 3 SFT. Reproducing a released checkpoint requires the original training code,
+dependency versions, and recipe; the paper's learning rate alone does not specify
+the loss scale. See the [Tulu 3 reproduction notes](../tulu3.md).
+
 ### Key Flags
 
 | Group | Flag | Description | Default |
