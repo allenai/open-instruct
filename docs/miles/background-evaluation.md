@@ -206,8 +206,9 @@ revision before starting. Build dependencies at image construction, never during
 an evaluation job. Publish the image to Beaker and configure its immutable ID.
 
 The large example sets `image` to the published evaluator image
-`01M445X89HGHZQE5CCH89TXNKR` and `revision` to olmo-eval
-`eac110dad2bb85e116f505bed2a976bb0dbdfaf8`, which includes `gsm8k:platinum`.
+`01M45DMWV3FEH7TNAXKZWR2DF2` and `revision` to olmo-eval
+`710b2b5dab6ea09764c02647f3a4e72819b9ee7c`, which includes `gsm8k:platinum`
+and the [stop-sequence normalization fix](https://github.com/allenai/olmo-eval/pull/450).
 Keep `revision` matched to the olmo-eval commit installed in the selected image.
 A serving-runtime refresh can change the image ID without changing that revision.
 

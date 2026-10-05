@@ -2,7 +2,7 @@
 # The independent CPU eval environment avoids changing serving's torch/transformers.
 ARG SERVING_IMAGE
 FROM ${SERVING_IMAGE}
-ARG OLMO_EVAL_REVISION=eac110dad2bb85e116f505bed2a976bb0dbdfaf8
+ARG OLMO_EVAL_REVISION=710b2b5dab6ea09764c02647f3a4e72819b9ee7c
 LABEL ai2.olmo.eval.revision=${OLMO_EVAL_REVISION}
 RUN git clone https://github.com/allenai/olmo-eval.git /opt/olmo-eval \
     && git -C /opt/olmo-eval checkout --detach ${OLMO_EVAL_REVISION} \
@@ -17,3 +17,6 @@ RUN /opt/evaluator-venv/bin/python -c "from olmo_eval.inference.providers import
 
 # Task names in the maintained background-evaluation example must resolve here.
 RUN /opt/evaluator-venv/bin/python -c "from olmo_eval.evals.tasks.common import get_task; [get_task(name) for name in ('gsm8k', 'gsm8k:platinum', 'ifeval_ood')]"
+
+# CLI stop-list overrides must remain hashable for async request batching.
+RUN /opt/evaluator-venv/bin/python -c "from dataclasses import replace; from olmo_eval.cli.run.config import _parse_override_value; from olmo_eval.common.types import SamplingParams; [hash(replace(SamplingParams(), stop_sequences=_parse_override_value(value))) for value in ('[]', '[\"END\"]')]"

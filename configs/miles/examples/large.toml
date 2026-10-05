@@ -66,8 +66,8 @@ interval = 50
 initial = true
 final = true
 # Evaluator image with GSM8K-Platinum support.
-image = "01M445X89HGHZQE5CCH89TXNKR"
-revision = "eac110dad2bb85e116f505bed2a976bb0dbdfaf8"
+image = "01M45DMWV3FEH7TNAXKZWR2DF2"
+revision = "710b2b5dab6ea09764c02647f3a4e72819b9ee7c"
 gpus = 1 # Additional allocation per task group, outside the 56-GPU training layout.
 cluster = "ai2/holmes"
 submit_timeout = 30
