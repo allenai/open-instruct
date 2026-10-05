@@ -158,7 +158,7 @@ def validate_data(data):
 
 
 def _tokenizer(hf):
-    return importlib.import_module("transformers").AutoTokenizer.from_pretrained(hf, trust_remote_code=True)
+    return importlib.import_module("open_instruct.tokenizer_utils").load_tokenizer(hf, trust_remote_code=True)
 
 
 def _source_rows(name):

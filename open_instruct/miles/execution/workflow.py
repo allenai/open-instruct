@@ -166,8 +166,8 @@ def prepare_model(spec):
         if template:
             template_path = Path(template)
             if template_path.is_dir():
-                transformers = importlib.import_module("transformers")
-                tokenizer = transformers.AutoTokenizer.from_pretrained(template_path, trust_remote_code=True)
+                tokenizer_utils = importlib.import_module("open_instruct.tokenizer_utils")
+                tokenizer = tokenizer_utils.load_tokenizer(template_path, trust_remote_code=True)
                 # A stale standalone template overrides tokenizer_config in
                 # Transformers. Remove only our copied templates before saving.
                 (staging / "chat_template.jinja").unlink(missing_ok=True)

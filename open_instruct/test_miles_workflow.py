@@ -73,9 +73,7 @@ def test_template_directory_never_writes_through_source_links(spec, tmp_path, mo
     monkeypatch.setattr(
         workflow.importlib,
         "import_module",
-        lambda name: SimpleNamespace(
-            AutoTokenizer=SimpleNamespace(from_pretrained=lambda *args, **kwargs: Tokenizer())
-        ),
+        lambda name: SimpleNamespace(load_tokenizer=lambda *args, **kwargs: Tokenizer()),
     )
     target = Path(workflow.prepare_model(spec))
     after = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*") if path.is_file()}
@@ -197,9 +195,7 @@ def test_template_directory_removes_stale_standalone_template(spec, tmp_path, mo
     monkeypatch.setattr(
         workflow.importlib,
         "import_module",
-        lambda name: SimpleNamespace(
-            AutoTokenizer=SimpleNamespace(from_pretrained=lambda *args, **kwargs: Tokenizer())
-        ),
+        lambda name: SimpleNamespace(load_tokenizer=lambda *args, **kwargs: Tokenizer()),
     )
     target = Path(workflow.prepare_model(spec))
     assert not (target / "chat_template.jinja").exists()
