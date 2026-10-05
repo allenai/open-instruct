@@ -45,9 +45,36 @@ def _flush_partial_files(tokens_fh, labels_fh, boundaries_fh) -> None:
         os.fsync(fh.fileno())
 
 
+def _row_aligned_chunk_ends(document_ends: np.ndarray, total_items: int, chunk_size: int) -> list[int]:
+    """End offsets of chunks of at most `chunk_size` items that only end where a row ends.
+
+    A row longer than `chunk_size` gets a chunk of its own, over the size limit, rather than being cut.
+    """
+    ends: list[int] = []
+    start = 0
+    while start < total_items:
+        # The last row end within the size limit, or failing that the first row end after it.
+        idx = int(np.searchsorted(document_ends, start + chunk_size, side="right")) - 1
+        if idx < 0 or document_ends[idx] <= start:
+            idx = int(np.searchsorted(document_ends, start, side="right"))
+        ends.append(int(document_ends[idx]))
+        start = ends[-1]
+    return ends
+
+
 def _write_memmap_chunked_from_file(
-    base_filename: pathlib.Path, source_path: pathlib.Path, total_items: int, dtype, max_size_gb: int = 1
+    base_filename: pathlib.Path,
+    source_path: pathlib.Path,
+    total_items: int,
+    dtype,
+    max_size_gb: int = 1,
+    document_ends: np.ndarray | None = None,
 ) -> list[tuple[int, int]]:
+    """Copy `source_path` into `_part_XXXX.npy` files of at most `max_size_gb` each.
+
+    Without `document_ends`, files are cut every `max_size_gb`, mid-row. With the sorted row end
+    offsets, files are cut only where a row ends, so no row spans two files.
+    """
     item_size = np.dtype(dtype).itemsize
     chunk_size = int((max_size_gb * 1024**3) // item_size)
     chunk_boundaries: list[tuple[int, int]] = []
@@ -55,15 +82,23 @@ def _write_memmap_chunked_from_file(
     if total_items == 0:
         return chunk_boundaries
 
+    if document_ends is None:
+        chunk_ends = [min(i + chunk_size, total_items) for i in range(0, total_items, chunk_size)]
+    else:
+        if len(document_ends) == 0 or int(document_ends[-1]) != total_items:
+            raise ValueError(f"Row ends must finish at the last token ({total_items:,}).")
+        chunk_ends = _row_aligned_chunk_ends(document_ends, total_items, chunk_size)
+
     src = np.memmap(source_path, mode="r", dtype=dtype, shape=(total_items,))
-    for chunk_idx, i in enumerate(range(0, total_items, chunk_size)):
-        end = min(i + chunk_size, total_items)
+    i = 0
+    for chunk_idx, end in enumerate(chunk_ends):
         filename = base_filename.with_name(f"{base_filename.name}_part_{chunk_idx:04d}.npy")
         dst = np.memmap(filename, mode="w+", dtype=dtype, shape=(end - i,))
         dst[:] = src[i:end]
         dst.flush()
         chunk_boundaries.append((i, end))
         logger.info(f"Written {filename} ({(end - i) * item_size / 1024**3:.2f} GB)")
+        i = end
 
     return chunk_boundaries
 
@@ -224,7 +259,14 @@ def convert_hf_to_numpy_sft(
     tokenizer_config_only: bool = False,
     num_examples: int = 0,
     batch_size: int = 1000,
+    row_aligned_parts: bool = False,
 ) -> None:
+    """Tokenize the mix and write it to `output_dir` in OLMo-core's numpy layout.
+
+    With `row_aligned_parts`, the token and label files are cut only at row boundaries, so every
+    row is one `(start,end)` line of one metadata file. Otherwise they are cut every 1 GiB, mid-row,
+    and the row at each cut appears as two lines, one in each file.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Verify these values match the tokenizer config used in Olmo-core:")
@@ -385,12 +427,17 @@ def convert_hf_to_numpy_sft(
 
     logger.info(f"Writing converted data to {output_dir}")
     token_ids_base = output_dir / "token_ids"
-    token_chunk_boundaries = _write_memmap_chunked_from_file(token_ids_base, tokens_path, total_tokens, token_dtype)
-
     document_boundaries = (
         np.memmap(boundaries_path, mode="r", dtype=_BOUNDARIES_DTYPE, shape=(total_samples, 2))
         if total_samples > 0
         else np.zeros((0, 2), dtype=_BOUNDARIES_DTYPE)
+    )
+    token_chunk_boundaries = _write_memmap_chunked_from_file(
+        token_ids_base,
+        tokens_path,
+        total_tokens,
+        token_dtype,
+        document_ends=document_boundaries[:, 1] if row_aligned_parts else None,
     )
     _write_metadata_for_chunks(token_ids_base, document_boundaries, token_chunk_boundaries)
     del document_boundaries
