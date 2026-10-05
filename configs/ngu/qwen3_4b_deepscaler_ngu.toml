@@ -1,0 +1,126 @@
+# Never Give Up (NGU) on Deepscaler with Qwen3-4B-Thinking-2507: one 8-GPU node, 2 trainer + 6 engines.
+# Ports mnoukhov/never-give-up experiments/deepscaler/qwen3_4b_deepscaler.sh to MILES/Core.
+# Kept outside configs/miles, which holds only the maintained starters. Prepare data first with scripts/miles/prepare_deepscaler.py; replace YOUR_USERNAME paths.
+# For the baseline arm set async_unused_samples_handler = "retry" and drop the ngu_* options.
+schema_version = 1
+name = "qwen3-4b-deepscaler-ngu"
+
+[model]
+source = "/weka/oe-adapt-default/YOUR_USERNAME/checkpoints/Qwen3-4B-Thinking-2507"
+format = "hf"
+
+[output]
+root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/qwen3-4b-deepscaler-ngu"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-adapt"
+cluster = "ai2/jupiter"
+priority = "high"
+min_runtime = "4h"
+timeout = "72h"
+auto_resume = true
+gpus_per_replica = 8
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[launch.env]
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+
+[data]
+prompt_data = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/train.jsonl"
+eval_prompt_data = [
+  "aime_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-aime_2025.jsonl",
+  "brumo_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-brumo_2025.jsonl",
+  "hmmt_nov_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-hmmt_nov_2025.jsonl",
+  "hmmt_feb_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-hmmt_feb_2025.jsonl",
+]
+reward_config = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/verifiers.json"
+seed = 1
+shuffle = true
+
+[training]
+# NGU retries the groups this zero-std filter rejects.
+filter_zero_std_groups = true
+# total_episodes 256000 / (32 prompts x 8 samples)
+num_rollouts = 1000
+skip_eval_before_train = false
+eval_interval = 100
+save_checkpoints = true
+save_interval = 100
+
+[trainer]
+gpus = 2
+trainer_num_nodes = 1
+expert_parallel_size = 1
+micro_batch_size = 1
+sequence_packing = true
+packing_max_tokens = 18432
+activation_recompute = true
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 6
+rollout_tensor_parallel_size = 1
+rollout_batch_size = 32
+samples_per_prompt = 8
+global_batch_size = 256
+max_response_length = 16384
+max_context_length = 18432
+radix_cache = true
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+clip_grad = 1.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.272
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "never-give-up"
+wandb_group = "qwen3-4b-deepscaler-miles"
+
+[core]
+checkpoint_keep_last = 2
+# NGU on Core supports barrier publication only (refresh would mirror --inflight_updates).
+publication_mode = "barrier"
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+
+[miles]
+rollout_temperature = 1.0
+rollout_top_p = 1.0
+rollout_seed = 1
+seed = 1
+rollout_max_prompt_len = 2048
+# advantage_normalization_type centered: subtract the group mean, no std division.
+disable_grpo_std_normalization = true
+# grpo_fast --loss_denominator token (default): normalize by response tokens, not responses.
+calculate_per_token_loss = true
+tis_clip = 2.0
+eval_temperature = 1.0
+eval_top_p = 0.95
+n_samples_per_eval_prompt = 32
+ngu_requeue_probability = 0.875
+ngu_solved_reward = 1.0
+
+[async]
+fully_async = true
+# open-instruct --async_steps 2
+max_weight_staleness = 2
+async_unused_samples_handler = "never_give_up"
+off_policy_correction = "tis"
