@@ -1,20 +1,20 @@
 # Never Give Up (NGU) on Deepscaler with Qwen3-4B-Thinking-2507: one 8-GPU node, 2 trainer + 6 engines.
 # Ports mnoukhov/never-give-up experiments/deepscaler/qwen3_4b_deepscaler.sh to MILES/Core.
-# Kept outside configs/miles, which holds only the maintained starters. Prepare data first with scripts/miles/prepare_deepscaler.py; replace YOUR_USERNAME paths.
+# Kept outside configs/miles, which holds only the maintained starters. Prepare data first with scripts/miles/prepare_deepscaler.py.
 # For the baseline arm set async_unused_samples_handler = "retry" and drop the ngu_* options.
 schema_version = 1
 name = "qwen3-4b-deepscaler-ngu"
 
 [model]
-source = "/weka/oe-adapt-default/YOUR_USERNAME/checkpoints/Qwen3-4B-Thinking-2507"
+source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Thinking-2507"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/qwen3-4b-deepscaler-ngu"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-deepscaler-ngu"
 export_hf = true
 
 [launch]
-workspace = "ai2/open-instruct-dev"
+workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-adapt"
 cluster = "ai2/jupiter"
 priority = "high"
@@ -35,14 +35,14 @@ mount_path = "/weka/oe-training-default"
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 
 [data]
-prompt_data = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/train.jsonl"
+prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/train.jsonl"
 eval_prompt_data = [
-  "aime_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-aime_2025.jsonl",
-  "brumo_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-brumo_2025.jsonl",
-  "hmmt_nov_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-hmmt_nov_2025.jsonl",
-  "hmmt_feb_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/eval-hmmt_feb_2025.jsonl",
+  "aime_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-aime_2025.jsonl",
+  "brumo_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-brumo_2025.jsonl",
+  "hmmt_nov_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-hmmt_nov_2025.jsonl",
+  "hmmt_feb_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-hmmt_feb_2025.jsonl",
 ]
-reward_config = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler/verifiers.json"
+reward_config = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/verifiers.json"
 seed = 1
 shuffle = true
 
