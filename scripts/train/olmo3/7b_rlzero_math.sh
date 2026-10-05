@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# This is the later Olmo 3.1 recipe from rlzero-math-script (#1261).
+# The original Olmo 3.0 release used olmo_thinker_dapo, now removed from main.
+# See "RL Zero chat templates" in scripts/train/olmo3/README.md.
+
 EXP_NAME="olmo3_7b_rlzero_math"
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"

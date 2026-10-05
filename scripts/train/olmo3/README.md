@@ -24,26 +24,27 @@ For our recent [Olmo3 paper](https://arxiv.org/abs/2512.13961), we used the foll
 | 32B Think DPO   | [`32b_think_dpo.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo3/32b_think_dpo.sh)    | https://beaker.org/ex/01K9VYQV2RFPS9ECP63JFQFVDN | https://wandb.ai/ai2-llm/open_instruct_internal/runs/te37gyey | [`2fd104e`](https://github.com/allenai/open-instruct/commit/2fd104e) |
 | 32B Think RL          | [`32b_think_rl.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/olmo3/32b_think_rl.sh) | https://beaker.org/ex/01KA4ZXT7MCVK493Y2B3K0BC82 | https://wandb.ai/ai2-llm/open_instruct_internal/runs/29h723j6 | [`42aa63c`](https://github.com/allenai/open-instruct/commit/42aa63c) |
 
-To reproduce these runs, if you are internal to Ai2, you can run [`./scripts/train/build_image_and_launch.sh`](https://github.com/allenai/open-instruct/blob/main/scripts/train/build_image_and_launch.sh)
+The commit column records run code; the linked open-instruct DPO/RL scripts were published later and do not exist at those recorded commits. Checking out a table commit and passing its script path to `build_image_and_launch.sh` is therefore not a reproduction procedure. Use the original Beaker launch specifications and historical script snapshots; the RL Zero sources and remaining limits are described below. SFT uses the separately linked OLMo-core implementation.
 
-```
-git checkout $COMMIT
-./scripts/train/build_image_and_launch.sh $SCRIPT_NAME
-```
-
-This will build an image and launch it. You can also check out the beaker link to see the **exact run** that produced the model! If you are external to Ai2, we have many [fine job postings](https://allenai.org/careers), but, unfortunately, do not have great advice on how to launch these jobs. Preliminary steps to launch on your own infrastructure would involve:
-
-1. Modifying the launch scripts to remove the stuff attached to the [`mason.py`](https://github.com/allenai/open-instruct/blob/main/mason.py) command
-2. Setting up your own cluster with the requisite number of {H,A}100 nodes, connected together via Ray.
+For external infrastructure, adapt the original trainer command to your launcher, replace internal paths with verified public inputs, and preserve the recorded distributed-training and evaluation settings.
 
 ## RL Zero chat templates
 
-The RL Zero scripts on `main` do not all select the chat template that the released checkpoints were trained with (see [#1899](https://github.com/allenai/open-instruct/issues/1899)).
+The scripts on `main` have changed since the original Olmo 3.0 RL Zero runs (see [template-mismatch (#1899)](https://github.com/allenai/open-instruct/issues/1899)). Training-run provenance and shipped checkpoint templates are distinct:
 
-- The released RL Zero Code, IF, General and Mix checkpoints ship a `chat_template.jinja` that is byte-identical to `olmo_thinker` as defined in [`dataset_transformation.py` at `d928a7c`](https://github.com/allenai/open-instruct/blob/d928a7cd29c2610af04300f817494c8e6dba977d/open_instruct/dataset_transformation.py), the commit listed in the table above. This is the `<|im_start|>` chat format with `<think>` opening the assistant turn. The Code and IF wandb runs record `chat_template_name=olmo_thinker`.
-- `olmo_thinker_rlzero` and `olmo_thinker_code_rlzero` are simple task-specific prompts that were added after those runs, in [#1216](https://github.com/allenai/open-instruct/pull/1216). `7b_rlzero_code.sh`, `7b_rlzero_instruction_following.sh`, `7b_rlzero_math.sh` and `7b_rlzero_mix.sh` now select them, so launching those scripts from `main` trains a later simple-template variant and not the released recipe.
-- `olmo_thinker` itself has changed on `main` since `d928a7c`. To reproduce a released checkpoint, check out the commit from the table as described above. Changing only `--chat_template_name` on `main` is not enough.
-- The released RL Zero Math checkpoint is the exception: it ships a simple prompt template (the `olmo_thinker_rlzero` prompt, with "math problem" in place of "problem").
+- **Code, IF and General:** the [Code](https://wandb.ai/ai2-llm/open_instruct_internal/runs/o40rwmu8), [IF](https://wandb.ai/ai2-llm/open_instruct_internal/runs/hk80a60o) and [General](https://wandb.ai/ai2-llm/open_instruct_internal/runs/0tscl05k) run configs record `chat_template_name=olmo_thinker` and code commit `d928a7c`. Their released `chat_template.jinja` files are byte-identical to that 1652-byte [historical template](https://github.com/allenai/open-instruct/blob/d928a7cd29c2610af04300f817494c8e6dba977d/open_instruct/dataset_transformation.py), including `<|im_start|>` chat formatting and the `<think>` assistant opener.
+- **Mix:** the shipped template is the same 1652-byte file. There is no Mix training-run row in the table above, so this file comparison does not establish its training-run provenance.
+- **Math (Olmo 3.0):** the [released template](https://huggingface.co/allenai/Olmo-3-7B-RL-Zero-Math/blob/main/chat_template.jinja) is byte-identical to the 430-byte `olmo_thinker_dapo` at `d928a7c`. The [Math run](https://wandb.ai/ai2-llm/open_instruct_internal/runs/w0ql4f5r) records that template name, but its metadata does not establish the code commit listed in the table.
+
+`olmo_thinker_rlzero` and `olmo_thinker_code_rlzero` were added later in [rlzero-template-and-fixes (#1216)](https://github.com/allenai/open-instruct/pull/1216). Current Code, IF and Mix scripts select those simple task prompts. General still selects `olmo_thinker`, but its definition has changed on `main`. The current Math script is the later **Olmo 3.1** recipe from [rlzero-math-script (#1261)](https://github.com/allenai/open-instruct/pull/1261); the original `olmo_thinker_dapo` name no longer exists on `main`. Changing a template flag alone does not restore the original recipes.
+
+### Historical sources and reproduction limits
+
+The recorded code at [`d928a7c`](https://github.com/allenai/open-instruct/tree/d928a7cd29c2610af04300f817494c8e6dba977d) has no `scripts/train/olmo3/` directory. The launch-script snapshots were first added to `main` in [add-olmo3-scripts (#1215)](https://github.com/allenai/open-instruct/pull/1215), at `3af17aacf`; see the [original Math snapshot](https://github.com/allenai/open-instruct/blob/3af17aacff528025142a54449fcf8ce51a20363c/scripts/train/olmo3/7b_rlzero_math.sh). The subsequent [update-olmo3-scripts (#1221)](https://github.com/allenai/open-instruct/pull/1221), at `7e780f2fe`, corrected node counts from four to five in the [Code](https://github.com/allenai/open-instruct/blob/7e780f2fea1217fad80665a1b754bd8bec4afd8f/scripts/train/olmo3/7b_rlzero_code.sh), [IF](https://github.com/allenai/open-instruct/blob/7e780f2fea1217fad80665a1b754bd8bec4afd8f/scripts/train/olmo3/7b_rlzero_instruction_following.sh) and [General](https://github.com/allenai/open-instruct/blob/7e780f2fea1217fad80665a1b754bd8bec4afd8f/scripts/train/olmo3/7b_rlzero_general.sh) snapshots.
+
+Use these snapshots and the original [Code](https://beaker.org/ex/01K7FSWM4717FAR9KF6GE958CA) / [IF](https://beaker.org/ex/01K7MVRTNJNYB37GC8SDTYHKC1) launch specs as provenance references. They contain internal WEKA checkpoint paths and pre-release dataset names. Mapping those inputs to the public base model and `Dolci-RLZero-*` datasets requires verifying revisions and equivalence; a renamed input is not evidence of an identical input. Compatibility of the later script snapshots with the earlier code, any uncommitted launch changes, and the precise run/step behind released weights have not been established here.
+
+The Code/IF launch specs record evaluation task aliases and `oe_eval_max_length=16384`. Those arguments alone do not establish the evaluator commit, resolved configurations, checkpoint selection or exact evaluation protocol behind the paper's scores. That evaluation provenance remains open in template-mismatch (#1899).
 
 For inference with a released checkpoint, use the chat template that ships with it.
 
