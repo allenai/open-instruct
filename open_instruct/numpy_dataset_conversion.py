@@ -30,6 +30,8 @@ _BOUNDARIES_DTYPE = np.int64
 TOKEN_IDS_NPY_GLOB = "token_ids_part_*.npy"
 LABELS_MASK_NPY_GLOB = "labels_mask_part_*.npy"
 TOKEN_IDS_METADATA_GLOB = "token_ids_part_*.csv.gz"
+# Set in dataset_statistics.json's configuration when the parts were cut only between rows.
+ROW_ALIGNED_PARTS_KEY = "row_aligned_parts"
 
 
 def _select_token_dtype(vocab_size: int):
@@ -472,6 +474,7 @@ def convert_hf_to_numpy_sft(
         per_dataset_tokens=stats["per_dataset_tokens"],
         per_dataset_trainable_tokens=stats["per_dataset_trainable_tokens"],
         per_dataset_filtered=stats["per_dataset_filtered"],
+        row_aligned_parts=row_aligned_parts,
     )
 
 
@@ -491,6 +494,7 @@ def write_dataset_statistics(
     per_dataset_filtered: dict[str, int],
     chat_template_source: str | None = None,
     chat_template_hash: str | None = None,
+    row_aligned_parts: bool = False,
 ) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -534,6 +538,8 @@ def write_dataset_statistics(
             "chat_template": chat_template_name,
             "chat_template_source": chat_template_source,
             "chat_template_hash": chat_template_hash,
+            # Only when set, so default caches keep their existing statistics layout.
+            **({ROW_ALIGNED_PARTS_KEY: True} if row_aligned_parts else {}),
         },
         "per_dataset_statistics": merged_stats,
         "overall_statistics": {

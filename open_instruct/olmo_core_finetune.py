@@ -28,7 +28,9 @@ Usage:
 import dataclasses
 import datetime
 import glob
+import gzip
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -89,12 +91,31 @@ _ROW_ALIGNED_CACHE_SUFFIX = "-rowaligned"
 
 
 def _numpy_cache_dir(
-    local_cache_dir: str, cache_hash: str, seed: int, max_seq_length: int, document_boundaries_from_metadata: bool
+    local_cache_dir: str, cache_hash: str, seed: int, max_seq_length: int, row_aligned_parts: bool
 ) -> str:
+    """The cache directory. It depends on the file layout, not on how training reads boundaries."""
     name = f"{cache_hash}-{_seed_cache_suffix(seed, max_seq_length)}"
-    if document_boundaries_from_metadata:
+    if row_aligned_parts:
         name += _ROW_ALIGNED_CACHE_SUFFIX
     return os.path.join(local_cache_dir, _NUMPY_SFT_SUBDIR, name)
+
+
+def _check_row_aligned_cache(numpy_dir: str) -> None:
+    """Raise unless `numpy_dir` was written with row-aligned parts: one metadata line per row."""
+    stats_path = os.path.join(numpy_dir, "dataset_statistics.json")
+    with open(stats_path) as f:
+        stats = json.load(f)
+    if not stats["configuration"].get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
+        raise ValueError(f"{numpy_dir} was not written with --row_aligned_parts ({stats_path} has no marker).")
+    num_lines = 0
+    for path in glob.glob(os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB)):
+        with gzip.open(path, "rt") as f:
+            num_lines += sum(1 for _ in f)
+    num_rows = stats["overall_statistics"]["total_instances"]
+    if num_lines != num_rows:
+        raise ValueError(
+            f"{numpy_dir} has {num_lines:,} metadata lines for {num_rows:,} rows, so some row spans two parts."
+        )
 
 
 def _olmo_core_supports_metadata_boundaries() -> bool:
@@ -105,13 +126,17 @@ def _olmo_core_supports_metadata_boundaries() -> bool:
     return "use_array_if_local" in {field.name for field in dataclasses.fields(oc_data.NumpyPackedFSLDatasetConfig)}
 
 
-def _document_boundary_kwargs(document_boundaries_from_metadata: bool) -> dict[str, Any]:
+def _document_boundary_kwargs(document_boundaries_from_metadata: bool, row_aligned_parts: bool) -> dict[str, Any]:
     """Extra `NumpyPackedFSLDatasetConfig` arguments for the requested boundary source.
 
     Empty by default, so the config, its fingerprint and OLMo-core's packing caches are unchanged.
     """
     if not document_boundaries_from_metadata:
         return {}
+    if not row_aligned_parts:
+        # A mid-row-cut cache has two metadata lines for each cut row, so with metadata boundaries
+        # that row would train as two documents, the second without its prompt.
+        raise ValueError("--document_boundaries_from_metadata requires --row_aligned_parts.")
     if not _olmo_core_supports_metadata_boundaries():
         raise ValueError(
             "--document_boundaries_from_metadata needs an OLMo-core whose NumpyPackedFSLDatasetConfig "
@@ -164,7 +189,7 @@ def _tokenize_to_numpy_dir(
         shuffle_seed=args.tracking.seed,
         resume=True,
         visualize=visualize,
-        row_aligned_parts=args.sft.document_boundaries_from_metadata,
+        row_aligned_parts=args.sft.row_aligned_parts,
     )
 
 
@@ -183,14 +208,20 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
+    row_aligned_parts: bool = False
+    """Cut the numpy cache's 1 GiB part files only between rows, so no row spans two files.
+
+    The default cuts every 1 GiB, mid-row, and OLMo-core's EOS scan never yields the piece of a row
+    before a file's end. Row-aligned caches live in their own directory (suffix `-rowaligned`), so
+    turning this on tokenizes once more. It does not change how training finds document boundaries;
+    that is `document_boundaries_from_metadata`."""
     document_boundaries_from_metadata: bool = False
     """Take document boundaries from the per-row metadata files instead of scanning for EOS.
 
     The EOS scan splits a multi-turn row at each non-final assistant turn's EOS, and merges a row
     with no trailing EOS (a final tool call, or a row truncated at max_seq_length) into the next.
-    With this set, packing and the attention mask follow the rows exactly, and the cache is written
-    with row-aligned parts to its own directory (suffix `-rowaligned`), so it is re-tokenized once.
-    Needs an OLMo-core with `use_array_if_local` (allenai/OLMo-core#843)."""
+    With this set, packing and the attention mask follow the rows exactly. Requires
+    `row_aligned_parts`, and an OLMo-core with `use_array_if_local` (allenai/OLMo-core#843)."""
 
 
 @dataclasses.dataclass
@@ -206,7 +237,9 @@ class SFTArguments:
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     # Fail before tokenizing, not after, if the installed OLMo-core cannot honour the flag.
-    document_boundary_kwargs = _document_boundary_kwargs(args.sft.document_boundaries_from_metadata)
+    document_boundary_kwargs = _document_boundary_kwargs(
+        args.sft.document_boundaries_from_metadata, args.sft.row_aligned_parts
+    )
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
@@ -228,7 +261,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         cache_hash,
         args.tracking.seed,
         args.training.max_seq_length,
-        args.sft.document_boundaries_from_metadata,
+        args.sft.row_aligned_parts,
     )
 
     if args.dataset.cache_dataset_only:
@@ -266,8 +299,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             quoted = " ".join(shlex.quote(token) for token in tc.reserved_slot_tokens)
             cache_args.append(f"--reserved_slot_tokens {quoted}")
         # Part of the cache directory name.
-        if args.sft.document_boundaries_from_metadata:
-            cache_args.append("--document_boundaries_from_metadata")
+        if args.sft.row_aligned_parts:
+            cache_args.append("--row_aligned_parts")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
@@ -283,6 +316,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             f"      {cache_cmd}\n\n"
             "Re-launch training once the tokenization job has completed."
         )
+
+    if args.sft.row_aligned_parts:
+        _check_row_aligned_cache(numpy_dir)
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
         seed=args.tracking.seed, timeout=datetime.timedelta(hours=args.sft.dist_timeout_hours)
