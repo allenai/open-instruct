@@ -1,5 +1,6 @@
 """Unit tests for cache-validation and checkpoint-detection helpers."""
 
+import gzip
 import json
 import os
 import shlex
@@ -73,18 +74,27 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
         )
 
     def test_default_adds_no_dataset_config_arguments(self) -> None:
-        self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False), {})
+        self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, False), {})
+        # The EOS arm of a row-aligned cache reads it exactly as today.
+        self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, True), {})
 
     def test_flag_reads_boundaries_from_metadata(self) -> None:
         with mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=True):
-            self.assertEqual(olmo_core_finetune._document_boundary_kwargs(True), {"use_array_if_local": False})
+            self.assertEqual(olmo_core_finetune._document_boundary_kwargs(True, True), {"use_array_if_local": False})
+
+    def test_flag_requires_row_aligned_parts(self) -> None:
+        with (
+            mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=True),
+            self.assertRaisesRegex(ValueError, "--row_aligned_parts"),
+        ):
+            olmo_core_finetune._document_boundary_kwargs(True, False)
 
     def test_flag_requires_supporting_olmo_core(self) -> None:
         with (
             mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=False),
             self.assertRaisesRegex(ValueError, "use_array_if_local"),
         ):
-            olmo_core_finetune._document_boundary_kwargs(True)
+            olmo_core_finetune._document_boundary_kwargs(True, True)
 
     def test_default_dataset_config_matches_previous_arguments(self) -> None:
         tokenizer = oc_data.TokenizerConfig(vocab_size=128, eos_token_id=2, pad_token_id=1)
@@ -102,6 +112,34 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             sequence_length=64,
         )
         self.assertEqual(config, expected)
+
+
+class CheckRowAlignedCacheTest(unittest.TestCase):
+    def _write_cache(self, tmp: str, parts: list[str], total_instances: int, marker: bool) -> None:
+        configuration = {"row_aligned_parts": True} if marker else {}
+        stats = {"configuration": configuration, "overall_statistics": {"total_instances": total_instances}}
+        _write(os.path.join(tmp, "dataset_statistics.json"), json.dumps(stats))
+        for i, lines in enumerate(parts):
+            with gzip.open(os.path.join(tmp, f"token_ids_part_{i:04d}.csv.gz"), "wt") as f:
+                f.write(lines)
+
+    def test_row_aligned_cache_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_cache(tmp, ["0,3\n3,8\n", "0,4\n"], total_instances=3, marker=True)
+            olmo_core_finetune._check_row_aligned_cache(tmp)
+
+    def test_cache_without_marker_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_cache(tmp, ["0,3\n3,8\n", "0,4\n"], total_instances=3, marker=False)
+            with self.assertRaisesRegex(ValueError, "--row_aligned_parts"):
+                olmo_core_finetune._check_row_aligned_cache(tmp)
+
+    def test_row_cut_across_parts_fails(self) -> None:
+        # The legacy layout: the second row is cut at the part boundary and appears in both files.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_cache(tmp, ["0,3\n3,8\n", "0,4\n"], total_instances=2, marker=True)
+            with self.assertRaisesRegex(ValueError, "spans two parts"):
+                olmo_core_finetune._check_row_aligned_cache(tmp)
 
 
 class IsHfCheckpointTest(unittest.TestCase):
