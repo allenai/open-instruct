@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from olmo_core import data as oc_data
 from parameterized import parameterized
 
 from open_instruct import olmo_core_finetune, olmo_core_utils
@@ -55,6 +56,52 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
             _touch(os.path.join(tmp, "labels_mask_part_0000.npy"))
             _touch(os.path.join(tmp, "token_ids_part_0000.csv.gz"))
             self.assertFalse(olmo_core_finetune._numpy_dir_is_populated(tmp))
+
+
+class DocumentBoundariesFromMetadataTest(unittest.TestCase):
+    def test_default_cache_dir_is_unchanged(self) -> None:
+        # The Dolci-Think cache that H038 and H045 trained on.
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, False),
+            "/cache/numpy_sft/1edd51f3e3-6068a350",
+        )
+
+    def test_row_aligned_cache_gets_its_own_dir(self) -> None:
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, True),
+            "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
+        )
+
+    def test_default_adds_no_dataset_config_arguments(self) -> None:
+        self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False), {})
+
+    def test_flag_reads_boundaries_from_metadata(self) -> None:
+        with mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=True):
+            self.assertEqual(olmo_core_finetune._document_boundary_kwargs(True), {"use_array_if_local": False})
+
+    def test_flag_requires_supporting_olmo_core(self) -> None:
+        with (
+            mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=False),
+            self.assertRaisesRegex(ValueError, "use_array_if_local"),
+        ):
+            olmo_core_finetune._document_boundary_kwargs(True)
+
+    def test_default_dataset_config_matches_previous_arguments(self) -> None:
+        tokenizer = oc_data.TokenizerConfig(vocab_size=128, eos_token_id=2, pad_token_id=1)
+        config = olmo_core_finetune._numpy_dataset_config(
+            "/data", tokenizer, work_dir="/work", sequence_length=64, document_boundary_kwargs={}
+        )
+        expected = oc_data.NumpyPackedFSLDatasetConfig(
+            tokenizer=tokenizer,
+            work_dir="/work",
+            paths=["/data/token_ids_part_*.npy"],
+            expand_glob=True,
+            label_mask_paths=["/data/labels_mask_part_*.npy"],
+            generate_doc_lengths=True,
+            long_doc_strategy=oc_data.LongDocStrategy.truncate,
+            sequence_length=64,
+        )
+        self.assertEqual(config, expected)
 
 
 class IsHfCheckpointTest(unittest.TestCase):

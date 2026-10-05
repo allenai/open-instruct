@@ -83,6 +83,63 @@ def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
 
+# Appended to the numpy cache directory name for caches written with row-aligned parts, so they
+# never share a directory with the 1 GiB mid-row-cut caches the default writes under the same hash.
+_ROW_ALIGNED_CACHE_SUFFIX = "-rowaligned"
+
+
+def _numpy_cache_dir(
+    local_cache_dir: str, cache_hash: str, seed: int, max_seq_length: int, document_boundaries_from_metadata: bool
+) -> str:
+    name = f"{cache_hash}-{_seed_cache_suffix(seed, max_seq_length)}"
+    if document_boundaries_from_metadata:
+        name += _ROW_ALIGNED_CACHE_SUFFIX
+    return os.path.join(local_cache_dir, _NUMPY_SFT_SUBDIR, name)
+
+
+def _olmo_core_supports_metadata_boundaries() -> bool:
+    """Whether the installed OLMo-core can take packing boundaries from the metadata files.
+
+    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843.
+    """
+    return "use_array_if_local" in {field.name for field in dataclasses.fields(oc_data.NumpyPackedFSLDatasetConfig)}
+
+
+def _document_boundary_kwargs(document_boundaries_from_metadata: bool) -> dict[str, Any]:
+    """Extra `NumpyPackedFSLDatasetConfig` arguments for the requested boundary source.
+
+    Empty by default, so the config, its fingerprint and OLMo-core's packing caches are unchanged.
+    """
+    if not document_boundaries_from_metadata:
+        return {}
+    if not _olmo_core_supports_metadata_boundaries():
+        raise ValueError(
+            "--document_boundaries_from_metadata needs an OLMo-core whose NumpyPackedFSLDatasetConfig "
+            "has use_array_if_local (allenai/OLMo-core#843); the installed one does not."
+        )
+    return {"use_array_if_local": False}
+
+
+def _numpy_dataset_config(
+    numpy_dir: str,
+    tokenizer: oc_data.TokenizerConfig,
+    work_dir: str,
+    sequence_length: int,
+    document_boundary_kwargs: dict[str, Any],
+) -> oc_data.NumpyPackedFSLDatasetConfig:
+    return oc_data.NumpyPackedFSLDatasetConfig(
+        tokenizer=tokenizer,
+        work_dir=work_dir,
+        paths=[os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)],
+        expand_glob=True,
+        label_mask_paths=[os.path.join(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)],
+        generate_doc_lengths=True,
+        long_doc_strategy=oc_data.LongDocStrategy.truncate,
+        sequence_length=sequence_length,
+        **document_boundary_kwargs,
+    )
+
+
 def _tokenize_to_numpy_dir(
     numpy_dir: str,
     args: "SFTArguments",
@@ -107,6 +164,7 @@ def _tokenize_to_numpy_dir(
         shuffle_seed=args.tracking.seed,
         resume=True,
         visualize=visualize,
+        row_aligned_parts=args.sft.document_boundaries_from_metadata,
     )
 
 
@@ -125,6 +183,14 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
+    document_boundaries_from_metadata: bool = False
+    """Take document boundaries from the per-row metadata files instead of scanning for EOS.
+
+    The EOS scan splits a multi-turn row at each non-final assistant turn's EOS, and merges a row
+    with no trailing EOS (a final tool call, or a row truncated at max_seq_length) into the next.
+    With this set, packing and the attention mask follow the rows exactly, and the cache is written
+    with row-aligned parts to its own directory (suffix `-rowaligned`), so it is re-tokenized once.
+    Needs an OLMo-core with `use_array_if_local` (allenai/OLMo-core#843)."""
 
 
 @dataclasses.dataclass
@@ -139,6 +205,8 @@ class SFTArguments:
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
+    # Fail before tokenizing, not after, if the installed OLMo-core cannot honour the flag.
+    document_boundary_kwargs = _document_boundary_kwargs(args.sft.document_boundaries_from_metadata)
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
@@ -155,8 +223,13 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
     )
     cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
-    seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
-    numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
+    numpy_dir = _numpy_cache_dir(
+        args.dataset.local_cache_dir,
+        cache_hash,
+        args.tracking.seed,
+        args.training.max_seq_length,
+        args.sft.document_boundaries_from_metadata,
+    )
 
     if args.dataset.cache_dataset_only:
         pre_init_rank = int(os.environ.get("RANK", 0))
@@ -192,6 +265,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         if tc.reserved_slot_tokens:
             quoted = " ".join(shlex.quote(token) for token in tc.reserved_slot_tokens)
             cache_args.append(f"--reserved_slot_tokens {quoted}")
+        # Part of the cache directory name.
+        if args.sft.document_boundaries_from_metadata:
+            cache_args.append("--document_boundaries_from_metadata")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
@@ -245,15 +321,12 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     dp_world_size = world_size // cp_degree
 
     oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc)
-    np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
-        tokenizer=oc_tokenizer_config,
+    np_dataset_config = _numpy_dataset_config(
+        numpy_dir,
+        oc_tokenizer_config,
         work_dir=args.checkpoint.output_dir,
-        paths=[os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)],
-        expand_glob=True,
-        label_mask_paths=[os.path.join(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)],
-        generate_doc_lengths=True,
-        long_doc_strategy=oc_data.LongDocStrategy.truncate,
         sequence_length=args.training.max_seq_length,
+        document_boundary_kwargs=document_boundary_kwargs,
     )
     np_dataset = np_dataset_config.build()
     np_dataset.prepare()
