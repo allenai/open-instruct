@@ -220,7 +220,8 @@ class SFTConfig:
 
     The EOS scan splits a multi-turn row at each non-final assistant turn's EOS, and merges a row
     with no trailing EOS (a final tool call, or a row truncated at max_seq_length) into the next.
-    With this set, packing and the attention mask follow the rows exactly. Requires
+    With this set, packing, the attention mask and EMO document pools (if the model routes with
+    EMO) follow the rows exactly. Requires
     `row_aligned_parts`, and an OLMo-core with `use_array_if_local` (allenai/OLMo-core#843)."""
 
 
@@ -331,7 +332,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = olmo_core_utils.setup_model(args.model, tc, init_device="meta")
+    model, model_config = olmo_core_utils.setup_model(
+        args.model, tc, init_device="meta", emo_segments_from_doc_lens=args.sft.document_boundaries_from_metadata
+    )
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
     cp_degree = args.training.cp_degree or 1

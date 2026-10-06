@@ -1,11 +1,14 @@
 """Unit tests for cache-validation and checkpoint-detection helpers."""
 
 import gzip
+import importlib
+import importlib.util
 import json
 import os
 import shlex
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -112,6 +115,51 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             sequence_length=64,
         )
         self.assertEqual(config, expected)
+
+
+# EMO routing exists only in newer OLMo-core.
+emo = importlib.import_module("olmo_core.nn.moe.emo") if importlib.util.find_spec("olmo_core.nn.moe.emo") else None
+
+
+def _emo_model_config(emo_factory):
+    """A TransformerConfig-shaped stand-in: an EMO block, an EMO override and a plain override."""
+
+    def block(emo):
+        return types.SimpleNamespace(routed_experts_router=types.SimpleNamespace(emo=emo))
+
+    return types.SimpleNamespace(
+        block=block(emo_factory()), block_overrides={"7": block(emo_factory()), "15": block(None)}
+    )
+
+
+class UseDocLensForEmoSegmentsTest(unittest.TestCase):
+    def test_sets_every_emo_router(self) -> None:
+        config = _emo_model_config(lambda: types.SimpleNamespace(segment_ids_from="eos"))
+        self.assertEqual(olmo_core_utils.use_doc_lens_for_emo_segments(config), 2)
+        self.assertEqual(config.block.routed_experts_router.emo.segment_ids_from, "doc_lens")
+        self.assertEqual(config.block_overrides["7"].routed_experts_router.emo.segment_ids_from, "doc_lens")
+        self.assertIsNone(config.block_overrides["15"].routed_experts_router.emo)
+
+    def test_model_without_emo_is_untouched(self) -> None:
+        config = types.SimpleNamespace(block=types.SimpleNamespace(), block_overrides=None)
+        self.assertEqual(olmo_core_utils.use_doc_lens_for_emo_segments(config), 0)
+
+    def test_old_olmo_core_emo_config_fails(self) -> None:
+        config = _emo_model_config(types.SimpleNamespace)
+        with self.assertRaisesRegex(ValueError, "segment_ids_from"):
+            olmo_core_utils.use_doc_lens_for_emo_segments(config)
+
+    @unittest.skipUnless(
+        hasattr(getattr(emo, "EmoRouterConfig", None), "segment_ids_from"),
+        "installed OLMo-core's EmoRouterConfig has no segment_ids_from",
+    )
+    def test_real_emo_router_config(self) -> None:
+        config = _emo_model_config(
+            lambda: emo.EmoRouterConfig(eos_token_id=0, min_document_expert_pool=2, max_document_expert_pool=4)
+        )
+        self.assertEqual(config.block.routed_experts_router.emo.segment_ids_from, "eos")
+        olmo_core_utils.use_doc_lens_for_emo_segments(config)
+        self.assertEqual(config.block.routed_experts_router.emo.segment_ids_from, "doc_lens")
 
 
 class CheckRowAlignedCacheTest(unittest.TestCase):

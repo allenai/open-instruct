@@ -9,6 +9,7 @@ The output layout for each `output_dir` is:
 """
 
 import gzip
+import io
 import json
 import os
 import pathlib
@@ -110,7 +111,9 @@ def _write_metadata_for_chunks(
 ) -> None:
     for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
         metadata_filename = base_filename.with_name(f"{base_filename.name}_part_{chunk_idx:04d}.csv.gz")
-        with gzip.open(metadata_filename, "wt", encoding="utf-8") as f:
+        # mtime=0 keeps the file byte-identical across rewrites of the same rows. OLMo-core
+        # fingerprints metadata-backed datasets by these files.
+        with gzip.GzipFile(metadata_filename, mode="wb", mtime=0) as gz, io.TextIOWrapper(gz, encoding="utf-8") as f:
             for doc_start, doc_end in document_boundaries:
                 if doc_end > chunk_start and doc_start < chunk_end:
                     adjusted_start = max(0, int(doc_start) - chunk_start)
