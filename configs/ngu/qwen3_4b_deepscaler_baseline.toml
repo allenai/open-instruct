@@ -2,14 +2,14 @@
 # unused-samples handler is "retry" and the ngu_* options are dropped.
 # Prepare data first with scripts/miles/prepare_deepscaler.py --train-dataset mnoukhov/deepscaler-10k-rlvr.
 schema_version = 1
-name = "qwen3-4b-deepscaler-baseline"
+name = "qwen3-4b-deepscaler-10k-baseline"
 
 [model]
 source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Thinking-2507"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-deepscaler-baseline"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-deepscaler-10k-baseline"
 export_hf = true
 
 [launch]
