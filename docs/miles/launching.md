@@ -96,6 +96,37 @@ before building, including mount coverage. The MILES image wrapper passes the
 frozen configuration directly to `open_instruct.miles.execution.submit`; no
 debug launch script is involved.
 
+## Jupiter CUDA compatibility
+
+For MILES GPU runs on `ai2/jupiter`, merge these settings into your run file:
+
+```toml
+[launch]
+cluster = "ai2/jupiter"
+priority = "high"
+# Retain the run's GPU count, mounts, timeout and preemption/resume settings.
+
+[launch.env]
+LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+```
+
+The September 2026 Jupiter H100 checks initially failed CUDA preflight because
+the host driver was older than the pinned image's CUDA 13 runtime. Retrying with
+the same image and `/usr/local/cuda/compat` first in `LD_LIBRARY_PATH` passed;
+subsequent paired hero-checkpoint smoke runs completed four optimizer updates.
+Set this environment variable **inside the Beaker job** through `launch.env`;
+exporting it only on the submission host does not configure the workers.
+
+Keep the pinned MILES runtime. The ordinary launcher's `--cuda-version 12|13`
+switch cannot be combined with `--miles`. The override uses compatibility
+libraries already present in the image; it does not upgrade the host driver or
+establish support for arbitrary image/driver combinations. After changing either,
+verify CUDA initialization and a short training lifecycle on the target hardware.
+Size the workload for Jupiter's H100 memory instead of copying B300 memory budgets.
+
+Then follow the image selection and `plan`/`validate`/`run` steps above, using a
+fresh output path. This setting does not change scheduling or checkpoint recovery.
+
 ## Distributed scheduling contract
 
 A distributed run must be submitted as **one task with `replicas: N` and
