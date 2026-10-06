@@ -26,7 +26,6 @@ with contextlib.suppress(Exception):
 
 # isort: on
 import math
-import pathlib
 import random
 import shutil
 import time
@@ -518,7 +517,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     # Cache the logprobs
     if args.loss_type.needs_reference_model:
         ref_cache_hash = dpo_utils.compute_reference_cache_hash(args, tc)
-        reference_cache_path = pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH) / f"{ref_cache_hash}.pt"
+        reference_cache_path = dpo_utils.get_reference_logprobs_cache_path() / f"{ref_cache_hash}.pt"
         reference_cache = dpo_utils.build_reference_logprobs_cache(
             model=model,
             dataloader=train_dataloader,

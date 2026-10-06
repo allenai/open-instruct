@@ -1,7 +1,10 @@
 """Tests for DPO utility functions."""
 
 import logging
+import os
+import pathlib
 import unittest
+import unittest.mock
 
 import torch
 from parameterized import parameterized
@@ -224,6 +227,31 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
         hash2 = dpo_utils.compute_reference_cache_hash(make_test_args(seed=2, max_train_samples=2000), tc)
 
         self.assertNotEqual(hash1, hash2)
+
+
+class TestGetReferenceLogprobsCachePath(unittest.TestCase):
+    """Tests for get_reference_logprobs_cache_path resolution order."""
+
+    def test_env_var_wins_over_beaker(self):
+        env = {"REFERENCE_LOGPROBS_CACHE_PATH": "/tmp/my_cache", "BEAKER_JOB_ID": "1234"}
+        with unittest.mock.patch.dict(os.environ, env):
+            self.assertEqual(dpo_utils.get_reference_logprobs_cache_path(), pathlib.Path("/tmp/my_cache"))
+
+    def test_weka_path_on_beaker(self):
+        with unittest.mock.patch.dict(os.environ, {"BEAKER_JOB_ID": "1234"}):
+            os.environ.pop("REFERENCE_LOGPROBS_CACHE_PATH", None)
+            self.assertEqual(
+                dpo_utils.get_reference_logprobs_cache_path(), pathlib.Path(dpo_utils.REFERENCE_LOGPROBS_CACHE_PATH)
+            )
+
+    def test_local_path_without_beaker(self):
+        env = os.environ.copy()
+        env.pop("REFERENCE_LOGPROBS_CACHE_PATH", None)
+        env.pop("BEAKER_JOB_ID", None)
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(
+                dpo_utils.get_reference_logprobs_cache_path(), pathlib.Path("local_reference_logprobs_cache")
+            )
 
 
 if __name__ == "__main__":

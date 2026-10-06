@@ -49,3 +49,20 @@ beaker image create open_instruct_dev_uv -n open_instruct_dev_uv -w ai2/$beaker_
 ```
 
 If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
+
+## Running the local debug scripts outside Ai2
+
+The training code itself does not require Beaker: integrations like auto-evaluation or saving to Beaker datasets only activate when the job runs on Beaker. On your own machine (or rented GPUs), you can train with the debug scripts directly, e.g. single-GPU DPO:
+
+```bash
+./scripts/train/debug/dpo/local.sh
+```
+
+A few defaults behave differently outside Ai2, all overridable with environment variables:
+
+* Caches land next to your working directory instead of `/weka`: the DPO reference-logprobs cache goes to `local_reference_logprobs_cache/` (set `REFERENCE_LOGPROBS_CACHE_PATH` to move it), and dataset caches go to `local_dataset_cache/`.
+* If you don't have a Weights & Biases API key, pass `--wandb_entity <anything>`; otherwise startup fails in `wandb.login()` because the client probes for the internal `ai2-llm` team even when tracking is off.
+* To skip the local dataset-caching step when launching through `mason.py` (it imports `vllm`, which is not available on macOS), pass `--no_auto_dataset_cache`.
+* On `push_to_hub`, the model is pushed to your own HuggingFace account unless you pass `--hf_entity`; you can also set `WANDB_ENTITY`/`WANDB_PROJECT` to control W&B.
+
+Training still needs at least one GPU; the scripts above are smoke tests, not replacements for the Beaker-based multi-node orchestration.
