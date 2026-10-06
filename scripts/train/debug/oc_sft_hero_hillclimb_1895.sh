@@ -52,13 +52,36 @@ case "$ARM" in
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
-        case "$ARM_CACHE" in
+        case "${ARM_CACHE%-rowaligned}" in
             062b8a3d20-6068a350|15bfc110a1-6068a350|3f12323c3b-6068a350)
                 echo "H038_CACHE=$ARM_CACHE is an olmo123 cache; the olmo35 arms need their own" >&2; exit 1 ;;
         esac
         ;;
     *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both])" >&2; exit 1 ;;
 esac
+# H049: ROW_ALIGNED_PARTS=1 tokenizes/trains on the row-aligned layout ("-rowaligned" cache),
+# DOCB=1 takes document boundaries from its per-row metadata instead of EOS (needs
+# ROW_ALIGNED_PARTS=1). Both default off, which leaves every existing arm unchanged.
+# The cache name must agree with the layout, so a row-aligned run can never read a
+# mid-row-cut cache or the reverse. Validated again, and turned into flags, downstream.
+ROW_ALIGNED_PARTS="${ROW_ALIGNED_PARTS:-0}"
+DOCB="${DOCB:-0}"
+BOUNDARY_TAG=""
+if [[ "$ROW_ALIGNED_PARTS" == "1" || "$DOCB" == "1" ]]; then
+    if [[ "$ARM" != olmo35* ]]; then
+        echo "ROW_ALIGNED_PARTS/DOCB apply to the olmo35 arms only (the others pin pre-#843 images or caches)" >&2; exit 1
+    fi
+    BOUNDARY_TAG=$([[ "$DOCB" == "1" ]] && echo "-docb" || echo "-rowaligned")
+fi
+if [[ -n "$ARM_CACHE" ]]; then
+    if [[ "$ROW_ALIGNED_PARTS" == "1" && "$ARM_CACHE" != *-rowaligned ]]; then
+        echo "ROW_ALIGNED_PARTS=1 needs a -rowaligned cache; H038_CACHE=$ARM_CACHE is mid-row-cut" >&2; exit 1
+    fi
+    if [[ "$ROW_ALIGNED_PARTS" != "1" && "$ARM_CACHE" == *-rowaligned ]]; then
+        echo "H038_CACHE=$ARM_CACHE is row-aligned; set ROW_ALIGNED_PARTS=1 to use it" >&2; exit 1
+    fi
+fi
+export ROW_ALIGNED_PARTS DOCB
 case "$MODE" in
     train)
         export STEPS=3072 NNODES=2 NPROC=8 CKPT_STEPS=3072 EPHEMERAL_STEPS=1024
@@ -105,7 +128,7 @@ case "$MODE" in
         export CONVERT_PYTHONPATH=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-anchor/olmo-core-b1fd2c97/src
         if [[ "$EXPERIMENT" != "h010" ]]; then
             # BUDGET=full converts the train_full dir of the same arm and seed.
-            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/${EXPERIMENT}-${ARM}-train${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}}"
+            export CKPT_ROOT="${CKPT_ROOT:-$H015_ROOT/${EXPERIMENT}-${ARM}${BOUNDARY_TAG}-train${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}}"
         else
             export CKPT_ROOT="${CKPT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-train-20260918}"
         fi
@@ -152,12 +175,12 @@ export PRIORITY="${PRIORITY:-normal}"
 export MAX_RETRIES="${MAX_RETRIES:-0}"
 export KEEP_LAST_N="${KEEP_LAST_N:-1}"
 if [[ "$EXPERIMENT" != "h010" ]]; then
-    H015_TAG="${ARM}-${MODE}${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}"
+    H015_TAG="${ARM}${BOUNDARY_TAG}-${MODE}${BUDGET:+-$BUDGET}-s${DATA_LOADER_SEED}"
     export RUN_NAME="${RUN_NAME:-hero-sft-${EXPERIMENT}-$H015_TAG}"
     export OUTPUT_DIR="${OUTPUT_DIR:-$H015_ROOT/${EXPERIMENT}-$H015_TAG}"
 fi
-export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
-export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}-${RUN_TAG:-${MODE}}-20260918}"
+export RUN_NAME="${RUN_NAME:-hero-sft-h010-${ARM}${BOUNDARY_TAG}-${RUN_TAG:-${MODE}-s${DATA_LOADER_SEED}}-20260918}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-hillclimb-1895/${ARM}${BOUNDARY_TAG}-${RUN_TAG:-${MODE}}-20260918}"
 # Caller accounts for all queued/running jobs against 32 urgent + 32 normal.
 # Explicit interpreter avoids local sync of the separately pinned MoE runtime.
 export PY="${PY:-python}"

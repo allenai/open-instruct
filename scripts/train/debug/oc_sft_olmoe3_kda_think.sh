@@ -159,6 +159,30 @@ RESERVED_SLOT_FLAGS=()
 if [[ "${THINK_TOKENS:-0}" == "1" ]]; then
     RESERVED_SLOT_FLAGS=(--reserved_slot_tokens "<think>" "</think>")
 fi
+# H049: the cache layout and the document-boundary source, both off by default.
+# ROW_ALIGNED_PARTS=1 cuts the numpy parts only between rows and names the cache
+# "<hash>-<seed>-rowaligned"; it is a cache-key argument, so tokenize and train must
+# pass it identically. DOCB=1 takes packing boundaries from the per-row metadata
+# instead of EOS; it changes no cache key, and needs ROW_ALIGNED_PARTS=1 and an image
+# whose OLMo-core has use_array_if_local (allenai/OLMo-core#843).
+ROW_ALIGNED_PARTS="${ROW_ALIGNED_PARTS:-0}"
+DOCB="${DOCB:-0}"
+for flag_name in ROW_ALIGNED_PARTS DOCB; do
+    if [[ "${!flag_name}" != "0" && "${!flag_name}" != "1" ]]; then
+        echo "$flag_name must be 0 or 1, got ${!flag_name}" >&2; exit 1
+    fi
+done
+if [[ "$DOCB" == "1" && "$ROW_ALIGNED_PARTS" != "1" ]]; then
+    echo "DOCB=1 requires ROW_ALIGNED_PARTS=1: a mid-row-cut cache would train a cut row as two documents" >&2
+    exit 1
+fi
+ROW_BOUNDARY_FLAGS=()
+if [[ "$ROW_ALIGNED_PARTS" == "1" ]]; then
+    ROW_BOUNDARY_FLAGS+=(--row_aligned_parts)
+fi
+if [[ "$DOCB" == "1" ]]; then
+    ROW_BOUNDARY_FLAGS+=(--document_boundaries_from_metadata)
+fi
 # 32768 is the cache's native tokenisation length (no re-tokenize) and cuts
 # mid-trace truncation to 1.95%; 16384 would show the LC base the same data as
 # the midtrain base.
@@ -262,6 +286,7 @@ case "$MODE" in
         --gpus 0 \
         --non_resumable \
         --no_auto_dataset_cache \
+        ${TOKENIZE_TIMEOUT:+--timeout $TOKENIZE_TIMEOUT} \
         ${EXPECTED_NUMPY_CACHE:+--env EXPECTED_NUMPY_CACHE=$EXPECTED_NUMPY_CACHE} \
         $EXTRA_BUCKET_FLAGS \
         -- uv run python open_instruct/olmo_core_finetune.py \
@@ -271,6 +296,7 @@ case "$MODE" in
         --chat_template_name $CHAT_TEMPLATE \
         ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
         ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
+        ${ROW_BOUNDARY_FLAGS[@]+"${ROW_BOUNDARY_FLAGS[@]}"} \
         --max_seq_length "$SEQ" \
         --mixer_list $MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
@@ -304,6 +330,7 @@ case "$MODE" in
         --chat_template_name $CHAT_TEMPLATE \
         ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
         ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
+        ${ROW_BOUNDARY_FLAGS[@]+"${ROW_BOUNDARY_FLAGS[@]}"} \
         --max_seq_length "$SEQ" \
         --mixer_list $FULL_MIXER \
         --local_cache_dir $LOCAL_CACHE_DIR \
@@ -410,6 +437,7 @@ case "$MODE" in
         --chat_template_name $CHAT_TEMPLATE \
         ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
         ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
+        ${ROW_BOUNDARY_FLAGS[@]+"${ROW_BOUNDARY_FLAGS[@]}"} \
         --max_seq_length "$SEQ" \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps $GRAD_ACCUM \
