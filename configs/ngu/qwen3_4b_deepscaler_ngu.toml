@@ -49,8 +49,8 @@ shuffle = true
 [training]
 # NGU retries the groups this zero-std filter rejects.
 filter_zero_std_groups = true
-# total_episodes 256000 / (32 prompts x 8 samples)
-num_rollouts = 1000
+# total_episodes 128000 / (32 prompts x 8 samples), matching the 10k-prompt runs
+num_rollouts = 500
 skip_eval_before_train = false
 eval_interval = 100
 save_checkpoints = true
