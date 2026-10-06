@@ -187,6 +187,41 @@ def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_pat
     assert "should-not-print" not in str(error.value)
 
 
+@pytest.mark.parametrize("cluster", ["ai2/jupiter", "ai2/holmes", "ai2/saturn"])
+@pytest.mark.parametrize("override", [None, "/custom/lib:/usr/local/nvidia/lib64", ""])
+def test_jupiter_cuda_default_and_explicit_overrides_reach_workers(tmp_path, cluster, override):
+    env = {"DEBUG_LABEL": "preserved"}
+    if override is not None:
+        env["LD_LIBRARY_PATH"] = override
+    run = spec(tmp_path, launch={"cluster": cluster, "env": env})
+    expected = override
+    if cluster == "ai2/jupiter" and override is None:
+        expected = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+    assert run.launch["env"].get("LD_LIBRARY_PATH") == expected
+    assert run.plan()["launch"]["env"] == run.launch["env"]
+    assert run.launch["env"]["DEBUG_LABEL"] == "preserved"
+    restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "frozen.json")
+    assert restored.launch["env"] == run.launch["env"]
+    task = launch.specification(IMAGE_ID, restored)["tasks"][0]
+    worker_env = {entry["name"]: entry.get("value") for entry in task["envVars"]}
+    assert worker_env.get("LD_LIBRARY_PATH") == expected
+    assert payload(task["arguments"][0])["launch"]["env"] == run.launch["env"]
+
+
+def test_jupiter_cuda_path_cli_override_and_secret_precedence(tmp_path):
+    run = spec(tmp_path, launch={"cluster": "ai2/jupiter"})
+    overridden = RunSpec.from_dict(
+        run.to_dict(), config_path=tmp_path / "run.json", overrides=['launch.env.LD_LIBRARY_PATH="/custom/lib"']
+    )
+    assert overridden.launch["env"]["LD_LIBRARY_PATH"] == "/custom/lib"
+    secret = spec(tmp_path, launch={"cluster": "ai2/jupiter", "secrets": {"LD_LIBRARY_PATH": "library-path"}})
+    assert "LD_LIBRARY_PATH" not in secret.launch["env"]
+    entries = launch.specification(IMAGE_ID, secret)["tasks"][0]["envVars"]
+    assert [entry for entry in entries if entry["name"] == "LD_LIBRARY_PATH"] == [
+        {"name": "LD_LIBRARY_PATH", "secret": "library-path"}
+    ]
+
+
 def test_run_freezes_overrides_before_required_build_wrapper(tmp_path, monkeypatch):
     path = tmp_path / "run.toml"
     path.write_text(

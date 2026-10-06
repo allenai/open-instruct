@@ -9,11 +9,13 @@ Choose according to model and workload support, preserve the user's selected
 workflow, and identify support gaps explicitly. MILES does not deprecate the
 existing GRPO trainers.
 
-For MILES GPU runs on `ai2/jupiter`, keep the pinned MILES image and set
+For MILES GPU runs on `ai2/jupiter`, keep the pinned MILES image. RunSpec defaults
 `launch.env.LD_LIBRARY_PATH` to
 `/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64`.
 This selects the image's CUDA forward-compatibility libraries on the older host
-driver; it was required by the successful Jupiter H100 runs. See the
+driver; it was required by the successful Jupiter H100 runs. An explicit
+`launch.env.LD_LIBRARY_PATH` (including a CLI `--set` override) takes precedence.
+Other clusters do not receive this default. See the
 [Jupiter launch instructions](docs/miles/launching.md#jupiter-cuda-compatibility).
 Do not use the ordinary launcher's `--cuda-version` flag with MILES. Revalidate
 CUDA initialization and a short training run when the image or driver changes.

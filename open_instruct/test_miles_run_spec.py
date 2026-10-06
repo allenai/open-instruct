@@ -273,6 +273,21 @@ def test_repeatable_toml_overrides_before_compilation(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "override,match",
+    [
+        ('launch.env.LD-LIBRARY-PATH="/lib"', "SECTION.KEY"),
+        ('launch.env.1PATH="/lib"', "SECTION.KEY"),
+        ('launch.env.CUDA_VISIBLE_DEVICES="0"', "runtime owns"),
+        ('launch.secrets.PYTHONPATH="source-secret"', "runtime owns"),
+        ('launch.CLUSTER="ai2/jupiter"', "SECTION.KEY"),
+    ],
+)
+def test_environment_cli_overrides_preserve_name_and_ownership_validation(tmp_path, override, match):
+    with pytest.raises(ValueError, match=match):
+        RunSpec.from_dict(spec(tmp_path).to_dict(), config_path=tmp_path / "run.json", overrides=[override])
+
+
+@pytest.mark.parametrize(
     "sections,match",
     [
         ({"schema_version": 2}, "schema_version"),

@@ -224,7 +224,7 @@
     "launch.coordination": "Multi-node coordination timeouts table.",
     "launch.coordination.heartbeat_timeout": "Positive seconds for replica heartbeat timeout; default 120.",
     "launch.coordination.startup_timeout": "Positive seconds to await coordinated startup; default 1200.",
-    "launch.env": "Environment-name to nonsecret string mapping, default empty; rank/Ray/CUDA variables are reserved.",
+    "launch.env": "Environment-name to nonsecret string mapping. On ai2/jupiter, LD_LIBRARY_PATH defaults to the pinned image's CUDA compatibility libraries followed by NVIDIA/CUDA library directories; explicit values or secret references take precedence. Otherwise defaults empty; rank/Ray/CUDA device variables are reserved.",
     "launch.gpus_per_replica": "Positive integer physical GPUs per replica; inferred from topology if omitted.",
     "launch.max_retries": "Restarts this run may make before it refuses to start again; default -1 for no cap. Counts every start recorded in attempts.json under output.root, including productive ones.",
     "launch.min_runtime": "Beaker preemption-protected minimum runtime as a Go-style duration (45m, 4h, 2h30m); defaults to 0s (unallocated) when omitted. Integer 0, string 0, 0s or a blank value also selects unallocated scheduling on any topology and is submitted as 0s. Values above Beaker's usual 8h limit warn; Beaker enforces scheduling limits.",

@@ -98,7 +98,9 @@ debug launch script is involved.
 
 ## Jupiter CUDA compatibility
 
-For MILES GPU runs on `ai2/jupiter`, merge these settings into your run file:
+For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` automatically sets
+the compatibility library path inside the Beaker job. The resolved value appears
+in `plan`, the submitted configuration and the launch receipt:
 
 ```toml
 [launch]
@@ -114,8 +116,20 @@ The September 2026 Jupiter H100 checks initially failed CUDA preflight because
 the host driver was older than the pinned image's CUDA 13 runtime. Retrying with
 the same image and `/usr/local/cuda/compat` first in `LD_LIBRARY_PATH` passed;
 subsequent paired hero-checkpoint smoke runs completed four optimizer updates.
-Set this environment variable **inside the Beaker job** through `launch.env`;
-exporting it only on the submission host does not configure the workers.
+The `[launch.env]` entry above shows the default and can be omitted. An explicit
+value replaces the default exactly; it is never prepended or merged. For example,
+to use the host driver libraries without the compatibility directory:
+
+```toml
+[launch.env]
+LD_LIBRARY_PATH = "/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+```
+
+The CLI also accepts `--set 'launch.env.LD_LIBRARY_PATH="/custom/lib"'`.
+Other clusters receive no automatic library-path override, and explicit Beaker
+secret references retain precedence. Exporting the variable only on the
+submission host does not configure the workers. Older submission checkouts need
+the explicit `[launch.env]` setting shown above.
 
 Keep the pinned MILES runtime. The ordinary launcher's `--cuda-version 12|13`
 switch cannot be combined with `--miles`. The override uses compatibility
