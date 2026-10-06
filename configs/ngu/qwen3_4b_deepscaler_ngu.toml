@@ -15,7 +15,7 @@ export_hf = true
 
 [launch]
 workspace = "ai2/olmo-instruct"
-budget = "ai2/oe-adapt"
+budget = "ai2/oe-other"
 cluster = "ai2/jupiter"
 priority = "high"
 min_runtime = "4h"
