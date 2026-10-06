@@ -632,8 +632,34 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
+def use_doc_lens_for_emo_segments(model_config: TransformerConfig) -> int:
+    """Make every EMO router take its document segments from the batch's `doc_lens`.
+
+    EMO routing otherwise splits documents at EOS, which disagrees with metadata document
+    boundaries. Returns the number of EMO router configs changed; zero for models without EMO.
+    """
+    blocks = [model_config.block, *(getattr(model_config, "block_overrides", None) or {}).values()]
+    changed = 0
+    for block in blocks:
+        router = getattr(block, "routed_experts_router", None)
+        emo = getattr(router, "emo", None)
+        if emo is None:
+            continue
+        if not hasattr(emo, "segment_ids_from"):
+            raise ValueError(
+                "This model routes with EMO, and the installed OLMo-core's EmoRouterConfig has no "
+                "segment_ids_from, so EMO would keep splitting documents at EOS."
+            )
+        emo.segment_ids_from = "doc_lens"
+        changed += 1
+    return changed
+
+
 def setup_model(
-    model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
+    model_config_args: ModelConfig,
+    tc: TokenizerConfig | None = None,
+    init_device: str = "cpu",
+    emo_segments_from_doc_lens: bool = False,
 ) -> tuple[Transformer, TransformerConfig]:
     model_name_or_path = model_config_args.model_name_or_path
     if is_hf_checkpoint(model_name_or_path):
@@ -663,6 +689,8 @@ def setup_model(
                 old_context_len=model_config_args.rope_scaling_old_context_len,
             )
         )
+    if emo_segments_from_doc_lens and use_doc_lens_for_emo_segments(model_config):
+        logger.info("EMO routers take their document segments from doc_lens")
     model = model_config.build(init_device=init_device)
     return model, model_config
 

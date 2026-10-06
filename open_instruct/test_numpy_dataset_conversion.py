@@ -435,6 +435,18 @@ class TestRowAlignedParts(_NumpySftTestBase):
         self.assertEqual(rows, expected)
         self.assertEqual(sum(len(spans) for _, _, spans in parts), len(_CHAT_ROWS))
 
+    def test_rewriting_the_same_rows_gives_identical_metadata_files(self):
+        # gzip stamps the write time into its header unless told otherwise; OLMo-core fingerprints
+        # metadata-backed datasets by these files, so a rewrite must not change a byte.
+        outputs = []
+        for name, now in (("first", 1_000_000_000.0), ("second", 1_500_000_000.0)):
+            with unittest.mock.patch("gzip.time.time", return_value=now):
+                outputs.append(self._convert(name, row_aligned_parts=True))
+        names = sorted(p.name for p in outputs[0].glob("token_ids_part_*.csv.gz"))
+        self.assertGreater(len(names), 1)
+        for name in names:
+            self.assertEqual((outputs[0] / name).read_bytes(), (outputs[1] / name).read_bytes(), msg=name)
+
     def test_default_cuts_every_part_size_mid_row(self):
         default = self._parts(self._convert("default", row_aligned_parts=False))
         aligned = self._parts(self._convert("aligned", row_aligned_parts=True))
