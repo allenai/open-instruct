@@ -9,7 +9,7 @@ source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Thinking-2507"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-deepscaler-10k-baseline"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/r2-qwen3-4b-deepscaler-10k-baseline"
 export_hf = true
 
 [launch]
@@ -29,6 +29,10 @@ mount_path = "/weka/oe-adapt-default"
 [[launch.weka_mounts]]
 weka = "oe-training-default"
 mount_path = "/weka/oe-training-default"
+
+[launch.secrets]
+WANDB_API_KEY = "michaeln_WANDB_API_KEY"
+HF_TOKEN = "michaeln_HF_TOKEN"
 
 [launch.env]
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
