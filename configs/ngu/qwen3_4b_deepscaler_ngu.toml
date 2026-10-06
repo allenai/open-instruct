@@ -3,14 +3,14 @@
 # Kept outside configs/miles, which holds only the maintained starters. Prepare data first with scripts/miles/prepare_deepscaler.py --train-dataset mnoukhov/deepscaler-10k-rlvr.
 # For the baseline arm set async_unused_samples_handler = "retry" and drop the ngu_* options.
 schema_version = 1
-name = "qwen3-4b-deepscaler-ngu"
+name = "qwen3-4b-deepscaler-10k-ngu"
 
 [model]
 source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Thinking-2507"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-deepscaler-ngu"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-deepscaler-10k-ngu"
 export_hf = true
 
 [launch]
