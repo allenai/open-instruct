@@ -61,6 +61,7 @@ The training code itself does not require Beaker: integrations like auto-evaluat
 A few defaults behave differently outside Ai2, all overridable with environment variables:
 
 * Caches land next to your working directory instead of `/weka`: the DPO reference-logprobs cache goes to `local_reference_logprobs_cache/` (set `REFERENCE_LOGPROBS_CACHE_PATH` to move it), and dataset caches go to `local_dataset_cache/`.
+* If you don't have a Weights & Biases API key, pass `--wandb_entity <anything>`; otherwise startup fails in `wandb.login()` because the client probes for the internal `ai2-llm` team even when tracking is off.
 * To skip the local dataset-caching step when launching through `mason.py` (it imports `vllm`, which is not available on macOS), pass `--no_auto_dataset_cache`.
 * On `push_to_hub`, the model is pushed to your own HuggingFace account unless you pass `--hf_entity`; you can also set `WANDB_ENTITY`/`WANDB_PROJECT` to control W&B.
 
