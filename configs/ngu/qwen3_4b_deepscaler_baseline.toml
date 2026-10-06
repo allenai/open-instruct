@@ -1,6 +1,6 @@
 # Baseline (no NGU) arm of configs/ngu/qwen3_4b_deepscaler_ngu.toml: identical except the
 # unused-samples handler is "retry" and the ngu_* options are dropped.
-# Prepare data first with scripts/miles/prepare_deepscaler.py.
+# Prepare data first with scripts/miles/prepare_deepscaler.py --train-dataset mnoukhov/deepscaler-10k-rlvr.
 schema_version = 1
 name = "qwen3-4b-deepscaler-baseline"
 
@@ -34,14 +34,14 @@ mount_path = "/weka/oe-training-default"
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 
 [data]
-prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/train.jsonl"
+prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k/train.jsonl"
 eval_prompt_data = [
-  "aime_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-aime_2025.jsonl",
-  "brumo_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-brumo_2025.jsonl",
-  "hmmt_nov_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-hmmt_nov_2025.jsonl",
-  "hmmt_feb_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/eval-hmmt_feb_2025.jsonl",
+  "aime_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k/eval-aime_2025.jsonl",
+  "brumo_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k/eval-brumo_2025.jsonl",
+  "hmmt_nov_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k/eval-hmmt_nov_2025.jsonl",
+  "hmmt_feb_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k/eval-hmmt_feb_2025.jsonl",
 ]
-reward_config = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler/verifiers.json"
+reward_config = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k/verifiers.json"
 seed = 1
 shuffle = true
 
