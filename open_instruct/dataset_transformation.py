@@ -67,8 +67,8 @@ from transformers import GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFas
 from transformers.utils import chat_template_utils
 from transformers.utils.hub import extract_commit_hash
 
+from open_instruct import control_token_guard, launch_utils, logger_utils, tokenizer_utils
 from open_instruct import dataset_statistics as token_statistics
-from open_instruct import launch_utils, logger_utils, tokenizer_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -2207,6 +2207,16 @@ _SFT_TOKENIZE_FNS = {
     "sft_tulu_tokenize_and_truncate_v1",
     "last_turn_tulu_tokenize_and_truncate_v1",
 }
+# SFT tokenization functions that render only the messages column.
+_SFT_MESSAGES_ONLY_TOKENIZE_FNS = {"sft_tokenize_v1", "sft_tokenize_mask_out_prompt_v1"}
+
+# Bump when the control-token guard changes which rows it drops. Only keys of mixes that lose
+# rows to the guard include it, so changing it never invalidates a clean mix's cache.
+CONTROL_TOKEN_GUARD_VERSION = "v1"
+DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC = 0.001
+# DatasetConfig fields kept out of the cache key: the guard enters the key only through
+# CONTROL_TOKEN_GUARD_VERSION, and only when it actually drops rows.
+_CONTROL_TOKEN_GUARD_FIELDS = ("drop_control_token_rows", "control_token_max_drop_frac", "control_token_rows_dropped")
 
 
 class SimplePreferenceCollator:
@@ -2261,8 +2271,14 @@ class DatasetConfig:
     transform_fn_args: list[dict[str, Any]] = field(default_factory=list)
     target_columns: list[str] | None = None
     dataset_config_seed: int = 42
+    drop_control_token_rows: bool = True
+    """Drop SFT rows whose raw fields spell out a special token; see `_drop_control_token_rows`."""
+    control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC
+    """Fail instead of dropping when the guard would drop more than this fraction of the dataset."""
 
     # for tracking purposes
+    control_token_rows_dropped: int | None = None
+    """Rows the control-token guard dropped, or None if it did not run on this dataset."""
     dataset_commit_hash: str | None = None
     frac_or_num_samples: int | float | None = None
     original_dataset_size: int | None = None
@@ -2339,6 +2355,69 @@ class DatasetConfig:
         return self.dataset.select(indices)
 
 
+def _control_token_guard_columns(dc: DatasetConfig) -> list[str]:
+    """The raw columns `dc`'s SFT tokenizer renders, or [] when the guard does not apply."""
+    if not dc.drop_control_token_rows:
+        return []
+    for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
+        if fn_name in _SFT_TOKENIZE_FNS:
+            return [DEFAULT_SFT_MESSAGES_KEY, TOOLS_COLUMN_KEY]
+        if fn_name in _SFT_MESSAGES_ONLY_TOKENIZE_FNS:
+            return [fn_args.get("sft_messages_key", DEFAULT_SFT_MESSAGES_KEY)]
+    return []
+
+
+def _has_control_token_rows(dc: DatasetConfig, tokenizer: PreTrainedTokenizer) -> bool:
+    columns = _control_token_guard_columns(dc)
+    if not columns:
+        return False
+    tokens = control_token_guard.control_tokens(tokenizer)
+    return bool(control_token_guard.control_token_row_mask(dc.dataset, columns, tokens, stop_at_first_hit=True).any())
+
+
+def _drop_control_token_rows(dc: DatasetConfig, dataset: Dataset, tokenizer: PreTrainedTokenizer) -> Dataset:
+    """Drop SFT rows whose raw fields contain a literal special token, before any rendering.
+
+    Such a literal tokenizes to the real control id, planting an EOS or turn boundary the chat
+    template never emitted. The check reads the raw messages (every role, `reasoning_content`,
+    tool calls) and tool schemas, so the special tokens the template inserts are never flagged.
+    Records the count on `dc` and raises if it exceeds `dc.control_token_max_drop_frac`.
+    """
+    columns = _control_token_guard_columns(dc)
+    if not columns:
+        dc.control_token_rows_dropped = None
+        return dataset
+    tokens = control_token_guard.control_tokens(tokenizer)
+    mask = control_token_guard.control_token_row_mask(dataset, columns, tokens)
+    dropped = int(mask.sum())
+    dc.control_token_rows_dropped = dropped
+    if dropped == 0:
+        logger.info(f"Control-token guard: no row of {dc.dataset_name} contains any of {tokens}.")
+        return dataset
+    frac = dropped / len(dataset)
+    examples = []
+    for index in np.flatnonzero(mask)[:3]:
+        row = dataset[int(index)]
+        raw = {column: row[column] for column in columns if column in row}
+        locations = sorted(set(control_token_guard.control_token_locations(raw, tokens)))
+        examples.append(f"row {int(index)}: {locations}")
+    logger.warning(
+        f"Control-token guard: dropping {dropped} of {len(dataset)} rows ({frac:.4%}) from {dc.dataset_name} "
+        f"whose raw text contains a special token. Examples: {'; '.join(examples)}"
+    )
+    if frac > dc.control_token_max_drop_frac:
+        raise ValueError(
+            f"{dropped} of {len(dataset)} rows ({frac:.4%}) of {dc.dataset_name} contain a literal special token "
+            f"({tokens}), more than --control_token_max_drop_frac={dc.control_token_max_drop_frac}. Clean the "
+            "dataset, raise the threshold, or pass --no_drop_control_token_rows to keep the rows as they are."
+        )
+    fingerprint = hashlib.sha256(
+        f"{DATASET_CACHE_VERSION}:control_token_guard:{CONTROL_TOKEN_GUARD_VERSION}:{dataset._fingerprint}:"
+        f"{json.dumps(tokens)}:{json.dumps(columns)}".encode()
+    ).hexdigest()[:16]
+    return dataset.select(np.flatnonzero(~mask), new_fingerprint=fingerprint)
+
+
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     assert len(dc.transform_fn) == len(dc.transform_fn_args), (
         f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
@@ -2347,7 +2426,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
 
     tokenizer = tc.tokenizer
-    dataset = dc.dataset
+    dataset = _drop_control_token_rows(dc, dc.dataset, tokenizer)
     chat_template = getattr(tokenizer, "chat_template", None)
     try:
         chat_template_str = json.dumps(chat_template, sort_keys=True)
@@ -2462,17 +2541,23 @@ def _get_chat_template_metadata(tc: TokenizerConfig) -> dict[str, str | None]:
     }
 
 
-def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
-    """Compute a deterministic hash of both configs for caching.
+def _control_token_guard_metadata(dcs: list[DatasetConfig], tc: TokenizerConfig) -> dict[str, Any] | None:
+    """What the control-token guard checked for, or None if it ran on none of `dcs`."""
+    if not any(_control_token_guard_columns(dc) for dc in dcs):
+        return None
+    return {"version": CONTROL_TOKEN_GUARD_VERSION, "tokens": control_token_guard.control_tokens(tc.tokenizer)}
 
-    The hash includes DATASET_CACHE_VERSION to invalidate old caches when
-    transformation logic changes significantly.
-    """
+
+def _config_hash_payload(dcs: list[DatasetConfig], tc: TokenizerConfig) -> dict[str, Any]:
+    """Everything `compute_config_hash` hashes."""
     # Resolve the tokenizer before snapshotting tc: loading it populates
     # tc.tokenizer_files_hash, so hashing a pristine tc would give a different
     # result than hashing the same tc after any tc.tokenizer access.
     chat_template = getattr(tc.tokenizer, "chat_template", None)
     dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
+    for dc_dict in dc_dicts:
+        for key in _CONTROL_TOKEN_GUARD_FIELDS:
+            dc_dict.pop(key, None)
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
     try:
         chat_template_str = json.dumps(chat_template, sort_keys=True)
@@ -2485,7 +2570,21 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
         "tokenizer_config": tc_dict,
         "chat_template_hash": chat_template_hash,
     }
-    config_str = json.dumps(combined_dict, sort_keys=True)
+    # A mix the control-token guard leaves untouched keeps its pre-guard key and so its existing
+    # cache, which is byte-identical. A mix that loses rows gets a new key, so a pre-guard cache
+    # still holding those rows is never reused for it.
+    if any(_has_control_token_rows(dc, tc.tokenizer) for dc in dcs):
+        combined_dict["control_token_guard"] = CONTROL_TOKEN_GUARD_VERSION
+    return combined_dict
+
+
+def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
+    """Compute a deterministic hash of both configs for caching.
+
+    The hash includes DATASET_CACHE_VERSION to invalidate old caches when
+    transformation logic changes significantly.
+    """
+    config_str = json.dumps(_config_hash_payload(dcs, tc), sort_keys=True)
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
 
@@ -2653,6 +2752,7 @@ class LocalDatasetTransformationCache:
                 "initial_instances": initial_size,
                 "final_instances": len(dataset),
                 "instances_filtered": initial_size - len(dataset),
+                "control_token_rows_dropped": dc.control_token_rows_dropped,
                 "frac_or_num_samples": dc.frac_or_num_samples,
                 "original_dataset_size": dc.original_dataset_size,
                 "is_upsampled": dc.is_upsampled,
@@ -2683,6 +2783,7 @@ class LocalDatasetTransformationCache:
             "per_dataset_stats": dataset_statistics,
             "dataset_order": dataset_order,
             **_get_chat_template_metadata(tc),
+            "control_token_guard": _control_token_guard_metadata(dcs, tc),
         }
 
         if dataset_skip_cache:
@@ -2711,6 +2812,8 @@ def load_dataset_configs(
     transform_fn_args: list[dict[str, Any]],
     target_columns: list[str] | None = None,
     dataset_config_seed: int = 42,
+    drop_control_token_rows: bool = True,
+    control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> list[DatasetConfig]:
     """
     Load and configure datasets from a mixer list.
@@ -2734,6 +2837,8 @@ def load_dataset_configs(
         transform_fn_args: Arguments for transform functions.
         target_columns: Optional list of columns to keep.
         dataset_config_seed: Random seed for sampling.
+        drop_control_token_rows: Drop SFT rows whose raw fields contain a literal special token.
+        control_token_max_drop_frac: Fail if the guard would drop more than this fraction of a dataset.
 
     Returns:
         List of configured DatasetConfig objects.
@@ -2767,6 +2872,8 @@ def load_dataset_configs(
             target_columns=target_columns,
             frac_or_num_samples=frac_or_num_samples,
             dataset_config_seed=dataset_config_seed,
+            drop_control_token_rows=drop_control_token_rows,
+            control_token_max_drop_frac=control_token_max_drop_frac,
         )
 
         original_size = len(dataset_config.dataset)
@@ -2807,6 +2914,8 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    drop_control_token_rows: bool = True,
+    control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
@@ -2816,6 +2925,8 @@ def get_cached_dataset_tulu_with_statistics(
             transform_fn_args,
             target_columns,
             dataset_config_seed,
+            drop_control_token_rows=drop_control_token_rows,
+            control_token_max_drop_frac=control_token_max_drop_frac,
         )
         dataset_config_hash = compute_config_hash(dcs, tc)
     else:
@@ -2849,6 +2960,8 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    drop_control_token_rows: bool = True,
+    control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2865,4 +2978,6 @@ def get_cached_dataset_tulu(
         drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
+        drop_control_token_rows=drop_control_token_rows,
+        control_token_max_drop_frac=control_token_max_drop_frac,
     )[0]

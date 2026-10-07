@@ -107,6 +107,8 @@ def _tokenize_to_numpy_dir(
         shuffle_seed=args.tracking.seed,
         resume=True,
         visualize=visualize,
+        drop_control_token_rows=args.sft.drop_control_token_rows,
+        control_token_max_drop_frac=args.sft.control_token_max_drop_frac,
     )
 
 
@@ -125,6 +127,12 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
+    drop_control_token_rows: bool = True
+    """Drop rows whose raw messages, reasoning, tool calls or tool schemas contain a literal
+    special token (e.g. `<|im_end|>`), which would tokenize to the real control id. Mixes with no
+    such row keep their existing cache key; mixes that lose rows get a new one."""
+    control_token_max_drop_frac: float = dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC
+    """Fail if `drop_control_token_rows` would drop more than this fraction of a dataset."""
 
 
 @dataclasses.dataclass
@@ -153,6 +161,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         dataset_transform_fn=args.dataset.transform_fn,
         transform_fn_args=transform_fn_args,
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+        drop_control_token_rows=args.sft.drop_control_token_rows,
+        control_token_max_drop_frac=args.sft.control_token_max_drop_frac,
     )
     cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
     seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
@@ -186,6 +196,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # Part of the cache hash.
         if args.training.over_length_strategy != dataset_transformation.DEFAULT_OVER_LENGTH_STRATEGY:
             cache_args.append(f"--over_length_strategy {args.training.over_length_strategy}")
+        # Part of the cache hash whenever the guard would drop rows.
+        if not args.sft.drop_control_token_rows:
+            cache_args.append("--no_drop_control_token_rows")
+        if args.sft.control_token_max_drop_frac != dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC:
+            cache_args.append(f"--control_token_max_drop_frac {args.sft.control_token_max_drop_frac}")
         # Also part of the cache hash, and the values contain shell metacharacters: an
         # unquoted `<think>` would be a redirection, and a command that dropped the flag
         # would tokenize to a different hash than the one this job is looking for.
