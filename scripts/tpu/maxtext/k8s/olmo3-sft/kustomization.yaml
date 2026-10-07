@@ -1,0 +1,36 @@
+# Olmo 3 7B SFT smoke test on one spot 2x2x4 v4 slice of gke-tpu-v4 (allenai/open-instruct#1933).
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+# The JobSet is immutable: delete it before applying again.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+
+resources:
+- jobset.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: olmo3-sft-launcher
+  files:
+  - train_sft.sh
+- name: olmo3-sft-env
+  literals:
+  - RUN_NAME=olmo3-sft-dolci-smoke
+  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-1025-7b/0/items
+  - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo-3-instruct-dev-fixed
+  - TRAIN_FILES=/mnt/post-training/data/dolci-instruct-sft-shuf-s0/*.parquet
+  - TOTAL_DEVICES=16
+  - GLOBAL_BATCH=64
+  - STEPS=100
+  # Checkpointing must stay on for multi-host runs: MaxText only calls jax.distributed.initialize() on TPU
+  # when it is, and Tunix's checkpoint manager needs the distributed client either way.
+  - EXTRA_ARGS=enable_checkpointing=true checkpoint_period=1000 remat_policy=full attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE
+
+# Upstream MaxText e259ed61 plus our patches (scripts/tpu/maxtext/image/build.sh).
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+  newTag: e259ed61-pc16bd395

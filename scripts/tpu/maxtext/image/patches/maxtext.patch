@@ -1,0 +1,268 @@
+diff --git a/src/maxtext/checkpoint_conversion/utils/hf_shape.py b/src/maxtext/checkpoint_conversion/utils/hf_shape.py
+index 44022cd3..de56a21f 100644
+--- a/src/maxtext/checkpoint_conversion/utils/hf_shape.py
++++ b/src/maxtext/checkpoint_conversion/utils/hf_shape.py
+@@ -1043,6 +1043,49 @@ def LLAMA31_HF_WEIGHTS_TO_SHAPE(config):
+   return mapping
+ 
+ 
++def OLMO3_HF_WEIGHTS_TO_SHAPE(config):
++  """Returns mapping between HuggingFace weights path and weights shape for Olmo 3.
++
++  Olmo 3 has no input layernorm: each layer normalizes the attention and MLP outputs
++  (post_attention_layernorm, post_feedforward_layernorm), and QK norm spans all heads.
++
++  Args:
++      config (dict): Model configuration dictionary, defined in `model_configs.py`
++
++  Returns:
++      dict: A mapping where:
++          - Keys are HuggingFace model parameter paths
++          - Values are parameter shape as a List
++  """
++  hidden = config["hidden_size"]
++  head_dim = config.get("head_dim") or hidden // config["num_attention_heads"]
++  q_dim = config["num_attention_heads"] * head_dim
++  kv_dim = config["num_key_value_heads"] * head_dim
++  mapping = {
++      "model.embed_tokens.weight": [config["vocab_size"], hidden],
++      "model.norm.weight": [hidden],
++      "lm_head.weight": [config["vocab_size"], hidden],
++  }
++  for layer_idx in range(config["num_hidden_layers"]):
++    prefix = f"model.layers.{layer_idx}"
++    mapping.update(
++        {
++            f"{prefix}.mlp.down_proj.weight": [hidden, config["intermediate_size"]],
++            f"{prefix}.mlp.gate_proj.weight": [config["intermediate_size"], hidden],
++            f"{prefix}.mlp.up_proj.weight": [config["intermediate_size"], hidden],
++            f"{prefix}.post_attention_layernorm.weight": [hidden],
++            f"{prefix}.post_feedforward_layernorm.weight": [hidden],
++            f"{prefix}.self_attn.q_norm.weight": [q_dim],
++            f"{prefix}.self_attn.k_norm.weight": [kv_dim],
++            f"{prefix}.self_attn.q_proj.weight": [q_dim, hidden],
++            f"{prefix}.self_attn.k_proj.weight": [kv_dim, hidden],
++            f"{prefix}.self_attn.v_proj.weight": [kv_dim, hidden],
++            f"{prefix}.self_attn.o_proj.weight": [hidden, q_dim],
++        }
++    )
++  return mapping
++
++
+ def MIXTRAL_HF_WEIGHTS_TO_SHAPE(config):
+   """
+   Returns a mapping of Hugging Face parameter names to their tensor shapes.
+@@ -1306,6 +1349,9 @@ HF_SHAPE = {
+     "gpt-oss-120b": GPT_OSS_HF_WEIGHTS_TO_SHAPE,
+     "mixtral-8x7b": MIXTRAL_HF_WEIGHTS_TO_SHAPE,
+     "mixtral-8x22b": MIXTRAL_HF_WEIGHTS_TO_SHAPE,
++    "olmo3-7b": OLMO3_HF_WEIGHTS_TO_SHAPE,
++    "olmo3-7b-pt": OLMO3_HF_WEIGHTS_TO_SHAPE,
++    "olmo3-32b": OLMO3_HF_WEIGHTS_TO_SHAPE,
+     "qwen3.5-35b-a3b": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
+     "qwen3.5-35b-a3b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
+     "qwen3.5-35b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
+diff --git a/src/maxtext/input_pipeline/input_pipeline_utils.py b/src/maxtext/input_pipeline/input_pipeline_utils.py
+index 01d228df..5ee4392f 100644
+--- a/src/maxtext/input_pipeline/input_pipeline_utils.py
++++ b/src/maxtext/input_pipeline/input_pipeline_utils.py
+@@ -251,51 +251,106 @@ def extract_token_ids(tokens):
+     raise ValueError(f"Can't extract token_ids from type {type(tokens)}")
+ 
+ 
+-def _split_turn_into_prompt_and_completion(tokenizer_model, round_msgs):
+-  """Splits a conversational round (system + user + assistant) into prompt and completion formatted strings.
++def _assistant_span_is_clean(messages, message_idx, rendered, span_text):
++  """Whether a derived assistant span lines up with its message: it covers the content, starts at it
++  (not inside the assistant header) and does not run into later messages. Turns whose content the
++  template rewrites are not checked. Mirrors open-instruct's _verify_assistant_spans_cover_content."""
++  content = messages[message_idx].get("content")
++  if not content or content not in rendered:
++    return True
++  if content not in span_text or not span_text.lstrip().startswith(content):
++    return False
++  tail = span_text[span_text.index(content) + len(content) :]
++  return not any(m.get("content") and m["content"] in tail for m in messages[message_idx + 1 :])
++
++
++def _split_conversation_into_segments(tokenizer_model, conversation):
++  """Splits a conversation into formatted (text, is_prompt) segments covering its whole rendering.
+ 
+-  Uses the longest-common-prefix between the full conversation tokens and the
+-  generation-prompt tokens to locate where the prompt ends and completion begins.
++  The conversation is templated once, as a whole, and every segment is cut from that rendering, so
++  turns appear exactly as the chat template renders the full conversation (one system prompt, no
++  extra end-of-sequence tokens between turns). Assistant turn i is trained from the token count of
++  the conversation before it rendered with the generation prompt, to the token count of the
++  conversation through it. When every such prefix renders as a literal prefix of the whole, a token
++  straddling the end of the generation prompt is trained too (open-instruct's char-offset spans);
++  otherwise, e.g. a template closing the last message with end-of-sequence instead of end-of-turn,
++  spans come from token counts alone and each is checked against its message. Messages after the
++  last assistant turn stay as untrained context.
++
++  If a checked span does not line up with its message's content (it would put header or later-message
++  tokens in the loss), no token of the conversation is trained. open-instruct drops such conversations.
+ 
+   Args:
+     tokenizer_model: The tokenizer instance.
+-    round_msgs: Messages for the current conversational turn including the assistant response.
++    conversation: The messages of one conversation.
+ 
+   Returns:
+-    A tuple of (prompt_str, completion_str).
++    A list of (text, is_prompt) pairs.
+   """
++
++  def n_tokens(messages, add_generation_prompt):
++    return len(
++        extract_token_ids(
++            tokenizer_model.apply_chat_template(messages, add_generation_prompt=add_generation_prompt, tokenize=True)
++        )
++    )
++
+   full_tokens = extract_token_ids(
+-      tokenizer_model.apply_chat_template(round_msgs, add_generation_prompt=False, tokenize=True)
++      tokenizer_model.apply_chat_template(conversation, add_generation_prompt=False, tokenize=True)
+   )
+-  prompt_tokens = extract_token_ids(
+-      tokenizer_model.apply_chat_template(round_msgs[:-1], add_generation_prompt=True, tokenize=True)
++  rendered = tokenizer_model.apply_chat_template(conversation, add_generation_prompt=False, tokenize=False)
++  decode = lambda tokens: tokenizer_model.decode(tokens, skip_special_tokens=False)
++  assistant_indices = [idx for idx, message in enumerate(conversation) if message["role"] == "assistant"]
++  # Conversations whose prefixes render as literal prefixes of the whole need no check; the rest (e.g. a
++  # template closing the last message with end-of-sequence) are checked turn by turn, as in open-instruct.
++  prefix_stable = all(
++      rendered.startswith(
++          tokenizer_model.apply_chat_template(conversation[: idx + 1], add_generation_prompt=False, tokenize=False)
++      )
++      and (
++          idx == 0
++          or rendered.startswith(
++              tokenizer_model.apply_chat_template(conversation[:idx], add_generation_prompt=True, tokenize=False)
++          )
++      )
++      for idx in assistant_indices
+   )
+-
+-  # Find the longest common prefix where prompt ends and completion begins
+-  common_len = 0
+-  for full_id, prompt_id in zip(full_tokens, prompt_tokens):
+-    if full_id == prompt_id:
+-      common_len += 1
++  spans = []
++  for idx in assistant_indices:
++    if idx == 0:
++      start = 0
++    elif prefix_stable:
++      # A token straddling the end of the generation prompt is trained, as open-instruct's char-offset
++      # spans do: the span starts where the tokens of the full rendering first differ from the prompt's.
++      prompt_tokens = extract_token_ids(
++          tokenizer_model.apply_chat_template(conversation[:idx], add_generation_prompt=True, tokenize=True)
++      )
++      start = next((i for i, (x, y) in enumerate(zip(full_tokens, prompt_tokens)) if x != y), len(prompt_tokens))
+     else:
+-      break
+-
+-  if common_len == 0:
+-    raise ValueError(
+-        "Chat template generation prompt mismatch: no common prefix tokens found.\n"
+-        f"Full conversation tokens: {full_tokens} ('{tokenizer_model.decode(full_tokens)}')\n"
+-        f"Generation prompt tokens: {prompt_tokens} ('{tokenizer_model.decode(prompt_tokens)}')\n"
+-        "Cannot determine completion boundary."
+-    )
+-
+-  prompt_str = tokenizer_model.decode(full_tokens[:common_len], skip_special_tokens=False)
+-  completion_str = tokenizer_model.decode(full_tokens[common_len:], skip_special_tokens=False)
+-  return prompt_str, completion_str
+-
+-
+-def _get_completion_in_chat_template(tokenizer_model, round_msgs):
+-  """Calculates the completion part of a conversation turn formatted with a chat template."""
+-  _, completion_str = _split_turn_into_prompt_and_completion(tokenizer_model, round_msgs)
+-  return completion_str
++      start = n_tokens(conversation[:idx], True)
++    end = min(n_tokens(conversation[: idx + 1], False), len(full_tokens))
++    if (
++        not prefix_stable
++        and start < end
++        and not _assistant_span_is_clean(conversation, idx, rendered, decode(full_tokens[start:end]))
++    ):
++      max_logging.log(f"Not training on a conversation whose assistant span {idx} does not match its content.")
++      return [(decode(full_tokens), True)]
++    spans.append((start, end))
++  if not spans:
++    return []
++  segments = []
++  pos = 0
++  for start, end in spans:
++    start = max(start, pos)
++    if start > pos:
++      segments.append((decode(full_tokens[pos:start]), True))
++    if end > start:
++      segments.append((decode(full_tokens[start:end]), False))
++    pos = max(pos, end)
++  if pos < len(full_tokens):
++    segments.append((decode(full_tokens[pos:]), True))
++  return segments
+ 
+ 
+ def apply_chat_template(example, tokenizer_model, data_column_name):
+@@ -319,29 +374,17 @@ def apply_chat_template(example, tokenizer_model, data_column_name):
+         prompt (if applicable). `False` indicates the expected LLM
+         completion, excluding the assistant's start tokens.
+   """
+-  messages = []
+-  is_prompt = []
+-  round_msgs = []
++  conversation = list(example[data_column_name])
+   try:
+-    for idx, message in enumerate(example[data_column_name]):
+-      if message["role"] == "system":
+-        if idx != 0:
+-          raise ValueError(f"System message found at index {idx}. System messages must be at index 0.")
+-        round_msgs.append(message)
+-      elif message["role"] == "user":
+-        round_msgs.append(message)
+-      elif message["role"] == "assistant":
+-        round_msgs.append(message)
+-        prompt_str, completion_str = _split_turn_into_prompt_and_completion(tokenizer_model, round_msgs)
+-        messages.extend([prompt_str, completion_str])
+-        is_prompt.extend([True, False])
+-        # Round ended, clearing the buffer.
+-        round_msgs.clear()
++    for idx, message in enumerate(conversation):
++      if message["role"] == "system" and idx != 0:
++        raise ValueError(f"System message found at index {idx}. System messages must be at index 0.")
++    segments = _split_conversation_into_segments(tokenizer_model, conversation)
+   except ValueError as e:
+     max_logging.log(f"Unable to apply chat template: {e}")
+     raise e
+-  example["is_prompt"] = is_prompt
+-  example[data_column_name] = messages
++  example["is_prompt"] = [is_prompt for _, is_prompt in segments]
++  example[data_column_name] = [text for text, _ in segments]
+   return example
+ 
+ 
+diff --git a/src/maxtext/models/olmo3.py b/src/maxtext/models/olmo3.py
+index dbb73642..f9ae619a 100644
+--- a/src/maxtext/models/olmo3.py
++++ b/src/maxtext/models/olmo3.py
+@@ -95,11 +95,13 @@ class Olmo3DecoderLayer(nnx.Module):
+         rngs=rngs,
+     )
+ 
+-    # Match HF runtime: a single rotary (with rope_scaling/YaRN) is applied to every layer,
+-    # including sliding-window. The "RoPE scaling is not applied to sliding window attention
+-    # layers" comment in HF's modular_olmo3.py is unimplemented design intent — its code
+-    # passes the same (cos, sin) to all layers.
++    # Olmo 3 applies RoPE scaling (YaRN) to full-attention layers only; sliding-window layers use
++    # plain RoPE with the same theta. This is how the models were trained (OLMo-core
++    # `with_rope_scaling(full_attn_layers_only=True)`) and how vLLM and HF transformers >= 5.13
++    # run them. HF transformers <= 5.12 shared one scaled rotary across all layers.
+     current_rope_type = config.rope_type.lower()
++    if self.attention_type == AttentionType.LOCAL_SLIDING:
++      current_rope_type = "default"
+ 
+     # Self-attention block
+     self.attention = Attention(
