@@ -1,0 +1,235 @@
+{
+ "version": "v2",
+ "description": "o3i7b cell aime26 on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
+ "tasks": [
+  {
+   "name": "main",
+   "image": {
+    "beaker": "01KZ5J4CKZPXY5X5AFBBRB5RX3"
+   },
+   "command": [
+    "bash",
+    "/gantry/entrypoint.sh"
+   ],
+   "arguments": [
+    "olmo-eval",
+    "run",
+    "-O",
+    "/results",
+    "-m",
+    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0",
+    "-t",
+    "aime_2026:pass_at_32",
+    "-o",
+    "temperature=1.0",
+    "-o",
+    "do_sample=true",
+    "-o",
+    "max_tokens=32768",
+    "-o",
+    "top_p=0.95",
+    "-o",
+    "num_samples=16",
+    "--experiment-group",
+    "o3i7b-tpu-aime26-t10-20261007",
+    "--experiment-name",
+    "o3i7b-tpu-aime26-t10",
+    "--harness",
+    "default",
+    "-o",
+    "provider.kind=vllm",
+    "-o",
+    "provider.dtype=bfloat16",
+    "-o",
+    "provider.num_instances=1",
+    "-o",
+    "provider.package=wheel",
+    "-o",
+    "provider.max_model_len=65536",
+    "-o",
+    "provider.dependencies=[datasets==4.8.4,vllm==0.19.1,huggingface-hub==1.16.1,cached-path>=1.7.2,dataclass-extensions>=0.3.0,bettermap,importlib_resources,safetensors,rich,pandas,transformers==5.14.1,huggingface-hub==1.16.1]",
+    "-o",
+    "provider.kwargs.enforce_eager=true",
+    "-o",
+    "provider.kwargs.language_model_only=true",
+    "-o",
+    "provider.kwargs.attention_backend=FLASH_ATTN",
+    "-o",
+    "provider.kwargs.enable_flashinfer_autotune=false",
+    "-o",
+    "provider.kwargs.enable_prefix_caching=false",
+    "-o",
+    "provider.tokenizer=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released",
+    "-o",
+    "provider.kwargs.hf_overrides={\"rope_parameters\":{\"rope_type\":\"yarn\",\"factor\":8.0,\"original_max_position_embeddings\":8192,\"attention_factor\":1.2079441541679836,\"beta_fast\":32,\"beta_slow\":1,\"rope_theta\":500000}}",
+    "-o",
+    "provider.kwargs.generation_config=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released"
+   ],
+   "envVars": [
+    {
+     "name": "GANTRY_VERSION",
+     "value": "3.7.0"
+    },
+    {
+     "name": "GITHUB_REPO",
+     "value": "allenai/olmo-eval"
+    },
+    {
+     "name": "GIT_REF",
+     "value": "25ae07aca2194de6238536c73d893913d94757e2"
+    },
+    {
+     "name": "GANTRY_TASK_NAME",
+     "value": "main"
+    },
+    {
+     "name": "RESULTS_DIR",
+     "value": "/results"
+    },
+    {
+     "name": "GANTRY_RUNTIME_DIR",
+     "value": "/gantry-runtime"
+    },
+    {
+     "name": "GANTRY_EXEC_METHOD",
+     "value": "exec"
+    },
+    {
+     "name": "GANTRY_NO_PYTHON",
+     "value": "1"
+    },
+    {
+     "name": "GANTRY_INSTALL_CMD",
+     "value": "export UV_PROJECT_ENVIRONMENT=/opt/venv && export UV_CACHE_DIR=/weka/oe-eval-default/olmo-eval-pypi-cache && rm -rf /opt/*/lib/python3*/site-packages/flash_attn && export OLMO_EVAL_RUNTIME_TORCH_VERSION=2.10.0+cu128 && export OLMO_EVAL_RUNTIME_TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 && uv pip install --refresh-package torch --reinstall-package torch --index-url https://download.pytorch.org/whl/cu128 'torch==2.10.0+cu128' && uv pip freeze -q | grep -E '^(torch(==| @ )|nvidia-)' | grep -vE '^nvidia-cutlass-dsl' > /tmp/cuda-constraints.txt && cd /gantry-runtime && uv pip install -e '.[s3,beaker]' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package wheel --reinstall-package wheel --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'wheel' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package datasets --reinstall-package datasets --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'datasets==4.8.4' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package vllm --reinstall-package vllm --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'vllm==0.19.1' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package huggingface-hub --reinstall-package huggingface-hub --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'huggingface-hub==1.16.1' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package cached-path --reinstall-package cached-path --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'cached-path>=1.7.2' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package dataclass-extensions --reinstall-package dataclass-extensions --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'dataclass-extensions>=0.3.0' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package bettermap --reinstall-package bettermap --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'bettermap' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package importlib-resources --reinstall-package importlib-resources --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'importlib_resources' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package safetensors --reinstall-package safetensors --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'safetensors' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package rich --reinstall-package rich --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'rich' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package pandas --reinstall-package pandas --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'pandas' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package transformers --reinstall-package transformers --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'transformers==5.14.1' -c /tmp/cuda-constraints.txt && uv pip install --refresh-package huggingface-hub --reinstall-package huggingface-hub --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match 'huggingface-hub==1.16.1' -c /tmp/cuda-constraints.txt"
+    },
+    {
+     "name": "OLMO_CONTAINER_RUNTIME",
+     "value": "podman"
+    },
+    {
+     "name": "SWEREX_REGISTRY",
+     "value": "us-east1-docker.pkg.dev/ai2-allennlp/olmo-eval"
+    },
+    {
+     "name": "OLMO_PASTA_HOST_IP",
+     "value": "169.254.1.2"
+    },
+    {
+     "name": "OLMO_RESULT_DIR",
+     "value": "/results"
+    },
+    {
+     "name": "OLMO_S3_BUCKET",
+     "value": "ai2-llm"
+    },
+    {
+     "name": "OLMO_S3_PREFIX",
+     "value": "olmo-eval"
+    },
+    {
+     "name": "HF_HOME",
+     "value": "/weka/oe-eval-default/oyvindt/hf-cache"
+    },
+    {
+     "name": "HF_HUB_CACHE",
+     "value": "/weka/oe-eval-default/oyvindt/hf-cache"
+    },
+    {
+     "name": "INSPECT_CACHE_DIR",
+     "value": "/weka/oe-training-default/olmo-eval/inspect-cache"
+    },
+    {
+     "name": "UV_LINK_MODE",
+     "value": "copy"
+    },
+    {
+     "name": "UV_CACHE_DIR",
+     "value": "/weka/oe-eval-default/olmo-eval-pypi-cache && rm -rf /opt/*/lib/python3*/site-packages/flash_attn"
+    },
+    {
+     "name": "UV_CONSTRAINT",
+     "value": "/weka/oe-adapt-default/abhishekr/handoff/xarch-evals/constraints-kda-eval.txt"
+    },
+    {
+     "name": "PYTHONPATH",
+     "value": "/gantry-runtime/src"
+    },
+    {
+     "name": "TRITON_PTXAS_PATH",
+     "value": "/opt/conda/bin/ptxas"
+    },
+    {
+     "name": "VLLM_ALLOW_LONG_MAX_MODEL_LEN",
+     "value": "1"
+    },
+    {
+     "name": "OLMO_EVAL_RUNTIME_TORCH_VERSION",
+     "value": "2.10.0+cu128"
+    },
+    {
+     "name": "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+     "value": "https://download.pytorch.org/whl/cu128"
+    },
+    {
+     "name": "HF_TOKEN",
+     "secret": "abhishekr_HF_TOKEN"
+    },
+    {
+     "name": "WANDB_API_KEY",
+     "secret": "abhishekr_WANDB_API_KEY"
+    },
+    {
+     "name": "BEAKER_TOKEN",
+     "secret": "abhishekr_BEAKER_TOKEN"
+    }
+   ],
+   "datasets": [
+    {
+     "mountPath": "/gantry",
+     "source": {
+      "beaker": "01KPS49NV3MKBP92R2C83V3B3P"
+     }
+    },
+    {
+     "mountPath": "/weka/oe-training-default",
+     "source": {
+      "weka": "oe-training-default"
+     }
+    },
+    {
+     "mountPath": "/weka/oe-eval-default",
+     "source": {
+      "weka": "oe-eval-default"
+     }
+    },
+    {
+     "mountPath": "/weka/oe-adapt-default",
+     "source": {
+      "weka": "oe-adapt-default"
+     }
+    }
+   ],
+   "result": {
+    "path": "/results"
+   },
+   "resources": {
+    "gpuCount": 1,
+    "sharedMemory": "10 GiB"
+   },
+   "context": {
+    "priority": "normal",
+    "minRuntime": "8h",
+    "autoResume": false
+   },
+   "constraints": {
+    "cluster": [
+     "ai2/jupiter"
+    ]
+   },
+   "hostNetworking": false,
+   "propagateFailure": false,
+   "propagatePreemption": false,
+   "timeout": "24h"
+  }
+ ]
+}

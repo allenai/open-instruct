@@ -1,0 +1,1 @@
+{"rope_parameters": {"rope_type": "yarn", "factor": 8.0, "original_max_position_embeddings": 8192, "attention_factor": 1.2079441541679836, "beta_fast": 32, "beta_slow": 1, "rope_theta": 500000}}

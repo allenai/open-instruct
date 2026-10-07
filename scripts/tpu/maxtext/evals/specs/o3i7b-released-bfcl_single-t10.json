@@ -1,0 +1,66 @@
+{
+ "version": "v2",
+ "description": "o3i7b cell bfcl_single on released (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released); copied from c4-thinkoff-s34521-bfcl-single-20261005.json; changes: model, names, ladders tar + hero-core + olmoe3 plugins + fla removed, released tokenizer + generation_config, flat YaRN hf_overrides, tool_call_parser olmo3, no reasoning_parser (see mkspecs_o3i7b.py D1-D8).",
+ "tasks": [
+  {
+   "name": "o3i7b-released-bfcl_single-t10",
+   "image": {
+    "beaker": "01KY8RWDARD3PR0F1T4ANGFH95"
+   },
+   "command": [
+    "/bin/bash",
+    "-lc"
+   ],
+   "arguments": [
+    "set -euo pipefail\ngit clone --quiet https://github.com/allenai/olmo-eval.git /tmp/olmo-eval && git -C /tmp/olmo-eval checkout --quiet 9538453e55\nuv venv --python 3.12 /tmp/hero-eval-env\nexport PATH=/tmp/hero-eval-env/bin:$PATH\nuv pip install --python /tmp/hero-eval-env/bin/python --index-url https://download.pytorch.org/whl/cu128 'torch==2.10.0' 'torchvision==0.25.0' 'torchaudio==2.10.0'\nuv pip install --python /tmp/hero-eval-env/bin/python 'vllm==0.19.1' 'transformers==5.16.1' 'huggingface_hub==1.16.1' 'datasets==4.8.4' 'torch==2.10.0' 'opencv-python-headless==4.13.0.92' 'torch-c-dlpack-ext' 'tree-sitter-java' 'tree-sitter-javascript' -e /tmp/olmo-eval\nexport TRITON_PTXAS_PATH=/tmp/hero-eval-env/lib/python3.12/site-packages/triton/backends/nvidia/bin/ptxas\npython -c 'import torch; assert torch.cuda.is_available(); print(torch.__version__, torch.cuda.get_device_name())'\npython -c 'import olmo_eval, vllm; print(\"olmo-eval ok, vllm\", vllm.__version__)'\nexport VLLM_PYTHON=/tmp/hero-eval-env/bin/python\nmkdir -p /results\nolmo-eval run --harness default -o provider.kind=vllm_server -o provider.kwargs.startup_timeout=840 -o provider.tokenizer=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released -o provider.kwargs.enable_auto_tool_choice=true -o provider.kwargs.tool_call_parser=olmo3 -o provider.kwargs.dtype=bfloat16 -o provider.kwargs.max_model_len=65536 -o provider.kwargs.enforce_eager=true -o provider.kwargs.trust_remote_code=true -o provider.kwargs.enable_prefix_caching=false -o provider.kwargs.timeout=1800 -o 'provider.kwargs.hf_overrides={\"rope_parameters\":{\"rope_type\":\"yarn\",\"factor\":8.0,\"original_max_position_embeddings\":8192,\"attention_factor\":1.2079441541679836,\"beta_fast\":32,\"beta_slow\":1,\"rope_theta\":500000}}' -o provider.kwargs.generation_config=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released -m /weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released -t bfcl -t bfcl:categories -O /results --experiment-name o3i7b-released-bfcl_single-t10 --experiment-group o3i7b-released-bfcl_single-t10-20261007 --num-gpus 1\nls /results | head; cat /results/metrics.json | head -c 4000 || true\n"
+   ],
+   "envVars": [
+    {
+     "name": "HF_TOKEN",
+     "secret": "abhishekr_HF_TOKEN"
+    },
+    {
+     "name": "HF_HOME",
+     "value": "/weka/oe-adapt-default/allennlp/.cache/huggingface"
+    }
+   ],
+   "datasets": [
+    {
+     "mountPath": "/weka/oe-adapt-default",
+     "source": {
+      "weka": "oe-adapt-default"
+     }
+    },
+    {
+     "mountPath": "/weka/oe-training-default",
+     "source": {
+      "weka": "oe-training-default"
+     }
+    }
+   ],
+   "result": {
+    "path": "/results"
+   },
+   "resources": {
+    "cpuCount": 12,
+    "gpuCount": 1,
+    "memory": "96 GiB",
+    "sharedMemory": "16 GiB"
+   },
+   "context": {
+    "priority": "normal",
+    "minRuntime": "8h",
+    "autoResume": false
+   },
+   "constraints": {
+    "cluster": [
+     "ai2/jupiter"
+    ]
+   },
+   "hostNetworking": false,
+   "propagateFailure": false,
+   "propagatePreemption": false,
+   "timeout": "24h"
+  }
+ ]
+}
