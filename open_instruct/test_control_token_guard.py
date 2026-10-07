@@ -112,6 +112,8 @@ def _plant(row: dict, field: str) -> dict:
         row["tools"] = json.dumps(tools)
     elif field == "tool_content":
         messages[3]["content"] += PLANTED
+    elif field == "tool_call_argument_key":
+        messages[2]["tool_calls"][0]["function"]["arguments"] = {"query": "word", PLANTED: "x"}
     else:
         raise ValueError(field)
     return row
@@ -199,6 +201,19 @@ class TestRowMask(unittest.TestCase):
         mask = control_token_guard.control_token_row_mask(dataset, ["messages", "tools"], self.TOKENS)
         self.assertEqual(mask.tolist(), [False, False, True])
 
+    def test_struct_field_names_flag_every_row_that_renders_them(self):
+        # Decoding fills a field missing from a row with None, and templates render None values,
+        # so a special token in a field name reaches every row whose struct is set.
+        rows = [
+            {"messages": [{"role": "user", "content": "a"}], "tools": [{"properties": {PLANTED: "x"}}]},
+            {"messages": [{"role": "user", "content": "b"}], "tools": [{"properties": {"query": "y"}}]},
+            {"messages": [{"role": "user", "content": "c"}], "tools": None},
+        ]
+        # Built from Arrow directly so `tools` is a struct whatever `datasets` would infer.
+        dataset = datasets.Dataset(pyarrow.Table.from_pylist(rows))
+        mask = control_token_guard.control_token_row_mask(dataset, ["messages", "tools"], self.TOKENS)
+        self.assertEqual(mask.tolist(), [True, True, False])
+
     def test_respects_selected_and_upsampled_rows(self):
         dataset = datasets.Dataset.from_list([_clean_row(0), _plant(_clean_row(1), "user_content")])
         selected = dataset.select([1, 0, 1])
@@ -219,47 +234,71 @@ class TestRowMask(unittest.TestCase):
         self.assertEqual(locations, [("messages[2].tool_calls[0].function.name", PLANTED)])
 
 
+def _guard(enabled: bool = True, max_drop_frac: float = 0.001) -> dataset_transformation.ControlTokenGuard:
+    return dataset_transformation.ControlTokenGuard(enabled=enabled, max_drop_frac=max_drop_frac)
+
+
 class TestGuardInTokenization(_GuardTestBase):
+    def _transform(self, dc, tc=None, guard=None):
+        return dataset_transformation._transform_dataset(dc, tc or self._tc(), guard or _guard())
+
     @parameterized.expand(FIELDS)
     def test_planted_row_is_dropped_before_tokenization(self, field):
         rows = [_clean_row(0), _plant(_clean_row(1), field), _clean_row(2)]
-        dc = self._dc(self._write(rows), control_token_max_drop_frac=0.5)
-        dataset = dataset_transformation.get_dataset_v1(dc, self._tc())
+        dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard(max_drop_frac=0.5))
         self.assertEqual(len(dataset), 2)
-        self.assertEqual(dc.control_token_rows_dropped, 1)
+        self.assertEqual(dropped, 1)
+
+    def test_argument_key_is_flagged_wherever_the_decoded_row_carries_it(self):
+        # JSONL loads tool-call arguments as a struct (older `datasets`) or as JSON text (newer).
+        # A struct gives every row every key, unset ones as None, and the template renders them;
+        # JSON text keeps each row's own keys. Either way, flag exactly the rows that render it.
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_call_argument_key"), _clean_row(2)]
+        dc = self._dc(self._write(rows))
+        mask = control_token_guard.control_token_row_mask(
+            dc.dataset, ["messages", "tools"], control_token_guard.control_tokens(self._tc().tokenizer)
+        )
+        carries = [PLANTED in row["messages"][2]["tool_calls"][0]["function"]["arguments"] for row in dc.dataset]
+        self.assertTrue(carries[1])
+        self.assertEqual(mask.tolist(), carries)
+        rendered = [self._tc().tokenizer.apply_chat_template(row["messages"], tokenize=False) for row in dc.dataset]
+        self.assertEqual([f"<parameter={PLANTED}>" in text for text in rendered], carries)
 
     def test_unguarded_literal_reaches_the_token_ids(self):
         # The failure the guard prevents: the literal becomes the real control id.
         tc = self._tc()
         im_end = tc.tokenizer.convert_tokens_to_ids(PLANTED)
         clean = self._dc(self._write([_clean_row(1)], "clean"))
-        planted = self._dc(
-            self._write([_plant(_clean_row(1), "user_content")], "planted"), drop_control_token_rows=False
-        )
+        planted = self._dc(self._write([_plant(_clean_row(1), "user_content")], "planted"))
         clean_ids = dataset_transformation.get_dataset_v1(clean, tc)[0]["input_ids"]
-        planted_ids = dataset_transformation.get_dataset_v1(planted, tc)[0]["input_ids"]
-        self.assertEqual(planted_ids.count(im_end), clean_ids.count(im_end) + 1)
-        self.assertIsNone(planted.control_token_rows_dropped)
+        planted_dataset, dropped = self._transform(planted, tc, _guard(enabled=False))
+        self.assertEqual(planted_dataset[0]["input_ids"].count(im_end), clean_ids.count(im_end) + 1)
+        self.assertIsNone(dropped)
 
     @parameterized.expand([("tokenizer_default",), ("olmo",), ("tulu",)])
     def test_template_inserted_specials_are_not_flagged(self, chat_template_name):
         tc = self._tc(chat_template_name)
-        dc = self._dc(self._write([_clean_row(i) for i in range(4)]))
-        dataset = dataset_transformation.get_dataset_v1(dc, tc)
+        dataset, dropped = self._transform(self._dc(self._write([_clean_row(i) for i in range(4)])), tc)
         self.assertEqual(len(dataset), 4)
-        self.assertEqual(dc.control_token_rows_dropped, 0)
+        self.assertEqual(dropped, 0)
         # The rendered rows do carry the template's own special tokens.
-        eos = tc.tokenizer.eos_token_id
-        self.assertIn(eos, dataset[0]["input_ids"])
+        self.assertIn(tc.tokenizer.eos_token_id, dataset[0]["input_ids"])
         if chat_template_name != "tulu":
             self.assertIn(tc.tokenizer.convert_tokens_to_ids("<|im_start|>"), dataset[0]["input_ids"])
+
+    def test_clean_rows_keep_their_fingerprint(self):
+        # The guard must not perturb HF fingerprints (and so the saved cache's state.json).
+        path = self._write([_clean_row(i) for i in range(3)])
+        on = dataset_transformation.get_dataset_v1(self._dc(path), self._tc())
+        off = dataset_transformation.get_dataset_v1(self._dc(path), self._tc(), _guard(enabled=False))
+        self.assertEqual(on._fingerprint, off._fingerprint)
 
     def test_threshold_error(self):
         rows = [_clean_row(i) for i in range(9)] + [_plant(_clean_row(9), "assistant_content")]
         with self.assertRaisesRegex(ValueError, "control_token_max_drop_frac"):
             dataset_transformation.get_dataset_v1(self._dc(self._write(rows)), self._tc())
-        dc = self._dc(self._write(rows), control_token_max_drop_frac=0.1)
-        self.assertEqual(len(dataset_transformation.get_dataset_v1(dc, self._tc())), 9)
+        dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard(max_drop_frac=0.1))
+        self.assertEqual((len(dataset), dropped), (9, 1))
 
     def test_non_sft_transforms_are_not_guarded(self):
         dc = dataset_transformation.DatasetConfig(
@@ -271,35 +310,51 @@ class TestGuardInTokenization(_GuardTestBase):
         )
         self.assertEqual(dataset_transformation._control_token_guard_columns(dc), [])
 
-    def test_local_cache_statistics_record_drops(self):
-        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
-        _, statistics = dataset_transformation.get_cached_dataset_tulu_with_statistics(
+    def _cached_statistics(self, rows, cache_mode="local", **kwargs):
+        return dataset_transformation.get_cached_dataset_tulu_with_statistics(
             [self._write(rows), "1.0"],
             ["train"],
             self._tc(),
             SFT_FNS,
             SFT_FN_ARGS,
             dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
+            dataset_cache_mode=cache_mode,
+            hf_entity="test-entity",
             dataset_local_cache_dir=os.path.join(self.temp_dir.name, "cache"),
-            control_token_max_drop_frac=0.5,
+            **kwargs,
         )
+
+    def test_local_cache_statistics_record_drops(self):
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
+        _, statistics = self._cached_statistics(rows, control_token_max_drop_frac=0.5)
         self.assertEqual(statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
         self.assertEqual(statistics["control_token_guard"]["version"], "v1")
         self.assertIn(PLANTED, statistics["control_token_guard"]["tokens"])
 
+    def test_hf_cache_statistics_record_drops_when_transforming(self):
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
+        with mock.patch.object(dataset_transformation, "revision_exists", return_value=False):
+            dataset, statistics = self._cached_statistics(
+                rows, cache_mode="hf", dataset_skip_cache=True, control_token_max_drop_frac=0.5
+            )
+        self.assertEqual(len(dataset), 2)
+        self.assertEqual(statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
+
 
 class TestCacheKey(_GuardTestBase):
-    def _hash(self, path: str, **kwargs) -> str:
-        return dataset_transformation.compute_config_hash([self._dc(path, **kwargs)], self._tc())
+    def _hash(self, path: str, guard=None) -> str:
+        return dataset_transformation.compute_config_hash([self._dc(path)], self._tc(), guard or _guard())
 
     def test_clean_mix_keeps_its_key(self):
         path = self._write([_clean_row(i) for i in range(3)])
-        self.assertEqual(self._hash(path), self._hash(path, drop_control_token_rows=False))
-        self.assertEqual(self._hash(path), self._hash(path, control_token_max_drop_frac=0.5))
+        self.assertEqual(self._hash(path), self._hash(path, _guard(enabled=False)))
+        self.assertEqual(self._hash(path), self._hash(path, _guard(max_drop_frac=0.5)))
 
     def test_mix_that_loses_rows_gets_a_new_key(self):
         path = self._write([_clean_row(0), _plant(_clean_row(1), "user_content")])
-        self.assertNotEqual(self._hash(path), self._hash(path, drop_control_token_rows=False))
+        self.assertNotEqual(self._hash(path), self._hash(path, _guard(enabled=False)))
+        # A cache built under a permissive threshold must not satisfy a stricter run.
+        self.assertNotEqual(self._hash(path), self._hash(path, _guard(max_drop_frac=0.5)))
 
     def test_hashed_config_matches_the_pre_guard_layout(self):
         # Pins the hashed dict to what it was before the guard existed, so a clean mix's

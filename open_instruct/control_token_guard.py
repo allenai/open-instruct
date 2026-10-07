@@ -39,21 +39,36 @@ def _re2_literal(text: str) -> str:
     return "".join("\\" + char if char in _RE2_METACHARACTERS else char for char in text)
 
 
+def _matches(strings: pyarrow.Array, pattern: str) -> np.ndarray:
+    matched = compute.call_function("match_substring_regex", [strings], compute.MatchSubstringOptions(pattern))
+    return compute.call_function("coalesce", [matched, False]).to_numpy(zero_copy_only=False)
+
+
 def _rows_with_match(array: pyarrow.Array | pyarrow.ChunkedArray, pattern: str) -> np.ndarray:
-    """For each element of `array`, whether any string nested anywhere inside it matches `pattern`."""
+    """For each element of `array`, whether any string nested anywhere inside it matches `pattern`.
+
+    Struct field names count too, for every row where the struct itself is set: chat templates
+    render the keys of tool-call arguments and tool schemas, and a decoded row carries every
+    field of the struct type, unset ones as None.
+    """
     if isinstance(array, pyarrow.ChunkedArray):
         if array.num_chunks == 0:
             return np.zeros(0, dtype=bool)
         return np.concatenate([_rows_with_match(chunk, pattern) for chunk in array.chunks])
     hits = np.zeros(len(array), dtype=bool)
     array_type = array.type
+    if isinstance(array_type, pyarrow.BaseExtensionType):
+        # e.g. datasets' `Json` feature, which stores each value as JSON text, keys included.
+        return _rows_with_match(array.storage, pattern)
     if pyarrow.types.is_dictionary(array_type):
         return _rows_with_match(array.dictionary_decode(), pattern)
     if pyarrow.types.is_string(array_type) or pyarrow.types.is_large_string(array_type):
-        matched = compute.call_function("match_substring_regex", [array], compute.MatchSubstringOptions(pattern))
-        return compute.call_function("coalesce", [matched, False]).to_numpy(zero_copy_only=False)
+        return _matches(array, pattern)
     if pyarrow.types.is_struct(array_type):
         # flatten() applies the struct's offset and null mask to every child.
+        names = [array_type.field(i).name for i in range(array_type.num_fields)]
+        if names and _matches(pyarrow.array(names, type=pyarrow.string()), pattern).any():
+            hits |= array.is_valid().to_numpy(zero_copy_only=False)
         for child in array.flatten():
             hits |= _rows_with_match(child, pattern)
         return hits
@@ -83,8 +98,8 @@ def control_token_row_mask(
     """Whether each row has a control-token literal in any string inside `columns`.
 
     Every string leaf counts, however deeply nested: message content in any role,
-    `reasoning_content`, tool-call names and arguments, and tool schemas, whether stored as
-    structs or JSON strings. Columns missing from `dataset` are skipped. With `stop_at_first_hit`
+    `reasoning_content`, tool-call names and arguments (keys and values), and tool schemas,
+    whether stored as structs, JSON strings or datasets' `Json` feature. Columns missing from `dataset` are skipped. With `stop_at_first_hit`
     the scan stops after the first batch with a hit and the remaining rows read as False.
     """
     mask = np.zeros(len(dataset), dtype=bool)
@@ -110,7 +125,11 @@ def control_token_locations(value: Any, tokens: Sequence[str], path: str = "") -
                 yield path, token
     elif isinstance(value, dict):
         for key, item in value.items():
-            yield from control_token_locations(item, tokens, f"{path}.{key}" if path else str(key))
+            key_path = f"{path}.{key}" if path else str(key)
+            for token in tokens:
+                if token in str(key):
+                    yield f"{key_path} (key)", token
+            yield from control_token_locations(item, tokens, key_path)
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             yield from control_token_locations(item, tokens, f"{path}[{index}]")

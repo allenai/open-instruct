@@ -161,10 +161,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         dataset_transform_fn=args.dataset.transform_fn,
         transform_fn_args=transform_fn_args,
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
-        drop_control_token_rows=args.sft.drop_control_token_rows,
-        control_token_max_drop_frac=args.sft.control_token_max_drop_frac,
     )
-    cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
+    guard = dataset_transformation.ControlTokenGuard(
+        enabled=args.sft.drop_control_token_rows, max_drop_frac=args.sft.control_token_max_drop_frac
+    )
+    cache_hash = dataset_transformation.compute_config_hash(dcs, tc, guard)
     seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
     numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
 
@@ -196,7 +197,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # Part of the cache hash.
         if args.training.over_length_strategy != dataset_transformation.DEFAULT_OVER_LENGTH_STRATEGY:
             cache_args.append(f"--over_length_strategy {args.training.over_length_strategy}")
-        # Part of the cache hash whenever the guard would drop rows.
+        # Part of the cache hash whenever the guard drops rows.
         if not args.sft.drop_control_token_rows:
             cache_args.append("--no_drop_control_token_rows")
         if args.sft.control_token_max_drop_frac != dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC:
