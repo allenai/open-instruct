@@ -95,7 +95,8 @@ eps_clip_high = 0.272
 
 [tracking]
 wandb_mode = "online"
-wandb_project = "never-give-up"
+wandb_team = "ai2-llm"
+wandb_project = "open_instruct_internal"
 wandb_group = "qwen3-4b-deepscaler-miles"
 
 [core]
