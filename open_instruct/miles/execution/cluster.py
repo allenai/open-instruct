@@ -40,10 +40,19 @@ def read(path):
     return json.loads(path.read_text())
 
 
-def free_port():
-    with socket.socket() as stream:
-        stream.bind(("0.0.0.0", 0))
-        return stream.getsockname()[1]
+def free_ports(count):
+    """Select distinct local ports together, then release them for service startup.
+
+    Holding every socket until selection finishes prevents duplicates within this
+    batch. Other processes can still claim a port after these sockets close.
+    """
+    ports = []
+    with contextlib.ExitStack() as sockets:
+        for _ in range(count):
+            stream = sockets.enter_context(socket.socket())
+            stream.bind(("0.0.0.0", 0))
+            ports.append(stream.getsockname()[1])
+    return ports
 
 
 def terminate(process):
@@ -262,6 +271,8 @@ def run(path):
         if len(visible) != layout["gpus_per_replica"]:
             raise RuntimeError("Visible devices differ from the Beaker GPU allocation")
         ray_devices, judges = topology.devices(node, visible)
+        # Three Ray agent ports everywhere; the head needs three more Ray ports.
+        ports = iter(free_ports(len(judges) + (6 if address == head else 3)))
         write(
             root / f"placement-{rank}.json",
             {"address": address, "head": head, "ray_devices": ray_devices, "judge_devices": judges, "layout": layout},
@@ -271,7 +282,7 @@ def run(path):
         health = {}
         for name, devices in judges.items():
             service = registry["judges"][name]
-            port = free_port()
+            port = next(ports)
             service["endpoint"] = f"http://{address}:{port}/v1"
             command = judge_server.command(service, port)
             judge_env = dict(env, CUDA_VISIBLE_DEVICES=",".join(devices))
@@ -301,7 +312,7 @@ def run(path):
         env["CUDA_VISIBLE_DEVICES"] = ",".join(ray_devices)
         env["RAY_NODE_IP_ADDRESS"] = address
         if address == head:
-            port = free_port()
+            port = next(ports)
             write(root / "head.json", {"address": f"{head}:{port}"})
         supervisor.wait(lambda: (root / "head.json").exists())
         ray_address = read(root / "head.json")["address"]
@@ -319,11 +330,11 @@ def run(path):
         ]
         ray_command += [
             "--dashboard-agent-listen-port",
-            str(free_port()),
+            str(next(ports)),
             "--dashboard-agent-grpc-port",
-            str(free_port()),
+            str(next(ports)),
             "--runtime-env-agent-port",
-            str(free_port()),
+            str(next(ports)),
         ]
         if address == head:
             ray_command += [
@@ -332,9 +343,9 @@ def run(path):
                 str(port),
                 "--include-dashboard=false",
                 "--ray-client-server-port",
-                str(free_port()),
+                str(next(ports)),
                 "--dashboard-port",
-                str(free_port()),
+                str(next(ports)),
             ]
         else:
             ray_command += ["--address", ray_address]
