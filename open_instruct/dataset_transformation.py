@@ -2561,13 +2561,18 @@ def _get_chat_template_metadata(tc: TokenizerConfig) -> dict[str, str | None]:
 def _control_token_guard_metadata(
     dcs: list[DatasetConfig], tc: TokenizerConfig, guard: ControlTokenGuard
 ) -> dict[str, Any] | None:
-    """What the control-token guard checked for, or None if it ran on none of `dcs`."""
-    if not guard.enabled or not any(_control_token_guard_columns(dc) for dc in dcs):
+    """What the control-token guard checked for, or None if the guard is off.
+
+    With the guard on, the record is always a non-empty dict, so cache hits can require it; when
+    no dataset in `dcs` has an SFT tokenizer to guard, its `tokens` list is empty.
+    """
+    if not guard.enabled:
         return None
+    guarded = any(_control_token_guard_columns(dc) for dc in dcs)
     return {
         "version": CONTROL_TOKEN_GUARD_VERSION,
         "max_drop_frac": guard.max_drop_frac,
-        "tokens": control_token_guard.control_tokens(tc.tokenizer),
+        "tokens": control_token_guard.control_tokens(tc.tokenizer) if guarded else [],
     }
 
 

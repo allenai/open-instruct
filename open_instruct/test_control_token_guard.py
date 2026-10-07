@@ -576,6 +576,16 @@ class TestGuardInTokenization(_GuardTestBase):
         self.assertEqual(loaded_statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
         self.assertEqual(loaded_statistics["control_token_guard"], built_statistics["control_token_guard"])
 
+    def test_guarded_local_cache_without_sft_datasets_is_reusable(self):
+        # With no dataset to guard, the build still records a truthy guard entry, so its own
+        # cache hit is not mistaken for an interrupted save.
+        rows = [_clean_row(0), _clean_row(1)]
+        with mock.patch.object(dataset_transformation, "_control_token_guard_columns", return_value=[]):
+            _, built_statistics = self._cached_statistics(rows, drop_control_token_rows=True)
+            _, loaded_statistics = self._cached_statistics(rows, drop_control_token_rows=True)
+        self.assertEqual(built_statistics["control_token_guard"]["tokens"], [])
+        self.assertEqual(loaded_statistics["control_token_guard"], built_statistics["control_token_guard"])
+
     def test_guarded_hf_hit_without_statistics_raises(self):
         rows = [_clean_row(0)]
         with (
