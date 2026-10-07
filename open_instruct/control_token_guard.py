@@ -75,11 +75,11 @@ class _Patterns(NamedTuple):
     tokens: tuple[str, ...]
     literal: str
     """Matches a token spelled out in plain text."""
-    json: str
-    """Matches a token spelled out in JSON text, where any character may be escaped. Slow with
-    many tokens, so it only runs on strings `json_escape` matches."""
     json_escape: str
     """Matches an escaped spelling of any character that occurs in a token."""
+    double_json_escape: str
+    """`json_escape`, or an escaped backslash: in JSON text holding JSON text, the inner layer's
+    escapes are themselves spelled with escaped backslashes."""
 
 
 def _patterns(tokens: Sequence[str]) -> _Patterns:
@@ -87,8 +87,8 @@ def _patterns(tokens: Sequence[str]) -> _Patterns:
     return _Patterns(
         tokens=tuple(tokens),
         literal="|".join(_re2_literal(token) for token in tokens),
-        json="|".join("".join(_re2_json_char(char) for char in token) for token in tokens),
         json_escape="|".join(escape for char in chars for escape in _re2_json_escapes(char)),
+        double_json_escape="|".join(escape for char in [*chars, "\\"] for escape in _re2_json_escapes(char)),
     )
 
 
@@ -144,12 +144,26 @@ def _joined_text_parts(array: pyarrow.Array) -> pyarrow.Array | None:
     if not pyarrow.types.is_struct(value_type) or value_type.get_field_index("text") < 0:
         return None
     text_type = value_type.field("text").type
-    if not (pyarrow.types.is_string(text_type) or pyarrow.types.is_large_string(text_type)):
-        return None
     texts = compute.call_function("struct_field", [array.values], compute.StructFieldOptions("text"))
-    texts = compute.call_function("coalesce", [texts, ""])
+    if isinstance(text_type, pyarrow.BaseExtensionType):
+        # A `Json` text field: decode each value, keeping only the ones that are strings.
+        decoded = [_json_string_or_empty(text) for text in texts.storage.to_pylist()]
+        texts, text_type = pyarrow.array(decoded, type=pyarrow.large_string()), pyarrow.large_string()
+    elif not (pyarrow.types.is_string(text_type) or pyarrow.types.is_large_string(text_type)):
+        return None
+    texts = compute.call_function("coalesce", [texts, pyarrow.scalar("", type=text_type)])
     rebuilt = type(array).from_arrays(array.offsets, texts)
     return compute.call_function("binary_join", [rebuilt, pyarrow.scalar("", type=text_type)])
+
+
+def _json_string_or_empty(text: str | None) -> str:
+    if text is None:
+        return ""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return ""
+    return value if isinstance(value, str) else ""
 
 
 def _rows_with_match(
@@ -180,13 +194,11 @@ def _rows_with_match(
         literal = _matches(array, patterns.literal)
         if not json_text:
             return literal
-        # Candidates, each confirmed by decoding: literal spellings; escaped spellings, looked
-        # for only where a token character appears escaped; and text-part lists, whose texts a
-        # template joins.
-        hits = literal | _matches(array, _TEXT_PART_PATTERN)
-        escaped = np.flatnonzero(~hits & _matches(array, patterns.json_escape))
-        if len(escaped):
-            hits[escaped] = _matches(array.take(pyarrow.array(escaped)), patterns.json)
+        # Candidates, each confirmed by decoding: literal spellings, strings where a token
+        # character (or, for doubly encoded text, a backslash) appears escaped, and text-part
+        # lists, whose texts a template joins.
+        escapes = patterns.double_json_escape if json_column else patterns.json_escape
+        hits = literal | _matches(array, _TEXT_PART_PATTERN) | _matches(array, escapes)
         for index in np.flatnonzero(hits):
             text = array[int(index)].as_py()
             hits[index] = _decoded_json_spells_token(text, patterns.tokens, decode_string_result=json_column)

@@ -314,6 +314,27 @@ class TestRowMask(unittest.TestCase):
         wrapped = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array(messages))
         self.assertEqual(control_token_guard._rows_with_match(wrapped, patterns).tolist(), [True, False])
 
+    def test_json_valued_text_fields_and_doubly_encoded_tools(self):
+        patterns = control_token_guard._patterns(self.TOKENS)
+        # Struct parts whose `text` field is a `Json` value.
+        part = pyarrow.struct([("type", pyarrow.string()), ("text", pyarrow.json_())])
+        texts = pyarrow.ExtensionArray.from_storage(
+            pyarrow.json_(), pyarrow.array([json.dumps(t) for t in ["hello<|im_", "end|>", "hello<|im_", "start"]])
+        )
+        parts = pyarrow.StructArray.from_arrays([pyarrow.array(["text"] * 4), texts], fields=list(part))
+        lists = pyarrow.ListArray.from_arrays(pyarrow.array([0, 2, 4], type=pyarrow.int32()), parts)
+        self.assertEqual(control_token_guard._rows_with_match(lists, patterns).tolist(), [True, False])
+        # A tools string that is JSON text holding JSON text, the inner escape spelled \u005c.
+        inner = json.dumps(json.dumps([{"description": PLANTED}]))
+        outer = inner.replace("<", "\\u005cu003c")
+        self.assertEqual(json.loads(json.loads(outer))[0]["description"], PLANTED)
+        self.assertNotIn(PLANTED, outer)
+        strings = pyarrow.array([outer, json.dumps(json.dumps([{"description": "fine"}]))])
+        self.assertEqual(
+            control_token_guard._rows_with_match(strings, patterns, json_text=True, json_column=True).tolist(),
+            [True, False],
+        )
+
     def test_json_scan_is_fast_on_clean_rows_with_many_tokens(self):
         # The escape-aware pattern only runs where a token character appears escaped.
         tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
@@ -536,6 +557,17 @@ class TestGuardInTokenization(_GuardTestBase):
         ):
             self._cached_statistics(rows, cache_mode="hf", drop_control_token_rows=True)
 
+    def test_guarded_local_hit_without_statistics_raises(self):
+        rows = [_clean_row(0)]
+        cache_dir = os.path.join(self.temp_dir.name, "cache")
+        self._cached_statistics(rows, drop_control_token_rows=True)
+        (built,) = os.listdir(cache_dir)
+        os.remove(os.path.join(cache_dir, built, "dataset_statistics.json"))
+        with self.assertRaisesRegex(ValueError, "--dataset_skip_cache"):
+            self._cached_statistics(rows, drop_control_token_rows=True)
+        # Unguarded hits keep accepting a cache without statistics, as before.
+        self.assertEqual(len(self._cached_statistics(rows, dataset_config_hash=built)[0]), 1)
+
     def test_explicit_hash_must_name_a_cache_built_with_the_same_guard(self):
         rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
         cache_dir = os.path.join(self.temp_dir.name, "cache")
@@ -544,7 +576,7 @@ class TestGuardInTokenization(_GuardTestBase):
         self._cached_statistics(rows, drop_control_token_rows=True, control_token_max_drop_frac=0.5)
         (permissive,) = set(os.listdir(cache_dir)) - {unguarded}
         for config_hash in (unguarded, permissive):
-            with self.assertRaisesRegex(ValueError, "records control_token_guard"):
+            with self.assertRaisesRegex(ValueError, "control_token_guard"):
                 self._cached_statistics(rows, dataset_config_hash=config_hash, drop_control_token_rows=True)
         dataset, _ = self._cached_statistics(
             rows, dataset_config_hash=permissive, drop_control_token_rows=True, control_token_max_drop_frac=0.5

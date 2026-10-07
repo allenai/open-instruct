@@ -2863,10 +2863,17 @@ class LocalDatasetTransformationCache:
                 for key in ("chat_template_name", "chat_template_source", "chat_template_hash"):
                     if key not in statistics:
                         statistics[key] = None
-                return dataset, statistics
             else:
                 # Return empty statistics if not cached
-                return dataset, EMPTY_DATASET_STATISTICS.copy()
+                statistics = EMPTY_DATASET_STATISTICS.copy()
+            if guard.enabled and not statistics.get("control_token_guard"):
+                # Written last, so a guarded cache without it was interrupted mid-save.
+                raise ValueError(
+                    f"Cached dataset {cache_path} records no control_token_guard statistics, so it cannot vouch for "
+                    "--drop_control_token_rows. A guarded build that lost them mid-save needs a rebuild with "
+                    "--dataset_skip_cache; an unguarded cache cannot be used with the guard on."
+                )
+            return dataset, statistics
 
         print("Cache not found or invalid, transforming datasets...")
 
