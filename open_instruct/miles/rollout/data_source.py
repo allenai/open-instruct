@@ -81,15 +81,32 @@ class DashboardDrainingRolloutDataSource:
                 groups = record_selection.take(self._delegate.get_samples, num_samples, self._selection.keep, limit)
             if self._recovery_groups is not None:
                 self._recovery_groups.extend(copy.deepcopy(groups))
-            if self._fully_async:
-                for group in groups:
-                    self._pending_groups.setdefault(group[0].group_index, copy.deepcopy(group))
+            for group in groups:
+                identity = group[0].group_index
+                if identity not in self._pending_groups:
+                    self._pending_groups[identity] = copy.deepcopy(group)
             return groups
 
     def add_samples(self, samples: Any) -> None:
         """Return aborted samples to the underlying MILES buffer."""
         with self._cursor_lock:
             self._delegate.add_samples(samples)
+            if not self._fully_async:
+                # Sync generation returns its unused groups after joining all work.
+                # Everything else was consumed or intentionally discarded.
+                self._pending_groups = self._sync_buffered_groups()
+
+    def _sync_buffered_groups(self) -> dict[int, Any]:
+        """Keep pristine prompts in buffer order, never the partial responses."""
+        groups = {}
+        for group in self._delegate.buffer:
+            identity = group[0].group_index
+            if identity not in self._pending_groups:
+                raise RuntimeError(f"sync buffered prompt group {identity} has no pristine prompt record")
+            if identity in groups:
+                raise RuntimeError(f"duplicate sync buffered prompt group {identity}")
+            groups[identity] = self._pending_groups[identity]
+        return groups
 
     def begin_recovery_batch(self) -> None:
         """Retain pristine prompts until this synchronous batch completes."""
@@ -151,6 +168,8 @@ class DashboardDrainingRolloutDataSource:
         Generation runs on another event-loop thread. Keep one lock across the
         cursor snapshot and prompt ledger; no generated response is checkpointed.
         Resume regenerates pending groups under the restored actor policy.
+        Sync saves run between collections and retain only buffered groups;
+        async saves also retain in-flight and completed-but-unconsumed groups.
         """
 
         delegate = self._delegate
@@ -161,11 +180,13 @@ class DashboardDrainingRolloutDataSource:
                 key: getattr(delegate, key)
                 for key in ("sample_offset", "epoch_id", "sample_group_index", "sample_index", "metadata")
             }
-            if self._fully_async:
-                state["olmo_async_pending"] = {
-                    "schema_version": 1,
-                    "groups": [[sample.to_dict() for sample in group] for group in self._pending_groups.values()],
-                }
+            if not self._fully_async:
+                self._pending_groups = self._sync_buffered_groups()
+            key = "olmo_async_pending" if self._fully_async else "olmo_sync_pending"
+            state[key] = {
+                "schema_version": 1,
+                "groups": [[sample.to_dict() for sample in group] for group in self._pending_groups.values()],
+            }
             destination = Path(delegate.args.save) / "rollout" / f"global_dataset_state_dict_{rollout_id}.pt"
             destination.parent.mkdir(parents=True, exist_ok=True)
             descriptor, name = tempfile.mkstemp(prefix=".cursor-", dir=destination.parent)
@@ -184,22 +205,32 @@ class DashboardDrainingRolloutDataSource:
                 Path(name).unlink(missing_ok=True)
 
     def load(self, rollout_id: int | None = None) -> None:
-        """Restore the underlying dataset cursor."""
+        """Restore the cursor and regenerate pending work from pristine prompts."""
         with self._cursor_lock:
             self._delegate.load(rollout_id)
-            if not self._fully_async or not self._delegate.args.load:
+            if not self._delegate.args.rollout_global_dataset or not self._delegate.args.load:
                 return
+            mode = "async" if self._fully_async else "sync"
             path = Path(self._delegate.args.load) / "rollout" / f"global_dataset_state_dict_{rollout_id}.pt"
             # Initial actor checkpoints have no RL cursor. A resumed RL attempt must.
             if not path.exists():
-                if getattr(self._delegate.args, "start_rollout_id", 0) > 0:
+                if self._fully_async and getattr(self._delegate.args, "start_rollout_id", 0) > 0:
                     raise RuntimeError("async resume requires a complete prompt cursor")
                 return
 
             state = torch.load(path, map_location="cpu", weights_only=True)
-            pending = state.get("olmo_async_pending")
+            key = f"olmo_{mode}_pending"
+            if not self._fully_async and key not in state:
+                logger.warning(
+                    "Legacy sync cursor has no pending-prompt ledger; restoring the cursor only. "
+                    "Any buffered prompts from that checkpoint cannot be recovered."
+                )
+                self._pending_groups = {}
+                self._delegate.buffer = []
+                return
+            pending = state.get(key)
             if not isinstance(pending, dict) or pending.get("schema_version") != 1:
-                raise RuntimeError("async resume cursor lacks the pending-prompt ledger; unsafe legacy checkpoint")
+                raise RuntimeError(f"{mode} resume cursor lacks the pending-prompt ledger; unsafe legacy checkpoint")
             groups = [[Sample.from_dict(sample) for sample in group] for group in pending["groups"]]
             restored = {}
             for group in groups:
@@ -209,11 +240,11 @@ class DashboardDrainingRolloutDataSource:
                     or group[0].group_index in restored
                     or any(sample.weight_versions or sample.response_length for sample in group)
                 ):
-                    raise RuntimeError("async resume cursor has an invalid pending prompt group")
+                    raise RuntimeError(f"{mode} resume cursor has an invalid pending prompt group")
                 restored[group[0].group_index] = copy.deepcopy(group)
             self._pending_groups = restored
             self._delegate.buffer = groups
-            logger.info("Restored %d pending async prompt groups for regeneration", len(groups))
+            logger.info("Restored %d pending %s prompt groups for regeneration", len(groups), mode)
 
     def get_buffer_length(self) -> int | None:
         """Return the number of buffered sample groups."""

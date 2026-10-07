@@ -65,6 +65,15 @@ untested. Manual relaunch with the same unchanged specification/output root can 
 checkpoint after failure; a completed run root cannot be overwritten. Do not
 change the recipe in-place and call it a resume.
 
+Rollout cursor checkpoints preserve pending prompts for regeneration under the
+restored policy. In synchronous runs this includes groups retained in the partial
+rollout buffer; in fully asynchronous runs it also includes in-flight and queued
+unconsumed groups. Resume discards partial responses and regenerates these groups
+from their original prompts. Saving does not reset the live buffer, so an
+uninterrupted synchronous run can continue its partial responses normally.
+Older synchronous cursor checkpoints lack this ledger: they still load, with a
+warning that any buffered prompts omitted from the checkpoint cannot be recovered.
+
 Budget checkpoint disk space, synchronous save time and startup load time. See
 [operations](operations.md) for artifact/completion checks.
 

@@ -14,11 +14,11 @@ from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 
-def make_source(root, *, load=None):
+def make_source(root, *, load=None, fully_async=True):
     args = SimpleNamespace(
         rollout_global_dataset=False,
         use_miles_dashboard=False,
-        fully_async=True,
+        fully_async=fully_async,
         buffer_filter_path=None,
         n_samples_per_prompt=2,
         save=str(root),
@@ -64,9 +64,10 @@ def test_pending_prompt_cursor_regenerates_without_skipping_or_reusing_output(tm
     )
 
 
-def test_interrupted_cursor_write_preserves_committed_file(tmp_path, monkeypatch):
-    source = make_source(tmp_path)
-    source.get_samples(1)
+@pytest.mark.parametrize("fully_async", [False, True])
+def test_interrupted_cursor_write_preserves_committed_file(tmp_path, monkeypatch, fully_async):
+    source = make_source(tmp_path, fully_async=fully_async)
+    source.add_samples(source.get_samples(1))
     source.save(0)
     path = tmp_path / "rollout/global_dataset_state_dict_0.pt"
     original = path.read_bytes()
@@ -80,6 +81,100 @@ def test_interrupted_cursor_write_preserves_committed_file(tmp_path, monkeypatch
         source.save(0)
     assert path.read_bytes() == original
     assert not list(path.parent.glob(".cursor-*"))
+
+
+def test_sync_resume_regenerates_only_buffered_prompts_in_buffer_order(tmp_path):
+    source = make_source(tmp_path, fully_async=False)
+    consumed, filtered, first, second = source.get_samples(4)
+    for group in (first, second):
+        for sample in group:
+            sample.tokens = [10, 20]
+            sample.response = "partial answer"
+            sample.response_length = 1
+            sample.reward = 0.5
+            sample.loss_mask = [1]
+            sample.rollout_log_probs = [-0.5]
+            sample.status = Sample.Status.ABORTED
+            sample.metadata = {"start_rollout_id": 0}
+    source.add_samples([second, first])
+    assert set(source._pending_groups) == {first[0].group_index, second[0].group_index}
+    source.save(0)
+    # Saving must not reset the live buffer or discard its partial generation.
+    assert all(sample.response == "partial answer" for group in source._delegate.buffer for sample in group)
+
+    restored = make_source(tmp_path, load=tmp_path, fully_async=False)
+    restored.load(0)
+    groups = restored.get_samples(3)
+    assert [g[0].prompt for g in groups] == ["prompt-3", "prompt-2", "prompt-4"]
+    assert [s.index for g in groups for s in g] == [6, 7, 4, 5, 8, 9]
+    for group in groups:
+        for sample in group:
+            assert sample.response == "" and sample.response_length == 0
+            assert not sample.tokens and not sample.weight_versions
+            assert sample.reward is None and sample.loss_mask is None
+            assert sample.rollout_log_probs is None
+            assert sample.status == Sample.Status.PENDING
+            assert "start_rollout_id" not in (sample.metadata or {})
+
+    # A group can remain partial across several uninterrupted collections. Its
+    # original prompt, not the latest partial response, must survive a checkpoint.
+    live = source.get_samples(1)
+    assert live == [second]
+    live[0][0].response += " continued"
+    source.add_samples(live)
+    source.save(1)
+    restored = make_source(tmp_path, load=tmp_path, fully_async=False)
+    restored.load(1)
+    assert [g[0].prompt for g in restored._delegate.buffer] == ["prompt-2", "prompt-3"]
+    assert all(not s.response for g in restored._delegate.buffer for s in g)
+
+    # Once those groups finish (or are deliberately filtered), they are not
+    # replayed by the next checkpoint. The ledger must not grow across collections.
+    source.get_samples(2)
+    source.add_samples([])
+    assert source._pending_groups == {}
+    source.save(2)
+    restored.load(2)
+    assert restored.get_buffer_length() == 0
+    assert restored.get_samples(1)[0][0].prompt == "prompt-4"
+
+
+def test_sync_legacy_cursor_warns_and_restores_position(tmp_path, monkeypatch):
+    source = make_source(tmp_path, fully_async=False)
+    source.get_samples(3)
+    source.add_samples([])
+    source.save(0)
+    path = tmp_path / "rollout/global_dataset_state_dict_0.pt"
+    state = torch.load(path, weights_only=True)
+    del state["olmo_sync_pending"]
+    torch.save(state, path)
+    warnings = []
+    monkeypatch.setattr("open_instruct.miles.rollout.data_source.logger.warning", warnings.append)
+    restored = make_source(tmp_path, load=tmp_path, fully_async=False)
+    restored.load(0)
+    assert len(warnings) == 1 and "cannot be recovered" in warnings[0]
+    assert restored.get_samples(1)[0][0].prompt == "prompt-3"
+
+
+@pytest.mark.parametrize("fully_async", [False, True])
+@pytest.mark.parametrize("invalid", ["duplicate", "response", "group_size"])
+def test_resume_rejects_invalid_pending_groups(tmp_path, fully_async, invalid):
+    source = make_source(tmp_path, fully_async=fully_async)
+    source.add_samples(source.get_samples(1))
+    source.save(0)
+    path = tmp_path / "rollout/global_dataset_state_dict_0.pt"
+    state = torch.load(path, weights_only=True)
+    groups = state["olmo_async_pending" if fully_async else "olmo_sync_pending"]["groups"]
+    if invalid == "duplicate":
+        groups.append(groups[0])
+    elif invalid == "response":
+        groups[0][0]["response_length"] = 1
+    else:
+        groups[0].pop()
+    torch.save(state, path)
+    restored = make_source(tmp_path, load=tmp_path, fully_async=fully_async)
+    with pytest.raises(RuntimeError, match="invalid pending prompt group"):
+        restored.load(0)
 
 
 def test_async_buffer_homogeneity_and_optimizer_step_lag_budget():
