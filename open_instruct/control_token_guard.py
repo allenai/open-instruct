@@ -51,12 +51,9 @@ def _re2_json_unicode_escape(code_unit: int) -> str:
     return _RE2_BACKSLASHES + "u" + digits
 
 
-def _re2_json_char(char: str) -> str:
-    """Every way JSON text, possibly encoded twice, can spell `char` inside a string.
-
-    A superset: a match is confirmed by decoding before it counts.
-    """
-    options = [_re2_literal(char)]
+def _re2_json_escapes(char: str) -> list[str]:
+    """Every escaped way JSON text, possibly encoded twice, can spell `char` inside a string."""
+    options = []
     code = ord(char)
     if code <= 0xFFFF:
         options.append(_re2_json_unicode_escape(code))
@@ -65,7 +62,12 @@ def _re2_json_char(char: str) -> str:
         options.append(_re2_json_unicode_escape(high) + _re2_json_unicode_escape(low))
     if char in _JSON_SHORT_ESCAPES:
         options.append(_RE2_BACKSLASHES + _re2_literal(_JSON_SHORT_ESCAPES[char]))
-    return "(?:" + "|".join(options) + ")"
+    return options
+
+
+def _re2_json_char(char: str) -> str:
+    """Every way JSON text can spell `char`. A superset: matches are confirmed by decoding."""
+    return "(?:" + "|".join([_re2_literal(char), *_re2_json_escapes(char)]) + ")"
 
 
 class _Patterns(NamedTuple):
@@ -73,15 +75,36 @@ class _Patterns(NamedTuple):
     literal: str
     """Matches a token spelled out in plain text."""
     json: str
-    """Matches a token spelled out in JSON text, where any character may be escaped."""
+    """Matches a token spelled out in JSON text, where any character may be escaped. Slow with
+    many tokens, so it only runs on strings `json_escape` matches."""
+    json_escape: str
+    """Matches an escaped spelling of any character that occurs in a token."""
 
 
 def _patterns(tokens: Sequence[str]) -> _Patterns:
+    chars = sorted({char for token in tokens for char in token})
     return _Patterns(
         tokens=tuple(tokens),
         literal="|".join(_re2_literal(token) for token in tokens),
         json="|".join("".join(_re2_json_char(char) for char in token) for token in tokens),
+        json_escape="|".join(escape for char in chars for escape in _re2_json_escapes(char)),
     )
+
+
+# Content given as `{"type": "text", "text": ...}` parts; templates render the texts joined.
+_TEXT_PART_PATTERN = '"text"'
+
+
+def _joined_text_part_lists(value: Any) -> Iterator[str]:
+    """Each list of text parts inside a decoded value, its texts joined with no separator."""
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _joined_text_part_lists(item)
+    elif isinstance(value, list):
+        if value and all(isinstance(part, dict) and isinstance(part.get("text"), str) for part in value):
+            yield "".join(part["text"] for part in value)
+        for item in value:
+            yield from _joined_text_part_lists(item)
 
 
 def _matches(strings: pyarrow.Array, pattern: str) -> np.ndarray:
@@ -101,6 +124,8 @@ def _decoded_json_spells_token(text: str, tokens: Sequence[str], decode_string_r
     except json.JSONDecodeError:
         return True
     if any(True for _ in control_token_locations(value, tokens)):
+        return True
+    if any(token in joined for joined in _joined_text_part_lists(value) for token in tokens):
         return True
     if decode_string_result and isinstance(value, str):
         return _decoded_json_spells_token(value, tokens, decode_string_result=False)
@@ -150,9 +175,16 @@ def _rows_with_match(
     if pyarrow.types.is_dictionary(array_type):
         return _rows_with_match(array.dictionary_decode(), patterns, json_text, json_column)
     if pyarrow.types.is_string(array_type) or pyarrow.types.is_large_string(array_type):
+        literal = _matches(array, patterns.literal)
         if not json_text:
-            return _matches(array, patterns.literal)
-        hits = _matches(array, patterns.json)
+            return literal
+        # Candidates, each confirmed by decoding: literal spellings; escaped spellings, looked
+        # for only where a token character appears escaped; and text-part lists, whose texts a
+        # template joins.
+        hits = literal | _matches(array, _TEXT_PART_PATTERN)
+        escaped = np.flatnonzero(~hits & _matches(array, patterns.json_escape))
+        if len(escaped):
+            hits[escaped] = _matches(array.take(pyarrow.array(escaped)), patterns.json)
         for index in np.flatnonzero(hits):
             text = array[int(index)].as_py()
             hits[index] = _decoded_json_spells_token(text, patterns.tokens, decode_string_result=json_column)

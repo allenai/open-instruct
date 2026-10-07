@@ -60,7 +60,7 @@ import numpy as np
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
-from huggingface_hub import ModelCard, revision_exists
+from huggingface_hub import HfApi, ModelCard, hf_hub_download, revision_exists
 from rich.console import Console
 from rich.text import Text
 from tokenizers import Tokenizer
@@ -2613,6 +2613,33 @@ def compute_config_hash(
     return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
 
+def _concatenate_with_index(datasets: list[Dataset]) -> Dataset:
+    combined_dataset = concatenate_datasets(datasets)
+    if "index" in combined_dataset.column_names:
+        combined_dataset = combined_dataset.remove_columns("index")
+    return combined_dataset.add_column("index", range(len(combined_dataset)))
+
+
+def _check_cached_guard(statistics: dict[str, Any], guard: ControlTokenGuard, config_hash: str) -> None:
+    """Refuse a cache named by an explicit hash unless it was built with this run's guard settings.
+
+    A derived hash already encodes the guard; an explicit one could name any cache.
+    """
+    if not guard.enabled:
+        return
+    recorded = statistics.get("control_token_guard") or {}
+    expected = {"version": CONTROL_TOKEN_GUARD_VERSION, "max_drop_frac": guard.max_drop_frac}
+    if {key: recorded.get(key) for key in expected} != expected:
+        raise ValueError(
+            f"--drop_control_token_rows is on, but the cache named by --dataset_config_hash {config_hash} records "
+            f"control_token_guard={recorded or None}, not {expected}. Drop the explicit hash to build a guarded "
+            "cache, or match the cache's settings."
+        )
+
+
+_STATISTICS_FILENAME = "dataset_statistics.json"
+
+
 def _transform_datasets_with_statistics(
     dcs: list[DatasetConfig], tc: TokenizerConfig, guard: ControlTokenGuard
 ) -> tuple[Dataset, dict[str, Any]]:
@@ -2658,12 +2685,7 @@ def _transform_datasets_with_statistics(
         dataset_statistics.append(stats)
         dataset_order.append(dc.dataset_name)
 
-    # Combine datasets
-    combined_dataset = concatenate_datasets(transformed_datasets)
-    if "index" in combined_dataset.column_names:
-        combined_dataset = combined_dataset.remove_columns("index")
-    combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
-
+    combined_dataset = _concatenate_with_index(transformed_datasets)
     all_statistics = {
         "per_dataset_stats": dataset_statistics,
         "dataset_order": dataset_order,
@@ -2708,12 +2730,25 @@ class DatasetTransformationCache:
                 assert isinstance(loaded_dataset, Dataset)
                 if "index" not in loaded_dataset.column_names:
                     loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
-                return loaded_dataset, EMPTY_DATASET_STATISTICS.copy()
+                statistics = EMPTY_DATASET_STATISTICS.copy()
+                if guard.enabled:
+                    # Guarded builds store their statistics next to the data (see below).
+                    with contextlib.suppress(Exception):
+                        path = hf_hub_download(
+                            repo_name, _STATISTICS_FILENAME, repo_type="dataset", revision=self.config_hash
+                        )
+                        with open(path) as f:
+                            statistics = json.load(f)
+                return loaded_dataset, statistics
 
         print("Cache not found, transforming datasets...")
 
-        # Statistics are only available when this run transformed the data; the hub cache does not store them.
-        combined_dataset, all_statistics = _transform_datasets_with_statistics(dcs, tc, guard)
+        if guard.enabled:
+            combined_dataset, all_statistics = _transform_datasets_with_statistics(dcs, tc, guard)
+        else:
+            # Unguarded, exactly as before the guard existed: this cache records no statistics.
+            combined_dataset = _concatenate_with_index([get_dataset_v1(dc, tc) for dc in dcs])
+            all_statistics = EMPTY_DATASET_STATISTICS.copy()
         if dataset_skip_cache:
             return combined_dataset, all_statistics
 
@@ -2747,11 +2782,19 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
 `List[DatasetConfig]`:
 ```json
-{json.dumps([asdict(dc) for dc in dcs], indent=2)}
+{json.dumps([_get_serializable_dataset_config_dict(dc) for dc in dcs], indent=2)}
 ```
 """
         )
         model_card.push_to_hub(repo_name, repo_type="dataset", revision=self.config_hash)
+        if guard.enabled:
+            HfApi().upload_file(
+                path_or_fileobj=json.dumps(all_statistics, indent=2).encode(),
+                path_in_repo=_STATISTICS_FILENAME,
+                repo_id=repo_name,
+                repo_type="dataset",
+                revision=self.config_hash,
+            )
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
@@ -2946,6 +2989,7 @@ def get_cached_dataset_tulu_with_statistics(
     control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> tuple[Dataset, dict[str, Any]]:
     guard = ControlTokenGuard(enabled=drop_control_token_rows, max_drop_frac=control_token_max_drop_frac)
+    explicit_hash = dataset_config_hash is not None
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
             dataset_mixer_list,
@@ -2966,6 +3010,8 @@ def get_cached_dataset_tulu_with_statistics(
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
 
     dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache, guard=guard)
+    if explicit_hash:
+        _check_cached_guard(statistics, guard, dataset_config_hash)
 
     if drop_dataset_source:
         dataset = remove_dataset_source_field(dataset)

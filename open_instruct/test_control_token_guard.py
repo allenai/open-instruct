@@ -12,6 +12,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -283,6 +284,31 @@ class TestRowMask(unittest.TestCase):
         mask = control_token_guard.control_token_row_mask(dataset, ["messages"], self.TOKENS)
         self.assertEqual(mask.tolist(), [True, False])
 
+    def test_token_split_across_json_text_parts_is_found(self):
+        # The same parts stored as datasets' `Json` feature, one half escaped.
+        patterns = control_token_guard._patterns(self.TOKENS)
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "end|>"}]},
+            {"role": "user", "content": [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "start"}]},
+        ]
+        storage = [json.dumps(message) for message in messages]
+        storage[0] = storage[0].replace("end|>", "\\u0065nd|>")
+        self.assertEqual(json.loads(storage[0]), messages[0])
+        wrapped = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array(storage))
+        self.assertEqual(control_token_guard._rows_with_match(wrapped, patterns).tolist(), [True, False])
+
+    def test_json_scan_is_fast_on_clean_rows_with_many_tokens(self):
+        # The escape-aware pattern only runs where a token character appears escaped.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        patterns = control_token_guard._patterns(control_token_guard.control_tokens(tokenizer))
+        self.assertGreater(len(patterns.tokens), 200)
+        text = json.dumps({"role": "user", "content": "word " * 200 + 'caf\u00e9\n"q"'})
+        wrapped = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array([text] * 5000))
+        start = time.perf_counter()
+        hits = control_token_guard._rows_with_match(wrapped, patterns)
+        self.assertFalse(hits.any())
+        self.assertLess(time.perf_counter() - start, 2.0)
+
     def test_regex_metacharacters_are_literal(self):
         dataset = datasets.Dataset.from_list([{"messages": [{"role": "user", "content": "a|b"}]}])
         mask = control_token_guard.control_token_row_mask(dataset, ["messages"], ["a|b|c", "x.y"])
@@ -424,6 +450,79 @@ class TestGuardInTokenization(_GuardTestBase):
             )
         self.assertEqual(len(dataset), 2)
         self.assertEqual(statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
+
+    def test_hf_cache_off_transforms_as_before(self):
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content")]
+        with (
+            mock.patch.object(dataset_transformation, "revision_exists", return_value=False),
+            mock.patch.object(dataset_transformation, "_transform_datasets_with_statistics") as with_statistics,
+        ):
+            dataset, statistics = self._cached_statistics(rows, cache_mode="hf", dataset_skip_cache=True)
+        with_statistics.assert_not_called()
+        self.assertEqual(len(dataset), 2)
+        self.assertEqual(statistics, dataset_transformation.EMPTY_DATASET_STATISTICS)
+
+    def test_hf_cache_round_trips_guard_statistics(self):
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
+        uploads = {}
+
+        def upload_file(path_or_fileobj, path_in_repo, **kwargs):
+            uploads[path_in_repo] = path_or_fileobj
+
+        def hf_hub_download(repo_id, filename, **kwargs):
+            path = os.path.join(self.temp_dir.name, filename)
+            with open(path, "wb") as f:
+                f.write(uploads[filename])
+            return path
+
+        built = {}
+
+        def load_dataset(*args, **kwargs):
+            if args and args[0] == "test-entity/dataset-mix-cached":
+                return built["dataset"]
+            return datasets.load_dataset(*args, **kwargs)
+
+        def push_to_hub(dataset, *args, **kwargs):
+            built["dataset"] = dataset
+
+        with (
+            mock.patch.object(dataset_transformation, "revision_exists", return_value=False),
+            mock.patch.object(dataset_transformation, "load_dataset", side_effect=load_dataset),
+            mock.patch.object(datasets.Dataset, "push_to_hub", autospec=True, side_effect=push_to_hub),
+            mock.patch.object(dataset_transformation.ModelCard, "push_to_hub"),
+            mock.patch.object(dataset_transformation.HfApi, "upload_file", side_effect=upload_file),
+        ):
+            _, built_statistics = self._cached_statistics(
+                rows, cache_mode="hf", drop_control_token_rows=True, control_token_max_drop_frac=0.5
+            )
+        self.assertIn("dataset_statistics.json", uploads)
+        with (
+            mock.patch.object(dataset_transformation, "revision_exists", return_value=True),
+            mock.patch.object(dataset_transformation, "load_dataset", side_effect=load_dataset),
+            mock.patch.object(dataset_transformation, "hf_hub_download", side_effect=hf_hub_download),
+        ):
+            _, loaded_statistics = self._cached_statistics(
+                rows, cache_mode="hf", drop_control_token_rows=True, control_token_max_drop_frac=0.5
+            )
+        self.assertEqual(loaded_statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
+        self.assertEqual(loaded_statistics["control_token_guard"], built_statistics["control_token_guard"])
+
+    def test_explicit_hash_must_name_a_cache_built_with_the_same_guard(self):
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
+        cache_dir = os.path.join(self.temp_dir.name, "cache")
+        self._cached_statistics(rows)
+        (unguarded,) = os.listdir(cache_dir)
+        self._cached_statistics(rows, drop_control_token_rows=True, control_token_max_drop_frac=0.5)
+        (permissive,) = set(os.listdir(cache_dir)) - {unguarded}
+        for config_hash in (unguarded, permissive):
+            with self.assertRaisesRegex(ValueError, "records control_token_guard"):
+                self._cached_statistics(rows, dataset_config_hash=config_hash, drop_control_token_rows=True)
+        dataset, _ = self._cached_statistics(
+            rows, dataset_config_hash=permissive, drop_control_token_rows=True, control_token_max_drop_frac=0.5
+        )
+        self.assertEqual(len(dataset), 2)
+        # With the guard off an explicit hash is taken as given, as before.
+        self.assertEqual(len(self._cached_statistics(rows, dataset_config_hash=unguarded)[0]), 3)
 
 
 class TestCacheKey(_GuardTestBase):
