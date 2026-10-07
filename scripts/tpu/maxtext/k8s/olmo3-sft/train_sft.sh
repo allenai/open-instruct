@@ -12,6 +12,7 @@ SEQ_LEN="${SEQ_LEN:-4096}"
 LR="${LR:-8e-5}"
 WARMUP_FRAC="${WARMUP_FRAC:-0.03}"
 DATA_SEED="${DATA_SEED:-0}"
+NUM_EPOCH="${NUM_EPOCH:-2}" # Passes over the data the stream holds; STEPS decides how much is trained.
 PER_DEVICE_BATCH="${PER_DEVICE_BATCH:-1}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
@@ -48,7 +49,7 @@ python3 -m maxtext.trainers.post_train.sft.train_sft src/maxtext/configs/post_tr
   load_parameters_path="$LOAD_PARAMETERS_PATH" tokenizer_path="$TOKENIZER_PATH" \
   hf_path=parquet hf_train_files="$TRAIN_FILES" train_split=train hf_eval_split="" eval_interval=-1 \
   train_data_columns="['messages']" sft_train_on_completion_only=true \
-  max_target_length="$SEQ_LEN" packing=true num_epoch=2 data_shuffle_seed="$DATA_SEED" \
+  max_target_length="$SEQ_LEN" packing=true num_epoch="$NUM_EPOCH" data_shuffle_seed="$DATA_SEED" \
   per_device_batch_size="$PER_DEVICE_BATCH" gradient_accumulation_steps="$GRAD_ACCUM" steps="$STEPS" \
   learning_rate="$LR" lr_schedule_type=wsd warmup_steps_fraction="$WARMUP_FRAC" \
   wsd_decay_steps_fraction="$(python3 -c "print(1 - $WARMUP_FRAC)")" wsd_decay_style=linear learning_rate_final_fraction=0.0 \
