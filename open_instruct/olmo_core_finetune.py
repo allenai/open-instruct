@@ -127,12 +127,13 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
-    drop_control_token_rows: bool = True
+    drop_control_token_rows: bool = False
     """Drop rows whose raw messages, reasoning, tool calls or tool schemas contain a literal
-    special token (e.g. `<|im_end|>`), which would tokenize to the real control id. Mixes with no
-    such row keep their existing cache key; mixes that lose rows get a new one."""
+    special token (e.g. `<|im_end|>`), which would tokenize to the real control id. Off by
+    default; turning it on changes the dataset cache key (with `control_token_max_drop_frac`)."""
     control_token_max_drop_frac: float = dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC
-    """Fail if `drop_control_token_rows` would drop more than this fraction of a dataset."""
+    """Fail if `drop_control_token_rows` would drop more than this fraction of a dataset.
+    Part of the cache key when the guard is on."""
 
 
 @dataclasses.dataclass
@@ -197,10 +198,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # Part of the cache hash.
         if args.training.over_length_strategy != dataset_transformation.DEFAULT_OVER_LENGTH_STRATEGY:
             cache_args.append(f"--over_length_strategy {args.training.over_length_strategy}")
-        # Part of the cache hash whenever the guard drops rows.
-        if not args.sft.drop_control_token_rows:
-            cache_args.append("--no_drop_control_token_rows")
-        if args.sft.control_token_max_drop_frac != dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC:
+        # Both part of the cache hash when the guard is on.
+        if args.sft.drop_control_token_rows:
+            cache_args.append("--drop_control_token_rows")
             cache_args.append(f"--control_token_max_drop_frac {args.sft.control_token_max_drop_frac}")
         # Also part of the cache hash, and the values contain shell metacharacters: an
         # unquoted `<think>` would be a redirection, and a command that dropped the flag

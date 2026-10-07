@@ -182,12 +182,12 @@ class FlatArguments:
         },
     )
     drop_control_token_rows: bool = field(
-        default=True,
+        default=False,
         metadata={
             "help": (
                 "Drop rows whose raw messages, reasoning, tool calls or tool schemas contain a literal "
-                "special token (e.g. '<|im_end|>'), which would tokenize to the real control id. Mixes "
-                "with no such row keep their existing dataset cache key."
+                "special token (e.g. '<|im_end|>'), which would tokenize to the real control id. Off by "
+                "default; turning it on changes the dataset cache key."
             )
         },
     )

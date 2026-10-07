@@ -340,7 +340,9 @@ class TestGuardInTokenization(_GuardTestBase):
         clean = self._dc(self._write([_clean_row(1)], "clean"))
         planted = self._dc(self._write([_plant(_clean_row(1), "user_content")], "planted"))
         clean_ids = dataset_transformation.get_dataset_v1(clean, tc)[0]["input_ids"]
-        planted_dataset, dropped = self._transform(planted, tc, _guard(enabled=False))
+        # get_dataset_v1's default is the guard off.
+        planted_dataset = dataset_transformation.get_dataset_v1(planted, tc)
+        _, dropped = self._transform(planted, tc, _guard(enabled=False))
         self.assertEqual(planted_dataset[0]["input_ids"].count(im_end), clean_ids.count(im_end) + 1)
         self.assertIsNone(dropped)
 
@@ -358,14 +360,14 @@ class TestGuardInTokenization(_GuardTestBase):
     def test_clean_rows_keep_their_fingerprint(self):
         # The guard must not perturb HF fingerprints (and so the saved cache's state.json).
         path = self._write([_clean_row(i) for i in range(3)])
-        on = dataset_transformation.get_dataset_v1(self._dc(path), self._tc())
-        off = dataset_transformation.get_dataset_v1(self._dc(path), self._tc(), _guard(enabled=False))
+        on = dataset_transformation.get_dataset_v1(self._dc(path), self._tc(), _guard())
+        off = dataset_transformation.get_dataset_v1(self._dc(path), self._tc())
         self.assertEqual(on._fingerprint, off._fingerprint)
 
     def test_threshold_error(self):
         rows = [_clean_row(i) for i in range(9)] + [_plant(_clean_row(9), "assistant_content")]
         with self.assertRaisesRegex(ValueError, "control_token_max_drop_frac"):
-            dataset_transformation.get_dataset_v1(self._dc(self._write(rows)), self._tc())
+            dataset_transformation.get_dataset_v1(self._dc(self._write(rows)), self._tc(), _guard())
         dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard(max_drop_frac=0.1))
         self.assertEqual((len(dataset), dropped), (9, 1))
 
@@ -395,16 +397,30 @@ class TestGuardInTokenization(_GuardTestBase):
 
     def test_local_cache_statistics_record_drops(self):
         rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
-        _, statistics = self._cached_statistics(rows, control_token_max_drop_frac=0.5)
+        _, statistics = self._cached_statistics(rows, drop_control_token_rows=True, control_token_max_drop_frac=0.5)
         self.assertEqual(statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
         self.assertEqual(statistics["control_token_guard"]["version"], "v1")
         self.assertIn(PLANTED, statistics["control_token_guard"]["tokens"])
+
+    def test_guard_is_off_by_default(self):
+        rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
+        with mock.patch.object(control_token_guard, "control_token_row_mask") as scan:
+            dataset, statistics = self._cached_statistics(rows)
+        scan.assert_not_called()
+        self.assertEqual(len(dataset), 3)
+        # Unguarded statistics keep their pre-guard layout.
+        self.assertNotIn("control_token_guard", statistics)
+        self.assertNotIn("control_token_rows_dropped", statistics["per_dataset_stats"][0])
 
     def test_hf_cache_statistics_record_drops_when_transforming(self):
         rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
         with mock.patch.object(dataset_transformation, "revision_exists", return_value=False):
             dataset, statistics = self._cached_statistics(
-                rows, cache_mode="hf", dataset_skip_cache=True, control_token_max_drop_frac=0.5
+                rows,
+                cache_mode="hf",
+                dataset_skip_cache=True,
+                drop_control_token_rows=True,
+                control_token_max_drop_frac=0.5,
             )
         self.assertEqual(len(dataset), 2)
         self.assertEqual(statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
@@ -412,18 +428,34 @@ class TestGuardInTokenization(_GuardTestBase):
 
 class TestCacheKey(_GuardTestBase):
     def _hash(self, path: str, guard=None) -> str:
-        return dataset_transformation.compute_config_hash([self._dc(path)], self._tc(), guard or _guard())
+        if guard is None:
+            return dataset_transformation.compute_config_hash([self._dc(path)], self._tc())
+        return dataset_transformation.compute_config_hash([self._dc(path)], self._tc(), guard)
 
-    def test_clean_mix_keeps_its_key(self):
-        path = self._write([_clean_row(i) for i in range(3)])
-        self.assertEqual(self._hash(path), self._hash(path, _guard(enabled=False)))
-        self.assertEqual(self._hash(path), self._hash(path, _guard(max_drop_frac=0.5)))
-
-    def test_mix_that_loses_rows_gets_a_new_key(self):
+    def test_off_is_the_default_and_scans_nothing(self):
         path = self._write([_clean_row(0), _plant(_clean_row(1), "user_content")])
-        self.assertNotEqual(self._hash(path), self._hash(path, _guard(enabled=False)))
-        # A cache built under a permissive threshold must not satisfy a stricter run.
-        self.assertNotEqual(self._hash(path), self._hash(path, _guard(max_drop_frac=0.5)))
+        with mock.patch.object(control_token_guard, "control_token_row_mask") as scan:
+            default = self._hash(path)
+            off = self._hash(path, _guard(enabled=False))
+        scan.assert_not_called()
+        self.assertEqual(default, off)
+
+    def test_on_changes_the_key_with_or_without_flagged_rows(self):
+        # The key never depends on the data, so computing it never scans.
+        for rows in ([_clean_row(0)], [_clean_row(0), _plant(_clean_row(1), "user_content")]):
+            path = self._write(rows)
+            with mock.patch.object(control_token_guard, "control_token_row_mask") as scan:
+                on, off = self._hash(path, _guard()), self._hash(path, _guard(enabled=False))
+                strict, permissive = (
+                    self._hash(path, _guard(max_drop_frac=0.001)),
+                    self._hash(path, _guard(max_drop_frac=0.5)),
+                )
+            scan.assert_not_called()
+            self.assertNotEqual(on, off)
+            # A cache built under a permissive threshold must not satisfy a stricter run.
+            self.assertNotEqual(strict, permissive)
+        on_payload = dataset_transformation._config_hash_payload([self._dc(path)], self._tc(), _guard())
+        self.assertEqual(on_payload["control_token_guard"], {"version": "v1", "max_drop_frac": 0.001})
 
     def test_hashed_config_matches_the_pre_guard_layout(self):
         # Pins the hashed dict to what it was before the guard existed, so a clean mix's
@@ -467,8 +499,8 @@ class TestNumpyCaches(_GuardTestBase):
     def test_clean_mix_gives_byte_identical_files(self):
         path = self._write([_clean_row(i) for i in range(5)])
         out = pathlib.Path(self.temp_dir.name)
-        on = self._convert(out / "on", path)
-        off = self._convert(out / "off", path, drop_control_token_rows=False)
+        on = self._convert(out / "on", path, drop_control_token_rows=True)
+        off = self._convert(out / "off", path)
         for pattern in ("token_ids_part_*.npy", "labels_mask_part_*.npy", "token_ids_part_*.csv.gz"):
             on_files = sorted((out / "on").glob(pattern))
             off_files = sorted((out / "off").glob(pattern))
@@ -484,13 +516,18 @@ class TestNumpyCaches(_GuardTestBase):
         self.assertEqual(on["per_dataset_statistics"][0]["control_token_rows_dropped"], 0)
         self.assertEqual(on["overall_statistics"]["control_token_rows_dropped"], 0)
         self.assertIsNotNone(on["configuration"]["control_token_guard"])
-        self.assertIsNone(off["overall_statistics"]["control_token_rows_dropped"])
-        self.assertIsNone(off["configuration"]["control_token_guard"])
+        # Off, the statistics keep their pre-guard layout.
+        self.assertNotIn("control_token_rows_dropped", off["overall_statistics"])
+        self.assertNotIn("control_token_rows_dropped", off["per_dataset_statistics"][0])
+        self.assertNotIn("control_token_guard", off["configuration"])
 
     def test_dropped_rows_are_recorded(self):
         rows = [_clean_row(0), _plant(_clean_row(1), "reasoning_content"), _clean_row(2)]
         stats = self._convert(
-            pathlib.Path(self.temp_dir.name) / "out", self._write(rows), control_token_max_drop_frac=0.5
+            pathlib.Path(self.temp_dir.name) / "out",
+            self._write(rows),
+            drop_control_token_rows=True,
+            control_token_max_drop_frac=0.5,
         )
         self.assertEqual(stats["overall_statistics"]["total_instances"], 2)
         self.assertEqual(stats["per_dataset_statistics"][0]["control_token_rows_dropped"], 1)

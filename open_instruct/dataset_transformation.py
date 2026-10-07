@@ -2211,8 +2211,8 @@ _SFT_TOKENIZE_FNS = {
 # SFT tokenization functions that render only the messages column.
 _SFT_MESSAGES_ONLY_TOKENIZE_FNS = {"sft_tokenize_v1", "sft_tokenize_mask_out_prompt_v1"}
 
-# Bump when the control-token guard changes which rows it drops. Only keys of mixes that lose
-# rows to the guard include it, so changing it never invalidates a clean mix's cache.
+# Bump when the control-token guard changes which rows it drops. It is part of the cache key of
+# every mix tokenized with the guard on, and of no other.
 CONTROL_TOKEN_GUARD_VERSION = "v1"
 DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC = 0.001
 
@@ -2221,12 +2221,14 @@ DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC = 0.001
 class ControlTokenGuard:
     """Whether to drop SFT rows whose raw fields spell out a special token; see `_drop_control_token_rows`.
 
-    Kept off `DatasetConfig` on purpose: its fields are hashed into the cache key, and the
-    instance itself into the HF fingerprint of the dataset-source map, so adding fields there
-    would change both for every mix, clean or not.
+    Off by default, so existing cache keys and caches are untouched. When on, it adds
+    `{version, max_drop_frac}` to the cache key of every mix. Kept off `DatasetConfig` on
+    purpose: its fields are hashed into the cache key, and the instance itself into the HF
+    fingerprint of the dataset-source map, so adding fields there would change both for every
+    mix even with the guard off.
     """
 
-    enabled: bool = True
+    enabled: bool = False
     max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC
     """Fail instead of dropping when a dataset would lose more than this fraction of its rows."""
 
@@ -2374,17 +2376,6 @@ def _control_token_guard_columns(dc: DatasetConfig) -> list[str]:
     return []
 
 
-def _has_control_token_rows(dc: DatasetConfig, tokenizer: PreTrainedTokenizer) -> bool:
-    columns = _control_token_guard_columns(dc)
-    if not columns:
-        return False
-    tokens = control_token_guard.control_tokens(tokenizer)
-    mask = control_token_guard.control_token_row_mask(
-        dc.dataset, columns, tokens, json_columns=[TOOLS_COLUMN_KEY], stop_at_first_hit=True
-    )
-    return bool(mask.any())
-
-
 def _describe_tokens(tokens: Sequence[str]) -> str:
     return str(tokens) if len(tokens) <= 12 else f"{tokens[:12]} and {len(tokens) - 12} more"
 
@@ -2428,7 +2419,7 @@ def _drop_control_token_rows(
         raise ValueError(
             f"{dropped} of {len(dataset)} rows ({frac:.4%}) of {dc.dataset_name} contain a literal special token "
             f"({_describe_tokens(tokens)}), more than --control_token_max_drop_frac={guard.max_drop_frac}. Clean the "
-            "dataset, raise the threshold, or pass --no_drop_control_token_rows to keep the rows as they are."
+            "dataset, raise the threshold, or drop --drop_control_token_rows to keep the rows as they are."
         )
     fingerprint = hashlib.sha256(
         f"{DATASET_CACHE_VERSION}:control_token_guard:{CONTROL_TOKEN_GUARD_VERSION}:{dataset._fingerprint}:"
@@ -2599,11 +2590,10 @@ def _config_hash_payload(
         "tokenizer_config": tc_dict,
         "chat_template_hash": chat_template_hash,
     }
-    # A mix the control-token guard leaves untouched keeps its pre-guard key and so its existing
-    # cache, which is byte-identical. A mix that loses rows gets a new key, so a pre-guard cache
-    # still holding those rows is never reused for it. The threshold is in that key too, so a
-    # cache built under a permissive threshold never satisfies a stricter run.
-    if guard.enabled and any(_has_control_token_rows(dc, tc.tokenizer) for dc in dcs):
+    # Off, the key is exactly the pre-guard one. On, it records the guard and its threshold, so
+    # a guarded cache is never confused with an unguarded one, nor a cache built under a
+    # permissive threshold with a stricter run's.
+    if guard.enabled:
         combined_dict["control_token_guard"] = {
             "version": CONTROL_TOKEN_GUARD_VERSION,
             "max_drop_frac": guard.max_drop_frac,
@@ -2645,7 +2635,6 @@ def _transform_datasets_with_statistics(
             "initial_instances": initial_size,
             "final_instances": len(dataset),
             "instances_filtered": initial_size - len(dataset),
-            "control_token_rows_dropped": control_token_rows_dropped,
             "frac_or_num_samples": dc.frac_or_num_samples,
             "original_dataset_size": dc.original_dataset_size,
             "is_upsampled": dc.is_upsampled,
@@ -2653,6 +2642,9 @@ def _transform_datasets_with_statistics(
             if dc.dataset_range is not None and dc.original_dataset_size and dc.original_dataset_size > 0
             else 1.0,
         }
+        # Only with the guard on, so an unguarded cache's statistics stay as they were.
+        if guard.enabled:
+            stats["control_token_rows_dropped"] = control_token_rows_dropped
 
         # Count tokens if the dataset has been tokenized
         if INPUT_IDS_KEY in dataset.column_names:
@@ -2676,8 +2668,9 @@ def _transform_datasets_with_statistics(
         "per_dataset_stats": dataset_statistics,
         "dataset_order": dataset_order,
         **_get_chat_template_metadata(tc),
-        "control_token_guard": _control_token_guard_metadata(dcs, tc, guard),
     }
+    if guard.enabled:
+        all_statistics["control_token_guard"] = _control_token_guard_metadata(dcs, tc, guard)
     return combined_dataset, all_statistics
 
 
@@ -2949,7 +2942,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
-    drop_control_token_rows: bool = True,
+    drop_control_token_rows: bool = False,
     control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> tuple[Dataset, dict[str, Any]]:
     guard = ControlTokenGuard(enabled=drop_control_token_rows, max_drop_frac=control_token_max_drop_frac)
@@ -2994,7 +2987,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
-    drop_control_token_rows: bool = True,
+    drop_control_token_rows: bool = False,
     control_token_max_drop_frac: float = DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
