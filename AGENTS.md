@@ -29,6 +29,12 @@ CUDA initialization and a short training run when the image or driver changes.
 
 
 # Workflow
+- Begin every GitHub comment published by Codex with a GitHub note alert:
+  ```markdown
+  > [!NOTE]
+  > Drafted by Codex.
+  ```
+  If Robert reviewed the response before publication, use `Drafted by Codex and reviewed by Robert.` instead. Only include the review attribution when Robert actually reviewed the response; permission to post alone does not count as review.
 - When a PR changes anything under `open_instruct/`, add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`). This is what CI enforces; PRs touching only `scripts/`, docs, or config are exempt, though an entry is still welcome for anything user-visible.
   - The entry must contain the PR's own URL, which does not exist until the PR is opened. Add the entry, open the PR, then amend the entry with the URL and push again.
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).

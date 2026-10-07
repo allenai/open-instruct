@@ -106,7 +106,7 @@ def test_process_reuse_bounded_concurrency_errors_and_stdout():
     asyncio.run(run())
 
 
-def test_timeout_and_cancellation_reap_worker_and_allow_next_request():
+def test_timeout_and_cancellation_reap_worker_and_allow_next_request(monkeypatch):
     async def run():
         pool = rewards._MathProcessPool(workers=1, timeout=20)
         try:
@@ -118,8 +118,16 @@ def test_timeout_and_cancellation_reap_worker_and_allow_next_request():
             pool.timeout = 20
             second = await pool.score(_request())
             assert int(second.reasoning.split(":")[0]) != first_pid
+            exchange_started = asyncio.Event()
+            exchange = pool._exchange
+
+            async def track_exchange(process, payload):
+                exchange_started.set()
+                return await exchange(process, payload)
+
+            monkeypatch.setattr(pool, "_exchange", track_exchange)
             request = asyncio.create_task(pool.score(_request("sleep")))
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(exchange_started.wait(), timeout=20)
             request.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await request

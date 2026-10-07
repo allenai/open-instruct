@@ -4,8 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'open_instruct/miles/**'
-      - 'open_instruct/test_miles*.py'
+      - 'open_instruct/**'
       - 'tests/miles/**'
       - 'tests/miles_eval/**'
       - 'scripts/miles/**'

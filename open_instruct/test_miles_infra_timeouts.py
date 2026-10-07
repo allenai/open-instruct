@@ -46,7 +46,8 @@ def test_invalid_multiplier_fails(monkeypatch, factor):
 
 
 def test_async_wait_warns_and_preserves_cancellation(monkeypatch, caplog):
-    monkeypatch.setenv("MILES_INFRA_TIMEOUT_MULTIPLIER", "5")
+    # Leave headroom for a loaded runner without delaying the warning threshold.
+    monkeypatch.setenv("MILES_INFRA_TIMEOUT_MULTIPLIER", "25")
 
     async def exercise():
         assert (
@@ -54,8 +55,14 @@ def test_async_wait_warns_and_preserves_cancellation(monkeypatch, caplog):
             == "ready"
         )
         before = asyncio.all_tasks()
-        task = asyncio.create_task(infra_timeouts.wait_for(asyncio.sleep(100), 10, operation="cancelled"))
-        await asyncio.sleep(0.01)
+        started = asyncio.Event()
+
+        async def blocked():
+            started.set()
+            await asyncio.Future()
+
+        task = asyncio.create_task(infra_timeouts.wait_for(blocked(), 10, operation="cancelled"))
+        await asyncio.wait_for(started.wait(), timeout=20)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -66,4 +73,4 @@ def test_async_wait_warns_and_preserves_cancellation(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         asyncio.run(exercise())
     assert "operation=publication" in caplog.text
-    assert "deadline_s=0.05" in caplog.text
+    assert "deadline_s=0.25" in caplog.text
