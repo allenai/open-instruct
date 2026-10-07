@@ -82,6 +82,14 @@ def _read_json_object(path, inputs):
     return validation.mapping(value, str(path))
 
 
+def _required_mapping(value, name, fields):
+    value = validation.mapping(value, name)
+    missing = set(fields) - value.keys()
+    if missing:
+        raise InputError(f"{name} is missing required fields: {', '.join(sorted(missing))}")
+    return value
+
+
 def _rows(raw, source="Data JSONL"):
     try:
         # Unicode paragraph/line separators are valid inside JSON strings.
@@ -236,21 +244,31 @@ def _adopt(data, tokenizer, template, inputs):
     manifest = _read_json_object(path, inputs)
     if manifest.get("schema_version") != 1:
         raise InputError("Only baseline rl_manifest schema_version=1 is supported")
-    options = manifest["miles"]
+    options = _required_mapping(manifest.get("miles"), f"{path}: miles", ("input_key", "metadata_key", "label_key"))
+    for key in ("input_key", "metadata_key", "label_key"):
+        validation.text(options[key], f"{path}: miles.{key}")
     if options.get("custom_rm_path") != "olmo_miles.rl.rewards.registered_reward":
         raise InputError("Manifest reward function is not the supported baseline registered reward contract")
     if options.get("apply_chat_template") is not True:
         raise InputError("Baseline manifest must declare apply_chat_template=true")
     descriptor = options.get("chat_template")
     if descriptor is not None:
+        _required_mapping(descriptor, f"{path}: chat_template", ("path", "sha256"))
+        validation.text(descriptor["path"], f"{path}: chat_template.path")
         raw = _read(path.parent / descriptor["path"], inputs)
         if _sha(raw) != descriptor["sha256"]:
             raise InputError("Manifest chat template hash mismatch")
-        template = raw.decode()
+        try:
+            template = raw.decode()
+        except UnicodeError as error:
+            raise InputError(f"{path}: chat template must be UTF-8") from error
     partitions = {}
-    for split, artifact in manifest["artifacts"].items():
+    artifacts = validation.mapping(manifest.get("artifacts"), f"{path}: artifacts")
+    for split, artifact in artifacts.items():
         if split not in ("train", "eval"):
             raise InputError(f"Unsupported manifest partition: {split}")
+        _required_mapping(artifact, f"{path}: artifacts.{split}", ("path", "sha256", "records"))
+        validation.text(artifact["path"], f"{path}: artifacts.{split}.path")
         raw = _read(path.parent / artifact["path"], inputs)
         if _sha(raw) != artifact["sha256"]:
             raise InputError(f"Manifest {split} artifact hash mismatch")
@@ -258,9 +276,11 @@ def _adopt(data, tokenizer, template, inputs):
         if len(source) != artifact.get("records"):
             raise InputError(f"Manifest {split} record count mismatch")
         partitions[split] = []
-        for row in source:
+        for index, row in enumerate(source, 1):
+            context = f"{path}: {split} row {index}"
+            _required_mapping(row, context, (options["input_key"], options["metadata_key"], options["label_key"]))
             messages = _messages({"messages": row[options["input_key"]]}, strip_answer=False)
-            metadata = copy.deepcopy(row[options["metadata_key"]])
+            metadata = copy.deepcopy(validation.mapping(row[options["metadata_key"]], f"{context}: metadata"))
             metadata.setdefault("query", messages[-1]["content"])
             partitions[split].append(
                 {
@@ -300,6 +320,16 @@ def _prepared(data, inputs):
     return partitions, {"already_rendered": True}, registry
 
 
+def _sample_indices(rng, size, train_count, eval_count):
+    """Choose training independently of the requested held-out sample count."""
+    training = rng.sample(range(size), train_count)
+    if not eval_count:
+        return training
+    selected = set(training)
+    remaining = [index for index in range(size) if index not in selected]
+    return training + rng.sample(remaining, eval_count)
+
+
 def _tasks(data, tokenizer, template, seed):
     partitions = {"train": [], "eval": []}
     provenance = []
@@ -308,14 +338,14 @@ def _tasks(data, tokenizer, template, seed):
         train_count, eval_count = task.get("train_count") or 0, task.get("eval_count") or 0
         total = train_count + eval_count
         source, revision, verifier = TASKS[name]
-        # Preserve sampling of this same cleaned dataset under its former task name, gsm8k.
+        # Preserve the cleaned dataset's seed convention under its former task name, gsm8k.
         # This does not align its selected rows with the original, uncleaned dataset.
         sampling_name = "gsm8k" if name == "gsm8k-less-noise" else name
         rng = random.Random(f"{seed}:{sampling_name}")
         if name == "multiplication":
             if total > 8100:
                 raise InputError("Generated multiplication supports at most 8100 unique ordered two-digit pairs")
-            pairs = rng.sample(range(8100), total)
+            pairs = _sample_indices(rng, 8100, train_count, eval_count)
             rows = [
                 {
                     "question": f"Compute {10 + p // 90} * {10 + p % 90}. Put the result in <answer> tags.",
@@ -328,7 +358,7 @@ def _tasks(data, tokenizer, template, seed):
             rows = _source_rows(name)
             if len(rows) < total:
                 raise InputError(f"{name}: requested {total} rows but source has {len(rows)}")
-            indices = rng.sample(range(len(rows)), total)
+            indices = _sample_indices(rng, len(rows), train_count, eval_count)
         for position, index in enumerate(indices):
             raw = rows[index]
             messages = _messages(raw, strip_answer=True)
@@ -345,14 +375,21 @@ def _tasks(data, tokenizer, template, seed):
                     target = target[0]
                 if not isinstance(target, str) or not target.strip():
                     raise InputError("Math target must be a nonempty scalar string")
-            elif not isinstance(target, str) or "func_name" not in json.loads(target):
-                raise InputError("Named ifeval source requires legacy func_name target")
+            else:
+                try:
+                    parsed_target = json.loads(target) if isinstance(target, str) else None
+                except ValueError as error:
+                    raise InputError(f"{name} source row {index}: target must be valid JSON with func_name") from error
+                if not isinstance(parsed_target, dict) or "func_name" not in parsed_target:
+                    raise InputError(f"{name} source row {index}: requires legacy func_name target")
             wrapper = task.get("prompt_wrapper", "none")
             if wrapper == "auto":
                 wrapper = "none" if name == "ifeval" else "open_instruct_rlzero_answer"
             if wrapper == "open_instruct_rlzero_answer":
                 messages[-1]["content"] = f"{ANSWER_PREFIX}\n\n{messages[-1]['content']}\n\n{ANSWER_SUFFIX}"
             metadata = {
+                # "train" is the source dataset split, not this run's partition.
+                # Keep source identities equal even if a row is assigned to eval.
                 "prepared_sample_id": f"{name}:train:{index}",
                 "source_dataset": source,
                 "source_revision": revision,
@@ -407,7 +444,13 @@ def prepare_data(
         raise InputError("max_prompt_length must be positive")
     output, hf_checkpoint = Path(output).resolve(), Path(hf_checkpoint).resolve()
     inputs = {}
-    for path in sorted(hf_checkpoint.iterdir()):
+    try:
+        hf_files = sorted(hf_checkpoint.iterdir())
+    except OSError as error:
+        raise InputError(
+            f"Cannot read tokenizer directory {hf_checkpoint}: {error}. Check the path and mounts."
+        ) from error
+    for path in hf_files:
         if path.is_file() and (
             path.suffix in (".json", ".jinja", ".model", ".txt", ".tiktoken") or path.name.startswith("tokenizer")
         ):
@@ -424,16 +467,22 @@ def prepare_data(
     if output.exists():
         if not manifest_path.is_file():
             raise InputError("Preparation directory is incomplete; use a fresh output directory")
-        manifest = json.loads(manifest_path.read_text())
+        manifest = _required_mapping(
+            _read_json_object(manifest_path, {}), str(manifest_path), ("contract", "inputs", "outputs", "result")
+        )
         if manifest["contract"] != contract:
             raise InputError("Preparation contract changed; refusing to alter resumed run data")
-        for path, digest in manifest["inputs"].items():
-            if _sha(Path(path).read_bytes()) != digest:
+        for path, digest in validation.mapping(manifest["inputs"], f"{manifest_path}: inputs").items():
+            if _sha(_read(path, {})) != digest:
                 raise InputError(f"Preparation source changed: {path}")
-        for filename, digest in manifest["outputs"].items():
-            if _sha((output / filename).read_bytes()) != digest:
+        for filename, digest in validation.mapping(manifest["outputs"], f"{manifest_path}: outputs").items():
+            if _sha(_read(output / filename, {})) != digest:
                 raise InputError(f"Prepared artifact changed: {filename}")
-        return manifest["result"]
+        return _required_mapping(
+            manifest["result"],
+            f"{manifest_path}: result",
+            ("prompt_data", "eval_prompt_data", "reward_config", "manifest"),
+        )
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template
     if data.get("rl_manifest") is not None:
@@ -499,7 +548,7 @@ def prepare_data(
         }
         (staging / "manifest.json").write_bytes(_encoded(manifest))
         for path, digest in inputs.items():
-            if _sha(Path(path).read_bytes()) != digest:
+            if _sha(_read(path, {})) != digest:
                 raise InputError(f"Preparation source changed while preparing: {path}")
         staging.rename(output)
     finally:

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles.datasets import run_data
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import task_verifiers
 
 
@@ -172,12 +173,13 @@ def test_gsm8k_variants_share_verifier_and_record_distinct_sources(environment, 
     assert registry == {"gsm8k": {"factory": run_data.FACTORIES["gsm8k"]}}
 
 
-def test_less_noise_preserves_historical_cleaned_sampling(environment, monkeypatch):
+def test_less_noise_preserves_cleaned_seed_convention(environment, monkeypatch):
     rows = [{"question": f"Question {i}", "ground_truth": str(i), "original_row": 100 + i} for i in range(12)]
     monkeypatch.setattr(run_data, "_source_rows", lambda name: rows)
     result = prepare(environment, {"tasks": [{"task": "gsm8k-less-noise", "train_count": 5, "eval_count": 3}]})
-    # Historical cleaned gsm8k order with seed 17, including split shuffling.
-    for path, indices in [(result["prompt_data"], [6, 5, 0, 10, 7]), (result["eval_prompt_data"][1], [1, 9, 4])]:
+    # The historical gsm8k seed convention remains; held-out rows now come from
+    # a separate draw over the remainder, followed by the usual split shuffling.
+    for path, indices in [(result["prompt_data"], [6, 5, 0, 10, 7]), (result["eval_prompt_data"][1], [2, 11, 8])]:
         prepared = [json.loads(line) for line in Path(path).read_text().splitlines()]
         assert [row["metadata"]["source_row"] for row in prepared] == indices
         assert [row["metadata"]["original_row"] for row in prepared] == [100 + i for i in indices]
@@ -340,3 +342,126 @@ def test_jsonl_unicode_separators_are_content_not_record_boundaries():
     rows = [{"input": "before\u2028middle\u2029after\u0085end"}, {"input": "second"}]
     raw = ("\r\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n").encode()
     assert run_data._rows(raw) == rows
+
+
+@pytest.mark.parametrize(
+    "task,size,train_count,eval_counts",
+    [("gsm8k", 100, 20, [0, 10, 80]), ("multiplication", 8100, 128, [0, 20, 2000])],
+)
+def test_eval_count_does_not_change_training_rows(monkeypatch, task, size, train_count, eval_counts):
+    rows = [{"question": f"Question {i}", "ground_truth": str(i)} for i in range(size)]
+    monkeypatch.setattr(run_data, "_source_rows", lambda name: rows)
+    baseline = None
+    for eval_count in eval_counts:
+        task_config = {"task": task, "train_count": train_count}
+        if eval_count:
+            task_config["eval_count"] = eval_count
+        data = {"tasks": [task_config]}
+        partitions, _, _ = run_data._tasks(data, Tokenizer(), "template", 17)
+        if baseline is None:
+            baseline = partitions["train"]
+        assert partitions["train"] == baseline
+        assert len(partitions["eval"]) == eval_count
+        assert not {row["input"] for row in baseline} & {row["input"] for row in partitions["eval"]}
+
+
+def test_named_sample_id_describes_source_split_even_for_heldout(monkeypatch):
+    monkeypatch.setattr(run_data, "_source_rows", lambda name: [{"question": "only row", "ground_truth": "1"}])
+    for counts, split in [({"train_count": 1}, "train"), ({"eval_count": 1}, "eval")]:
+        partitions, _, _ = run_data._tasks({"tasks": [{"task": "gsm8k", **counts}]}, Tokenizer(), "template", 17)
+        assert partitions[split][0]["metadata"]["prepared_sample_id"] == "gsm8k:train:0"
+
+
+def test_existing_named_preparation_never_resamples(environment, monkeypatch):
+    data = {"tasks": [{"task": "multiplication", "train_count": 8, "eval_count": 4}]}
+    result = prepare(environment, data)
+    before = {path.name: path.read_bytes() for path in environment[1].iterdir()}
+    monkeypatch.setattr(run_data, "_tasks", lambda *args: pytest.fail("Resampled immutable preparation"))
+    assert prepare(environment, data) == result
+    assert {path.name: path.read_bytes() for path in environment[1].iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        ("miles",),
+        ("artifacts",),
+        ("miles", "input_key"),
+        ("miles", "chat_template", "path"),
+        ("artifacts", "train", "path"),
+    ],
+)
+def test_adopted_manifest_missing_fields_are_input_errors(environment, tmp_path, keys):
+    path = source_manifest(tmp_path)
+    manifest = json.loads(path.read_text())
+    parent = manifest
+    for key in keys[:-1]:
+        parent = parent[key]
+    del parent[keys[-1]]
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(InputError, match="missing required fields|table/object"):
+        prepare(environment, {"rl_manifest": str(path)})
+
+
+@pytest.mark.parametrize("invalid", ["missing_column", "invalid_metadata", "invalid_template"])
+def test_adopted_artifact_errors_have_input_context(environment, tmp_path, invalid):
+    path = source_manifest(tmp_path)
+    manifest = json.loads(path.read_text())
+    if invalid == "invalid_template":
+        artifact = manifest["miles"]["chat_template"]
+        raw = b"\xff"
+        message = "chat template must be UTF-8"
+    else:
+        artifact = manifest["artifacts"]["train"]
+        row = json.loads((path.parent / artifact["path"]).read_text())
+        if invalid == "missing_column":
+            del row["ground_truth"]
+            message = "train row 1.*ground_truth"
+        else:
+            row["metadata"] = []
+            message = "train row 1.*metadata"
+        raw = json.dumps(row).encode() + b"\n"
+    (path.parent / artifact["path"]).write_bytes(raw)
+    artifact["sha256"] = hashlib.sha256(raw).hexdigest()
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(InputError, match=message):
+        prepare(environment, {"rl_manifest": str(path)})
+
+
+@pytest.mark.parametrize("invalid", ["json", "fields", "inputs", "missing_output"])
+def test_resume_manifest_errors_are_input_errors(environment, invalid):
+    data = {"tasks": [{"task": "multiplication", "train_count": 1}]}
+    result = prepare(environment, data)
+    path = Path(result["manifest"])
+    manifest = json.loads(path.read_text())
+    if invalid == "json":
+        path.write_text("{")
+    elif invalid == "missing_output":
+        Path(result["prompt_data"]).unlink()
+    else:
+        if invalid == "fields":
+            del manifest["contract"]
+        else:
+            manifest["inputs"] = []
+        path.write_text(json.dumps(manifest))
+    with pytest.raises(InputError, match="Invalid JSON|missing required fields|table/object|Cannot read input"):
+        prepare(environment, data)
+
+
+@pytest.mark.parametrize("target", ["{", "null", "[]"])
+def test_invalid_ifeval_target_is_an_input_error(environment, monkeypatch, target):
+    monkeypatch.setattr(run_data, "_source_rows", lambda name: [{"question": "question", "ground_truth": target}])
+    with pytest.raises(InputError, match="ifeval source row 0"):
+        prepare(environment, {"tasks": [{"task": "ifeval", "train_count": 1}]})
+
+
+def test_missing_tokenizer_directory_is_an_input_error(environment):
+    hf, output, _ = environment
+    with pytest.raises(InputError, match="Cannot read tokenizer directory"):
+        run_data.prepare_data(
+            {"tasks": [{"task": "multiplication", "train_count": 1}]},
+            hf / "missing",
+            output,
+            max_prompt_length=2000,
+            seed=17,
+        )

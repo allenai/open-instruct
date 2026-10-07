@@ -30,12 +30,19 @@ corrected targets and omits 93 problems judged ambiguous or unreliable, leaving
 original dataset.
 
 For fresh preparations that previously selected the cleaned data as `gsm8k`, use
-`task = "gsm8k-less-noise"`. It preserves that variant's previous row selection
-and ordering for the same seed and counts; task names and prepared sample IDs
-identify it explicitly. Equal seeds across the original and cleaned datasets
-do not select the same problems. Existing prepared runs retain their immutable
+`task = "gsm8k-less-noise"`. It retains that variant's sampling seed convention;
+task names and prepared sample IDs identify it explicitly. Equal seeds across the
+original and cleaned datasets do not select the same problems. Existing prepared runs retain their immutable
 data on resume; keep their original configuration rather than renaming the task
 inside an existing preparation contract.
+
+Fresh preparations select training rows first, independently of `eval_count`,
+then select held-out rows from the remainder. This can change selections compared
+with older preparations that sampled both partitions together. Existing prepared
+runs reuse their recorded data unchanged. For named source datasets, the `train`
+component in `prepared_sample_id` identifies the source split, including when the
+row is assigned to this run's held-out partition; it is not a training assignment.
+
 The [multitask example](../../configs/miles/examples/medium.toml) mixes
 GSM8K and math; it is not the complete published Olmo 3 mixture.
 Use manifest adoption for broader data. Unsupported task/verifier contracts fail
