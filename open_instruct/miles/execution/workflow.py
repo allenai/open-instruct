@@ -22,16 +22,13 @@ from pathlib import Path
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.infrastructure import artifacts
 
 logger = logger_utils.setup_logger(__name__)
 
 
 def write_json(path, document):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
-    temporary.replace(path)
+    artifacts.atomic_json(Path(path), document)
 
 
 def fingerprint(document):

@@ -25,6 +25,7 @@ from urllib import request
 
 
 def write_json(path, value):
+    """Persist resumable receipts with the shared artifact helper's durability guarantees."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # This file is transported alone; keep publication independent of package imports.
@@ -33,7 +34,14 @@ def write_json(path, value):
     try:
         with stream:
             json.dump(value, stream, indent=2, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
         temporary.replace(path)
+        descriptor = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     finally:
         temporary.unlink(missing_ok=True)
 
