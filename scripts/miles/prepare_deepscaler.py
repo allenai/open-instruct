@@ -1,14 +1,17 @@
-"""Prepare the never-give-up Deepscaler experiment as MILES prompt_data JSONL.
+"""Prepare the Deepscaler NGU experiments as MILES prompt_data JSONL.
 
-Mirrors mnoukhov/never-give-up experiments/deepscaler/qwen3_4b_deepscaler.sh: train on
-mnoukhov/deepscaler_openinstruct and evaluate on AIME/BRUMO/HMMT 2025, with the math system
-prompt prepended and the policy's own chat template. Writes train.jsonl, one JSONL per eval set
-and verifiers.json into OUTPUT, for [data] prompt_data / eval_prompt_data / reward_config.
+Mirrors the open-instruct OLMo-core baseline ai2-llm/open_instruct_internal/cmoi4l53
+(qwen3_4b_base_deepscaler_oc_2k_baseline_dapo_n8_k16): train on
+mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles and evaluate on
+allenai/aime_2025_openinstruct, rendered with the qwen_instruct_user_boxed_math chat template
+and no system prompt, as rlvr_tokenize_v1 does. The math verifier is weighted by 10, matching
+open-instruct's default verification_reward. Writes train.jsonl, one JSONL per eval set and
+verifiers.json into OUTPUT, for [data] prompt_data / eval_prompt_data / reward_config.
 
-Prompts longer than --max-prompt-tokens are dropped, matching open-instruct's --max_prompt_token_length
-filter; MILES rejects over-long prompts instead of skipping them.
+Prompts longer than --max-prompt-tokens are dropped, matching open-instruct's
+rlvr_max_length_filter_v1; MILES rejects over-long prompts instead of skipping them.
 
-Usage: python scripts/miles/prepare_deepscaler.py /weka/.../data/deepscaler-10k --train-dataset mnoukhov/deepscaler-10k-rlvr
+Usage: python scripts/miles/prepare_deepscaler.py /weka/.../data/deepscaler-10k-base --tokenizer /weka/.../Qwen3-4B-Base
 """
 
 import argparse
@@ -18,23 +21,20 @@ from pathlib import Path
 import datasets
 import transformers
 
-SYSTEM_PROMPT = "Please reason step by step, and put your final answer within \\boxed{}."
-TRAIN = "mnoukhov/deepscaler_openinstruct"
-EVALS = {
-    "aime_2025": "mnoukhov/aime_2025_openinstruct",
-    "brumo_2025": "mnoukhov/brumo_2025_openinstruct",
-    "hmmt_nov_2025": "mnoukhov/hmmt_nov_2025_openinstruct",
-    "hmmt_feb_2025": "mnoukhov/hmmt_feb_2025_openinstruct",
-}
+from open_instruct import dataset_transformation
+
+TRAIN = "mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles"
+EVALS = {"aime_2025": "allenai/aime_2025_openinstruct"}
+CHAT_TEMPLATE = "qwen_instruct_user_boxed_math"
+VERIFICATION_REWARD = 10.0
 REGISTRY = {"math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"}}
 
 
 def rows(name, dataset, tokenizer, max_prompt_tokens):
     dropped = 0
     for index, row in enumerate(datasets.load_dataset(dataset, split="train")):
-        messages = [message for message in row["messages"] if message["role"] != "assistant"]
-        # open-instruct's --system_prompt_override_file replaces any system turn.
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [m for m in messages if m["role"] != "system"]
+        # rlvr_tokenize_v1: a single message is the prompt, otherwise all but the last turn.
+        messages = row["messages"] if len(row["messages"]) == 1 else row["messages"][:-1]
         target = row["ground_truth"]
         if isinstance(target, list):
             if len(target) != 1:
@@ -52,7 +52,7 @@ def rows(name, dataset, tokenizer, max_prompt_tokens):
                 "source_dataset": dataset,
                 "source_row": index,
                 "query": messages[-1]["content"],
-                "verifiers": [{"name": "math", "target": target, "weight": 1.0}],
+                "verifiers": [{"name": "math", "target": target, "weight": VERIFICATION_REWARD}],
             },
         }
     print(f"Dropped {dropped} {dataset} prompts over {max_prompt_tokens} tokens")
@@ -70,11 +70,12 @@ def write(path, records):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--tokenizer", default="Qwen/Qwen3-4B-Thinking-2507")
+    parser.add_argument("--tokenizer", default="Qwen/Qwen3-4B-Base")
     parser.add_argument("--train-dataset", default=TRAIN)
     parser.add_argument("--max-prompt-tokens", type=int, default=2048)
     options = parser.parse_args()
     tokenizer = transformers.AutoTokenizer.from_pretrained(options.tokenizer)
+    tokenizer.chat_template = dataset_transformation.CHAT_TEMPLATES[CHAT_TEMPLATE]
     options.output.mkdir(parents=True, exist_ok=False)
     write(options.output / "train.jsonl", rows("deepscaler", options.train_dataset, tokenizer, options.max_prompt_tokens))
     for name, dataset in EVALS.items():
