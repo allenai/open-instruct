@@ -844,6 +844,12 @@ class RunSpec:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
         result = RunConfig(CoreConfig(**core), miles)
         result.validate()
+        if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
+            raise InputError(
+                "core.reward_final_answer_only is incompatible with judging.bindings "
+                "(managed or external named judges); set reward_final_answer_only=false "
+                "or use text verifiers without named judge bindings."
+            )
         return result
 
     def launch_warnings(self, miles) -> list[str]:

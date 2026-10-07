@@ -13,6 +13,7 @@ import pytest
 from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import cluster, launch
 from open_instruct.miles.rewards import general_judge, judge_registry, judging, rewards
 
@@ -126,6 +127,28 @@ def test_invalid_judge_contracts_fail_before_gpu_submission(document, mutate):
     mutate(document)
     with pytest.raises(ValueError):
         RunSpec.from_dict(document)
+
+
+@pytest.mark.parametrize("mode", ["managed", "external"])
+@pytest.mark.parametrize("section", ["core", "training"])
+def test_final_answer_only_with_named_judges_fails_before_submission(document, mode, section):
+    if mode == "external":
+        document["judges"]["general"] = {
+            "mode": "external",
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "http://judge.example/v1",
+        }
+    assert RunSpec.from_dict(document).compile().core.reward_final_answer_only is False
+    document[section] = {"reward_final_answer_only": True}
+    with pytest.raises(InputError, match=r"core.reward_final_answer_only.*judging.bindings"):
+        RunSpec.from_dict(document)
+
+
+def test_final_answer_only_without_named_judges_remains_supported(document):
+    for key in ("judges", "rubrics", "judging"):
+        document.pop(key)
+    document["core"] = {"reward_final_answer_only": True}
+    assert RunSpec.from_dict(document).compile().core.reward_final_answer_only is True
 
 
 @pytest.fixture
