@@ -2389,7 +2389,7 @@ def _drop_control_token_rows(
     template never emitted. The check reads the raw messages (every role, `reasoning_content`,
     tool calls) and tool schemas, so the special tokens the template inserts are never flagged.
     Returns the kept rows and how many were dropped (None if the guard did not run), and raises
-    if a dataset would lose more than `guard.max_drop_frac` of its rows.
+    if a dataset would lose more than one row and more than `guard.max_drop_frac` of its rows.
     """
     columns = _control_token_guard_columns(dc)
     if not guard.enabled or not columns:
@@ -2415,7 +2415,9 @@ def _drop_control_token_rows(
         f"Control-token guard: dropping {dropped} of {len(dataset)} rows ({frac:.4%}) from {dc.dataset_name} "
         f"whose raw text contains a special token. Examples: {'; '.join(examples)}"
     )
-    if frac > guard.max_drop_frac:
+    # A single hit never trips the threshold, so a small subset (under 1/max_drop_frac rows) is not
+    # rejected for one stray token; two or more are held to the fraction.
+    if dropped > 1 and frac > guard.max_drop_frac:
         raise ValueError(
             f"{dropped} of {len(dataset)} rows ({frac:.4%}) of {dc.dataset_name} contain a literal special token "
             f"({_describe_tokens(tokens)}), more than --control_token_max_drop_frac={guard.max_drop_frac}. Clean the "

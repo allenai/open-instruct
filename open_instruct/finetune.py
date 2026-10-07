@@ -193,7 +193,9 @@ class FlatArguments:
     )
     control_token_max_drop_frac: float = field(
         default=DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
-        metadata={"help": "Fail if drop_control_token_rows would drop more than this fraction of a dataset."},
+        metadata={
+            "help": "Fail if drop_control_token_rows would drop more than one row and more than this fraction of a dataset."
+        },
     )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}

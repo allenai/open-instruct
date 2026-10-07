@@ -454,10 +454,16 @@ class TestGuardInTokenization(_GuardTestBase):
         self.assertEqual(on._fingerprint, off._fingerprint)
 
     def test_threshold_error(self):
-        rows = [_clean_row(i) for i in range(9)] + [_plant(_clean_row(9), "assistant_content")]
+        rows = [_clean_row(i) for i in range(8)] + [_plant(_clean_row(i), "assistant_content") for i in (8, 9)]
         with self.assertRaisesRegex(ValueError, "control_token_max_drop_frac"):
             dataset_transformation.get_dataset_v1(self._dc(self._write(rows)), self._tc(), _guard())
-        dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard(max_drop_frac=0.1))
+        dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard(max_drop_frac=0.2))
+        self.assertEqual((len(dataset), dropped), (8, 2))
+
+    def test_single_hit_never_trips_threshold(self):
+        # 1 of 10 rows is 10%, far above the default 0.001, but one stray token is not a dirty dataset.
+        rows = [_clean_row(i) for i in range(9)] + [_plant(_clean_row(9), "assistant_content")]
+        dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard())
         self.assertEqual((len(dataset), dropped), (9, 1))
 
     def test_non_sft_transforms_are_not_guarded(self):

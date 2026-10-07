@@ -129,6 +129,12 @@ class ConvertSFTDataArguments:
     """Shuffle seed for reproducible dataset ordering"""
     shuffle_seed: int = field(default=42)
 
+    """Drop rows whose raw fields contain a literal special token (off by default; on changes the cache key)."""
+    drop_control_token_rows: bool = False
+
+    """Fail if `drop_control_token_rows` would drop more than one row and more than this fraction of a dataset."""
+    control_token_max_drop_frac: float = dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC
+
 
 def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -162,6 +168,8 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
         visualize=args.visualize,
         tokenizer_config_only=args.tokenizer_config_only,
         num_examples=args.num_examples,
+        drop_control_token_rows=args.drop_control_token_rows,
+        control_token_max_drop_frac=args.control_token_max_drop_frac,
     )
 
 

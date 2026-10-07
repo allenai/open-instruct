@@ -132,7 +132,7 @@ class SFTConfig:
     special token (e.g. `<|im_end|>`), which would tokenize to the real control id. Off by
     default; turning it on changes the dataset cache key (with `control_token_max_drop_frac`)."""
     control_token_max_drop_frac: float = dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC
-    """Fail if `drop_control_token_rows` would drop more than this fraction of a dataset.
+    """Fail if `drop_control_token_rows` would drop more than one row and more than this fraction of a dataset.
     Part of the cache key when the guard is on."""
 
 
