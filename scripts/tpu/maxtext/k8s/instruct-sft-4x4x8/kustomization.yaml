@@ -37,17 +37,19 @@ configMapGenerator:
 - name: olmo3-sft-env
   behavior: merge
   literals:
-  - RUN_NAME=olmo3-7b-instruct-sft-tpu-s0
+  - RUN_NAME=olmo3-7b-instruct-sft-tpu-s0b
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-7b-think-sft/0/items
   - TRAIN_FILES=/mnt/post-training/data/dolci-instruct-sft-shuf-s0/*.parquet
   - TOTAL_DEVICES=128
   - GLOBAL_BATCH=32
   - PER_DEVICE_BATCH=0.25
   - SEQ_LEN=32768
-  # 2 epochs as a token budget: 1,706,402,500 template tokens after truncation at 32768 (data/count_tokens.py)
-  # under per-host next-fit packing (94.6% full, simulated on the real lengths) = 110,146 instances = 3,442 steps.
+  # 2 epochs as a token budget of real (non-pad) tokens: 2 x 1,706,402,500 template tokens after truncation at
+  # 32768 (data/count_tokens.py) / (1,048,576 slots x 97.56% fill) = 3,336 steps. The fill is measured on MaxText's
+  # own pipeline at this run's per-host batch of 4 sequences (one per host is 94.5%). The released run: 3,258 steps
+  # x 1,048,576 = 3,416,260,608 slot tokens under OLMo-core's OBFD packing (W&B ai2-llm/jacobm-7B-sft/zfn667tc).
   # NUM_EPOCH=3 only keeps the stream from running dry before the last step.
-  - STEPS=3442
+  - STEPS=3336
   - NUM_EPOCH=3
   - DATA_SEED=0
   - EXTRA_ARGS=logical_axis_rules=[['vocab',[]],['activation_vocab',[]]] sharding_tolerance=0.05 enable_checkpointing=true checkpoint_period=1000 ici_fsdp_parallelism=32 ici_tensor_parallelism=4 num_vocab_tiling=8 remat_policy=full attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
