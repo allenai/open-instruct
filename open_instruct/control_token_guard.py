@@ -7,6 +7,7 @@ the raw fields *before* the chat template renders them, so the control tokens th
 inserts are never seen.
 """
 
+import contextlib
 import json
 from collections.abc import Iterator, Sequence
 from typing import Any, NamedTuple
@@ -91,8 +92,9 @@ def _patterns(tokens: Sequence[str]) -> _Patterns:
     )
 
 
-# Content given as `{"type": "text", "text": ...}` parts; templates render the texts joined.
-_TEXT_PART_PATTERN = '"text"'
+# The `"text"` key of `{"type": "text", "text": ...}` content parts in JSON text, however escaped;
+# templates render a list of such parts joined.
+_TEXT_PART_PATTERN = '\\\\*"' + "".join(_re2_json_char(char) for char in "text") + '\\\\*"'
 
 
 def _joined_text_part_lists(value: Any) -> Iterator[str]:
@@ -214,6 +216,22 @@ def _rows_with_match(
         joined = None if pyarrow.types.is_map(array_type) else _joined_text_parts(array)
         if joined is not None:
             hits |= _matches(joined, patterns.literal)
+        elif isinstance(array_type.value_type, pyarrow.BaseExtensionType):
+            # Parts stored one JSON value each: decode the lists that may hold text parts.
+            storage = values.storage
+            for row in np.unique(parents[_matches(storage, _TEXT_PART_PATTERN)]):
+                if hits[row]:
+                    continue
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
+                    parts = [
+                        json.loads(text)
+                        for text in storage[offsets[row] - offsets[0] : offsets[row + 1] - offsets[0]].to_pylist()
+                    ]
+                    hits[row] = any(
+                        token in joined_text
+                        for joined_text in _joined_text_part_lists(parts)
+                        for token in patterns.tokens
+                    )
         if array.null_count:
             hits &= array.is_valid().to_numpy(zero_copy_only=False)
         return hits

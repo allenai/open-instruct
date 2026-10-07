@@ -2732,13 +2732,22 @@ class DatasetTransformationCache:
                     loaded_dataset = loaded_dataset.add_column("index", range(len(loaded_dataset)))
                 statistics = EMPTY_DATASET_STATISTICS.copy()
                 if guard.enabled:
-                    # Guarded builds store their statistics next to the data (see below).
-                    with contextlib.suppress(Exception):
+                    # Guarded builds store their statistics next to the data (see below); a hit
+                    # without them (an interrupted upload, say) cannot vouch for its drops.
+                    try:
                         path = hf_hub_download(
                             repo_name, _STATISTICS_FILENAME, repo_type="dataset", revision=self.config_hash
                         )
                         with open(path) as f:
                             statistics = json.load(f)
+                        if not statistics.get("control_token_guard"):
+                            raise ValueError("no control_token_guard record")
+                    except Exception as exc:
+                        raise ValueError(
+                            f"Cached dataset {repo_name}@{self.config_hash} was built with --drop_control_token_rows "
+                            f"but its {_STATISTICS_FILENAME} is missing or unreadable ({exc}). Rebuild it with "
+                            "--dataset_skip_cache."
+                        ) from exc
                 return loaded_dataset, statistics
 
         print("Cache not found, transforming datasets...")

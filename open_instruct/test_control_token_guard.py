@@ -297,6 +297,23 @@ class TestRowMask(unittest.TestCase):
         wrapped = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array(storage))
         self.assertEqual(control_token_guard._rows_with_match(wrapped, patterns).tolist(), [True, False])
 
+    def test_token_split_across_json_valued_parts_is_found(self):
+        # Content as a list of `Json` values, one per part, with the "text" key itself escaped.
+        patterns = control_token_guard._patterns(self.TOKENS)
+        rows = [
+            [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "end|>"}],
+            [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "start"}],
+        ]
+        storage = [json.dumps(part).replace('"text"', '"\\u0074ext"') for row in rows for part in row]
+        self.assertEqual(json.loads(storage[0]), rows[0][0])
+        parts = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array(storage))
+        lists = pyarrow.ListArray.from_arrays(pyarrow.array([0, 2, 4], type=pyarrow.int32()), parts)
+        self.assertEqual(control_token_guard._rows_with_match(lists, patterns).tolist(), [True, False])
+        # The same parts as whole-message JSON text.
+        messages = [json.dumps({"role": "user", "content": row}).replace('"text"', '"\\u0074ext"') for row in rows]
+        wrapped = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array(messages))
+        self.assertEqual(control_token_guard._rows_with_match(wrapped, patterns).tolist(), [True, False])
+
     def test_json_scan_is_fast_on_clean_rows_with_many_tokens(self):
         # The escape-aware pattern only runs where a token character appears escaped.
         tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
@@ -506,6 +523,18 @@ class TestGuardInTokenization(_GuardTestBase):
             )
         self.assertEqual(loaded_statistics["per_dataset_stats"][0]["control_token_rows_dropped"], 1)
         self.assertEqual(loaded_statistics["control_token_guard"], built_statistics["control_token_guard"])
+
+    def test_guarded_hf_hit_without_statistics_raises(self):
+        rows = [_clean_row(0)]
+        with (
+            mock.patch.object(dataset_transformation, "revision_exists", return_value=True),
+            mock.patch.object(
+                dataset_transformation, "load_dataset", return_value=datasets.Dataset.from_dict({"a": [1]})
+            ),
+            mock.patch.object(dataset_transformation, "hf_hub_download", side_effect=FileNotFoundError("missing")),
+            self.assertRaisesRegex(ValueError, "--dataset_skip_cache"),
+        ):
+            self._cached_statistics(rows, cache_mode="hf", drop_control_token_rows=True)
 
     def test_explicit_hash_must_name_a_cache_built_with_the_same_guard(self):
         rows = [_clean_row(0), _plant(_clean_row(1), "tool_content"), _clean_row(2)]
