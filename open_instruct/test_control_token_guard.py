@@ -335,6 +335,31 @@ class TestRowMask(unittest.TestCase):
             [True, False],
         )
 
+    def test_nested_tool_values_are_decoded_once(self):
+        # Only a top-level tools string is decoded a second time; a backslash in a nested
+        # `Json` value is ordinary text.
+        patterns = control_token_guard._patterns(self.TOKENS)
+        description = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array([json.dumps("C:\\tmp")]))
+        tools = pyarrow.ListArray.from_arrays(
+            pyarrow.array([0, 1], type=pyarrow.int32()),
+            pyarrow.StructArray.from_arrays([description], names=["description"]),
+        )
+        self.assertEqual(control_token_guard._rows_with_match(tools, patterns, json_column=True).tolist(), [False])
+
+    def test_text_parts_of_a_slice_are_joined_from_that_slice_only(self):
+        patterns = control_token_guard._patterns(self.TOKENS)
+        part = {"type": "text", "text": "x"}
+        rows = [[part, part]] * 50 + [[{"type": "text", "text": "a<|im_"}, {"type": "text", "text": "end|>"}]]
+        lists = pyarrow.array(rows)
+        with mock.patch.object(
+            control_token_guard.compute, "call_function", wraps=control_token_guard.compute.call_function
+        ) as call:
+            hits = control_token_guard._rows_with_match(lists.slice(49, 2), patterns)
+        self.assertEqual(hits.tolist(), [False, True])
+        struct_field_inputs = [c.args[1][0] for c in call.call_args_list if c.args[0] == "struct_field"]
+        self.assertTrue(struct_field_inputs)
+        self.assertTrue(all(len(values) == 4 for values in struct_field_inputs))
+
     def test_json_scan_is_fast_on_clean_rows_with_many_tokens(self):
         # The escape-aware pattern only runs where a token character appears escaped.
         tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)

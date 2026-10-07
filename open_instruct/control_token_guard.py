@@ -144,7 +144,10 @@ def _joined_text_parts(array: pyarrow.Array) -> pyarrow.Array | None:
     if not pyarrow.types.is_struct(value_type) or value_type.get_field_index("text") < 0:
         return None
     text_type = value_type.field("text").type
-    texts = compute.call_function("struct_field", [array.values], compute.StructFieldOptions("text"))
+    # Only this slice's values: `values` is the whole unsliced child.
+    offsets = array.offsets.to_numpy(zero_copy_only=False).astype(np.int64)
+    values = array.values.slice(offsets[0], offsets[-1] - offsets[0])
+    texts = compute.call_function("struct_field", [values], compute.StructFieldOptions("text"))
     if isinstance(text_type, pyarrow.BaseExtensionType):
         # A `Json` text field: decode each value, keeping only the ones that are strings.
         decoded = [_json_string_or_empty(text) for text in texts.storage.to_pylist()]
@@ -152,7 +155,8 @@ def _joined_text_parts(array: pyarrow.Array) -> pyarrow.Array | None:
     elif not (pyarrow.types.is_string(text_type) or pyarrow.types.is_large_string(text_type)):
         return None
     texts = compute.call_function("coalesce", [texts, pyarrow.scalar("", type=text_type)])
-    rebuilt = type(array).from_arrays(array.offsets, texts)
+    rebased = pyarrow.array(offsets - offsets[0], type=array.offsets.type)
+    rebuilt = type(array).from_arrays(rebased, texts)
     return compute.call_function("binary_join", [rebuilt, pyarrow.scalar("", type=text_type)])
 
 
@@ -174,7 +178,9 @@ def _rows_with_match(
 ) -> np.ndarray:
     """For each element of `array`, whether any string nested anywhere inside it spells a token.
 
-    `json_text` strings (a `json_column` stored as text, or the storage of an Arrow extension
+    `json_column` marks a top-level value the pipeline decodes twice when it is JSON text that
+    holds JSON text (the tools column); nested values are decoded once. `json_text` strings (a
+    `json_column` stored as text, or the storage of an Arrow extension
     type such as datasets' `Json` feature) are decoded before rendering, so escaped spellings
     count there, confirmed by decoding. Struct field names count too, for every row where the
     struct itself is set: chat templates render the keys of tool-call arguments and tool
@@ -209,10 +215,10 @@ def _rows_with_match(
             hits |= array.is_valid().to_numpy(zero_copy_only=False)
         # flatten() applies the struct's offset and null mask to every child.
         for child in array.flatten():
-            hits |= _rows_with_match(child, patterns, json_column=json_column)
+            hits |= _rows_with_match(child, patterns)
         return hits
     if pyarrow.types.is_fixed_size_list(array_type):
-        return _rows_with_match(array.cast(pyarrow.list_(array_type.value_field)), patterns, json_column=json_column)
+        return _rows_with_match(array.cast(pyarrow.list_(array_type.value_field)), patterns)
     if (
         pyarrow.types.is_list(array_type)
         or pyarrow.types.is_large_list(array_type)
@@ -222,7 +228,7 @@ def _rows_with_match(
         # may still own values, so its row is masked out afterwards.
         offsets = array.offsets.to_numpy(zero_copy_only=False).astype(np.int64)
         values = array.values.slice(offsets[0], offsets[-1] - offsets[0])
-        child_hits = _rows_with_match(values, patterns, json_column=json_column)
+        child_hits = _rows_with_match(values, patterns)
         parents = np.repeat(np.arange(len(array)), np.diff(offsets))
         hits[parents[child_hits]] = True
         joined = None if pyarrow.types.is_map(array_type) else _joined_text_parts(array)
