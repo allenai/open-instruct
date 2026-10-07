@@ -48,6 +48,7 @@ from transformers.training_args import _convert_str_dict
 
 from open_instruct import logger_utils, model_utils, utils
 from open_instruct.dataset_transformation import (
+    DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
     INPUT_IDS_KEY,
     TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
@@ -178,6 +179,22 @@ class FlatArguments:
                 "leaves it unterminated, 'terminate' ends it with a trainable EOS, 'drop' "
                 "discards it. The default leaves existing dataset cache hashes untouched."
             )
+        },
+    )
+    drop_control_token_rows: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Drop rows whose raw messages, reasoning, tool calls or tool schemas contain a literal "
+                "special token (e.g. '<|im_end|>'), which would tokenize to the real control id. Off by "
+                "default; turning it on changes the dataset cache key."
+            )
+        },
+    )
+    control_token_max_drop_frac: float = field(
+        default=DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
+        metadata={
+            "help": "Fail if drop_control_token_rows would drop more than one row and more than this fraction of a dataset."
         },
     )
     overwrite_cache: bool = field(
@@ -529,6 +546,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             hf_entity=args.hf_entity,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
+            drop_control_token_rows=args.drop_control_token_rows,
+            control_token_max_drop_frac=args.control_token_max_drop_frac,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")

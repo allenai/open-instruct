@@ -224,6 +224,8 @@ def convert_hf_to_numpy_sft(
     tokenizer_config_only: bool = False,
     num_examples: int = 0,
     batch_size: int = 1000,
+    drop_control_token_rows: bool = False,
+    control_token_max_drop_frac: float = dataset_transformation.DEFAULT_CONTROL_TOKEN_MAX_DROP_FRAC,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -251,6 +253,8 @@ def convert_hf_to_numpy_sft(
         dataset_local_cache_dir=dataset_local_cache_dir,
         dataset_skip_cache=dataset_skip_cache,
         drop_dataset_source=False,
+        drop_control_token_rows=drop_control_token_rows,
+        control_token_max_drop_frac=control_token_max_drop_frac,
     )
 
     train_dataset = train_dataset.shuffle(seed=shuffle_seed)
@@ -421,6 +425,7 @@ def convert_hf_to_numpy_sft(
         chat_template_name=dataset_statistics.get("chat_template_name"),
         chat_template_source=dataset_statistics.get("chat_template_source"),
         chat_template_hash=dataset_statistics.get("chat_template_hash"),
+        control_token_guard=dataset_statistics.get("control_token_guard"),
         per_dataset_counts=stats["per_dataset_counts"],
         per_dataset_tokens=stats["per_dataset_tokens"],
         per_dataset_trainable_tokens=stats["per_dataset_trainable_tokens"],
@@ -444,6 +449,7 @@ def write_dataset_statistics(
     per_dataset_filtered: dict[str, int],
     chat_template_source: str | None = None,
     chat_template_hash: str | None = None,
+    control_token_guard: dict[str, Any] | None = None,
 ) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -476,6 +482,9 @@ def write_dataset_statistics(
             if total_instances > 0
             else 0,
         }
+        # The guard's fields appear only when it ran, so unguarded statistics keep their layout.
+        if control_token_guard is not None:
+            merged_stat["control_token_rows_dropped"] = pre_stat.get("control_token_rows_dropped")
         merged_stats.append(merged_stat)
 
     stats_data = {
@@ -499,6 +508,12 @@ def write_dataset_statistics(
             "average_sequence_length": total_tokens / total_instances if total_instances > 0 else 0,
         },
     }
+    control_token_rows_dropped = None
+    if control_token_guard is not None:
+        dropped_counts = [stat["control_token_rows_dropped"] for stat in merged_stats]
+        control_token_rows_dropped = sum(count or 0 for count in dropped_counts)
+        stats_data["configuration"]["control_token_guard"] = control_token_guard
+        stats_data["overall_statistics"]["control_token_rows_dropped"] = control_token_rows_dropped
 
     json_path = output_dir / "dataset_statistics.json"
     with json_path.open("w") as f:
@@ -518,7 +533,10 @@ def write_dataset_statistics(
         f.write(f"- Max Sequence Length: {max_seq_length}\n")
         f.write(f"- Chat Template: {chat_template_name}\n")
         f.write(f"- Chat Template Source: {chat_template_source}\n")
-        f.write(f"- Chat Template Hash: {chat_template_hash}\n\n")
+        f.write(f"- Chat Template Hash: {chat_template_hash}\n")
+        if control_token_guard is not None:
+            f.write(f"- Control-Token Guard: {control_token_guard}\n")
+        f.write("\n")
 
         f.write("Per-Dataset Statistics:\n")
         f.write("=" * 80 + "\n")
@@ -533,6 +551,8 @@ def write_dataset_statistics(
             f.write(
                 f"  - Instances filtered during transformation: {stat.get('instances_filtered_during_transformation', 'N/A')}\n"
             )
+            if control_token_guard is not None:
+                f.write(f"  - Rows dropped by the control-token guard: {stat['control_token_rows_dropped']}\n")
 
             if stat.get("frac_or_num_samples") is not None:
                 if isinstance(stat["frac_or_num_samples"], float):
@@ -563,6 +583,8 @@ def write_dataset_statistics(
         f.write(f"- Trainable tokens: {stats_data['overall_statistics']['trainable_tokens']:,} ")
         f.write(f"({stats_data['overall_statistics']['trainable_percentage']:.1f}%)\n")
         f.write(f"- Instances filtered out: {stats_data['overall_statistics']['instances_filtered']}\n")
+        if control_token_guard is not None:
+            f.write(f"- Rows dropped by the control-token guard: {control_token_rows_dropped}\n")
         f.write(f"- Average sequence length: {stats_data['overall_statistics']['average_sequence_length']:.1f}\n")
 
     logger.info(f"Written human-readable statistics to {text_path}")
