@@ -7,6 +7,7 @@ the raw fields *before* the chat template renders them, so the control tokens th
 inserts are never seen.
 """
 
+import json
 from collections.abc import Iterator, Sequence
 from typing import Any, NamedTuple
 
@@ -40,14 +41,21 @@ def _re2_literal(text: str) -> str:
     return "".join("\\" + char if char in _RE2_METACHARACTERS else char for char in text)
 
 
+# One or more backslashes: JSON text that itself holds JSON text escapes its backslashes again.
+_RE2_BACKSLASHES = "\\\\+"
+
+
 def _re2_json_unicode_escape(code_unit: int) -> str:
     # JSON's \uXXXX accepts either case for the hex digits.
     digits = "".join(f"[{d}{d.upper()}]" if d.isalpha() else d for d in f"{code_unit:04x}")
-    return "\\\\u" + digits
+    return _RE2_BACKSLASHES + "u" + digits
 
 
 def _re2_json_char(char: str) -> str:
-    """Every way JSON text can spell `char` inside a string."""
+    """Every way JSON text, possibly encoded twice, can spell `char` inside a string.
+
+    A superset: a match is confirmed by decoding before it counts.
+    """
     options = [_re2_literal(char)]
     code = ord(char)
     if code <= 0xFFFF:
@@ -56,11 +64,12 @@ def _re2_json_char(char: str) -> str:
         high, low = 0xD800 + ((code - 0x10000) >> 10), 0xDC00 + ((code - 0x10000) & 0x3FF)
         options.append(_re2_json_unicode_escape(high) + _re2_json_unicode_escape(low))
     if char in _JSON_SHORT_ESCAPES:
-        options.append("\\\\" + _re2_literal(_JSON_SHORT_ESCAPES[char]))
+        options.append(_RE2_BACKSLASHES + _re2_literal(_JSON_SHORT_ESCAPES[char]))
     return "(?:" + "|".join(options) + ")"
 
 
 class _Patterns(NamedTuple):
+    tokens: tuple[str, ...]
     literal: str
     """Matches a token spelled out in plain text."""
     json: str
@@ -69,6 +78,7 @@ class _Patterns(NamedTuple):
 
 def _patterns(tokens: Sequence[str]) -> _Patterns:
     return _Patterns(
+        tokens=tuple(tokens),
         literal="|".join(_re2_literal(token) for token in tokens),
         json="|".join("".join(_re2_json_char(char) for char in token) for token in tokens),
     )
@@ -77,6 +87,24 @@ def _patterns(tokens: Sequence[str]) -> _Patterns:
 def _matches(strings: pyarrow.Array, pattern: str) -> np.ndarray:
     matched = compute.call_function("match_substring_regex", [strings], compute.MatchSubstringOptions(pattern))
     return compute.call_function("coalesce", [matched, False]).to_numpy(zero_copy_only=False)
+
+
+def _decoded_json_spells_token(text: str, tokens: Sequence[str], decode_string_result: bool) -> bool:
+    """Whether JSON `text` decodes to a value containing a token.
+
+    With `decode_string_result`, a value that decodes to a string is decoded once more, as
+    `_normalize_tools_for_chat_template` does with a tools value that is itself JSON text.
+    Undecodable text counts as a hit, since the pipeline could not parse it either.
+    """
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return True
+    if any(True for _ in control_token_locations(value, tokens)):
+        return True
+    if decode_string_result and isinstance(value, str):
+        return _decoded_json_spells_token(value, tokens, decode_string_result=False)
+    return False
 
 
 def _joined_text_parts(array: pyarrow.Array) -> pyarrow.Array | None:
@@ -94,40 +122,51 @@ def _joined_text_parts(array: pyarrow.Array) -> pyarrow.Array | None:
     texts = compute.call_function("struct_field", [array.values], compute.StructFieldOptions("text"))
     texts = compute.call_function("coalesce", [texts, ""])
     rebuilt = type(array).from_arrays(array.offsets, texts)
-    return compute.call_function("binary_join", [rebuilt, ""])
+    return compute.call_function("binary_join", [rebuilt, pyarrow.scalar("", type=text_type)])
 
 
-def _rows_with_match(array: pyarrow.Array | pyarrow.ChunkedArray, patterns: _Patterns, json_text: bool) -> np.ndarray:
+def _rows_with_match(
+    array: pyarrow.Array | pyarrow.ChunkedArray,
+    patterns: _Patterns,
+    json_text: bool = False,
+    json_column: bool = False,
+) -> np.ndarray:
     """For each element of `array`, whether any string nested anywhere inside it spells a token.
 
-    Strings that are JSON text (`json_text`, or the storage of an Arrow extension type such as
-    datasets' `Json` feature) are matched with escapes allowed, since they are decoded before
-    rendering. Struct field names count too, for every row where the struct itself is set:
-    chat templates render the keys of tool-call arguments and tool schemas, and a decoded row
-    carries every field of the struct type, unset ones as None.
+    `json_text` strings (a `json_column` stored as text, or the storage of an Arrow extension
+    type such as datasets' `Json` feature) are decoded before rendering, so escaped spellings
+    count there, confirmed by decoding. Struct field names count too, for every row where the
+    struct itself is set: chat templates render the keys of tool-call arguments and tool
+    schemas, and a decoded row carries every field of the struct type, unset ones as None.
     """
     if isinstance(array, pyarrow.ChunkedArray):
         if array.num_chunks == 0:
             return np.zeros(0, dtype=bool)
-        return np.concatenate([_rows_with_match(chunk, patterns, json_text) for chunk in array.chunks])
+        return np.concatenate([_rows_with_match(chunk, patterns, json_text, json_column) for chunk in array.chunks])
     hits = np.zeros(len(array), dtype=bool)
     array_type = array.type
     if isinstance(array_type, pyarrow.BaseExtensionType):
-        return _rows_with_match(array.storage, patterns, json_text=True)
+        return _rows_with_match(array.storage, patterns, json_text=True, json_column=json_column)
     if pyarrow.types.is_dictionary(array_type):
-        return _rows_with_match(array.dictionary_decode(), patterns, json_text)
+        return _rows_with_match(array.dictionary_decode(), patterns, json_text, json_column)
     if pyarrow.types.is_string(array_type) or pyarrow.types.is_large_string(array_type):
-        return _matches(array, patterns.json if json_text else patterns.literal)
+        if not json_text:
+            return _matches(array, patterns.literal)
+        hits = _matches(array, patterns.json)
+        for index in np.flatnonzero(hits):
+            text = array[int(index)].as_py()
+            hits[index] = _decoded_json_spells_token(text, patterns.tokens, decode_string_result=json_column)
+        return hits
     if pyarrow.types.is_struct(array_type):
         names = [array_type.field(i).name for i in range(array_type.num_fields)]
         if names and _matches(pyarrow.array(names, type=pyarrow.string()), patterns.literal).any():
             hits |= array.is_valid().to_numpy(zero_copy_only=False)
         # flatten() applies the struct's offset and null mask to every child.
         for child in array.flatten():
-            hits |= _rows_with_match(child, patterns, json_text)
+            hits |= _rows_with_match(child, patterns, json_column=json_column)
         return hits
     if pyarrow.types.is_fixed_size_list(array_type):
-        return _rows_with_match(array.cast(pyarrow.list_(array_type.value_field)), patterns, json_text)
+        return _rows_with_match(array.cast(pyarrow.list_(array_type.value_field)), patterns, json_column=json_column)
     if (
         pyarrow.types.is_list(array_type)
         or pyarrow.types.is_large_list(array_type)
@@ -136,12 +175,13 @@ def _rows_with_match(array: pyarrow.Array | pyarrow.ChunkedArray, patterns: _Pat
         # `offsets` already accounts for a slice; `values` is the unsliced child. A null list
         # may still own values, so its row is masked out afterwards.
         offsets = array.offsets.to_numpy(zero_copy_only=False).astype(np.int64)
-        child_hits = _rows_with_match(array.values.slice(offsets[0], offsets[-1] - offsets[0]), patterns, json_text)
+        values = array.values.slice(offsets[0], offsets[-1] - offsets[0])
+        child_hits = _rows_with_match(values, patterns, json_column=json_column)
         parents = np.repeat(np.arange(len(array)), np.diff(offsets))
         hits[parents[child_hits]] = True
         joined = None if pyarrow.types.is_map(array_type) else _joined_text_parts(array)
         if joined is not None:
-            hits |= _matches(joined, patterns.json if json_text else patterns.literal)
+            hits |= _matches(joined, patterns.literal)
         if array.null_count:
             hits &= array.is_valid().to_numpy(zero_copy_only=False)
         return hits
@@ -161,8 +201,8 @@ def control_token_row_mask(
     Every string leaf counts, however deeply nested: message content in any role (text parts
     joined as the template joins them), `reasoning_content`, tool-call names and arguments (keys
     and values), and tool schemas, whether stored as structs, JSON strings or datasets' `Json`
-    feature. Strings in `json_columns` are JSON text the pipeline decodes before rendering, so
-    escaped spellings count there. This is deliberately a superset of what any one template
+    feature. A string column in `json_columns` is JSON text the pipeline decodes before
+    rendering, so escaped spellings count there. This is deliberately a superset of what any one template
     renders: a token in a field the template ignores (a tool-call `id`, say) still drops the row.
     Columns missing from `dataset` are skipped. With `stop_at_first_hit` the scan stops after
     the first batch with a hit and the remaining rows read as False.
@@ -175,7 +215,8 @@ def control_token_row_mask(
     start = 0
     for batch in dataset.select_columns(present).with_format("arrow").iter(batch_size=_SCAN_BATCH_SIZE):
         for name, column in zip(batch.column_names, batch.columns):
-            mask[start : start + batch.num_rows] |= _rows_with_match(column, patterns, name in json_columns)
+            is_json = name in json_columns
+            mask[start : start + batch.num_rows] |= _rows_with_match(column, patterns, is_json, is_json)
         start += batch.num_rows
         if stop_at_first_hit and mask.any():
             break

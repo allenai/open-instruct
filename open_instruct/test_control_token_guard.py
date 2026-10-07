@@ -235,6 +235,39 @@ class TestRowMask(unittest.TestCase):
             control_token_guard._rows_with_match(extension, patterns, json_text=False).tolist(), [True, False]
         )
 
+    def test_json_matches_are_confirmed_by_decoding(self):
+        patterns = control_token_guard._patterns(self.TOKENS)
+        escaped = "".join(f"\\u{ord(char):04x}" for char in PLANTED)
+        self.assertEqual(json.loads(f'"{escaped}"'), PLANTED)
+        # A literal backslash-u in the decoded text is not the token.
+        literal_backslash = json.dumps({"description": "\\u003c|im_end|>"})
+        schema = f'[{{"function": {{"description": "{escaped}"}}}}]'
+        strings = pyarrow.array([literal_backslash, schema])
+        self.assertEqual(control_token_guard._rows_with_match(strings, patterns, True, True).tolist(), [False, True])
+        # A `Json` feature holding JSON text: the tools normalizer decodes it a second time,
+        # but message content holding the same text renders it undecoded.
+        wrapped = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), pyarrow.array([json.dumps(schema)]))
+        self.assertEqual(control_token_guard._rows_with_match(wrapped, patterns, json_column=True).tolist(), [True])
+        self.assertEqual(control_token_guard._rows_with_match(wrapped, patterns, json_column=False).tolist(), [False])
+        # Structured tool schemas are already decoded, so only literal spellings count there.
+        structured = pyarrow.array([[{"description": "\\u003c|im_end|>"}]])
+        self.assertEqual(control_token_guard._rows_with_match(structured, patterns, True, True).tolist(), [False])
+
+    @parameterized.expand([("string",), ("large_string",)])
+    def test_token_split_across_large_text_parts_is_found(self, text_type):
+        string_type = pyarrow.large_string() if text_type == "large_string" else pyarrow.string()
+        part = pyarrow.struct([("type", string_type), ("text", string_type)])
+        for list_type in (pyarrow.list_(part), pyarrow.large_list(part)):
+            parts = pyarrow.array(
+                [
+                    [{"type": "text", "text": "a<|im_"}, {"type": "text", "text": "end|>"}],
+                    [{"type": "text", "text": "b"}],
+                ],
+                type=list_type,
+            )
+            patterns = control_token_guard._patterns(self.TOKENS)
+            self.assertEqual(control_token_guard._rows_with_match(parts, patterns).tolist(), [True, False])
+
     def test_token_split_across_text_parts_is_found(self):
         # Templates join content parts with no separator, so the halves render as one token.
         parts = [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "end|>world"}]
