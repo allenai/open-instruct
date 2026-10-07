@@ -213,7 +213,11 @@ def render(native_help=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate reference inputs and render in memory without writing files; generated pages are not tracked, so no output comparison is performed",
+    )
     parser.add_argument("--native-help", type=Path, help="Optional help artifact captured in the pinned runtime")
     parser.add_argument(
         "--output-dir", type=Path, default=ROOT / "runs/miles-docs", help="Directory for generated Markdown"

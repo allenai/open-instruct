@@ -35,6 +35,7 @@ fi
 
 if [[ $# -eq 0 ]]; then
   echo "Usage: $0 [--cuda-version 12|13] SCRIPT [SCRIPT_ARGS...]"
+  echo "       $0 --miles CONFIG [--set KEY=VALUE ...]"
   exit 1
 fi
 

@@ -266,7 +266,7 @@ The Core commit pinned in `runtime/miles/runtime.lock.json` includes these
 controls; images built from an older lock do not. Selecting router-selected counts
 with an older Core dependency fails explicitly.
 
-`open_instruct/test_miles_router_objective.py` checks losses and gradients against
+`tests/miles/test_adapter_router_objective.py` checks losses and gradients against
 an independent reference for every grouping/averaging/count-source combination,
 with and without activation recomputation. It also checks unchanged replay
 outputs and policy gradients. The pinned Core source includes native count-source
