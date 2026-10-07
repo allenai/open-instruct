@@ -53,6 +53,17 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
             _touch(os.path.join(tmp, "token_ids_part_0000.csv.gz"))
             self.assertTrue(olmo_core_finetune._numpy_dir_is_populated(tmp))
 
+    def test_missing_statistics_is_not_populated_when_required(self) -> None:
+        # Conversion writes dataset_statistics.json last; a run killed before it left a broken cache.
+        with tempfile.TemporaryDirectory() as tmp:
+            _touch(os.path.join(tmp, "token_ids_part_0000.npy"))
+            _touch(os.path.join(tmp, "labels_mask_part_0000.npy"))
+            _touch(os.path.join(tmp, "token_ids_part_0000.csv.gz"))
+            self.assertTrue(olmo_core_finetune._numpy_dir_is_populated(tmp))
+            self.assertFalse(olmo_core_finetune._numpy_dir_is_populated(tmp, require_statistics=True))
+            _touch(os.path.join(tmp, "dataset_statistics.json"))
+            self.assertTrue(olmo_core_finetune._numpy_dir_is_populated(tmp, require_statistics=True))
+
     def test_partial_second_chunk_is_not_populated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             for i in (0, 1):
@@ -139,6 +150,17 @@ class UseDocLensForEmoSegmentsTest(unittest.TestCase):
         self.assertEqual(config.block.routed_experts_router.emo.segment_ids_from, "doc_lens")
         self.assertEqual(config.block_overrides["7"].routed_experts_router.emo.segment_ids_from, "doc_lens")
         self.assertIsNone(config.block_overrides["15"].routed_experts_router.emo)
+
+    def test_sets_emo_routers_in_named_blocks(self) -> None:
+        # olmo_core_hybrid builds `block` as a dict of named blocks.
+        def block(emo):
+            return types.SimpleNamespace(routed_experts_router=types.SimpleNamespace(emo=emo))
+
+        config = types.SimpleNamespace(
+            block={"gdn": block(types.SimpleNamespace(segment_ids_from="eos")), "attn": block(None)}
+        )
+        self.assertEqual(olmo_core_utils.use_doc_lens_for_emo_segments(config), 1)
+        self.assertEqual(config.block["gdn"].routed_experts_router.emo.segment_ids_from, "doc_lens")
 
     def test_model_without_emo_is_untouched(self) -> None:
         config = types.SimpleNamespace(block=types.SimpleNamespace(), block_overrides=None)

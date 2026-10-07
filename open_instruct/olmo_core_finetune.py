@@ -71,8 +71,14 @@ def _chunk_indices(numpy_dir: str, pattern: str) -> set[int]:
     return indices
 
 
-def _numpy_dir_is_populated(numpy_dir: str) -> bool:
-    """Return True only if every chunk has token_ids, labels_mask, and metadata."""
+def _numpy_dir_is_populated(numpy_dir: str, require_statistics: bool = False) -> bool:
+    """Return True only if every chunk has token_ids, labels_mask, and metadata.
+
+    With `require_statistics`, also require `dataset_statistics.json`, which the conversion writes
+    last, so a run interrupted after the parts but before the statistics counts as unpopulated.
+    """
+    if require_statistics and not os.path.exists(os.path.join(numpy_dir, "dataset_statistics.json")):
+        return False
     token_chunks = _chunk_indices(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)
     if not token_chunks:
         return False
@@ -268,14 +274,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     if args.dataset.cache_dataset_only:
         pre_init_rank = int(os.environ.get("RANK", 0))
         if pre_init_rank == 0:
-            if _numpy_dir_is_populated(numpy_dir):
+            if _numpy_dir_is_populated(numpy_dir, require_statistics=args.sft.row_aligned_parts):
                 logger.info(f"Numpy SFT files already present at {numpy_dir}; nothing to do.")
             else:
                 _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
             logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 
-    if not _numpy_dir_is_populated(numpy_dir):
+    if not _numpy_dir_is_populated(numpy_dir, require_statistics=args.sft.row_aligned_parts):
         cache_args = [
             f"--model_name_or_path {args.model.model_name_or_path}",
             f"--tokenizer_name_or_path {tc.tokenizer_name_or_path}",

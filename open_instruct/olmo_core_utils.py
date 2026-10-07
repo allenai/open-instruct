@@ -481,7 +481,10 @@ def use_doc_lens_for_emo_segments(model_config: TransformerConfig) -> int:
     EMO routing otherwise splits documents at EOS, which disagrees with metadata document
     boundaries. Returns the number of EMO router configs changed; zero for models without EMO.
     """
-    blocks = [model_config.block, *(getattr(model_config, "block_overrides", None) or {}).values()]
+    # Hybrid models (olmo_core_hybrid) give `block` as a dict of named blocks.
+    block = model_config.block
+    blocks = list(block.values()) if isinstance(block, dict) else [block]
+    blocks += (getattr(model_config, "block_overrides", None) or {}).values()
     changed = 0
     for block in blocks:
         router = getattr(block, "routed_experts_router", None)
