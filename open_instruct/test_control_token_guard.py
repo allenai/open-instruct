@@ -220,6 +220,36 @@ class TestRowMask(unittest.TestCase):
         mask = control_token_guard.control_token_row_mask(selected, ["messages", "tools"], self.TOKENS)
         self.assertEqual(mask.tolist(), [True, False, True])
 
+    def test_escaped_json_spellings_are_found(self):
+        # The pipeline decodes JSON-string tool schemas and `Json` features before rendering, so an
+        # escaped spelling still renders, and tokenizes, as the control token.
+        escaped = json.dumps(TOOLS).replace("Look", "\\u003c|im_end|\\u003eLook")
+        self.assertIn(PLANTED, json.dumps(json.loads(escaped), ensure_ascii=False))
+        dataset = datasets.Dataset.from_list([{**_clean_row(0), "tools": escaped}, _clean_row(1)])
+        mask = control_token_guard.control_token_row_mask(dataset, ["tools"], self.TOKENS, json_columns=["tools"])
+        self.assertEqual(mask.tolist(), [True, False])
+        storage = pyarrow.array([r'{"q": "\u003C|im_end|>"}', '{"q": "fine"}'])
+        extension = pyarrow.ExtensionArray.from_storage(pyarrow.json_(), storage)
+        patterns = control_token_guard._patterns(self.TOKENS)
+        self.assertEqual(
+            control_token_guard._rows_with_match(extension, patterns, json_text=False).tolist(), [True, False]
+        )
+
+    def test_token_split_across_text_parts_is_found(self):
+        # Templates join content parts with no separator, so the halves render as one token.
+        parts = [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "end|>world"}]
+        clean = [{"type": "text", "text": "hello<|im_"}, {"type": "text", "text": "start"}]
+        dataset = datasets.Dataset(
+            pyarrow.Table.from_pylist(
+                [
+                    {"messages": [{"role": "user", "content": parts}]},
+                    {"messages": [{"role": "user", "content": clean}]},
+                ]
+            )
+        )
+        mask = control_token_guard.control_token_row_mask(dataset, ["messages"], self.TOKENS)
+        self.assertEqual(mask.tolist(), [True, False])
+
     def test_regex_metacharacters_are_literal(self):
         dataset = datasets.Dataset.from_list([{"messages": [{"role": "user", "content": "a|b"}]}])
         mask = control_token_guard.control_token_row_mask(dataset, ["messages"], ["a|b|c", "x.y"])
@@ -263,6 +293,12 @@ class TestGuardInTokenization(_GuardTestBase):
         self.assertEqual(mask.tolist(), carries)
         rendered = [self._tc().tokenizer.apply_chat_template(row["messages"], tokenize=False) for row in dc.dataset]
         self.assertEqual([f"<parameter={PLANTED}>" in text for text in rendered], carries)
+
+    def test_escaped_tool_schema_is_dropped(self):
+        escaped = json.dumps(TOOLS).replace("Look", "\\u003c|im_end|\\u003eLook")
+        rows = [_clean_row(0), {**_clean_row(1), "tools": escaped}, _clean_row(2)]
+        dataset, dropped = self._transform(self._dc(self._write(rows)), guard=_guard(max_drop_frac=0.5))
+        self.assertEqual((len(dataset), dropped), (2, 1))
 
     def test_unguarded_literal_reaches_the_token_ids(self):
         # The failure the guard prevents: the literal becomes the real control id.

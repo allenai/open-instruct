@@ -43,6 +43,7 @@ The main things we are looking for are:
 ## TODO: We should just simplify the tokenization setups. We have multiple "rlvr_tokenize", etc. This came from a previous version of version handling that prioritised backwards compatibility, but I think in practice we should just directly edit these functions + invalidate caches.
 """
 
+import contextlib
 import copy
 import difflib
 import hashlib
@@ -2378,7 +2379,10 @@ def _has_control_token_rows(dc: DatasetConfig, tokenizer: PreTrainedTokenizer) -
     if not columns:
         return False
     tokens = control_token_guard.control_tokens(tokenizer)
-    return bool(control_token_guard.control_token_row_mask(dc.dataset, columns, tokens, stop_at_first_hit=True).any())
+    mask = control_token_guard.control_token_row_mask(
+        dc.dataset, columns, tokens, json_columns=[TOOLS_COLUMN_KEY], stop_at_first_hit=True
+    )
+    return bool(mask.any())
 
 
 def _describe_tokens(tokens: Sequence[str]) -> str:
@@ -2400,7 +2404,7 @@ def _drop_control_token_rows(
     if not guard.enabled or not columns:
         return dataset, None
     tokens = control_token_guard.control_tokens(tokenizer)
-    mask = control_token_guard.control_token_row_mask(dataset, columns, tokens)
+    mask = control_token_guard.control_token_row_mask(dataset, columns, tokens, json_columns=[TOOLS_COLUMN_KEY])
     dropped = int(mask.sum())
     if dropped == 0:
         logger.info(f"Control-token guard: no row of {dc.dataset_name} contains any of {_describe_tokens(tokens)}.")
@@ -2410,6 +2414,10 @@ def _drop_control_token_rows(
     for index in np.flatnonzero(mask)[:3]:
         row = dataset[int(index)]
         raw = {column: row[column] for column in columns if column in row}
+        if isinstance(raw.get(TOOLS_COLUMN_KEY), str):
+            # Locate inside the decoded schema, where an escaped spelling reads as the token.
+            with contextlib.suppress(json.JSONDecodeError):
+                raw[TOOLS_COLUMN_KEY] = json.loads(raw[TOOLS_COLUMN_KEY])
         locations = sorted(set(control_token_guard.control_token_locations(raw, tokens)))
         examples.append(f"row {int(index)}: {locations}")
     logger.warning(
