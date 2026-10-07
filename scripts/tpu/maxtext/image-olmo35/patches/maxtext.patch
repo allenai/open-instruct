@@ -341,10 +341,10 @@ index 01d228df..98f9e785 100644
      elif isinstance(example[column_name], str):
        example[column_name] = hf_tokenizer(example[column_name], truncation=truncation, max_length=max_length)["input_ids"]
 diff --git a/src/maxtext/models/olmo3.py b/src/maxtext/models/olmo3.py
-index dbb73642..f9ae619a 100644
+index 4b6bc943..a26d8706 100644
 --- a/src/maxtext/models/olmo3.py
 +++ b/src/maxtext/models/olmo3.py
-@@ -95,11 +95,13 @@ class Olmo3DecoderLayer(nnx.Module):
+@@ -97,11 +97,13 @@ class Olmo3DecoderLayer(nnx.Module):
          rngs=rngs,
      )
  

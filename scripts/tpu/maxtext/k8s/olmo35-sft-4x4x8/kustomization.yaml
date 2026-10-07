@@ -1,0 +1,47 @@
+# Olmo 3.5 hero-small SFT on TPU, the H045 anchor recipe (olmo35-small-4t-emo base, Dolci-Think, the Olmo 3.5
+# template with H045's prefix labelling, 65,536-token sequences, 1,048,576 tokens/step, LR 5e-5, 3% warmup then
+# linear to 0 over 11,768 steps, AdamW wd 0, clip 1.0, router load-balancing 0.01 and z-loss 1e-5, EMO off).
+# STEPS < LR_SCHEDULE_STEPS runs the start of that schedule for loss parity against H045's W&B curve.
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+
+resources:
+- jobset.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: olmo35-sft-launcher
+  files:
+  - train_sft.sh # a copy of ../olmo3-sft/train_sft.sh (kustomize loads no files from outside this directory); keep them identical
+- name: olmo35-sft-env
+  literals:
+  - RUN_NAME=olmo35-sft-h045-tpu-memtest
+  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
+  # OLMo-core step5961 converted with o35/convert_olmocore_to_maxtext.py (fp32 masters, padded 100352 vocab).
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items
+  # allenai/dolma2-tokenizer-olmo35 @8b971706 with open-instruct's olmo35 template, saved by o35/tok_oi35.py.
+  - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo35-8b971706-h045
+  - TRAIN_FILES=/mnt/post-training/data/dolci-think-sft-shuf-s0/*.parquet
+  - MODEL_NAME=olmo35-tiny
+  - MAXTEXT_SFT_LABELS=prefix
+  - TOTAL_DEVICES=128
+  - GLOBAL_BATCH=16
+  - PER_DEVICE_BATCH=0.125
+  - SEQ_LEN=65536
+  - LR=5e-5
+  - WARMUP_FRAC=0.03
+  - LR_SCHEDULE_STEPS=11768
+  - STEPS=10
+  - NUM_EPOCH=2
+  - DATA_SEED=0
+  # FSDP 16 x tensor 8: one 64K sequence per 8 chips (the padded vocab divides by 8).
+  - EXTRA_ARGS=emo_enabled=false enable_checkpointing=true checkpoint_period=100000 ici_fsdp_parallelism=16 ici_tensor_parallelism=8 num_vocab_tiling=8 remat_policy=full
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE
+
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+  newTag: a7f34953-p1904ecdc
