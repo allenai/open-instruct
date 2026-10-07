@@ -101,7 +101,8 @@ eps_clip_high = 0.272
 wandb_mode = "online"
 wandb_team = "ai2-llm"
 wandb_project = "open_instruct_internal"
-wandb_group = "qwen3-4b-base-deepscaler-miles"
+# One group per arm with no random suffix, so the wandb run name is exactly this.
+wandb_group = "qwen3-4b-base-deepscaler_ngu_r01"
 
 [core]
 checkpoint_keep_last = 3
@@ -111,6 +112,7 @@ router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
 
 [miles]
+wandb_random_suffix = false
 adam_beta1 = 0.9
 adam_beta2 = 0.999
 rollout_temperature = 1.0
