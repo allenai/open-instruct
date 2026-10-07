@@ -32,6 +32,16 @@ has no launch/data workflow. User-input failures raise InputError (a ValueError
 subclass); the CLI prints a field-oriented error and exits 2. --debug includes the
 traceback. Preparation checks that need data/model files run where those are mounted.
 
+Backend constraint messages distinguish **Invalid configuration** (contradictory
+settings or an option used through the wrong interface), **Not implemented**
+(a feature the adapter does not support yet), and **Not validated** (a configuration
+outside the qualified runtime combinations). All three stop validation before
+training; they are not warnings that can be ignored. Implementation contributions
+with tests and focused validation runs are welcome for the latter two categories.
+The shared definitions in `open_instruct/miles/configuration/constraints.py` drive
+validation and the generated reference. Rules involving several settings remain
+in the configuration validators.
+
 ## Which section to edit
 
 | Section | Purpose |

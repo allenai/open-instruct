@@ -1,6 +1,5 @@
 """Documentation coverage and launch examples must follow the real CPU contract."""
 
-import ast
 import hashlib
 import json
 import re
@@ -13,7 +12,7 @@ import pytest
 from mkdocs.structure.files import Files
 from scripts.miles import docs_site, generate_docs
 
-from open_instruct.miles.configuration import options, run_spec
+from open_instruct.miles.configuration import constraints, options, run_spec
 from open_instruct.miles.execution import launch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,65 +64,14 @@ def test_optional_help_requires_matching_provenance_and_complete_actions(tmp_pat
 
 def test_structured_field_descriptions_cover_closed_schemas():
     descriptions = json.loads((DOCS / "reference-help.json").read_text())["structured"]
-    tree = ast.parse((ROOT / "open_instruct/miles/configuration/run_spec.py").read_text())
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_table"
-            and len(node.args) >= 3
-            and isinstance(node.args[2], ast.Set)
-        ):
-            section = ast.literal_eval(node.args[1])
-            for field in ast.literal_eval(node.args[2]):
-                assert f"{section}.{field}" in descriptions
-        if isinstance(node, ast.FunctionDef) and node.name in ("_data", "_launch"):
-            allowed = next(
-                child
-                for child in node.body
-                if isinstance(child, ast.Assign)
-                and any(isinstance(t, ast.Name) and t.id == "allowed" for t in child.targets)
-            )
-            for field in ast.literal_eval(allowed.value):
-                assert f"{node.name[1:]}.{field}" in descriptions
-    # Judge/rubric schemas are separate from RunSpec.
-    tree = ast.parse((ROOT / "open_instruct/miles/rewards/judging.py").read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "fields":
-            if len(node.args) != 3 or not isinstance(node.args[2], ast.Set):
-                continue
-            keys = ast.literal_eval(node.args[2])
-            prefix = (
-                "judges.NAME"
-                if "prepared_dir" in keys
-                else "rubrics.NAME"
-                if "profile" in keys
-                else "judging.bindings.VERIFIER"
-                if "judge" in keys
-                else None
-            )
-            if prefix:
-                for key in keys:
-                    assert f"{prefix}.{key}" in descriptions
+    for section, fields in constraints.STRUCTURED_FIELDS.items():
+        for field in fields:
+            assert f"{section}.{field}" in descriptions
 
 
 def test_special_control_descriptions_cover_dispatch():
     described = json.loads((DOCS / "reference-help.json").read_text())["special"]
-    tree = ast.parse((ROOT / "open_instruct/miles/configuration/run_spec.py").read_text())
-    loop = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.For) and isinstance(node.iter, ast.Name) and node.iter.id == "RUN_SECTIONS"
-    )
-    for node in ast.walk(loop):
-        if not isinstance(node, ast.Compare) or not isinstance(node.left, ast.Name) or node.left.id != "key":
-            continue
-        for value in node.comparators:
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                assert value.value in described
-            elif isinstance(value, ast.Tuple):
-                for key in ast.literal_eval(value):
-                    assert key in described
+    assert constraints.SPECIAL_CONTROLS.keys() <= described.keys()
 
 
 @pytest.mark.parametrize("path", sorted((ROOT / "configs/miles/examples").glob("*.toml")), ids=lambda p: p.stem)

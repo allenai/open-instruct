@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, options, topology, validation
+from open_instruct.miles.configuration import async_capacity, constraints, options, topology, validation
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
@@ -53,50 +53,8 @@ FIELD_MAP = {
     "router_balance_rel_threshold": "miles.router_balance_rel_threshold",
     "enable_mixed_chunk": "miles.sglang_enable_mixed_chunk",
 }
-UNSUPPORTED_FIELDS = {
-    "megatron_checkpoint": "use model.source/model.format or miles.load for a native Core RL resume",
-    "output_dir": "use output.root",
-    "hf_checkpoint": "use model.source; preparation supplies miles.hf_checkpoint",
-    "trainer_backend": "Core selects its native model backend; omit the Megatron optimized/compatibility switch",
-    "recompute_modules": "Core supports block activation_checkpointing, not Megatron selective modules",
-    "accumulate_allreduce_grads_in_fp32": "Core owns reduction precision; this Megatron switch has no Core equivalent",
-    "save_retain_interval": "native Core checkpoint retention is not implemented",
-    "save_tokens_per_expert_interval": "tokens-per-expert checkpoint capture is not implemented",
-    "capture_generation_samples": "use output.rollout_sample_rate to capture whole prompt groups",
-    "generation_samples_per_rollout": "use output.rollout_sample_rate to capture whole prompt groups",
-    "rollout_recovery_max_attempts": "Core does not yet implement the baseline driver retry budget",
-    "rollout_recovery_mem_fraction_static": "Core does not implement recovery-time memory overrides",
-    "rollout_stage_timeout": "Core does not yet implement the baseline per-stage deadline",
-    "rollout_health_diagnostics": "use dedicated recovery probes; the baseline diagnostic wrapper is not installed",
-    "rollout_test_fault": "use a dedicated fault-injection qualification, not an ordinary run",
-    "inference_ep_diagnostics": "use the separate inference-EP diagnostics",
-    "determinism_probe_samples": "use retained-input diagnostic scripts",
-    "determinism_probe_forward_trace": "use retained-input diagnostic scripts",
-    "determinism_probe_cross_gpu": "use retained-input diagnostic scripts",
-    "determinism_probe_retune_kda": "use retained-input diagnostic scripts",
-    "determinism_probe_l2norm_inputs": "use retained-input diagnostic scripts",
-    "weight_export_mode": "Core exports native HF tensors; use core.stream_moe_export",
-    "colocated_live_weight_export": "Core already owns live IPC export; there is no Megatron patch selector",
-    "hardware_profile": "choose explicit Core/serving settings and launch.cluster; automatic hardware policy is not implemented",
-    "code_service_mode": "provision the verifier service externally and pass its environment",
-    "code_service_workers": "provision the verifier service externally",
-    "code_service_source_revision": "record externally provisioned service provenance",
-    "start_code_service": "per-run code-service provisioning is not implemented",
-    "code_service_source_root": "per-run code-service provisioning is not implemented",
-    "code_service_python": "per-run code-service provisioning is not implemented",
-    "code_service_host": "per-run code-service provisioning is not implemented",
-    "code_service_port": "per-run code-service provisioning is not implemented",
-    "code_service_log": "per-run code-service provisioning is not implemented",
-    "fla_prewarm": "use compiler_cache.enabled; generic FLA prewarming is not implemented",
-    "fla_prewarm_sequence_length": "generic FLA prewarming is not implemented",
-    "miles_train_script": "this workflow owns the Core driver",
-    "python_path": "install code in the pinned runtime image; the launcher owns PYTHONPATH",
-    "skip_cuda_check": "plan is CPU-safe; validate checks the installed runtime",
-    "validate_miles_args": "use the validate command",
-    "no_start_ray": "the launcher owns Ray startup",
-    "dataset_profile": "choose data.tasks, data.recipe or data.rl_manifest",
-    "rl_manifest": "use data.rl_manifest",
-}
+# Retain the existing name for callers inspecting migration guidance.
+UNSUPPORTED_FIELDS = {name: rule.message for name, rule in constraints.UNSUPPORTED_RUN_FIELDS.items()}
 PATH_OPTIONS = {
     "load",
     "ref_load",
@@ -222,7 +180,7 @@ class RunSpec:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
             raise InputError("name must contain only letters, digits, dots, underscores and hyphens")
         base = path.parent
-        model = _table(document, "model", {"source", "format", "hf_template", "reference_hf"}, required=True)
+        model = _table(document, "model", constraints.STRUCTURED_FIELDS["model"], required=True)
         model["source"] = _path(model.get("source"), base, "model.source")
         if model.get("reference_hf") is not None:
             raise InputError(
@@ -239,7 +197,7 @@ class RunSpec:
         for key in ("hf_template",):
             if key in model:
                 model[key] = _path(model[key], base, f"model.{key}")
-        output = _table(document, "output", {"root", "export_hf", "hf_dir", "rollout_sample_rate"}, required=True)
+        output = _table(document, "output", constraints.STRUCTURED_FIELDS["output"], required=True)
         output["root"] = _path(output.get("root"), base, "output.root")
         if "rollout_sample_rate" in output:
             output["rollout_sample_rate"] = min(
@@ -247,18 +205,14 @@ class RunSpec:
             )
         output["export_hf"] = _boolean(output.get("export_hf", False), "output.export_hf")
         output["hf_dir"] = _path(output.get("hf_dir", str(Path(output["root"]) / "export-hf")), base, "output.hf_dir")
-        conversion = _table(document, "conversion", {"hf_output"})
+        conversion = _table(document, "conversion", constraints.STRUCTURED_FIELDS["conversion"])
         conversion["hf_output"] = _path(
             conversion.get("hf_output", str(Path(output["root"]) / "prepared" / "hf")), base, "conversion.hf_output"
         )
         data = cls._data(_table(document, "data", required=True), base)
         run_data.validate_data(data)
         launch = cls._launch(_table(document, "launch"), base)
-        cache = _table(
-            document,
-            "compiler_cache",
-            {"enabled", "shared_root", "restore", "diagnostics", "max_storage_bytes", "publish_interval_seconds"},
-        )
+        cache = _table(document, "compiler_cache", constraints.STRUCTURED_FIELDS["compiler_cache"])
         if "max_storage_bytes" in cache:
             validation.integer(cache["max_storage_bytes"], "compiler_cache.max_storage_bytes", minimum=0)
         if "publish_interval_seconds" in cache:
@@ -270,10 +224,8 @@ class RunSpec:
                 _boolean(cache[key], f"compiler_cache.{key}")
         if "shared_root" in cache:
             cache["shared_root"] = _path(cache["shared_root"], base, "compiler_cache.shared_root")
-        records = cls._records(
-            _table(document, "records", {"enabled", "root", "responses", "response_sample_rate"}), base
-        )
-        selection = _table(document, "selection", {"table", "sha256"})
+        records = cls._records(_table(document, "records", constraints.STRUCTURED_FIELDS["records"]), base)
+        selection = _table(document, "selection", constraints.STRUCTURED_FIELDS["selection"])
         if selection:
             if set(selection) != {"table", "sha256"}:
                 raise InputError("[selection] needs both table and sha256; `records select` prints the digest")
@@ -345,16 +297,7 @@ class RunSpec:
 
     @staticmethod
     def _data(data, base):
-        allowed = {
-            "seed",
-            "shuffle",
-            "tasks",
-            "recipe",
-            "rl_manifest",
-            "prompt_data",
-            "eval_prompt_data",
-            "reward_config",
-        }
+        allowed = constraints.STRUCTURED_FIELDS["data"]
         if unknown := set(data) - allowed:
             raise InputError(f"Unknown [data] fields: {sorted(unknown)}")
         selectors = [key for key in ("tasks", "recipe", "rl_manifest", "prompt_data") if key in data]
@@ -396,22 +339,7 @@ class RunSpec:
 
     @staticmethod
     def _launch(launch, base):
-        allowed = {
-            "workspace",
-            "budget",
-            "cluster",
-            "priority",
-            "min_runtime",
-            "auto_resume",
-            "max_retries",
-            "shared_memory",
-            "gpus_per_replica",
-            "weka_mounts",
-            "env",
-            "secrets",
-            "timeout",
-            "coordination",
-        }
+        allowed = constraints.STRUCTURED_FIELDS["launch"]
         if unknown := set(launch) - allowed:
             raise InputError(f"Unknown [launch] fields: {sorted(unknown)}")
         defaults = dict(
@@ -551,38 +479,34 @@ class RunSpec:
         for section in RUN_SECTIONS:
             for key, value in self.sections[section].items():
                 origin = f"{section}.{key}"
-                if key == "gpus" and section in ("trainer", "inference"):
+                control = constraints.SPECIAL_CONTROLS.get(key)
+                if control == "gpus" and section in ("trainer", "inference"):
                     put(
                         "miles.actor_num_gpus_per_node" if section == "trainer" else "miles.rollout_num_gpus",
                         value,
                         origin,
                     )
-                elif key in UNSUPPORTED_FIELDS:
-                    raise InputError(f"{origin} is unsupported: {UNSUPPORTED_FIELDS[key]}")
-                elif key in (
-                    "placement_mode",
-                    "max_context_length",
-                    "save_checkpoints",
-                    "off_policy_correction",
-                    "policy_drift_action",
-                ):
+                elif key in constraints.UNSUPPORTED_RUN_FIELDS:
+                    rule = constraints.UNSUPPORTED_RUN_FIELDS[key]
+                    raise constraints.error(f"{origin} is unsupported: {rule.message}", rule.category)
+                elif control == "deferred":
                     if key in controls and controls[key][0] != value:
                         raise InputError(f"Conflicting settings for {key}")
                     controls[key] = (value, origin)
-                elif key in ("radix_cache", "disable_radix_cache"):
+                elif control == "radix_cache":
                     value = _boolean(value, origin)
                     put("miles.sglang_disable_radix_cache", not value if key == "radix_cache" else value, origin)
-                elif key == "trainer_diagnostics":
+                elif control == "trainer_diagnostics":
                     put("core.diagnostic_interval", int(_boolean(value, origin)), origin)
-                elif key == "recompute_mode":
+                elif control == "recompute_mode":
                     if value not in ("full", "off"):
                         raise InputError(f"{origin}: Core supports full/off block recomputation, not selective mode")
                     put("core.activation_checkpointing", value == "full", origin)
-                elif key == "trainer_flash_attention_version":
+                elif control == "trainer_flash_attention_version":
                     if type(value) is not int or value not in (2, 3, 4):
                         raise InputError(f"{origin} must be 2, 3 or 4")
                     put("core.attention_backend", f"flash_{value}", origin)
-                elif key == "dynamic_batching":
+                elif control == "dynamic_batching":
                     put("miles.use_dynamic_batch_size", _boolean(value, origin), origin)
                 elif key in FIELD_MAP:
                     put(FIELD_MAP[key], value, origin)

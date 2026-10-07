@@ -6,14 +6,13 @@ include the complete reference.
 """
 
 import argparse
-import ast
 import dataclasses
 import hashlib
 import html
 import json
 from pathlib import Path
 
-from open_instruct.miles.configuration import config, options, run_spec
+from open_instruct.miles.configuration import config, constraints, options, run_spec
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs/miles"
@@ -41,53 +40,8 @@ def table(headers, rows):
 
 
 def source_constraints():
-    """Include the explicit fixed-value/replacement checks without another registry."""
-    tree = ast.parse((ROOT / "open_instruct/miles/configuration/config.py").read_text())
-    constraints = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.For) and isinstance(node.target, ast.Tuple):
-            names = [getattr(x, "id", "") for x in node.target.elts]
-            if names not in (["name", "expected"], ["name", "replacement"]):
-                continue
-            try:
-                values = ast.literal_eval(node.iter.func.value)
-            except (ValueError, AttributeError):
-                continue
-            constraints.update(
-                {
-                    key: f"Required value: {literal(value)}" if names[1] == "expected" else f"Rejected; use {value}"
-                    for key, value in values.items()
-                }
-            )
-    for name in (
-        "train_backend",
-        "custom_config_path",
-        "config",
-        "olmo_core_config",
-        "data_source_path",
-        "custom_async_data_buffer_path",
-    ):
-        constraints[name] = "Adapter-owned; cannot override"
-    constraints.update(
-        save_hf="Rejected; use output.export_hf or supported snapshot export",
-        lora_rank="Must be nonpositive; LoRA is not implemented",
-        max_weight_staleness="Must equal core.max_policy_lag",
-    )
-    constraints.update(
-        micro_batch_size="Required value: 1; use Core sequence_packing for packed forwards",
-        use_dynamic_batch_size="Required value: false",
-        offload_train="Required value: false; resident Core trainer",
-        qkv_format="thd with sequence_packing; bshd otherwise",
-        check_weight_update_selector="Required value: all",
-        ref_update_interval="Rejected; reference policy must be fixed",
-        fully_async="Requires disaggregated resident engines and positive Core lag allowance",
-        use_rollout_routing_replay="Requires use_miles_router; separate from Megatron replay",
-    )
-    for name in ("tensor_model_parallel_size", "pipeline_model_parallel_size", "context_parallel_size"):
-        constraints[name] = "Required value: 1; this Core adapter does not implement trainer TP/PP/CP > 1"
-    for name in ("use_critic", "multi_lora", "indep_dp", "use_opd", "use_routing_replay"):
-        constraints[name] = "Required value: false; no Core implementation"
-    return constraints
+    """Describe the shared backend rules without inspecting validator source."""
+    return constraints.native_descriptions()
 
 
 def render(native_help=None):
@@ -125,7 +79,11 @@ def render(native_help=None):
         [("core." + f.name, str(f.type), literal(f.default), help_data["core"][f.name]) for f in fields],
     )
     text += "\n## Unsupported Megatron-implementation controls\n\n" + table(
-        ["Field", "Replacement or limitation"], sorted(run_spec.UNSUPPORTED_FIELDS.items())
+        ["Field", "Category", "Replacement or limitation"],
+        [
+            (name, rule.category.value, rule.message)
+            for name, rule in sorted(constraints.UNSUPPORTED_RUN_FIELDS.items())
+        ],
     )
     text += "\n## Example recipes\n\nGenerated from the actual structured TOMLs. These are starting recipes, not universal defaults; see [development defaults](development-defaults.md). GPU columns distinguish per-node trainers from total rollout GPUs.\n\n"
     allocations = []
@@ -189,7 +147,7 @@ def render(native_help=None):
         recipes,
     )
     result[DOCS / "configuration.md"] = text
-    constraints = source_constraints()
+    native_constraints = source_constraints()
     groups = {"native-training-options": [], "native-serving-options": []}
     for record in schema:
         name = record["dest"]
@@ -210,7 +168,7 @@ def render(native_help=None):
                 record["type"] or record["kind"],
                 literal(record.get("choices", [])) if "choices" in record else "—",
                 default,
-                constraints.get(name, "Parser option; subject to Core/model/runtime validation"),
+                native_constraints.get(name, "Parser option; subject to Core/model/runtime validation"),
                 description,
             )
         )

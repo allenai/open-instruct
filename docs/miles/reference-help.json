@@ -216,6 +216,7 @@
     "judges.NAME.revision": "Managed only: required immutable 40-character hexadecimal model revision.",
     "judges.NAME.tensor_parallel_size": "Managed only: positive TP count, default 1.",
     "judges.NAME.timeout": "Positive seconds per judge request, default 120.",
+    "judging.bindings": "Table mapping verifier names to an explicit judge and rubric pair.",
     "judging.bindings.VERIFIER.judge": "Required name of a declared judge.",
     "judging.bindings.VERIFIER.rubric": "Required name of a declared rubric.",
     "launch.auto_resume": "Boolean, default true; Beaker restart policy. A restart into the same output root resumes from the newest native checkpoint. Restarting a run that carries a managed judge is untested.",

@@ -9,7 +9,7 @@ import copy
 import re
 from urllib.parse import urlsplit
 
-from open_instruct.miles.configuration import validation
+from open_instruct.miles.configuration import constraints, validation
 from open_instruct.miles.errors import InputError
 
 REGISTRY_ENV = "OI_MILES_JUDGE_REGISTRY"
@@ -25,32 +25,14 @@ def parse(document):
     routing = copy.deepcopy(document.get("judging", {}))
     for name, value in (("judges", judges), ("rubrics", rubrics), ("judging", routing)):
         validation.mapping(value, name)
-    validation.fields(routing, "judging", {"bindings"})
+    validation.fields(routing, "judging", constraints.STRUCTURED_FIELDS["judging"])
     bindings = routing.get("bindings", {})
     validation.mapping(bindings, "judging.bindings")
     for name, service in judges.items():
         if not re.fullmatch(r"[a-z][a-z0-9_-]*", name):
             raise InputError("judge names must be lowercase identifiers")
         validation.mapping(service, f"judges.{name}")
-        validation.fields(
-            service,
-            f"judges.{name}",
-            {
-                "mode",
-                "backend",
-                "model",
-                "revision",
-                "gpus",
-                "tensor_parallel_size",
-                "prepared_dir",
-                "chat_template",
-                "endpoint",
-                "max_context_length",
-                "max_concurrent_calls",
-                "timeout",
-                "context_extension",
-            },
-        )
+        validation.fields(service, f"judges.{name}", constraints.STRUCTURED_FIELDS["judges.NAME"])
         validation.text(service.get("model"), f"judges.{name}.model")
         mode = service.get("mode")
         if mode not in ("managed", "external"):
@@ -102,7 +84,7 @@ def parse(document):
                 raise InputError("external judge cannot specify managed placement fields")
     for name, rubric in rubrics.items():
         validation.mapping(rubric, f"rubrics.{name}")
-        validation.fields(rubric, f"rubrics.{name}", {"profile", "max_response_tokens", "temperature"})
+        validation.fields(rubric, f"rubrics.{name}", constraints.STRUCTURED_FIELDS["rubrics.NAME"])
         if rubric.get("profile") not in PROFILES:
             raise InputError("rubric requires a supported open-instruct/general-* profile")
         rubric.setdefault("max_response_tokens", 2048)
@@ -113,7 +95,7 @@ def parse(document):
             raise InputError("rubric temperature must be nonnegative")
     for name, binding in bindings.items():
         validation.mapping(binding, f"binding {name}")
-        validation.fields(binding, f"binding {name}", {"judge", "rubric"})
+        validation.fields(binding, f"binding {name}", constraints.STRUCTURED_FIELDS["judging.bindings.VERIFIER"])
         if binding.get("judge") not in judges or binding.get("rubric") not in rubrics:
             raise InputError(f"binding {name} references an unknown judge or rubric")
         if rubrics[binding["rubric"]]["max_response_tokens"] >= judges[binding["judge"]]["max_context_length"]:
