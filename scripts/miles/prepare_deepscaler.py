@@ -4,14 +4,14 @@ Mirrors the open-instruct OLMo-core baseline ai2-llm/open_instruct_internal/cmoi
 (qwen3_4b_base_deepscaler_oc_2k_baseline_dapo_n8_k16): train on
 mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles and evaluate on
 allenai/aime_2025_openinstruct, rendered with the qwen_instruct_user_boxed_math chat template
-and no system prompt, as rlvr_tokenize_v1 does. The math verifier is weighted by 10, matching
-open-instruct's default verification_reward. Writes train.jsonl, one JSONL per eval set and
+and no system prompt, as rlvr_tokenize_v1 does. Rewards use the MILES-native 1/0 scale
+(open-instruct's verification_reward is 10). Writes train.jsonl, one JSONL per eval set and
 verifiers.json into OUTPUT, for [data] prompt_data / eval_prompt_data / reward_config.
 
 Prompts longer than --max-prompt-tokens are dropped, matching open-instruct's
 rlvr_max_length_filter_v1; MILES rejects over-long prompts instead of skipping them.
 
-Usage: python scripts/miles/prepare_deepscaler.py /weka/.../data/deepscaler-10k-base --tokenizer /weka/.../Qwen3-4B-Base
+Usage: python scripts/miles/prepare_deepscaler.py /weka/.../data/deepscaler-10k-base-01 --tokenizer /weka/.../Qwen3-4B-Base
 """
 
 import argparse
@@ -26,7 +26,7 @@ from open_instruct import dataset_transformation
 TRAIN = "mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles"
 EVALS = {"aime_2025": "allenai/aime_2025_openinstruct"}
 CHAT_TEMPLATE = "qwen_instruct_user_boxed_math"
-VERIFICATION_REWARD = 10.0
+VERIFICATION_REWARD = 1.0
 REGISTRY = {"math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"}}
 
 
