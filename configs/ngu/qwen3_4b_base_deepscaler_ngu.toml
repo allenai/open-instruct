@@ -1,18 +1,19 @@
 # Never Give Up (NGU) on Deepscaler with Qwen3-4B-Base: one 8-GPU node, 4 trainer + 4 engines.
 # Matches the open-instruct OLMo-core baseline ai2-llm/open_instruct_internal/cmoi4l53
-# (qwen3_4b_base_deepscaler_oc_2k_baseline_dapo_n8_k16) except for the unused-samples handler.
+# (qwen3_4b_base_deepscaler_oc_2k_baseline_dapo_n8_k16) except for the unused-samples handler,
+# MILES-native 1/0 rewards (open-instruct uses 10/0) and the default grad clip of 1.0 (cmoi4l53 used 5).
 # Kept outside configs/miles, which holds only the maintained starters. Prepare data first with
 # scripts/miles/prepare_deepscaler.py, which renders qwen_instruct_user_boxed_math prompts.
 # For the baseline arm set async_unused_samples_handler = "retry" and drop the ngu_* options.
 schema_version = 1
-name = "qwen3-4b-base-deepscaler-ngu"
+name = "qwen3-4b-base-deepscaler-ngu-r01"
 
 [model]
 source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Base"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-ngu"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-ngu-r01"
 export_hf = true
 
 [launch]
@@ -42,10 +43,10 @@ OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 
 [data]
 # deepscaler-10k-qwen3-4b-base-32samples-quartiles; eval on allenai/aime_2025_openinstruct.
-prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k-base/train.jsonl"
-eval_prompt_data = ["aime_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k-base/eval-aime_2025.jsonl"]
-# Math verifier weighted by 10 (open-instruct verification_reward).
-reward_config = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k-base/verifiers.json"
+prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k-base-01/train.jsonl"
+eval_prompt_data = ["aime_2025", "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k-base-01/eval-aime_2025.jsonl"]
+# Math verifier scores 1/0.
+reward_config = "/weka/oe-adapt-default/michaeln/open-instruct/data/deepscaler-10k-base-01/verifiers.json"
 seed = 1
 shuffle = true
 
@@ -85,12 +86,11 @@ check_weight_update_equal = true
 update_weight_buffer_size = 1073741824
 
 [optimizer]
-# AdamW betas (0.9, 0.999), constant lr, no warmup or weight decay; max_grad_norm 5.
+# AdamW betas (0.9, 0.999), constant lr, no warmup or weight decay; default clip_grad 1.0.
 learning_rate = 0.000001
 lr_decay_style = "constant"
 lr_warmup_iters = 0
 weight_decay = 0.0
-clip_grad = 5.0
 kl_loss_coef = 0.0
 entropy_coef = 0.0
 # loss_fn dapo: clip_lower 0.2, clip_higher 0.272
@@ -130,8 +130,7 @@ eval_top_p = 0.95
 n_samples_per_eval_prompt = 32
 eval_max_response_len = 8192
 ngu_requeue_probability = 0.875
-# Reward of a correct answer under the 10x verifier weight.
-ngu_solved_reward = 10.0
+ngu_solved_reward = 1.0
 
 [async]
 fully_async = true
