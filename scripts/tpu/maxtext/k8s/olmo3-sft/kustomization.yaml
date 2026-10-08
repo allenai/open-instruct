@@ -33,4 +33,4 @@ configMapGenerator:
 # Upstream MaxText e259ed61 plus our patches (scripts/tpu/maxtext/image/build.sh).
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
-  newTag: e259ed61-pc16bd395
+  newTag: e259ed61-p792b7189

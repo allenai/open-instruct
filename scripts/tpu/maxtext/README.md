@@ -9,10 +9,11 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 
 | Path | What |
 |---|---|
-| `image/` | The training image: upstream MaxText at a pinned commit, plus `patches/maxtext.patch`, Tunix and the post-training dependencies. `build.sh <maxtext commit>` builds it with Cloud Build. |
+| `image/` | The training image: upstream MaxText at a pinned commit, plus `patches/maxtext.patch`, Tunix and the post-training dependencies. `build.sh <full maxtext commit SHA>` builds it with Cloud Build; the base image is tagged with the full SHA. |
 | `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. The base is a smoke test on one spot `2x2x4` slice (16 chips) at 4,096 tokens. |
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
+| `k8s/resume_check.py` | Checks that a resumed run trains on the same batches as the original pass. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |
 | `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. |
 | `parity/` | Token and loss-mask parity against open-instruct's SFT tokenization. |
@@ -23,6 +24,7 @@ The patch is against MaxText `e259ed61`. The fixes are not upstream yet; diffs a
 
 - **YaRN on full-attention layers only** (AI-Hypercomputer/maxtext#5544), as Olmo 3 was trained. Unpatched, the starting loss is 0.105 nats/token too high.
 - **Chat templating** (AI-Hypercomputer/maxtext#5522). The whole conversation is rendered once. Assistant spans are derived the way open-instruct derives them: common-prefix starts when the prefixes render stably, otherwise token counts with a content check. Messages after the last assistant turn are kept as untrained context. Unpatched, every multi-turn row differs.
+- **Resume skips trained batches.** Tunix skips the batches a restored checkpoint already trained on only when no data hooks are set, and MaxText always sets them. Unpatched, a run restarted after preemption or a slice failure replays the data from the start. `k8s/resume_check.py` validates a resume: `total_weights` depends only on the batch, so it must equal the original pass's at every step both ran.
 - **HF export shape table for Olmo 3** (AI-Hypercomputer/maxtext#5587). MaxText's exported `config.json` is still wrong, so `export_hf.sh` replaces it with the base model's.
 
 ## Traps

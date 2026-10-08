@@ -28,8 +28,8 @@ patches:
     - op: replace
       path: /spec/replicatedJobs/0/template/spec/template/spec/nodeSelector/cloud.google.com~1gke-tpu-topology
       value: 4x4x8
-    # hero preempts post-training. A restart resumes from the latest checkpoint (every CHECKPOINT_PERIOD steps),
-    # but MaxText's streaming HF iterator is not checkpointed: a restarted run sees the data from the start again.
+    # hero preempts post-training, and slices fail. A restart resumes from the latest checkpoint and the patched
+    # data hooks skip the batches it already trained on (the streaming HF iterator itself is not checkpointed).
     - op: replace
       path: /spec/failurePolicy/maxRestarts
       value: 3
@@ -37,7 +37,7 @@ configMapGenerator:
 - name: olmo3-sft-env
   behavior: merge
   literals:
-  - RUN_NAME=olmo3-7b-instruct-sft-tpu-s0b
+  - RUN_NAME=olmo3-7b-instruct-sft-tpu-s0c
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-7b-think-sft/0/items
   - TRAIN_FILES=/mnt/post-training/data/dolci-instruct-sft-shuf-s0/*.parquet
   - TOTAL_DEVICES=128
