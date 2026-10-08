@@ -1,0 +1,52 @@
+# Olmo 3 7B DPO smoke test on one spot 2x2x4 v4 slice of gke-tpu-v4 (allenai/open-instruct#1933): the SFT JobSet
+# under -dpo names, with the DPO launcher and settings. Starts from Olmo-3-7B-Instruct-SFT on pre-tokenized
+# Dolci-Instruct-DPO (data/build_dpo_pretokenized.py), at 4,096 tokens so it fits and compiles fast.
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+# The JobSet is immutable: delete it before applying again.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+nameSuffix: -dpo # olmo3-sft-dpo with olmo3-sft-{env,launcher}-dpo, so SFT runs are never touched.
+
+resources:
+- ../olmo3-sft
+
+patches:
+- target: {kind: JobSet, name: olmo3-sft}
+  patch: |-
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/command
+      value: [bash, /launcher/train_dpo.sh]
+    # Kustomize does not know JobSet's ConfigMap references, so nameSuffix leaves them pointing at SFT's.
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/envFrom/0/configMapRef/name
+      value: olmo3-sft-env-dpo
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/volumes/0/configMap/name
+      value: olmo3-sft-launcher-dpo
+
+configMapGenerator:
+- name: olmo3-sft-launcher
+  behavior: replace
+  files:
+  - train_dpo.sh
+- name: olmo3-sft-env
+  behavior: replace
+  literals:
+  - RUN_NAME=olmo3-dpo-smoke
+  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-7b-instruct-sft/0/items
+  - TOKENIZER_PATH=allenai/Olmo-3-7B-Instruct-SFT
+  - TRAIN_FILES=/mnt/post-training/data/dolci-instruct-dpo-pretok-s42/*.parquet
+  - TOTAL_DEVICES=16
+  - GLOBAL_BATCH=16
+  - SEQ_LEN=4096
+  - STEPS=20
+  # As in SFT: multi-host runs need checkpointing on for jax.distributed. Vocab tiling is unsupported for DPO.
+  - EXTRA_ARGS=enable_checkpointing=true checkpoint_period=1000 remat_policy=full attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE
+
+# Upstream MaxText e259ed61 plus our patches, including the DPO ones (scripts/tpu/maxtext/image/build.sh).
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+  newTag: e259ed61-p549b7497

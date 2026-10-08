@@ -62,6 +62,111 @@ index 44022cd3..de56a21f 100644
      "qwen3.5-35b-a3b": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
      "qwen3.5-35b-a3b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
      "qwen3.5-35b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
+diff --git a/src/maxtext/configs/types.py b/src/maxtext/configs/types.py
+index 00e8410a..7cd46bd6 100644
+--- a/src/maxtext/configs/types.py
++++ b/src/maxtext/configs/types.py
+@@ -2244,6 +2244,18 @@ class DPO(BaseModel):
+       gt=0,
+       description="Maximum length for prompt. If None, defaults to half of max_target_length.",
+   )
++  loss_type: Literal["dpo", "dpo_norm"] = Field(
++      "dpo",
++      description="'dpo' sums completion log-probs; 'dpo_norm' averages them over the loss tokens (open-instruct).",
++  )
++  pretokenized: bool = Field(
++      False,
++      description=(
++          "Train on pre-tokenized pairs: columns chosen_input_ids, chosen_labels, rejected_input_ids, rejected_labels"
++          " (open-instruct's tokenized preference format; labels -100 are not trained). Each sequence is fed whole,"
++          " and the loss mask comes from the labels rather than from the prompt/completion split."
++      ),
++  )
+ 
+ 
+ class FineTuning(BaseModel):
+@@ -5262,6 +5274,11 @@ class MaxTextConfig(
+     if self.use_dpo:
+       if self.packing:
+         raise ValueError("For DPO/ORPO, `packing` is not supported.")
++      if self.dpo.pretokenized:
++        # The "prompt" is each sequence's first token, shared by chosen and rejected; the rest is the completion.
++        if self.tokenize_train_data:
++          raise ValueError("dpo.pretokenized=true needs tokenize_train_data=false.")
++        self.dpo.max_prompt_length = 1
+       if self.dpo.max_prompt_length is None:
+         self.dpo.max_prompt_length = self.max_target_length // 2
+       if self.dpo.max_prompt_length >= self.max_target_length:
+diff --git a/src/maxtext/input_pipeline/dpo_utils.py b/src/maxtext/input_pipeline/dpo_utils.py
+index 9d564330..9e4d55a9 100644
+--- a/src/maxtext/input_pipeline/dpo_utils.py
++++ b/src/maxtext/input_pipeline/dpo_utils.py
+@@ -105,3 +105,47 @@ class DPODataFormatting(grain.MapTransform):
+       pad_width = ((0, pad_amount),)
+       x_trimmed = x[:length]
+     return np.pad(x_trimmed, pad_width, constant_values=self.pad_id).astype(np.int32)
++
++
++@dataclasses.dataclass
++class DPOPretokenizedFormatting(grain.MapTransform):
++  """Prepares pre-tokenized DPO pairs (open-instruct's tokenized preference format).
++
++  Each sequence is fed whole: its first token is the shared "prompt" and the rest the completion, right-padded with
++  `pad_id`. Attention covers every real token; the loss mask is `labels[1:] != -100`, so it can differ from the
++  attention mask (untrained context after the last labelled token, or labels covering several spans).
++  Sequences longer than `max_target_length` are truncated from the right, as open-instruct truncates.
++  """
++
++  pad_id: int
++  max_target_length: int
++  data_column_names: tuple[str, ...]
++
++  def map(self, element):
++    """Apply the dataset transformations for pre-tokenized DPO."""
++    if len(self.data_column_names) != 4:
++      raise ValueError(
++          "dpo.pretokenized expects train_data_columns ['chosen_input_ids', 'chosen_labels', 'rejected_input_ids',"
++          f" 'rejected_labels'], got {self.data_column_names}"
++      )
++    chosen_ids, chosen_labels, rejected_ids, rejected_labels = (
++        np.asarray(element[c])[: self.max_target_length] for c in self.data_column_names
++    )
++    if chosen_ids.shape != chosen_labels.shape or rejected_ids.shape != rejected_labels.shape:
++      raise ValueError("input_ids and labels must have the same length.")
++    if chosen_ids[0] != rejected_ids[0]:
++      raise ValueError(f"chosen and rejected must start with the same token, got {chosen_ids[0]} and {rejected_ids[0]}.")
++    # The model derives attention from `!= pad_id` (no dense mask), so the pad id must not occur as a real token.
++    if (chosen_ids == self.pad_id).any() or (rejected_ids == self.pad_id).any():
++      raise ValueError(f"pad id {self.pad_id} occurs inside a sequence.")
++    for key in self.data_column_names:
++      del element[key]
++    width = self.max_target_length - 1
++    element["prompt_ids"] = chosen_ids[:1].astype(np.int32)
++    element["prompt_mask"] = np.ones(1, np.int32)
++    for name, ids, labels in (("chosen", chosen_ids, chosen_labels), ("rejected", rejected_ids, rejected_labels)):
++      n = ids.shape[0] - 1
++      element[f"{name}_ids"] = np.pad(ids[1:], (0, width - n), constant_values=self.pad_id).astype(np.int32)
++      element[f"{name}_mask"] = np.pad(np.ones(n, np.int32), (0, width - n))
++      element[f"{name}_loss_mask"] = np.pad((labels[1:] != -100).astype(np.int32), (0, width - n))
++    return element
+diff --git a/src/maxtext/input_pipeline/hf_data_processing.py b/src/maxtext/input_pipeline/hf_data_processing.py
+index a70a91a6..2f9ab120 100644
+--- a/src/maxtext/input_pipeline/hf_data_processing.py
++++ b/src/maxtext/input_pipeline/hf_data_processing.py
+@@ -455,8 +455,11 @@ def preprocessing_pipeline(
+   else:
+     if use_dpo:
+       # Renames arbitrary DPO columns and performs DPO-aware padding.
+-      max_prompt_length = config.dpo.max_prompt_length
+-      operations.append(dpo_utils.DPODataFormatting(pad_id, max_target_length, data_column_names, max_prompt_length))
++      if config.dpo.pretokenized:
++        operations.append(dpo_utils.DPOPretokenizedFormatting(pad_id, max_target_length, tuple(data_column_names)))
++      else:
++        max_prompt_length = config.dpo.max_prompt_length
++        operations.append(dpo_utils.DPODataFormatting(pad_id, max_target_length, data_column_names, max_prompt_length))
+     else:
+       operations.append(input_pipeline_utils.PadOrTrimToMaxLength(max_target_length, pad_id, config=config))
+     operations.append(grain.Batch(batch_size=batch_size, drop_remainder=drop_remainder))
 diff --git a/src/maxtext/input_pipeline/input_pipeline_utils.py b/src/maxtext/input_pipeline/input_pipeline_utils.py
 index 01d228df..98f9e785 100644
 --- a/src/maxtext/input_pipeline/input_pipeline_utils.py
@@ -362,6 +467,108 @@ index dbb73642..f9ae619a 100644
  
      # Self-attention block
      self.attention = Attention(
+diff --git a/src/maxtext/trainers/post_train/dpo/train_dpo.py b/src/maxtext/trainers/post_train/dpo/train_dpo.py
+index 3836cb13..93e04dcf 100644
+--- a/src/maxtext/trainers/post_train/dpo/train_dpo.py
++++ b/src/maxtext/trainers/post_train/dpo/train_dpo.py
+@@ -26,8 +26,11 @@ Training & Evaluation:
+     eval_interval=2 eval_steps=2 steps=10 profiler=xplane weight_dtype=bfloat16
+ """
+ 
++from typing import Any, override
++
+ from absl import app
+ import jax
++import jax.numpy as jnp
+ import optax
+ from orbax import checkpoint as ocp
+ import pathwaysutils
+@@ -35,8 +38,9 @@ import pathwaysutils
+ from flax import nnx
+ from flax.core.spmd import logical_axis_rules
+ 
++from tunix.rl import common as tunix_common
+ from tunix.sft import metrics_logger, profiler
+-from tunix.sft.dpo.dpo_trainer import DPOTrainer, DPOTrainingConfig
++from tunix.sft.dpo.dpo_trainer import DPOTrainer, DPOTrainingConfig, TrainExample, compute_logps
+ 
+ from maxtext.common.goodput import (
+     GoodputEvent,
+@@ -58,6 +62,58 @@ from maxtext.utils import maxtext_utils
+ from maxtext.utils import model_creation_utils
+ 
+ 
++
++class MaxTextDPOTrainer(DPOTrainer):
++  """Tunix's DPOTrainer with a loss mask separate from attention, length-normalized DPO, and no dense mask.
++
++  - The loss mask is `{chosen,rejected}_loss_mask` when the data provides it (dpo.pretokenized), else the completion
++    attention mask.
++  - dpo.loss_type=dpo_norm averages each sequence's log-probs over its loss tokens, as open-instruct's dpo_norm does.
++    Weighting the loss mask by 1/count makes Tunix's summed log-probs those averages, for the policy and the
++    reference alike, so Tunix's DPO loss applies unchanged.
++  - Tunix materializes a [B, L, L] attention mask; it is passed as None instead, and the MaxText adapter derives
++    segment ids from `input_tokens != pad_id`. That is exact here because padding is only ever trailing and the pad
++    id never occurs as a real token (DPOPretokenizedFormatting checks this).
++  """
++
++  def __init__(self, *args, loss_type: str = "dpo", **kwargs):
++    super().__init__(*args, **kwargs)
++    self.loss_type = loss_type
++
++  @override
++  def _prepare_inputs(self, training_input: Any) -> Any:
++    x = training_input
++    prompt_ids = jnp.concatenate([x["prompt_ids"], x["prompt_ids"]], axis=0)
++    prompt_mask = jnp.concatenate([x["prompt_mask"], x["prompt_mask"]], axis=0)
++    completion_ids = jnp.concatenate([x["chosen_ids"], x["rejected_ids"]], axis=0)
++    completion_mask = jnp.concatenate([x["chosen_mask"], x["rejected_mask"]], axis=0)
++    loss_mask = jnp.concatenate(
++        [x.get("chosen_loss_mask", x["chosen_mask"]), x.get("rejected_loss_mask", x["rejected_mask"])], axis=0
++    ).astype(jnp.float32)
++    if self.loss_type == "dpo_norm":
++      loss_mask = loss_mask / jnp.maximum(loss_mask.sum(axis=-1, keepdims=True), 1.0)
++    input_ids = jnp.concatenate([prompt_ids, completion_ids], axis=1)
++    mask = jnp.concatenate([prompt_mask, completion_mask], axis=1)
++    positions = tunix_common.build_positions_from_mask(mask)
++    logits_to_keep = completion_ids.shape[1]
++    ref_chosen_logps = ref_rejected_logps = None
++    if self._ref_model_exists:
++      ref_chosen_logps, ref_rejected_logps, _ = compute_logps(
++          self.ref_model, input_ids, positions, None, logits_to_keep, loss_mask
++      )
++    return TrainExample(
++        input_ids=input_ids,
++        positions=positions,
++        attention_mask=None,
++        ref_chosen_logps=ref_chosen_logps,
++        ref_rejected_logps=ref_rejected_logps,
++        completion_mask=loss_mask,
++        logits_to_keep=logits_to_keep,
++        images=None,
++        full_mask=mask,
++    )
++
++
+ def get_tunix_config(mt_config: MaxTextConfig) -> DPOTrainingConfig:
+   """Gets the Tunix training configurations from the MaxText config.
+ 
+@@ -150,8 +206,13 @@ def setup_trainer_state(mt_config, goodput_recorder=None, test_only_training_hoo
+ 
+     # Provide rules context so logical axes (e.g. 'norm') are translated to mesh axes during maybe_restore
+     with logical_axis_rules(mt_config.logical_axis_rules):
+-      trainer = DPOTrainer(
+-          model=model, ref_model=ref_model, optimizer=optimizer, training_config=tunix_config, tokenizer=None
++      trainer = MaxTextDPOTrainer(
++          model=model,
++          ref_model=ref_model,
++          optimizer=optimizer,
++          training_config=tunix_config,
++          tokenizer=None,
++          loss_type=mt_config.dpo.loss_type,
+       )
+       trainer.with_training_hooks(training_hooks)
+       trainer.with_data_hooks(data_hooks)
 diff --git a/src/maxtext/trainers/post_train/hooks.py b/src/maxtext/trainers/post_train/hooks.py
 index bc8666a1..19c65a17 100644
 --- a/src/maxtext/trainers/post_train/hooks.py
