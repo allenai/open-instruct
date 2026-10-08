@@ -20,8 +20,10 @@ vocab=$($PY - "$PARAMS" <<'PYEOF'
 import sys, orbax.checkpoint as ocp
 m = ocp.PyTreeCheckpointer().metadata(sys.argv[1])
 m = m.item_metadata.tree if hasattr(m, "item_metadata") else m.tree
-p = m["params"]["params"] if "params" in m else m
-print(p["token_embedder"]["embedding"].shape[0])
+p = m["params"]["params"] if "params" in m else m  # to_maxtext layout, or Tunix's model_params
+e = p["token_embedder"]["embedding"]
+e = e["value"] if isinstance(e, dict) else e  # Tunix wraps every leaf as {"value": ...}
+print(e.shape[0])
 PYEOF
 )
 if [[ "$vocab" != "100278" ]]; then
