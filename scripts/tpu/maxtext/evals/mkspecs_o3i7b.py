@@ -74,7 +74,6 @@ SRC = {
 }
 SRC_MODEL = "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/runs/h045-anchor-emo-olmo35-s34521/hf_step11768"
 C4_TOK = "/weka/oe-adapt-default/abhishekr/handoff/c4/tok-thinkoff"
-MAIN = "5ef9cee1cfa4eafd8bb624bd18e2817c74cd54cc"
 
 # D3: flat YaRN, exactly config.json's rope_scaling plus rope_theta.
 HF_OVERRIDES = {
@@ -118,7 +117,7 @@ CELLS = {
     "aime26": ("OFF", "aime_2026:pass_at_32", REASON + ["num_samples=16"], 1, None),
     "hmmt26": ("OFF", "hmmt_feb_2026:pass_at_32", REASON + ["num_samples=16"], 1, None),
     "gpqa": ("OFF", "gpqa_diamond:cot", REASON + ["num_samples=8"], 1, None),
-    "mmlupro": ("OFF", "mmlu_pro:cot", REASON, 4, MAIN),
+    # mmlupro dropped 2026-10-08: a held-out test set, and too heavy (4 GPUs, 8h+) for development evals.
     "lcb": ("LCB", "livecodebench:lite", ["temperature=1.0", "max_tokens=32768", "num_samples=8"], None, None),
     "ifeval": ("OFF", "ifeval", IF, 1, None),
     "ifbench": ("OFF", "ifeval_ood", ["temperature=1.0", "do_sample=true", "max_tokens=32768"], 1, None),
