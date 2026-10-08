@@ -16,7 +16,7 @@ src = sorted(glob.glob("/opt/scratch/hf/hub/datasets--allenai--Dolci-Think-SFT/s
 out, n_shards, seed = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 os.makedirs(out, exist_ok=True)
 ds = datasets.load_dataset("parquet", data_files=src, split="train", cache_dir="/opt/scratch/hf/datasets")
-ds = ds.select_columns(["id", "messages", "source_dataset"]).shuffle(seed=seed)
+ds = ds.select_columns([c for c in ("id", "messages", "source_dataset", "source") if c in ds.column_names]).shuffle(seed=seed)
 for i in range(n_shards):
     ds.shard(n_shards, i, contiguous=True).to_parquet(f"{out}/train-{i:05d}-of-{n_shards:05d}.parquet")
 print(ds.num_rows, "rows ->", n_shards, "shards in", out)

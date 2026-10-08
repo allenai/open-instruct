@@ -362,3 +362,56 @@ index 4b6bc943..a26d8706 100644
  
      # Self-attention block
      self.attention = Attention(
+diff --git a/src/maxtext/models/olmoe3.py b/src/maxtext/models/olmoe3.py
+index e3b6b830..8cc77f16 100644
+--- a/src/maxtext/models/olmoe3.py
++++ b/src/maxtext/models/olmoe3.py
+@@ -219,6 +219,13 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+       else:
+         prev_ids = jnp.pad(decoder_segment_ids, ((0, 0), (1, 0)), constant_values=-1)[:, :seq_len]
+         resets = decoder_segment_ids != prev_ids
++        # Padding (segment id 0) takes no part in the recurrence: no decay and no state update. Its gates are
++        # arbitrary, and a chunk made only of padding can push the unfused chunk's decay exponents past the float
++        # range; the inf * 0 = NaN that follows reaches real tokens through the loss's 0-weighted terms and the
++        # dense MoE dispatch. Padding outputs are never trained, so real tokens are unchanged.
++        is_pad = (decoder_segment_ids == 0)[:, :, None]
++        log_decay = jnp.where(is_pad[..., None], 0.0, log_decay)
++        beta = jnp.where(is_pad, 0.0, beta)
+ 
+       chunk = self.config.gdn_chunk_size
+       if chunk > 0 and seq_len % chunk == 0:
+diff --git a/src/maxtext/trainers/post_train/hooks.py b/src/maxtext/trainers/post_train/hooks.py
+index bc8666a1..19c65a17 100644
+--- a/src/maxtext/trainers/post_train/hooks.py
++++ b/src/maxtext/trainers/post_train/hooks.py
+@@ -209,11 +209,29 @@ class BaseDataHooks(DataHooks):
+     self.train_data_loader = DataLoader(config, mesh, self.train_data_iterator, goodput_recorder=goodput_recorder)
+     self.train_batch = None
+     self.eval_batch = None
++    self._resume_skip_done = False
++
++  def _skip_trained_batches(self, train_ctx: peft_trainer.PeftTrainer):
++    """On resume, discards the batches the restored checkpoint already trained on.
++
++    Tunix skips them itself only when no data hooks are set, and the streaming iterators are not checkpointed, so
++    without this a resumed run replays the data from the start.
++    """
++    self._resume_skip_done = True
++    n = train_ctx._iter_steps  # pylint: disable=protected-access
++    if n <= 0:
++      return
++    start = time.perf_counter()
++    for _ in range(n):
++      self.train_data_loader.load_next_batch_pre_sharding()
++    max_logging.log(f"Resume: skipped {n} already-trained batches in {time.perf_counter() - start:.1f}s")
+ 
+   @override
+-  def load_next_train_batch(self, train_ctx: peft_trainer.PeftTrainer):  # pylint: disable=unused-argument
++  def load_next_train_batch(self, train_ctx: peft_trainer.PeftTrainer):
+     """Loads the next batch of data for training."""
+     try:
++      if not self._resume_skip_done:
++        self._skip_trained_batches(train_ctx)
+       self.train_batch = self.train_data_loader.load_next_batch()
+     except Exception as e:  # pylint: disable=broad-exception-caught
+       max_logging.log(f"Exception in load_next_train_batch: {str(e)}")
