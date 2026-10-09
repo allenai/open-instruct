@@ -161,3 +161,31 @@ def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled):
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
     expected = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std" if enabled else None
     assert parsed.dynamic_sampling_filter_path == expected
+
+
+def test_bread_long_evaluation_survives_native_validation(monkeypatch):
+    # The optional dumper plugin imports GPU-only Megatron libraries on CPU hosts.
+    monkeypatch.setitem(sys.modules, "megatron", None)
+    config = RunConfig(
+        CoreConfig(
+            reward_zero_truncated=True,
+            max_sequence_length=32768,
+            bread_eval_panel_size=128,
+            bread_eval_long_response_len=32768,
+        ),
+        {
+            "hf_checkpoint": "model",
+            "rollout_function_path": "open_instruct.miles.rollout.bread_runtime.BreadRolloutFn",
+            "rollout_batch_size": 1,
+            "n_samples_per_prompt": 4,
+            "global_batch_size": 4,
+            "rollout_max_context_len": 32768,
+            "sglang_context_length": 65536,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["test", *config.arguments()])
+    with contextlib.redirect_stderr(io.StringIO()):
+        parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
+    assert parsed.rollout_max_context_len == 32768
+    assert parsed.sglang_context_length == 65536
+    assert parsed.olmo_core.bread_eval_long_response_len == 32768
