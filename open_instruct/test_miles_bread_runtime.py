@@ -108,16 +108,16 @@ def collector(runtime, tmp_path, score_sequence):
 
 
 def test_collector_rescues_before_filter_and_keeps_prefix_outside_loss_span(runtime, tmp_path):
-    fn, calls, retired = collector(runtime, tmp_path, [[0, 0], [0, 1], [1, 0]])
+    fn, calls, retired = collector(runtime, tmp_path, [[0, 0], [0, 1]])
     output = asyncio.run(fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2)))
-    assert len(calls) == 3 and retired == [[]]
+    assert len(calls) == 2 and retired == [[]]
     assert output.samples == [calls[-1]]
     for sample in output.samples[0]:
         assert sample.prompt.endswith("first\n\n")
         assert sample.tokens[: -sample.response_length] == list(sample.prompt.encode())
         assert len(sample.rollout_log_probs) == sample.response_length == 2
-    assert output.metrics["bread/generated_tokens"] == 12
-    event = json.loads((tmp_path / "bread/groups.jsonl").read_text())
+    assert output.metrics["bread/generated_tokens"] == 8
+    event = json.loads((tmp_path / "bread/groups.jsonl").read_text().splitlines()[-1])
     assert event["accepted"] and event["outcome"] == "rescued"
     assert event["sample_id"] == "openr1:test" and event["weight_version"] == 2
 
@@ -129,6 +129,44 @@ def test_collection_budget_fails_instead_of_looping_and_does_not_acknowledge(run
     assert retired == []
 
 
+@pytest.mark.parametrize("rescue", [False, True])
+def test_collector_accepts_truncated_negatives_in_ordinary_and_rescued_groups(runtime, tmp_path, rescue):
+    scores = [[0, 0], [1, 0]] if rescue else [[1, 0]]
+    fn, calls, retired = collector(runtime, tmp_path, scores)
+    generate = runtime[1].generate_and_rm_group
+
+    async def capped(state, group, params, evaluation):
+        result = await generate(state, group, params, evaluation)
+        for sample in result:
+            if sample.reward["score"] == 0:
+                sample.status = SimpleNamespace(value="truncated")
+        return result
+
+    runtime[1].generate_and_rm_group = capped
+    output = asyncio.run(fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2)))
+    assert len(calls) == (2 if rescue else 1)
+    assert output.samples == [calls[-1]] and retired == [[]]
+    assert output.samples[0][1].status.value == "truncated"
+    assert output.samples[0][1].reward["score"] == 0
+    assert output.metrics["bread/rescued_groups"] == int(rescue)
+
+
+@pytest.mark.parametrize("status", ["aborted", "failed"])
+def test_interrupted_sample_retries_without_search_or_admission(runtime, tmp_path, status):
+    fn, calls, retired = collector(runtime, tmp_path, [[1, 0]])
+    generate = runtime[1].generate_and_rm_group
+
+    async def interrupted(state, group, params, evaluation):
+        result = await generate(state, group, params, evaluation)
+        result[1].status = SimpleNamespace(value=status)
+        return result
+
+    runtime[1].generate_and_rm_group = interrupted
+    with pytest.raises(runtime[2], match="interrupted"):
+        asyncio.run(fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2)))
+    assert len(calls) == 1 and retired == []
+
+
 def test_aborted_generation_propagates_to_recovery_without_consumption(runtime, tmp_path):
     fn, _, retired = collector(runtime, tmp_path, [[0, 0]])
     fn.state.aborted = True
@@ -137,7 +175,7 @@ def test_aborted_generation_propagates_to_recovery_without_consumption(runtime, 
     assert retired == []
 
 
-def test_concurrent_waves_refill_in_input_order_without_overfetch(runtime, tmp_path):
+def test_continuous_collection_backfills_before_slow_group_finishes(runtime, tmp_path):
     fn, _, retired = collector(runtime, tmp_path, [])
     fn.state.args.olmo_core = dataclasses.replace(
         fn.state.args.olmo_core, bread_concurrent_groups=2, bread_max_groups_per_batch=4
@@ -161,27 +199,27 @@ def test_concurrent_waves_refill_in_input_order_without_overfetch(runtime, tmp_p
     fn.data_source.get_samples = get_samples
 
     async def run():
-        second_finished = asyncio.Event()
+        third_finished = asyncio.Event()
 
         async def generate(state, group, params, evaluation):
             identity = group[0].group_index
             if identity == 0:
-                await second_finished.wait()
+                await third_finished.wait()
             for i, sample in enumerate(group):
                 sample.status = SimpleNamespace(value="completed")
                 sample.reward = {"score": 1 if identity == 1 else i}
                 sample.response_length = 2
             finished.append(identity)
-            if identity == 1:
-                second_finished.set()
+            if identity == 2:
+                third_finished.set()
             return group
 
         runtime[1].generate_and_rm_group = generate
         return await fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2))
 
     output = asyncio.run(run())
-    assert finished == [1, 0, 2, 3]
-    assert requested == [2, 2] and retired == [[]]
+    assert finished.index(2) < finished.index(0)
+    assert requested == [1, 1, 1, 1] and retired == [[]]
     assert [group[0].group_index for group in output.samples] == [0, 2, 3]
     assert output.metrics["bread/generated_tokens"] == 16
     assert output.metrics["bread/dropped_groups"] == 1
@@ -195,7 +233,8 @@ def test_failed_concurrent_wave_settles_siblings_without_acknowledging(runtime, 
     for index, group in enumerate(groups):
         for sample in group:
             sample.group_index = index
-    fn.data_source.get_samples = lambda count: groups
+    pending_groups = iter(groups)
+    fn.data_source.get_samples = lambda count: [next(pending_groups)]
     settled = []
 
     async def run():
@@ -217,3 +256,41 @@ def test_failed_concurrent_wave_settles_siblings_without_acknowledging(runtime, 
     with pytest.raises(runtime[2], match="interrupted"):
         asyncio.run(run())
     assert settled == [True] and retired == []
+
+
+def test_slow_earlier_success_is_selected_over_fast_overflow(runtime, tmp_path):
+    fn, _, retired = collector(runtime, tmp_path, [])
+    fn.state.args.olmo_core = dataclasses.replace(fn.state.args.olmo_core, bread_concurrent_groups=2)
+    groups = [samples(), samples()]
+    for identity, group in enumerate(groups):
+        for sample in group:
+            sample.group_index = identity
+    pending_groups = iter(groups)
+    fn.data_source.get_samples = lambda count: [next(pending_groups)]
+
+    async def run():
+        fast = asyncio.Event()
+
+        async def generate(state, group, params, evaluation):
+            if group[0].group_index == 0:
+                await fast.wait()
+            for index, sample in enumerate(group):
+                sample.status = SimpleNamespace(value="completed" if index else "truncated")
+                sample.reward = {"score": index}
+                sample.response = "thinking" if not index else "</think> answer"
+                sample.response_length = 2
+            fast.set()
+            return group
+
+        runtime[1].generate_and_rm_group = generate
+        return await fn._call_train(SimpleNamespace(rollout_id=0, weight_version=0))
+
+    output = asyncio.run(run())
+    assert output.samples[0][0].group_index == 0
+    assert output.metrics["bread/overflow_groups"] == 1
+    assert output.metrics["bread/generated/responses"] == 4
+    assert output.metrics["bread/generated/truncated_fraction"] == 0.5
+    assert output.metrics["bread/admitted/responses"] == 2
+    assert output.metrics["bread/admitted/centered_reward/truncated/mean"] == -0.5
+    assert output.metrics["bread/admitted_bread_fraction"] == 0
+    assert retired == [[]]

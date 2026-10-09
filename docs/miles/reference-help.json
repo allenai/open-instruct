@@ -2,7 +2,9 @@
   "core": {
     "bread_max_prefixes": "Maximum expert-prefix probes per failed group in the opt-in synchronous BREAD rollout.",
     "bread_max_groups_per_batch": "Maximum original prompt groups acquired to fill a BREAD collection before failing instead of waiting indefinitely.",
-    "bread_concurrent_groups": "Maximum prompt groups searched concurrently in a bounded wave; each wave finishes before groups are admitted in input order.",
+    "bread_concurrent_groups": "Maximum concurrent question groups with continuous backfill. Drain outstanding work and select eligible groups in input order; count overflow separately.",
+    "bread_eval_panel_size": "Fixed unhinted panel size for periodic BREAD evaluation; zero uses native evaluation unchanged. Initial and final evaluations use the full held-out set.",
+    "bread_eval_long_response_len": "Additional initial evaluation response cap on the same fixed panel; zero disables the length-cap comparison. Requires context space beyond this response budget.",
     "expert_balance_search_proposals": "Maximum guided/random swap attempts per optimizer block, default 1024; zero keeps the greedy-only planner. Search uses exact incremental packing and preserves the original nonregression guard.",
     "expert_balance_search_seconds": "Swap-search wall-clock allowance per collection in seconds, split across complete optimizer blocks; default 0.25. Zero skips swaps. Histogram construction and greedy scoring are outside this allowance. Deadline termination may differ across machines; seed, attempts and selected permutation are logged.",
     "expert_balanced_packing": "Experimental, opt-in replay-informed sample ordering within optimizer steps; disabled by default. Net throughput benefit depends on workload/topology and planning overhead. Requires world > EP > 1, sequence packing, routing replay, zero balancing loss and miles.balance_data=false. Uses exact pack/equalization scoring with identity fallback. Only single-turn Olmo3MoE inputs with original prompt identities are supported.",

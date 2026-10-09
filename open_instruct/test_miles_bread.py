@@ -44,10 +44,9 @@ def test_search_preserves_inputs_and_retries_from_pristine_context():
 
     result = asyncio.run(bread.rescue(pristine, initial, generate))
     assert pristine == before
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert calls[0][0].prompt.endswith("first\n\n")
     assert calls[1][0].prompt.endswith("first\n\nsecond\n\n")
-    assert calls[1] == calls[2]  # fresh winning-prefix rollout, no probe response reuse
     assert all(not sample.tokens and sample.response_length == 0 for group in calls for sample in group)
     assert result.event["outcome"] == "rescued"
     assert result.event["selected_sections"] == 2
@@ -60,19 +59,40 @@ def test_search_preserves_inputs_and_retries_from_pristine_context():
     [
         ([0, 1], "completed"),
         ([1, 1], "completed"),
-        ([0, 0], "truncated"),
         ([0, 0], "aborted"),
+        ([0, 0], "failed"),
+        ([0, 0], "pending"),
         ([0, 0.5], "completed"),
         ([0, float("nan")], "completed"),
     ],
 )
-def test_only_finished_all_zero_binary_groups_trigger_search(scores, status):
+def test_only_terminal_all_zero_binary_groups_trigger_search(scores, status):
     async def forbidden(group):
         pytest.fail("unexpected guidance")
 
     original = samples(scores, status=status)
     result = asyncio.run(bread.rescue(samples(), original, forbidden))
     assert result.group is original
+
+
+def test_truncated_zero_rewards_search_continue_and_supply_probe_negatives():
+    calls = []
+
+    async def generate(group):
+        calls.append(group)
+        if len(calls) == 1:
+            return samples([0, 0], status="truncated")
+        result = samples([1, 0])
+        result[1].status = "truncated"
+        return result
+
+    result = asyncio.run(bread.rescue(samples(), samples([0, 0], status="truncated"), generate))
+    assert len(calls) == 2
+    assert result.event["initial_rewards"] == [0, 0]
+    assert result.event["attempts"][0]["rewards"] == [0, 0]
+    assert result.event["selected_sections"] == 2
+    assert result.event["outcome"] == "rescued"
+    assert bread.rewards(result.group, "score") == [1, 0]
 
 
 def test_exhausted_search_never_exposes_complete_reference():
@@ -99,7 +119,7 @@ def test_context_budget_stops_before_generation_and_boxed_answer_stops_prefixes(
     assert list(bread.prefixes(["setup", r"answer \boxed{7}", "end"], 9)) == [(1, "setup\n\n")]
 
 
-def test_all_correct_probe_gets_fresh_group_but_not_a_fabricated_negative():
+def test_all_correct_probe_stops_without_resampling():
     calls = []
 
     async def generate(group):
@@ -107,8 +127,8 @@ def test_all_correct_probe_gets_fresh_group_but_not_a_fabricated_negative():
         return samples([1, 1])
 
     result = asyncio.run(bread.rescue(samples(), samples([0, 0]), generate))
-    assert len(calls) == 2
-    assert result.event["outcome"] == "fresh_group_not_mixed"
+    assert len(calls) == 1
+    assert result.event["outcome"] == "probe_all_correct"
     assert bread.rewards(result.group, "score") == [1, 1]
 
 
@@ -122,7 +142,7 @@ def test_cancellation_propagates():
 
 def config(**options):
     return RunConfig(
-        CoreConfig(),
+        CoreConfig(reward_zero_truncated=True),
         {
             "hf_checkpoint": "/fixture/hf",
             "rollout_function_path": BREAD_ROLLOUT,
@@ -136,7 +156,10 @@ def config(**options):
 
 def test_bread_is_opt_in_and_rejects_async_and_other_generation_hooks():
     config().validate()
-    assert "rollout_function_path" not in RunConfig(CoreConfig(), {"hf_checkpoint": "/fixture"}).resolved_miles()
+    assert (
+        "rollout_function_path"
+        not in RunConfig(CoreConfig(reward_zero_truncated=True), {"hf_checkpoint": "/fixture"}).resolved_miles()
+    )
     for options in (
         {"fully_async": True},
         {"custom_generate_function_path": "external.generate"},
@@ -146,4 +169,23 @@ def test_bread_is_opt_in_and_rejects_async_and_other_generation_hooks():
         with pytest.raises(ValueError, match="BREAD"):
             config(**options).validate()
     with pytest.raises(ValueError, match="bread_max_groups_per_batch"):
-        dataclasses.replace(config(), core=CoreConfig(bread_max_groups_per_batch=1)).validate()
+        dataclasses.replace(
+            config(), core=CoreConfig(bread_max_groups_per_batch=1, reward_zero_truncated=True)
+        ).validate()
+
+
+def test_bread_requires_truncation_zero_and_long_eval_serving_capacity():
+    with pytest.raises(ValueError, match="reward_zero_truncated"):
+        dataclasses.replace(config(), core=CoreConfig()).validate()
+    candidate = dataclasses.replace(
+        config(sglang_context_length=65536, rollout_max_context_len=32768),
+        core=CoreConfig(
+            reward_zero_truncated=True,
+            max_sequence_length=32768,
+            bread_eval_panel_size=128,
+            bread_eval_long_response_len=32768,
+        ),
+    )
+    candidate.validate()
+    with pytest.raises(ValueError, match="context space"):
+        dataclasses.replace(candidate, miles={**candidate.miles, "sglang_context_length": 32768}).validate()

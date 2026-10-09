@@ -32,6 +32,8 @@ class CoreConfig:
     bread_max_prefixes: int = 9
     bread_max_groups_per_batch: int = 1024
     bread_concurrent_groups: int = 1
+    bread_eval_panel_size: int = 0
+    bread_eval_long_response_len: int = 0
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
     pipeline_observation_interval: float = 0.0
@@ -147,6 +149,8 @@ class CoreConfig:
             raise constraints.error("core.expert_publication must be per_expert or fused")
         for name in ("bread_max_prefixes", "bread_max_groups_per_batch", "bread_concurrent_groups"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=1)
+        for name in ("bread_eval_panel_size", "bread_eval_long_response_len"):
+            validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         for name in ("diagnostic_interval", "scoring_check_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
@@ -513,6 +517,18 @@ class RunConfig:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
 
     def _validate_bread(self, options):
+        if not self.core.reward_zero_truncated:
+            raise constraints.error("BREAD requires reward_zero_truncated=true; capped responses remain in the loss")
+        if self.core.bread_eval_long_response_len and not self.core.bread_eval_panel_size:
+            raise constraints.error("bread_eval_long_response_len requires bread_eval_panel_size")
+        if self.core.bread_eval_panel_size and options.get("eval_uses_snapshots"):
+            raise constraints.error("BREAD evaluation panels currently require shared-engine evaluation")
+        if self.core.bread_eval_long_response_len >= (
+            options.get("sglang_context_length")
+            or options.get("rollout_max_context_len")
+            or self.core.max_sequence_length
+        ):
+            raise constraints.error("BREAD long evaluation requires context space beyond its response cap")
         if options.get("fully_async", False) or self.core.publication_mode != "barrier":
             raise constraints.error("BREAD requires synchronous collection and publication_mode=barrier")
         if not self.core.filter_zero_std_groups or options.get("n_samples_per_prompt", 1) < 2:

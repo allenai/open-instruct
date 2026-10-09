@@ -23,9 +23,11 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
+from open_instruct.miles.configuration.config import BREAD_ROLLOUT
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.rollout import bread_evaluation
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -193,11 +195,19 @@ async def train(args, *, export_hf=None):
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)
-            if evaluation is not None and should_run_periodic_action(
-                rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout
+            final_bread_eval = (
+                getattr(args, "rollout_function_path", None) == BREAD_ROLLOUT
+                and args.olmo_core.bread_eval_panel_size > 0
+                and (stopped_for_time or rollout_id == args.num_rollout - 1)
+            )
+            if final_bread_eval:
+                bread_evaluation.mark_final(args, rollout_id)
+            if evaluation is not None and (
+                final_bread_eval
+                or should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout)
             ):
                 with evaluation_stage(args, rollout_id):
-                    await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
+                    await evaluation.dispatch(rollout_id, force=final_bread_eval or rollout_id == args.num_rollout - 1)
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
             if coordinator is not None and background is not None and not (stopped_for_time and background["final"]):
