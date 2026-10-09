@@ -39,6 +39,7 @@ choosing a backend. Introducing MILES does not deprecate the existing GRPO train
 | [Async queues and discard metrics](async-pipeline.md) | Sizing producer and completed buffers, tracing waits, and measuring discarded work |
 | [Topology and capacity](topology.md) | Choosing GPU placement, async scheduling, batch geometry and serving capacity |
 | [Data and evaluation](data-and-evaluation.md) | Selecting tasks, importing mixtures and retaining held-out generations |
+| [OpenR1 and BREAD](bread.md) | Preparing verified reference data and testing failure-triggered continuation curricula |
 | [Background evaluation](background-evaluation.md) | Configuring best-effort external olmo-eval jobs, receipts and W&B publishing |
 | [Managed judges](managed-judges.md) | Binding named rubrics and placing fixed-weight judge services |
 | [Operations](operations.md) | Reading metrics, diagnosing failures and establishing run completion |

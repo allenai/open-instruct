@@ -19,6 +19,7 @@ ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_rewar
 FINISHED_STD_FILTER = "open_instruct.miles.rewards.truncation.filter_finished_reward_variance"
 EXCLUDE_TRUNCATED = "open_instruct.miles.rewards.truncation.exclude_truncated"
 EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
+BREAD_ROLLOUT = "open_instruct.miles.rollout.bread_runtime.BreadRolloutFn"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 
@@ -28,6 +29,8 @@ class CoreConfig:
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
+    bread_max_prefixes: int = 9
+    bread_max_groups_per_batch: int = 1024
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
     pipeline_observation_interval: float = 0.0
@@ -141,6 +144,8 @@ class CoreConfig:
             raise constraints.error("core.row_specialization must be static or dynamic")
         if self.expert_publication not in ("per_expert", "fused"):
             raise constraints.error("core.expert_publication must be per_expert or fused")
+        for name in ("bread_max_prefixes", "bread_max_groups_per_batch"):
+            validation.integer(getattr(self, name), f"core.{name}", minimum=1)
         for name in ("diagnostic_interval", "scoring_check_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
@@ -372,6 +377,8 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise constraints.error("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
+        if options.get("rollout_function_path") == BREAD_ROLLOUT:
+            self._validate_bread(options)
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
@@ -503,6 +510,30 @@ class RunConfig:
             self._validate_refresh(options, collection, samples)
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
+
+    def _validate_bread(self, options):
+        if options.get("fully_async", False) or self.core.publication_mode != "barrier":
+            raise constraints.error("BREAD requires synchronous collection and publication_mode=barrier")
+        if not self.core.filter_zero_std_groups or options.get("n_samples_per_prompt", 1) < 2:
+            raise constraints.error("BREAD requires zero-variance filtering and at least two samples per prompt")
+        if self.core.bread_max_groups_per_batch < options.get("rollout_batch_size", 1):
+            raise constraints.error("bread_max_groups_per_batch must cover rollout_batch_size")
+        if options.get("dynamic_sampling_filter_path") != ZERO_STD_FILTER:
+            raise constraints.error("BREAD supports only the built-in zero-variance filter")
+        for name in (
+            "partial_rollout",
+            "custom_generate_function_path",
+            "rollout_sample_filter_path",
+            "rollout_all_samples_process_path",
+            "custom_reward_post_process_path",
+            "load_debug_rollout_data",
+            "recompute_logprobs_via_prefill",
+            "custom_convert_samples_to_train_data_path",
+            "eval_function_path",
+            "sglang_enable_deterministic_inference",
+        ):
+            if options.get(name):
+                raise constraints.error(f"BREAD does not yet support miles.{name}")
 
     def _validate_engine_drain(self, options, collection, samples):
         if not options.get("fully_async", False):

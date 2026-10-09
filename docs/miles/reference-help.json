@@ -1,5 +1,7 @@
 {
   "core": {
+    "bread_max_prefixes": "Maximum expert-prefix probes per failed group in the opt-in synchronous BREAD rollout.",
+    "bread_max_groups_per_batch": "Maximum original prompt groups acquired to fill a BREAD collection before failing instead of waiting indefinitely.",
     "expert_balance_search_proposals": "Maximum guided/random swap attempts per optimizer block, default 1024; zero keeps the greedy-only planner. Search uses exact incremental packing and preserves the original nonregression guard.",
     "expert_balance_search_seconds": "Swap-search wall-clock allowance per collection in seconds, split across complete optimizer blocks; default 0.25. Zero skips swaps. Histogram construction and greedy scoring are outside this allowance. Deadline termination may differ across machines; seed, attempts and selected permutation are logged.",
     "expert_balanced_packing": "Experimental, opt-in replay-informed sample ordering within optimizer steps; disabled by default. Net throughput benefit depends on workload/topology and planning overhead. Requires world > EP > 1, sequence packing, routing replay, zero balancing loss and miles.balance_data=false. Uses exact pack/equalization scoring with identity fallback. Only single-turn Olmo3MoE inputs with original prompt identities are supported.",

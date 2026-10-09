@@ -114,6 +114,7 @@ nav:
         - Engine drain: miles/engine-drain.md
       - Data and evaluation:
         - Data and rewards: miles/data-and-evaluation.md
+        - OpenR1 and BREAD: miles/bread.md
         - Managed judges: miles/managed-judges.md
         - Background evaluation: miles/background-evaluation.md
         - Inference records: miles/inference-records.md
