@@ -53,6 +53,7 @@ publication_mode = "barrier"
 filter_zero_std_groups = true
 bread_max_prefixes = 9
 bread_max_groups_per_batch = 1024
+bread_concurrent_groups = 64
 
 [miles]
 fully_async = false
@@ -60,8 +61,10 @@ rollout_function_path = "open_instruct.miles.rollout.bread_runtime.BreadRolloutF
 ```
 
 This fragment does not specify a checkpoint or authorize a launch. Configure at
-least two samples per prompt. The implementation collects one prompt group at a
-time, with the samples within each group generated concurrently. Async publication,
+least two samples per prompt. The implementation collects bounded waves of prompt
+groups, with both groups and their samples generated concurrently. Each wave completes
+before admitting results in input order, avoiding selection by completion speed.
+The default concurrency is one group; size it to the inference fleet. Async publication,
 partial rollout and custom generation/postprocessing hooks are rejected. Existing
 synchronous publication keeps policy weights fixed through probes and fresh samples.
 Deterministic serving is also rejected because its repeated per-sample seeds would

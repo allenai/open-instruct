@@ -31,6 +31,7 @@ class CoreConfig:
     filter_zero_std_groups: bool = True
     bread_max_prefixes: int = 9
     bread_max_groups_per_batch: int = 1024
+    bread_concurrent_groups: int = 1
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
     pipeline_observation_interval: float = 0.0
@@ -144,7 +145,7 @@ class CoreConfig:
             raise constraints.error("core.row_specialization must be static or dynamic")
         if self.expert_publication not in ("per_expert", "fused"):
             raise constraints.error("core.expert_publication must be per_expert or fused")
-        for name in ("bread_max_prefixes", "bread_max_groups_per_batch"):
+        for name in ("bread_max_prefixes", "bread_max_groups_per_batch", "bread_concurrent_groups"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=1)
         for name in ("diagnostic_interval", "scoring_check_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)

@@ -1,6 +1,7 @@
 """Exercise the BREAD collector against the pinned runtime's callback contracts."""
 
 import asyncio
+import dataclasses
 import importlib.util
 import json
 import sys
@@ -134,3 +135,85 @@ def test_aborted_generation_propagates_to_recovery_without_consumption(runtime, 
     with pytest.raises(runtime[2], match="interrupted"):
         asyncio.run(fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2)))
     assert retired == []
+
+
+def test_concurrent_waves_refill_in_input_order_without_overfetch(runtime, tmp_path):
+    fn, _, retired = collector(runtime, tmp_path, [])
+    fn.state.args.olmo_core = dataclasses.replace(
+        fn.state.args.olmo_core, bread_concurrent_groups=2, bread_max_groups_per_batch=4
+    )
+    fn.state.args.rollout_batch_size = 3
+    requested, finished = [], []
+    next_id = 0
+
+    def get_samples(count):
+        nonlocal next_id
+        requested.append(count)
+        groups = []
+        for _ in range(count):
+            group = samples()
+            for i, sample in enumerate(group):
+                sample.index, sample.group_index = next_id * 2 + i, next_id
+            groups.append(group)
+            next_id += 1
+        return groups
+
+    fn.data_source.get_samples = get_samples
+
+    async def run():
+        second_finished = asyncio.Event()
+
+        async def generate(state, group, params, evaluation):
+            identity = group[0].group_index
+            if identity == 0:
+                await second_finished.wait()
+            for i, sample in enumerate(group):
+                sample.status = SimpleNamespace(value="completed")
+                sample.reward = {"score": 1 if identity == 1 else i}
+                sample.response_length = 2
+            finished.append(identity)
+            if identity == 1:
+                second_finished.set()
+            return group
+
+        runtime[1].generate_and_rm_group = generate
+        return await fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2))
+
+    output = asyncio.run(run())
+    assert finished == [1, 0, 2, 3]
+    assert requested == [2, 2] and retired == [[]]
+    assert [group[0].group_index for group in output.samples] == [0, 2, 3]
+    assert output.metrics["bread/generated_tokens"] == 16
+    assert output.metrics["bread/dropped_groups"] == 1
+
+
+def test_failed_concurrent_wave_settles_siblings_without_acknowledging(runtime, tmp_path):
+    fn, _, retired = collector(runtime, tmp_path, [])
+    fn.state.args.olmo_core = dataclasses.replace(fn.state.args.olmo_core, bread_concurrent_groups=2)
+    fn.state.args.rollout_batch_size = 2
+    groups = [samples(), samples()]
+    for index, group in enumerate(groups):
+        for sample in group:
+            sample.group_index = index
+    fn.data_source.get_samples = lambda count: groups
+    settled = []
+
+    async def run():
+        sibling_started = asyncio.Event()
+
+        async def generate(state, group, params, evaluation):
+            if group[0].group_index == 0:
+                await sibling_started.wait()
+                raise runtime[2]("interrupted")
+            try:
+                sibling_started.set()
+                await asyncio.Event().wait()
+            finally:
+                settled.append(True)
+
+        runtime[1].generate_and_rm_group = generate
+        return await fn._call_train(SimpleNamespace(rollout_id=7, weight_version=2))
+
+    with pytest.raises(runtime[2], match="interrupted"):
+        asyncio.run(run())
+    assert settled == [True] and retired == []

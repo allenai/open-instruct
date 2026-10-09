@@ -1,5 +1,6 @@
 """Opt-in synchronous BREAD collection using the pinned MILES generation interface."""
 
+import asyncio
 import copy
 import json
 import os
@@ -53,9 +54,8 @@ class BreadRolloutFn(inference_rollout_common.InferenceRolloutFn):
             length = len(self.state.tokenizer.encode(prompt, add_special_tokens=False))
             return length + args.rollout_max_response_len <= context
 
-        for _ in range(args.olmo_core.bread_max_groups_per_batch):
+        async def process(group):
             started = time.monotonic()
-            [group] = self.data_source.get_samples(1)
             pristine = copy.deepcopy(group)
             initial = await generate(group)
             result = await bread.rescue(
@@ -87,13 +87,26 @@ class BreadRolloutFn(inference_rollout_common.InferenceRolloutFn):
                 "accepted": keep,
             }
             self._record(event)
-            if keep:
-                accepted.append(result.group)
-            else:
+            if not keep:
                 totals["bread/dropped_groups"] += 1
-            if len(accepted) == args.rollout_batch_size:
-                break
-        else:
+            return result.group if keep else None
+
+        remaining = args.olmo_core.bread_max_groups_per_batch
+        while remaining and len(accepted) < args.rollout_batch_size:
+            count = min(args.olmo_core.bread_concurrent_groups, args.rollout_batch_size - len(accepted), remaining)
+            groups = self.data_source.get_samples(count)
+            tasks = [asyncio.create_task(process(group)) for group in groups]
+            try:
+                # Finish each bounded wave and retain input order; speed does not select the training set.
+                results = await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+            accepted.extend(group for group in results if group is not None)
+            remaining -= count
+        if len(accepted) < args.rollout_batch_size:
             raise RuntimeError("BREAD collection budget exhausted before obtaining enough mixed-reward groups")
         self.data_source.add_samples([])
         self.state.reset()
