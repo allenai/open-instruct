@@ -32,6 +32,8 @@ def test_select_verified_complete_reference_without_leaking_into_prompt():
     assert "Set up" not in row["messages"][0]["content"]
     assert row["messages"][0]["role"] == "user"
     assert row["ground_truth"] == "1"
+    assert row["metadata"]["verifiers"] == [{"name": "openr1_math", "target": "1", "weight": 1.0}]
+    assert run_data.FACTORIES["openr1_math"] == "open_instruct.miles.rewards.openr1_verifier.OpenR1MathVerifier"
     assert "<think>" not in row["metadata"]["bread"]["sections"][0]
 
 

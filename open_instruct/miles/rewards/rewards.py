@@ -33,6 +33,7 @@ from open_instruct.miles.rewards import general_judge, judge_registry
 logger = logger_utils.setup_logger(__name__)
 
 _MATH_FACTORIES = {
+    "open_instruct.miles.rewards.openr1_verifier.OpenR1MathVerifier",
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.ground_truth_utils.StrictMathVerifier",
 }

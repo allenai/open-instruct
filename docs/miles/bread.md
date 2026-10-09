@@ -23,8 +23,14 @@ remain fixed when only the held-out count changes. It retains final-answer quest
 R1 generation, using the shortest eligible attempt. It excludes proof targets,
 obvious diagram references, and references without paragraph boundaries. These
 are conservative filters, not a guarantee of correctness or absence of images.
-The source's Math-Verify flags do not establish agreement with our runtime math
-verifier; check that agreement before a learning run.
+The `openr1_math` registry entry uses Math-Verify 0.9.0, with raw answer targets
+wrapped in LaTeX boxes and anchored prediction extraction following OpenR1's
+reward recipe. Symbolic dependencies are pinned separately and run in bounded
+verifier subprocesses. Existing `math` grading is unchanged. Audit reference
+agreement and wrong-answer rejection before a learning run: source flags alone
+do not guarantee runtime agreement. Math-Verify can interpret comma-separated
+answers as sets, losing order and multiplicity; agreement is not a correctness
+certificate for sequence questions.
 
 `manifest.json` records revision, configuration, seed, filter counts and output
 hashes. Each training row contains a question-only user message, a reward target,

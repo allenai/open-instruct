@@ -66,7 +66,7 @@ def convert(row, revision, config):
             "source": row.get("source"),
             "problem_type": row.get("problem_type"),
             "query": question,
-            "verifiers": [{"name": "math", "target": answer.strip(), "weight": 1.0}],
+            "verifiers": [{"name": "openr1_math", "target": answer.strip(), "weight": 1.0}],
             "bread": {"sections": chunks, "reference_index": index},
         },
     }, None

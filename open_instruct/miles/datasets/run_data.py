@@ -40,6 +40,7 @@ TASKS = {
     "multiplication": ("generated-multiplication-v1", None, "multiplication"),
 }
 FACTORIES = {
+    "openr1_math": "open_instruct.miles.rewards.openr1_verifier.OpenR1MathVerifier",
     "gsm8k": "open_instruct.miles.rewards.verifiers.GSM8KVerifier",
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "strict_math": "open_instruct.ground_truth_utils.StrictMathVerifier",

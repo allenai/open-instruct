@@ -1,0 +1,6 @@
+# Loaded only in verifier subprocesses; do not replace the trainer's ANTLR/SymPy.
+antlr4-python3-runtime==4.11.1
+math-verify==0.9.0
+latex2sympy2-extended==1.11.0
+sympy==1.14.0
+mpmath==1.3.0
