@@ -39,7 +39,7 @@ case "$ARM" in
     # tags are ordinary BPE pieces, as in the H028 anchors. The cache hash is known only once
     # the tokenize job has run; pass it as H038_CACHE. Steps come from the cache token count
     # (0.5 epoch of the union), passed as TRAIN_FULL_STEPS.
-    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both|olmo35-kimik3|olmo35-origearly)
+    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both|olmo35-kimik3|olmo35-origearly|olmo35-ifchat-kimik3|olmo35-ifchat-orig)
         IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE="${H038_CACHE:-}"
         export TOKENIZER=allenai/dolma2-tokenizer-olmo35
         export TOKENIZER_REVISION=8b9717061fae09d5be814373d189919a62a9a00d
@@ -55,6 +55,14 @@ case "$ARM" in
             # two arms that differ only in TRAIN_FULL_STEPS, so they share a cache.
             olmo35-kimik3) FULL_MIXER="allenai/Dolci-Think-SFT-7B-KimiK3-Early 1.0" ;;
             olmo35-origearly) FULL_MIXER="allenai/Dolci-Think-SFT-7B-Original-Early 1.0" ;;
+            # H056: the same pair over IF/chat prompts instead of math. H040's
+            # prompts came out 86% math because the corpus is grouped by source
+            # and that run took a contiguous prefix; these are a stratified
+            # random sample, so the arms can speak about instruction following.
+            # 295,207 rows, not 300,000: the distillation lost its workers to
+            # preemption at 98.4% and both sides drop the rows it missed.
+            olmo35-ifchat-kimik3) FULL_MIXER="allenai/Dolci-Think-SFT-7B-IFChat-KimiK3 1.0" ;;
+            olmo35-ifchat-orig) FULL_MIXER="allenai/Dolci-Think-SFT-7B-IFChat-Original 1.0" ;;
         esac
         # H040 takes the reserved-slot tags, against the comment above, because its
         # two arms tokenize the <think> boundary differently as ordinary BPE pieces:
@@ -65,7 +73,7 @@ case "$ARM" in
         # trained on. One token per tag removes the merge and makes the arms
         # symmetric by construction. Measured by Beaker 01M3YR4XS5TBY4CK5YD4G0N9EN.
         case "$ARM" in
-            olmo35-kimik3|olmo35-origearly) THINK_TOKENS=1 ;;
+            olmo35-kimik3|olmo35-origearly|olmo35-ifchat-kimik3|olmo35-ifchat-orig) THINK_TOKENS=1 ;;
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
