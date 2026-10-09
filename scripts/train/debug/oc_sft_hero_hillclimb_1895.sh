@@ -100,6 +100,14 @@ case "$MODE" in
         # mid-run checkpoint stays at the half-way step.
         export STEPS="${TRAIN_FULL_STEPS:-11768}" NNODES=2 NPROC=8 EPHEMERAL_STEPS=1024
         export CKPT_STEPS=$(( STEPS / 2 ))
+        # olmo-core rejects ephemeral_save_interval >= save_interval, and
+        # save_interval is STEPS/2, so the 1024 that suits a full-length run is
+        # too large for a short one. H056's arms are 663 and 828 steps, which
+        # put save_interval at 331 and 414 and failed every rank at config
+        # validation. Runs of 2048 steps or more are unaffected.
+        if (( EPHEMERAL_STEPS >= CKPT_STEPS )); then
+            export EPHEMERAL_STEPS=$(( CKPT_STEPS / 2 ))
+        fi
         export JOB_TIMEOUT="${JOB_TIMEOUT:-9h}"
         # RUN_TAG keeps the run name and output dir distinct from the 3072-update
         # arm, whose dir already exists; MODE itself must read "train" downstream.
