@@ -39,7 +39,12 @@ case "$ARM" in
     # tags are ordinary BPE pieces, as in the H028 anchors. The cache hash is known only once
     # the tokenize job has run; pass it as H038_CACHE. Steps come from the cache token count
     # (0.5 epoch of the union), passed as TRAIN_FULL_STEPS.
-    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both)
+    # H054: continued SFT from an SFT checkpoint (MODEL=<run dir>/stepN) on one Tmax terminal-agent
+    # set alone, converted to the open-instruct layout (ledger experiments/h054/convert_tmax_oi.py).
+    # Same tokenizer, template and cache machinery as the H038/H049 arms; LR comes from the caller
+    # (the Tmax SFT recipe is 2e-5, 2 epochs; steps = ceil(2 x cache tokens / 1,048,576) via
+    # TRAIN_FULL_STEPS). Run with ROW_ALIGNED_PARTS=1 DOCB=1 as H049's nemo-docb.
+    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both|olmo35-tmax-sft|olmo35-tmax-glm52|olmo35-tmax-big)
         IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE="${H038_CACHE:-}"
         export TOKENIZER=allenai/dolma2-tokenizer-olmo35
         export TOKENIZER_REVISION=8b9717061fae09d5be814373d189919a62a9a00d
@@ -49,6 +54,9 @@ case "$ARM" in
             olmo35-simfc) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0" ;;
             olmo35-nemotron) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
             olmo35-both) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
+            olmo35-tmax-sft) FULL_MIXER="allenai/tmax-sft-oi 1.0" ;;
+            olmo35-tmax-glm52) FULL_MIXER="allenai/tmax-sft-glm-52-oi 1.0" ;;
+            olmo35-tmax-big) FULL_MIXER="allenai/tmax-sft-big-oi 1.0" ;;
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
@@ -57,7 +65,7 @@ case "$ARM" in
                 echo "H038_CACHE=$ARM_CACHE is an olmo123 cache; the olmo35 arms need their own" >&2; exit 1 ;;
         esac
         ;;
-    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both])" >&2; exit 1 ;;
+    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both|-tmax-sft|-tmax-glm52|-tmax-big])" >&2; exit 1 ;;
 esac
 # H049: ROW_ALIGNED_PARTS=1 tokenizes/trains on the row-aligned layout ("-rowaligned" cache),
 # DOCB=1 takes document boundaries from its per-row metadata instead of EOS (needs
@@ -149,7 +157,9 @@ case "$MODE" in
         ;;
     *) echo "Expected train, train_full, tokenize, gate or convert" >&2; exit 1 ;;
 esac
-export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
+# LR is the anchor recipe's 5e-5 unless the caller sets it (H054's continued-SFT arms use 2e-5).
+export BASE=hero-small-nonemo SEQ=65536
+export LR="${LR:-5e-5}"
 export THINK_TOKENS
 # Train and gate must name their cache. Tokenize names it when it is already known, which
 # makes a flag-off tokenize job a CPU preflight: the production hash either resolves to the
