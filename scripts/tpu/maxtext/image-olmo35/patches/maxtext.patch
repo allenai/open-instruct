@@ -63,7 +63,7 @@ index 44022cd3..de56a21f 100644
      "qwen3.5-35b-a3b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
      "qwen3.5-35b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
 diff --git a/src/maxtext/input_pipeline/hf_data_processing.py b/src/maxtext/input_pipeline/hf_data_processing.py
-index a70a91a6..e44656ed 100644
+index a70a91a6..94624f37 100644
 --- a/src/maxtext/input_pipeline/hf_data_processing.py
 +++ b/src/maxtext/input_pipeline/hf_data_processing.py
 @@ -30,6 +30,8 @@ from maxtext.input_pipeline import input_pipeline_utils
@@ -75,7 +75,19 @@ index a70a91a6..e44656ed 100644
  
  
  def _get_pad_id(tokenizer):
-@@ -296,6 +298,27 @@ def vision_sft_preprocessing_pipeline(
+@@ -89,7 +91,10 @@ def _get_training_objective_transform(
+   if objective != "causal_lm":
+     raise ValueError(f"Unsupported training objective: {objective}")
+   if shift and not use_dpo:
+-    return input_pipeline_utils.ShiftData(ignored_ids=[pad_id, bos_token_id], axis=1)
++    # A BOS target only marks the next packed document, so it carries no loss. Pass bos_token_id=None when BOS is
++    # also EOS (Olmo, GPT-2 style): ignoring it would also drop every EOS target, and the model never learns to stop.
++    ignored = [pad_id] if bos_token_id is None else [pad_id, bos_token_id]
++    return input_pipeline_utils.ShiftData(ignored_ids=ignored, axis=1)
+   return None
+ 
+ 
+@@ -296,6 +301,27 @@ def vision_sft_preprocessing_pipeline(
    return multihost_gen
  
  
@@ -103,7 +115,7 @@ index a70a91a6..e44656ed 100644
  def preprocessing_pipeline(
      dataloading_host_index,
      dataloading_host_count,
-@@ -344,6 +367,18 @@ def preprocessing_pipeline(
+@@ -344,6 +370,18 @@ def preprocessing_pipeline(
      batch_size = local_batch_size // num_microbatches
    else:
      batch_size = local_batch_size
@@ -122,7 +134,12 @@ index a70a91a6..e44656ed 100644
  
    # for multi-epoch with shuffle, shuffle each epoch with different seeds then concat
    if shuffle and num_epoch > 1:
-@@ -472,6 +507,8 @@ def preprocessing_pipeline(
+@@ -468,10 +506,12 @@ def preprocessing_pipeline(
+       use_sft=use_sft,
+       packing=packing,
+       pad_id=pad_id,
+-      bos_token_id=tokenizer.bos_token_id,
++      bos_token_id=None if tokenizer.bos_token_id == tokenizer.eos_token_id else tokenizer.bos_token_id,
    )
    if target_transform is not None:
      operations.append(target_transform)

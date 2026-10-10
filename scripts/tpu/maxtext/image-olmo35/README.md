@@ -4,4 +4,4 @@ them forward-substitution KDA, `moe_aux_loss_reduction`, `warmup_step_offset`, a
 with this directory's `patches/maxtext.patch` (the SFT fixes cherry-picked onto it, plus KDA keeping the sequence
 whole under context parallelism).
 
-    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-pf387f341
+    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-p84627a55

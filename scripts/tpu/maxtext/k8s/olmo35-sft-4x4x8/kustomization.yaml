@@ -49,4 +49,4 @@ configMapGenerator:
 
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
-  newTag: 51f8cc4b-pf387f341
+  newTag: 51f8cc4b-p84627a55
