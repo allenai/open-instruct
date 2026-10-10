@@ -445,3 +445,26 @@ index bc8666a1..19c65a17 100644
        self.train_batch = self.train_data_loader.load_next_batch()
      except Exception as e:  # pylint: disable=broad-exception-caught
        max_logging.log(f"Exception in load_next_train_batch: {str(e)}")
+diff --git a/src/maxtext/trainers/post_train/sft/train_sft.py b/src/maxtext/trainers/post_train/sft/train_sft.py
+index 274c6623..e524213c 100644
+--- a/src/maxtext/trainers/post_train/sft/train_sft.py
++++ b/src/maxtext/trainers/post_train/sft/train_sft.py
+@@ -87,6 +87,18 @@ class MaxTextPeftTrainer(peft_trainer.PeftTrainer):
+   train_step), which avoids the nested NNX transformation issue entirely.
+   """
+ 
++  def _post_process_train_step(self, aux):
++    """Logs the loss's parts: the reported loss also carries the MoE load-balancing and z-loss terms."""
++    if not aux or jax.process_index() != 0:
++      return
++    # The scalars are replicated, so this host's copy is the global value.
++    xent_sum, weights, z, lb = (
++        float(x.addressable_data(0)) if isinstance(x, jax.Array) else float(x)
++        for x in (aux["xent_sum"], aux["total_weights"], aux["z_loss"], aux["moe_lb_loss"])
++    )
++    ce = xent_sum / (weights + 1e-8) - z  # xent_sum includes the z-loss term
++    max_logging.log(f"LOSS-PARTS step={self._train_steps + 1} ce={ce:.6f} moe_lb={lb:.6f} z={z:.6f}")
++
+   def create_train_step_fn(self):
+     """Creates a train step using jax.value_and_grad with explicit NNX split/merge."""
+     loss_fn_ref = self.loss_fn
