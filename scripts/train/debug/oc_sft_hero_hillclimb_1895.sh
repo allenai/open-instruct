@@ -104,7 +104,10 @@ case "$MODE" in
         # minRuntime shield's preemption window unnecessarily early.
         # TRAIN_FULL_STEPS (H038) moves the step count with the mixture's token count; the
         # mid-run checkpoint stays at the half-way step.
-        export STEPS="${TRAIN_FULL_STEPS:-11768}" NNODES=2 NPROC=8 EPHEMERAL_STEPS=1024
+        # EPHEMERAL_STEPS must stay below CKPT_STEPS (= STEPS/2), or OLMo-core refuses the config
+        # ("ephemeral_save_interval must be less than save_interval"): H054's 176- and 490-step
+        # continued-SFT arms pass EPHEMERAL_STEPS=-1 (off). The 1024 default is unchanged for long runs.
+        export STEPS="${TRAIN_FULL_STEPS:-11768}" NNODES=2 NPROC=8 EPHEMERAL_STEPS="${EPHEMERAL_STEPS:-1024}"
         export CKPT_STEPS=$(( STEPS / 2 ))
         export JOB_TIMEOUT="${JOB_TIMEOUT:-9h}"
         # RUN_TAG keeps the run name and output dir distinct from the 3072-update
