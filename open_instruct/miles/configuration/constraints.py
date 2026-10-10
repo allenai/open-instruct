@@ -82,7 +82,7 @@ ADAPTER_OWNED_OPTIONS = (
 )
 
 TRAINER_PARALLEL_OPTIONS = ("tensor_model_parallel_size", "pipeline_model_parallel_size", "context_parallel_size")
-UNIMPLEMENTED_OPTIONS = ("use_critic", "multi_lora", "indep_dp", "use_opd", "use_routing_replay")
+UNIMPLEMENTED_OPTIONS = ("use_critic", "multi_lora", "indep_dp", "use_routing_replay")
 OFFLOAD_OPTIONS = ("offload", "fsdp_cpu_offload", "optimizer_cpu_offload", "stream_optimizer_state_to_disk")
 
 # These rules need predicates or Core values, so their checks remain in RunConfig.
@@ -226,6 +226,11 @@ NATIVE_VALIDATION_OPTIONS = (
             "custom_generate_function_path",
             "custom_loss_function_path",
             "custom_reward_post_process_path",
+            "custom_rm_path",
+            "use_opd",
+            "opd_type",
+            "opd_kl_coef",
+            "opd_log_prob_top_k",
             "dynamic_sampling_filter_path",
             "eval_function_path",
             "eval_num_gpus",

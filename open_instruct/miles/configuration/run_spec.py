@@ -15,6 +15,7 @@ from typing import Any
 from open_instruct.miles.configuration import async_capacity, constraints, options, topology, validation
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
+from open_instruct.miles.distillation import config as distillation
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.rewards import judging
@@ -140,6 +141,7 @@ class RunSpec:
     evaluation: dict[str, Any]
     records: dict[str, Any] = dataclasses.field(default_factory=dict)
     selection: dict[str, Any] = dataclasses.field(default_factory=dict)
+    teacher: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -168,6 +170,7 @@ class RunSpec:
             "rubrics",
             "judging",
             "evaluation",
+            "teacher",
         }
         if set(document) & {"validation", "conversion_validation"}:
             raise InputError(
@@ -246,6 +249,7 @@ class RunSpec:
             evaluation.parse(_table(document, "evaluation"), launch),
             records,
             selection,
+            distillation.parse(document, base),
         )
         result.compile()
         return result
@@ -268,6 +272,7 @@ class RunSpec:
             "core": self.core,
             "miles": self.miles,
             **self.judges,
+            **({"teacher": self.teacher} if self.teacher else {}),
         }
         payload = copy.deepcopy(payload)
         for section in (*RUN_SECTIONS, "core", "miles"):
@@ -766,6 +771,7 @@ class RunSpec:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
+        distillation.compile_options(self, miles, core)
         result = RunConfig(CoreConfig(**core), miles)
         result.validate()
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:

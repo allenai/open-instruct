@@ -35,7 +35,10 @@ def plan(spec):
     if miles.get("eval_num_gpus", 0) or miles.get("rollout_external", False):
         raise InputError("The config launcher does not yet allocate dedicated eval or external rollout pools")
     policy = trainer if miles["colocate"] else trainer + rollout
-    total = policy + sum(managed.values())
+    teacher = spec.teacher.get("gpus", 0)
+    total = policy + sum(managed.values()) + teacher
+    if teacher and (trainer_nodes != 1 or total > capacity):
+        raise InputError("Core OPD validation requires trainer, inference and frozen teacher on one node")
     nodes: list[dict[str, Any]]
     if total <= capacity and trainer_nodes == 1:
         nodes = [
@@ -44,6 +47,7 @@ def plan(spec):
                 "rollout_gpus": 0 if miles["colocate"] else rollout,
                 "ray_gpus": policy,
                 "judges": managed,
+                **({"teacher_gpus": teacher} if teacher else {}),
             }
         ]
         allocated = total
@@ -80,6 +84,7 @@ def plan(spec):
         "allocated_gpus": allocated * len(nodes),
         "policy_gpus": policy,
         "judge_gpus": sum(managed.values()),
+        "teacher_gpus": teacher,
         "nodes": nodes,
         "unused_gpus": allocated * len(nodes) - total,
     }
@@ -92,7 +97,7 @@ def assign(layout, addresses):
 
 
 def devices(node, visible):
-    required = node["ray_gpus"] + sum(node["judges"].values())
+    required = node["ray_gpus"] + sum(node["judges"].values()) + node.get("teacher_gpus", 0)
     if len(visible) < required or len(set(visible)) != len(visible) or any(not item for item in visible):
         raise ValueError("CUDA device visibility does not cover the disjoint role assignment")
     offset = node["ray_gpus"]
@@ -100,4 +105,6 @@ def devices(node, visible):
     for name, count in sorted(node["judges"].items()):
         judges[name] = visible[offset : offset + count]
         offset += count
+    if node.get("teacher_gpus"):
+        judges["__opd_teacher__"] = visible[offset : offset + node["teacher_gpus"]]
     return visible[: node["ray_gpus"]], judges

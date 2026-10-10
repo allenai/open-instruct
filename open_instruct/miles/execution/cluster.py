@@ -24,6 +24,7 @@ from urllib import request
 
 from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.distillation import config as distillation
 from open_instruct.miles.execution import rendezvous
 from open_instruct.miles.infrastructure import infra_timeouts
 from open_instruct.miles.rewards import judge_registry, judge_server, judging
@@ -278,6 +279,35 @@ def run(path):
             {"address": address, "head": head, "ray_devices": ray_devices, "judge_devices": judges, "layout": layout},
         )
         env = dict(os.environ)
+        if spec.teacher:
+            devices = judges.pop("__opd_teacher__")
+            port = next(ports)
+            service = dict(spec.teacher, endpoint=f"http://{address}:{port}")
+            teacher_path = root / "teacher.json"
+            write(teacher_path, service)
+            teacher_env = dict(env, CUDA_VISIBLE_DEVICES=",".join(devices))
+            teacher_env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "false"
+            supervisor.start(
+                "teacher",
+                [sys.executable, "-m", "open_instruct.miles.distillation.teacher", str(teacher_path), str(port)],
+                teacher_env,
+            )
+
+            def teacher_ready():
+                try:
+                    with request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3) as response:
+                        return response.status == 200
+                except OSError:
+                    return False
+
+            supervisor.wait(teacher_ready, timeout=service["startup_timeout"])
+            supervisor.run_child(
+                "teacher-probe",
+                [sys.executable, "-m", "open_instruct.miles.distillation.teacher", str(teacher_path), "--probe"],
+                teacher_env,
+            )
+            supervisor.health["opd_teacher"] = f"http://127.0.0.1:{port}/health"
+            env[distillation.ENV] = json.dumps(service)
         registry = judging.registry(spec.judges)
         health = {}
         for name, devices in judges.items():

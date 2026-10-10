@@ -13,6 +13,7 @@ from typing import Any
 
 from open_instruct.miles.configuration import async_capacity, constraints, graph_config, throughput, validation
 from open_instruct.miles.configuration import options as cli_options
+from open_instruct.miles.distillation import config as distillation
 from open_instruct.miles.errors import InputError
 
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
@@ -259,6 +260,8 @@ def scoring_pass(core: CoreConfig, options: dict[str, Any]) -> ScoringPass:
     samples = options.get("global_batch_size")
     collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
     steps = collection // samples if collection and samples else None
+    if options.get("use_opd", False):
+        return ScoringPass(True, "OPD requires pre-update student scores", steps)
     if core.scoring_pass_required:
         return ScoringPass(True, "core.scoring_pass_required", steps)
     if steps is None:
@@ -384,7 +387,10 @@ class RunConfig:
         options = self.resolved_miles()
         if options.get("rollout_function_path") == BREAD_ROLLOUT:
             self._validate_bread(options)
-        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
+        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path") not in (
+            None,
+            distillation.HOOK + ".post_process" if options.get("use_opd") else None,
+        ):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
         if self.core.records_root is not None and not options.get("fully_async", False):
@@ -460,6 +466,7 @@ class RunConfig:
                 f"miles.global_batch_size={samples!r} must be a positive multiple of trainer world size {world}; "
                 f"use {world}, {2 * world}, or another multiple."
             )
+        distillation.validate(options, self.core)
         for name in constraints.OFFLOAD_OPTIONS:
             if options.get(name, False):
                 raise constraints.error(

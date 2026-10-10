@@ -33,7 +33,7 @@ def receipt_path(spec):
 def specification(image, spec, *, hostnames=None):
     config = spec.compile()
     layout = topology.plan(spec)
-    host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])
+    host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"]) or bool(spec.teacher)
     allocated = layout["gpus_per_replica"]
     mounts = spec.launch["weka_mounts"]
 
