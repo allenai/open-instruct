@@ -1,6 +1,6 @@
 # Olmo 3.5 hero-small SFT on TPU, the H045 anchor recipe (olmo35-small-4t-emo base, Dolci-Think, the Olmo 3.5
-# template with H045's prefix labelling, 65,536-token sequences, 1,048,576 tokens/step, LR 5e-5, 3% warmup then
-# linear to 0 over 11,768 steps, AdamW wd 0, clip 1.0, router load-balancing 0.01, router and LM-head z-loss 1e-5, EMO off).
+# template with H045's prefix labelling, 65,536-token sequences, 1,048,576 tokens/step, LR 5e-5, 3% warmup (from step one, as OLMo-core) then
+# linear to 0 over 11,768 steps, AdamW wd 0, clip 1.0, router load-balancing 0.01 and router z-loss 1e-5 summed over MoE layers as OLMo-core does, LM-head z-loss 1e-5, dropless MoE, EMO off).
 # STEPS < LR_SCHEDULE_STEPS runs the start of that schedule for loss parity against H045's W&B curve.
 #   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -19,7 +19,7 @@ configMapGenerator:
   - train_sft.sh # a copy of ../olmo3-sft/train_sft.sh (kustomize loads no files from outside this directory); keep them identical
 - name: olmo35-sft-env
   literals:
-  - RUN_NAME=olmo35-sft-h045-tpu-parity-s0
+  - RUN_NAME=olmo35-sft-h045-tpu-parity-c1
   - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
   # OLMo-core step5961 converted with o35/convert_olmocore_to_maxtext.py (fp32 masters, padded 100352 vocab).
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items
@@ -42,9 +42,9 @@ configMapGenerator:
   # sequence per 8 chips. Tensor parallelism stops at 4 (the full-attention layers have 4 KV heads); context load
   # balancing is off so packed rows keep their order and segment masks. Expert parallelism, per-layer remat and
   # megablox follow olmo-gcp-infra examples/olmo35-maxtext (pure FSDP all-gathers every MoE layer's experts).
-  - EXTRA_ARGS=override_model_config=true z_loss_multiplier=1e-5 emo_enabled=false enable_checkpointing=true checkpoint_period=100000 ici_fsdp_parallelism=4 ici_expert_parallelism=4 ici_tensor_parallelism=4 ici_context_parallelism=2 context_parallel_load_balance=false allow_split_physical_axes=true shard_exp_on_fsdp=False ragged_buffer_factor=1.5 sharding_tolerance=0.3 olmoe3_per_layer_remat=true sparse_matmul=true megablox=true use_tokamax_kda=false num_vocab_tiling=8 remat_policy=full
+  - EXTRA_ARGS=override_model_config=true moe_aux_loss_reduction=sum warmup_step_offset=1 z_loss_multiplier=1e-5 emo_enabled=false enable_checkpointing=true checkpoint_period=100000 ici_fsdp_parallelism=4 ici_expert_parallelism=4 ici_tensor_parallelism=4 ici_context_parallelism=2 context_parallel_load_balance=false allow_split_physical_axes=true shard_exp_on_fsdp=False ragged_buffer_factor=-1 sharding_tolerance=0.3 olmoe3_per_layer_remat=true sparse_matmul=true megablox=true use_tokamax_kda=false num_vocab_tiling=8 remat_policy=full
   - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE
 
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
-  newTag: a7f34953-p301796e0
+  newTag: 51f8cc4b-p74248ae0

@@ -363,19 +363,10 @@ index 4b6bc943..a26d8706 100644
      # Self-attention block
      self.attention = Attention(
 diff --git a/src/maxtext/models/olmoe3.py b/src/maxtext/models/olmoe3.py
-index e3b6b830..acb9ddde 100644
+index b1fa3309..ba927120 100644
 --- a/src/maxtext/models/olmoe3.py
 +++ b/src/maxtext/models/olmoe3.py
-@@ -40,6 +40,8 @@ import functools
- from typing import Any
- 
- from jax.sharding import Mesh, PartitionSpec
-+import os
-+
- import jax
- import jax.numpy as jnp
- 
-@@ -219,6 +221,13 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+@@ -219,6 +219,21 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
        else:
          prev_ids = jnp.pad(decoder_segment_ids, ((0, 0), (1, 0)), constant_values=-1)[:, :seq_len]
          resets = decoder_segment_ids != prev_ids
@@ -386,30 +377,28 @@ index e3b6b830..acb9ddde 100644
 +        is_pad = (decoder_segment_ids == 0)[:, :, None]
 +        log_decay = jnp.where(is_pad[..., None], 0.0, log_decay)
 +        beta = jnp.where(is_pad, 0.0, beta)
++
++      # The recurrence runs along the sequence, so it must see the whole sequence. Left to propagation, a
++      # context-sharded sequence shards the scan's chunk axis, and XLA all-gathers every chunk's inputs on each
++      # scan iteration (quadratic traffic: 90% of a 64K step at context 2). Gather once per layer instead.
++      seq_whole = ("activation_batch", None, "activation_heads", None)
++      q, k, v, log_decay = (nn.with_logical_constraint(t, seq_whole) for t in (q, k, v, log_decay))
++      beta = nn.with_logical_constraint(beta, seq_whole[:3])
++      resets = nn.with_logical_constraint(resets, seq_whole[:2])
  
        chunk = self.config.gdn_chunk_size
        if chunk > 0 and seq_len % chunk == 0:
-@@ -396,9 +405,17 @@ def _delta_rule_chunked(q, k, v, log_decay, beta, resets, chunk_size: int, state
-     # log2(C) steps. Batched matmuls stay on the MXU; solve_triangular's TPU
-     # lowering forced a ~2.4s/step relayout at the 3p5b shape (profiled).
-     a_mat = eye + m
--    m_inv = eye - m
--    for _ in range(max(0, (c - 1).bit_length() - 1)):
--      m_inv = m_inv @ (2.0 * eye - a_mat @ m_inv)
-+    if os.environ.get("OLMOE3_KDA_SOLVE", "triangular") == "newton":
-+      m_inv = eye - m
-+      for _ in range(max(0, (c - 1).bit_length() - 1)):
-+        m_inv = m_inv @ (2.0 * eye - a_mat @ m_inv)
-+    else:
-+      # Forward substitution. Newton's iterates are partial Neumann sums of -M, whose powers overflow f32 when
-+      # beta approaches 2 (allow_neg_eigval) and consecutive keys nearly coincide (e.g. repetitive text), even
-+      # though the inverse itself is moderate; the substitution never forms those powers (as fla's solve_tril).
-+      m_inv = jax.scipy.linalg.solve_triangular(
-+          a_mat.astype(jnp.float32), jnp.broadcast_to(eye, a_mat.shape).astype(jnp.float32), lower=True, unit_diagonal=True
-+      )
-     carried = jnp.einsum("bhid,bhdv->bhiv", k_i * cum.astype(compute_dtype), state) * from_prev
-     delta = jnp.einsum(
-         "bhij,bhjv->bhiv", m_inv.astype(compute_dtype), (v_i - carried) * beta_i[..., None].astype(compute_dtype)
+@@ -227,8 +242,9 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+         )
+       else:
+         out = _delta_rule_scan(q, k, v.astype(jnp.float32), jnp.exp(log_decay), beta, resets)
++      out = nn.with_logical_constraint(out, ("activation_batch", "activation_length", "activation_heads", None))
+ 
+-    gate = jax.nn.sigmoid(self.g_proj_2(self.g_proj_1(x)).reshape(batch, seq_len, heads, dv))
++    gate =jax.nn.sigmoid(self.g_proj_2(self.g_proj_1(x)).reshape(batch, seq_len, heads, dv))
+     out = self.o_norm(out.astype(x.dtype)) * gate
+     return self.w_out(out.reshape(batch, seq_len, heads * dv))
+ 
 diff --git a/src/maxtext/trainers/post_train/hooks.py b/src/maxtext/trainers/post_train/hooks.py
 index bc8666a1..19c65a17 100644
 --- a/src/maxtext/trainers/post_train/hooks.py
