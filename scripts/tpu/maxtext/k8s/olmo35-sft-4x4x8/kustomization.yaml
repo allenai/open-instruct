@@ -19,7 +19,7 @@ configMapGenerator:
   - train_sft.sh # a copy of ../olmo3-sft/train_sft.sh (kustomize loads no files from outside this directory); keep them identical
 - name: olmo35-sft-env
   literals:
-  - RUN_NAME=olmo35-sft-h045-tpu-memtest
+  - RUN_NAME=olmo35-sft-h045-tpu-parity-s0
   - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
   # OLMo-core step5961 converted with o35/convert_olmocore_to_maxtext.py (fp32 masters, padded 100352 vocab).
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items
@@ -35,7 +35,7 @@ configMapGenerator:
   - LR=5e-5
   - WARMUP_FRAC=0.03
   - LR_SCHEDULE_STEPS=11768
-  - STEPS=10
+  - STEPS=600
   - NUM_EPOCH=2
   - DATA_SEED=0
   # FSDP 4 x expert 4 x tensor 4 x context 2 = 128 chips; batch shards over fsdp x expert (16 sequences), one 64K
@@ -47,4 +47,4 @@ configMapGenerator:
 
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
-  newTag: a7f34953-p1499e63d
+  newTag: a7f34953-pe24e9a55

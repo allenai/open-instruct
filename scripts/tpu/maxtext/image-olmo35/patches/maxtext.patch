@@ -363,10 +363,19 @@ index 4b6bc943..a26d8706 100644
      # Self-attention block
      self.attention = Attention(
 diff --git a/src/maxtext/models/olmoe3.py b/src/maxtext/models/olmoe3.py
-index e3b6b830..8cc77f16 100644
+index e3b6b830..acb9ddde 100644
 --- a/src/maxtext/models/olmoe3.py
 +++ b/src/maxtext/models/olmoe3.py
-@@ -219,6 +219,13 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+@@ -40,6 +40,8 @@ import functools
+ from typing import Any
+ 
+ from jax.sharding import Mesh, PartitionSpec
++import os
++
+ import jax
+ import jax.numpy as jnp
+ 
+@@ -219,6 +221,13 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
        else:
          prev_ids = jnp.pad(decoder_segment_ids, ((0, 0), (1, 0)), constant_values=-1)[:, :seq_len]
          resets = decoder_segment_ids != prev_ids
@@ -380,6 +389,27 @@ index e3b6b830..8cc77f16 100644
  
        chunk = self.config.gdn_chunk_size
        if chunk > 0 and seq_len % chunk == 0:
+@@ -396,9 +405,17 @@ def _delta_rule_chunked(q, k, v, log_decay, beta, resets, chunk_size: int, state
+     # log2(C) steps. Batched matmuls stay on the MXU; solve_triangular's TPU
+     # lowering forced a ~2.4s/step relayout at the 3p5b shape (profiled).
+     a_mat = eye + m
+-    m_inv = eye - m
+-    for _ in range(max(0, (c - 1).bit_length() - 1)):
+-      m_inv = m_inv @ (2.0 * eye - a_mat @ m_inv)
++    if os.environ.get("OLMOE3_KDA_SOLVE", "triangular") == "newton":
++      m_inv = eye - m
++      for _ in range(max(0, (c - 1).bit_length() - 1)):
++        m_inv = m_inv @ (2.0 * eye - a_mat @ m_inv)
++    else:
++      # Forward substitution. Newton's iterates are partial Neumann sums of -M, whose powers overflow f32 when
++      # beta approaches 2 (allow_neg_eigval) and consecutive keys nearly coincide (e.g. repetitive text), even
++      # though the inverse itself is moderate; the substitution never forms those powers (as fla's solve_tril).
++      m_inv = jax.scipy.linalg.solve_triangular(
++          a_mat.astype(jnp.float32), jnp.broadcast_to(eye, a_mat.shape).astype(jnp.float32), lower=True, unit_diagonal=True
++      )
+     carried = jnp.einsum("bhid,bhdv->bhiv", k_i * cum.astype(compute_dtype), state) * from_prev
+     delta = jnp.einsum(
+         "bhij,bhjv->bhiv", m_inv.astype(compute_dtype), (v_i - carried) * beta_i[..., None].astype(compute_dtype)
 diff --git a/src/maxtext/trainers/post_train/hooks.py b/src/maxtext/trainers/post_train/hooks.py
 index bc8666a1..19c65a17 100644
 --- a/src/maxtext/trainers/post_train/hooks.py
