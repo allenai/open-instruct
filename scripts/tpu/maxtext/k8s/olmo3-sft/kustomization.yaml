@@ -28,9 +28,11 @@ configMapGenerator:
   # Checkpointing must stay on for multi-host runs: MaxText only calls jax.distributed.initialize() on TPU
   # when it is, and Tunix's checkpoint manager needs the distributed client either way.
   - EXTRA_ARGS=enable_checkpointing=true checkpoint_period=1000 remat_policy=full attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
-  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true
+  # An environment variable, not a libtpu flag: inside LIBTPU_INIT_ARGS it did nothing (~1 GiB HBM per chip on v4).
+  - TPU_MEGACORE=MEGACORE_DENSE
 
 # Upstream MaxText e259ed61 plus our patches (scripts/tpu/maxtext/image/build.sh).
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
-  newTag: e259ed61-p792b7189
+  newTag: e259ed61-paa14a780

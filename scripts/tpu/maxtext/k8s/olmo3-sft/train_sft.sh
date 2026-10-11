@@ -27,7 +27,7 @@ assert slots == int(slots) and $GLOBAL_BATCH % int(slots) == 0, f'GLOBAL_BATCH=$
 print($GLOBAL_BATCH // int(slots))")
 
 # The image (maxtext-posttrain, scripts/tpu/maxtext/image) carries the MaxText patches; fail fast if it doesn't.
-python3 -c "from maxtext.input_pipeline import input_pipeline_utils as u; assert hasattr(u, '_split_conversation_into_segments')"
+python3 -c "from maxtext.input_pipeline import input_pipeline_utils as u; assert hasattr(u, '_split_conversation_into_segments') and hasattr(u, 'ExpandToLoadedRows')"
 models_dir=$(python3 -c "import os, maxtext.models; print(os.path.dirname(maxtext.models.__file__))")
 
 cat <<INFO
