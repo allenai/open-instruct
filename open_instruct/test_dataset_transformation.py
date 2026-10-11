@@ -3,14 +3,17 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
 from unittest import mock
 
+import datasets
 import torch
 from parameterized import parameterized
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, GPTNeoXTokenizerFast
+from transformers.utils import chat_template_utils
 
 import open_instruct.dataset_transformation
 
@@ -86,6 +89,64 @@ class TestConfigHash(unittest.TestCase):
         hash1 = open_instruct.dataset_transformation.compute_config_hash(dcs1, tc)
         hash2 = open_instruct.dataset_transformation.compute_config_hash(dcs2, tc)
         self.assertNotEqual(hash1, hash2, "Different configs should have different hashes")
+
+    def test_config_hash_stable_across_tokenizer_access(self):
+        # Regression test for the numpy SFT cache mismatch: loading the tokenizer
+        # populates tc.tokenizer_files_hash, so the hash must not depend on whether
+        # tc.tokenizer was accessed before compute_config_hash was called.
+        def make_tc():
+            return open_instruct.dataset_transformation.TokenizerConfig(
+                tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+            )
+
+        dcs = [
+            open_instruct.dataset_transformation.DatasetConfig(
+                dataset_name=os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"),
+                dataset_split="train",
+                dataset_revision="main",
+                transform_fn=["sft_tokenize_v1"],
+                transform_fn_args=[{}],
+            )
+        ]
+
+        tc = make_tc()
+        hash_before_access = open_instruct.dataset_transformation.compute_config_hash(dcs, tc)
+        hash_after_access = open_instruct.dataset_transformation.compute_config_hash(dcs, tc)
+        self.assertEqual(hash_before_access, hash_after_access)
+
+        tc_preloaded = make_tc()
+        _ = tc_preloaded.tokenizer
+        hash_preloaded = open_instruct.dataset_transformation.compute_config_hash(dcs, tc_preloaded)
+        self.assertEqual(hash_preloaded, hash_before_access)
+
+    def test_dataset_commit_hash_resolved_after_download(self):
+        # get_commit_hash only looks in the local HF hub cache, so it must run
+        # after load_dataset has downloaded the dataset (which populates the
+        # cache); otherwise a fresh machine hashes dataset_commit_hash=None while
+        # a warm one hashes the real commit, producing different cache hashes.
+        calls = []
+        fake_dataset = datasets.Dataset.from_dict({"messages": [[{"role": "user", "content": "hi"}]]})
+
+        def fake_load_dataset(*args, **kwargs):
+            calls.append("load_dataset")
+            return fake_dataset
+
+        def fake_get_commit_hash(*args, **kwargs):
+            calls.append("get_commit_hash")
+            return "abc123"
+
+        with (
+            mock.patch.object(open_instruct.dataset_transformation, "load_dataset", side_effect=fake_load_dataset),
+            mock.patch.object(
+                open_instruct.dataset_transformation, "get_commit_hash", side_effect=fake_get_commit_hash
+            ),
+        ):
+            dc = open_instruct.dataset_transformation.DatasetConfig(
+                dataset_name="fake-org/fake-hub-dataset", dataset_split="train", dataset_revision="main"
+            )
+
+        self.assertEqual(calls, ["load_dataset", "get_commit_hash"])
+        self.assertEqual(dc.dataset_commit_hash, "abc123")
 
 
 class TestCachedDataset(unittest.TestCase):
@@ -633,6 +694,160 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertNotIn("trailing user message", trained_text)
 
 
+class TestChatTemplateResolution(unittest.TestCase):
+    def _tc(self, chat_template_name):
+        return open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH,
+            tokenizer_revision="main",
+            use_fast=True,
+            chat_template_name=chat_template_name,
+            add_bos=False,
+        )
+
+    def test_registry_name_applies_chat_templates_entry(self):
+        tokenizer = self._tc("simple_chat").tokenizer
+        self.assertEqual(tokenizer.chat_template, open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_chat"])
+
+    def test_none_and_tokenizer_default_use_the_same_tokenizer_template(self):
+        none_template = self._tc(None).tokenizer.chat_template
+        default_template = self._tc("tokenizer_default").tokenizer.chat_template
+        self.assertEqual(none_template, default_template)
+        self.assertNotEqual(default_template, open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_chat"])
+
+    @mock.patch("open_instruct.tokenizer_utils.AutoTokenizer.from_pretrained")
+    def test_tokenizer_default_and_none_do_not_require_add_bos_for_olmo_gpt_neox(self, from_pretrained):
+        for chat_template_name in (None, "tokenizer_default"):
+            with self.subTest(chat_template_name=chat_template_name):
+                tokenizer = mock.MagicMock(spec=GPTNeoXTokenizerFast)
+                tokenizer.pad_token_id = None
+                tokenizer.eos_token_id = 1
+                tokenizer.bos_token = None
+                tokenizer.eos_token = "<|endoftext|>"
+                tokenizer.chat_template = "{{ messages }}"
+                from_pretrained.return_value = tokenizer
+                config = open_instruct.dataset_transformation.TokenizerConfig(
+                    tokenizer_name_or_path="allenai/Olmo-test", chat_template_name=chat_template_name, add_bos=False
+                )
+
+                result = open_instruct.dataset_transformation.get_tokenizer_tulu_v2_2(config)
+
+                self.assertIs(result, tokenizer)
+        self.assertEqual(from_pretrained.call_count, 2)
+
+    def test_tokenizer_default_requires_a_published_template(self):
+        tokenizer = mock.MagicMock()
+        tokenizer.chat_template = None
+        with self.assertRaisesRegex(ValueError, "does not define a chat template"):
+            open_instruct.dataset_transformation._set_chat_template(self._tc("tokenizer_default"), tokenizer)
+
+    def test_unknown_name_raises_with_available_keys_and_suggestion(self):
+        with self.assertRaises(ValueError) as ctx:
+            _ = self._tc("olmo123").tokenizer
+        message = str(ctx.exception)
+        self.assertIn("Unknown chat template name 'olmo123'", message)
+        self.assertIn("tokenizer_default", message)
+        self.assertIn("Did you mean", message)
+        self.assertIn("'olmo'", message)
+
+    def test_unknown_name_that_looks_like_a_registry_key_suggests_it(self):
+        with self.assertRaises(ValueError) as ctx:
+            _ = self._tc("olmo_thinker_no_think_final").tokenizer
+        message = str(ctx.exception)
+        self.assertIn("Unknown chat template name 'olmo_thinker_no_think_final'", message)
+        self.assertIn("Did you mean", message)
+        self.assertTrue(
+            "olmo_thinker_no_think_7b" in message or "olmo_thinker_no_think_sft_tokenization" in message, message
+        )
+
+    def test_unknown_name_is_validated_before_olmo_bos_checks(self):
+        config = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="allenai/Olmo-test", chat_template_name="tuluu", add_bos=False
+        )
+        with self.assertRaisesRegex(ValueError, "Unknown chat template name 'tuluu'"):
+            open_instruct.dataset_transformation.get_tokenizer_tulu_v2_2(config)
+
+    def test_all_tokenizer_functions_validate_names_before_loading(self):
+        config = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="/does/not/exist", chat_template_name="tuluu"
+        )
+        for function in open_instruct.dataset_transformation.GET_TOKENIZER_FN.values():
+            with (
+                self.subTest(function=function.__name__),
+                self.assertRaisesRegex(ValueError, "Unknown chat template name 'tuluu'"),
+            ):
+                function(config)
+
+    def test_dataset_statistics_record_resolved_template(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        _, stats = open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics(
+            [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            ["train"],
+            self._tc("tulu"),
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=cache_dir,
+        )
+        self.assertEqual(stats["chat_template_name"], "tulu")
+        self.assertEqual(stats["chat_template_source"], "registry:tulu")
+        self.assertEqual(len(stats["chat_template_hash"]), 64)
+
+        _, default_stats = open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics(
+            [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            ["train"],
+            self._tc("tokenizer_default"),
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=cache_dir,
+        )
+        self.assertEqual(default_stats["chat_template_source"], f"tokenizer:{TOKENIZER_PATH}")
+        self.assertEqual(len(default_stats["chat_template_hash"]), 64)
+
+    def test_legacy_cached_statistics_mark_template_metadata_unknown(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache("legacy", cache_dir)
+        cache_path = cache.get_cache_path()
+        open_instruct.dataset_transformation.Dataset.from_dict({"value": [1]}).save_to_disk(cache_path)
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        legacy_statistics = {"per_dataset_stats": [], "dataset_order": []}
+        with open(stats_path, "w") as f:
+            json.dump(legacy_statistics, f)
+
+        _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
+
+        self.assertIsNone(statistics["chat_template_name"])
+        self.assertIsNone(statistics["chat_template_source"])
+        self.assertIsNone(statistics["chat_template_hash"])
+        with open(stats_path) as f:
+            self.assertEqual(json.load(f), legacy_statistics)
+
+    def test_cached_template_metadata_is_not_overwritten_by_the_callers_tokenizer(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache("explicit-hash", cache_dir)
+        cache_path = cache.get_cache_path()
+        open_instruct.dataset_transformation.Dataset.from_dict({"value": [1]}).save_to_disk(cache_path)
+        stored_statistics = {
+            "per_dataset_stats": [],
+            "dataset_order": [],
+            "chat_template_name": "original",
+            "chat_template_source": "tokenizer:original",
+            "chat_template_hash": "original-hash",
+        }
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        with open(stats_path, "w") as f:
+            json.dump(stored_statistics, f)
+
+        _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
+
+        self.assertEqual(statistics, stored_statistics)
+        with open(stats_path) as f:
+            self.assertEqual(json.load(f), stored_statistics)
+
+
 # Templates from CHAT_TEMPLATES that are used for SFT (as opposed to the RL/inference-only
 # ones, which never reach the assistant-label code path).
 SFT_CHAT_TEMPLATE_NAMES = [
@@ -675,40 +890,14 @@ CONVERSATION_SHAPES = {
     ],
 }
 
-# (template, eos_variant, shape) combinations whose assistant spans can be derived, and which
-# must therefore produce correct labels. Everything not listed here is expected to be detected
-# as underivable and masked out (the row is then dropped by `sft_tulu_filter_v1`).
-#
-# The two categories together are the specification: a combination either trains exactly the
-# assistant content, or trains nothing at all. Producing *wrong* labels is the failure this
-# sweep exists to catch, and no combination is allowed to do it.
-#
-# Growing this set is the goal of the P1 work in
-# https://github.com/allenai/open-instruct/issues/1800: templates that rewrite assistant
-# content as they render (`*_thinker*` inject or split on <think>) cannot be located by either
-# the char-offset or the token-count derivation, and need `{% generation %}` markers instead.
-# Consecutive assistant turns are underivable for the same underlying reason -- every
-# derivation must render a prefix ending in an assistant turn, which templates that
-# special-case the final turn render differently from the full conversation.
+# In-repo SFT templates declare `{% generation %}` blocks, so every (template, eos, shape)
+# combination must train exactly the assistant content. Templates this repo does not own
+# (and the dedicated underivable-template tests below) still go through prefix derivation.
 DERIVABLE_COMBINATIONS = {
-    ("tulu", "native_eos", "alternating"),
-    ("tulu", "im_end_eos", "alternating"),
-    ("olmo", "native_eos", "alternating"),
-    ("olmo", "im_end_eos", "alternating"),
-    ("olmo", "im_end_eos", "consecutive_assistant"),
-    ("olmo_old", "native_eos", "alternating"),
-    ("olmo_old", "im_end_eos", "alternating"),
-    ("olmo_old", "im_end_eos", "consecutive_assistant"),
-    ("olmo_thinker_no_think_7b", "native_eos", "alternating"),
-    ("olmo_thinker_no_think_7b", "im_end_eos", "alternating"),
-    ("olmo_thinker_no_think_7b", "im_end_eos", "consecutive_assistant"),
-    ("olmo_thinker_no_think_sft_tokenization", "native_eos", "alternating"),
-    ("olmo_thinker_no_think_sft_tokenization", "im_end_eos", "alternating"),
-    ("olmo_thinker_no_think_sft_tokenization", "im_end_eos", "consecutive_assistant"),
-    ("zephyr", "native_eos", "alternating"),
-    ("zephyr", "native_eos", "consecutive_assistant"),
-    ("zephyr", "im_end_eos", "alternating"),
-    ("zephyr", "im_end_eos", "consecutive_assistant"),
+    (template_name, eos_name, shape_name)
+    for template_name in SFT_CHAT_TEMPLATE_NAMES
+    for eos_name, _ in EOS_VARIANTS
+    for shape_name in CONVERSATION_SHAPES
 }
 
 
@@ -721,7 +910,6 @@ def _sweep_cases():
 
 
 WORKING_SWEEP_CASES = [c for c in _sweep_cases() if c[4] in DERIVABLE_COMBINATIONS]
-BROKEN_SWEEP_CASES = [c for c in _sweep_cases() if c[4] not in DERIVABLE_COMBINATIONS]
 
 
 class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
@@ -760,13 +948,15 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
             elif message["content"]:
                 self.assertNotIn(message["content"], trained_text, f"{message['role']} content leaked into loss")
 
-    @parameterized.expand([(c[0], c[1], c[2], c[3]) for c in BROKEN_SWEEP_CASES])
-    def test_underivable_spans_are_masked_out_not_mislabelled(self, _name, template_name, eos_token, shape_name):
-        # Detection, not silence: the span can't be located, so the row trains on nothing and
-        # `sft_tulu_filter_v1` drops it. Training on a misaligned span is the failure mode this
-        # whole area guards against, so "no labels" is the correct outcome, not "some labels".
-        messages = CONVERSATION_SHAPES[shape_name]
-        tokenizer = self._tokenizer_for(template_name, eos_token)
+    def test_underivable_spans_are_masked_out_not_mislabelled(self):
+        # Detection, not silence: a template with no `{% generation %}` blocks whose
+        # prefixes cannot be located still trains on nothing and is dropped.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}"
+            "{% if loop.last %}{{ eos_token }}{% endif %}\n{% endfor %}"
+        )
+        messages = CONVERSATION_SHAPES["alternating"]
         row = {"messages": [dict(m) for m in messages]}
         out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
             dict(row), tokenizer, max_seq_length=4096
@@ -777,30 +967,87 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
             open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer),
             "an all-masked row must be dropped by the filter",
         )
-        # The underlying derivation must still report *why*, so the drop is diagnosable.
-        tools = None
         with self.assertRaises(open_instruct.dataset_transformation.AssistantSpanDerivationError):
             open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
-                messages, tokenizer, tools, 4096
+                messages, tokenizer, None, 4096
             )
 
     def test_one_bad_row_does_not_abort_a_dataset_map(self):
-        # The rung-5 failure mode: a single underivable conversation used to raise inside
-        # `dataset.map` and kill the whole tokenization job. Good rows must survive alongside it.
+        # A single underivable conversation used to raise inside `dataset.map` and kill
+        # the whole tokenization job. Good rows must survive alongside it.
         tokenizer = self._tokenizer_for("tulu", None)
+        tokenizer.chat_template = tokenizer.chat_template.replace(
+            "{% generation %}", "{% if message['content'] != 'BADROW' %}{% generation %}"
+        ).replace("{% endgeneration %}", "{% endgeneration %}{% endif %}")
         good = {"messages": [dict(m) for m in CONVERSATION_SHAPES["alternating"]]}
-        bad = {"messages": [dict(m) for m in CONVERSATION_SHAPES["consecutive_assistant"]]}
+        bad = {"messages": [{"role": "user", "content": "question"}, {"role": "assistant", "content": "BADROW"}]}
         rows = [
-            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(dict(r), tokenizer, 4096)
-            for r in (good, bad, good)
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(dict(row), tokenizer, 4096)
+            for row in (good, bad, good)
         ]
         kept = [r for r in rows if open_instruct.dataset_transformation.sft_tulu_filter_v1(r, tokenizer)]
         self.assertEqual(len(kept), 2, "the two derivable rows must survive the undecidable one")
 
+    def test_olmo_thinker_trains_think_tags(self):
+        # Prefix derivation used to drop or mis-mask thinking turns so `<think>` never
+        # entered the loss. The generation-block mask must keep the opener.
+        tokenizer = self._tokenizer_for("olmo_thinker", None)
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("<think>", trained_text)
+        self.assertIn("THINKONE", trained_text)
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("USERQUERY", trained_text)
+
+    def test_tulu_thinker_r1_style_trains_the_stripped_answer(self):
+        # This template rewrites assistant content (split on `</think>`). The mask must
+        # follow the rewrite: the answer is trained, the dropped thinking is not.
+        tokenizer = self._tokenizer_for("tulu_thinker_r1_style", None)
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("THINKONE", trained_text)
+        self.assertNotIn("USERQUERY", trained_text)
+
+    def test_remove_intermediate_thinking_keeps_only_the_final_think_block(self):
+        tokenizer = self._tokenizer_for("olmo_thinker_remove_intermediate_thinking", None)
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+            {"role": "user", "content": "USER2"},
+            {"role": "assistant", "content": "<think>THINKTWO</think>ANSWERTWO"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("THINKONE", trained_text)
+        self.assertIn("<think>", trained_text)
+        self.assertIn("THINKTWO", trained_text)
+        self.assertIn("ANSWERTWO", trained_text)
+
     def test_prefix_unstable_template_falls_back_instead_of_raising(self):
-        # `olmo` swaps <|im_end|> for eos_token on the final assistant turn, so the rendered
-        # prefixes are not literal prefixes of the full render. That used to raise; it must now
-        # fall back to token-count derivation and produce correct labels.
+        # `olmo` swaps <|im_end|> for eos_token on the final assistant turn. Generation
+        # blocks (or the token-count fallback) must still produce correct labels.
         messages = CONVERSATION_SHAPES["alternating"]
         tokenizer = self._tokenizer_for("olmo", None)
         out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
@@ -815,8 +1062,8 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         self.assertNotIn("USERTWO", trained_text)
 
     def test_last_turn_only_still_trains_only_the_final_turn_after_fallback(self):
-        # The fallback derives a span per assistant turn; `last_turn_only` must still restrict
-        # to the final one rather than training every turn.
+        # Multi-turn `olmo` labels every assistant generation block; `last_turn_only`
+        # must still restrict to the final one rather than training every turn.
         messages = CONVERSATION_SHAPES["alternating"]
         tokenizer = self._tokenizer_for("olmo", None)
         out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
@@ -827,6 +1074,132 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
         self.assertIn("ASSISTTWO", trained_text)
         self.assertNotIn("ASSISTONE", trained_text)
+
+    def test_last_turn_only_preserves_contiguous_generation_block_boundaries(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}|{% endgeneration %}"
+            "{% else %}{{ m['content'] }}|{% endif %}"
+            "{% endfor %}"
+        )
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "ASSISTONE"},
+            {"role": "assistant", "content": "ASSISTTWO"},
+        ]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertEqual(trained_text, "ASSISTTWO|")
+
+    def test_compact_generation_tag_uses_assistant_mask(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{%generation%}{{ m['content'] }}{%endgeneration%}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ASSISTONE"}]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertEqual(trained_text, "ASSISTONE")
+
+    def test_last_turn_only_supports_multiple_generation_spans_per_turn(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}{% endgeneration %}"
+            "{% generation %}{{ eos_token }}{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ASSISTONE"}]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertEqual(trained_text, f"ASSISTONE{tokenizer.eos_token}")
+
+    def test_last_turn_only_never_uses_an_earlier_turns_generation_spans(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' and m['content'] %}"
+            "{% generation %}{{ m['content'] }}{% endgeneration %}"
+            "{% generation %}{{ eos_token }}{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "ASSISTONE"},
+            {"role": "assistant", "content": ""},
+        ]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+
+    def test_last_turn_only_does_not_train_an_earlier_turn_when_final_turn_is_truncated(self):
+        tokenizer = self._tokenizer_for("tulu", None)
+        messages = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "FIRSTANSWER"},
+            {"role": "user", "content": "filler " * 200},
+            {"role": "assistant", "content": "FINALANSWER"},
+        ]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=64
+        )
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+
+    def test_left_truncation_keeps_visible_later_assistant_labels(self):
+        tokenizer = self._tokenizer_for("tulu", None)
+        tokenizer.truncation_side = "left"
+        messages = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "OLDANSWER"},
+            {"role": "user", "content": "filler " * 200},
+            {"role": "assistant", "content": "VISIBLEANSWER"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=32
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("VISIBLEANSWER", trained_text)
+        self.assertNotIn("OLDANSWER", trained_text)
+
+    def test_simple_chat_rejects_non_string_assistant_content(self):
+        tokenizer = self._tokenizer_for("simple_chat", None)
+        for content in (None, {"text": "answer"}, ["answer"]):
+            with self.subTest(content=content), self.assertRaises(TypeError):
+                tokenizer.apply_chat_template(
+                    [{"role": "user", "content": "question"}, {"role": "assistant", "content": content}],
+                    tokenize=False,
+                )
+
+    def test_generation_mask_preserves_nonfinal_separator_masking(self):
+        tokenizer = self._tokenizer_for("tulu", None)
+        messages = CONVERSATION_SHAPES["alternating"]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertNotIn(f"{tokenizer.eos_token}\n", trained_text)
 
     def test_span_running_past_the_turn_is_rejected(self):
         # Guards the over-wide direction directly: a span that starts correctly but runs on
@@ -941,12 +1314,12 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
                 messages, tokenizer, None, 4096
             )
 
-    def test_generation_blocks_yield_an_all_zero_mask_without_raising(self):
-        # Constraint on the intended fix: `return_assistant_tokens_mask=True` on a template with
-        # no {% generation %} block does not raise -- it warns and returns an all-zero mask. A
-        # migration to that API must assert the mask is non-empty, or a template that was simply
-        # not migrated will silently train on nothing, which is worse than today's loud error.
-        tokenizer = self._tokenizer_for("tulu", None)
+    def test_transformers_returns_zero_mask_when_generation_blocks_are_absent(self):
+        # Hugging Face does not raise on a template with no `{% generation %}` block -- it
+        # warns and returns an all-zero mask. The tokenize path must not treat that as a
+        # successful mask, or an unmigrated template would silently train on nothing.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_concat_with_space"]
         out = tokenizer.apply_chat_template(
             CONVERSATION_SHAPES["alternating"],
             tokenize=True,
@@ -958,6 +1331,476 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         if masks and isinstance(masks[0], list):
             masks = masks[0]
         self.assertEqual(sum(masks), 0)
+
+    def test_empty_generation_mask_on_assistant_turns_is_underivable(self):
+        # The template string has `{% generation %}` so we take the mask path, but the
+        # block never emits tokens. That must be a loud miss, not an all-zero train.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{{ m['content'] }}{% endfor %}"
+            "{% if false %}{% generation %}x{% endgeneration %}{% endif %}"
+        )
+        messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+        with self.assertRaisesRegex(
+            open_instruct.dataset_transformation.AssistantSpanDerivationError, "no non-empty assistant spans"
+        ):
+            open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+                messages, tokenizer, None, 4096
+            )
+
+    def test_generation_blocks_are_detected_in_selected_tool_use_template(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = {
+            "default": "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}\n{% endfor %}",
+            "tool_use": (
+                "{% for m in messages %}"
+                "{% if m['role'] == 'assistant' %}"
+                "assistant: {% generation %}{{ m['content'] + eos_token }}{% endgeneration %}"
+                "{% else %}{{ m['role'] }}: {{ m['content'] }}\n{% endif %}"
+                "{% endfor %}"
+            ),
+        }
+        messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ANSWERONE"}]
+        tools = [{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]
+        input_ids, _, labels, _ = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+            messages, tokenizer, tools, 4096
+        )
+        trained_text = tokenizer.decode(
+            [token for token, label in zip(input_ids[0].tolist(), labels[0].tolist()) if label != -100]
+        )
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("USERQUERY", trained_text)
+
+
+def _template_contract_cases():
+    shapes = list(CONVERSATION_SHAPES.values()) + [
+        [{"role": "user", "content": "QUESTION"}],
+        [{"role": "assistant", "content": "ANSWER"}],
+        [{"role": "user", "content": "QUESTION"}, {"role": "assistant", "content": ""}],
+        [{"role": "user", "content": "QUESTION"}, {"role": "assistant", "content": "<think>reason</think>ANSWER"}],
+        [
+            {"role": "user", "content": "QUESTION"},
+            {"role": "assistant", "content": "CALL", "function_calls": "lookup()"},
+            {"role": "environment", "content": "RESULT"},
+            {"role": "assistant", "content": "ANSWER"},
+        ],
+    ]
+    for messages in shapes:
+        for eos in ("<|end_of_text|>", "<|im_end|>"):
+            for bos in (False, True):
+                for prompt in (False, True):
+                    for tools in (
+                        None,
+                        [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}],
+                    ):
+                        yield messages, eos, bos, prompt, tools
+
+
+class TestSftTemplateRenderingContract(unittest.TestCase):
+    @parameterized.expand(SFT_CHAT_TEMPLATE_NAMES)
+    def test_render_matches_pre_generation_templates_and_one_block_per_assistant(self, template_name):
+        # Golden renders were produced from the templates before this PR (7a15dedf8).
+        # This protects the original rewrite, not just output-neutral tag removal.
+        with open(os.path.join(TEST_DATA_DIR, "sft_template_render_hashes.json")) as golden_file:
+            golden = json.load(golden_file)
+        digest = hashlib.sha256()
+        for messages, eos, bos, prompt, tools in _template_contract_cases():
+            template = open_instruct.dataset_transformation.CHAT_TEMPLATES[template_name]
+            if bos:
+                template = "{{ bos_token }}" + template
+            rendered, ranges = chat_template_utils.render_jinja_template(
+                conversations=[messages],
+                chat_template=template,
+                tools=tools,
+                return_assistant_tokens_mask=True,
+                add_generation_prompt=prompt,
+                eos_token=eos,
+                bos_token="<|begin_of_text|>",
+            )
+            digest.update(rendered[0].encode())
+            digest.update(b"\0")
+            self.assertEqual(len(ranges[0]), sum(m["role"] == "assistant" for m in messages))
+        self.assertEqual(digest.hexdigest(), golden[template_name])
+
+
+class TestGenerationBlockContracts(unittest.TestCase):
+    def setUp(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+
+    def _trained(self, messages, last=False, max_length=4096):
+        ids, _, labels, _ = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+            messages, self.tokenizer, None, max_length, last_turn_only=last
+        )
+        return self.tokenizer.decode(ids[labels != -100].tolist())
+
+    def test_empty_render_does_not_abort_dataset_map(self):
+        self.tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["assistant_message_only"]
+        dataset = open_instruct.dataset_transformation.Dataset.from_list(
+            [
+                {"messages": [{"role": "user", "content": "No assistant response"}]},
+                {"messages": [{"role": "assistant", "content": "ANSWER"}]},
+            ]
+        )
+        mapped = dataset.map(
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1,
+            fn_kwargs={"tokenizer": self.tokenizer, "max_seq_length": 4096},
+        )
+        self.assertEqual(mapped[0][open_instruct.dataset_transformation.LABELS_KEY], [])
+        filtered = mapped.filter(
+            open_instruct.dataset_transformation.sft_tulu_filter_v1, fn_kwargs={"tokenizer": self.tokenizer}
+        )
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["messages"][0]["content"], "ANSWER")
+
+    def test_empty_offsets_with_nonempty_spans_are_safe(self):
+        labels = open_instruct.dataset_transformation._labels_from_char_spans(
+            torch.empty((1, 0), dtype=torch.long), torch.tensor([]).numpy(), [(0, 3)]
+        )
+        self.assertEqual(labels.shape, (1, 0))
+
+    def test_unknown_special_token_outside_block_warns_without_rejecting(self):
+        self.tokenizer.add_special_tokens({"additional_special_tokens": ["<|custom_end|>"]})
+        with mock.patch.object(open_instruct.dataset_transformation.logger, "warning") as warning:
+            open_instruct.dataset_transformation._verify_generation_terminators(
+                "ANSWER<|custom_end|>", [(0, 6)], self.tokenizer
+            )
+        warning.assert_called_once()
+        self.assertIn("<|custom_end|>", warning.call_args.args[0])
+        with mock.patch.object(open_instruct.dataset_transformation.logger, "warning") as warning:
+            open_instruct.dataset_transformation._verify_generation_terminators(
+                "ANSWER<|custom_end|>", [(0, 6), (6, 20)], self.tokenizer
+            )
+        warning.assert_not_called()
+
+    @parameterized.expand(SFT_CHAT_TEMPLATE_NAMES)
+    def test_bos_preserves_last_assistant_labels(self, template_name):
+        template = open_instruct.dataset_transformation.CHAT_TEMPLATES[template_name]
+        messages = [
+            {"role": "user", "content": "QUESTIONONE"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+            {"role": "user", "content": "QUESTIONTWO"},
+            {"role": "assistant", "content": "<think>THINKTWO</think>ANSWERTWO"},
+        ]
+        self.tokenizer.chat_template = template
+        expected = self._trained(messages, last=True)
+        self.tokenizer.chat_template = "{{ bos_token }}" + template
+        self.assertEqual(self._trained(messages, last=True), expected)
+        self.assertIn("ANSWERTWO", expected)
+        self.assertNotIn("ANSWERONE", expected)
+
+    @parameterized.expand([(False, "eos"), (True, "eos"), (False, "handoff"), (True, "handoff")])
+    def test_closing_token_outside_generation_blocks_is_rejected(self, last, terminator_kind):
+        terminator = self.tokenizer.eos_token if terminator_kind == "eos" else "<|im_end|>"
+        self.tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}{% endgeneration %}"
+            + terminator
+            + "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "QUESTION"}, {"role": "assistant", "content": "ANSWER"}]
+        with self.assertRaisesRegex(open_instruct.dataset_transformation.AssistantSpanDerivationError, "terminator"):
+            self._trained(messages, last=last)
+
+    def test_separate_reasoning_answer_and_terminator_blocks(self):
+        self.tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}<think>reason</think>{% endgeneration %}"
+            "{% generation %}{{ m['content'] }}{% endgeneration %}"
+            "{% generation %}{{ eos_token }}{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [
+            {"role": "user", "content": "QUESTION"},
+            {"role": "assistant", "content": "FIRST"},
+            {"role": "assistant", "content": "LAST"},
+        ]
+        self.assertEqual(self._trained(messages, last=True), "<think>reason</think>LAST" + self.tokenizer.eos_token)
+
+    def test_ambiguous_external_block_ownership_is_rejected(self):
+        # Earlier assistant endings change on a prefix render. Matching block and
+        # assistant counts must not authorize choosing the last block.
+        self.tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}{{ 'FINAL' if loop.last else 'MORE' }}{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [
+            {"role": "user", "content": "QUESTION"},
+            {"role": "assistant", "content": "FIRST"},
+            {"role": "assistant", "content": "LAST"},
+        ]
+        with self.assertRaisesRegex(open_instruct.dataset_transformation.AssistantSpanDerivationError, "ownership"):
+            self._trained(messages, last=True)
+
+    def test_zero_width_offsets_and_spans_are_not_trainable(self):
+        ids = torch.tensor([[10, 11, 12, 13, 14]])
+        offsets = torch.tensor([[0, 2], [2, 2], [2, 4], [4, 6], [6, 8]]).numpy()
+        labels = open_instruct.dataset_transformation._labels_from_char_spans(ids, offsets, [(1, 4), (5, 5)])
+        self.assertEqual(labels.tolist(), [[10, -100, 12, -100, -100]])
+
+
+class TestOlmo35GenerationLabels(unittest.TestCase):
+    def setUp(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        self.tokenizer.add_tokens(["<|im_start|>", "<|im_end|>"], special_tokens=True)
+        with open(os.path.join(TEST_DATA_DIR, "olmo35_chat_template.jinja")) as template_file:
+            self.tokenizer.chat_template = template_file.read()
+
+    @parameterized.expand([("inline",), ("separate",), ("empty",), ("tool_call",)])
+    def test_complete_assistant_output_is_trained(self, shape):
+        assistant = {"role": "assistant", "content": "ANSWER"}
+        reasoning = "REASON" if shape != "empty" else ""
+        if shape == "inline":
+            assistant["content"] = "<think>REASON</think>ANSWER"
+        elif shape != "empty":
+            assistant["reasoning_content"] = reasoning
+        expected = f"<think>{reasoning}</think>ANSWER"
+        if shape == "tool_call":
+            assistant["tool_calls"] = [{"function": {"name": "lookup", "arguments": {"query": "VALUE"}}}]
+            expected += "\n\n<tool_call>\n<function=lookup>\n<parameter=query>\nVALUE\n</parameter>\n</function>\n</tool_call><|im_end|>"
+        else:
+            expected += self.tokenizer.eos_token
+        messages = [
+            {"role": "user", "content": "FIRSTQUESTION"},
+            {"role": "assistant", "content": "FIRSTANSWER"},
+            {"role": "user", "content": "QUESTION " * 200},
+            assistant,
+        ]
+        if shape == "tool_call":
+            messages.append({"role": "tool", "content": "TOOLRESULT"})
+        for bos in (False, True):
+            template = self.tokenizer.chat_template
+            if bos:
+                self.tokenizer.chat_template = "{{ bos_token }}" + template
+            for last in (False, True):
+                for side, limit in (("right", 4096), ("left", 100)):
+                    with self.subTest(bos=bos, last=last, side=side):
+                        self.tokenizer.truncation_side = side
+                        ids, _, labels, _ = (
+                            open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+                                messages, self.tokenizer, None, limit, last_turn_only=last
+                            )
+                        )
+                        trained = self.tokenizer.decode(ids[labels != -100].tolist())
+                        if last:
+                            self.assertEqual(trained, expected)
+                        else:
+                            self.assertIn(expected, trained)
+                        self.assertNotIn("QUESTION", trained)
+                        self.assertNotIn("TOOLRESULT", trained)
+            self.tokenizer.chat_template = template
+
+    def test_tags_do_not_change_rendered_text_or_inference_prompt(self):
+        messages = [
+            {"role": "user", "content": "QUESTION"},
+            {"role": "assistant", "reasoning_content": "REASON", "content": "ANSWER"},
+        ]
+        template = self.tokenizer.chat_template
+        # Preserve Jinja whitespace control while replacing annotations with comments.
+        plain = re.sub(r"\{%(-?)\s*(?:endgeneration|generation)\s*(-?)%\}", r"{#\1 annotation \2#}", template)
+        for prompt in (False, True):
+            rendered, ranges = chat_template_utils.render_jinja_template(
+                conversations=[messages],
+                chat_template=template,
+                return_assistant_tokens_mask=True,
+                add_generation_prompt=prompt,
+                **self.tokenizer.special_tokens_map,
+            )
+            self.tokenizer.chat_template = plain
+            self.assertEqual(
+                rendered[0], self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=prompt)
+            )
+            self.assertEqual(len(ranges[0]), 1)
+            if prompt:
+                self.assertTrue(rendered[0].endswith("<|im_start|>assistant\n<think>"))
+                self.assertLess(ranges[0][-1][1], len(rendered[0]))
+
+
+class TestOverLengthStrategy(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+
+    def _tokenize(self, max_seq_length, over_length_strategy):
+        row = {
+            "messages": [
+                {"role": "user", "content": "Count upward for a while."},
+                {"role": "assistant", "content": " ".join(str(i) for i in range(400))},
+            ]
+        }
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy
+        )
+
+    def _short_row(self, over_length_strategy):
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096, over_length_strategy=over_length_strategy
+        )
+
+    def test_keep_leaves_a_truncated_row_unterminated(self):
+        out = self._tokenize(64, "keep")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertNotEqual(input_ids[-1], self.tokenizer.eos_token_id)
+
+    def test_terminate_ends_a_truncated_row_with_a_trainable_eos(self):
+        out = self._tokenize(64, "terminate")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertEqual(input_ids[-1], self.tokenizer.eos_token_id)
+        # Trainable, so the model learns to stop rather than merely being delimited.
+        self.assertEqual(labels[-1], self.tokenizer.eos_token_id)
+
+    def test_drop_masks_a_truncated_row_so_the_filter_removes_it(self):
+        out = self._tokenize(64, "drop")
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+        self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    @parameterized.expand([("keep",), ("terminate",), ("drop",)])
+    def test_rows_that_fit_are_untouched(self, over_length_strategy):
+        """A row that fits must be byte-identical across strategies."""
+        baseline = self._short_row("keep")
+        out = self._short_row(over_length_strategy)
+        for key in (
+            open_instruct.dataset_transformation.INPUT_IDS_KEY,
+            open_instruct.dataset_transformation.LABELS_KEY,
+            open_instruct.dataset_transformation.ATTENTION_MASK_KEY,
+        ):
+            self.assertEqual(out[key].tolist(), baseline[key].tolist(), key)
+        self.assertTrue(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    def test_exact_length_row_that_covers_its_render_is_not_treated_as_truncated(self):
+        """A conversation can render to exactly `max_seq_length` tokens without being cut."""
+        offsets = [(0, 3), (3, 7)]
+        rendered = "abcdefg"
+        self.assertFalse(
+            open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    def test_over_length_render_cut_on_an_eos_is_still_truncated(self):
+        """A render cut exactly on an earlier turn's EOS ends in EOS but still lost text."""
+        offsets = [(0, 3), (3, 7)]
+        rendered = "abcdefg and a great deal more text"
+        self.assertTrue(
+            open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    @parameterized.expand([("keep",), ("drop",), ("terminate",)])
+    def test_left_truncation_strategy_preserves_tool_handoff_unless_dropped(self, strategy):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.truncation_side = "left"
+        tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_end|>"]})
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}<|im_end|>{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "filler " * 200}, {"role": "assistant", "content": "TOOLCALL"}]
+        _, _, _, truncated = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+            messages, tokenizer, None, 32
+        )
+        self.assertTrue(truncated)
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": messages}, tokenizer, max_seq_length=32, over_length_strategy=strategy
+        )
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        if strategy == "drop":
+            self.assertTrue(all(label == -100 for label in labels))
+            self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer))
+        else:
+            self.assertEqual(labels[-1], tokenizer.convert_tokens_to_ids("<|im_end|>"))
+
+    def test_left_truncation_ignores_zero_width_offsets(self):
+        self.assertTrue(
+            open_instruct.dataset_transformation._was_truncated(
+                [(0, 0), (4, 7)], "abcdefg", n_tokens=2, max_seq_length=2
+            )
+        )
+
+    def test_terminate_leaves_a_cut_in_a_masked_span_alone(self):
+        """A cut in a later user turn has no trainable tail to terminate."""
+        input_ids = torch.tensor([[10, 11, 12]])
+        labels = torch.tensor([[-100, 11, -100]])  # earlier trainable token, masked tail
+        out_ids, out_labels = open_instruct.dataset_transformation._apply_over_length_strategy(
+            input_ids.clone(), labels.clone(), self.tokenizer, truncated=True, over_length_strategy="terminate"
+        )
+        self.assertEqual(out_ids.tolist(), input_ids.tolist())
+        self.assertEqual(out_labels.tolist(), labels.tolist())
+
+    def test_terminate_rewrites_a_cut_inside_a_trainable_span(self):
+        input_ids = torch.tensor([[10, 11, 12]])
+        labels = torch.tensor([[-100, 11, 12]])
+        out_ids, out_labels = open_instruct.dataset_transformation._apply_over_length_strategy(
+            input_ids.clone(), labels.clone(), self.tokenizer, truncated=True, over_length_strategy="terminate"
+        )
+        self.assertEqual(out_ids[0, -1].item(), self.tokenizer.eos_token_id)
+        self.assertEqual(out_labels[0, -1].item(), self.tokenizer.eos_token_id)
+
+    def test_terminate_does_not_rescue_an_all_masked_row(self):
+        """A single trainable EOS must not rescue a row the filter is meant to drop."""
+        with mock.patch.object(
+            open_instruct.dataset_transformation,
+            "_tokenize_tulu_sft_with_assistant_labels",
+            side_effect=open_instruct.dataset_transformation.AssistantSpanDerivationError("forced"),
+        ):
+            out = self._tokenize(64, "terminate")
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+        self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    def test_default_is_omitted_from_the_tokenize_args(self):
+        """Keeps existing dataset cache hashes unchanged."""
+        self.assertEqual(
+            open_instruct.dataset_transformation.sft_tokenize_fn_args(4096, "keep"), {"max_seq_length": 4096}
+        )
+
+    @parameterized.expand([("terminate",), ("drop",)])
+    def test_opting_in_is_recorded_in_the_tokenize_args(self, over_length_strategy):
+        self.assertEqual(
+            open_instruct.dataset_transformation.sft_tokenize_fn_args(4096, over_length_strategy),
+            {"max_seq_length": 4096, "over_length_strategy": over_length_strategy},
+        )
+
+    def test_unknown_strategy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._tokenize(64, "truncate-harder")
+
+    def _thinker_tokenize(self, max_seq_length, over_length_strategy):
+        # `olmo_thinker` declares `{% generation %}` blocks, so this drives the
+        # generation-block labeling path rather than prefix derivation. It is the
+        # intersection of over_length_strategy (#1876) and generation-block labels
+        # (#1879): the strategy only applies here if `truncated` is threaded through
+        # that path, so these two tests guard that seam.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"]
+        row = {
+            "messages": [
+                {"role": "user", "content": "Count upward for a while."},
+                {"role": "assistant", "content": "<think>" + " ".join(str(i) for i in range(400)) + "</think>done"},
+            ]
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy
+        )
+        return tokenizer, out
+
+    def test_generation_block_template_keep_leaves_a_truncated_row_unterminated(self):
+        tokenizer, out = self._thinker_tokenize(64, "keep")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertNotEqual(input_ids[-1], tokenizer.eos_token_id)
+
+    def test_generation_block_template_terminate_ends_with_a_trainable_eos(self):
+        tokenizer, out = self._thinker_tokenize(64, "terminate")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertEqual(input_ids[-1], tokenizer.eos_token_id)
+        # Trainable, so a generation-block-labeled row also learns to stop when cut.
+        self.assertEqual(labels[-1], tokenizer.eos_token_id)
 
 
 if __name__ == "__main__":
