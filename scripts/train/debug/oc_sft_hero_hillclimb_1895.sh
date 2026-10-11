@@ -50,8 +50,9 @@ case "$ARM" in
             olmo35-nemotron) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
             olmo35-both) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
             # H060: olmo35-nemotron plus nvidia/Nemotron-SFT-Instruction-Following-Chat-v3's IF split, converted to
-            # open-instruct rows and decontaminated (ledger experiments/h060); a local parquet on WEKA, not an HF dataset.
-            olmo35-nemotron-if) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/h060/data/nemotron-ifchat-v3-if-decontam.parquet 1.0" ;;
+            # open-instruct rows and decontaminated (ledger experiments/h060); a local parquet on WEKA, not an HF dataset,
+            # named by its sha256 prefix because the dataset caches key a local file on its path, not its content.
+            olmo35-nemotron-if) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/h060/data/nemotron-ifchat-v3-if-decontam-1fee8794.parquet 1.0" ;;
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
