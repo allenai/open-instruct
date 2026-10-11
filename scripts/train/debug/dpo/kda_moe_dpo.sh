@@ -205,7 +205,7 @@ case "$MODE" in
     cache_dataset)
         DESC="KDA MoE DPO: tokenize $MIXER at $SEQ"
         $PY mason.py \
-            --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
+            --cluster ${TOKENIZE_CLUSTERS:-ai2/saturn ai2/neptune ai2/jupiter} \
             --workspace "$WORKSPACE" --priority "$PRIORITY" \
             --image "$BEAKER_IMAGE" --description "$DESC" --pure_docker_mode \
             --timeout "${TOKENIZE_TIMEOUT:-4h}" \
