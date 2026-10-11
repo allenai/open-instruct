@@ -92,13 +92,41 @@ set -euo pipefail
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 MODE="${2:-smoke}"
 
-# The #1854 SFT checkpoint: 0.5 epoch of Dolci-Think on the long-context KDA base.
-MODEL="${MODEL:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/7u2rne45/step11768}"
+# BASE picks the SFT checkpoint and everything that must match how it was trained.
+#   proxy           the #1854 SFT checkpoint: 0.5 epoch of Dolci-Think on the long-context
+#                   latent-KDA 1.2B proxy.
+#   h049-nemo-docb  Olmo 3.5 hero small (4T EMO base) after H049's nemo-docb SFT, the control
+#                   for the DPO-stage hypothesis. Tokenizer, revision, template and model config
+#                   are the ones that SFT ran with (Beaker 01M4BRPYCXG62ZFNGYVDA3B8AH). Eager, as
+#                   that SFT was: compile gives a non-finite loss at step 1 on this family.
+BASE="${BASE:-proxy}"
+case "$BASE" in
+    proxy)
+        DEFAULT_MODEL=/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/7u2rne45/step11768
+        DEFAULT_CONFIG=scripts/train/debug/kda_lc_sft.json
+        DEFAULT_TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
+        DEFAULT_TOKENIZER_REVISION=
+        DEFAULT_TEMPLATE=olmo123
+        DEFAULT_COMPILE=1
+        ;;
+    h049-nemo-docb)
+        DEFAULT_MODEL=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/runs/h049-nemo-docb-s34521/step13656
+        DEFAULT_CONFIG=scripts/train/debug/kda_hero_small_sft.json
+        DEFAULT_TOKENIZER=allenai/dolma2-tokenizer-olmo35
+        DEFAULT_TOKENIZER_REVISION=8b9717061fae09d5be814373d189919a62a9a00d
+        DEFAULT_TEMPLATE=olmo35
+        DEFAULT_COMPILE=0
+        ;;
+    *) echo "Unknown BASE=$BASE (expected proxy or h049-nemo-docb)" >&2; exit 1 ;;
+esac
+MODEL="${MODEL:-$DEFAULT_MODEL}"
 # The architecture the SFT run trained, including recompute_each_block. dpo.py
 # needs it because an olmo-core checkpoint carries no HF config to build from.
-CONFIG_NAME="${CONFIG_NAME:-scripts/train/debug/kda_lc_sft.json}"
-TOKENIZER="${TOKENIZER:-allenai/olmo-3-tokenizer-instruct-dev}"
-CHAT_TEMPLATE="${CHAT_TEMPLATE:-olmo123}"
+CONFIG_NAME="${CONFIG_NAME:-$DEFAULT_CONFIG}"
+TOKENIZER="${TOKENIZER:-$DEFAULT_TOKENIZER}"
+TOKENIZER_REVISION="${TOKENIZER_REVISION:-$DEFAULT_TOKENIZER_REVISION}"
+CHAT_TEMPLATE="${CHAT_TEMPLATE:-$DEFAULT_TEMPLATE}"
+COMPILE="${COMPILE:-$DEFAULT_COMPILE}"
 MIXER="${MIXER:-allenai/Dolci-Think-DPO-7B 1.0}"
 
 SEQ="${SEQ:-16384}"
@@ -131,7 +159,7 @@ MAX_RETRIES="${MAX_RETRIES:-2}"
 OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/kda-moe-dpo-$(date +%s)}"
 PY="${PY:-uv run python}"
 
-EXP_NAME="kda-moe-dpo-${MODE}-lr${LR}-seq${SEQ}-$(date +%s)"
+EXP_NAME="${BASE}-dpo-${MODE}-lr${LR}-seq${SEQ}-$(date +%s)"
 
 # Arguments shared by every mode. Kept in one place so the reference cache built by
 # cache_logprobs hashes identically to the one the training run looks for.
@@ -166,6 +194,12 @@ common_args=(
 if [[ -n "$MAX_SAMPLES" ]]; then
     common_args+=(--max_train_samples "$MAX_SAMPLES")
 fi
+if [[ -n "$TOKENIZER_REVISION" ]]; then
+    common_args+=(--tokenizer_revision "$TOKENIZER_REVISION")
+fi
+if [[ "$COMPILE" != "1" ]]; then
+    common_args+=(--no_compile_model)
+fi
 
 case "$MODE" in
     cache_dataset)
@@ -184,7 +218,9 @@ case "$MODE" in
             cache_logprobs) EXTRA=(--cache_logprobs_only); DESC="KDA MoE DPO: reference logprobs at $SEQ" ;;
             # Checkpointing is left off: each write is 207 GB and synchronous (the DDP
             # train module rejects async saves), which a memory gate does not need.
-            smoke)          EXTRA=(--max_train_steps "${STEPS:-30}"); DESC="KDA MoE DPO smoke: ${STEPS:-30} steps at $SEQ" ;;
+            # SAVE=1 writes one checkpoint at the last step, for the export and vLLM load check.
+            smoke)          EXTRA=(--max_train_steps "${STEPS:-30}" --checkpointing_steps "$( [[ "${SAVE:-0}" == 1 ]] && echo "${STEPS:-30}" || echo 1000000 )" --with_tracking)
+                            DESC="$BASE DPO smoke: ${STEPS:-30} steps at $SEQ, ${NNODES}x${NPROC}" ;;
             train)          EXTRA=(--checkpointing_steps "${CKPT_STEPS:-500}" --with_tracking); DESC="KDA MoE DPO: 1 epoch, lr $LR, seq $SEQ" ;;
         esac
         if (( NNODES > 1 )); then
