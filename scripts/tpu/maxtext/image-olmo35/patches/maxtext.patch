@@ -62,6 +62,327 @@ index 44022cd3..de56a21f 100644
      "qwen3.5-35b-a3b": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
      "qwen3.5-35b-a3b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
      "qwen3.5-35b-fp8": QWEN3_5_HF_WEIGHTS_TO_SHAPE,
+diff --git a/src/maxtext/common/common_types.py b/src/maxtext/common/common_types.py
+index 9a6a979a..86776848 100644
+--- a/src/maxtext/common/common_types.py
++++ b/src/maxtext/common/common_types.py
+@@ -194,6 +194,7 @@ class CustomRule(enum.Enum):
+   PURE_FSDP = "pure-fsdp"
+   CP_AS_EP = "cp-as-ep"  # Support CP and EP together
+   EP_AS_CP = "ep-as-cp"  # Support EP only
++  OLMO35_EP_AS_CP = "olmo35-ep-as-cp"  # ep-as-cp with KDA heads on the expert axis
+   PIPELINE_LARGE_MOE = "pipeline-large-moe"
+   FSDP_2D = "2d-fsdp"
+   EP_AS_DP = "ep-as-dp"
+diff --git a/src/maxtext/configs/base.yml b/src/maxtext/configs/base.yml
+index f50bf0e9..55d9c9f6 100644
+--- a/src/maxtext/configs/base.yml
++++ b/src/maxtext/configs/base.yml
+@@ -653,6 +653,7 @@ logical_axis_rules: [
+                       ['activation_batch_attn', ['data', 'fsdp', 'fsdp_transpose', 'expert']],
+                       ['activation_input_length_attn', ['tensor_sequence', 'context']],
+                       ['activation_heads', ['tensor', 'tensor_sequence', 'autoregressive']],
++                      ['activation_kda_heads', ['tensor', 'tensor_sequence', 'autoregressive']],
+                       ['activation_kv_heads', ['tensor', 'tensor_sequence']],
+                       ['activation_length_attn', ['context', 'context_usp_ulysses']],
+                       ['activation_q_length', ['context', 'context_usp_ulysses']],
+@@ -885,6 +886,10 @@ sft_train_on_completion_only: false
+ # dataset_type must be synthetic, hf, grain, tfds
+ # details in: https://github.com/AI-Hypercomputer/maxtext/blob/main/docs/guides/data_input_pipeline.md
+ dataset_type: synthetic
++# synthetic only: build the fixed batch once and reuse it, keeping its per-step reshard out of the step time.
++synthetic_data_reuse_batch: false
++# Norm metrics per step: all (grad, raw grad, param norms), grad (one shared norm), none.
++norm_metrics: "all"
+ # for TFDS input pipeline (dataset_type=tfds)
+ dataset_path: "" # your path given as argument in download_dataset.sh, e.g. "gs://my-maxtext-dataset/"
+ dataset_name: 'c4/en:3.1.0'
+@@ -1459,6 +1464,17 @@ gdn_num_value_heads: 32
+ gdn_chunk_size: 64
+ # dtype for the chunked delta-rule state and matmul operands; the decay algebra stays float32.
+ gdn_state_dtype: "float32"
++# Pure-JAX chunked KDA: "subblock" (MXU sub-block factorization, hoisted WY) or "pairwise".
++kda_chunked_impl: "pairwise"
++# Sub-block KDA: rows per diagonal sub-block of the intra-chunk matrices.
++kda_sub_block: 16
++kda_matmul_precision: "default"
++# Sub-block KDA: run the chunk-state recurrence as the Pallas kernel in kernels/kda_scan.py (bf16 state).
++kda_pallas_scan: false
++# With kda_fused_input_proj, constrain the concatenated kernel to the weights' embed sharding.
++kda_fused_proj_reduce_scatter: false
++# Fuse the KDA layer's six input projections of x into one matmul (same params).
++kda_fused_input_proj: false
+ # Fused tokamax Kimi Delta Attention kernel (experimental; Pallas Mosaic on TPU >= gen6).
+ use_tokamax_kda: false
+ # Reference beta in [0, 2) via allow_neg_eigval; False clamps to [0, 1] (diagnostic).
+@@ -1468,6 +1484,9 @@ kda_allow_neg_eigval: true
+ tokamax_kda_max_num_segments: 32
+ # Floor (nats) on per-step KDA log-decay fed to the tokamax kernel; it NaNs past ~30. 0 disables.
+ tokamax_kda_log_decay_floor: 20.0
++# Reset KDA state at packed-document starts through the log-decay gate (needs a floor > 0)
++# instead of the kernel's varlen path, which pads seq by 63*tokamax_kda_max_num_segments.
++tokamax_kda_resets_in_gate: false
+ # Do the KDA q/k L2-norm outside the tokamax kernel, where XLA can fuse it.
+ tokamax_kda_l2norm_outside: false
+ # Same MoE routing with fewer sorts, and routing indices saved for the bwd.
+@@ -1476,6 +1495,12 @@ moe_lean_routing: false
+ moe_topk_by_bisection: false
+ # With moe_lean_routing, top-k with a Pallas max-and-mask kernel instead of a sort.
+ moe_topk_pallas: false
++# EP dispatch/combine all-to-all with one slice per (shard, local expert), so tokens arrive grouped by
++# expert and neither side needs the local permute (a row gather).
++moe_a2a_expert_major: false
++# Run the all-to-all MoE path in this many token chunks, routing once over the whole sequence first (EMo
++# pools need whole documents). Keeps v4's permute gathers under the 128 MiB CMEM at seq 8192.
++moe_a2a_token_chunks: 1
+ # Cast the KDA short-conv weight to the activation dtype so q/k/v stay bf16.
+ kda_conv_in_compute_dtype: false
+ # Rematerialize each OLMoE3 layer on its own instead of per mixer cycle.
+diff --git a/src/maxtext/configs/custom_mesh_and_rule/olmo35-ep-as-cp.yml b/src/maxtext/configs/custom_mesh_and_rule/olmo35-ep-as-cp.yml
+new file mode 100644
+index 00000000..244b917d
+--- /dev/null
++++ b/src/maxtext/configs/custom_mesh_and_rule/olmo35-ep-as-cp.yml
+@@ -0,0 +1,81 @@
++# Copyright 2026 Google LLC
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#    https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++# ep-as-cp for Olmo 3.5 (olmoe3): the expert axis is context parallelism outside the dMoE, and KDA's recurrence,
++# which needs the whole sequence, shards its heads over that axis instead (an all-to-all in and out, as in Ulysses).
++# This rule uses data, stage, FSDP, and expert. Expert axis acts as context parallelism in
++# components except core dMoE part (between EP all2all).
++mesh_axes: ['data', 'stage', 'fsdp', 'expert']
++data_sharding: [['data', 'stage', 'fsdp', 'expert']]
++logical_axis_rules: [
++                      # ==========================================
++                      # Vocabulary Embedding
++                      # ==========================================
++                      # Vocab Activations
++                      ['activation_embed_and_logits_batch', ['data', 'stage', 'fsdp']],
++                      ['activation_embed_and_logits_batch_sequence', ['data', 'stage', 'fsdp', 'expert']],
++                      # Vocab Weights
++                      ['vocab', []],
++                      ['embed_vocab', ['fsdp', 'expert']],
++                      # ==========================================
++                      # Attention
++                      # ==========================================
++                      # Attention Activations
++                      ['activation_batch_attn', ['data', 'fsdp']],
++                      ['activation_heads', []],
++                      ['activation_kda_heads', ['expert']],
++                      ['activation_kv_heads', []],
++                      ['activation_length_attn', ['expert']],
++                      ['activation_q_length', ['expert']],
++                      ['activation_kv_length', []],
++                      ['activation_embed_attn', []],
++                      ['activation_kv', []],
++                      ['activation_kv_batch', ['data', 'fsdp']],
++                      ['activation_kv_head_dim', []],
++                      # Attention Weights
++                      ['heads', []],
++                      ['q_heads', []],
++                      ['kv_heads', []],
++                      ['qkv', []],
++                      ['kv', []],
++                      ['kv_head_dim', []],
++                      ['q_lora', ['fsdp']],
++                      ["q_lora_up_proj", []],
++                      ['kv_lora', ['fsdp']],
++                      ["kv_lora_up_proj", []],
++                      # ==========================================
++                      # Mixture of Experts (MoE)
++                      # ==========================================
++                      # MoE Activations
++                      ['activation_batch_moe', ['data', 'fsdp']],
++                      ['activation_exp', ['expert']],
++                      # MoE Weights
++                      ['exp', 'expert'],
++                      ['embed_moe', ['fsdp']],
++                      # ==========================================
++                      # Standard MLP / Dense Layers / Model Structure
++                      # ==========================================
++                      # Dense Activations
++                      ['activation_mlp', []],
++                      ['activation_batch', ['data', 'fsdp']],
++                      ['activation_length', ['expert']],
++                      ['activation_norm_length', ['expert']],
++                      ['activation_embed', []],
++                      ['activation_stage', 'stage'],
++                      # General Weights
++                      ['mlp', []],
++                      ['layers', 'stage'],
++                      ['embed', ['fsdp', 'expert']],
++                      ['embed_attn', ['fsdp', 'expert']],
++                  ]
+diff --git a/src/maxtext/configs/types.py b/src/maxtext/configs/types.py
+index 8a02beb1..ba157d4d 100644
+--- a/src/maxtext/configs/types.py
++++ b/src/maxtext/configs/types.py
+@@ -1521,6 +1521,39 @@ class Qwen3Next(BaseModel):
+           " Mosaic KDA kernel is validated for (non-reference; kernel fallback/diagnostic only)."
+       ),
+   )
++  kda_fused_input_proj: bool = Field(
++      False,
++      description=(
++          "Compute the KDA layer's six projections of x (q, k, v, decay and gate low-rank inputs, beta) as one"
++          " matmul over their concatenated kernels. Same parameters and math; fewer, wider matmuls."
++      ),
++  )
++  kda_chunked_impl: Literal["pairwise", "subblock"] = Field(
++      "pairwise",
++      description=(
++          "Pure-JAX chunked KDA (use_tokamax_kda=False, e.g. TPU v4). 'subblock' factors the intra-chunk decay"
++          " through sub-block pivots onto the MXU, inverts by block doubling, and hoists the WY products out"
++          " of the scan; 'pairwise' builds the full per-pair decay tensor."
++      ),
++  )
++  kda_matmul_precision: Literal["default", "high", "highest"] = Field(
++      "default",
++      description="jax.default_matmul_precision for the chunked KDA paths (pairwise and subblock).",
++  )
++  kda_sub_block: int = Field(
++      16,
++      description="Sub-block KDA: rows per diagonal sub-block of the intra-chunk matrices (divides gdn_chunk_size).",
++  )
++  kda_fused_proj_reduce_scatter: bool = Field(
++      False,
++      description="With kda_fused_input_proj, constrain the concatenated kernel to the weights' embed sharding so"
++      " its gradient is reduce-scattered instead of all-reduced in full.",
++  )
++  kda_pallas_scan: bool = Field(
++      False,
++      description="Sub-block KDA: run the chunk-state recurrence as the Pallas kernel in kernels/kda_scan.py, with"
++      " the state resident in VMEM and a hand-written backward. Needs gdn_state_dtype=bfloat16.",
++  )
+   tokamax_kda_max_num_segments: int = Field(
+       32,
+       description=(
+@@ -1536,6 +1569,15 @@ class Qwen3Next(BaseModel):
+           " under exp(-20) per step. 0 disables it and lets the kernel activate the gate itself."
+       ),
+   )
++  tokamax_kda_resets_in_gate: bool = Field(
++      False,
++      description=(
++          "Mark packed-document starts by setting that token's KDA log-decay to -tokamax_kda_log_decay_floor"
++          " and call the tokamax kernel without segment ids. This skips the varlen path, which pads each"
++          " sequence by (chunk-1)*tokamax_kda_max_num_segments positions. The previous document's state"
++          " leaks in at exp(-floor) (4.5e-5 at floor 10), below bf16 rounding. Needs a floor > 0."
++      ),
++  )
+   tokamax_kda_l2norm_outside: bool = Field(
+       False,
+       description=(
+@@ -1568,6 +1610,18 @@ class Qwen3Next(BaseModel):
+       description="With moe_lean_routing, pick the top-k experts with the Pallas kernel in kernels/topk.py"
+       " instead of lax.top_k (a sort on TPU). Same indices in the same order.",
+   )
++  moe_a2a_token_chunks: int = Field(
++      1,
++      description="Run the all-to-all MoE path (not ring-of-experts) in this many sequence chunks. Routing runs"
++      " once over the whole sequence and each chunk reuses its slice as forced experts, so EMo pools still see"
++      " whole documents. Smaller dispatch buffers keep the permute gathers inside v4's 128 MiB CMEM at seq 8192.",
++  )
++  moe_a2a_expert_major: bool = Field(
++      False,
++      description="With expert parallelism over a batch-sharded input, send one ragged all-to-all slice per"
++      " (destination shard, local expert) so received tokens are already grouped by local expert. Removes the"
++      " local permute row gather on the dispatch and combine sides (and their bwd scatters).",
++  )
+   kda_conv_in_compute_dtype: bool = Field(
+       False,
+       description=(
+@@ -1968,6 +2022,27 @@ class RematAndOffload(BaseModel):
+       RematLocation.REMAT,
+       description="Remat policy for the dispatched (expert-sorted) MoE inputs.",
+   )
++  moe_combine: RematLocation = Field(
++      RematLocation.REMAT,
++      description=(
++          "Remat policy for the expert-parallel MoE combine output (after the return all-to-all) and the"
++          " unpermuted layer output. Saving them skips the wo GMM and the combine all-to-all in the bwd."
++      ),
++  )
++  kda_wy: RematLocation = Field(
++      RematLocation.REMAT,
++      description=(
++          "Remat policy for the KDA intra-chunk inverse and the masked q-k scores. Saving them lets the remat"
++          " forward skip the intra-chunk build and the triangular inverse."
++      ),
++  )
++  moe_x_sorted: RematLocation = Field(
++      RematLocation.REMAT,
++      description=(
++          "Remat policy for the expert-local MoE tokens after the expert-parallel dispatch all-to-all and"
++          " local sort. Saving them skips the dispatch all-to-all in the bwd."
++      ),
++  )
+   query_proj: RematLocation = Field(RematLocation.REMAT, description="Remat policy for the query projection.")
+   key_proj: RematLocation = Field(RematLocation.REMAT, description="Remat policy for the key projection.")
+   value_proj: RematLocation = Field(RematLocation.REMAT, description="Remat policy for the value projection.")
+@@ -2036,6 +2111,17 @@ class DatasetGeneral(BaseModel):
+   """General configuration for dataset and data loading."""
+ 
+   dataset_type: DatasetType = Field(DatasetType.SYNTHETIC, description="The type of the data loading pipeline.")
++  norm_metrics: Literal["all", "grad", "none"] = Field(
++      "all",
++      description="Norm metrics per step. 'all': grad, raw grad and param norms (three full passes). 'grad': the"
++      " raw grad norm shared with gradient clipping, and the clipped norm derived from it (no param norm)."
++      " 'none': skip them. Training is unchanged; only the logged metrics differ.",
++  )
++  synthetic_data_reuse_batch: bool = Field(
++      False,
++      description="With dataset_type=synthetic, generate the (fixed) batch once and return it every step, so the"
++      " per-step reshard of the synthetic arrays stays out of the step time. Same values as regenerating.",
++  )
+   per_device_batch_size: int | float = Field(12, description="The batch size per device.")
+   eval_per_device_batch_size: int | float = Field(
+       0.0,
+@@ -3933,10 +4019,8 @@ class MaxTextConfig(
+     if self.log_required_ragged_buffer_factor:
+       if self.te_moe_block:
+         raise ValueError("log_required_ragged_buffer_factor=True is not supported with te_moe_block=True.")
+-      if not (self.use_ring_of_experts and self.use_ragged_sort):
+-        raise ValueError(
+-            "log_required_ragged_buffer_factor=True requires use_ring_of_experts=True and use_ragged_sort=True."
+-        )
++      if self.use_ring_of_experts and not self.use_ragged_sort:
++        raise ValueError("log_required_ragged_buffer_factor=True with use_ring_of_experts=True requires use_ragged_sort=True.")
+       if self.num_moe_emb_chunks > 0:
+         raise ValueError("log_required_ragged_buffer_factor=True does not support num_moe_emb_chunks > 0.")
+ 
+@@ -4570,6 +4654,9 @@ class MaxTextConfig(
+           "moe_routing",
+           "moe_router_logits",
+           "moe_dispatch",
++          "moe_x_sorted",
++          "moe_combine",
++          "kda_wy",
+           "mlpwi_0",
+           "mlpwi_1",
+           "mlpwo",
+@@ -6008,6 +6095,9 @@ class RLConfig(
+           "moe_routing",
+           "moe_router_logits",
+           "moe_dispatch",
++          "moe_x_sorted",
++          "moe_combine",
++          "kda_wy",
+           "mlpwi_0",
+           "mlpwi_1",
+           "mlpwo",
 diff --git a/src/maxtext/input_pipeline/hf_data_processing.py b/src/maxtext/input_pipeline/hf_data_processing.py
 index a70a91a6..94624f37 100644
 --- a/src/maxtext/input_pipeline/hf_data_processing.py
@@ -454,6 +775,773 @@ index 01d228df..3709cc51 100644
  @dataclasses.dataclass
  class PadOrTrimToMaxLength(grain.MapTransform):
    """Pads or trims each input to the specified length.
+diff --git a/src/maxtext/input_pipeline/synthetic_data_processing.py b/src/maxtext/input_pipeline/synthetic_data_processing.py
+index 964397ec..695f78cd 100644
+--- a/src/maxtext/input_pipeline/synthetic_data_processing.py
++++ b/src/maxtext/input_pipeline/synthetic_data_processing.py
+@@ -112,8 +112,15 @@ class SyntheticDataIterator:
+     return self
+ 
+   def __next__(self):
++    # self.data never changes, so every step's batch is the same array. Reusing the first one skips the
++    # per-step reshard (about 30 ms on a v4-128 at seq 4096), which a real loader's prefetch would hide.
++    if self.config.synthetic_data_reuse_batch and getattr(self, "_batch", None) is not None:
++      return self._batch
+     with self.mesh:
+-      return self.data_generator(self.config, self.data)  # pylint: disable=not-callable
++      batch = self.data_generator(self.config, self.data)  # pylint: disable=not-callable
++    if self.config.synthetic_data_reuse_batch:
++      self._batch = batch
++    return batch
+ 
+   @staticmethod
+   def raw_generate_synthetic_data(config: pyconfig.HyperParameters, data):
+diff --git a/src/maxtext/kernels/kda_scan.py b/src/maxtext/kernels/kda_scan.py
+new file mode 100644
+index 00000000..2e4eca07
+--- /dev/null
++++ b/src/maxtext/kernels/kda_scan.py
+@@ -0,0 +1,146 @@
++"""Pallas TPU kernels for the KDA chunk-state recurrence, with a hand-written backward.
++
++The sub-block KDA core (`models/olmoe3.py`) hoists everything that does not depend on the carried state out of
++the chunk loop, leaving per chunk c (state S_c entering the chunk, `[dk, dv]` per batch and head):
++
++    delta_c = u_c - w_c S_c                       (bf16 output)
++    S_{c+1} = dl_c * S_c + kc_c^T delta_c         (dl_c per key channel, 0 after a reset; S kept in bf16)
++
++As an XLA while loop this costs ~27 us per chunk on v4 for ~5 us of work, so the loop is latency-bound. Here
++each (batch, head) runs its chunks in one kernel with S resident in VMEM, and the grid's head axis is
++`parallel` so v4's two megacore TensorCores split the heads.
++
++The backward carries R_c = dL/dS_{c+1} in reverse:
++
++    dd_c    = g_delta_c + kc_c R_c                (= du_c)
++    R_{c-1} = g_states_c + dl_c * R_c - w_c^T dd_c
++
++and the remaining gradients need no recurrence, so they run batched over all chunks outside the kernel:
++dw_c = -dd_c S_c^T, dkc_c = delta_c R_c^T, ddl_c = sum_v S_c * R_c.
++"""
++
++import functools
++
++import jax
++import jax.numpy as jnp
++from jax.experimental import pallas as pl
++from jax.experimental.pallas import tpu as pltpu
++
++
++def _fwd_kernel(uw_ref, kct_ref, dl_ref, states_ref, delta_ref, s_ref):
++  @pl.when(pl.program_id(1) == 0)
++  def _():
++    s_ref[...] = jnp.zeros_like(s_ref)
++
++  dv = s_ref.shape[1]
++  s = s_ref[...]  # f32 holding bf16 values
++  s_bf = s.astype(jnp.bfloat16)
++  states_ref[0, 0] = s_bf
++  uw = uw_ref[0, 0]
++  delta = uw[:, :dv] - jnp.dot(uw[:, dv:].astype(jnp.bfloat16), s_bf, preferred_element_type=jnp.float32)
++  delta_bf = delta.astype(jnp.bfloat16)
++  delta_ref[0, 0] = delta_bf
++  new = s * dl_ref[0, 0] + jnp.dot(kct_ref[0, 0], delta_bf, preferred_element_type=jnp.float32)
++  s_ref[...] = new.astype(jnp.bfloat16).astype(jnp.float32)
++
++
++def _bwd_kernel(gs_ref, gd_ref, kc_ref, wt_ref, dl_ref, r_out_ref, dd_ref, r_ref):
++  @pl.when(pl.program_id(1) == 0)
++  def _():
++    r_ref[...] = jnp.zeros_like(r_ref)
++
++  r = r_ref[...]
++  r_out_ref[0, 0] = r
++  dd = gd_ref[0, 0].astype(jnp.float32) + jnp.dot(
++      kc_ref[0, 0], r.astype(jnp.bfloat16), preferred_element_type=jnp.float32
++  )
++  dd_ref[0, 0] = dd
++  r_ref[...] = (
++      gs_ref[0, 0].astype(jnp.float32)
++      + r * dl_ref[0, 0]
++      - jnp.dot(wt_ref[0, 0], dd.astype(jnp.bfloat16), preferred_element_type=jnp.float32)
++  )
++
++
++def _spec(shape, reverse=False, num_chunks=None):
++  if reverse:
++    return pl.BlockSpec(shape, lambda bh, c: (bh, num_chunks - 1 - c, 0, 0))
++  return pl.BlockSpec(shape, lambda bh, c: (bh, c, 0, 0))
++
++
++def _scan_fwd_call(uw, kc, dl, interpret):
++  bh, n, c, dk = kc.shape
++  dv = uw.shape[-1] - dk
++  kct = jnp.swapaxes(kc, -1, -2)
++  return pl.pallas_call(
++      _fwd_kernel,
++      grid=(bh, n),
++      in_specs=[_spec((1, 1, c, dv + dk)), _spec((1, 1, dk, c)), _spec((1, 1, dk, 1))],
++      out_specs=[_spec((1, 1, dk, dv)), _spec((1, 1, c, dv))],
++      out_shape=[
++          jax.ShapeDtypeStruct((bh, n, dk, dv), jnp.bfloat16),
++          jax.ShapeDtypeStruct((bh, n, c, dv), jnp.bfloat16),
++      ],
++      scratch_shapes=[pltpu.VMEM((dk, dv), jnp.float32)],
++      compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel", "arbitrary")),
++      interpret=interpret,
++  )(uw, kct, dl)
++
++
++def _scan_bwd_call(g_states, g_delta, w, kc, dl, interpret):
++  bh, n, c, dv = g_delta.shape
++  dk = w.shape[-1]
++  wt = jnp.swapaxes(w, -1, -2)
++  rev = functools.partial(_spec, reverse=True, num_chunks=n)
++  return pl.pallas_call(
++      _bwd_kernel,
++      grid=(bh, n),
++      in_specs=[rev((1, 1, dk, dv)), rev((1, 1, c, dv)), rev((1, 1, c, dk)), rev((1, 1, dk, c)), rev((1, 1, dk, 1))],
++      out_specs=[rev((1, 1, dk, dv)), rev((1, 1, c, dv))],
++      out_shape=[
++          jax.ShapeDtypeStruct((bh, n, dk, dv), jnp.float32),
++          jax.ShapeDtypeStruct((bh, n, c, dv), jnp.float32),
++      ],
++      scratch_shapes=[pltpu.VMEM((dk, dv), jnp.float32)],
++      compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel", "arbitrary")),
++      interpret=interpret,
++  )(g_states, g_delta, kc, wt, dl)
++
++
++@functools.partial(jax.custom_vjp, nondiff_argnums=(3,))
++def kda_state_scan(uw, kc, dl, interpret=False):
++  """Chunk states and deltas of the KDA recurrence.
++
++  Args:
++    uw: `[BH, N, C, dv + dk]` f32, the WY products u (values, first dv lanes) and w (multiplies the state).
++      Taken whole, as the einsum produces it, so XLA need not slice and relayout u and w for the kernel.
++    kc: `[BH, N, C, dk]` bf16, keys decayed to the chunk end (zero outside the chunk's last segment).
++    dl: `[BH, N, dk, 1]` f32, per-channel decay over the chunk, 0 where the chunk holds a reset.
++    interpret: run the kernels in interpret mode (CPU tests).
++
++  Returns:
++    states `[BH, N, dk, dv]` bf16 (the state entering each chunk) and delta `[BH, N, C, dv]` bf16.
++  """
++  states, delta = _scan_fwd_call(uw, kc, dl, interpret)
++  return states, delta
++
++
++def _kda_state_scan_fwd(uw, kc, dl, interpret):
++  states, delta = _scan_fwd_call(uw, kc, dl, interpret)
++  return (states, delta), (states, delta, uw, kc, dl)
++
++
++def _kda_state_scan_bwd(interpret, res, g):
++  states, delta, uw, kc, dl = res
++  g_states, g_delta = g
++  bf16 = jnp.bfloat16
++  dv = delta.shape[-1]
++  w = uw[..., dv:].astype(bf16)
++  r, dd = _scan_bwd_call(g_states.astype(bf16), g_delta.astype(bf16), w, kc, dl, interpret)
++  dw = -jnp.einsum("...cv,...dv->...cd", dd.astype(bf16), states, preferred_element_type=jnp.float32)
++  dkc = jnp.einsum("...cv,...dv->...cd", delta, r.astype(bf16), preferred_element_type=jnp.float32)
++  ddl = jnp.sum(states.astype(jnp.float32) * r, axis=-1, keepdims=True)
++  return jnp.concatenate([dd, dw], axis=-1), dkc.astype(kc.dtype), ddl
++
++
++kda_state_scan.defvjp(_kda_state_scan_fwd, _kda_state_scan_bwd)
+diff --git a/src/maxtext/layers/moe.py b/src/maxtext/layers/moe.py
+index 4b8b02a8..e3ea8be0 100644
+--- a/src/maxtext/layers/moe.py
++++ b/src/maxtext/layers/moe.py
+@@ -85,6 +85,8 @@ class RouteMetadata:
+   # Shape [num_ep, num_ep]. all_gather of reshaped_group_sizes across EP shards.
+   # [i, j] = number of tokens from batch shard i sent to expert shard j.
+   all_shards_group_sizes: Optional[jax.Array]
++  # Inverse of local_sorted_indices when it was built without a sort (moe_lean_routing); None otherwise.
++  local_inverse: Optional[jax.Array] = None
+ 
+ 
+ @struct.dataclass
+@@ -258,6 +260,103 @@ def _take_along_last_axis_dense_vjp_bwd(num_classes, indices, g):
+ take_along_last_axis_dense_vjp.defvjp(_take_along_last_axis_dense_vjp_fwd, _take_along_last_axis_dense_vjp_bwd)
+ 
+ 
++def take_along_last_axis_dense(x: jax.Array, indices: jax.Array) -> jax.Array:
++  """`jnp.take_along_axis(x, indices, axis=-1)` as one compare-select-reduce: no gather, and a dense bwd.
++
++  Exact: each output sums one selected element and zeros. On v4 at [4096, 512] logits and top-16 it is 3x
++  faster forward than the gather and 2x faster forward plus backward.
++  """
++  iota = jax.lax.broadcasted_iota(indices.dtype, (1,) * indices.ndim + (x.shape[-1],), indices.ndim)
++  hit = indices[..., None] == iota
++  return jnp.sum(jnp.where(hit, x[..., None, :], jnp.zeros((), x.dtype)), axis=-1)
++
++
++def _count_ids(ids: jax.Array, length: int) -> jax.Array:
++  """`jnp.bincount(ids, length=length)` as a compare-and-sum, which XLA fuses; bincount lowers to a scatter."""
++  return jnp.sum((ids.reshape(-1)[:, None] == jnp.arange(length, dtype=ids.dtype)).astype(jnp.int32), axis=0)
++
++
++def _ids_from_group_sizes(group_sizes: jax.Array, rows: int) -> jax.Array:
++  """Group id of each of `rows` rows laid out group after group, like `jnp.repeat(arange, group_sizes)`.
++
++  Counts the group ends at or before each row instead of `jnp.repeat`, which lowers to a gather. Rows past the
++  last group get the last id, as `jnp.repeat` with `total_repeat_length` does.
++  """
++  ends = jnp.cumsum(group_sizes)[:-1]
++  return jnp.sum((jnp.arange(rows, dtype=ends.dtype)[:, None] >= ends[None, :]).astype(jnp.int32), axis=1)
++
++
++def _lookup_small(table: jax.Array, idx: jax.Array) -> jax.Array:
++  """`table[idx]` for a short table as a compare-select-sum; XLA lowers the gather to a much slower kernel."""
++  hit = idx[:, None] == jnp.arange(table.shape[0], dtype=idx.dtype)[None, :]
++  return jnp.sum(jnp.where(hit, table[None, :], jnp.zeros((), table.dtype)), axis=1)
++
++
++def _block_transpose_indices(sizes: jax.Array, rows: int):
++  """Reorders rows laid out in blocks (s, j) to (j, s): gather indices, their inverse, and each output row's j.
++
++  `sizes` is `[S, J]`. Equals the stable argsort of the per-row j (and the argsort of that), built from
++  compare-and-sum passes over the S * J block ends instead of a `jnp.repeat` gather and two sorts: 2x faster on
++  v4 at 74K rows. Rows past the blocks (buffer padding) map to themselves with id J - 1, as the argsort leaves
++  them.
++  """
++  num_s, num_j = sizes.shape
++  src, dst = sizes.reshape(-1), sizes.T.reshape(-1)
++  src_end, dst_end = jnp.cumsum(src), jnp.cumsum(dst)
++  src_start, dst_start = src_end - src, dst_end - dst
++  row = jnp.arange(rows, dtype=src_end.dtype)
++  valid = row < src_end[-1]
++
++  def block_of(ends):  # zero-size blocks end at their start, so they are counted as passed
++    return jnp.minimum(jnp.sum((row[:, None] >= ends[None, :]).astype(jnp.int32), axis=1), num_s * num_j - 1)
++
++  b_out = block_of(dst_end)
++  j_out, s_out = b_out // num_s, b_out % num_s
++  gather = jnp.where(valid, _lookup_small(src_start, s_out * num_j + j_out) + row - _lookup_small(dst_start, b_out), row)
++  b_in = block_of(src_end)
++  s_in, j_in = b_in // num_j, b_in % num_j
++  inverse = jnp.where(valid, _lookup_small(dst_start, j_in * num_s + s_in) + row - _lookup_small(src_start, b_in), row)
++  return gather, inverse, jnp.where(valid, j_out, num_j - 1)
++
++
++@functools.partial(jax.custom_vjp, nondiff_argnums=(3, 4, 5, 6))
++def _ragged_a2a_paired(x, fwd_params, bwd_params, out_rows, in_rows, axis_name, zero_fill):
++  """`ragged_all_to_all` into `out_rows` rows whose transpose is the one given by `bwd_params`.
++
++  The generic transpose rule all-to-alls the offsets to the peers before sending the cotangent back. Every
++  shard already holds the all-gathered group sizes, so the bwd just runs the reverse exchange (the dispatch's
++  transpose is the combine, and the combine's is the dispatch). `zero_fill=False` leaves unwritten forward
++  rows uninitialized, as the dispatch buffer always was; the bwd always zero-fills.
++  """
++  del bwd_params, in_rows
++  return jax.lax.ragged_all_to_all(
++      x, _zeros_varying_like(x, out_rows, zero_fill), *fwd_params, axis_name=axis_name
++  )
++
++
++def _zeros_varying_like(ref, rows, zero_fill=True):
++  """Zeros (or uninitialized) of `ref`'s trailing shape and dtype with `rows` rows, varying like `ref`."""
++  shape = (rows,) + ref.shape[1:]
++  buf = jnp.zeros(shape, ref.dtype) if zero_fill else jax.lax.empty(shape, dtype=ref.dtype)
++  vma = tuple(jax.typeof(ref).manual_axis_type.varying)
++  return jax.lax.pcast(buf, vma, to="varying") if vma else buf
++
++
++def _ragged_a2a_paired_fwd(x, fwd_params, bwd_params, out_rows, in_rows, axis_name, zero_fill):
++  out = _ragged_a2a_paired(x, fwd_params, bwd_params, out_rows, in_rows, axis_name, zero_fill)
++  return out, (bwd_params, x[:0])
++
++
++def _ragged_a2a_paired_bwd(out_rows, in_rows, axis_name, zero_fill, res, g):
++  del out_rows, zero_fill
++  bwd_params, x_ref = res
++  dx = jax.lax.ragged_all_to_all(g, _zeros_varying_like(x_ref, in_rows), *bwd_params, axis_name=axis_name)
++  return dx, None, None
++
++
++_ragged_a2a_paired.defvjp(_ragged_a2a_paired_fwd, _ragged_a2a_paired_bwd)
++
++
+ @jax.custom_vjp
+ def _permute_rows(inputs: jax.Array, indices: jax.Array, inverse: jax.Array) -> jax.Array:
+   """`inputs[indices]` whose bwd gathers with a known inverse instead of argsorting."""
+@@ -1079,6 +1178,8 @@ class RoutedMoE(nnx.Module):
+       if self.config.decoder_block == ctypes.DecoderBlockType.GEMMA4:
+         router_probs = jax.nn.softmax(gate_logits.astype(jnp.float32), axis=-1)
+         top_k_weights = jnp.take_along_axis(router_probs, gather_indices, axis=-1).astype(self.dtype)
++      elif self.config.moe_lean_routing:
++        top_k_weights = take_along_last_axis_dense(gate_logits, gather_indices)
+       else:
+         top_k_weights = jnp.take_along_axis(gate_logits, gather_indices, axis=-1)
+     else:
+@@ -1125,7 +1226,7 @@ class RoutedMoE(nnx.Module):
+         else:
+           _, top_k_indices = jax.lax.top_k(jax.lax.stop_gradient(gate_logits), self.num_experts_per_tok)
+         top_k_indices = adc.checkpoint_name(top_k_indices, "moe_routing")
+-        top_k_weights = jnp.take_along_axis(gate_logits, top_k_indices, axis=-1)
++        top_k_weights = take_along_last_axis_dense(gate_logits, top_k_indices)
+       else:
+         top_k_weights, top_k_indices = jax.lax.top_k(gate_logits, self.num_experts_per_tok)
+ 
+@@ -1401,9 +1502,11 @@ class RoutedMoE(nnx.Module):
+         sorted_inputs = sorted_inputs.astype(self.dtype)
+       sorted_inputs = adc.checkpoint_name(sorted_inputs, "moe_dispatch")
+ 
+-      group_size = adc.checkpoint_name(
+-          jnp.bincount(flatten_selected_experts_safe, length=self.num_experts), "moe_routing"
+-      )
++      if self.config.moe_lean_routing:
++        group_size = _count_ids(flatten_selected_experts_safe, self.num_experts)
++      else:
++        group_size = jnp.bincount(flatten_selected_experts_safe, length=self.num_experts)
++      group_size = adc.checkpoint_name(group_size, "moe_routing")
+ 
+     num_tokens = bsz_times_seq_len * self.num_experts_per_tok
+     use_truncated_buffer = use_ragged_in_permute and buffer_size is not None and buffer_size < num_tokens
+@@ -1659,6 +1762,48 @@ class RoutedMoE(nnx.Module):
+         sorted_experts_ids,
+     )
+ 
++  @staticmethod
++  def get_expert_major_all_to_all_params(global_group_sizes, shard_id, local_expert_size, buffer_size, is_dispatch=True):
++    """ragged_all_to_all params that land the received tokens already grouped by local expert.
++
++    One slice per (destination shard, local expert) instead of one per destination, so the receiver buffer is
++    ordered [local expert][source shard] and neither the dispatch nor the combine side needs a local permute.
++
++    Args:
++      global_group_sizes: `[num_shards, num_experts]` rows each source shard holds for each global expert, in
++        its expert-sorted send buffer.
++      shard_id: this shard's index on the expert axis.
++      local_expert_size: experts per shard.
++      buffer_size: receiver buffer rows; overflow is dropped from the end of the [expert][source] order.
++      is_dispatch: dispatch (to the experts) or combine (back to the source shards).
++
++    Returns:
++      input_offsets, send_sizes, output_offsets, recv_sizes, and the `[local_expert_size]` kept group sizes.
++    """
++    num_shards = global_group_sizes.shape[0]
++    # sizes[d, j, s]: rows source shard s sends to local expert j of shard d.
++    sizes = global_group_sizes.reshape(num_shards, num_shards, local_expert_size).transpose(1, 2, 0)
++    end = jnp.minimum(jnp.cumsum(sizes.reshape(num_shards, -1), axis=1), buffer_size)
++    start = jnp.concatenate([jnp.zeros_like(end[:, :1]), end[:, :-1]], axis=1)
++    kept = (end - start).reshape(sizes.shape)
++    start = start.reshape(sizes.shape)
++    # Where each global expert's rows begin in every source shard's send buffer, as [s, d, j].
++    src_start = (jnp.cumsum(global_group_sizes, axis=1) - global_group_sizes).reshape(
++        num_shards, num_shards, local_expert_size
++    )
++    local_group_sizes = jnp.sum(kept[shard_id], axis=-1)
++    if is_dispatch:
++      input_offsets = src_start[shard_id].reshape(-1)
++      send_sizes = kept[:, :, shard_id].reshape(-1)
++      output_offsets = start[:, :, shard_id].reshape(-1)
++      recv_sizes = kept[shard_id].T.reshape(-1)
++    else:
++      input_offsets = start[shard_id].T.reshape(-1)
++      send_sizes = kept[shard_id].T.reshape(-1)
++      output_offsets = src_start[:, shard_id, :].reshape(-1)
++      recv_sizes = kept[:, :, shard_id].reshape(-1)
++    return input_offsets, send_sizes, output_offsets, recv_sizes, local_group_sizes
++
+   @staticmethod
+   def get_all_to_all_params(
+       all_shards_group_sizes,
+@@ -2334,9 +2479,11 @@ class RoutedMoE(nnx.Module):
+       # Duplicate routing inputs across all expert shards. Routing evaluates
+       # the full gathered batch; logits, pre_bias_logits, and
+       # forced_routed_experts must follow the identical all-gather so expert
+-      # assignments align across shards.
+-      logits, pre_bias_logits, forced_routed_experts = tuple(
+-          _ep_all_gather(z) if z is not None else None for z in (logits, pre_bias_logits, forced_routed_experts)
++      # assignments align across shards. input_ids too: routers that read them
++      # (hash routing, OLMoE3 EMo document masks) must see the gathered batch.
++      logits, pre_bias_logits, forced_routed_experts, input_ids = tuple(
++          _ep_all_gather(z) if z is not None else None
++          for z in (logits, pre_bias_logits, forced_routed_experts, input_ids)
+       )
+ 
+       # "Route" tokens within each shard.
+@@ -2398,10 +2545,12 @@ class RoutedMoE(nnx.Module):
+         rngs,
+         input_ids=None,
+         forced_routed_experts=None,
++        shard_group_sizes=None,
+     ):
+       local_sorted_indices = None
+       all_shards_group_sizes = None
+       reshaped_group_sizes = None
++      local_inverse = None
+       (
+           x,
+           sorted_selected_experts,
+@@ -2430,8 +2579,37 @@ class RoutedMoE(nnx.Module):
+         reshaped_group_sizes = jnp.sum(group_sizes.reshape(-1, local_expert_size), axis=1)
+         global_group_sizes = group_sizes
+ 
+-        if is_batch_sharded_by_expert:
++        if is_batch_sharded_by_expert and self.config.moe_a2a_expert_major:
++          # all_shards_group_sizes carries the full [shard, expert] counts to the combine.
++          if shard_group_sizes is None:
++            shard_group_sizes = jax.lax.all_gather(group_sizes, axis_name=self._expert_parallelism_name)
++          all_shards_group_sizes = adc.checkpoint_name(shard_group_sizes, "moe_routing")
++          buffer_size = self.get_ragged_buffer_size(
++              jnp.shape(x)[0],
++              num_ep,
++              self.config.num_experts,
++              self.config.num_experts_per_tok,
++              self.get_ragged_buffer_factor(),
++          )
++          *dispatch_params, group_sizes = RoutedMoE.get_expert_major_all_to_all_params(
++              all_shards_group_sizes, expert_shard_id, local_expert_size, buffer_size
++          )
++          combine_params = RoutedMoE.get_expert_major_all_to_all_params(
++              all_shards_group_sizes, expert_shard_id, local_expert_size, buffer_size, is_dispatch=False
++          )[:4]
++          x = _ragged_a2a_paired(
++              x, tuple(dispatch_params), combine_params, buffer_size, x.shape[0], self._expert_parallelism_name, True
++          )
++          selected_experts = _ids_from_group_sizes(group_sizes, buffer_size)
++          x = adc.checkpoint_name(x, "moe_x_sorted")
++          group_sizes, selected_experts = (adc.checkpoint_name(t, "moe_routing") for t in (group_sizes, selected_experts))
++        elif is_batch_sharded_by_expert:
+           all_shards_group_sizes = jax.lax.all_gather(reshaped_group_sizes, axis_name=batch_axis)
++          # The combine all-to-all reuses these; saved (moe_routing=device) they never force
++          # the bwd to rerun routing.
++          reshaped_group_sizes, all_shards_group_sizes = (
++              adc.checkpoint_name(t, "moe_routing") for t in (reshaped_group_sizes, all_shards_group_sizes)
++          )
+           buffer_size = self.get_ragged_buffer_size(
+               jnp.shape(x)[0],
+               num_ep,
+@@ -2439,35 +2617,59 @@ class RoutedMoE(nnx.Module):
+               self.config.num_experts_per_tok,
+               self.get_ragged_buffer_factor(),
+           )
+-          input_offsets, send_sizes, output_offsets, recv_sizes = RoutedMoE.get_all_to_all_params(
++          dispatch_params = RoutedMoE.get_all_to_all_params(
+               all_shards_group_sizes,
+               expert_shard_id,
+               num_ep,
+               ragged_buffer_factor=self.get_ragged_buffer_factor(),
+               buffer_size=buffer_size,
+           )
+-
+-          output_shape = jax.lax.empty((buffer_size, self.moe_expert_input_dim), dtype=x.dtype)
+-
+-          x = jax.lax.ragged_all_to_all(
+-              x,
+-              output_shape,
+-              input_offsets,
+-              send_sizes,
+-              output_offsets,
+-              recv_sizes,
+-              axis_name=self._expert_parallelism_name,
+-          )
++          if self.config.moe_lean_routing:
++            combine_params = RoutedMoE.get_all_to_all_params(
++                all_shards_group_sizes,
++                expert_shard_id,
++                num_ep,
++                ragged_buffer_factor=self.get_ragged_buffer_factor(),
++                buffer_size=buffer_size,
++                is_dispatch=False,
++            )
++            x = _ragged_a2a_paired(
++                x, dispatch_params, combine_params, buffer_size, x.shape[0], self._expert_parallelism_name, False
++            )
++          else:
++            output_shape = jax.lax.empty((buffer_size, self.moe_expert_input_dim), dtype=x.dtype)
++            x = jax.lax.ragged_all_to_all(x, output_shape, *dispatch_params, axis_name=self._expert_parallelism_name)
+           global_group_sizes = jax.lax.all_gather(group_sizes, axis_name=self._expert_parallelism_name)
+-          x, local_sorted_indices, group_sizes, selected_experts = RoutedMoE.local_permute(
+-              x,
+-              global_group_sizes,
+-              local_expert_size,
+-              shard_index=expert_shard_id,
+-              use_custom_sort_vjp=self.config.use_custom_sort_vjp,
+-              use_ragged_sort=self.config.use_ragged_sort,
+-              ragged_buffer_factor=self.get_ragged_buffer_factor(),
+-              use_single_sparsecore=self.config.ragged_sort_use_single_sparsecore,
++          if self.config.moe_lean_routing and not self.config.use_ragged_sort:
++            # Received rows are blocks (source shard, local expert); reorder them to (local expert, source)
++            # with sort-free indices, and keep the inverse for the combine and both bwd gathers.
++            sizes = jax.lax.dynamic_slice_in_dim(
++                global_group_sizes, expert_shard_id * local_expert_size, local_expert_size, axis=1
++            )
++            if self.get_ragged_buffer_factor() > 0.0:
++              ends = jnp.minimum(jnp.cumsum(sizes.reshape(-1)), x.shape[0])
++              sizes = jnp.diff(ends, prepend=jnp.zeros((1,), ends.dtype)).reshape(sizes.shape)
++            local_sorted_indices, local_inverse, selected_experts = _block_transpose_indices(sizes, x.shape[0])
++            local_inverse = adc.checkpoint_name(local_inverse, "moe_routing")
++            x = _permute_rows(x, local_sorted_indices, local_inverse)
++            group_sizes = jnp.sum(sizes, axis=0)
++          else:
++            x, local_sorted_indices, group_sizes, selected_experts = RoutedMoE.local_permute(
++                x,
++                global_group_sizes,
++                local_expert_size,
++                shard_index=expert_shard_id,
++                use_custom_sort_vjp=self.config.use_custom_sort_vjp,
++                use_ragged_sort=self.config.use_ragged_sort,
++                ragged_buffer_factor=self.get_ragged_buffer_factor(),
++                use_single_sparsecore=self.config.ragged_sort_use_single_sparsecore,
++            )
++          # Saving the expert-local tokens (moe_x_sorted=device) lets the bwd skip the
++          # dispatch all-to-all and the local sort; the small routing metadata rides on
++          # moe_routing so recomputing it never needs the pre-all-to-all tokens.
++          x = adc.checkpoint_name(x, "moe_x_sorted")
++          local_sorted_indices, group_sizes, selected_experts = (
++              adc.checkpoint_name(t, "moe_routing") for t in (local_sorted_indices, group_sizes, selected_experts)
+           )
+         else:
+           x, local_sorted_indices, group_sizes, selected_experts = RoutedMoE.local_permute(
+@@ -2483,6 +2685,18 @@ class RoutedMoE(nnx.Module):
+               use_single_sparsecore=self.config.ragged_sort_use_single_sparsecore,
+           )
+ 
++      required_rbf = None
++      if getattr(self.config, "log_required_ragged_buffer_factor", False) and all_shards_group_sizes is not None:
++        # The all-to-all path's version of required_ragged_buffer_factor: a receiving shard drops tokens iff the rows
++        # sent to it by every shard of its EP group exceed int(local rows * factor), local rows being its own
++        # (tokens x top_k) count, which is what buffer_size scales.
++        per_dest = all_shards_group_sizes
++        if per_dest.shape[1] != num_ep:  # expert-major: [source shard, expert] -> [source shard, destination shard]
++          per_dest = jnp.sum(per_dest.reshape(per_dest.shape[0], num_ep, -1), axis=2)
++        received = jnp.sum(per_dest, axis=0)[expert_shard_id]
++        required_rbf = received.astype(jnp.float32) / jnp.float32(sorted_selected_experts.shape[0])
++        if self.mesh is not None and self.mesh.axis_names:
++          required_rbf = jax.lax.pmax(required_rbf, tuple(self.mesh.axis_names))
+       return (
+           x,
+           RouteOutput(
+@@ -2493,12 +2707,14 @@ class RoutedMoE(nnx.Module):
+               lb_loss=lb_loss,
+               bias_updates=bias_updates,
+               local_group_sizes=local_group_sizes,
++              required_rbf=required_rbf,
+           ),
+           RouteMetadata(
+               expert_shard_id=expert_shard_id,
+               local_sorted_indices=local_sorted_indices,
+               all_shards_group_sizes=all_shards_group_sizes,
+               reshaped_group_sizes=reshaped_group_sizes,
++              local_inverse=local_inverse,
+           ),
+       )
+ 
+@@ -2510,6 +2726,7 @@ class RoutedMoE(nnx.Module):
+         input_ids=None,
+         forced_routed_experts=None,
+         force_dropless=False,
++        shard_group_sizes=None,
+     ):
+       """Performs both across device and within device token routing/sorting"""
+       num_ep = self.get_expert_parallelism_size()
+@@ -2537,6 +2754,7 @@ class RoutedMoE(nnx.Module):
+             rngs,
+             input_ids=input_ids,
+             forced_routed_experts=forced_routed_experts,
++            shard_group_sizes=shard_group_sizes,
+         )
+ 
+     def get_active_sharding_axes(pspec_dim_axes, tensor_dim_index):
+@@ -2697,6 +2915,26 @@ class RoutedMoE(nnx.Module):
+         is_batch_sharded_by_expert,
+     ):
+       """Unsort tokens and return them to original shards using ragged all-to-all."""
++      if is_batch_sharded_by_expert and self.config.moe_a2a_expert_major:
++        params = [
++            RoutedMoE.get_expert_major_all_to_all_params(
++                route_metadata.all_shards_group_sizes,
++                route_metadata.expert_shard_id,
++                self.config.num_experts // self.get_expert_parallelism_size(),
++                intermediate_output.shape[0],
++                is_dispatch=dispatch,
++            )[:4]
++            for dispatch in (False, True)
++        ]
++        return _ragged_a2a_paired(
++            intermediate_output,
++            params[0],
++            params[1],
++            output_shape.shape[0],
++            intermediate_output.shape[0],
++            self._expert_parallelism_name,
++            True,
++        )
+       if is_batch_sharded_by_expert:
+         # locally unpermute back to the original order
+         if self.config.use_ragged_sort:
+@@ -2710,6 +2948,10 @@ class RoutedMoE(nnx.Module):
+               valid_end,
+               use_single_sparsecore=self.config.ragged_sort_use_single_sparsecore,
+           )
++        elif route_metadata.local_inverse is not None:
++          local_output = _permute_rows(
++              intermediate_output, route_metadata.local_inverse, route_metadata.local_sorted_indices
++          )
+         else:
+           local_output = _sort_activations(
+               intermediate_output,
+@@ -2718,22 +2960,29 @@ class RoutedMoE(nnx.Module):
+           )
+ 
+         buffer_size = intermediate_output.shape[0]
+-        input_offsets, send_sizes, output_offsets, recv_sizes = RoutedMoE.get_all_to_all_params(
+-            route_metadata.all_shards_group_sizes,
+-            route_metadata.expert_shard_id,
+-            self.get_expert_parallelism_size(),
+-            ragged_buffer_factor=self.get_ragged_buffer_factor(),
+-            buffer_size=buffer_size,
+-            is_dispatch=False,
+-        )
++        params = [
++            RoutedMoE.get_all_to_all_params(
++                route_metadata.all_shards_group_sizes,
++                route_metadata.expert_shard_id,
++                self.get_expert_parallelism_size(),
++                ragged_buffer_factor=self.get_ragged_buffer_factor(),
++                buffer_size=buffer_size,
++                is_dispatch=dispatch,
++            )
++            for dispatch in (False, True)
++        ]
++        if self.config.moe_lean_routing:
++          return _ragged_a2a_paired(
++              local_output,
++              params[0],
++              params[1],
++              output_shape.shape[0],
++              buffer_size,
++              self._expert_parallelism_name,
++              True,
++          )
+         return jax.lax.ragged_all_to_all(
+-            local_output,
+-            output_shape,
+-            input_offsets,
+-            send_sizes,
+-            output_offsets,
+-            recv_sizes,
+-            axis_name=self._expert_parallelism_name,
++            local_output, output_shape, *params[0], axis_name=self._expert_parallelism_name
+         )
+ 
+       # If batch is replicated across EP shards then each shard should send
+@@ -2870,6 +3119,7 @@ class RoutedMoE(nnx.Module):
+         rngs,
+         forced_routed_experts=None,
+         force_dropless=False,
++        shard_group_sizes=None,
+     ):
+       batch_size, sequence_length, embed_dim = x.shape
+       if self.config.num_moe_emb_chunks > 0:
+@@ -2896,6 +3146,7 @@ class RoutedMoE(nnx.Module):
+             input_ids=sharded_input_ids,
+             forced_routed_experts=forced_routed_experts,
+             force_dropless=force_dropless,
++            shard_group_sizes=shard_group_sizes,
+         )
+         mask = jnp.arange(x.shape[0]) < valid_token_count(x, routing, route_metadata)
+ 
+@@ -2979,6 +3230,9 @@ class RoutedMoE(nnx.Module):
+             output_shape,
+             is_batch_sharded_by_expert,
+         )
++        # unpermute's bwd reads its input for the gate-weight gradient; saving it
++        # (moe_combine=device) keeps the bwd from rerunning the wo GMM and the combine all-to-all.
++        intermediate_output = adc.checkpoint_name(intermediate_output, "moe_combine")
+ 
+       output = self.unpermute(
+           intermediate_output,
+@@ -2989,6 +3243,7 @@ class RoutedMoE(nnx.Module):
+           use_custom_sort_vjp=self.config.use_custom_sort_vjp,
+           group_sizes=routing.group_sizes,
+       )
++      output = adc.checkpoint_name(output, "moe_combine")
+ 
+       return output, routing.lb_loss, routing.bias_updates, routing.has_overflow, routing.required_rbf
+ 
+@@ -3046,9 +3301,66 @@ class RoutedMoE(nnx.Module):
+       if barrier_enabled is None:
+         barrier_enabled = self.config.moe_chunk_barrier
+ 
++      def _route_once_dispatch_in_chunks(force_dropless):
++        """The all-to-all path in `moe_a2a_token_chunks` sequence chunks, routed once over the whole sequence.
++
++        EMo pools are per document, so routing needs every token: it runs once here and each chunk reuses its
++        slice as forced experts. The load-balance loss also comes from the full routing, so it equals the
++        unchunked one. What the chunks buy is smaller dispatch buffers: on v4 a row gather whose source exceeds
++        the 128 MiB CMEM runs ~3.5x slower, and at seq 8192 every MoE permute does.
++        """
++        num = self.config.moe_a2a_token_chunks
++        _, top_k_indices = self.get_topk(logits, pre_bias_logits, rngs, sharded_input_ids, None)
++        top_k_indices = adc.checkpoint_name(top_k_indices, "moe_routing")
++        lb_loss = None
++        if self.config.load_balance_loss_weight > 0.0 and not self.is_hash_routing:
++          probs_logits = pre_bias_logits if pre_bias_logits is not None else logits
++          probs = jax.nn.softmax(probs_logits.astype(jnp.float32), axis=-1).astype(self.dtype)
++          lb_loss = self.load_balance_loss(top_k_indices, probs)
++        chunk = x.shape[1] // num
++        shard_sizes = None
++        if self.config.moe_a2a_expert_major and self.get_expert_parallelism_size() > 1:
++          # Every chunk's per-expert counts in one all-gather instead of one small, latency-bound gather per
++          # chunk; the counts are the same compare-and-sum permute() does on the chunk's forced experts.
++          counts = jnp.stack(
++              [
++                  _count_ids(top_k_indices[:, c * chunk : (c + 1) * chunk, :], self.config.num_experts)
++                  for c in range(num)
++              ]
++          )
++          shard_sizes = jax.lax.all_gather(counts, axis_name=self._expert_parallelism_name)  # [S, num, E]
++        outs, bias_updates_list, has_overflows, required_rbfs = [], [], [], []
++        for c in range(num):
++          sl = slice(c * chunk, (c + 1) * chunk)
++          out_c, _, bu_c, ov_c, req_c = _moe_body(
++              x[:, sl, :],
++              logits[:, sl, :],
++              None if pre_bias_logits is None else pre_bias_logits[:, sl, :],
++              w0,
++              w1,
++              wo,
++              w0_bias,
++              w1_bias,
++              wo_bias,
++              None,
++              rngs,
++              top_k_indices[:, sl, :],
++              force_dropless=force_dropless,
++              shard_group_sizes=None if shard_sizes is None else shard_sizes[:, c, :],
++          )
++          outs.append(out_c)
++          bias_updates_list.append(bu_c)
++          has_overflows.append(ov_c)
++          required_rbfs.append(req_c)
++        bias_updates = None if bias_updates_list[0] is None else sum(bias_updates_list) / num
++        required_rbf = None if required_rbfs[0] is None else jnp.max(jnp.stack(required_rbfs))
++        return jnp.concatenate(outs, axis=1), lb_loss, bias_updates, jnp.any(jnp.stack(has_overflows)), required_rbf
++
+       def _route_and_compute(force_dropless, n_chunks=n_chunks, barrier_enabled=barrier_enabled):
+         """Runs route+compute once; force_dropless=True redoes all n_chunks, not just the overflowing one(s)."""
+         if n_chunks <= 1 or not self.config.use_ring_of_experts:
++          if self.config.moe_a2a_token_chunks > 1 and forced_routed_experts is None:
++            return _route_once_dispatch_in_chunks(force_dropless)
+           return _moe_body(
+               x,
+               logits,
+@@ -3125,6 +3437,11 @@ class RoutedMoE(nnx.Module):
+ 
+       # In-layer dropless fallback: calculate the overflow, then run either the
+       # normal capped path or a chunked dropless path for this layer only (no step replay).
++      # Draw one key up front: an nnx.Rngs can't be advanced inside the lax.cond
++      # branches (TraceContextError), and routers that sample (e.g. EMo pools)
++      # then use the same key in the check and in both branches.
++      if rngs is not None and callable(getattr(rngs, "params", None)):
++        rngs = rngs.params()
+       took_fallback = self._check_ragged_overflow(
+           logits, pre_bias_logits, rngs, sharded_input_ids, forced_routed_experts, n_chunks
+       )
 diff --git a/src/maxtext/models/olmo3.py b/src/maxtext/models/olmo3.py
 index 4b6bc943..a26d8706 100644
 --- a/src/maxtext/models/olmo3.py
@@ -477,10 +1565,63 @@ index 4b6bc943..a26d8706 100644
      # Self-attention block
      self.attention = Attention(
 diff --git a/src/maxtext/models/olmoe3.py b/src/maxtext/models/olmoe3.py
-index b1fa3309..ba927120 100644
+index b1fa3309..46e4a5ae 100644
 --- a/src/maxtext/models/olmoe3.py
 +++ b/src/maxtext/models/olmoe3.py
-@@ -219,6 +219,21 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+@@ -42,12 +42,14 @@ from typing import Any
+ from jax.sharding import Mesh, PartitionSpec
+ import jax
+ import jax.numpy as jnp
++import numpy as np
+ 
+ from flax import linen as nn
+ from flax import nnx
+ from jax.ad_checkpoint import checkpoint_name
+ 
+ from maxtext.common.common_types import Config, BATCH, LENGTH, EMBED
++from maxtext.kernels import kda_scan
+ from maxtext.layers import attentions
+ from maxtext.layers import initializers as max_initializers
+ from maxtext.layers import moe
+@@ -187,6 +189,8 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+         rngs=rngs,
+     )
+     self.w_out = _dense(cfg, value_width, cfg.emb_dim, ("mlp", "embed"), quant, rngs)
++    # Quantized kernels go through DenseGeneral's own dot_general, so they stay separate.
++    self.fused_input_proj = bool(cfg.kda_fused_input_proj) and quant is None
+ 
+   def __call__(self, x: jnp.ndarray, decoder_segment_ids: None | jnp.ndarray = None) -> jnp.ndarray:
+     batch, seq_len, _ = x.shape
+@@ -195,14 +199,22 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+     # An fp32 conv weight otherwise promotes q/k/v (and their kernel residuals) to fp32.
+     cast = self.config.kda_conv_in_compute_dtype
+     q_conv, k_conv, v_conv = (w[...].astype(x.dtype) if cast else w[...] for w in (self.q_conv, self.k_conv, self.v_conv))
+-    q = causal_depthwise_conv(self.w_q(x), q_conv, decoder_segment_ids).reshape(batch, seq_len, heads, dk)
+-    k = causal_depthwise_conv(self.w_k(x), k_conv, decoder_segment_ids).reshape(batch, seq_len, heads, dk)
+-    v = causal_depthwise_conv(self.w_v(x), v_conv, decoder_segment_ids).reshape(batch, seq_len, heads, dv)
+-
+-    raw_g = self.f_proj_2(self.f_proj_1(x)).reshape(batch, seq_len, heads, dk)
++    if self.fused_input_proj:
++      q_in, k_in, v_in, f_in, g_in, b_in = self._fused_input_proj(x)
++    else:
++      q_in, k_in, v_in = self.w_q(x), self.w_k(x), self.w_v(x)
++      f_in, g_in, b_in = self.f_proj_1(x), self.g_proj_1(x), self.w_b(x)
++    # Named so the custom remat policy can keep the projections (query/key/value_proj=device)
++    # and skip recomputing them and their weight all-gathers in the bwd.
++    q_in, k_in, v_in = (checkpoint_name(t, n) for t, n in ((q_in, "query_proj"), (k_in, "key_proj"), (v_in, "value_proj")))
++    q = causal_depthwise_conv(q_in, q_conv, decoder_segment_ids).reshape(batch, seq_len, heads, dk)
++    k = causal_depthwise_conv(k_in, k_conv, decoder_segment_ids).reshape(batch, seq_len, heads, dk)
++    v = causal_depthwise_conv(v_in, v_conv, decoder_segment_ids).reshape(batch, seq_len, heads, dv)
++
++    raw_g = self.f_proj_2(f_in).reshape(batch, seq_len, heads, dk)
+     # Reference uses allow_neg_eigval (beta in [0, 2)); False clamps to [0, 1].
+     beta_scale = 2.0 if self.config.kda_allow_neg_eigval else 1.0
+-    beta = beta_scale * jax.nn.sigmoid(self.w_b(x).astype(jnp.float32))
++    beta = beta_scale * jax.nn.sigmoid(b_in.astype(jnp.float32))
+ 
+     if self.config.use_tokamax_kda:
+       out = self._tokamax_kda(q, k, v, raw_g, beta, decoder_segment_ids)
+@@ -219,19 +231,93 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
        else:
          prev_ids = jnp.pad(decoder_segment_ids, ((0, 0), (1, 0)), constant_values=-1)[:, :seq_len]
          resets = decoder_segment_ids != prev_ids
@@ -495,24 +1636,348 @@ index b1fa3309..ba927120 100644
 +      # The recurrence runs along the sequence, so it must see the whole sequence. Left to propagation, a
 +      # context-sharded sequence shards the scan's chunk axis, and XLA all-gathers every chunk's inputs on each
 +      # scan iteration (quadratic traffic: 90% of a 64K step at context 2). Gather once per layer instead.
-+      seq_whole = ("activation_batch", None, "activation_heads", None)
++      # Its heads may shard instead (activation_kda_heads; olmo35-ep-as-cp puts them on the context axis).
++      seq_whole = ("activation_batch", None, "activation_kda_heads", None)
 +      q, k, v, log_decay = (nn.with_logical_constraint(t, seq_whole) for t in (q, k, v, log_decay))
 +      beta = nn.with_logical_constraint(beta, seq_whole[:3])
 +      resets = nn.with_logical_constraint(resets, seq_whole[:2])
  
        chunk = self.config.gdn_chunk_size
        if chunk > 0 and seq_len % chunk == 0:
-@@ -227,8 +242,9 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
-         )
+-        out = _delta_rule_chunked(
+-            q, k, v.astype(jnp.float32), log_decay, beta, resets, chunk, self.config.gdn_state_dtype
+-        )
++        if self.config.kda_chunked_impl == "subblock":
++          # On TPU, "default" runs f32 matmuls as bf16 passes (kda_matmul_precision applies to both chunked paths).
++          with jax.default_matmul_precision(self.config.kda_matmul_precision):
++            out = _delta_rule_chunked_subblock(
++                q,
++                k,
++                v.astype(jnp.float32),
++                log_decay,
++                beta,
++                resets,
++                chunk,
++                self.config.gdn_state_dtype,
++                sub_block=self.config.kda_sub_block,
++                state_scan=self._pallas_state_scan if self.config.kda_pallas_scan else None,
++            )
++        else:
++          with jax.default_matmul_precision(self.config.kda_matmul_precision):
++            out = _delta_rule_chunked(q, k, v.astype(jnp.float32), log_decay, beta, resets, chunk, self.config.gdn_state_dtype)
        else:
          out = _delta_rule_scan(q, k, v.astype(jnp.float32), jnp.exp(log_decay), beta, resets)
 +      out = nn.with_logical_constraint(out, ("activation_batch", "activation_length", "activation_heads", None))
  
 -    gate = jax.nn.sigmoid(self.g_proj_2(self.g_proj_1(x)).reshape(batch, seq_len, heads, dv))
-+    gate =jax.nn.sigmoid(self.g_proj_2(self.g_proj_1(x)).reshape(batch, seq_len, heads, dv))
++    gate = jax.nn.sigmoid(self.g_proj_2(g_in).reshape(batch, seq_len, heads, dv))
      out = self.o_norm(out.astype(x.dtype)) * gate
      return self.w_out(out.reshape(batch, seq_len, heads * dv))
  
++  def _pallas_state_scan(self, uw, k_carry, decay_last):
++    """`kda_scan.kda_state_scan` on `[B, H, N, ...]` operands, split over the batch axes only.
++
++    Pallas kernels can't be auto-partitioned; batch rows are independent, so each shard scans its own.
++    """
++    batch_axes = nn.logical_to_mesh_axes(("activation_batch",), self.config.logical_axis_rules)[0]
++    spec = PartitionSpec(batch_axes)
++    interpret = jax.devices()[0].platform != "tpu"
++
++    @functools.partial(jax.shard_map, mesh=self.mesh, in_specs=(spec,) * 3, out_specs=(spec, spec), check_vma=False)
++    def scan(uw_, kc_, dl_):
++      b, h, n = uw_.shape[:3]
++      flat = lambda t: t.reshape(b * h, n, *t.shape[3:])
++      states, delta = kda_scan.kda_state_scan(flat(uw_), flat(kc_), flat(dl_)[..., None], interpret)
++      return states.reshape(b, h, n, *states.shape[2:]), delta.reshape(b, h, n, *delta.shape[2:])
++
++    return scan(uw, k_carry, decay_last)
++
++  def _fused_input_proj(self, x):
++    """The six projections of x as one matmul over the concatenated kernels.
++
++    Same parameters and the same arithmetic per output column, so checkpoints are
++    unchanged; one wide matmul fills the MXU better than six narrow ones and
++    turns six bwd input-gradient matmuls into one.
++    """
++    mods = (self.w_q, self.w_k, self.w_v, self.f_proj_1, self.g_proj_1, self.w_b)
++    dtype = self.config.dtype
++    kernels = [jnp.asarray(m.kernel[...], dtype) for m in mods]
++    kernel = jnp.concatenate(kernels, axis=-1)
++    if self.config.kda_fused_proj_reduce_scatter:
++      # Keep the concatenated kernel sharded like its parts (embed axis), so its gradient is reduce-scattered;
++      # unconstrained, XLA all-reduces the whole [emb, 9224] gradient and then slices it.
++      kernel = nn.with_logical_constraint(kernel, ("embed", None))
++    out = jax.lax.dot_general(
++        jnp.asarray(x, dtype),
++        kernel,
++        (((x.ndim - 1,), (0,)), ((), ())),
++        precision=self.config.matmul_precision,
++    )
++    bounds = np.cumsum([k.shape[-1] for k in kernels])[:-1]
++    return jnp.split(out, bounds, axis=-1)
++
+   def _tokamax_kda(self, q, k, v, raw_g, beta, decoder_segment_ids) -> jnp.ndarray:
+     """Fused KDA via tokamax (PR #1103, experimental). Raw q/k/v/gate in: the
+ 
+@@ -254,6 +340,9 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+     max_num_segments = int(self.config.tokamax_kda_max_num_segments)
+     decay_floor = float(self.config.tokamax_kda_log_decay_floor)
+     l2norm_outside = bool(self.config.tokamax_kda_l2norm_outside)
++    resets_in_gate = has_segments and bool(self.config.tokamax_kda_resets_in_gate)
++    if resets_in_gate and decay_floor <= 0:
++      raise ValueError("tokamax_kda_resets_in_gate needs tokamax_kda_log_decay_floor > 0")
+ 
+     @functools.partial(
+         jax.shard_map,
+@@ -267,7 +356,7 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+         return t.transpose(2, 0, 1, 3)
+ 
+       seg_kwargs = {}
+-      if has_segments:
++      if has_segments and not resets_in_gate:
+         # tokamax expects 1-indexed segment ids with 0 reserved for padding,
+         # which is MaxText's packed-data convention already.
+         seg_kwargs = {"segment_ids": rest[0], "max_num_segments": max_num_segments}
+@@ -282,6 +371,13 @@ class OLMoE3KimiDeltaAttention(nnx.Module):
+         )
+         gate_kwargs = {"use_gate_in_kernel": False}
+         g_hf = jnp.maximum(log_decay, -decay_floor)
++        if resets_in_gate:
++          # A document's first token decays the carried state by exp(-floor) in every channel,
++          # which stands in for the varlen reset. Its own decay only ever multiplies a zero
++          # state, so pinning it loses no gradient the exact reset would keep.
++          seg = rest[0]
++          starts = seg != jnp.pad(seg, ((0, 0), (1, 0)), constant_values=-1)[:, :-1]
++          g_hf = jnp.where(starts[None, :, :, None], -decay_floor, g_hf)
+       else:
+         gate_kwargs = {"use_gate_in_kernel": True, "a_log": a_log_, "delta_time_bias": dt_bias_}
+       if l2norm_outside:
+@@ -475,6 +571,213 @@ def _delta_rule_chunked(q, k, v, log_decay, beta, resets, chunk_size: int, state
+   return outputs.transpose(1, 0, 3, 2, 4).reshape(batch, seq_len, heads, dv)
+ 
+ 
++@jax.custom_vjp
++def _invert_unit_lower(m: jnp.ndarray) -> jnp.ndarray:
++  """(I + M)^-1 for strictly lower triangular M over the last two axes.
++
++  Block doubling from 16 x 16: each diagonal block's inverse is a power series
++  that ends because M is nilpotent, then [[A, 0], [C, D]]^-1 = [[A^-1, 0],
++  [-D^-1 C A^-1, D^-1]] doubles the block size. All batched matmuls; the
++  analytic VJP below replaces differentiating through the iterations.
++  """
++  return _invert_unit_lower_fwd(m)[0]
++
++
++def _invert_unit_lower_fwd(m):
++  c = m.shape[-1]
++  base = min(16, c)
++  lead = m.shape[:-2]
++  nb = c // base
++  f32 = jnp.float32
++  # Tiny matrices: full precision costs little, and a 1-pass bf16 inverse drifts.
++  mm = functools.partial(jnp.matmul, precision=jax.lax.Precision.HIGHEST)
++  blocks = m.reshape(*lead, nb, base, nb, base)
++  diag = jnp.einsum("...rirj->...rij", blocks).astype(f32)
++  eye = jnp.eye(base, dtype=f32)
++  # (I + N)^-1 = (I - N)(I + N^2)(I + N^4)... until N^base = 0.
++  p = -diag
++  inv = eye + p
++  power = 1
++  while 2 * power < base:
++    p = mm(p, p)
++    inv = mm(inv, eye + p)
++    power *= 2
++  size = base
++  while size < c:
++    n2 = inv.shape[-3] // 2
++    inv = inv.reshape(*lead, n2, 2, size, size)
++    a_inv, d_inv = inv[..., 0, :, :], inv[..., 1, :, :]
++    # The lower-left block of the 2*size block that starts at row 2*k*size.
++    lower = m.reshape(*lead, n2, 2 * size, c)
++    lower = jnp.stack([lower[..., i, size:, 2 * i * size : (2 * i + 1) * size] for i in range(n2)], axis=-3).astype(f32)
++    off = -mm(mm(d_inv, lower), a_inv)
++    zeros = jnp.zeros_like(off)
++    top = jnp.concatenate([a_inv, zeros], axis=-1)
++    bottom = jnp.concatenate([off, d_inv], axis=-1)
++    inv = jnp.concatenate([top, bottom], axis=-2)
++    size *= 2
++  x = inv.reshape(*lead, c, c)
++  return x, x
++
++
++def _invert_unit_lower_bwd(x, dx):
++  # d(T^-1) = -X dT X, so dT = -X^T dX X^T; T's free entries are strictly lower.
++  xt = jnp.swapaxes(x, -1, -2)
++  mm = functools.partial(jnp.matmul, precision=jax.lax.Precision.HIGHEST)
++  dm = -mm(mm(xt, dx.astype(jnp.float32)), xt)
++  return (jnp.tril(dm, k=-1),)
++
++
++_invert_unit_lower.defvjp(_invert_unit_lower_fwd, _invert_unit_lower_bwd)
++
++
++def _kda_intra_chunk(q, k, g, sub_block: int, compute_dtype):
++  """Per-chunk ``sum_d a_id b_jd exp(g_id - g_jd)`` for (a, b) = (q, k) and (k, k).
++
++  Shapes ``[..., C, d]`` in, ``[..., C, C]`` out (unmasked, f32). ``g`` is the
++  cumulative log-decay from the chunk start, so it is non-increasing in time.
++
++  Rows are split into sub-blocks of ``sub_block``. Against an earlier column,
++  a row's decay factors through its sub-block's first row p: exp(g_i - g_j) =
++  exp(g_i - g_p) exp(g_p - g_j), and both exponents are <= 0 because g only
++  falls. That turns every below-diagonal sub-block into a matmul that cannot
++  overflow. Only the diagonal sub-blocks need the exact per-pair tensor, which
++  is 1/(C/sub_block) of the full one.
++  """
++  c, d = k.shape[-2], k.shape[-1]
++  s = min(sub_block, c)
++  nb = c // s
++  lead = k.shape[:-2]
++  f32 = jnp.float32
++  pos = jnp.arange(c)
++  piv = jnp.arange(nb) * s
++  g_piv = g[..., piv, :]  # [..., nb, d]
++  # Right operand for row block r: column j scaled by exp(g_p - g_j), kept only for j < p.
++  right_exp = jnp.where((pos[None, :] < piv[:, None])[..., None], g_piv[..., :, None, :] - g[..., None, :, :], -jnp.inf)
++  right = (k[..., None, :, :].astype(f32) * jnp.exp(right_exp)).astype(compute_dtype)  # [..., nb, C, d]
++  g_rows = g.reshape(*lead, nb, s, d)
++  left_scale = jnp.exp(g_rows - g_piv[..., :, None, :])
++  # q and k share the right operand and the per-pair decays, so they are stacked on a
++  # leading axis: one matmul with twice the rows, and one pass over the pair tensor.
++  k_rows = k.reshape(*lead, nb, s, d).astype(f32)
++  qk_rows = jnp.stack([q.reshape(*lead, nb, s, d).astype(f32), k_rows], axis=-4)  # [..., 2, nb, s, d]
++  lqk = (qk_rows * left_scale[..., None, :, :, :]).astype(compute_dtype)
++  off = jnp.einsum("...xrsd,...rjd->...xrsj", lqk, right, preferred_element_type=f32).reshape(*lead, 2, c, c)
++  # Diagonal sub-blocks: exact per pair, masked before the exp (upper pairs can be +inf).
++  tri = jnp.tril(jnp.ones((s, s), dtype=bool))
++  pair = jnp.exp(jnp.where(tri[..., None], g_rows[..., :, None, :] - g_rows[..., None, :, :], -jnp.inf))
++  diag = jnp.einsum("...xrid,...rjd,...rijd->...xrij", qk_rows, k_rows, pair)
++  eye_nb = jnp.eye(nb, dtype=f32)
++  both = off + jnp.einsum("...xrij,rq->...xriqj", diag, eye_nb).reshape(*lead, 2, c, c)
++  return both[..., 0, :, :], both[..., 1, :, :]
++
++
++def _delta_rule_chunked_subblock(
++    q,
++    k,
++    v,
++    log_decay,
++    beta,
++    resets,
++    chunk_size: int,
++    state_dtype: str = "float32",
++    sub_block: int = 16,
++    state_scan=None,
++) -> jnp.ndarray:
++  """``_delta_rule_chunked`` restructured for the MXU. Same math, same contract.
++
++  Three changes. The intra-chunk matrices use ``_kda_intra_chunk``'s sub-block
++  factorization instead of the full per-pair decay tensor. ``(I + M)^-1`` uses
++  block doubling with an analytic VJP. And everything that does not depend on
++  the carried state (the matrices, the inverse, the WY products u and w, the
++  output readout) runs for all chunks at once outside the scan, which keeps
++  only two matmuls per chunk on the sequential path. The scan returns each
++  chunk's incoming state and delta; the readout uses them afterwards.
++
++  ``state_scan(uw, k_carry, decay)`` replaces that scan when given (bf16 state only), e.g. the Pallas
++  kernel in ``kernels/kda_scan.py``; ``uw`` is u and w side by side, and ``decay`` is already zeroed for
++  chunks that hold a reset.
++  """
++  batch, seq_len, heads, dk = q.shape
++  dv = v.shape[-1]
++  c = chunk_size
++  n = seq_len // c
++  f32 = jnp.float32
++  compute_dtype = jnp.bfloat16 if state_dtype == "bfloat16" else f32
++
++  def to_chunks(x):  # [B, T, H, D] -> [B, H, N, C, D]
++    return x.reshape(batch, n, c, heads, -1).transpose(0, 3, 1, 2, 4)
++
++  # Cast before chunking so the saved activations are in the compute dtype.
++  q_c, k_c, v_c = (to_chunks(t.astype(compute_dtype)) for t in (q, k, v))
++  # Cumulative decay as a lower-triangular matmul: jnp.cumsum lowers to an O(C^2) reduce_window on TPU.
++  tri_ones = jnp.tril(jnp.ones((c, c), f32))
++  g = jnp.einsum("ij,...jd->...id", tri_ones, to_chunks(log_decay).astype(f32), precision=jax.lax.Precision.HIGHEST)
++  beta_c = beta.reshape(batch, n, c, heads).transpose(0, 3, 1, 2).astype(f32)[..., None]
++  # Named "context" so a custom remat policy (context=device) can keep the chunked inputs and the
++  # intra-chunk results below; the bwd then skips the projections, conv, norm, decay activation,
++  # intra-chunk build and inverse that per-layer remat would otherwise recompute.
++  q_c, k_c, v_c, g, beta_c = (checkpoint_name(t, "context") for t in (q_c, k_c, v_c, g, beta_c))
++
++  # Segment layout per chunk, broadcast over heads.
++  seg = jnp.cumsum(resets.reshape(batch, n, c).astype(jnp.int32), axis=-1)[:, None]  # [B, 1, N, C]
++  same_doc = seg[..., :, None] == seg[..., None, :]
++  causal = jnp.tril(jnp.ones((c, c), dtype=bool))
++  strict = jnp.tril(jnp.ones((c, c), dtype=bool), k=-1)
++  from_prev = (seg == 0)[..., None].astype(f32)
++  last_seg = (seg == seg[..., -1:])[..., None]
++  any_reset = seg[..., -1] > 0  # [B, 1, N]
++
++  # The [.., nb, C, d] and per-pair intermediates are large; recompute them in the bwd.
++  intra = jax.checkpoint(
++      functools.partial(_kda_intra_chunk, sub_block=sub_block, compute_dtype=compute_dtype),
++      policy=jax.checkpoint_policies.nothing_saveable,
++  )
++  scores, kk = intra(q_c, k_c, g)
++  scores = jnp.where(causal & same_doc, scores, 0.0)
++  m = jnp.where(strict & same_doc, kk, 0.0) * beta_c
++  x = _invert_unit_lower(m)
++
++  # WY: delta = X diag(beta) (v - from_prev * (k e^g) S) = u - w S.
++  eg = jnp.exp(g)
++  rhs = jnp.concatenate([v_c.astype(f32) * beta_c, k_c.astype(f32) * eg * beta_c * from_prev], axis=-1)
++  uw = jnp.einsum("...ij,...jd->...id", x.astype(compute_dtype), rhs.astype(compute_dtype), preferred_element_type=f32)
++  # Saved as kda_wy=device (34 MB per layer at seq 4096), the remat forward skips the intra-chunk build and the
++  # inverse; the intra-chunk VJP still recomputes its own forward.
++  x, scores = (checkpoint_name(t, "kda_wy") for t in (x, scores))
++  uw = checkpoint_name(uw, "context")
++  u, w = uw[..., :dv], uw[..., dv:]
++  # Only the chunk's last segment writes the carried state.
++  g_last = g[..., -1:, :]
++  k_carry = k_c.astype(f32) * jnp.exp(jnp.where(last_seg, g_last - g, -jnp.inf))
++  decay_last = jnp.exp(g_last[..., 0, :])  # [B, H, N, dk]
++
++  def scan_layout(t):  # [B, H, N, ...] -> [N, B, H, ...]
++    return jnp.moveaxis(t, 2, 0)
++
++  def body(state, xs):
++    u_i, w_i, kc_i, dl_i, reset_i = xs
++    delta = u_i - jnp.einsum("bhcd,bhdv->bhcv", w_i.astype(compute_dtype), state, preferred_element_type=f32)
++    delta = delta.astype(compute_dtype)
++    kept = jnp.where(reset_i[:, :, None, None], 0.0, state.astype(f32) * dl_i[..., None])
++    new_state = kept + jnp.einsum("bhcd,bhcv->bhdv", kc_i.astype(compute_dtype), delta, preferred_element_type=f32)
++    return new_state.astype(compute_dtype), (state, delta)
++
++  if state_scan is not None and compute_dtype == jnp.bfloat16:
++    decay = jnp.where(any_reset[..., None], 0.0, decay_last)
++    states, delta = state_scan(uw, k_carry.astype(compute_dtype), decay)
++  else:
++    xs = tuple(scan_layout(t) for t in (u, w, k_carry, decay_last, any_reset))
++    init_state = jnp.zeros((batch, heads, dk, dv), compute_dtype)
++    _, (states, delta) = jax.lax.scan(body, init_state, xs)
++    states, delta = jnp.moveaxis(states, 0, 2), jnp.moveaxis(delta, 0, 2)  # [B, H, N, ...]
++
++  qg = (q_c.astype(f32) * eg * from_prev).astype(compute_dtype)
++  out = jnp.einsum("...cd,...dv->...cv", qg, states, preferred_element_type=f32)
++  out = out + jnp.einsum("...ij,...jv->...iv", scores.astype(compute_dtype), delta, preferred_element_type=f32)
++  return out.transpose(0, 2, 3, 1, 4).reshape(batch, seq_len, heads, dv)
++
++
+ def _delta_rule_scan(q, k, v, decay, beta, resets) -> jnp.ndarray:
+   """Unfused delta-rule recurrence, scanned over time.
+ 
+@@ -593,7 +896,10 @@ class OLMoE3LatentRoutedMoE(moe.RoutedMoE):
+     logits leave that unchanged: every selected expert is inside the pool, so
+     the gathered scores are the unmasked ones.
+     """
+-    if self.config.emo_enabled:
++    # Forced experts arrive already routed (moe_a2a_token_chunks reuses the full-sequence EMo routing per
++    # chunk). They lie inside their pools, so masking again changes nothing but would rebuild the pools from a
++    # partial sequence.
++    if self.config.emo_enabled and forced_routed_experts is None:
+       gate_logits = self._emo_mask_logits(gate_logits, input_ids, rngs)
+     top_k_weights, top_k_indices = super().get_topk(
+         gate_logits, pre_bias_logits, rngs, input_ids=None, forced_routed_experts=forced_routed_experts
 diff --git a/src/maxtext/trainers/post_train/hooks.py b/src/maxtext/trainers/post_train/hooks.py
 index bc8666a1..19c65a17 100644
 --- a/src/maxtext/trainers/post_train/hooks.py
@@ -549,10 +2014,18 @@ index bc8666a1..19c65a17 100644
      except Exception as e:  # pylint: disable=broad-exception-caught
        max_logging.log(f"Exception in load_next_train_batch: {str(e)}")
 diff --git a/src/maxtext/trainers/post_train/sft/train_sft.py b/src/maxtext/trainers/post_train/sft/train_sft.py
-index 274c6623..e524213c 100644
+index 274c6623..35bd2cdb 100644
 --- a/src/maxtext/trainers/post_train/sft/train_sft.py
 +++ b/src/maxtext/trainers/post_train/sft/train_sft.py
-@@ -87,6 +87,18 @@ class MaxTextPeftTrainer(peft_trainer.PeftTrainer):
+@@ -40,6 +40,7 @@ from typing import Any, Sequence
+ from absl import app
+ import os
+ import jax
++import numpy as np
+ import jax.numpy as jnp
+ import optax
+ import pathwaysutils
+@@ -87,6 +88,26 @@ class MaxTextPeftTrainer(peft_trainer.PeftTrainer):
    train_step), which avoids the nested NNX transformation issue entirely.
    """
  
@@ -566,8 +2039,185 @@ index 274c6623..e524213c 100644
 +        for x in (aux["xent_sum"], aux["total_weights"], aux["z_loss"], aux["moe_lb_loss"])
 +    )
 +    ce = xent_sum / (weights + 1e-8) - z  # xent_sum includes the z-loss term
-+    max_logging.log(f"LOSS-PARTS step={self._train_steps + 1} ce={ce:.6f} moe_lb={lb:.6f} z={z:.6f}")
++    max_logging.log(f"LOSS-PARTS step={self._train_steps + 1} ce={ce:.6f} moe_lb={lb:.6f} z={z:.6f} tokens={weights:.0f}")
++    if "moe_required_rbf" in aux:
++      # log_required_ragged_buffer_factor: per MoE layer, the smallest ragged_buffer_factor that would not have
++      # dropped a token this step; at or below the run's factor, the step dropped nothing.
++      rbf = aux["moe_required_rbf"]
++      rbf = np.asarray(rbf.addressable_data(0) if isinstance(rbf, jax.Array) else rbf, dtype=np.float32).ravel()
++      max_logging.log(
++          f"REQUIRED_RBF step={self._train_steps + 1} max={rbf.max():.4f} per_layer=[{','.join(f'{x:.3f}' for x in rbf)}]"
++      )
 +
    def create_train_step_fn(self):
      """Creates a train step using jax.value_and_grad with explicit NNX split/merge."""
      loss_fn_ref = self.loss_fn
+@@ -207,6 +228,7 @@ def get_tunix_config(mt_config):
+   checkpointing_options = ocp.CheckpointManagerOptions(
+       save_interval_steps=mt_config.checkpoint_period,
+       enable_async_checkpointing=mt_config.async_checkpointing,
++      max_to_keep=mt_config.max_num_checkpoints_to_keep,
+   )
+ 
+   # Metrics configurations
+diff --git a/src/maxtext/trainers/pre_train/scripts/olmo/run_olmoe3_3p5b_v4_128.sh b/src/maxtext/trainers/pre_train/scripts/olmo/run_olmoe3_3p5b_v4_128.sh
+new file mode 100755
+index 00000000..9664809d
+--- /dev/null
++++ b/src/maxtext/trainers/pre_train/scripts/olmo/run_olmoe3_3p5b_v4_128.sh
+@@ -0,0 +1,125 @@
++#!/bin/bash
++#
++# Copyright 2023-2026 Google LLC
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#    https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++# olmoe3-3p5b (OLMo 3.5 small) on one TPU v4-128 slice (4x4x4, 64 chips, one megacore device per chip):
++# the fastest measured configuration, run on every worker of the slice.
++#
++#   SEQ_LEN=8192 bash src/maxtext/trainers/pre_train/scripts/olmo/run_olmoe3_3p5b_v4_128.sh
++#   SEQ_LEN=4096 bash src/maxtext/trainers/pre_train/scripts/olmo/run_olmoe3_3p5b_v4_128.sh
++#
++# Measured (median of steps 10-19, synthetic data, per_device_batch_size=1):
++#   seq 4096: 1.520 s/step, 20.4% MFU (85.17 TF per chip per step, scripts/olmoe3_flops_check.py)
++#   seq 8192: 3.095 s/step, 20.3% MFU (172.81 TF per chip per step)
++#   F32_KDA_STATE=1 (strict precision): 1.558 s / 19.9% and 3.167 s / 19.8%
++#   SAFE_BUFFER=1 (ragged buffer 1.25): 1.581 s and 3.223 s
++# Flags and kernels are explained in olmoe3-3p5b-v4-128-config.md.
++#
++# Knobs (environment):
++#   SEQ_LEN        4096 or 8192 (default 8192)
++#   F32_KDA_STATE  1: KDA recurrent state and depthwise conv in float32 (strictly loss-neutral; ~2.5% slower)
++#   SAFE_BUFFER    1: ragged_buffer_factor=1.25 instead of 1.125 (no token drops on skewed routing)
++#   PROFILE        1: capture an xplane trace of steps 6-8
++#   STEPS, RUN_NAME, OUTPUT_DIR, DATASET_TYPE   as usual; extra MaxText flags can follow on the command line.
++
++set -euo pipefail
++
++MAXTEXT_ROOT="$(cd "$(dirname "$0")/../../../../.." && pwd)"
++export PYTHONPATH="${MAXTEXT_ROOT}/src:${PYTHONPATH:-}"
++export PYTHONUNBUFFERED=1
++
++SEQ_LEN="${SEQ_LEN:-8192}"
++STEPS="${STEPS:-20}"
++RUN_NAME="${RUN_NAME:-olmoe3_3p5b_v4_128_s${SEQ_LEN}}"
++OUTPUT_DIR="${OUTPUT_DIR:-/tmp/olmoe3_3p5b_v4}"
++DATASET_TYPE="${DATASET_TYPE:-synthetic}"
++
++# One megacore device per chip: +1 GiB of HBM for the TensorCores.
++export TPU_MEGACORE=MEGACORE_DENSE
++# Async ragged all-to-all lets one token chunk's exchange overlap another chunk's expert GEMMs.
++LIBTPU="--xla_tpu_spmd_rng_bit_generator_unsafe=true --xla_tpu_bf16_emission_mode=NATIVE_EMISSION \
++--xla_tpu_scoped_vmem_limit_kib=16384 --xla_tpu_enable_async_ragged_all_to_all=true"
++
++# Shared by both sequence lengths.
++FLAGS=(
++  # model, precision, batch
++  model_name=olmoe3-3p5b override_model_config=True
++  dtype=bfloat16 weight_dtype=float32
++  per_device_batch_size=1 max_target_length="${SEQ_LEN}"
++  # layout: 8 of 512 experts per chip, no expert-weight all-gathers
++  ici_expert_parallelism=64 ici_fsdp_parallelism=1 shard_exp_on_fsdp=False
++  # unrolled layers with a per-layer remat boundary (scanning keeps every layer's buffers live at once)
++  scan_layers=False olmoe3_per_layer_remat=True remat_policy=custom
++  moe_routing=device moe_x_sorted=device moe_combine=device decoder_layer_input=device
++  # routed experts: megablox (Pallas GMM); tokamax does not run on v4
++  sparse_matmul=True megablox=True use_tokamax_gmm=False use_gmm_v2=False
++  capacity_factor=-1 moe_lean_routing=True moe_topk_pallas=True emo_threshold_by_bisection=True
++  moe_a2a_expert_major=True
++  # megablox tiles (m, k, n): two n-tiles per GMM so both megacore TensorCores run
++  wi_tile_fwd_batch_seq=512 wi_tile_fwd_embed_dim=768 wi_tile_fwd_mlp_dim=896
++  wi_tile_dlhs_batch_seq=512 wi_tile_dlhs_mlp_dim=1792 wi_tile_dlhs_embed_dim=384
++  wi_tile_drhs_batch_seq=512 wi_tile_drhs_embed_dim=768 wi_tile_drhs_mlp_dim=896
++  wo_tile_fwd_batch_seq=512 wo_tile_fwd_mlp_dim=1792 wo_tile_fwd_embed_dim=384
++  wo_tile_dlhs_batch_seq=512 wo_tile_dlhs_embed_dim=768 wo_tile_dlhs_mlp_dim=896
++  wo_tile_drhs_batch_seq=512 wo_tile_drhs_mlp_dim=896 wo_tile_drhs_embed_dim=384
++  # KDA: pure-JAX sub-block chunked delta rule (tokamax KDA does not run on v4)
++  use_tokamax_kda=False kda_chunked_impl=subblock gdn_chunk_size=128 kda_fused_input_proj=True
++  # metrics: one shared grad norm instead of three full passes (training unchanged)
++  norm_metrics=grad
++  # the run
++  run_name="${RUN_NAME}" base_output_directory="${OUTPUT_DIR}" dataset_type="${DATASET_TYPE}" steps="${STEPS}"
++  enable_checkpointing=False async_checkpointing=False
++)
++
++if (( SEQ_LEN <= 4096 )); then
++  FLAGS+=(moe_a2a_token_chunks=2 num_vocab_tiling=1 moe_mlpwi_0=device)
++  # With MEGACORE_DENSE, XLA otherwise turns the weight all-gathers async, which loses ~50 ms at 4k.
++  LIBTPU="${LIBTPU} --xla_enable_async_all_gather=false"
++else
++  # 4 chunks keep each permute gather under v4's 128 MiB CMEM; at 8k the weight all-gathers must stay async.
++  FLAGS+=(moe_a2a_token_chunks=4 num_vocab_tiling=4 vocab_tiling_ag_once=True kda_wy=device)
++fi
++
++if [[ "${F32_KDA_STATE:-0}" == "1" ]]; then
++  FLAGS+=(gdn_state_dtype=float32 kda_conv_in_compute_dtype=False)
++else
++  FLAGS+=(gdn_state_dtype=bfloat16 kda_conv_in_compute_dtype=True)
++fi
++
++if [[ "${SAFE_BUFFER:-0}" == "1" ]]; then
++  FLAGS+=(ragged_buffer_factor=1.25)
++else
++  FLAGS+=(ragged_buffer_factor=1.125)
++fi
++
++if [[ "${DATASET_TYPE}" == "synthetic" ]]; then
++  # The synthetic batch never changes; reuse it instead of resharding it every step.
++  FLAGS+=(synthetic_data_reuse_batch=True)
++fi
++
++if [[ "${PROFILE:-0}" == "1" ]]; then
++  FLAGS+=(profiler=xplane skip_first_n_steps_for_profiler=5 profiler_steps=3)
++fi
++
++export LIBTPU_INIT_ARGS="${LIBTPU_INIT_ARGS:-} ${LIBTPU}"
++
++if [[ "${DRY_RUN:-0}" == "1" ]]; then
++  echo "TPU_MEGACORE=${TPU_MEGACORE}"
++  echo "LIBTPU_INIT_ARGS=${LIBTPU_INIT_ARGS}"
++  printf '%s\n' "${FLAGS[@]}" "$@"
++  exit 0
++fi
++
++exec python3 -m maxtext.trainers.pre_train.train "${MAXTEXT_ROOT}/src/maxtext/configs/base.yml" "${FLAGS[@]}" "$@"
+diff --git a/src/maxtext/trainers/pre_train/train.py b/src/maxtext/trainers/pre_train/train.py
+index 3a247089..87bce6fc 100644
+--- a/src/maxtext/trainers/pre_train/train.py
++++ b/src/maxtext/trainers/pre_train/train.py
+@@ -39,6 +39,7 @@ except ImportError:
+ 
+ import jax
+ import jax.numpy as jnp
++import optax
+ from jax.sharding import NamedSharding
+ 
+ from flax import nnx, traverse_util
+@@ -628,7 +629,16 @@ def train_step(model, config, state_mesh_shardings, params_shardings, state, dat
+     if global_max_logit is not None:
+       scalar_metrics["learning/max_logits"] = global_max_logit
+ 
+-  if not config.optimizer_memory_host_offload:
++  if not config.optimizer_memory_host_offload and config.norm_metrics == "grad":
++    # One norm instead of three full passes over the parameters. optax.global_norm is the expression
++    # clip_by_global_norm evaluates, so XLA shares it; the clipped norm follows from it.
++    raw_norm = optax.global_norm(raw_grads)
++    scalar_metrics["learning/raw_grad_norm"] = raw_norm
++    if config.gradient_clipping_threshold > 0:
++      scalar_metrics["learning/grad_norm"] = jnp.minimum(raw_norm, config.gradient_clipping_threshold)
++    else:
++      scalar_metrics["learning/grad_norm"] = raw_norm
++  elif not config.optimizer_memory_host_offload and config.norm_metrics == "all":
+     scalar_metrics["learning/grad_norm"] = max_utils.l2norm_pytree(grads)
+     scalar_metrics["learning/raw_grad_norm"] = max_utils.l2norm_pytree(raw_grads)
+     model_params = nnx.state(new_state.model, nnx.Param)

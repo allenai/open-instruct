@@ -1,7 +1,10 @@
 The training image for Olmo 3.5 SFT: `../image/` (same Dockerfile and build.sh) built on Caleb's MaxText line for
 Olmo 3.5 (AI-Hypercomputer/maxtext@51f8cc4b: Gagik's `olmo35-rebase` a7f34953 plus OLMo-core parity fixes, among
 them forward-substitution KDA, `moe_aux_loss_reduction`, `warmup_step_offset`, and zeroed MoE overflow rows),
-with this directory's `patches/maxtext.patch` (the SFT fixes cherry-picked onto it, plus KDA keeping the sequence
-whole under context parallelism).
+with this directory's `patches/maxtext.patch`: the SFT fixes cherry-picked onto it, KDA keeping the sequence whole
+under context parallelism, Gagik's v4 performance commit (agagik-olmoe3-v4 dd9c9511: sub-block KDA, all-to-all
+options), the `olmo35-ep-as-cp` mesh rule (KDA heads on the expert axis), the REQUIRED_RBF probe on the all-to-all
+path, and `max_num_checkpoints_to_keep` in SFT. Source branch: `olmo35-posttrain-perf` (maxtext e7f57d0b). The patch
+covers `src/` only: the base image has no top-level `scripts/`.
 
-    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-p84627a55
+    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-p0662c456
