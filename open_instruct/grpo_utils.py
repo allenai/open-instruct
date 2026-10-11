@@ -1,3 +1,4 @@
+import contextlib
 import enum
 import itertools
 import math
@@ -28,6 +29,11 @@ from open_instruct.utils import (
 )
 
 logger = logger_utils.setup_logger(__name__)
+
+DeepSpeedCPUAdam = None
+with contextlib.suppress(Exception):
+    from deepspeed.ops.adam import DeepSpeedCPUAdam
+
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
 
@@ -69,6 +75,19 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
+
+
+def create_optimizer(optim_params, args: "GRPOExperimentConfig") -> torch.optim.Optimizer:
+    """Builds the policy optimizer: DeepSpeedCPUAdam if ``args.use_cpu_adam``, else ``torch.optim.AdamW``."""
+    if args.use_cpu_adam:
+        if DeepSpeedCPUAdam is None:
+            raise RuntimeError(
+                "`use_cpu_adam=True` requires DeepSpeed to be installed. Install it with: pip install deepspeed"
+            )
+        return DeepSpeedCPUAdam(optim_params, lr=args.learning_rate, weight_decay=args.weight_decay)
+    return torch.optim.AdamW(
+        optim_params, lr=args.learning_rate, fused=args.fused_optimizer, weight_decay=args.weight_decay
+    )
 
 
 @dataclass
@@ -329,9 +348,9 @@ class GRPOExperimentConfig(
         if self.use_cpu_adam and self.deepspeed_stage == 0:
             raise ValueError("`use_cpu_adam` requires a DeepSpeed stage (`deepspeed_stage` > 0)!")
         if self.use_cpu_adam and not self.deepspeed_offload_optimizer:
-            logger.warning(
-                "`use_cpu_adam` is enabled but `deepspeed_offload_optimizer` is False. "
-                "Consider enabling `deepspeed_offload_optimizer` to fully benefit from CPU Adam."
+            raise ValueError(
+                "`use_cpu_adam` requires `deepspeed_offload_optimizer`: DeepSpeedCPUAdam only steps parameters "
+                "that live on the CPU, so the optimizer must be offloaded (`--deepspeed_offload_optimizer`)!"
             )
         if self.use_rho_correction:
             if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):

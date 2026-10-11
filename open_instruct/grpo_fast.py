@@ -35,10 +35,8 @@ from concurrent import futures
 from datetime import timedelta
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-DeepSpeedCPUAdam = None
 with contextlib.suppress(Exception):
     import deepspeed
-    from deepspeed.ops.adam import DeepSpeedCPUAdam
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
@@ -375,15 +373,7 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        if args.use_cpu_adam:
-            if DeepSpeedCPUAdam is None:
-                raise RuntimeError(
-                    "`use_cpu_adam=True` requires DeepSpeed to be installed. "
-                    "Install it with: pip install deepspeed"
-                )
-            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate, weight_decay=args.weight_decay)
-        else:
-            self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer, weight_decay=args.weight_decay)
+        self.optimizer = grpo_utils.create_optimizer(optim_params, args)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
