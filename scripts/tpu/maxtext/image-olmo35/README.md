@@ -4,7 +4,8 @@ them forward-substitution KDA, `moe_aux_loss_reduction`, `warmup_step_offset`, a
 with this directory's `patches/maxtext.patch`: the SFT fixes cherry-picked onto it, KDA keeping the sequence whole
 under context parallelism, Gagik's v4 performance commit (agagik-olmoe3-v4 dd9c9511: sub-block KDA, all-to-all
 options), the `olmo35-ep-as-cp` mesh rule (KDA heads on the expert axis), the REQUIRED_RBF probe on the all-to-all
-path, and `max_num_checkpoints_to_keep` in SFT. Source branch: `olmo35-posttrain-perf` (maxtext e7f57d0b). The patch
+path, `max_num_checkpoints_to_keep` in SFT, and the block-doubling inverse indexing m directly (slicing a reshape of m
+miscompiles on TPU v4). Source branch: `olmo35-posttrain-perf` (maxtext 9f55e7b6). The patch
 covers `src/` only: the base image has no top-level `scripts/`.
 
-    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-p0662c456
+    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-p907d86f3

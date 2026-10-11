@@ -1565,7 +1565,7 @@ index 4b6bc943..a26d8706 100644
      # Self-attention block
      self.attention = Attention(
 diff --git a/src/maxtext/models/olmoe3.py b/src/maxtext/models/olmoe3.py
-index b1fa3309..46e4a5ae 100644
+index b1fa3309..45ff5449 100644
 --- a/src/maxtext/models/olmoe3.py
 +++ b/src/maxtext/models/olmoe3.py
 @@ -42,12 +42,14 @@ from typing import Any
@@ -1752,7 +1752,7 @@ index b1fa3309..46e4a5ae 100644
        else:
          gate_kwargs = {"use_gate_in_kernel": True, "a_log": a_log_, "delta_time_bias": dt_bias_}
        if l2norm_outside:
-@@ -475,6 +571,213 @@ def _delta_rule_chunked(q, k, v, log_decay, beta, resets, chunk_size: int, state
+@@ -475,6 +571,216 @@ def _delta_rule_chunked(q, k, v, log_decay, beta, resets, chunk_size: int, state
    return outputs.transpose(1, 0, 3, 2, 4).reshape(batch, seq_len, heads, dv)
  
  
@@ -1792,9 +1792,12 @@ index b1fa3309..46e4a5ae 100644
 +    n2 = inv.shape[-3] // 2
 +    inv = inv.reshape(*lead, n2, 2, size, size)
 +    a_inv, d_inv = inv[..., 0, :, :], inv[..., 1, :, :]
-+    # The lower-left block of the 2*size block that starts at row 2*k*size.
-+    lower = m.reshape(*lead, n2, 2 * size, c)
-+    lower = jnp.stack([lower[..., i, size:, 2 * i * size : (2 * i + 1) * size] for i in range(n2)], axis=-3).astype(f32)
++    # The lower-left block of the 2*size block that starts at row 2*k*size, indexed on m directly. Slicing a
++    # [.., n2, 2*size, c] reshape of m instead miscompiles on TPU v4: for k >= 1 the column offset is dropped and the
++    # block comes from columns 0..size (rel. error 0.7 in the off-diagonal blocks, ~5e-3 in the inverse, +0.005 CE).
++    lower = jnp.stack(
++        [m[..., 2 * i * size + size : 2 * (i + 1) * size, 2 * i * size : (2 * i + 1) * size] for i in range(n2)], axis=-3
++    ).astype(f32)
 +    off = -mm(mm(d_inv, lower), a_inv)
 +    zeros = jnp.zeros_like(off)
 +    top = jnp.concatenate([a_inv, zeros], axis=-1)
@@ -1966,7 +1969,7 @@ index b1fa3309..46e4a5ae 100644
  def _delta_rule_scan(q, k, v, decay, beta, resets) -> jnp.ndarray:
    """Unfused delta-rule recurrence, scanned over time.
  
-@@ -593,7 +896,10 @@ class OLMoE3LatentRoutedMoE(moe.RoutedMoE):
+@@ -593,7 +899,10 @@ class OLMoE3LatentRoutedMoE(moe.RoutedMoE):
      logits leave that unchanged: every selected expert is inside the pool, so
      the gathered scores are the unmasked ones.
      """
