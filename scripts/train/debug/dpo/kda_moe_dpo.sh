@@ -159,6 +159,19 @@ MAX_RETRIES="${MAX_RETRIES:-2}"
 OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/kda-moe-dpo-$(date +%s)}"
 PY="${PY:-uv run python}"
 
+# mason mounts only oe-adapt-default and oe-training-default. Any other bucket named by MODEL or
+# OUTPUT_DIR (e.g. olmo-3p5-post-checkpoints) needs --extra_weka_buckets, derived here so an
+# override cannot forget it.
+EXTRA_BUCKET_FLAGS=""
+for path in "$MODEL" "$OUTPUT_DIR"; do
+    if [[ "$path" == /weka/* ]]; then
+        bucket="${path#/weka/}"; bucket="${bucket%%/*}"
+        if [[ "$bucket" != oe-adapt-default && "$bucket" != oe-training-default && "$EXTRA_BUCKET_FLAGS" != *"$bucket"* ]]; then
+            EXTRA_BUCKET_FLAGS="$EXTRA_BUCKET_FLAGS --extra_weka_buckets $bucket"
+        fi
+    fi
+done
+
 EXP_NAME="${BASE}-dpo-${MODE}-lr${LR}-seq${SEQ}-$(date +%s)"
 
 # Arguments shared by every mode. Kept in one place so the reference cache built by
@@ -221,7 +234,9 @@ case "$MODE" in
             # SAVE=1 writes one checkpoint at the last step, for the export and vLLM load check.
             smoke)          EXTRA=(--max_train_steps "${STEPS:-30}" --checkpointing_steps "$( [[ "${SAVE:-0}" == 1 ]] && echo "${STEPS:-30}" || echo 1000000 )" --with_tracking)
                             DESC="$BASE DPO smoke: ${STEPS:-30} steps at $SEQ, ${NNODES}x${NPROC}" ;;
-            train)          EXTRA=(--checkpointing_steps "${CKPT_STEPS:-500}" --with_tracking); DESC="KDA MoE DPO: 1 epoch, lr $LR, seq $SEQ" ;;
+            # EPHEMERAL_STEPS bounds what a preemption costs; olmo-core keeps only the latest ephemeral.
+            train)          EXTRA=(--checkpointing_steps "${CKPT_STEPS:-500}" --ephemeral_save_interval "${EPHEMERAL_STEPS:-100}" --with_tracking)
+                            DESC="$BASE DPO: 1 epoch, lr $LR, seq $SEQ, ${NNODES}x${NPROC}" ;;
         esac
         if (( NNODES > 1 )); then
             RDZV_FLAGS="--node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME --master_port=29400"
@@ -238,6 +253,7 @@ case "$MODE" in
             --timeout "$JOB_TIMEOUT" --max_retries "$MAX_RETRIES" \
             --num_nodes "$NNODES" --gpus "$NPROC" \
             --non_resumable --no_auto_dataset_cache \
+            $EXTRA_BUCKET_FLAGS \
             --env OLMO_SHARED_FS=1 \
             -- torchrun --nnodes="$NNODES" $RDZV_FLAGS --nproc_per_node="$NPROC" \
             open_instruct/dpo.py "${common_args[@]}" "${EXTRA[@]}"
