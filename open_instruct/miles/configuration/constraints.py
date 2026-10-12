@@ -295,7 +295,17 @@ def native_values(args, supplied_flags):
 
 # Closed structured schemas, also consumed by documentation coverage checks.
 STRUCTURED_FIELDS = {
-    "data": {"eval_prompt_data", "prompt_data", "recipe", "reward_config", "rl_manifest", "seed", "shuffle", "tasks"},
+    "data": {
+        "eval_prompt_data",
+        "in_sample_eval",
+        "prompt_data",
+        "recipe",
+        "reward_config",
+        "rl_manifest",
+        "seed",
+        "shuffle",
+        "tasks",
+    },
     "launch": {
         "auto_resume",
         "budget",

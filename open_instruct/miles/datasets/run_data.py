@@ -124,6 +124,7 @@ def validate_data(data):
         "prompt_data",
         "eval_prompt_data",
         "reward_config",
+        "in_sample_eval",
     }
     if unknown:
         raise InputError(
@@ -138,6 +139,14 @@ def validate_data(data):
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
     if "prompt_data" in modes and not data.get("reward_config"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
+    diagnostic = data.get("in_sample_eval", [])
+    if not isinstance(diagnostic, list) or any(not isinstance(name, str) for name in diagnostic):
+        raise InputError("in_sample_eval must list explicitly named training-question diagnostics")
+    if diagnostic and "prompt_data" not in modes:
+        raise InputError("in_sample_eval requires prepared prompt_data")
+    names = (data.get("eval_prompt_data") or [])[::2]
+    if len(set(diagnostic)) != len(diagnostic) or not set(diagnostic) <= set(names):
+        raise InputError("in_sample_eval names must be unique evaluation dataset names")
     if "tasks" in modes:
         tasks = data["tasks"]
         if not isinstance(tasks, list) or not tasks:
@@ -501,18 +510,30 @@ def prepare_data(
         raise InputError("Preparation requires nonempty training data")
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
+    diagnostics = set(data.get("in_sample_eval", []))
+    diagnostic_rows = []
+    train_pairs = set()
     for split, rows in partitions.items():
         for index, row in enumerate(rows, 1):
             try:
                 _verify_row(row, tokenizer, max_prompt_length, known)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
+            if split in diagnostics:
+                diagnostic_rows.append(row)
+                continue
             (train_prompts if split == "train" else eval_prompts).add(row["input"])
             identity = row["metadata"].get("prepared_sample_id")
+            if split == "train":
+                train_pairs.add((row["input"], identity))
             if identity:
                 (train_ids if split == "train" else eval_ids).add(identity)
     if train_prompts & eval_prompts or train_ids & eval_ids:
         raise InputError("Training and held-out data overlap by prompt or source identity")
+    for row in diagnostic_rows:
+        identity = row["metadata"].get("prepared_sample_id")
+        if not identity or (row["input"], identity) not in train_pairs:
+            raise InputError("Every in_sample_eval row must be a training prompt with the same source identity")
     if registry is None:
         names = {spec["name"] for rows in partitions.values() for row in rows for spec in row["metadata"]["verifiers"]}
         registry = {name: {"factory": FACTORIES[name]} for name in sorted(names)}
@@ -541,6 +562,7 @@ def prepare_data(
         }
         manifest = {
             "schema_version": 1,
+            "in_sample_eval": sorted(diagnostics),
             "contract": contract,
             "inputs": inputs,
             "outputs": outputs,

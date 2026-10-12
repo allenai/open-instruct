@@ -253,6 +253,44 @@ def test_prepared_mode_rejects_holdout_overlap(environment, tmp_path):
         )
 
 
+@pytest.mark.parametrize("diagnostic_identity, heldout_overlap", [("a", False), ("b", False), ("a", True)])
+def test_explicit_in_sample_diagnostic_does_not_relax_holdout_checks(
+    environment, tmp_path, diagnostic_identity, heldout_overlap
+):
+    row = {
+        "input": "same prompt",
+        "label": "1",
+        "metadata": {"prepared_sample_id": "a", "verifiers": [{"name": "gsm8k", "target": "1"}]},
+    }
+    train = tmp_path / "train.jsonl"
+    other = {
+        "input": "another prompt",
+        "label": "1",
+        "metadata": {"prepared_sample_id": "b", "verifiers": [{"name": "gsm8k", "target": "1"}]},
+    }
+    train.write_text(json.dumps(row) + "\n" + json.dumps(other) + "\n")
+    diagnostic = tmp_path / "diag.jsonl"
+    row["metadata"]["prepared_sample_id"] = diagnostic_identity
+    diagnostic.write_text(json.dumps(row) + "\n")
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"gsm8k": {"factory": run_data.FACTORIES["gsm8k"]}}))
+    data = {
+        "prompt_data": str(train),
+        "reward_config": str(registry),
+        "eval_prompt_data": ["train_diagnostic", str(diagnostic)],
+        "in_sample_eval": ["train_diagnostic"],
+    }
+    if heldout_overlap:
+        data["eval_prompt_data"].extend(["heldout", str(train)])
+    if diagnostic_identity != "a" or heldout_overlap:
+        with pytest.raises(ValueError, match="same source identity|overlap"):
+            prepare(environment, data)
+    else:
+        result = prepare(environment, data)
+        manifest = json.loads(Path(result["manifest"]).read_text())
+        assert manifest["in_sample_eval"] == ["train_diagnostic"]
+
+
 @pytest.mark.parametrize(
     "data",
     [

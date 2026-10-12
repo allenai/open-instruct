@@ -198,6 +198,7 @@
     "compiler_cache.shared_root": "Shared cache path; maps to core.compiler_cache_root. Default shared TTL root documented in cache guide.",
     "conversion.hf_output": "Prepared HF descriptor/export path; default output.root/prepared/hf.",
     "data.eval_prompt_data": "List alternating dataset names and held-out JSONL paths; paths resolve relative to TOML.",
+    "data.in_sample_eval": "Explicit prepared evaluation names that reuse training questions as diagnostics; all other evaluation inputs remain disjoint from training.",
     "data.prompt_data": "Prepared training JSONL path; exclusive data selector. Pair with reward_config.",
     "data.recipe": "Rejected: named recipes are not supported. Use tasks or an immutable manifest.",
     "data.reward_config": "Trusted verifier registry path for prepared inputs.",

@@ -22,15 +22,26 @@ def parse(document, base):
         startup_timeout=1800,
         max_context_length=65536,
         kl_coef=1.0,
+        objective="full",
+        pressure_clip=None,
+        calibrate_initial=False,
     )
     validation.mapping(teacher, "teacher")
     validation.fields(teacher, "teacher", set(defaults) | {"source"})
     teacher = defaults | teacher
     source = validation.text(teacher.get("source"), "teacher.source")
     teacher["source"] = str((base / Path(source).expanduser()).resolve())
-    for name in set(defaults) - {"kl_coef"}:
+    for name in set(defaults) - {"kl_coef", "objective", "pressure_clip", "calibrate_initial"}:
         validation.integer(teacher[name], f"teacher.{name}")
+    if not isinstance(teacher["calibrate_initial"], bool):
+        raise InputError("teacher.calibrate_initial must be boolean")
     validation.number(teacher["kl_coef"], "teacher.kl_coef", exclusive_min=True)
+    if teacher["objective"] not in {"full", "cancel_answer_positive"}:
+        raise InputError("teacher.objective must be full or cancel_answer_positive")
+    if teacher["pressure_clip"] is not None:
+        validation.number(teacher["pressure_clip"], "teacher.pressure_clip", exclusive_min=True)
+        if teacher["objective"] != "cancel_answer_positive":
+            raise InputError("pressure_clip belongs to cancel_answer_positive")
     if teacher["gpus"] != teacher["tensor_parallel_size"]:
         raise InputError("teacher.gpus must equal teacher.tensor_parallel_size")
     return teacher
