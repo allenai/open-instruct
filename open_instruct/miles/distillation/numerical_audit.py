@@ -56,6 +56,8 @@ async def measure(endpoints, saved, root, mode):
             values = await panel.score(endpoints[server] + "/generate", prefix, sequence, limit)
         finally:
             marker.unlink(missing_ok=True)
+        if capture and not (marker.parent / "weights.json").exists():
+            raise RuntimeError("Component tracing did not capture loaded weights")
         records[label] = values
         append(
             root / "scores.jsonl",
@@ -155,6 +157,12 @@ def main():
     }
     tracing = os.environ.get("OI_MILES_OPD_AUDIT_TRACE") == "1"
     modes = ("rounding-graphs", "rounding-eager", "off-eager", "core-eager")
+    requested_modes = os.environ.get("OI_MILES_OPD_AUDIT_MODES")
+    if requested_modes:
+        requested_modes = tuple(requested_modes.split(","))
+        if not set(requested_modes) <= set(modes):
+            raise ValueError("Unknown audit mode")
+        modes = requested_modes
     for mode in modes:
         print(f"Starting numerical audit mode {mode}; tracing={tracing}", flush=True)
         servers, handles, endpoints = [], [], []
@@ -180,10 +188,16 @@ def main():
                                 [
                                     {
                                         "name": "numerical-boundaries",
-                                        "target_modules": [""],
+                                        "target_modules": ["model"],
                                         "hook_factory": "open_instruct.miles.distillation.audit_trace:factory",
+                                        "config": {"root": str(root / f"{mode}-trace-{index}"), "base": "model"},
+                                    },
+                                    {
+                                        "name": "numerical-head",
+                                        "target_modules": ["logits_processor"],
+                                        "hook_factory": "open_instruct.miles.distillation.audit_trace:head_factory",
                                         "config": {"root": str(root / f"{mode}-trace-{index}")},
-                                    }
+                                    },
                                 ]
                             ),
                         ]

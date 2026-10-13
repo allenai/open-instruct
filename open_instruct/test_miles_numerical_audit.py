@@ -46,6 +46,35 @@ def test_capture_records_loaded_weights_and_boundaries(tmp_path, monkeypatch):
     assert len(weights["model.embed_norm.weight"]["sha256"]) == 64
 
 
+def test_inner_model_trace_survives_outer_forward_bypass(tmp_path, monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda: "test CPU")
+
+    class Inner(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed_norm = torch.nn.Linear(2, 2)
+
+        def forward(self, value):
+            return self.embed_norm(value)
+
+    class Outer(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = Inner()
+
+        def forward(self, value):
+            return self.model(value)
+
+    model = Outer()
+    model.model.register_forward_hook(audit_trace.factory({"root": str(tmp_path), "base": "model"}))
+    model.forward(torch.ones(1, 2))
+    (tmp_path / "capture").touch()
+    expected = model.forward(torch.ones(1, 2))
+    saved = torch.load(tmp_path / "model.embed_norm.pt", weights_only=True)
+    assert torch.equal(saved["outputs"], expected)
+    assert (tmp_path / "weights.json").exists()
+
+
 def test_audit_launch_does_not_train():
     spec = RunSpec.from_dict(
         {

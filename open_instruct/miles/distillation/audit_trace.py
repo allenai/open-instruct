@@ -47,6 +47,8 @@ def factory(config):
         nonlocal installed
         if not installed:
             for name, module in model.named_modules():
+                if config.get("base"):
+                    name = config["base"] + ("." + name if name else "")
                 boundary = name.startswith("model.layers.") and name.count(".") == 3
                 first_layer_detail = name.startswith("model.layers.0.self_attn.")
                 if not (boundary or first_layer_detail or name in {"model.embed_norm", "model.norm"}):
@@ -80,6 +82,25 @@ def factory(config):
             (root / "device.json").write_text(
                 json.dumps({"name": torch.cuda.get_device_name(), "compat": getattr(model, "core_compat_mode", None)})
             )
+        return output
+
+    return after
+
+
+def head_factory(config):
+    root = Path(config["root"])
+
+    def after(module, args, output):
+        if (root / "capture").exists():
+            weights = {}
+            for name, parameter in args[2].named_parameters():
+                raw = parameter.detach().contiguous().reshape(-1).view(torch.uint8).cpu().numpy()
+                weights[name] = {
+                    "shape": list(parameter.shape),
+                    "dtype": str(parameter.dtype),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                }
+            (root / "head-weights.json").write_text(json.dumps(weights))
         return output
 
     return after
