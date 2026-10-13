@@ -40,17 +40,21 @@ async def reward(args, sample, **kwargs):
     response = sample.tokens[-sample.response_length :]
     objective = service.get("objective", "full")
     prompts = {"full": prompt}
+    student_version = None
     if objective == "cancel_answer_positive":
+        if getattr(args, "fully_async", False):
+            raise ValueError("Matched student scoring requires synchronous publication")
+        versions = {str(span["version"]) for call in sample.weight_versions for span in call.to_dicts()}
+        if len(versions) != 1 or not next(iter(versions)).isdigit():
+            raise ValueError("Matched student scoring requires one recorded policy version")
+        student_version = next(iter(versions))
+        prompts["student_prefill"] = sample.tokens[: -sample.response_length]
         answer_prompt = sample.metadata.get("opd_answer_prompt")
         if not isinstance(answer_prompt, str) or not answer_prompt:
             raise ValueError("Cancellation requires a separate answer-only teacher prompt")
         prompts["answer"] = answer_prompt
-        if service.get("calibrate_initial"):
-            versions = {span["version"] for call in sample.weight_versions for span in call.to_dicts()}
-            if not versions:
-                raise ValueError("Initial calibration requires recorded policy versions")
-            if versions == {"0"}:
-                prompts["bare_control"] = sample.tokens[: -sample.response_length]
+        if service.get("calibrate_initial") and versions == {"0"}:
+            prompts["bare_control"] = sample.tokens[: -sample.response_length]
 
     async def score_context(name, text):
         context = tokenizer.encode(text, add_special_tokens=False) if isinstance(text, str) else list(text)
@@ -58,10 +62,15 @@ async def reward(args, sample, **kwargs):
         if len(ids) > service["max_context_length"]:
             raise ValueError("Teacher context overflow; do not silently shorten the reference")
         requested = time.perf_counter()
+        endpoint = (
+            f"http://{args.sglang_router_ip}:{args.sglang_router_port}"
+            if name == "student_prefill"
+            else service["endpoint"]
+        )
         async with limit:
             admitted = time.perf_counter()
             result = await on_policy_distillation._post_json(
-                service["endpoint"] + "/generate",
+                endpoint + "/generate",
                 {
                     "input_ids": ids,
                     "sampling_params": {"temperature": 0, "max_new_tokens": 0},
@@ -71,6 +80,9 @@ async def reward(args, sample, **kwargs):
                 timeout_secs=service["request_timeout"],
             )
         completed = time.perf_counter()
+        version = result.get("meta_info", {}).get("weight_version")
+        if name == "student_prefill" and str(version) != student_version:
+            raise ValueError(f"Student prefill version {version!r} does not match rollout {student_version}")
         return (
             name,
             alignment.extract_scores(result, ids, sample.response_length),
@@ -81,6 +93,8 @@ async def reward(args, sample, **kwargs):
                 "context_tokens": len(context),
                 "queue_seconds": admitted - requested,
                 "score_seconds": completed - admitted,
+                "weight_version": version,
+                "endpoint": endpoint,
             },
         )
 
@@ -98,8 +112,9 @@ async def reward(args, sample, **kwargs):
         if behavior is None or len(behavior) != sample.response_length:
             raise ValueError("Cancellation requires generation-time student log probabilities")
         pressure, metrics = cancellation.token_pressure(
-            behavior, scores, values["answer"], clip=service.get("pressure_clip")
+            values["student_prefill"], scores, values["answer"], clip=service.get("pressure_clip")
         )
+        gap = torch.tensor(values["student_prefill"]) - torch.tensor(behavior)
         # Native MILES subtracts beta * opd_reverse_kl. This field transports
         # negative shaped pressure here; it is not a KL divergence.
         sample.opd_reverse_kl = (-pressure).tolist()
@@ -107,15 +122,22 @@ async def reward(args, sample, **kwargs):
             "opd_pressure": metrics,
             "opd_answer_log_probs": values["answer"],
             "opd_behavior_log_probs": list(behavior),
+            "opd_student_prefill_log_probs": values["student_prefill"],
+            "opd_student_prefill_version": student_version,
+            "opd_pressure_anchor": "current_student_prefill",
+            "opd_decode_prefill_gap_mean": gap.mean().item(),
+            "opd_decode_prefill_gap_abs_mean": gap.abs().mean().item(),
             "opd_unscaled_pressure": pressure.tolist(),
         }
         if "bare_control" in values:
             gap = torch.tensor(values["bare_control"]) - torch.tensor(behavior)
+            matched_gap = torch.tensor(values["bare_control"]) - torch.tensor(values["student_prefill"])
             pressure_metadata.update(
                 opd_initial_bare_log_probs=values["bare_control"],
                 opd_initial_bare_gap_mean=gap.mean().item(),
                 opd_initial_bare_gap_abs_mean=gap.abs().mean().item(),
                 opd_initial_bare_gap_abs_max=gap.abs().max().item(),
+                opd_initial_matched_prefill_gap_abs_mean=matched_gap.abs().mean().item(),
             )
     task_reward = await rewards.registered_reward(args, sample, **kwargs)
     sample.train_metadata = dict(
@@ -127,8 +149,10 @@ async def reward(args, sample, **kwargs):
         opd_teacher_version=0,
         opd_teacher_source=service["source"],
         opd_teacher_context_tokens=contexts["full"]["context_tokens"],
-        opd_teacher_queue_seconds=sum(c["queue_seconds"] for c in contexts.values()),
-        opd_teacher_score_seconds=sum(c["score_seconds"] for c in contexts.values()),
+        opd_teacher_queue_seconds=sum(c["queue_seconds"] for k, c in contexts.items() if k != "student_prefill"),
+        opd_teacher_score_seconds=sum(c["score_seconds"] for k, c in contexts.items() if k != "student_prefill"),
+        opd_student_score_seconds=contexts.get("student_prefill", {}).get("score_seconds", 0),
+        opd_student_queue_seconds=contexts.get("student_prefill", {}).get("queue_seconds", 0),
         opd_teacher_wall_seconds=teacher_wall_seconds,
         **pressure_metadata,
     )
@@ -172,6 +196,7 @@ def post_process(args, samples, **kwargs):
                     "teacher_log_probs",
                     "opd_answer_log_probs",
                     "opd_behavior_log_probs",
+                    "opd_student_prefill_log_probs",
                     "opd_unscaled_pressure",
                     "opd_initial_bare_log_probs",
                     "response_token_ids",

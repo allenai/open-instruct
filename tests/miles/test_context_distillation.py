@@ -188,7 +188,11 @@ def test_privileged_context_is_scoring_only_and_truncated_loss_is_retained(monke
 
 
 @pytest.mark.parametrize("calibrate", [False, True])
-def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens(monkeypatch, calibrate):
+@pytest.mark.parametrize("version", ["0", "16"])
+@pytest.mark.parametrize("decode", [[-2.0, -2.0], [-1.5, -3.5]])
+def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens(
+    monkeypatch, calibrate, version, decode
+):
     pytest.importorskip("miles")
     torch = pytest.importorskip("torch")
     hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
@@ -213,10 +217,20 @@ def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens
 
     async def post(url, payload, timeout_secs):
         ids = payload["input_ids"]
-        requests.append(ids)
-        scores = {11: [-0.5, -3.0], 13: [-0.25, -4.0], 2: [-2.0, -2.0]}[ids[1]]
+        requests.append((url, ids))
+        # Frozen bare teacher deliberately differs after the student updates.
+        scores = (
+            [-2.0, -2.0]
+            if url == "http://student:123/generate"
+            else {11: [-0.5, -3.0], 13: [-0.25, -4.0], 2: [-5.0, -5.0]}[ids[1]]
+        )
         entries = [[None if i == 0 else -1.0, t] for i, t in enumerate(ids[:-2])]
-        return {"meta_info": {"input_token_logprobs": entries + [[p, t] for p, t in zip(scores, ids[-2:])]}}
+        return {
+            "meta_info": {
+                "input_token_logprobs": entries + [[p, t] for p, t in zip(scores, ids[-2:])],
+                "weight_version": version if url == "http://student:123/generate" else "0",
+            }
+        }
 
     async def grade(*args, **kwargs):
         return 0.0
@@ -228,20 +242,26 @@ def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens
         metadata={"opd_teacher_prompt": "full", "opd_answer_prompt": "answer"},
         tokens=[1, 2, 20, 21],
         response_length=2,
-        rollout_log_probs=[-2.0, -2.0],
+        rollout_log_probs=list(decode),
         train_metadata={},
-        weight_versions=[SimpleNamespace(to_dicts=lambda: [{"version": "0"}])],
+        weight_versions=[SimpleNamespace(to_dicts=lambda: [{"version": version}])],
         teacher_log_probs=None,
         opd_reverse_kl=None,
         status="truncated",
         loss_mask=[1, 1],
         get_reward_value=lambda args: 0.0,
     )
-    args = SimpleNamespace(hf_checkpoint="/student", save=None, opd_kl_coef=0.5)
+    args = SimpleNamespace(
+        hf_checkpoint="/student", save=None, opd_kl_coef=0.5, sglang_router_ip="student", sglang_router_port=123
+    )
     asyncio.run(hooks.reward(args, sample))
-    assert len(requests) == (3 if calibrate else 2)
-    if calibrate:
-        assert sample.train_metadata["opd_initial_bare_gap_abs_max"] == 0.0
+    assert len(requests) == (4 if calibrate and version == "0" else 3)
+    assert ("http://student:123/generate", [1, 2, 20, 21]) in requests
+    assert sample.rollout_log_probs == decode
+    assert sample.train_metadata["opd_student_prefill_version"] == version
+    assert sample.train_metadata["opd_student_prefill_log_probs"] == [-2.0, -2.0]
+    if calibrate and version == "0":
+        assert sample.train_metadata["opd_initial_matched_prefill_gap_abs_mean"] == 3.0
     assert sample.tokens == [1, 2, 20, 21] and sample.loss_mask == [1, 1]
     assert sample.opd_reverse_kl == [0.0, 1.0]
     assert hooks.post_process(args, [sample]) == ([0.0], [0.0])
@@ -255,3 +275,39 @@ def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens
     )
     assert advantages[0].tolist() == [0.0, -0.5]
     assert not advantages[0].requires_grad
+
+
+@pytest.mark.parametrize("scored_version", [None, "0", "17"])
+def test_cancellation_rejects_missing_or_stale_student_scoring(monkeypatch, scored_version):
+    hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
+    service = dict(
+        objective="cancel_answer_positive", endpoint="http://teacher", max_context_length=100, request_timeout=10
+    )
+    monkeypatch.setenv("OI_MILES_OPD_TEACHER", "test")
+    monkeypatch.setattr(
+        hooks, "resources", lambda *args: (service, SimpleNamespace(encode=lambda *a, **kw: [1]), asyncio.Semaphore(1))
+    )
+
+    async def post(url, payload, **kwargs):
+        return {"meta_info": {"weight_version": scored_version, "input_token_logprobs": [[None, 1], [-1.0, 2]]}}
+
+    monkeypatch.setattr(hooks.on_policy_distillation, "_post_json", post)
+    sample = SimpleNamespace(
+        response_length=1,
+        tokens=[1, 2],
+        metadata={"opd_teacher_prompt": "full", "opd_answer_prompt": "answer"},
+        weight_versions=[SimpleNamespace(to_dicts=lambda: [{"version": "16"}])],
+    )
+    args = SimpleNamespace(hf_checkpoint="/student", sglang_router_ip="student", sglang_router_port=123)
+    with pytest.raises(ValueError, match="does not match rollout"):
+        asyncio.run(hooks.reward(args, sample))
+
+
+def test_identical_prefill_contexts_cancel_without_decode_artifact():
+    cancellation = pytest.importorskip("open_instruct.miles.distillation.cancellation")
+    bare = [-1.0, -2.0, -3.0]
+    decode = [-0.9, -2.1, -2.8]
+    pressure, _ = cancellation.token_pressure(bare, bare, bare)
+    contaminated, _ = cancellation.token_pressure(decode, bare, bare)
+    assert pressure.tolist() == [0.0, 0.0, 0.0]
+    assert contaminated.sum().item() < 0

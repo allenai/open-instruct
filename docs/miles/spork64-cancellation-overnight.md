@@ -15,8 +15,14 @@ MILES/Core trainer and pinned runtime remain in use.
 Keep the previous cancellation objective, LR 1e-6, beta 1.0, no token-pressure
 clipping, gradient norm limit 1.0, BF16, 16K cap, 8 prompts × 2 fresh responses
 per update. Both teachers are scoring contexts of the same frozen model: full
-prepared R1 trace and answer-only. Training still uses generation-time behavior
-log probabilities. The added matched-prefill diagnostics do not alter the loss.
+prepared R1 trace and answer-only. Teaching pressure uses **current-student prefill**
+log probabilities from the student inference fleet, compared with frozen teacher
+prefill scores. Generation-time behavior probabilities are preserved separately
+for importance correction. Scoring requires a single recorded policy version and
+rejects a student response with a missing or different version. Synchronous
+publication holds weights fixed until rollout scoring completes. The fixed-text
+panel follows this matched-prefill objective; decode-based pressure is retained
+only as a counterfactual diagnostic.
 
 ## Pool and screening
 

@@ -144,8 +144,10 @@ async def observe(args, rollout_id, output, tokenizer, descriptor):
                     "kind": "fixed",
                     "rollout_id": rollout_id,
                     "sample_id": record["sample_id"],
-                    **movement(record["student_prefill"], current, record["behavior_pressure"]),
-                    "matched_prefill_pressure": movement(record["student_prefill"], current, record["pressure"]),
+                    **movement(record["student_prefill"], current, record["pressure"]),
+                    "behavior_pressure_counterfactual": movement(
+                        record["student_prefill"], current, record["behavior_pressure"]
+                    ),
                 }
                 summaries.append(summary)
                 stream.write(json.dumps({**summary, "student_prefill": current}, allow_nan=False) + "\n")

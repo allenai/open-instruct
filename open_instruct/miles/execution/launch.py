@@ -97,6 +97,8 @@ def specification(image, spec, *, hostnames=None):
             workload = "python scripts/miles/core_numerical_audit.py /output/submitted-run.json"
         if spec.launch["env"].get("OI_MILES_OPD_DECODE_AUDIT") == "1":
             workload = "python scripts/miles/decode_numerical_audit.py /output/submitted-run.json"
+        if spec.launch["env"].get("OI_MILES_OPD_PROFILE_QUALIFICATION") == "1":
+            workload = "python -m open_instruct.miles.distillation.profile_qualification /output/submitted-run.json"
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
         f"python -c {shlex.quote(setup)}\n"
