@@ -5,6 +5,7 @@ import gzip
 import json
 import math
 import os
+import shutil
 import signal
 import socket
 import statistics
@@ -66,7 +67,7 @@ def workloads(items, tokenizer, saved):
     return cases, selected
 
 
-def command(model, port, role, *, isolated_prefill=False):
+def command(model, port, role, *, isolated_prefill=False, disable_student_cache=False):
     service = dict(
         source=model,
         tensor_parallel_size=1,
@@ -92,6 +93,8 @@ def command(model, port, role, *, isolated_prefill=False):
         cmd[cmd.index("--max-mamba-cache-size") + 1] = "128"
     if isolated_prefill:
         cmd += ["--prefill-max-requests", "1"]
+    if role == "student" and disable_student_cache:
+        cmd += ["--disable-radix-cache"]
     return cmd
 
 
@@ -122,7 +125,13 @@ def server(model, device, role, mode, root, profile):
         else:
             env.pop(kernel_profile.REASON, None)
             env[kernel_profile.DIGEST] = kernel_profile.digest(json.loads(profile.read_text()))
-    cmd = command(model, port, role, isolated_prefill=mode in {"record", "strict"})
+    cmd = command(
+        model,
+        port,
+        role,
+        isolated_prefill=mode in {"record", "strict"},
+        disable_student_cache=mode == "strict" and os.environ.get("OI_MILES_OPD_QUALIFICATION_NO_RADIX") == "1",
+    )
     numerical_audit.append(root / "commands.jsonl", dict(label=label, command=cmd))
     start = time.monotonic()
     print(json.dumps(dict(event="server_start", label=label)), flush=True)
@@ -296,8 +305,10 @@ def measure(endpoint, role, mode, cases, root):
             )
             with gzip.open(root / f"decode-{mode}-{repeat}.json.gz", "wt") as stream:
                 json.dump(outputs, stream, allow_nan=False)
+        after_decode = {}
         for case in eligible:
             values = score(endpoint, [case])[0]
+            after_decode[case["name"]] = values
             numerical_audit.append(
                 root / "comparisons.jsonl",
                 dict(
@@ -308,6 +319,25 @@ def measure(endpoint, role, mode, cases, root):
                     **numerical_audit.compare(records[case["name"]], values),
                 ),
             )
+        with gzip.open(root / f"scores-{mode}-{role}-after-decode.json.gz", "wt") as stream:
+            json.dump(after_decode, stream, allow_nan=False)
+        flush_cache(endpoint)
+        after_flush = {}
+        for case in eligible:
+            values = score(endpoint, [case])[0]
+            after_flush[case["name"]] = values
+            numerical_audit.append(
+                root / "comparisons.jsonl",
+                dict(
+                    kind="after_decode_flush",
+                    mode=mode,
+                    role=role,
+                    case=case["name"],
+                    **numerical_audit.compare(records[case["name"]], values),
+                ),
+            )
+        with gzip.open(root / f"scores-{mode}-{role}-after-flush.json.gz", "wt") as stream:
+            json.dump(after_flush, stream, allow_nan=False)
     return records
 
 
@@ -443,8 +473,11 @@ def main():
     profile = root / "kernel-profile.json"
     # Recording has extra observation work. A fresh unpinned process provides the
     # ordinary-serving baseline; profile collection is timed separately.
-    with server(model, devices[0], "teacher", "record", root, profile) as endpoint:
-        measure(endpoint, "teacher", "record", cases, root)
+    if source := os.environ.get("OI_MILES_OPD_QUALIFICATION_PROFILE_SOURCE"):
+        shutil.copyfile(source, profile)
+    else:
+        with server(model, devices[0], "teacher", "record", root, profile) as endpoint:
+            measure(endpoint, "teacher", "record", cases, root)
     kernel_profile.validate(json.loads(profile.read_text()))
     with server(model, devices[0], "teacher", "baseline", root, profile) as endpoint:
         measure(endpoint, "teacher", "baseline", cases, root)

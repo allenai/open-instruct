@@ -90,6 +90,13 @@ def test_prefill_isolation_preserves_decode_concurrency(role, concurrency):
     assert isolated[isolated.index("--max-running-requests") + 1] == concurrency
 
 
+def test_student_cache_ablation_keeps_decode_graphs_and_concurrency():
+    cmd = qualification.command("/model", 123, "student", isolated_prefill=True, disable_student_cache=True)
+    assert "--disable-radix-cache" in cmd
+    assert "--disable-cuda-graph" not in cmd
+    assert cmd[cmd.index("--max-running-requests") + 1] == "8"
+
+
 def test_summary_excludes_first_request_timings_and_reports_nonexact(tmp_path):
     (tmp_path / "comparisons.jsonl").write_text(json.dumps(dict(mode="strict", mae=0.01)) + "\n")
     values = [
