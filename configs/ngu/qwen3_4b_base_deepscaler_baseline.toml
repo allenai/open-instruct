@@ -1,18 +1,19 @@
 # Baseline (no NGU) arm of configs/ngu/qwen3_4b_base_deepscaler_ngu.toml: Deepscaler with Qwen3-4B-Base,
 # matching the open-instruct OLMo-core baseline ai2-llm/open_instruct_internal/cmoi4l53
 # (qwen3_4b_base_deepscaler_oc_2k_baseline_dapo_n8_k16) except for MILES-native 1/0 rewards
-# (open-instruct uses 10/0) and the default grad clip of 1.0 (cmoi4l53 used 5).
+# (open-instruct uses 10/0) and the default grad clip of 1.0 (cmoi4l53 used 5). Uses refresh publication,
+# the equivalent of cmoi4l53's --inflight_updates.
 # Kept outside configs/miles, which holds only the maintained starters. Prepare data first with
 # scripts/miles/prepare_deepscaler.py, which renders qwen_instruct_user_boxed_math prompts.
 schema_version = 1
-name = "qwen3-4b-base-deepscaler-baseline-r01"
+name = "qwen3-4b-base-deepscaler-baseline-r02"
 
 [model]
 source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Base"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-baseline-r01"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-baseline-r02"
 export_hf = true
 
 [launch]
@@ -101,17 +102,19 @@ wandb_mode = "online"
 wandb_team = "ai2-llm"
 wandb_project = "open_instruct_internal"
 # One group per arm with no random suffix, so the wandb run name is exactly this.
-wandb_group = "qwen3-4b-base-deepscaler_baseline_r01"
+wandb_group = "qwen3-4b-base-deepscaler_baseline_r02"
 
 [core]
 checkpoint_keep_last = 3
-# Matches the NGU arm, which supports barrier publication only.
-publication_mode = "barrier"
+# Mixed-policy refresh keeps in-flight requests across weight updates (open-instruct --inflight_updates).
+publication_mode = "refresh"
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
 
 [miles]
 wandb_random_suffix = false
+# Refresh needs the MILES router to retain policy-span metadata.
+use_miles_router = true
 adam_beta1 = 0.9
 adam_beta2 = 0.999
 rollout_temperature = 1.0
