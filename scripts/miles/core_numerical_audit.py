@@ -100,7 +100,7 @@ def worker(spec, backend):
 
     for name, block in model.blocks.items():
         handles.append(block.register_forward_hook(capture(f"block.{name}")))
-        if hasattr(block, "routed_experts_router"):
+        if getattr(block, "routed_experts_router", None) is not None:
             handles.append(block.routed_experts_router.register_forward_hook(capture(f"routes.{name}", route=True)))
         if hasattr(block.attention, "o_norm"):
             handles.append(block.attention.o_norm.register_forward_pre_hook(capture(f"kda.{name}", before=True)))
@@ -201,7 +201,7 @@ def worker(spec, backend):
                     "comparison": numerical_audit.compare(baseline, record_sg["scores"]),
                 },
             )
-    for label, training in (("matched-repeat", False), ("grad-forward", True)):
+    for label, training in (("matched-repeat", False),):
         values, states, _ = score(label, training=training)
         record(label, values, states, baseline, baseline_states)
     for name, tuner in tuners.items():
@@ -223,6 +223,8 @@ def worker(spec, backend):
     install(baseline_configs)
     values, states, _ = score("restored-repeat")
     record("restored-repeat", values, states, baseline, baseline_states)
+    values, states, _ = score("grad-forward", training=True)
+    record("grad-forward", values, states, baseline, baseline_states)
     for record_sg in sg_records:
         if record_sg["label"] == "decode":
             values, _, _ = score("core-rescore-" + record_sg["mode"], record_sg["tokens"])

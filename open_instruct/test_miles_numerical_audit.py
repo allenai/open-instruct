@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from open_instruct.miles.configuration.run_spec import RunSpec
-from open_instruct.miles.distillation import audit_trace, audit_tuning, numerical_audit
+from open_instruct.miles.distillation import audit_decode, audit_trace, audit_tuning, numerical_audit
 from open_instruct.miles.execution import launch
 
 
@@ -76,8 +76,8 @@ def test_inner_model_trace_survives_outer_forward_bypass(tmp_path, monkeypatch):
     assert (tmp_path / "weights.json").exists()
 
 
-@pytest.mark.parametrize("core", [False, True])
-def test_audit_launch_does_not_train(core):
+@pytest.mark.parametrize("kind", ["serving", "core", "decode"])
+def test_audit_launch_does_not_train(kind):
     spec = RunSpec.from_dict(
         {
             "schema_version": 1,
@@ -88,18 +88,22 @@ def test_audit_launch_does_not_train(core):
             "launch": {
                 "gpus_per_replica": 2,
                 "auto_resume": False,
-                "env": {"OI_MILES_OPD_NUMERICAL_AUDIT": "1", "OI_MILES_OPD_CORE_AUDIT": "1" if core else "0"},
+                "env": {
+                    "OI_MILES_OPD_NUMERICAL_AUDIT": "1",
+                    "OI_MILES_OPD_CORE_AUDIT": "1" if kind == "core" else "0",
+                    "OI_MILES_OPD_DECODE_AUDIT": "1" if kind == "decode" else "0",
+                },
             },
             "trainer": {"gpus": 1, "expert_parallel_size": 1},
             "inference": {"placement_mode": "disaggregated", "gpus": 1},
         }
     )
     task = launch.specification("image", spec)["tasks"][0]
-    expected = (
-        "python scripts/miles/core_numerical_audit.py"
-        if core
-        else "python -m open_instruct.miles.distillation.numerical_audit"
-    )
+    expected = {
+        "serving": "python -m open_instruct.miles.distillation.numerical_audit",
+        "core": "python scripts/miles/core_numerical_audit.py",
+        "decode": "python scripts/miles/decode_numerical_audit.py",
+    }[kind]
     assert expected in task["arguments"][0]
     assert "python -m open_instruct.miles train" not in task["arguments"][0]
     assert task["resources"]["gpuCount"] == 2
@@ -114,6 +118,33 @@ def test_kernel_alternatives_separate_tiles_from_launch_choices():
         ("launch", launch_change),
     ]
     assert audit_tuning.alternatives([base], base) == []
+
+
+def test_decode_trace_captures_identical_prediction_position(tmp_path):
+    class Backbone(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.norm = torch.nn.Identity()
+
+        def forward(self, ids, positions):
+            return self.norm(ids.float()[:, None].expand(-1, 4))
+
+    model = Backbone()
+    model.register_forward_hook(audit_decode.factory({"root": str(tmp_path)}))
+    head = audit_decode.head_factory({"root": str(tmp_path)})
+    model(torch.tensor([3, 4]), torch.tensor([0, 1]))
+    (tmp_path / "control.json").write_text(json.dumps({"label": "decode", "positions": [1]}))
+    value = model(torch.tensor([3, 4]), torch.tensor([0, 1]))
+    output = SimpleNamespace(next_token_logits=value[-1:])
+    assert head(None, (), output) is output
+    saved = torch.load(tmp_path / "decode-1.pt", weights_only=True)
+    assert saved["input_token"] == 4
+    assert saved["position"] == 1
+    assert torch.equal(saved["states"]["norm"], value[-1])
+    assert torch.equal(saved["logits"], value[-1])
+    model(torch.tensor([3]), torch.tensor([0]))
+    head(None, (), output)
+    assert not (tmp_path / "decode-0.pt").exists()
 
 
 def test_tuning_replay_checks_real_choices_and_scoring_use(tmp_path, monkeypatch):
