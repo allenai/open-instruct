@@ -329,7 +329,13 @@ def main():
                 sock.bind(("0.0.0.0", 0))
                 ports.append(sock.getsockname()[1])
         endpoints = [f"http://127.0.0.1:{port}" for port in ports]
-        service = {"source": model, "tensor_parallel_size": 1, "max_context_length": 32768, "concurrency": 8}
+        service = {
+            "source": model,
+            "tensor_parallel_size": 1,
+            "max_context_length": 32768,
+            "concurrency": 8,
+            "isolate_prefill": document["teacher"].get("isolate_prefill", False),
+        }
         for device, port in zip(visible, ports, strict=True):
             cmd = teacher.command(service, port)
             cmd.remove("--disable-cuda-graph")

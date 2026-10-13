@@ -25,16 +25,19 @@ def parse(document, base):
         objective="full",
         pressure_clip=None,
         calibrate_initial=False,
+        isolate_prefill=False,
     )
     validation.mapping(teacher, "teacher")
     validation.fields(teacher, "teacher", set(defaults) | {"source"})
     teacher = defaults | teacher
     source = validation.text(teacher.get("source"), "teacher.source")
     teacher["source"] = str((base / Path(source).expanduser()).resolve())
-    for name in set(defaults) - {"kl_coef", "objective", "pressure_clip", "calibrate_initial"}:
+    for name in set(defaults) - {"kl_coef", "objective", "pressure_clip", "calibrate_initial", "isolate_prefill"}:
         validation.integer(teacher[name], f"teacher.{name}")
     if not isinstance(teacher["calibrate_initial"], bool):
         raise InputError("teacher.calibrate_initial must be boolean")
+    if not isinstance(teacher["isolate_prefill"], bool):
+        raise InputError("teacher.isolate_prefill must be boolean")
     validation.number(teacher["kl_coef"], "teacher.kl_coef", exclusive_min=True)
     if teacher["objective"] not in {"full", "cancel_answer_positive"}:
         raise InputError("teacher.objective must be full or cancel_answer_positive")
@@ -67,6 +70,8 @@ def compile_options(spec, miles, core):
         "custom_reward_post_process_path": HOOK + ".post_process",
         "eval_function_path": HOOK + ".evaluate",
     }
+    if spec.teacher["isolate_prefill"]:
+        required["sglang_prefill_max_requests"] = 1
     for key, value in required.items():
         if (
             key in miles

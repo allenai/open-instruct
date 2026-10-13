@@ -57,6 +57,32 @@ def test_teacher_allocation_and_configuration_round_trip():
     )
 
 
+def test_isolated_prefill_is_opt_in_and_shared_by_teacher_and_student():
+    teacher = pytest.importorskip("open_instruct.miles.distillation.teacher")
+    document = recipe()
+    ordinary = RunSpec.from_dict(document)
+    assert "sglang_prefill_max_requests" not in ordinary.compile().miles
+    assert "--prefill-max-requests" not in teacher.command(ordinary.teacher, 123)
+    document["teacher"]["isolate_prefill"] = True
+    spec = RunSpec.from_dict(document)
+    assert spec.compile().miles["sglang_prefill_max_requests"] == 1
+    command = teacher.command(spec.teacher, 123)
+    assert command[command.index("--prefill-max-requests") + 1] == "1"
+    assert command[command.index("--max-running-requests") + 1] == "4"
+    assert RunSpec.from_dict(spec.to_dict()).teacher["isolate_prefill"]
+    document["miles"] = {"sglang_prefill_max_requests": 2}
+    with pytest.raises(ValueError, match="owns miles.sglang_prefill_max_requests"):
+        RunSpec.from_dict(document).compile()
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_isolated_prefill_rejects_non_boolean(value):
+    document = recipe()
+    document["teacher"]["isolate_prefill"] = value
+    with pytest.raises(ValueError, match="isolate_prefill must be boolean"):
+        RunSpec.from_dict(document)
+
+
 @pytest.mark.parametrize(
     "change",
     [

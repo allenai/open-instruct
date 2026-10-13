@@ -13,7 +13,7 @@ from open_instruct.miles.distillation import alignment
 
 
 def command(service, port):
-    return [
+    cmd = [
         sys.executable,
         "-m",
         "sglang.launch_server",
@@ -47,6 +47,9 @@ def command(service, port):
         "--max-mamba-cache-size",
         "16",
     ]
+    if service.get("isolate_prefill", False):
+        cmd += ["--prefill-max-requests", "1"]
+    return cmd
 
 
 def probe(path):

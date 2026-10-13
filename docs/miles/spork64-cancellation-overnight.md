@@ -18,7 +18,9 @@ per update. Both teachers are scoring contexts of the same frozen model: full
 prepared R1 trace and answer-only. Teaching pressure uses **current-student prefill**
 log probabilities from the student inference fleet, compared with frozen teacher
 prefill scores. Generation-time behavior probabilities are preserved separately
-for importance correction. Scoring requires a single recorded policy version and
+for importance correction; this synchronous qualification recipe still has TIS
+disabled. Preserving the behavior scores does not itself enable that correction.
+Scoring requires a single recorded policy version and
 rejects a student response with a missing or different version. Synchronous
 publication holds weights fixed until rollout scoring completes. The fixed-text
 panel follows this matched-prefill objective; decode-based pressure is retained
@@ -77,8 +79,9 @@ question, supplies two measurements at the same checkpoints:
    choice of traces.
 2. **Fixed baseline text:** score the exact saved prefixes/tokens under the updated
    student. Measure log-probability changes separately on originally encouraged
-   and discouraged tokens and their pressure-weighted sum. Report both the actual
-   behavior-score-based pressure and a matched-prefill sensitivity calculation.
+   and discouraged tokens and their pressure-weighted sum. Report matched-prefill
+   pressure as the training objective and behavior-score-based pressure as a
+   counterfactual diagnostic.
 
 An unchanged aggregate teacher gap is not proof of no learning: new generations
 visit different states, and the objective deliberately removes some full-teacher
@@ -86,6 +89,14 @@ encouragement. The fixed-text panel is the more direct test of whether an update
 followed the signal. Neither metric alone establishes mathematical improvement.
 
 ## Numerical checks and observation
+
+For precision-sensitive scoring, `teacher.isolate_prefill=true` configures both
+the frozen teacher and student engines with `--prefill-max-requests 1`. This
+limits prefill batching, not decode concurrency. The same setting is applied to
+the screening workers. It is an explicit experiment option, not a GRPO default;
+qualify its performance together with the shared FLA kernel profile. Without
+isolation, a shared profile fixes autotuner choices but does not fix the way
+different requests share the prefill token budget.
 
 Before screening, generate one 1,024-token probe, score it on the same server,
 then on an identically configured second server. Both servers load the identical
