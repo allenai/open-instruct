@@ -27,6 +27,7 @@ COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles
 COPY README.md /opt/core-rl/README.md
 ENV PYTHONPATH=/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles
+ENV OLMO_SGLANG_CORE_COMPAT=rounding OLMO_SGLANG_REQUIRE_CORE_ROUNDING=1
 WORKDIR /opt/core-rl
 RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/sources/olmo-core/src/olmo_core /opt/core-rl/sources/miles/miles
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"

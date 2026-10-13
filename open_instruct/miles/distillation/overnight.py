@@ -21,6 +21,7 @@ from urllib import request
 
 from transformers import AutoTokenizer
 
+from open_instruct.miles.configuration import serving_arithmetic
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.distillation import panel, qualification, teacher
 from open_instruct.miles.execution import launch
@@ -280,6 +281,7 @@ def archive(root, output):
 
 
 def main():
+    serving_arithmetic.apply(os.environ)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path)
     args = parser.parse_args()

@@ -610,3 +610,38 @@ def test_image_wrapper_dispatches_to_package_without_a_debug_script(tmp_path, fa
             *overrides,
         ]
     assert not (launch.ROOT / "should-not-exist").exists()
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("OLMO_SGLANG_CORE_COMPAT", "off"),
+        ("OLMO_SGLANG_CORE_COMPAT", "auto"),
+        ("OLMO_SGLANG_REQUIRE_CORE_ROUNDING", "0"),
+    ],
+)
+def test_arithmetic_override_requires_diagnostic_reason(tmp_path, key, value):
+    with pytest.raises(ValueError, match="MILES requires"):
+        spec(tmp_path, launch={"env": {key: value}})
+
+
+def test_required_rounding_is_in_resolved_run_and_server_environment(tmp_path):
+    run = spec(tmp_path)
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    env = {entry["name"]: entry.get("value") for entry in task["envVars"]}
+    assert run.launch["env"]["OLMO_SGLANG_CORE_COMPAT"] == env["OLMO_SGLANG_CORE_COMPAT"] == "rounding"
+    assert env["OLMO_SGLANG_REQUIRE_CORE_ROUNDING"] == "1"
+    reason = "compare off and rounding without training"
+    run = spec(
+        tmp_path, launch={"env": {"OLMO_SGLANG_CORE_COMPAT": "off", "OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON": reason}}
+    )
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    env = {entry["name"]: entry.get("value") for entry in task["envVars"]}
+    assert env["OLMO_SGLANG_CORE_COMPAT"] == "off"
+    assert env["OLMO_SGLANG_REQUIRE_CORE_ROUNDING"] == "1"
+    assert payload(task["arguments"][0])["launch"]["env"]["OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON"] == reason
+
+
+def test_arithmetic_settings_cannot_be_hidden_in_secrets(tmp_path):
+    with pytest.raises(ValueError, match="must be visible"):
+        spec(tmp_path, launch={"secrets": {"OLMO_SGLANG_CORE_COMPAT": "secret-mode"}})

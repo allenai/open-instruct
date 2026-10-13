@@ -320,3 +320,20 @@ Inspect the latest attempt for **each task and replica rank**, not the first job
 experiment. Scheduler events explain pending jobs. Small reports/logs are copied
 to Beaker results; checkpoints and rollout tensors remain on WEKA. See
 [operations](operations.md) for completion, recovery and artifact interpretation.
+
+
+## Serving arithmetic requirement
+
+MILES requires `OLMO_SGLANG_CORE_COMPAT=rounding` and
+`OLMO_SGLANG_REQUIRE_CORE_ROUNDING=1`. These defaults are recorded in the
+resolved run and inherited by teacher and student servers. The runtime image
+also supplies them for direct server launches. The serving adapter verifies the
+selected mode and supported model/runtime before constructing model layers;
+unsupported configurations fail instead of falling back to ordinary arithmetic.
+This does not guarantee identical scores between all serving and training paths.
+
+For a deliberate numerical diagnostic, put a nonempty
+`OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON` in `launch.env` alongside the explicit
+mode being tested. Keep the requirement flag at `1`: the adapter records the
+exception as a warning, including the reason and actual selected mode. Ordinary
+runtime checks still apply. These settings cannot be hidden in `launch.secrets`.

@@ -8,6 +8,7 @@ from urllib import request
 
 from transformers import AutoTokenizer
 
+from open_instruct.miles.configuration import serving_arithmetic
 from open_instruct.miles.distillation import alignment
 
 
@@ -75,6 +76,7 @@ def main():
         probe(path)
         return
     service = json.loads(path.read_text())
+    serving_arithmetic.apply(os.environ)
     os.execv(sys.executable, command(service, int(sys.argv[2])))
 
 

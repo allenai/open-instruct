@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from open_instruct import logger_utils
+from open_instruct.miles.configuration import serving_arithmetic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import artifacts
@@ -242,6 +243,7 @@ def parse_runtime(config):
 
 
 def train_config(config, *, export_hf=None, background_evaluation=None):
+    serving_arithmetic.apply(os.environ)
     args = parse_runtime(config)
     args.background_evaluation = background_evaluation
     args.core_evaluation_snapshot = (

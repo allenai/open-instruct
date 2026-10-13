@@ -12,7 +12,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, constraints, options, topology, validation
+from open_instruct.miles.configuration import (
+    async_capacity,
+    constraints,
+    options,
+    serving_arithmetic,
+    topology,
+    validation,
+)
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.distillation import config as distillation
@@ -389,6 +396,9 @@ class RunSpec:
             validation.mapping(launch[key], f"launch.{key}")
             if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in launch[key]):
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
+        if serving_arithmetic.KEYS & set(launch["secrets"]):
+            raise InputError("Serving arithmetic settings and diagnostic reasons must be visible in launch.env")
+        serving_arithmetic.apply(launch["env"])
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         if launch["cluster"] == "ai2/jupiter" and "LD_LIBRARY_PATH" not in launch["secrets"]:

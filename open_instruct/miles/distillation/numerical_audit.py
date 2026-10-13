@@ -202,7 +202,12 @@ def main():
                             ),
                         ]
                     )
-                env = {**os.environ, "CUDA_VISIBLE_DEVICES": device}
+                env = {
+                    **os.environ,
+                    "CUDA_VISIBLE_DEVICES": device,
+                    "OLMO_SGLANG_REQUIRE_CORE_ROUNDING": "1",
+                    "OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON": f"numerical audit mode {mode}; no training",
+                }
                 env["OLMO_SGLANG_CORE_COMPAT"] = {"rounding": "rounding", "off": "0", "core": "1"}[mode.split("-")[0]]
                 handle = (root / f"{mode}-{index}.log").open("w")
                 handles.append(handle)
@@ -213,6 +218,7 @@ def main():
                         "server": index,
                         "command": cmd,
                         "compat": env.get("OLMO_SGLANG_CORE_COMPAT", "auto"),
+                        "diagnostic_override_reason": env["OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON"],
                         "device": device,
                     },
                 )
