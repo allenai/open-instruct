@@ -145,6 +145,18 @@ def test_decode_trace_captures_identical_prediction_position(tmp_path):
     model(torch.tensor([3]), torch.tensor([0]))
     head(None, (), output)
     assert not (tmp_path / "decode-0.pt").exists()
+    (tmp_path / "control.json").write_text(
+        json.dumps({"label": "forced", "positions": [1], "prefix_length": 2, "forced_tokens": [2]})
+    )
+    value = model(torch.tensor([3, 4]), torch.tensor([0, 1]))
+    raw = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    original = raw.clone()
+    head(None, (), SimpleNamespace(next_token_logits=raw))
+    stored = torch.load(tmp_path / "forced-1.pt", weights_only=True)
+    assert torch.equal(stored["logits"], original[0])
+    assert raw.argmax(-1).item() == 2
+    record = json.loads((tmp_path / "forced-logprobs.jsonl").read_text())
+    assert record["logprob"] == pytest.approx(original.log_softmax(-1)[0, 2].item())
 
 
 def test_tuning_replay_checks_real_choices_and_scoring_use(tmp_path, monkeypatch):

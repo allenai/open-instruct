@@ -7,6 +7,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 from urllib import request
@@ -14,7 +15,7 @@ from urllib import request
 import torch
 from olmo_sglang import kernel_profile
 
-from open_instruct.miles.distillation import numerical_audit, panel, teacher
+from open_instruct.miles.distillation import alignment, numerical_audit, panel, teacher
 
 
 def worker(spec, mode):
@@ -50,6 +51,9 @@ def worker(spec, mode):
         port,
     )
     cmd.remove("--disable-cuda-graph")
+    force_source = spec["launch"]["env"].get("OI_MILES_OPD_DECODE_FORCE_SOURCE")
+    if force_source:
+        cmd.append("--disable-overlap-schedule")
     cmd.extend(
         [
             "--cuda-graph-backend-decode",
@@ -112,7 +116,15 @@ def worker(spec, mode):
         offsets = [0, 1, 2, 63, 64, 127, 128, 255, 511, 1023]
         positions = [len(prefix) + i - 1 for i in offsets]
         control = root / "control.json"
-        control.write_text(json.dumps({"label": "decode", "positions": positions}))
+        settings = {"label": "decode", "positions": positions}
+        forced = None
+        if force_source:
+            prior = json.loads((Path(force_source) / mode / "generation.json").read_text())
+            forced = [v[1] for v in prior["meta_info"]["output_token_logprobs"]]
+            if len(forced) != 1024:
+                raise ValueError("Fixed-token trace expects 1024 saved continuation tokens")
+            settings.update(forced_tokens=forced, prefix_length=len(prefix))
+        control.write_text(json.dumps(settings))
         result = panel.post(
             url + "/generate",
             {
@@ -125,12 +137,15 @@ def worker(spec, mode):
                     "max_new_tokens": 1024,
                     "sampling_seed": 130064,
                     "skip_special_tokens": False,
+                    "ignore_eos": bool(forced),
                 },
             },
         )
         (root / "generation.json").write_text(json.dumps(result))
         entries = result["meta_info"]["output_token_logprobs"]
         tokens = [v[1] for v in entries]
+        if forced is not None and tokens != forced:
+            raise ValueError("Teacher-forced decode did not reproduce the saved token sequence")
         for offset, position in zip(offsets, positions, strict=True):
             if offset >= len(tokens):
                 continue
@@ -164,6 +179,7 @@ def worker(spec, mode):
                 "position": position,
                 "token": token,
                 "decode_api_logprob": entries[offset][0],
+                "teacher_forced": forced is not None,
                 "decode_logits_logprob": a[token].item(),
                 "prefill_logits_logprob": b[token].item(),
                 "kl_decode_to_prefill": (a.exp() * (a - b)).sum().item(),
@@ -173,6 +189,37 @@ def worker(spec, mode):
             numerical_audit.append(root / "comparisons.jsonl", summary)
             print(json.dumps({k: v for k, v in summary.items() if k != "layers"}), flush=True)
         control.unlink()
+        if forced is not None:
+            observed = [json.loads(line) for line in (root / "forced-logprobs.jsonl").read_text().splitlines()]
+            if [x["offset"] for x in observed] != list(range(len(tokens))):
+                raise ValueError("Missing or duplicate forced scoring positions")
+            ids = prefix + tokens
+            response = panel.post(
+                url + "/generate",
+                {
+                    "input_ids": ids,
+                    "return_logprob": True,
+                    "logprob_start_len": 0,
+                    "sampling_params": {"temperature": 0, "max_new_tokens": 0},
+                },
+            )
+            prefill_scores = alignment.extract_scores(response, ids, len(tokens))
+            decode_scores = [x["logprob"] for x in observed]
+            comparison = numerical_audit.compare(decode_scores, prefill_scores)
+            (root / "sequence-comparison.json").write_text(
+                json.dumps(
+                    {
+                        "tokens": tokens,
+                        "prefix": prefix,
+                        "decode_raw_logprobs": decode_scores,
+                        "prefill_logprobs": prefill_scores,
+                        "comparison": comparison,
+                        "teacher_forced": True,
+                        "source": force_source,
+                    }
+                )
+            )
+            print(json.dumps({"mode": mode, "fixed-sequence-comparison": comparison}), flush=True)
     finally:
         if server.poll() is None:
             os.killpg(server.pid, signal.SIGTERM)
@@ -193,6 +240,21 @@ def main():
     if args.mode:
         worker(spec, args.mode)
         return
+    if spec["launch"]["env"].get("OI_MILES_OPD_DECODE_QK_PROBE") == "1":
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "/opt/core-rl/serving-tests/test_kda_backend.py",
+                "-k",
+                "packed_kda_decode",
+                "-p",
+                "no:cacheprovider",
+            ],
+            check=True,
+        )
     root = Path(spec["output"]["root"])
     root.mkdir(parents=True, exist_ok=False)
     devices = os.environ.get("CUDA_VISIBLE_DEVICES", "0,1").split(",")
@@ -208,6 +270,14 @@ def main():
     codes = [p.wait() for p in processes]
     if any(codes):
         raise RuntimeError(f"Decode trace workers failed: {codes}")
+    with tarfile.open("/output/selected-decode-traces.tar.gz", "w:gz") as archive:
+        roots = [("current", root)]
+        source = spec["launch"]["env"].get("OI_MILES_OPD_DECODE_FORCE_SOURCE")
+        if source:
+            roots.append(("original", Path(source)))
+        for label, folder in roots:
+            for path in folder.glob("*/*.pt"):
+                archive.add(path, arcname=str(Path(label) / path.relative_to(folder)))
 
 
 if __name__ == "__main__":

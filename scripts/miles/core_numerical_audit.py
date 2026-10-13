@@ -225,6 +225,17 @@ def worker(spec, backend):
     record("restored-repeat", values, states, baseline, baseline_states)
     values, states, _ = score("grad-forward", training=True)
     record("grad-forward", values, states, baseline, baseline_states)
+    training_scores, training_states = values, states
+    # Match MILES prepare_model_config; the unmodified Core default above is
+    # deliberately retained as a numerical-sensitivity control.
+    for block in model.blocks.values():
+        experts = getattr(block, "routed_experts", None)
+        if experts is not None:
+            experts.match_eager_rounding = True
+            experts.row_specialization = "dynamic"
+    for label, training in (("miles-eval-rounded", False), ("miles-train-rounded", True)):
+        values, states, _ = score(label, training=training)
+        record(label, values, states, training_scores, training_states)
     for record_sg in sg_records:
         if record_sg["label"] == "decode":
             values, _, _ = score("core-rescore-" + record_sg["mode"], record_sg["tokens"])

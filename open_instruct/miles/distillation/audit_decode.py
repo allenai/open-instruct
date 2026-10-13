@@ -28,14 +28,16 @@ def factory(config):
         settings = json.loads(control.read_text())
         positions = args[1]
         position = int(positions[-1])
-        if position in settings["positions"]:
-            state.update(
-                position=position,
-                label=settings["label"],
-                rows=positions.numel(),
-                input_token=int(args[0][-1]),
-                states={},
-            )
+        state.update(
+            position=position,
+            label=settings["label"],
+            rows=positions.numel(),
+            input_token=int(args[0][-1]),
+            states={},
+            capture=position in settings["positions"],
+            forced_tokens=settings.get("forced_tokens"),
+            prefix_length=settings.get("prefix_length"),
+        )
 
     def after(model, args, output):
         nonlocal installed
@@ -49,7 +51,7 @@ def factory(config):
                 continue
 
             def capture(module, args, output, name=name):
-                if state:
+                if state and state["capture"]:
                     value = output[0] if isinstance(output, tuple) else output
                     state["states"][name] = last_row(value, state["rows"])
 
@@ -57,7 +59,7 @@ def factory(config):
             if name.endswith("o_norm"):
 
                 def capture_input(module, args, name=name):
-                    if state:
+                    if state and state["capture"]:
                         state["states"][name + ".input"] = last_row(args[0], state["rows"])
 
                 module.register_forward_pre_hook(capture_input)
@@ -75,8 +77,18 @@ def head_factory(config):
         if state:
             if output.next_token_logits is None or output.next_token_logits.shape[0] != 1:
                 raise ValueError("Decode audit requires one request and next-token logits")
-            state["logits"] = output.next_token_logits[0].detach().cpu().clone()
-            torch.save(state, root / f"{state['label']}-{state['position']}.pt")
+            if state["capture"]:
+                state["logits"] = output.next_token_logits[0].detach().cpu().clone()
+                torch.save(state, root / f"{state['label']}-{state['position']}.pt")
+            if state["forced_tokens"] is not None:
+                offset = state["position"] - state["prefix_length"] + 1
+                token = state["forced_tokens"][offset]
+                logprob = output.next_token_logits[0].float().log_softmax(-1)[token].item()
+                with (root / "forced-logprobs.jsonl").open("a") as stream:
+                    stream.write(json.dumps({"offset": offset, "token": token, "logprob": logprob}) + "\n")
+                # Diagnostic teacher forcing preserves the raw logits above.
+                output.next_token_logits.fill_(-float("inf"))
+                output.next_token_logits[0, token] = 0
             state.clear()
         return output
 
