@@ -1,14 +1,19 @@
 # Core-compatible serving modes
 
-Fused rounding is the default for the hybrid MoE checkpoint family when
-using an image built from the current runtime lock. The adapter selects it from
-the checkpoint configuration and resolved serving settings; no environment flag
-is required. Other checkpoint geometries and serving setups retain ordinary
-SGLang execution. The slow full reference remains opt-in.
+MILES launches explicitly require `OLMO_SGLANG_CORE_COMPAT=rounding` and
+`OLMO_SGLANG_REQUIRE_CORE_ROUNDING=1`. Configuration supplies these defaults and
+rejects an arithmetic override without a nonempty diagnostic reason. This makes
+unexpected fallback a startup error rather than a silent change in arithmetic.
+The slow full reference remains opt-in.
+
+Outside that MILES launch contract, the serving adapter also supports automatic
+selection from checkpoint geometry and resolved serving settings. The table
+below describes the adapter modes; it does not weaken the MILES requirement.
 
 ## Choose a mode
 
-Set overrides in the run's `[launch.env]` table. Unset means `auto`.
+Set overrides in the run's `[launch.env]` table. An unset adapter environment
+means `auto`; MILES fills it with `rounding` before starting workers.
 
 | `OLMO_SGLANG_CORE_COMPAT` | Behavior | When to use |
 | --- | --- | --- |
@@ -45,20 +50,20 @@ sglang_cuda_graph_backend_decode = "full"
 sglang_cuda_graph_backend_prefill = "disabled"
 ```
 
-For an explicit opt-out, add:
+For a diagnostic opt-out, add:
 
 ```toml
 [launch.env]
 OLMO_SGLANG_CORE_COMPAT = "0"
+OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON = "Compare arithmetic on fixed tokens"
 ```
 
 ## Optimized serving versus a strict parity check
 
-**Use automatic fused rounding for normal RL rollouts on the hybrid MoE
+**Use required fused rounding for normal MILES RL rollouts on the hybrid MoE
 profile.** It restores the intended rounding and normalization while retaining
 fast kernels and decode graphs. Read the model's startup log to confirm that
-`auto` resolved to `rounding`; an unset flag alone does not establish which path
-ran. Keep Core as the training/scoring policy and monitor probability differences
+the resolved mode is `rounding`. Keep Core as the training/scoring policy and monitor probability differences
 on the actual rollout tokens.
 
 A strict parity investigation has a different execution contract:
