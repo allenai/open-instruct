@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sources": {"miles":{"private":true,"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"eb57ffc7acebb01346cd2497c26da9fc1e3dc8c3"},"olmo-core":{"repository":"https://github.com/allenai/Olmo-core.git","revision":"7e97bc43ff25d080ae4fd0eab1050a79caf80e55"},"olmo-sglang":{"private":true,"repository":"https://github.com/allenai/olmo-sglang.git","revision":"92b35cdf2771353a9e2c527a5b96b29cbb3d38c8"}},
+  "sources": {"miles":{"private":true,"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"b7c451880b2d62c966e8b8f1724f34247e1fabbe"},"olmo-core":{"repository":"https://github.com/allenai/Olmo-core.git","revision":"7e97bc43ff25d080ae4fd0eab1050a79caf80e55"},"olmo-sglang":{"private":true,"repository":"https://github.com/allenai/olmo-sglang.git","revision":"92b35cdf2771353a9e2c527a5b96b29cbb3d38c8"}},
   "options": [
   {"dest":"config","type":"str"},
   {"dest":"optimizer","type":"str"},
@@ -104,6 +104,7 @@
   {"dest":"over_sampling_batch_size","type":"int"},
   {"dest":"dynamic_sampling_filter_path","type":"str"},
   {"dest":"ngu_requeue_probability","type":"float"},
+  {"dest":"ngu_max_retries","type":"int"},
   {"dest":"ngu_solved_reward","type":"float"},
   {"choices":["group","sample"],"dest":"rollout_submission_granularity","type":"str"},
   {"const":true,"default":false,"dest":"partial_rollout","kind":"switch","nargs":0},
