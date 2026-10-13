@@ -8,6 +8,11 @@ on:
       - 'tests/miles/**'
       - 'tests/miles_eval/**'
       - 'scripts/miles/**'
+      - 'scripts/miles_upstream/**'
+      - 'scripts/train/build_image_and_launch.sh'
+      - 'tests/miles_upstream/**'
+      - 'runtime/miles-upstream/**'
+      - 'configs/miles-upstream/**'
       - 'runtime/miles/**'
       - 'configs/miles/**'
       - 'docs/miles/**'
@@ -29,13 +34,13 @@ jobs:
       - run: uv sync --frozen
       - name: Check integration, scripts and runtime test style
         run: |
-          uv run --frozen ruff check open_instruct/miles scripts/miles tests/miles tests/miles_eval
-          uv run --frozen ruff format --check open_instruct/miles scripts/miles tests/miles tests/miles_eval
+          uv run --frozen ruff check open_instruct/miles scripts/miles scripts/miles_upstream tests/miles tests/miles_eval tests/miles_upstream
+          uv run --frozen ruff format --check open_instruct/miles scripts/miles scripts/miles_upstream tests/miles tests/miles_eval tests/miles_upstream
       - name: Check CPU contracts and generated references
         env:
           OMP_NUM_THREADS: '1'
         run: |
-          uv run --frozen pytest open_instruct/test_miles*.py
+          uv run --frozen pytest open_instruct/test_miles*.py tests/miles_upstream
           uv run --frozen python -m scripts.miles.generate_docs --check
       - name: Check application integration types
         run: uv run --frozen ty check open_instruct/miles --config 'src.exclude = []'

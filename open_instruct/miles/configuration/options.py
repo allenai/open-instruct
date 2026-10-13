@@ -3,17 +3,34 @@ This lets planning validate option names, types and command-line encoding withou
 installing the GPU stack. Regenerate the snapshot with scripts/miles/snapshot_options.py
 inside the pinned runtime; parser support alone does not establish that a selected
 backend implements an option.
+
+The default schema remains the Core runtime snapshot. Callers targeting an
+upstream image can pass schema_path to validate against that image's backend.
 """
 
 import argparse
 import difflib
 import json
 import math
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
+
+
+def _choice_token(action, choice):
+    """Record the CLI spelling of enum choices, not their Python representation."""
+    if not isinstance(choice, Enum):
+        return choice
+    for candidate in (choice.name, str(choice.value), str(choice)):
+        try:
+            if action.type(candidate) == choice:
+                return candidate
+        except (ValueError, KeyError, TypeError, argparse.ArgumentTypeError):
+            continue
+    raise ValueError(f"Cannot encode enum choice {choice!r} for {action.dest}")
 
 
 def describe_parser(parser):
@@ -43,7 +60,7 @@ def describe_parser(parser):
             "type": getattr(action.type, "__name__", None),
         }
         if action.choices is not None:
-            record["choices"] = sorted(action.choices, key=str)
+            record["choices"] = sorted((_choice_token(action, choice) for choice in action.choices), key=str)
         if kind in ("boolean", "switch"):
             record.update(default=action.default, const=action.const)
         if kind == "alias_const":
@@ -78,9 +95,9 @@ def load_schema(path=None):
     return schema
 
 
-@lru_cache(maxsize=1)
-def option_index():
-    records = load_schema()["options"]
+@lru_cache(maxsize=16)
+def option_index(schema_path=None):
+    records = load_schema(schema_path)["options"]
     index = {}
     for record in records:
         canonical_flag = "--" + record["dest"].replace("_", "-")
@@ -92,8 +109,8 @@ def option_index():
     return index
 
 
-def resolve_option(name, value):
-    index = option_index()
+def resolve_option(name, value, *, schema_path=None):
+    index = option_index(schema_path)
     if not isinstance(name, str):
         raise InputError("MILES option names must be strings; use underscores, for example global_batch_size.")
     if name not in index:
@@ -113,12 +130,12 @@ def resolve_option(name, value):
     return record, value
 
 
-def normalize_options(options):
+def normalize_options(options, *, schema_path=None):
     validation.mapping(options, "[miles]")
     result = {}
     seen = set()
     for name, value in options.items():
-        record, value = resolve_option(name, value)
+        record, value = resolve_option(name, value, schema_path=schema_path)
         dest = record["dest"]
         if dest in seen:
             raise InputError(f"Multiple spellings supplied for miles.{dest}; use one option name")
@@ -144,10 +161,10 @@ def _scalar(record, value):
     return str(value)
 
 
-def encode_options(options):
+def encode_options(options, *, schema_path=None):
     result = []
-    for name, value in normalize_options(options).items():
-        record = option_index()[name]
+    for name, value in normalize_options(options, schema_path=schema_path).items():
+        record = option_index(schema_path)[name]
         flag = record["flags"][0]
         kind = record["kind"]
         if kind == "unsupported":

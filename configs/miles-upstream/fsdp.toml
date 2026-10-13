@@ -1,0 +1,63 @@
+# Prepared model/data paths must be replaced before launching.
+schema_version = 1
+name = "upstream-fsdp-smoke"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/models/Qwen3-0.6B"
+format = "hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/runs/upstream-fsdp-smoke"
+
+[trainer]
+backend = "fsdp"
+gpus = 1
+trainer_num_nodes = 1
+activation_recompute = true
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_gpus_per_node = 2
+rollout_tensor_parallel_size = 1
+rollout_batch_size = 4
+samples_per_prompt = 2
+global_batch_size = 8
+max_response_length = 256
+sglang_mem_fraction_static = 0.4
+
+[data]
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/data/math.jsonl"
+input_key = "prompt"
+label_key = "label"
+apply_chat_template = true
+
+[training]
+num_rollouts = 4
+save_interval = 2
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+kl_loss_coef = 0.0
+
+[miles]
+rm_type = "deepscaler"
+advantage_estimator = "grpo"
+rollout_temperature = 1.0
+seed = 17
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = 0
+timeout = "30m"
+auto_resume = false
+gpus_per_replica = 2
+shared_memory = "32 GiB"
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"

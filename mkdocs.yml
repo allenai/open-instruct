@@ -103,6 +103,7 @@ nav:
         - Development defaults: miles/development-defaults.md
         - Workflow: miles/workflow.md
         - Launching: miles/launching.md
+        - Upstream MILES: miles/upstream.md
       - Models and training:
         - Models and checkpoints: miles/models-and-checkpoints.md
         - Hybrid MoE support: miles/moe-model-support.md

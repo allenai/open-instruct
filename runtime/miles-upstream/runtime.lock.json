@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "qualification": "candidate: GPU lifecycle validation pending",
+  "platform": "linux/amd64",
+  "image_inputs": "99f54101234c8603fdeaba0106eb0e08f89c462a0578d75d241eea722402ecec",
+  "base_image": "radixark/miles@sha256:eda6e69bd323107809d50052a5bba6fe92494298f603ba9f58846e1faca7168e",
+  "miles": {
+    "repository": "https://github.com/radixark/miles.git",
+    "revision": "bef2b237c42f1d6aef30b11df5d332f5ad228338"
+  }
+}
