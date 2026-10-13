@@ -170,6 +170,15 @@ def score(endpoint, cases):
     ]
 
 
+def flush_cache(endpoint):
+    """Require successful cache eviction before measuring an uncached request."""
+    req = request.Request(endpoint + "/flush_cache?timeout=30", data=b"", method="POST")
+    with request.urlopen(req, timeout=60) as response:
+        message = response.read().decode()
+    if not message.startswith("Cache flushed."):
+        raise RuntimeError(f"Unexpected cache-flush response: {message!r}")
+
+
 def measure(endpoint, role, mode, cases, root):
     records = {}
     capacity = 32768 if role == "student" else 65536
@@ -177,7 +186,7 @@ def measure(endpoint, role, mode, cases, root):
     # Flush between requests so timed repeats do not become cached-prefix lookups.
     for case in eligible:
         for repeat in range(2):
-            panel.post(endpoint + "/flush_cache", {})
+            flush_cache(endpoint)
             start = time.monotonic()
             values = score(endpoint, [case])[0]
             elapsed = time.monotonic() - start
@@ -215,7 +224,7 @@ def measure(endpoint, role, mode, cases, root):
     for batch in (2, 4, 8) if role == "student" else (2, 4):
         chosen = [mixed[max(0, min(len(mixed) - 1, (i + 1) * len(mixed) // batch - 1))] for i in range(batch)]
         for repeat in range(3):
-            panel.post(endpoint + "/flush_cache", {})
+            flush_cache(endpoint)
             start = time.monotonic()
             results = score(endpoint, chosen)
             elapsed = time.monotonic() - start
@@ -249,7 +258,7 @@ def measure(endpoint, role, mode, cases, root):
         json.dump(records, stream, allow_nan=False)
     if role == "student":
         for repeat in range(2):
-            panel.post(endpoint + "/flush_cache", {})
+            flush_cache(endpoint)
             start = time.monotonic()
             outputs = panel.post(
                 endpoint + "/generate",

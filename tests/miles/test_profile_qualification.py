@@ -1,11 +1,50 @@
 """Check workload coverage and interpretation of qualification measurements."""
 
 import json
+import threading
+from http import server
 from types import SimpleNamespace
+from urllib import error
 
 import pytest
 
 qualification = pytest.importorskip("open_instruct.miles.distillation.profile_qualification")
+
+
+@pytest.mark.parametrize(
+    "status,body",
+    [(200, b"Cache flushed.\nPlease check backend logs."), (400, b"Flush cache failed."), (200, b"Unexpected reply")],
+)
+def test_flush_cache_handles_real_http_text_and_rejects_failures(status, body):
+    calls = []
+
+    class Handler(server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            calls.append(self.path)
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    with server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as http:
+        thread = threading.Thread(target=http.serve_forever, daemon=True)
+        thread.start()
+        try:
+            endpoint = f"http://127.0.0.1:{http.server_port}"
+            if status == 400:
+                with pytest.raises(error.HTTPError):
+                    qualification.flush_cache(endpoint)
+            elif not body.startswith(b"Cache flushed."):
+                with pytest.raises(RuntimeError, match="Unexpected cache-flush response"):
+                    qualification.flush_cache(endpoint)
+            else:
+                qualification.flush_cache(endpoint)
+            assert calls == ["/flush_cache?timeout=30"]
+        finally:
+            http.shutdown()
+            thread.join()
 
 
 def test_workloads_cover_real_references_and_context_boundaries():
