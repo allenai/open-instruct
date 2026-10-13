@@ -126,7 +126,8 @@ case "$MODE" in
         ;;
     *) echo "Expected train, train_full, tokenize, gate or convert" >&2; exit 1 ;;
 esac
-export BASE=hero-small-nonemo SEQ=65536 LR=5e-5
+# LR is overridable for H061 (lr-half); the default is unchanged.
+export BASE=hero-small-nonemo SEQ=65536 LR="${LR:-5e-5}"
 export THINK_TOKENS
 # Train and gate must name their cache. Tokenize names it when it is already known, which
 # makes a flag-off tokenize job a CPU preflight: the production hash either resolves to the
