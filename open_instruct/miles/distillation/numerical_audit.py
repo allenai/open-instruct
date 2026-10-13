@@ -9,6 +9,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -47,7 +48,14 @@ async def measure(endpoints, saved, root, mode):
 
     async def score(label, server, sequence=tokens):
         start = time.monotonic()
-        values = await panel.score(endpoints[server] + "/generate", prefix, sequence, limit)
+        marker = root / f"{mode}-trace-{server}" / "capture"
+        capture = os.environ.get("OI_MILES_OPD_AUDIT_TRACE") == "1" and label == f"cold-{server}-1"
+        if capture:
+            marker.touch()
+        try:
+            values = await panel.score(endpoints[server] + "/generate", prefix, sequence, limit)
+        finally:
+            marker.unlink(missing_ok=True)
         records[label] = values
         append(
             root / "scores.jsonl",
@@ -145,7 +153,10 @@ def main():
         "max_context_length": 32768,
         "concurrency": 8,
     }
-    for mode in ("default-graphs", "default-eager", "core-eager"):
+    tracing = os.environ.get("OI_MILES_OPD_AUDIT_TRACE") == "1"
+    modes = ("rounding-graphs", "rounding-eager", "off-eager", "core-eager")
+    for mode in modes:
+        print(f"Starting numerical audit mode {mode}; tracing={tracing}", flush=True)
         servers, handles, endpoints = [], [], []
         try:
             with ExitStack() as stack:
@@ -156,13 +167,29 @@ def main():
                     ports.append(sock.getsockname()[1])
             for index, (device, port) in enumerate(zip(devices, ports, strict=True)):
                 cmd = teacher.command(service, port)
-                if mode == "default-graphs":
-                    cmd.remove("--disable-cuda-graph")
-                    cmd.extend(["--cuda-graph-backend-decode", "full", "--cuda-graph-max-bs-decode", "8"])
+                cmd.remove("--disable-cuda-graph")
+                cmd.extend(["--cuda-graph-backend-decode", "full" if mode.endswith("graphs") else "disabled"])
+                if mode.endswith("graphs"):
+                    cmd.extend(["--cuda-graph-max-bs-decode", "8"])
                 cmd.extend(["--cuda-graph-backend-prefill", "disabled", "--random-seed", "130064"])
+                if tracing:
+                    cmd.extend(
+                        [
+                            "--forward-hooks",
+                            json.dumps(
+                                [
+                                    {
+                                        "name": "numerical-boundaries",
+                                        "target_modules": [""],
+                                        "hook_factory": "open_instruct.miles.distillation.audit_trace:factory",
+                                        "config": {"root": str(root / f"{mode}-trace-{index}")},
+                                    }
+                                ]
+                            ),
+                        ]
+                    )
                 env = {**os.environ, "CUDA_VISIBLE_DEVICES": device}
-                if mode == "core-eager":
-                    env["OLMO_SGLANG_CORE_COMPAT"] = "1"
+                env["OLMO_SGLANG_CORE_COMPAT"] = {"rounding": "rounding", "off": "0", "core": "1"}[mode.split("-")[0]]
                 handle = (root / f"{mode}-{index}.log").open("w")
                 handles.append(handle)
                 append(
@@ -195,6 +222,10 @@ def main():
                 if pending:
                     time.sleep(2)
             asyncio.run(measure(endpoints, saved, root, mode))
+            if tracing:
+                with tarfile.open(f"/output/{mode}-traces.tar.gz", "w:gz") as archive:
+                    for index in range(2):
+                        archive.add(root / f"{mode}-trace-{index}", arcname=f"trace-{index}")
         finally:
             for process in servers:
                 if process.poll() is None:
