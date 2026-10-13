@@ -4,6 +4,18 @@ import ast
 import importlib
 
 
+def alternatives(configs, baseline):
+    """Choose one tile change and one launch-only change, when available."""
+    result = []
+    for kind, change_tiles in (("tiles", True), ("launch", False)):
+        candidate = next(
+            (c for c in configs if str(c) != str(baseline) and (c.kwargs != baseline.kwargs) == change_tiles), None
+        )
+        if candidate is not None:
+            result.append((kind, candidate))
+    return result
+
+
 class PinnedCache(dict):
     """Retain chosen configs and count their use during the scoring capture."""
 

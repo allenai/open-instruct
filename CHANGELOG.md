@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Fixed
+- Add a bounded matched-checkpoint Core numerical audit that varies one FLA kernel at a time and records hidden-state and expert-route differences (https://github.com/allenai/open-instruct/pull/1924).
 - Validate and record content-pinned serving kernel profiles for MILES; reject incomplete strict profiles and unacknowledged diagnostic overrides (https://github.com/allenai/open-instruct/pull/1924).
 - Require validated Core-compatible rounding for MILES teacher and student serving; reject silent arithmetic fallback and require a recorded reason for numerical diagnostic overrides (https://github.com/allenai/open-instruct/pull/1924).
 - SFT and DPO use explicit generation ranges for assistant labels, preserving thinker content and BOS-prefixed templates. External templates with stable turn boundaries support last-turn labeling, including Olmo 3.5-style reasoning and tool calls; closing EOS/ChatML tokens outside generation blocks are rejected. Dataset caches are invalidated for the changed labels (https://github.com/allenai/open-instruct/pull/1879).

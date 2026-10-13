@@ -76,7 +76,8 @@ def test_inner_model_trace_survives_outer_forward_bypass(tmp_path, monkeypatch):
     assert (tmp_path / "weights.json").exists()
 
 
-def test_audit_launch_does_not_train():
+@pytest.mark.parametrize("core", [False, True])
+def test_audit_launch_does_not_train(core):
     spec = RunSpec.from_dict(
         {
             "schema_version": 1,
@@ -84,15 +85,35 @@ def test_audit_launch_does_not_train():
             "model": {"source": "/model"},
             "output": {"root": "/output/audit"},
             "data": {"prompt_data": "/data", "reward_config": "/rewards"},
-            "launch": {"gpus_per_replica": 2, "auto_resume": False, "env": {"OI_MILES_OPD_NUMERICAL_AUDIT": "1"}},
+            "launch": {
+                "gpus_per_replica": 2,
+                "auto_resume": False,
+                "env": {"OI_MILES_OPD_NUMERICAL_AUDIT": "1", "OI_MILES_OPD_CORE_AUDIT": "1" if core else "0"},
+            },
             "trainer": {"gpus": 1, "expert_parallel_size": 1},
             "inference": {"placement_mode": "disaggregated", "gpus": 1},
         }
     )
     task = launch.specification("image", spec)["tasks"][0]
-    assert "python -m open_instruct.miles.distillation.numerical_audit" in task["arguments"][0]
+    expected = (
+        "python scripts/miles/core_numerical_audit.py"
+        if core
+        else "python -m open_instruct.miles.distillation.numerical_audit"
+    )
+    assert expected in task["arguments"][0]
     assert "python -m open_instruct.miles train" not in task["arguments"][0]
     assert task["resources"]["gpuCount"] == 2
+
+
+def test_kernel_alternatives_separate_tiles_from_launch_choices():
+    base = SimpleNamespace(kwargs={"BK": 64}, num_warps=4)
+    launch_change = SimpleNamespace(kwargs={"BK": 64}, num_warps=8)
+    tile_change = SimpleNamespace(kwargs={"BK": 32}, num_warps=4)
+    assert audit_tuning.alternatives([base, launch_change, tile_change], base) == [
+        ("tiles", tile_change),
+        ("launch", launch_change),
+    ]
+    assert audit_tuning.alternatives([base], base) == []
 
 
 def test_tuning_replay_checks_real_choices_and_scoring_use(tmp_path, monkeypatch):
