@@ -59,7 +59,7 @@ async def reward(args, sample, **kwargs):
     async def score_context(name, text):
         context = tokenizer.encode(text, add_special_tokens=False) if isinstance(text, str) else list(text)
         ids = context + response
-        if len(ids) > service["max_context_length"]:
+        if len(ids) > service["max_context_length"] - 8:
             raise ValueError("Teacher context overflow; do not silently shorten the reference")
         requested = time.perf_counter()
         endpoint = (

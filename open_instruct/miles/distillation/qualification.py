@@ -71,7 +71,7 @@ def render_row(row, template, tokenizer, training):
             )
             prompt = template["input"].replace(original, notes)
             context_tokens = len(tokenizer.encode(prompt, add_special_tokens=False).ids)
-            if context_tokens + 16384 > 65536:
+            if context_tokens + 16384 > 65528:
                 raise ValueError("Full reference plus response exceeds teacher context budget")
             metadata[key] = prompt
             metadata[key + "_tokens"] = context_tokens

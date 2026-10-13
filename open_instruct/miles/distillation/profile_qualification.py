@@ -51,7 +51,8 @@ def workloads(items, tokenizer, saved):
                     synthetic_response=True,
                 )
             )
-    for length in (1024, 8191, 8192, 8193, 16383, 16384, 16385, 32768, 65536):
+    # SGLang reserves five positions and rejects equality at its input limit.
+    for length in (1024, 8191, 8192, 8193, 16383, 16384, 16385, 32760, 65528):
         response = min(16384, length - 1)
         cases.append(
             dict(
@@ -209,7 +210,7 @@ def measure(endpoint, role, mode, cases, root):
         key=lambda case: len(case["prefix"]) + len(case["tokens"]),
     )
     for batch in (2, 4, 8) if role == "student" else (2, 4):
-        chosen = [mixed[min(len(mixed) - 1, (i + 1) * len(mixed) // batch - 1)] for i in range(batch)]
+        chosen = [mixed[max(0, min(len(mixed) - 1, (i + 1) * len(mixed) // batch - 1))] for i in range(batch)]
         for repeat in range(3):
             panel.post(endpoint + "/flush_cache", {})
             start = time.monotonic()

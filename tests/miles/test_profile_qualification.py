@@ -28,8 +28,8 @@ def test_workloads_cover_real_references_and_context_boundaries():
     assert [x["sample_id"] for x in selected] == ["4", "8", "16"]
     assert all(len(c["tokens"]) == 16384 for c in cases if c["kind"] != "boundary")
     lengths = {len(c["prefix"]) + len(c["tokens"]) for c in cases if c["kind"] == "boundary"}
-    assert {8191, 8192, 8193, 16383, 16384, 16385, 32768, 65536} <= lengths
-    assert max(len(c["prefix"]) + len(c["tokens"]) for c in cases) == 65536
+    assert {8191, 8192, 8193, 16383, 16384, 16385, 32760, 65528} <= lengths
+    assert max(len(c["prefix"]) + len(c["tokens"]) for c in cases) == 65528
 
 
 def test_roles_preserve_production_cache_graph_and_context_settings():
