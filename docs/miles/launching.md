@@ -337,3 +337,30 @@ For a deliberate numerical diagnostic, put a nonempty
 mode being tested. Keep the requirement flag at `1`: the adapter records the
 exception as a warning, including the reason and actual selected mode. Ordinary
 runtime checks still apply. These settings cannot be hidden in `launch.secrets`.
+
+### Reproducible serving kernel profiles
+
+Once a profile has been qualified for the intended runtime and workload, select
+it through `launch.env`:
+
+```json
+{
+  "OLMO_SGLANG_KERNEL_PROFILE": "/weka/oe-training-default/profiles/h045-b300.json",
+  "OLMO_SGLANG_KERNEL_PROFILE_MODE": "strict",
+  "OLMO_SGLANG_KERNEL_PROFILE_SHA256": "<64 lowercase hex characters>",
+  "OLMO_SGLANG_KERNEL_PROFILE_REPORT": "/weka/oe-training-default/run/kernel-profile-{pid}.json"
+}
+```
+
+The immutable content hash is obtained with
+`python -m olmo_sglang.kernel_profile inspect PROFILE`. It is recorded alongside
+the shared-mount or image path in the run receipt and inherited by teacher and
+student servers. The serving adapter validates and enforces the choices before
+warmup. Profile settings cannot be hidden in secrets. Existing compiler-cache
+restoration remains an acceleration mechanism, not the selection authority.
+
+Profiles are explicitly selected until hardware/workload qualification exists;
+the launcher never guesses a profile from a checkpoint path. A configured
+profile defaults to strict mode and requires its content hash. Recording or
+explicitly disabling a configured profile requires the diagnostic reason.
+Read `olmo-sglang/docs/kernel-profiles.md` for scope and preparation instructions.

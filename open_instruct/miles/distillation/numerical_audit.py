@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -15,7 +16,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from urllib import request
 
-from open_instruct.miles.distillation import panel, teacher
+from open_instruct.miles.distillation import alignment, panel, teacher
 
 
 def compare(left, right):
@@ -106,6 +107,44 @@ async def measure(endpoints, saved, root, mode):
         for server in range(2):
             await score(f"after-decode-{server}-{repeat}", server)
     fresh = [await score(f"generated-prefill-{i}", i, generated) for i in range(2)]
+    extra_pairs = []
+    if os.environ.get("OI_MILES_OPD_AUDIT_NATIVE_PROFILE") == "1":
+        # Fixed tokens isolate implementation differences without another generation pass.
+        for length in (4096, 8192):
+            sequence = (tokens * math.ceil(length / len(tokens)))[:length]
+            for server in range(2):
+                await score(f"length-{length}-{server}", server, sequence)
+            extra_pairs.append((f"length-{length}-0", f"length-{length}-1"))
+        sequences = [tokens, (tokens * 4)[:4096]]
+        for server in range(2):
+            batch = await asyncio.to_thread(
+                panel.post,
+                endpoints[server] + "/generate",
+                {
+                    "input_ids": [prefix + seq for seq in sequences],
+                    "sampling_params": {"temperature": 0, "max_new_tokens": 0},
+                    "return_logprob": True,
+                    "logprob_start_len": 0,
+                },
+            )
+            if not isinstance(batch, list) or len(batch) != len(sequences):
+                raise ValueError("Batched scoring returned the wrong result count")
+            for index, (result, seq) in enumerate(zip(batch, sequences, strict=True)):
+                label = f"batch-{index}-{server}"
+                values = alignment.extract_scores(result, prefix + seq, len(seq))
+                records[label] = values
+                append(
+                    root / "scores.jsonl",
+                    {
+                        "mode": mode,
+                        "label": label,
+                        "server": server,
+                        "prefix": prefix,
+                        "tokens": seq,
+                        "scores": values,
+                    },
+                )
+        extra_pairs.extend((f"batch-{i}-0", f"batch-{i}-1") for i in range(len(sequences)))
     comparisons = {}
     for left, right in [
         ("cold-0-0", "cold-1-0"),
@@ -117,6 +156,7 @@ async def measure(endpoints, saved, root, mode):
         ("cold-1-0", "after-decode-1-0"),
         ("after-decode-0-0", "after-decode-1-0"),
         ("short-0", "short-1"),
+        *extra_pairs,
     ]:
         comparisons[f"{left} vs {right}"] = compare(records[left], records[right])
     comparisons["decode vs generated-prefill-0"] = compare(decode, fresh[0])
@@ -158,6 +198,9 @@ def main():
     tuning_path = os.environ.get("OI_MILES_OPD_AUDIT_TUNING")
     if tuning_path:
         (root / "requested-tuning.json").write_bytes(Path(tuning_path).read_bytes())
+    native_profile = os.environ.get("OI_MILES_OPD_AUDIT_NATIVE_PROFILE") == "1"
+    if native_profile and not tuning_path:
+        raise ValueError("Native profile qualification needs recorded tuning choices")
     tracing = os.environ.get("OI_MILES_OPD_AUDIT_TRACE") == "1" or bool(tuning_path)
     modes = ("rounding-graphs", "rounding-eager", "off-eager", "core-eager")
     requested_modes = os.environ.get("OI_MILES_OPD_AUDIT_MODES")
@@ -168,6 +211,29 @@ def main():
         modes = requested_modes
     for mode in modes:
         print(f"Starting numerical audit mode {mode}; tracing={tracing}", flush=True)
+        profile_path, profile_digest = None, None
+        if native_profile:
+            kernel_profile = importlib.import_module("olmo_sglang.kernel_profile")
+
+            replay = root / f"{mode}-replay.json"
+            replay.write_text(json.dumps(json.loads(Path(tuning_path).read_text())[mode]))
+            profile_path = root / f"{mode}-kernel-profile.json"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "olmo_sglang.kernel_profile",
+                    "import-replay",
+                    str(replay),
+                    str(profile_path),
+                    "--model",
+                    saved["same_checkpoint"],
+                    "--arithmetic",
+                    "full" if mode.startswith("core") else "rounding",
+                ],
+                check=True,
+            )
+            profile_digest = kernel_profile.digest(json.loads(profile_path.read_text()))
         servers, handles, endpoints = [], [], []
         try:
             with ExitStack() as stack:
@@ -196,7 +262,7 @@ def main():
                                         "config": {
                                             "root": str(root / f"{mode}-trace-{index}"),
                                             "base": "model",
-                                            "tuning_path": tuning_path,
+                                            "tuning_path": None if native_profile else tuning_path,
                                             "tuning_mode": mode,
                                         },
                                     },
@@ -217,6 +283,17 @@ def main():
                     "OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON": f"numerical audit mode {mode}; no training",
                 }
                 env["OLMO_SGLANG_CORE_COMPAT"] = {"rounding": "rounding", "off": "0", "core": "1"}[mode.split("-")[0]]
+                if native_profile:
+                    env.update(
+                        {
+                            "OLMO_SGLANG_KERNEL_PROFILE": str(profile_path),
+                            "OLMO_SGLANG_KERNEL_PROFILE_MODE": "strict",
+                            "OLMO_SGLANG_KERNEL_PROFILE_SHA256": profile_digest,
+                            "OLMO_SGLANG_KERNEL_PROFILE_REPORT": str(
+                                root / f"{mode}-trace-{index}" / "kernel-profile-usage.json"
+                            ),
+                        }
+                    )
                 handle = (root / f"{mode}-{index}.log").open("w")
                 handles.append(handle)
                 append(
@@ -227,6 +304,7 @@ def main():
                         "command": cmd,
                         "compat": env.get("OLMO_SGLANG_CORE_COMPAT", "auto"),
                         "diagnostic_override_reason": env["OLMO_SGLANG_DIAGNOSTIC_OVERRIDE_REASON"],
+                        "kernel_profile_sha256": profile_digest,
                         "device": device,
                     },
                 )

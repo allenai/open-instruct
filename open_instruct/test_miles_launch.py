@@ -645,3 +645,27 @@ def test_required_rounding_is_in_resolved_run_and_server_environment(tmp_path):
 def test_arithmetic_settings_cannot_be_hidden_in_secrets(tmp_path):
     with pytest.raises(ValueError, match="must be visible"):
         spec(tmp_path, launch={"secrets": {"OLMO_SGLANG_CORE_COMPAT": "secret-mode"}})
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"OLMO_SGLANG_KERNEL_PROFILE": "/opt/profile.json"},
+        {"OLMO_SGLANG_KERNEL_PROFILE_MODE": "strict"},
+        {"OLMO_SGLANG_KERNEL_PROFILE": "/opt/profile.json", "OLMO_SGLANG_KERNEL_PROFILE_MODE": "off"},
+        {"OLMO_SGLANG_KERNEL_PROFILE": "/opt/profile.json", "OLMO_SGLANG_KERNEL_PROFILE_MODE": "record"},
+    ],
+)
+def test_kernel_profile_configuration_fails_closed(tmp_path, env):
+    with pytest.raises(ValueError):
+        spec(tmp_path, launch={"env": env})
+
+
+def test_kernel_profile_identity_is_in_launch_receipt(tmp_path):
+    env = {"OLMO_SGLANG_KERNEL_PROFILE": "/opt/profile.json", "OLMO_SGLANG_KERNEL_PROFILE_SHA256": "a" * 64}
+    run = spec(tmp_path, launch={"env": env})
+    assert run.launch["env"]["OLMO_SGLANG_KERNEL_PROFILE_MODE"] == "strict"
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    sent = {entry["name"]: entry.get("value") for entry in task["envVars"]}
+    assert all(sent[key] == value for key, value in env.items())
+    assert payload(task["arguments"][0])["launch"]["env"]["OLMO_SGLANG_KERNEL_PROFILE_SHA256"] == "a" * 64
