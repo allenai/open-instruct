@@ -184,6 +184,11 @@ def post_process(args, samples, **kwargs):
 def evaluate(args, rollout_id, data_source, evaluation=False):
     if not evaluation:
         raise ValueError("Task evaluation callback is evaluation-only")
+    descriptor_path = os.environ.get("OI_MILES_OPD_PANEL")
+    descriptor = json.loads(Path(descriptor_path).read_text()) if descriptor_path else None
+    if descriptor and rollout_id not in descriptor["evaluation_rollout_ids"]:
+        base = importlib.import_module("miles.rollout.base_types")
+        return base.RolloutFnEvalOutput(data={}, metrics={"qualification_skipped": 1})
     reward_path, postprocess_path = args.custom_rm_path, args.custom_reward_post_process_path
     args.custom_rm_path = "open_instruct.miles.rewards.rewards.registered_reward"
     args.custom_reward_post_process_path = None
@@ -212,6 +217,10 @@ def evaluate(args, rollout_id, data_source, evaluation=False):
                             )
                             + "\n"
                         )
+        if descriptor:
+            panel = importlib.import_module("open_instruct.miles.distillation.panel")
+            _, tokenizer, _ = resources(os.environ[config.ENV], args.hf_checkpoint)
+            asyncio.run(panel.observe(args, rollout_id, output, tokenizer, descriptor))
         return output
     finally:
         args.custom_rm_path, args.custom_reward_post_process_path = reward_path, postprocess_path

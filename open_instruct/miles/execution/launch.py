@@ -85,6 +85,10 @@ def specification(image, spec, *, hostnames=None):
         if host_networking
         else "python -m open_instruct.miles train /output/submitted-run.json"
     )
+    if spec.launch["env"].get("OI_MILES_OPD_OVERNIGHT") == "1":
+        if layout["replicas"] != 1 or allocated != 5 or spec.teacher.get("objective") != "cancel_answer_positive":
+            raise InputError("Overnight qualification requires one five-GPU node and cancellation distillation")
+        workload = preflight + "python -m open_instruct.miles.distillation.overnight /output/submitted-run.json"
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
         f"python -c {shlex.quote(setup)}\n"

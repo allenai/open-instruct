@@ -133,6 +133,16 @@ def test_evaluation_is_unhinted_logged_and_restores_training_hooks(monkeypatch, 
     assert args.custom_reward_post_process_path == "teacher.post"
 
 
+def test_panel_schedule_skips_intermediate_evaluation(monkeypatch, tmp_path):
+    pytest.importorskip("miles")
+    hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
+    path = tmp_path / "panel.json"
+    path.write_text(json.dumps({"evaluation_rollout_ids": [0, 15, 63]}))
+    monkeypatch.setenv("OI_MILES_OPD_PANEL", str(path))
+    output = hooks.evaluate(SimpleNamespace(), 31, None, evaluation=True)
+    assert output.data == {} and output.metrics["qualification_skipped"] == 1
+
+
 def test_privileged_context_is_scoring_only_and_truncated_loss_is_retained(monkeypatch):
     pytest.importorskip("miles")
     hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")

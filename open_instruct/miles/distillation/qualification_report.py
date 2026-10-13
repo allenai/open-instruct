@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,6 +16,15 @@ def policy_versions(row):
     if len(versions) != 1:
         raise ValueError("Synchronous evaluation requires exactly one policy version per response")
     return versions
+
+
+def pass_at_k(questions, k):
+    if any(len(rows) < k for rows in questions.values()):
+        return None
+    return sum(
+        1 - math.comb(len(rows) - sum(r["reward"] > 0 for r in rows), k) / math.comb(len(rows), k)
+        for rows in questions.values()
+    ) / len(questions)
 
 
 def summarize(evaluation, metrics):
@@ -45,6 +55,7 @@ def summarize(evaluation, metrics):
                 "question_any_success": sum(any(r["reward"] > 0 for r in rs) for rs in questions.values())
                 / len(questions),
                 "samples_per_question": sorted({len(rs) for rs in questions.values()}),
+                "estimated_pass_at_k": {str(k): pass_at_k(questions, k) for k in (1, 4, 8, 16)},
                 "question_sample_counts": {q: len(rs) for q, rs in questions.items()},
                 "truncation_rate": 1 - len(finished) / len(rows),
                 "finished_accuracy": sum(r["reward"] for r in finished) / len(finished) if finished else None,
