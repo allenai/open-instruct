@@ -81,6 +81,15 @@ def test_roles_preserve_production_cache_graph_and_context_settings():
     assert student[student.index("--cuda-graph-max-bs-decode") + 1] == "8"
 
 
+@pytest.mark.parametrize("role,concurrency", [("student", "8"), ("teacher", "4")])
+def test_prefill_isolation_preserves_decode_concurrency(role, concurrency):
+    ordinary = qualification.command("/model", 123, role)
+    isolated = qualification.command("/model", 123, role, isolated_prefill=True)
+    assert "--prefill-max-requests" not in ordinary
+    assert isolated[isolated.index("--prefill-max-requests") + 1] == "1"
+    assert isolated[isolated.index("--max-running-requests") + 1] == concurrency
+
+
 def test_summary_excludes_first_request_timings_and_reports_nonexact(tmp_path):
     (tmp_path / "comparisons.jsonl").write_text(json.dumps(dict(mode="strict", mae=0.01)) + "\n")
     values = [

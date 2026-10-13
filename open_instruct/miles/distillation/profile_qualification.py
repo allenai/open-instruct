@@ -66,7 +66,7 @@ def workloads(items, tokenizer, saved):
     return cases, selected
 
 
-def command(model, port, role):
+def command(model, port, role, *, isolated_prefill=False):
     service = dict(
         source=model,
         tensor_parallel_size=1,
@@ -90,6 +90,8 @@ def command(model, port, role):
         ]
         cmd[cmd.index("--max-total-tokens") + 1] = "524288"
         cmd[cmd.index("--max-mamba-cache-size") + 1] = "128"
+    if isolated_prefill:
+        cmd += ["--prefill-max-requests", "1"]
     return cmd
 
 
@@ -120,7 +122,7 @@ def server(model, device, role, mode, root, profile):
         else:
             env.pop(kernel_profile.REASON, None)
             env[kernel_profile.DIGEST] = kernel_profile.digest(json.loads(profile.read_text()))
-    cmd = command(model, port, role)
+    cmd = command(model, port, role, isolated_prefill=mode in {"record", "strict"})
     numerical_audit.append(root / "commands.jsonl", dict(label=label, command=cmd))
     start = time.monotonic()
     print(json.dumps(dict(event="server_start", label=label)), flush=True)
@@ -228,6 +230,8 @@ def measure(endpoint, role, mode, cases, root):
             start = time.monotonic()
             results = score(endpoint, chosen)
             elapsed = time.monotonic() - start
+            with gzip.open(root / f"batch-{mode}-{role}-{batch}-{repeat}.json.gz", "wt") as stream:
+                json.dump(dict(cases=[c["name"] for c in chosen], scores=results), stream, allow_nan=False)
             numerical_audit.append(
                 root / "timings.jsonl",
                 dict(
@@ -465,9 +469,22 @@ def main():
                     endpoint, teacher_endpoint, selected[1]["rendered"], saved["tokens"], tokenizer, model, root
                 )
             )
+            for item in selected:
+                asyncio.run(
+                    exercise_hook(
+                        endpoint,
+                        teacher_endpoint,
+                        item["rendered"],
+                        extend(saved["tokens"], 16384),
+                        tokenizer,
+                        model,
+                        root,
+                    )
+                )
         with server(model, devices[1], "teacher", "strict", root, profile) as endpoint:
+            peer_scores = measure(endpoint, "teacher", "strict-peer", cases, root)
             for case in cases:
-                values = score(endpoint, [case])[0]
+                values = peer_scores[case["name"]]
                 numerical_audit.append(
                     root / "comparisons.jsonl",
                     dict(
@@ -477,6 +494,24 @@ def main():
                         **numerical_audit.compare(values, teacher_scores[case["name"]]),
                     ),
                 )
+            for batch in (2, 4):
+                for repeat in range(3):
+                    with gzip.open(root / f"batch-strict-teacher-{batch}-{repeat}.json.gz", "rt") as stream:
+                        primary = json.load(stream)
+                    with gzip.open(root / f"batch-strict-peer-teacher-{batch}-{repeat}.json.gz", "rt") as stream:
+                        peer = json.load(stream)
+                    assert primary["cases"] == peer["cases"]
+                    for name, left, right in zip(primary["cases"], primary["scores"], peer["scores"], strict=True):
+                        numerical_audit.append(
+                            root / "comparisons.jsonl",
+                            dict(
+                                mode="strict",
+                                kind="cross_engine_batch",
+                                batch=batch,
+                                case=name,
+                                **numerical_audit.compare(left, right),
+                            ),
+                        )
     result = summarize(root)
     print(json.dumps(result), flush=True)
     if not result["all_exact"]:
