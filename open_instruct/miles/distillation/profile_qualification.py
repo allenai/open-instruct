@@ -123,6 +123,7 @@ def server(model, device, role, mode, root, profile):
     cmd = command(model, port, role)
     numerical_audit.append(root / "commands.jsonl", dict(label=label, command=cmd))
     start = time.monotonic()
+    print(json.dumps(dict(event="server_start", label=label)), flush=True)
     with (root / f"{label}.log").open("w") as log:
         process = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         endpoint = f"http://127.0.0.1:{port}"
@@ -138,6 +139,7 @@ def server(model, device, role, mode, root, profile):
                 except OSError:
                     time.sleep(2)
             numerical_audit.append(root / "startup.jsonl", dict(label=label, seconds=time.monotonic() - start))
+            print(json.dumps(dict(event="server_ready", label=label, seconds=time.monotonic() - start)), flush=True)
             yield endpoint
         finally:
             if process.poll() is None:
@@ -205,6 +207,7 @@ def measure(endpoint, role, mode, cases, root):
                     ),
                 )
             records[name] = values
+        print(json.dumps(dict(event="scored", mode=mode, role=role, case=name, seconds=elapsed)), flush=True)
     mixed = sorted(
         (case for case in eligible if case["kind"] != "boundary"),
         key=lambda case: len(case["prefix"]) + len(case["tokens"]),
@@ -241,6 +244,7 @@ def measure(endpoint, role, mode, cases, root):
                         **numerical_audit.compare(records[case["name"]], values),
                     ),
                 )
+        print(json.dumps(dict(event="batch_scored", mode=mode, role=role, batch=batch, seconds=elapsed)), flush=True)
     with gzip.open(root / f"scores-{mode}-{role}.json.gz", "wt") as stream:
         json.dump(records, stream, allow_nan=False)
     if role == "student":
@@ -410,6 +414,17 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
     items, provenance = overnight.candidates(tokenizer)
     cases, selected = workloads(items, tokenizer, saved)
+    print(
+        json.dumps(
+            dict(
+                event="inputs_ready",
+                candidates=len(items),
+                cases=len(cases),
+                reference_lengths=[i["rendered"]["metadata"]["opd_teacher_prompt_tokens"] for i in selected],
+            )
+        ),
+        flush=True,
+    )
     (root / "inputs.json").write_text(json.dumps(dict(cases=cases, provenance=provenance)))
     (root / "runtime.json").write_bytes(Path("/opt/core-rl/runtime/miles/runtime.lock.json").read_bytes())
     profile = root / "kernel-profile.json"
