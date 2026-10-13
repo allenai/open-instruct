@@ -50,9 +50,9 @@ import json
 import multiprocessing
 import os
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -1744,6 +1744,27 @@ def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) 
     return fn_args
 
 
+# SFT tokenizers that take `max_seq_length` / `over_length_strategy`.
+_SFT_TRUNCATING_TOKENIZE_FNS = {"sft_tulu_tokenize_and_truncate_v1", "last_turn_tulu_tokenize_and_truncate_v1"}
+
+
+def sft_transform_fn_args(
+    transform_fn: Sequence[str], max_seq_length: int | None, over_length_strategy: str
+) -> list[dict[str, Any]]:
+    """Build `transform_fn_args` for an SFT `transform_fn` list, one entry per function by name.
+
+    Truncating tokenizers get :func:`sft_tokenize_fn_args`; every other function gets `{}`. For
+    the default `[sft_tulu_tokenize_and_truncate_v1, sft_tulu_filter_v1]` this is the
+    `[sft_tokenize_fn_args(...), {}]` the SFT entry points always passed, so existing dataset
+    cache hashes are unchanged; it also lets a filter such as
+    `sft_added_token_strings_filter_v1` run ahead of the tokenizer.
+    """
+    return [
+        sft_tokenize_fn_args(max_seq_length, over_length_strategy) if fn_name in _SFT_TRUNCATING_TOKENIZE_FNS else {}
+        for fn_name in transform_fn
+    ]
+
+
 def _was_truncated(
     offsets: Sequence[Sequence[int]] | np.ndarray, rendered: str, n_tokens: int, max_seq_length: int | None
 ) -> bool:
@@ -1877,6 +1898,95 @@ def last_turn_tulu_tokenize_and_truncate_v1(
 
 def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
+
+
+DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT = (
+    # The olmo35 template carries reasoning inline in assistant content, and
+    # `--reserved_slot_tokens '<think>' '</think>'` (#1911) makes these added tokens.
+    "<think>",
+    "</think>",
+    # Added tokens in olmo-3-tokenizer-instruct-dev, whose system prompt tells the model to
+    # write its function calls inside these tags, i.e. in assistant content.
+    "<functions>",
+    "</functions>",
+    "<function_calls>",
+    "</function_calls>",
+)
+"""Added-token strings that `sft_added_token_strings_filter_v1` leaves in message content."""
+
+
+@lru_cache(maxsize=16)
+def _added_token_strings_pattern(added_strings: tuple[str, ...], allowed: frozenset[str]) -> re.Pattern[str] | None:
+    banned = [s for s in added_strings if s and s not in allowed]
+    # Longest first, so a string that contains another one is reported whole.
+    banned.sort(key=len, reverse=True)
+    return re.compile("|".join(re.escape(s) for s in banned)) if banned else None
+
+
+def _content_texts(content: Any) -> Iterator[str]:
+    """The strings a message's `content` renders: a plain string, or the text of list parts."""
+    if isinstance(content, str):
+        yield content
+    elif isinstance(content, list | tuple):
+        for part in content:
+            if isinstance(part, str):
+                yield part
+            elif isinstance(part, Mapping) and isinstance(part.get("text"), str):
+                yield part["text"]
+
+
+def find_added_token_strings(
+    messages: Sequence[Mapping[str, Any]] | None,
+    tokenizer: PreTrainedTokenizer,
+    allowed_strings: Sequence[str] | None = None,
+) -> list[str]:
+    """Sorted distinct strings from `tokenizer`'s added vocabulary that occur in `messages`' content.
+
+    `allowed_strings` defaults to `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`. The added
+    vocabulary is read on every call rather than cached per tokenizer, since promotion into
+    reserved slots edits a tokenizer in place.
+    """
+    allowed = frozenset(DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT if allowed_strings is None else allowed_strings)
+    pattern = _added_token_strings_pattern(tuple(tokenizer.get_added_vocab()), allowed)
+    if pattern is None:
+        return []
+    found: set[str] = set()
+    for message in messages or []:
+        if isinstance(message, Mapping):
+            for text in _content_texts(message.get("content")):
+                found.update(pattern.findall(text))
+    return sorted(found)
+
+
+def sft_added_token_strings_filter_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    allowed_strings: Sequence[str] | None = None,
+) -> bool:
+    """Drop a row whose message content contains a literal added-token string.
+
+    A string from the tokenizer's added vocabulary (`tokenizer.get_added_vocab()`) inside
+    content encodes to that token's id, not to text: under the olmo35 tokenizer an
+    `<|endoftext|>` in an assistant answer is an EOS mid-response, and an `<|im_start|>` in a
+    user turn opens a fake turn. `allowed_strings` (default
+    `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`) lists the strings a chat template expects
+    inside content. Plain-text look-alikes such as `</s>` are not added tokens and are kept.
+
+    Opt-in. It reads `messages`, which the SFT tokenizers drop, so it has to run before them:
+
+        --dataset_transform_fn sft_added_token_strings_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1
+
+    (`--transform_fn` for `olmo_core_finetune.py`). Enabling it changes the dataset cache hash;
+    leaving it off keeps existing hashes. `get_dataset_v1` logs how many rows it removed per
+    dataset.
+    """
+    if sft_messages_key not in row:
+        raise KeyError(
+            f"sft_added_token_strings_filter_v1 needs the {sft_messages_key!r} column; list it before the "
+            "tokenization function in the transform list, which drops that column."
+        )
+    return not find_added_token_strings(row[sft_messages_key], tokenizer, allowed_strings)
 
 
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -2188,6 +2298,7 @@ TRANSFORM_FNS = {
     "sft_tulu_tokenize_without_truncation_v1": (sft_tulu_tokenize_without_truncation_v1, "map"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
+    "sft_added_token_strings_filter_v1": (sft_added_token_strings_filter_v1, "filter"),
     "last_turn_tulu_tokenize_and_truncate_v1": (last_turn_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
@@ -2412,11 +2523,17 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 new_fingerprint=new_fingerprint,
             )
         elif fn_type == "filter":
+            num_rows_before = len(dataset)
             dataset = dataset.filter(
                 fn,
                 fn_kwargs=fn_kwargs,
                 num_proc=get_num_proc(len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
                 new_fingerprint=new_fingerprint,
+            )
+            num_removed = num_rows_before - len(dataset)
+            logger.info(
+                f"{fn_name} filtered out {num_removed} of {num_rows_before} rows "
+                f"({100 * num_removed / max(num_rows_before, 1):.4f}%) from {dc.dataset_name}"
             )
         # NOTE: elif we can implement packing here to create a packed SFT dataset. Low priority for now.
         else:
