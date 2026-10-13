@@ -1,12 +1,13 @@
 """Numerical audit comparisons and launch isolation."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from open_instruct.miles.configuration.run_spec import RunSpec
-from open_instruct.miles.distillation import audit_trace, numerical_audit
+from open_instruct.miles.distillation import audit_trace, audit_tuning, numerical_audit
 from open_instruct.miles.execution import launch
 
 
@@ -92,3 +93,23 @@ def test_audit_launch_does_not_train():
     assert "python -m open_instruct.miles.distillation.numerical_audit" in task["arguments"][0]
     assert "python -m open_instruct.miles train" not in task["arguments"][0]
     assert task["resources"]["gpuCount"] == 2
+
+
+def test_tuning_replay_checks_real_choices_and_scoring_use(tmp_path, monkeypatch):
+    marker = tmp_path / "capture"
+    tuner = SimpleNamespace(cache={}, configs=["config-a", "config-b"])
+    module = SimpleNamespace(kernel=SimpleNamespace(fn=tuner))
+    monkeypatch.setattr(audit_tuning.importlib, "import_module", lambda name: module)
+    document = {"fla.ops.test.kernel": {"(8, 'torch.bfloat16')": "config-b"}}
+    replay = audit_tuning.install(document, marker)
+    key = (8, "torch.bfloat16")
+    assert tuner.cache[key] == "config-b"
+    with pytest.raises(RuntimeError, match="never used"):
+        audit_tuning.report(replay)
+    marker.touch()
+    assert tuner.cache[key] == "config-b"
+    assert audit_tuning.report(replay)["fla.ops.test.kernel"][repr(key)]["scoring_hits"] == 1
+    with pytest.raises(RuntimeError, match="replace pinned"):
+        tuner.cache[key] = "config-a"
+    with pytest.raises(ValueError, match="unavailable"):
+        audit_tuning.install({"fla.ops.test.kernel": {repr(key): "unavailable"}}, marker)

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import torch
 
+from open_instruct.miles.distillation import audit_tuning
+
 
 def tensors(value):
     if isinstance(value, torch.Tensor):
@@ -39,6 +41,10 @@ def factory(config):
     root = Path(config["root"])
     root.mkdir(parents=True, exist_ok=True)
     installed = False
+    replay = None
+    if config.get("tuning_path"):
+        document = json.loads(Path(config["tuning_path"]).read_text())[config["tuning_mode"]]
+        replay = audit_tuning.install(document, root / "capture")
 
     def active():
         return (root / "capture").exists()
@@ -69,6 +75,8 @@ def factory(config):
                 module.register_forward_hook(capture)
             installed = True
         if active():
+            if replay is not None:
+                (root / "pinned-tuning.json").write_text(json.dumps(audit_tuning.report(replay), indent=2))
             weights = {}
             for name, parameter in model.named_parameters():
                 raw = parameter.detach().contiguous().reshape(-1).view(torch.uint8).cpu().numpy()

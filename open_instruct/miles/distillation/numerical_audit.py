@@ -155,7 +155,10 @@ def main():
         "max_context_length": 32768,
         "concurrency": 8,
     }
-    tracing = os.environ.get("OI_MILES_OPD_AUDIT_TRACE") == "1"
+    tuning_path = os.environ.get("OI_MILES_OPD_AUDIT_TUNING")
+    if tuning_path:
+        (root / "requested-tuning.json").write_bytes(Path(tuning_path).read_bytes())
+    tracing = os.environ.get("OI_MILES_OPD_AUDIT_TRACE") == "1" or bool(tuning_path)
     modes = ("rounding-graphs", "rounding-eager", "off-eager", "core-eager")
     requested_modes = os.environ.get("OI_MILES_OPD_AUDIT_MODES")
     if requested_modes:
@@ -190,7 +193,12 @@ def main():
                                         "name": "numerical-boundaries",
                                         "target_modules": ["model"],
                                         "hook_factory": "open_instruct.miles.distillation.audit_trace:factory",
-                                        "config": {"root": str(root / f"{mode}-trace-{index}"), "base": "model"},
+                                        "config": {
+                                            "root": str(root / f"{mode}-trace-{index}"),
+                                            "base": "model",
+                                            "tuning_path": tuning_path,
+                                            "tuning_mode": mode,
+                                        },
                                     },
                                     {
                                         "name": "numerical-head",
