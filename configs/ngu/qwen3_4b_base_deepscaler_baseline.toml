@@ -53,8 +53,8 @@ shuffle = true
 [training]
 # filter_zero_std_samples with active_sampling.
 filter_zero_std_groups = true
-# total_episodes 256000 / (8 prompts x 16 samples)
-num_rollouts = 2000
+# 1000 rollouts = 128000 episodes (8 prompts x 16 samples); cmoi4l53 ran 2000.
+num_rollouts = 1000
 skip_eval_before_train = false
 # local_eval_every / save_freq
 eval_interval = 100
