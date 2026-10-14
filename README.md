@@ -1,108 +1,110 @@
 [![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml)
 
-# Open Instruct
+# Training Open Instruction-Following Language Models
 
-Open Instruct is a research codebase for post-training language models with supervised finetuning (SFT), direct preference optimization (DPO), reward modeling, and reinforcement learning with verifiable rewards (RLVR), including tool use.
+This repo serves as an open effort on instruction-tuning and post-training popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
 
-For evaluation, use [OLMES](https://github.com/allenai/olmes). The legacy evaluation code in this repository is unmaintained.
+1. Code for finetuning language models with latest techniques and instruction datasets in a unified format.
+2. Code for DPO, preference finetuning and reinforcement learning with verifiable rewards (RLVR).
+3. Checkpoints or other useful artifacts that we build in our exploration.
 
-## Models and recipes
+We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
 
-Training recipes, checkpoints, and reproduction details are documented by model family:
-
-| Model family | Recipes and documentation |
-| --- | --- |
-| Olmo 3 and 3.1 | [Training scripts and run provenance](scripts/train/olmo3/README.md), [tokenizer settings](docs/olmo3.md) |
-| Olmo Hybrid | [Training recipes](scripts/train/olmo-hybrid/README.md), [tokenizer settings](docs/olmo3.md) |
-| OLMo 2 | [Training recipes and checkpoints](docs/olmo2.md) |
-| TÜLU 3 and 3.1 | [Training recipes and checkpoints](docs/tulu3.md) |
-| TÜLU 1 and 2 | [Historical recipes and checkpoints](docs/tulu1_tulu2.md) |
-
-Example released models include [Olmo 3 7B Instruct](https://huggingface.co/allenai/Olmo-3-7B-Instruct) and [Olmo 3.1 32B Think](https://huggingface.co/allenai/Olmo-3.1-32B-Think). See the [changelog](CHANGELOG.md) for code changes.
+<p align="center" width="100%">
+      <img src="assets/images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
+</p>
 
 ## Setup
 
-Training requires Linux, NVIDIA GPUs, and Python 3.12. We use [uv](https://docs.astral.sh/uv/) to manage dependencies. Open Instruct is a research codebase and does not guarantee backward compatibility.
+Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
+
+### Installation with uv
+
+We use [uv](https://docs.astral.sh/uv/) for installation and running code. You can install with `uv sync`.
+
+* **Git LFS** (for running tests): Install [Git LFS](https://git-lfs.com/) and run `git lfs install` before cloning. See [CONTRIBUTING.md](CONTRIBUTING.md#git-lfs) for details.
+
+* **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-git clone https://github.com/allenai/open-instruct.git
-cd open-instruct
-uv sync --frozen
-```
-
-On x86_64 Linux, the default dependency groups include development tools and CUDA 12.8 packages. For CUDA 13 instead, use:
-
-```bash
-uv sync --frozen --no-default-groups --group dev --group cuda13
-```
-
-Tests require [Git LFS](https://git-lfs.com/). Install it and run `git lfs install` before cloning; for an existing checkout, also run `git lfs pull`. See [CONTRIBUTING.md](CONTRIBUTING.md#git-lfs).
-
-The [Dockerfile](Dockerfile) provides the container environment:
-
-```bash
-docker build --platform linux/amd64 . \
+docker build . \
     --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
-    --build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
-    -t open_instruct_dev
+	--build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
+	-t open_instruct_dev
+
 ```
 
-The image defaults to CUDA 12.8. Add `--build-arg CUDA_VERSION=13` for CUDA 13; the target GPUs must have compatible drivers.
 
 ## Training
 
-The current training entry points are:
+After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](./docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](./docs/tulu1_tulu2.md).
 
-| Method | Implementation | Guide |
-| --- | --- | --- |
-| SFT | [OLMo-core SFT](open_instruct/olmo_core_finetune.py), [Hugging Face SFT](open_instruct/finetune.py) | [SFT guide](docs/algorithms/sft_running_guide.md) |
-| DPO | [OLMo-core DPO](open_instruct/dpo.py) | [DPO guide](docs/algorithms/dpo.md) |
-| RLVR / GRPO | [GRPO trainer](open_instruct/grpo_fast.py) | [GRPO guide](docs/algorithms/grpo.md), [tool training](docs/algorithms/tool_training.md) |
-| Reward modeling | [Reward model trainer](open_instruct/reward_modeling.py) | [Reward modeling guide](docs/algorithms/reward_modeling.md) |
+### Finetuning
 
-For Ai2 contributors, [build_image_and_launch.sh](scripts/train/build_image_and_launch.sh) builds a Beaker image from the current commit and passes it to the chosen script. Commit all changes before launching. These examples each request one GPU:
+**OLMo-core SFT**: For supported models (OLMo, OLMoE, Qwen3), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the list of supported models.
+
+
+### Reinforcement Learning with Verifiable Rewards (RLVR)
+
+We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_image_and_launch.sh`, which builds the Beaker image from your current commit and runs the chosen script:
 
 ```bash
-# OLMo-core SFT.
-./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh
-
-# OLMo-core DPO.
-./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh
-
-# GRPO / RLVR.
+# Single-GPU smoke test on Beaker (small model, fast).
 ./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
+
+# Two-node 8xGPU run (Qwen2.5-7B on code RLVR).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh
 ```
 
-Pass `--cuda-version 13` before the script path when targeting a CUDA 13-compatible cluster. Review the script's cluster, workspace, priority, timeout, and preemption settings before launching; scripts using `--preemptible` may wait for backfill capacity. See [CONTRIBUTING.md](CONTRIBUTING.md#launching-experiments-on-beaker) for more examples. On other infrastructure, adapt the training command after the `mason.py` argument separator to your launcher.
 
-Released-model reproduction may require the original commit and environment; use the provenance recorded in the model recipes above.
+## Contamination checks
 
-## Development
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
-```bash
+### Developing
+When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
+```
 make style
 make quality
-uv run pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for test requirements and PR checks. The development dependencies already include pre-commit; enable the hooks with `uv run pre-commit install`.
+Run the tests with `uv run pytest`.
 
-Build or preview the documentation with `uv run mkdocs build` or `uv run mkdocs serve`. Dataset overlap checks are documented in the [decontamination README](decontamination/README.md).
+#### Pre-commit hooks
+
+To automatically run linting and formatting on each commit:
+```bash
+uv run pre-commit install
+```
+
+To run on all files (recommended after initial setup):
+```bash
+uv run pre-commit run --all-files
+```
 
 ## Licensing
 
-The code is licensed under [Apache 2.0](LICENSE). Model and dataset licenses vary; check their individual model cards and dataset cards before use. Historical TÜLU 1 model terms are in [assets/model_licenses/tulu_license.txt](assets/model_licenses/tulu_license.txt).
+This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
+
+The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](./assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+
+V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
+
 
 ## Acknowledgements
 
-Our training code builds on [Hugging Face Transformers](https://github.com/huggingface/transformers), [TRL](https://github.com/huggingface/trl), [Eric Mitchell's DPO implementation](https://github.com/eric-mitchell/direct-preference-optimization), [OLMo-core](https://github.com/allenai/OLMo-core), and [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF). Earlier PPO implementations drew on OpenAI's [lm-human-preferences](https://github.com/openai/lm-human-preferences) and [summarize-from-feedback](https://github.com/openai/summarize-from-feedback), and [Huang et al.'s reproduction](https://github.com/vwxyzjn/summarize_from_feedback_details).
+Open Instruct is a project that benefited from many open-source projects and libraries. We would like to particularly thank the following projects:
+
+* [HuggingFace Transformers](https://github.com/huggingface/transformers): We adapted Hugging Face's Trainer for our finetuning scripts.
+* [HuggingFace TRL](https://github.com/huggingface/trl) and [eric-mitchell/direct-preference-optimization](https://github.com/eric-mitchell/direct-preference-optimization): our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
+* OpenAI's [lm-human-preferences](https://github.com/openai/lm-human-preferences), [summarize-from-feedback](https://github.com/openai/summarize-from-feedback), and [vwxyzjn/summarize_from_feedback_details](https://github.com/vwxyzjn/summarize_from_feedback_details): Our core PPO code is adapted from OpenAI's original RLHF code and [Huang et al (2024)'s reproduction work](https://openreview.net/forum?id=kHO2ZTa8e3) of OpenAI's summarize from feedback work.
+* [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF): We adapted OpenRLHF's Ray + vLLM distributed code for scaling up PPO RLVR training into the 70B scale.
 
 ## Citation
 
 If you used this repository or our models, please cite our work:
 
 Tulu 1:
-
 ```bibtex
 @misc{wang2023far,
    title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources},
@@ -115,7 +117,6 @@ Tulu 1:
 ```
 
 Tulu 2:
-
 ```bibtex
 @misc{ivison2023camels,
       title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2},
@@ -128,7 +129,6 @@ Tulu 2:
 ```
 
 Tulu 2.5:
-
 ```bibtex
 @misc{ivison2024unpacking,
       title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback},
@@ -141,7 +141,6 @@ Tulu 2.5:
 ```
 
 Tulu 3:
-
 ```bibtex
 @article{lambert2024tulu3,
   title = {Tülu 3: Pushing Frontiers in Open Language Model Post-Training},
@@ -153,8 +152,7 @@ Tulu 3:
 }
 ```
 
-Olmo 3:
-
+OLMo 3:
 ```bibtex
 @misc{olmo2025olmo3,
       title={OLMo 3},
