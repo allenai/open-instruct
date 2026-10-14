@@ -1,0 +1,282 @@
+"""Managed teacher-free Megatron verifier-GRPO workflow: prepare, convert, train, audit, reload."""
+
+import importlib.util
+import json
+import math
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+from pathlib import Path
+
+from open_instruct import logger_utils
+from open_instruct.miles.datasets import run_data
+from open_instruct.miles.distillation import opd_runtime
+from open_instruct.miles.errors import InputError
+from open_instruct.miles.execution import workflow
+from open_instruct.miles.megatron_grpo import (
+    checkpoint_reuse,
+    conversion,
+    grpo_args,
+    grpo_audit,
+    grpo_config,
+    grpo_hooks,
+)
+
+logger = logger_utils.setup_logger(__name__)
+
+
+def execute(spec):
+    root = Path(spec.output["root"])
+    with workflow.run_directory(spec) as (_, state):
+        model = workflow.prepare_model(spec)
+        descriptor = json.loads((Path(model) / "config.json").read_text())
+        architecture_name = spec.document["model"]["architecture"]
+        if descriptor.get("model_type") != grpo_config.ARCHITECTURES[architecture_name]:
+            raise InputError(
+                f"model.architecture={architecture_name} requires an HF model_type of "
+                f"{grpo_config.ARCHITECTURES[architecture_name]!r}; got {descriptor.get('model_type')!r}"
+            )
+        inf, trainer, training = (spec.document[k] for k in ("inference", "trainer", "training"))
+        data_key = workflow.fingerprint(
+            {
+                "data": spec.document["data"],
+                "model": workflow.model_identity(model),
+                "prompt_limit": inf["max_prompt_length"],
+            }
+        )[:16]
+        prepared = {
+            "model": model,
+            "identities": {"model": workflow.model_identity(model)},
+            "data": run_data.prepare_data(
+                spec.document["data"],
+                Path(model),
+                Path(spec.output["assets"]) / f"data-{data_key}",
+                max_prompt_length=inf["max_prompt_length"],
+                seed=spec.document["data"]["seed"],
+            ),
+        }
+        workflow.write_json(root / "prepared.json", prepared)
+        if training["phase"] == "prepare":
+            workflow.write_json(root / "result.json", {"status": "prepared", "algorithm": "grpo"})
+            state.update(status="complete", finished_unix=time.time())
+            workflow.write_json(root / "workflow.json", state)
+            return
+        native = importlib.util.find_spec("miles")
+        if native is None or native.origin is None:
+            raise InputError("Use the qualified native Megatron/SGLang image with committed code overlay")
+        miles_root = Path(native.origin).resolve().parents[1]
+        fully_async = bool(spec.document["miles"].get("fully_async", False))
+        dppo = spec.dppo_settings()
+        environment = dict(os.environ)
+        environment.pop("SGLANG_EXTERNAL_MODEL_PACKAGE", None)
+        environment.update(
+            {
+                "PYTHONPATH": "/src/Megatron-LM:" + environment.get("PYTHONPATH", ""),
+                "MILES_USE_LEGACY_ROLLOUT_V1": "0" if fully_async else "1",
+                "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+                "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
+                grpo_hooks.OUTPUT_ENV: str(root),
+                **grpo_hooks.reward_environment(prepared["data"]["reward_config"], spec.document["reward"]),
+                **(dppo.environment() if dppo else {}),
+            }
+        )
+        converter_path = miles_root / "tools/convert_hf_to_torch_dist.py"
+        converter_source = converter_path.read_text()
+        (root / "native-converter.py").write_text(converter_source)
+        converter_sha = conversion.verify_keep_pp1(converter_source, str(converter_path))
+        workflow.write_json(
+            root / "conversion-control.json",
+            {
+                "native_source_sha256": converter_sha,
+                "CONVERT_KEEP_PP1": "1",
+                "tensor_parallel_size": trainer["tensor_parallel_size"],
+                "pipeline_parallel_size": 1,
+            },
+        )
+        with (root / "runtime-tests.log").open("w") as stream:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "no:cacheprovider",
+                    "-q",
+                    # The CPU contract plus the pinned-MILES checks (converter guard, DPPO loss, async
+                    # producer) against the image's own MILES.
+                    "/opt/core-rl/open_instruct/test_miles_megatron_grpo.py",
+                    "/opt/core-rl/tests/miles/test_megatron_grpo_runtime.py",
+                    # The packed FlashAttention check the Qwen3.5 OPD route runs (8 heads, 2 groups, dim 256).
+                    *(["/opt/core-rl/tests/miles/test_opd_attention.py"] if architecture_name == "qwen3.5-2B" else []),
+                    *(["/opt/core-rl/open_instruct/test_miles_dppo.py"] if dppo else []),
+                    *(["/opt/core-rl/tests/miles/test_opd_async.py"] if fully_async else []),
+                ],
+                env=environment,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                check=True,
+                timeout=180,
+            )
+        layout = spec.allocation()
+        visible = environment.get("CUDA_VISIBLE_DEVICES", ",".join(map(str, range(layout["gpus_per_replica"])))).split(
+            ","
+        )
+        if len(visible) != layout["gpus_per_replica"]:
+            raise InputError("Visible GPU count differs from the audited teacher-free allocation")
+        environment["OI_GRPO_RAY_GPUS"] = str(layout["ray_gpus"])
+        architecture = opd_runtime.model_args(miles_root, environment, spec.document["model"]["architecture"])
+        tp = trainer["tensor_parallel_size"]
+        checkpoint = Path(spec.output["assets"]) / (
+            "learner-tp" + str(tp) + "-" + workflow.fingerprint(architecture)[:12]
+        )
+        provenance = spec.document["model"]["native_checkpoint"]
+        if provenance:
+            checkpoint, reuse_audit = checkpoint_reuse.reuse(
+                provenance, spec.model, trainer, spec.output, model, converter_sha, architecture
+            )
+            workflow.write_json(root / "checkpoint-reuse.json", reuse_audit)
+            logger.info("Using read-only completed native initial checkpoint: %s", checkpoint)
+        elif not (checkpoint / "latest_checkpointed_iteration.txt").exists():
+            conversion_env = environment | {
+                "CONVERT_KEEP_PP1": "1",
+                "CUDA_VISIBLE_DEVICES": ",".join(visible[i] for i in layout["roles"]["trainer"][:tp]),
+            }
+            command = conversion.conversion_command(sys.executable, miles_root, architecture, model, checkpoint, tp)
+            with (root / "conversion.log").open("w") as stream:
+                logger.info("Starting TP%s/PP1 learner conversion; retained log: %s", tp, root / "conversion.log")
+                conversion.run_conversion(command, conversion_env, stream)
+                logger.info("Learner conversion completed")
+        workflow.write_json(
+            root / "conversion-control.json",
+            {
+                "native_source_sha256": converter_sha,
+                "CONVERT_KEEP_PP1": "1",
+                "tensor_parallel_size": tp,
+                "pipeline_parallel_size": 1,
+                "mode": "reuse" if provenance else "conversion-cache",
+                "checkpoint_path": str(checkpoint),
+            },
+        )
+        arguments = grpo_args.native_arguments(spec, prepared, checkpoint, architecture)
+        workflow.write_json(root / "native-arguments.json", arguments)
+        preflight = grpo_args.preflight_code(spec)
+        with (root / "native-preflight.log").open("w") as stream:
+            subprocess.run(
+                [sys.executable, "-c", preflight, *arguments],
+                env=environment,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                check=True,
+                timeout=180,
+            )
+        process = None
+        try:
+            with (root / "training.log").open("a") as stream:
+                process = subprocess.Popen(
+                    [sys.executable, "-m", "open_instruct.miles.megatron_grpo.grpo_train", *arguments],
+                    env=environment,
+                    stdout=stream,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                if process.wait():
+                    raise RuntimeError("Native verifier GRPO failed; inspect training.log")
+            marker = root / "checkpoints/latest_checkpointed_iteration.txt"
+            if not marker.exists():
+                raise RuntimeError("Missing recoverable Megatron checkpoint")
+            audit = grpo_audit.audit(spec, prepared)
+            export = audit["export"]["path"]
+            reload_env = environment | {
+                "CUDA_VISIBLE_DEVICES": ",".join(
+                    visible[i] for i in layout["roles"]["student"][: inf["tensor_parallel_size"]]
+                )
+            }
+            port = opd_runtime.port()
+            url = f"http://127.0.0.1:{port}"
+            command = [
+                sys.executable,
+                "-m",
+                "sglang.launch_server",
+                "--model-path",
+                export,
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--tp",
+                str(inf["tensor_parallel_size"]),
+                "--mem-fraction-static",
+                "0.3",
+                "--context-length",
+                str(inf["max_context_length"]),
+                "--max-running-requests",
+                "4",
+                "--max-total-tokens",
+                str(inf["max_context_length"] * 4),
+                "--attention-backend",
+                "triton",
+                "--sampling-backend",
+                "pytorch",
+                "--disable-flashinfer-autotune",
+                "--disable-cuda-graph",
+                "--disable-radix-cache",
+            ]
+            with (root / "export-reload.log").open("w") as stream:
+                process = subprocess.Popen(
+                    command, env=reload_env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True
+                )
+                deadline = time.monotonic() + 900
+                while True:
+                    if process.poll() is not None:
+                        raise RuntimeError("Fresh export server failed")
+                    try:
+                        info = opd_runtime.request(url + "/get_model_info")
+                        if info.get("model_path") != export:
+                            raise RuntimeError("Fresh serving process loaded a different model")
+                        break
+                    except (urllib.error.URLError, TimeoutError):
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Fresh export reload deadline exceeded") from None
+                        time.sleep(2)
+                first = json.loads((root / grpo_hooks.EVIDENCE).read_text().splitlines()[0])
+                probe = opd_runtime.request(
+                    url + "/generate",
+                    {
+                        "input_ids": first["tokens"][: -first["response_length"]],
+                        "sampling_params": {"max_new_tokens": 32, "temperature": 0},
+                        "return_logprob": True,
+                    },
+                    timeout=180,
+                )
+                entries = probe.get("meta_info", {}).get("output_token_logprobs", [])
+                if not entries or not all(math.isfinite(float(item[0])) for item in entries):
+                    raise RuntimeError("Fresh export produced missing or nonfinite token log probabilities")
+                workflow.write_json(
+                    root / "export-reload.json",
+                    {
+                        "passed": True,
+                        "model": info,
+                        "generation": probe,
+                        "note": "Fresh-process reload, not numerical equivalence.",
+                    },
+                )
+            if provenance:
+                checkpoint_reuse.verify_checkpoint(provenance, spec.output)
+                workflow.write_json(root / "checkpoint-reuse-final.json", {"unchanged": True, "path": str(checkpoint)})
+            workflow.write_json(
+                root / "result.json",
+                {
+                    "status": "trained",
+                    "algorithm": "grpo",
+                    "teacher": None,
+                    "checkpoint_iteration": marker.read_text().strip(),
+                    "optimizer_updates": training["num_rollouts"],
+                    "note": "Reward-learning mechanics, audit and fresh export reload; no throughput or learning-quality claim.",
+                },
+            )
+            state.update(status="complete", finished_unix=time.time())
+            workflow.write_json(root / "workflow.json", state)
+        finally:
+            opd_runtime.stop(process)
