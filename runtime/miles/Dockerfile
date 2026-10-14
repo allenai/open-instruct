@@ -10,6 +10,12 @@ RUN --mount=type=secret,id=github_token,required=true \
     python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources \
     --github-token-file /run/secrets/github_token
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
+# Megatron OPD conversion uses this immutable mbridge revision.
+RUN uv pip install --system --no-deps \
+    "mbridge @ git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c" \
+    "nvidia-cudnn-cu13==9.23.2.1"
+ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
+ENV CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 
 FROM runtime-base AS application
 # The background evaluator submitter runs in an isolated, deadline-bounded process.
