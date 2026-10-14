@@ -132,14 +132,19 @@ COMPILE="${COMPILE:-${DEFAULT_COMPILE:-1}}"
 if [[ "$COMPILE" == "1" ]]; then COMPILE_FLAG=""; else COMPILE_FLAG="--no_compile_model"; fi
 # mason mounts only oe-adapt-default and oe-training-default; a base under any
 # other bucket needs --extra_weka_buckets or the job fails at load time with a
-# missing path (#1897). Derived from MODEL so a manual override cannot forget it.
-EXTRA_BUCKET_FLAGS=""
-if [[ "$MODEL" =~ ^/weka/([^/]+)/ ]]; then
-    bucket="${BASH_REMATCH[1]}"
-    if [[ "$bucket" != "oe-adapt-default" && "$bucket" != "oe-training-default" ]]; then
-        EXTRA_BUCKET_FLAGS="--extra_weka_buckets $bucket"
+# missing path (#1897). Derived from MODEL and OUTPUT_DIR so a manual override cannot
+# forget it: an unmounted OUTPUT_DIR would write to the container's own disk and be lost.
+EXTRA_BUCKETS=()
+for path in "$MODEL" "${OUTPUT_DIR:-}"; do
+    if [[ "$path" =~ ^/weka/([^/]+)/ ]]; then
+        bucket="${BASH_REMATCH[1]}"
+        if [[ "$bucket" != "oe-adapt-default" && "$bucket" != "oe-training-default" && " ${EXTRA_BUCKETS[*]:-} " != *" $bucket "* ]]; then
+            EXTRA_BUCKETS+=("$bucket")
+        fi
     fi
-fi
+done
+EXTRA_BUCKET_FLAGS=""
+if [[ ${#EXTRA_BUCKETS[@]} -gt 0 ]]; then EXTRA_BUCKET_FLAGS="--extra_weka_buckets ${EXTRA_BUCKETS[*]}"; fi
 # H038: the tokenizer, its revision and the template name are overridable so the Olmo 3.5
 # tokenizer (allenai/dolma2-tokenizer-olmo35, generation-annotated template) can carry the
 # tool-use mixtures. All three are tokenization cache keys. A template name that is not in
