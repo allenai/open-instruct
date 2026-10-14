@@ -208,6 +208,23 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
 
         self.assertNotEqual(hash1, hash2)
 
+    def test_seed_ignored_without_max_train_samples(self):
+        tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
+
+        hash1 = dpo_utils.compute_reference_cache_hash(make_test_args(seed=1), tc)
+        hash2 = dpo_utils.compute_reference_cache_hash(make_test_args(seed=2), tc)
+
+        self.assertEqual(hash1, hash2)
+
+    def test_seed_changes_hash_with_max_train_samples(self):
+        # The subset is drawn after shuffling, so which rows it holds depends on the seed.
+        tc = TokenizerConfig(tokenizer_name_or_path="allenai/OLMo-2-1124-7B")
+
+        hash1 = dpo_utils.compute_reference_cache_hash(make_test_args(seed=1, max_train_samples=2000), tc)
+        hash2 = dpo_utils.compute_reference_cache_hash(make_test_args(seed=2, max_train_samples=2000), tc)
+
+        self.assertNotEqual(hash1, hash2)
+
 
 if __name__ == "__main__":
     unittest.main()

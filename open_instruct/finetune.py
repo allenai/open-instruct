@@ -52,6 +52,7 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
+    sft_tokenize_fn_args,
     visualize_token,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
@@ -166,6 +167,16 @@ class FlatArguments:
             "help": (
                 "The maximum total input sequence length after tokenization. "
                 "Sequences longer than this will be truncated,"
+            )
+        },
+    )
+    over_length_strategy: str = field(
+        default="keep",
+        metadata={
+            "help": (
+                "What to do with a conversation that max_seq_length truncation cut short: 'keep' "
+                "leaves it unterminated, 'terminate' ends it with a trainable EOS, 'drop' "
+                "discards it. The default leaves existing dataset cache hashes untouched."
             )
         },
     )
@@ -364,6 +375,14 @@ def _create_scheduler(args: FlatArguments, optimizer, num_training_steps: int):
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
+    # A LoRA checkpoint saves only the adapters, so the seeded rows of promoted tokens -- which
+    # live in the frozen base embedding -- would not ship with it: the export would pair the
+    # promoted tokenizer with the untrained reserved-slot rows. Refuse before loading anything.
+    if args.use_lora and tc.reserved_slot_tokens:
+        raise ValueError(
+            "--reserved_slot_tokens is not supported with --use_lora/--use_qlora: the adapter checkpoint "
+            "does not carry the seeded embedding rows of the promoted tokens."
+        )
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -497,7 +516,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.dataset_mixer is not None:
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
-        transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        transform_fn_args = [sft_tokenize_fn_args(args.max_seq_length, args.over_length_strategy), {}]
         train_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
@@ -614,6 +633,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
+
+    # Tokens promoted into reserved vocabulary slots inherit an untrained row; seed it from the
+    # pieces the string used to tokenize into before training reads it. Gathers nothing unless
+    # the flag promoted something. A resume's load_state below overwrites these rows, as it must.
+    model_utils.initialize_promoted_token_embeddings_under_zero(model, tokenizer)
 
     if args.use_lora:
         if args.use_qlora:

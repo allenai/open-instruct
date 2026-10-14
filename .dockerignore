@@ -17,10 +17,14 @@ local_dataset_cache/
 
 
 # Virtual environments
-.venv/
-venv/
-ENV/
-env/
+# Use **/ so nested venvs are excluded too: patterns are matched relative to the
+# context root, so a bare `.venv/` misses `oe-eval-internal/.venv/`. That matters
+# because uv builds venvs whose bin/python symlinks to the host interpreter, and
+# the dangling symlink fails the COPY checksum ("... .venv/bin/python: not found").
+**/.venv/
+**/venv/
+**/ENV/
+**/env/
 
 # IDE and editor files
 .vscode/

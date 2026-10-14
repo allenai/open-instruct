@@ -79,5 +79,41 @@ class TestWorldAwarePacking(unittest.TestCase):
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
 
 
+class TestResultIsStale(unittest.TestCase):
+    def test_disabled_when_max_age_none(self):
+        self.assertFalse(data_loader.result_is_stale(model_step=0, training_step=100, max_result_age_steps=None))
+
+    def test_disabled_when_inputs_missing(self):
+        self.assertFalse(data_loader.result_is_stale(model_step=None, training_step=100, max_result_age_steps=4))
+        self.assertFalse(data_loader.result_is_stale(model_step=0, training_step=None, max_result_age_steps=4))
+
+    def test_stale_when_lag_exceeds_threshold(self):
+        # lag = 100 - 95 = 5 > 4 -> stale
+        self.assertTrue(data_loader.result_is_stale(model_step=95, training_step=100, max_result_age_steps=4))
+
+    def test_not_stale_at_threshold(self):
+        # lag = 100 - 96 = 4, not > 4 -> fresh
+        self.assertFalse(data_loader.result_is_stale(model_step=96, training_step=100, max_result_age_steps=4))
+
+    def test_not_stale_when_fresh(self):
+        self.assertFalse(data_loader.result_is_stale(model_step=100, training_step=100, max_result_age_steps=4))
+
+    def test_max_result_age_requires_replenish_prompts(self):
+        # The guard fires before any of the (here-dummy) inputs are used.
+        with self.assertRaisesRegex(ValueError, "replenish_prompts"):
+            data_loader.accumulate_inference_batches(
+                inference_results_Q=None,
+                generation_config=None,
+                num_prompts=1,
+                model_dims=None,
+                tokenizer=None,
+                dataset=None,
+                base_env_config=None,
+                training_step=0,
+                replenish_prompts=False,
+                max_result_age_steps=4,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

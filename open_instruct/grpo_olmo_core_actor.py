@@ -174,7 +174,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             )
 
         ac_config = olmo_core_utils.build_ac_config(
-            self.grpo_config.activation_memory_budget, self.grpo_config.compile_model
+            self.grpo_config.activation_memory_budget,
+            self.grpo_config.compile_model,
+            self.grpo_config.activation_checkpointing_mode,
+            self.grpo_config.activation_checkpointing_modules,
         )
 
         self.train_module = GRPOTrainModule(
@@ -374,7 +377,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.grpo_config.checkpoint_state_freq > 0:
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-                checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
+                checkpointing_steps=self.grpo_config.checkpoint_state_freq,
+                ephemeral_save_interval=None,
+                max_checkpoints=self.grpo_config.keep_last_n_checkpoints,
             )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 

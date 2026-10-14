@@ -11,12 +11,27 @@ if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
     echo "Pytest filter: ${PYTEST_ARGS[*]}"
 fi
 
+case "$BEAKER_IMAGE" in
+    *-cuda13)
+        CUDA_VERSION=13
+        CLUSTERS=(ai2/holmes)
+        ;;
+    *)
+        CUDA_VERSION=12
+        CLUSTERS=(ai2/jupiter ai2/ceres ai2/saturn)
+        ;;
+esac
+
+CLUSTER_ARGS=()
+for cluster in "${CLUSTERS[@]}"; do
+    CLUSTER_ARGS+=(--cluster "$cluster")
+done
+
+echo "Using CUDA $CUDA_VERSION test clusters: ${CLUSTERS[*]}"
 uv run python mason.py \
-       --cluster ai2/jupiter \
-       --cluster ai2/ceres \
-       --cluster ai2/saturn \
+       "${CLUSTER_ARGS[@]}" \
        --image "$BEAKER_IMAGE" \
-       --description "GPU tests for test_*_gpu.py" \
+       --description "CUDA $CUDA_VERSION GPU tests for test_*_gpu.py" \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \

@@ -671,7 +671,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                         num_training_gpus=accelerator.num_processes,
                     )["mfu"]
                     metrics_to_log["perf/tokens_per_second_step"] = step_tokens_per_second
-                    metrics_to_log["perf/tokens_per_second_total"] = total_tokens_per_second
+                    metrics_to_log["perf/tokens_per_second_avg"] = total_tokens_per_second
 
                     if accelerator.is_main_process:
                         logger.info(logger_str)

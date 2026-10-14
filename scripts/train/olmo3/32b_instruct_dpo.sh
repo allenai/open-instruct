@@ -52,7 +52,7 @@ uv run python mason.py \
     --logging_steps 1 \
     --gradient_checkpointing \
     --report_to wandb \
-    --chat_template_name olmo123 \
+    --chat_template_name tokenizer_default \
     --with_tracking \
     --eval_workspace ai2/olmo-instruct \
     --eval_priority urgent \

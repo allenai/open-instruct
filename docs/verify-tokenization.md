@@ -51,7 +51,7 @@ side of the A/B.
 
 Launch both images against the full production mixer with identical
 args (`Dolci-Think-SFT-32B 1.0` + 5 tool datasets at 3.0x,
-`--chat_template_name olmo123`, `--max_seq_length 32768`). Write into
+`--chat_template_name tokenizer_default`, `--max_seq_length 32768`). Write into
 distinct weka output dirs, e.g.
 `/weka/oe-adapt-default/$USER/dataset/olmo-hybrid-{main,head}`.
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
+import torch
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
@@ -123,7 +124,6 @@ class PerfCallback(Callback):
     """Calculates MFU and tokens_per_second using same formula as dpo_tune_cache.py."""
 
     model_dims: utils.ModelDims
-    per_device_train_batch_size: int
     gradient_accumulation_steps: int
     dp_world_size: int
     tensor_parallel_degree: int = 1
@@ -138,7 +138,7 @@ class PerfCallback(Callback):
     _batch_load_time: float = field(default=0.0, repr=False)
     _wall_clock_step_start: float = field(default=0.0, repr=False)
     _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
-    _interval_num_sequences: int = field(default=0, repr=False)
+    _interval_num_sequences: int | torch.Tensor = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
 
@@ -160,10 +160,7 @@ class PerfCallback(Callback):
         self._prev_pre_step_time = self._pre_step_time
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
-        num_seqs = padding_free_collator.get_num_sequences(batch)
-        if num_seqs is None:
-            num_seqs = self.per_device_train_batch_size * 2
-        self._interval_num_sequences += num_seqs * self.dp_world_size
+        self._interval_num_sequences += padding_free_collator.get_num_sequences(batch) * self.dp_world_size
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -185,9 +182,7 @@ class PerfCallback(Callback):
         tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
-        avg_sequence_length = (
-            total_tokens_step / self._interval_num_sequences if self._interval_num_sequences > 0 else 0
-        )
+        avg_sequence_length = total_tokens_step / int(self._interval_num_sequences)
 
         mfu_result = self.model_dims.approximate_learner_utilization(
             total_tokens=total_tokens_step,
@@ -201,10 +196,10 @@ class PerfCallback(Callback):
 
         seconds_per_step = interval_end - self._step_start_time
 
-        self.trainer.record_metric("perf/mfu", mfu_result["mfu"], reduce_type=None)
+        self.trainer.record_metric("perf/mfu_step", mfu_result["mfu"], reduce_type=None)
         self.trainer.record_metric("perf/mfu_avg", mfu_avg, reduce_type=None)
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
-        self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_step", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
         self.trainer.record_metric(
             "perf/tokens_per_second_per_gpu",

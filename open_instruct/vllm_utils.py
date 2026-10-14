@@ -136,7 +136,7 @@ class WeightUpdateRPCArgs(TypedDict):
 
 @dataclasses.dataclass
 class SamplingConfig:
-    temperature: float = 0.7
+    temperature: float
     top_p: float = 1.0
     max_tokens: int = 256
     min_tokens: int = 0

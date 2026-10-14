@@ -105,6 +105,7 @@ from open_instruct.model_utils import (
     load_ref_policy,
     print_rich_single_line_metrics,
     push_folder_to_hub,
+    uses_olmo3_generation_config,
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
@@ -841,12 +842,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_to_save = model_to_save.module
 
         # Set generation config after unwrapping to ensure it's on the actual model being saved
-        # Check both chat_template_name and model name for OLMo 3 detection
-        model_name = getattr(model_to_save.config, "_name_or_path", "") or ""
-        is_olmo3 = (
-            chat_template_name is not None and "olmo" in chat_template_name.lower()
-        ) or "olmo-3" in model_name.lower()
-        if is_olmo3:
+        if uses_olmo3_generation_config(chat_template_name, tokenizer, model_to_save):
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters
