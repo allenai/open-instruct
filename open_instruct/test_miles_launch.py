@@ -223,7 +223,8 @@ def test_jupiter_defaults_to_flash_attention_3_and_the_preflight_checks_it(tmp_p
     )
     assert run.compile().core.attention_backend == expected
     command = launch.specification(IMAGE_ID, run)["tasks"][0]["arguments"][0]
-    assert f"preflight_attention --backend {expected}" in command
+    # Only backends the preflight knows how to exercise are checked before training.
+    assert (f"preflight_attention --backend {expected}" in command) == (expected != "te")
 
 
 def test_jupiter_cuda_path_cli_override_and_secret_precedence(tmp_path):
