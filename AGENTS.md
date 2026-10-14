@@ -9,7 +9,7 @@ Choose according to model and workload support, preserve the user's selected
 workflow, and identify support gaps explicitly. MILES does not deprecate the
 existing GRPO trainers.
 
-For MILES GPU runs on `ai2/jupiter`, keep the pinned MILES image. RunSpec defaults
+For MILES GPU runs on `ai2/jupiter` or `ai2/saturn`, keep the pinned MILES image. RunSpec defaults
 `launch.env.LD_LIBRARY_PATH` to
 `/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64`.
 This selects the image's CUDA forward-compatibility libraries on the older host

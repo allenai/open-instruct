@@ -98,8 +98,8 @@ debug launch script is involved.
 
 ## Jupiter CUDA compatibility
 
-For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` automatically sets
-the compatibility library path inside the Beaker job. The resolved value appears
+For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` or `"ai2/saturn"` (both have
+CUDA 12.8 host drivers) automatically sets the compatibility library path inside the Beaker job. The resolved value appears
 in `plan`, the submitted configuration and the launch receipt:
 
 ```toml

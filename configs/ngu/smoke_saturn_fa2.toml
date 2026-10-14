@@ -34,8 +34,6 @@ WANDB_API_KEY = "michaeln_WANDB_API_KEY"
 HF_TOKEN = "michaeln_HF_TOKEN"
 
 [launch.env]
-# Saturn's host driver (12.8) is older than the image's CUDA 13 runtime; use its forward-compat libraries.
-LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 
 [data]

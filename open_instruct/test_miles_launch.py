@@ -195,7 +195,7 @@ def test_jupiter_cuda_default_and_explicit_overrides_reach_workers(tmp_path, clu
         env["LD_LIBRARY_PATH"] = override
     run = spec(tmp_path, launch={"cluster": cluster, "env": env})
     expected = override
-    if cluster == "ai2/jupiter" and override is None:
+    if cluster in ("ai2/jupiter", "ai2/saturn") and override is None:
         expected = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
     assert run.launch["env"].get("LD_LIBRARY_PATH") == expected
     assert run.plan()["launch"]["env"] == run.launch["env"]
