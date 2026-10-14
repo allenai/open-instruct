@@ -1,0 +1,16 @@
+# Step 1 of 2: adds FlashAttention 3 (Hopper, sm_90a) to the MILES base runtime so Core's flash_3
+# attention backend runs on H100 (ai2/jupiter); FlashAttention 4 (flash_4) supports only Blackwell.
+# Produced Beaker 01M4WKW6THBXKR9QVNQYV8PXTF from the previous base, Beaker 01M24E7MSDGN2QFW1T8Z31BCKS
+# (torch 2.13+cu130, nvcc 13.0). Step 2 is Dockerfile.flash-attn-2.
+#
+# Build the wheel inside the previous base (no GPU needed):
+#   git clone https://github.com/Dao-AILab/flash-attention && cd flash-attention
+#   git checkout 1fc0221183e799363001394a12dd9e78e15f5dda && git submodule update --init csrc/cutlass
+#   cd hopper && FLASH_ATTENTION_DISABLE_FP8=TRUE FLASH_ATTENTION_DISABLE_SM80=TRUE python setup.py bdist_wheel
+# Then, with the wheel in the build context:
+#   docker build -f runtime/miles/Dockerfile.flash-attn-3 --build-arg BASE_IMAGE=<previous base> <dir with wheel>
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY flash_attn_3-3.0.1-cp310-abi3-linux_x86_64.whl /tmp/
+RUN uv pip install --system --no-deps /tmp/flash_attn_3-3.0.1-cp310-abi3-linux_x86_64.whl && rm /tmp/flash_attn_3-*.whl
+RUN python -c "import importlib.util as u; assert u.find_spec('flash_attn_interface') and u.find_spec('flash_attn_3')"

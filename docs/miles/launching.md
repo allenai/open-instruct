@@ -98,8 +98,8 @@ debug launch script is involved.
 
 ## Jupiter CUDA compatibility
 
-For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` automatically sets
-the compatibility library path inside the Beaker job. The resolved value appears
+For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` or `"ai2/saturn"` (both have
+CUDA 12.8 host drivers) automatically sets the compatibility library path inside the Beaker job. The resolved value appears
 in `plan`, the submitted configuration and the launch receipt:
 
 ```toml
@@ -137,6 +137,10 @@ libraries already present in the image; it does not upgrade the host driver or
 establish support for arbitrary image/driver combinations. After changing either,
 verify CUDA initialization and a short training lifecycle on the target hardware.
 Size the workload for Jupiter's H100 memory instead of copying B300 memory budgets.
+FlashAttention 4 (`flash_4`, the default elsewhere) supports only Blackwell, so Jupiter (H100) runs
+default `core.attention_backend` to `flash_3` and Saturn (A100) runs to `flash_2`; the pinned runtime
+provides both (see `runtime/miles/Dockerfile.flash-attn-3` and `Dockerfile.flash-attn-2`). An explicit
+value takes precedence.
 
 Then follow the image selection and `plan`/`validate`/`run` steps above, using a
 fresh output path. This setting does not change scheduling or checkpoint recovery.
