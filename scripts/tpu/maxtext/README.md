@@ -29,6 +29,8 @@ The patch is against MaxText `e259ed61`. The fixes are not upstream yet; diffs a
 
 - **Tokenizer:** `allenai/olmo-3-tokenizer-instruct-dev` loads as `GPT2Tokenizer` under transformers 5 and drops the Dolma2 pre-tokenizer. Train with a `PreTrainedTokenizerFast.from_pretrained(...).save_pretrained(dir)` copy.
 - **Checkpointing:** multi-host `train_sft` needs `enable_checkpointing=true`. Otherwise `jax.distributed` is never initialized on TPU and Tunix's checkpoint manager fails.
+- **Every run saves its last step:** Tunix's `_save_last_checkpoint` forces a save at the final step whatever `checkpoint_period` is, because `train_sft` always passes a checkpoint directory. A 20-step smoke of the Olmo 3.5 overlay leaves a ~137 GB checkpoint with optimizer state.
+- **Loss lines are per pod:** each pod's `completed step: N, … loss:` line carries its own value; the 32 pods of one step differed by up to 0.4. Read the step loss from the `LOSS-PARTS step=N ce=… moe_lb=… z=… tokens=…` line, which one pod logs: its `tokens` is the step's loss-token count and the logged total is `ce + moe_lb + z`. Never deduplicate metric-logger lines across pods.
 - **Vocabulary vs tensor parallelism:** the vocabulary (100,278) does not divide by tensor parallelism 4.
   - Do not zero-pad it to 100,352. The padded logits sit at 0 while real logits are often low, which costs +3.2 nats/token.
   - Replicate the vocab axis instead: `logical_axis_rules=[['vocab',[]],['activation_vocab',[]]] sharding_tolerance=0.05`. This matches single-device log-probs to 6e-6.
