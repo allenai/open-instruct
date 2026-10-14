@@ -182,11 +182,13 @@ def build(args):
                 args.publish_workspace,
                 "--description",
                 f"Upstream MILES; build-id={build_id}",
-                "--format",
-                "json",
+                "--quiet",
             ]
         )
-        receipt["beaker"] = json.loads(response)[0]["id"]
+        # `image create` ignores --format; --quiet prints the immutable ID.
+        if not re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", response):
+            raise ValueError(f"Expected a Beaker image ID from image create --quiet, got {response!r}")
+        receipt["beaker"] = response
     (destination / "image.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps(receipt, indent=2))
     print(f"Build artifacts: {destination}")

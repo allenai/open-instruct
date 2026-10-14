@@ -247,6 +247,40 @@ def test_build_has_only_pinned_public_inputs():
     assert build_image.fingerprint(files | {"adapter/change.py": b"change"}) != identity
 
 
+def test_publish_reads_plain_image_id_from_quiet_create(monkeypatch, tmp_path):
+    image = "01M24E7MSDGN2QFW1T8Z31BCKS"
+    lock = build_image.read_lock(build_image.DEFAULT_LOCK)
+
+    def output(command, **kwargs):
+        if command[:3] == ["git", "status", "--porcelain"]:
+            return ""
+        if command[:3] == ["docker", "image", "inspect"]:
+            return "sha256:" + "a" * 64
+        assert command[:3] == ["beaker", "image", "create"]
+        assert "--quiet" in command
+        assert "--format" not in command
+        return image
+
+    monkeypatch.setattr(build_image, "output", output)
+    monkeypatch.setattr(
+        build_image,
+        "inspect_registry",
+        lambda *args: {"config": {"Labels": {"miles.image-inputs": lock["image_inputs"]}}},
+    )
+    monkeypatch.setattr(build_image.subprocess, "run", lambda *args, **kwargs: None)
+    build_image.build(
+        argparse.Namespace(
+            lock=build_image.DEFAULT_LOCK,
+            tag=None,
+            target="runtime",
+            dry_run=False,
+            publish_workspace="ai2/test",
+            output_dir=tmp_path,
+        )
+    )
+    assert json.loads((tmp_path / "image.json").read_text())["beaker"] == image
+
+
 @pytest.mark.parametrize(
     "key,value", [("base_image", "radixark/miles:latest"), ("image_inputs", ""), ("platform", "linux/arm64")]
 )
