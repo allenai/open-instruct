@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "Pinned MILES/Core runtime; see docs/miles/feature-parity.md for qualified scope",
   "base_image": {
-    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
-    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    "beaker": "01M4WKW6THBXKR9QVNQYV8PXTF",
+    "docker_id": "sha256:b93ec406dc04f234215cdc61669dd78ee63e88af58e0afe4b072c07806b07054"
   },
   "sources": {
     "olmo-core": {

@@ -137,6 +137,9 @@ libraries already present in the image; it does not upgrade the host driver or
 establish support for arbitrary image/driver combinations. After changing either,
 verify CUDA initialization and a short training lifecycle on the target hardware.
 Size the workload for Jupiter's H100 memory instead of copying B300 memory budgets.
+FlashAttention 4 (`flash_4`, the default elsewhere) supports only Blackwell, so Jupiter runs default
+`core.attention_backend` to `flash_3`, which the pinned runtime provides for H100
+(see `runtime/miles/Dockerfile.flash-attn-3`); an explicit value takes precedence.
 
 Then follow the image selection and `plan`/`validate`/`run` steps above, using a
 fresh output path. This setting does not change scheduling or checkpoint recovery.

@@ -23,6 +23,7 @@ RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "track
 WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache", "records", "selection"}
 CORE_FIELDS = {field.name for field in dataclasses.fields(CoreConfig)}
 BEAKER_MIN_RUNTIME_LIMIT_SECONDS = 8 * 3600
+JUPITER_CLUSTER = "ai2/jupiter"
 JUPITER_LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -386,7 +387,7 @@ class RunSpec:
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
-        if launch["cluster"] == "ai2/jupiter" and "LD_LIBRARY_PATH" not in launch["secrets"]:
+        if launch["cluster"] == JUPITER_CLUSTER and "LD_LIBRARY_PATH" not in launch["secrets"]:
             # The pinned CUDA runtime needs forward-compatibility libraries on
             # Jupiter's older host driver. Explicit environment values win.
             launch["env"].setdefault("LD_LIBRARY_PATH", JUPITER_LD_LIBRARY_PATH)
@@ -580,7 +581,8 @@ class RunSpec:
         if miles["actor_num_gpus_per_node"] > miles["num_gpus_per_node"]:
             raise InputError("trainer.gpus exceeds the declared physical num_gpus_per_node")
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
-        core.setdefault("attention_backend", "flash_4")
+        # FlashAttention 4 (CuTe) runs only on Blackwell; Jupiter's H100s use the runtime's FlashAttention 3.
+        core.setdefault("attention_backend", "flash_3" if self.launch.get("cluster") == JUPITER_CLUSTER else "flash_4")
         core.setdefault("row_specialization", "dynamic")
         # Roll native checkpoints by default: keep the newest committed one (the
         # final save is always the newest). Set core.checkpoint_keep_every to also

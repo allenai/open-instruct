@@ -208,6 +208,24 @@ def test_jupiter_cuda_default_and_explicit_overrides_reach_workers(tmp_path, clu
     assert payload(task["arguments"][0])["launch"]["env"] == run.launch["env"]
 
 
+@pytest.mark.parametrize(
+    ("cluster", "explicit", "expected"),
+    [
+        ("ai2/jupiter", None, "flash_3"),
+        ("ai2/holmes", None, "flash_4"),
+        ("ai2/jupiter", "te", "te"),
+        ("ai2/holmes", "flash_3", "flash_3"),
+    ],
+)
+def test_jupiter_defaults_to_flash_attention_3_and_the_preflight_checks_it(tmp_path, cluster, explicit, expected):
+    run = spec(
+        tmp_path, launch={"cluster": cluster}, **({"core": {"attention_backend": explicit}} if explicit else {})
+    )
+    assert run.compile().core.attention_backend == expected
+    command = launch.specification(IMAGE_ID, run)["tasks"][0]["arguments"][0]
+    assert f"preflight_attention --backend {expected}" in command
+
+
 def test_jupiter_cuda_path_cli_override_and_secret_precedence(tmp_path):
     run = spec(tmp_path, launch={"cluster": "ai2/jupiter"})
     overridden = RunSpec.from_dict(
