@@ -8,9 +8,15 @@ provenance column (`dataset_source` or `source`) are carried over; `n_tokens` is
 the same tokenizer, for packing and budgeting.
 
 Works for any dataset in this repo's SFT format: `messages` with `role` / `content` /
-`reasoning_content` / `tool_calls[].function.{name,arguments}` (arguments a JSON string) /
-`tool_call_id`, plus an optional top-level `tools` JSON string. Shards are streamed in row-group
-batches, so memory stays flat regardless of shard size.
+`reasoning_content` / `tool_calls[].function.{name,arguments}` (arguments a JSON string or a
+mapping) / `tool_call_id`, plus an optional top-level `tools` (a JSON string or a list of
+schemas). Shards are streamed in row-group batches, so memory stays flat regardless of shard
+size. Datasets without an `id` column get one from --id-from (dotted paths into the row, e.g.
+metadata.task,metadata.episode; `metadata` may be a struct or a JSON string), falling back to
+`<shard>-<row>`; --data-glob selects the shards (the tmax repos keep configs in `all/` and
+`successful/`); --source-column overrides the provenance column. The tokenizer is pinned to the
+revision every Olmo 3.5 text dataset in this series was rendered with; the repo's chat template
+is edited upstream, so pass --tokenizer-revision main deliberately to pick up a newer one.
 
     python scripts/data/render_olmo35_text.py --source allenai/simfc-thinking-qwen35 \\
         --out-dir /weka/oe-adapt-default/<user>/simfc-olmo35-text \\
@@ -39,7 +45,8 @@ logger = logger_utils.setup_logger(__name__)
 
 DEFAULT_SOURCE = "allenai/simfc-thinking-qwen35"
 DEFAULT_TOKENIZER = "allenai/dolma2-tokenizer-olmo35"
-SOURCE_COLUMNS = ("dataset_source", "source")
+DEFAULT_TOKENIZER_REVISION = "56415cee534a924b0b777d70a888266f4eef65ec"
+SOURCE_COLUMNS = ("dataset_source", "source_dataset", "source")
 SCHEMA = pa.schema(
     [("id", pa.string()), ("dataset_source", pa.string()), ("text", pa.string()), ("n_tokens", pa.int32())]
 )
@@ -64,16 +71,42 @@ def _to_chat(row: dict[str, Any]) -> tuple[list[dict[str, Any]], list | None]:
             if isinstance(arguments, str):
                 tc["function"]["arguments"] = json.loads(arguments)
         messages.append(m)
-    tools = json.loads(row["tools"]) if row.get("tools") else None
-    return messages, tools
+    tools = row.get("tools")
+    if isinstance(tools, str):
+        tools = json.loads(tools) if tools else None
+    return messages, tools or None
 
 
-def render_shard(args: tuple[str, str, str, str, str, int | None]) -> tuple[str, int, int, int]:
-    path, out_dir, tokenizer_name, tokenizer_revision, source_column, limit = args
+def _lookup(row: dict[str, Any], path: str) -> Any:
+    value: Any = row
+    for part in path.split("."):
+        if isinstance(value, str):
+            value = json.loads(value)  # e.g. a JSON-string metadata column
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
+def _row_id(row: dict[str, Any], id_from: list[str], fallback: str) -> str:
+    if "id" in row and row["id"] not in (None, ""):
+        return str(row["id"])
+    parts = [str(v) for v in (_lookup(row, p) for p in id_from) if v not in (None, "")]
+    return "/".join(parts) if parts and len(parts) == len(id_from) else fallback
+
+
+def render_shard(args: tuple[str, str, str, str, str, list[str], int | None]) -> tuple[str, int, int, int]:
+    path, out_dir, tokenizer_name, tokenizer_revision, source_column, id_from, limit = args
     tokenizer = _get_tokenizer(tokenizer_name, tokenizer_revision)
-    dst = os.path.join(out_dir, "data", os.path.basename(path))
+    shard = os.path.basename(path)
+    dst = os.path.join(out_dir, "data", shard)
     n_rows = n_tokens_total = n_tokens_max = 0
-    columns = ["id", source_column, "messages", "tools"]
+    names = pq.ParquetFile(path).schema_arrow.names
+    columns = [
+        c
+        for c in dict.fromkeys(["id", source_column, "messages", "tools", *(p.split(".")[0] for p in id_from)])
+        if c in names
+    ]
     with pq.ParquetWriter(dst, SCHEMA, compression="zstd") as writer:
         for batch in pq.ParquetFile(path).iter_batches(batch_size=BATCH_ROWS, columns=columns):
             out: dict[str, list] = {"id": [], "dataset_source": [], "text": [], "n_tokens": []}
@@ -85,7 +118,7 @@ def render_shard(args: tuple[str, str, str, str, str, int | None]) -> tuple[str,
                     messages, tools=tools, tokenize=False, add_generation_prompt=False
                 )
                 n = len(tokenizer(text, add_special_tokens=False)["input_ids"])
-                out["id"].append(row["id"])
+                out["id"].append(_row_id(row, id_from, f"{shard.removesuffix('.parquet')}-{n_rows}"))
                 out["dataset_source"].append(row[source_column])
                 out["text"].append(text)
                 out["n_tokens"].append(n)
@@ -162,8 +195,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source", default=DEFAULT_SOURCE, help="HF dataset repo in this repo's SFT messages format")
     parser.add_argument("--source-revision", default=None, help="commit to render (default: current main)")
+    parser.add_argument("--data-glob", default="data/*.parquet", help="shards to render within the repo")
+    parser.add_argument(
+        "--source-column", default=None, help=f"provenance column (default: first of {SOURCE_COLUMNS})"
+    )
+    parser.add_argument(
+        "--id-from",
+        default="",
+        help="comma-separated dotted paths that make the id when the dataset has no id column, e.g. metadata.task,metadata.episode",
+    )
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
+    parser.add_argument("--tokenizer-revision", default=DEFAULT_TOKENIZER_REVISION)
     parser.add_argument("--num-proc", type=int, default=None, help="worker processes (default: one per shard)")
     parser.add_argument("--limit", type=int, default=None, help="rows per shard, for a quick check")
     parser.add_argument("--push-to", default=None)
@@ -172,28 +215,35 @@ def main() -> None:
 
     api = HfApi()
     source_sha = args.source_revision or api.dataset_info(args.source).sha
-    tokenizer_sha = api.model_info(args.tokenizer).sha
+    tokenizer_sha = api.model_info(args.tokenizer, revision=args.tokenizer_revision).sha
     logger.info(f"source {args.source}@{source_sha}, tokenizer {args.tokenizer}@{tokenizer_sha}")
-    src = snapshot_download(args.source, repo_type="dataset", revision=source_sha, allow_patterns=["data/*.parquet"])
-    files = sorted(glob.glob(os.path.join(src, "data", "*.parquet")))
+    src = snapshot_download(args.source, repo_type="dataset", revision=source_sha, allow_patterns=[args.data_glob])
+    files = sorted(glob.glob(os.path.join(src, args.data_glob)))
     if not files:
-        raise SystemExit(f"no data/*.parquet in {args.source}@{source_sha}")
+        raise SystemExit(f"no {args.data_glob} in {args.source}@{source_sha}")
     if args.limit is not None:
         files = files[:1]
     names = pq.ParquetFile(files[0]).schema_arrow.names
-    source_column = next((c for c in SOURCE_COLUMNS if c in names), None)
-    if source_column is None:
-        raise SystemExit(f"{args.source} has none of {SOURCE_COLUMNS}; columns are {names}")
+    source_column = args.source_column or next((c for c in SOURCE_COLUMNS if c in names), None)
+    if source_column is None or source_column not in names:
+        raise SystemExit(
+            f"{args.source} has no provenance column {args.source_column or SOURCE_COLUMNS}; columns are {names}"
+        )
+    id_from = [p for p in args.id_from.split(",") if p]
+    if "id" not in names:
+        logger.info(f"no id column; ids from {id_from or ['<shard>-<row>']}")
     out_dir = pathlib.Path(args.out_dir)
     (out_dir / "data").mkdir(parents=True, exist_ok=True)
     num_proc = args.num_proc or len(files)
-    jobs = [(f, str(out_dir), args.tokenizer, tokenizer_sha, source_column, args.limit) for f in files]
+    jobs = [(f, str(out_dir), args.tokenizer, tokenizer_sha, source_column, id_from, args.limit) for f in files]
     with multiprocessing.get_context("spawn").Pool(min(num_proc, len(files))) as pool:
         results = pool.map(render_shard, jobs)
     prov = {
         "source_repo": args.source,
         "source_revision": source_sha,
         "source_column": source_column,
+        "data_glob": args.data_glob,
+        "id_from": id_from if "id" not in names else ["id"],
         "tokenizer": args.tokenizer,
         "tokenizer_revision": tokenizer_sha,
         "rows": sum(r[1] for r in results),
