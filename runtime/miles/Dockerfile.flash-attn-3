@@ -1,7 +1,7 @@
-# Adds FlashAttention 3 (Hopper, sm_90a) to the MILES base runtime so Core's flash_3 attention
-# backend runs on H100 (ai2/jupiter); FlashAttention 4 (flash_4) supports only Blackwell.
-# Produced the base pinned in runtime.lock.json (Beaker 01M4WKW6THBXKR9QVNQYV8PXTF) from the previous
-# base, Beaker 01M24E7MSDGN2QFW1T8Z31BCKS (torch 2.13+cu130, nvcc 13.0).
+# Step 1 of 2: adds FlashAttention 3 (Hopper, sm_90a) to the MILES base runtime so Core's flash_3
+# attention backend runs on H100 (ai2/jupiter); FlashAttention 4 (flash_4) supports only Blackwell.
+# Produced Beaker 01M4WKW6THBXKR9QVNQYV8PXTF from the previous base, Beaker 01M24E7MSDGN2QFW1T8Z31BCKS
+# (torch 2.13+cu130, nvcc 13.0). Step 2 is Dockerfile.flash-attn-2.
 #
 # Build the wheel inside the previous base (no GPU needed):
 #   git clone https://github.com/Dao-AILab/flash-attention && cd flash-attention

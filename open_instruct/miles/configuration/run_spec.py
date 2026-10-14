@@ -24,6 +24,7 @@ WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compile
 CORE_FIELDS = {field.name for field in dataclasses.fields(CoreConfig)}
 BEAKER_MIN_RUNTIME_LIMIT_SECONDS = 8 * 3600
 JUPITER_CLUSTER = "ai2/jupiter"
+CLUSTER_ATTENTION_BACKENDS = {JUPITER_CLUSTER: "flash_3", "ai2/saturn": "flash_2"}
 JUPITER_LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -581,8 +582,9 @@ class RunSpec:
         if miles["actor_num_gpus_per_node"] > miles["num_gpus_per_node"]:
             raise InputError("trainer.gpus exceeds the declared physical num_gpus_per_node")
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
-        # FlashAttention 4 (CuTe) runs only on Blackwell; Jupiter's H100s use the runtime's FlashAttention 3.
-        core.setdefault("attention_backend", "flash_3" if self.launch.get("cluster") == JUPITER_CLUSTER else "flash_4")
+        # FlashAttention 4 (CuTe) runs only on Blackwell; the runtime also provides FlashAttention 3 for
+        # Jupiter's H100s and FlashAttention 2 for Saturn's A100s.
+        core.setdefault("attention_backend", CLUSTER_ATTENTION_BACKENDS.get(self.launch.get("cluster"), "flash_4"))
         core.setdefault("row_specialization", "dynamic")
         # Roll native checkpoints by default: keep the newest committed one (the
         # final save is always the newest). Set core.checkpoint_keep_every to also

@@ -1,5 +1,5 @@
 # Keep the qualified binary toolchain, then prepare a reusable source/dependency layer.
-ARG BASE_IMAGE=olmo-miles-base-fa3
+ARG BASE_IMAGE=olmo-miles-base-fa23
 FROM ${BASE_IMAGE} AS runtime-base
 COPY runtime/miles /opt/core-rl/build/runtime/miles
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt

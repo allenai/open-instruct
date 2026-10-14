@@ -212,12 +212,13 @@ def test_jupiter_cuda_default_and_explicit_overrides_reach_workers(tmp_path, clu
     ("cluster", "explicit", "expected"),
     [
         ("ai2/jupiter", None, "flash_3"),
+        ("ai2/saturn", None, "flash_2"),
         ("ai2/holmes", None, "flash_4"),
         ("ai2/jupiter", "te", "te"),
         ("ai2/holmes", "flash_3", "flash_3"),
     ],
 )
-def test_jupiter_defaults_to_flash_attention_3_and_the_preflight_checks_it(tmp_path, cluster, explicit, expected):
+def test_cluster_attention_defaults_and_the_preflight_checks_them(tmp_path, cluster, explicit, expected):
     run = spec(
         tmp_path, launch={"cluster": cluster}, **({"core": {"attention_backend": explicit}} if explicit else {})
     )
