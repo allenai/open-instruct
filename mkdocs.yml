@@ -112,6 +112,7 @@ nav:
         - Sequence packing: miles/sequence-packing.md
         - Async queues: miles/async-pipeline.md
         - Engine drain: miles/engine-drain.md
+        - Experimental OPD: miles/opd.md
       - Data and evaluation:
         - Data and rewards: miles/data-and-evaluation.md
         - Managed judges: miles/managed-judges.md
