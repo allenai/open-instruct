@@ -8,7 +8,7 @@ source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Base"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-smoke-saturn-fa2"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-smoke-saturn-fa2-r2"
 export_hf = true
 
 [launch]
