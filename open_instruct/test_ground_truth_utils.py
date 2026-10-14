@@ -4,10 +4,12 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import nltk
 from parameterized import parameterized
 
 from open_instruct import ground_truth_utils
@@ -247,6 +249,17 @@ class TestIFEvalGWordCounting(unittest.TestCase):
     nltk.word_tokenize, which emits punctuation (".", ",") as standalone tokens. That
     made "exactly N words per sentence" off by one and any multi-sentence response look
     like it had duplicate words. The checkers now count only word tokens (instructions_util.word_tokens)."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            nltk.data.find("tokenizers/punkt_tab/english/")
+        except LookupError:
+            resource_dir = tempfile.TemporaryDirectory(prefix="ifevalg-nltk-")
+            cls.addClassCleanup(resource_dir.cleanup)
+            nltk.download("punkt_tab", download_dir=resource_dir.name, quiet=True, raise_on_error=True)
+            nltk.data.path.insert(0, resource_dir.name)
+            cls.addClassCleanup(nltk.data.path.remove, resource_dir.name)
 
     def setUp(self):
         self.cc = instructions_registry.INSTRUCTION_DICT["count:counting_composition"]("count:counting_composition")
