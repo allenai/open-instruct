@@ -9,6 +9,8 @@ The checked-in lock is a **candidate**. Matching dependency fingerprints and
 passing CPU tests do not establish GPU training correctness. Qualify a short
 rollout/train/weight-update/save/resume lifecycle on the intended hardware before
 long training. No backend or cluster has yet been qualified for this new wrapper.
+The Qwen3-0.6B FSDP smoke test below has passed rollout, training, weight refresh,
+and checkpoint saving on Holmes; this does not validate Megatron or torchtitan.
 
 ## Configuration compatibility
 
@@ -162,3 +164,65 @@ Measure startup/compilation, sustained throughput and memory, and checkpoint/eva
 overhead separately. Keep BF16, efficient attention, batching and data-loading
 settings consistent with the selected upstream recipe. Record image IDs, configs,
 and Beaker runs before changing the lock's qualification status.
+
+### Qwen3-0.6B FSDP smoke test (2026-10-13)
+
+[The four-update run](https://beaker.org/ex/01M4W4CMXVGB6S2SXT1QXB7XST)
+exited successfully on one Holmes node with two B300 GPUs, high priority,
+`min_runtime = 0`, no automatic retry, and a 30-minute timeout. One GPU trained
+with upstream FSDP and the other ran SGLang. The
+[FSDP example](../../configs/miles-upstream/fsdp.toml) records the exercised
+settings with placeholder WEKA paths.
+
+The application image was `01M4W3VJ926WHT53SDGE69CBBA`, build
+`12ea4ee6e13e06dfc982007fa5f4cc68c462b4e6978347794aafc38556238022`, with
+MILES `bef2b237c42f1d6aef30b11df5d332f5ad228338`. Inputs were
+`Qwen/Qwen3-0.6B` at `c1899de289a04d12100db370d81485cdf75e47ca` and the first
+128 rows of `zhuzilin/gsm8k`'s `train.parquet` at
+`0cbd9f31d91ac21a7613dcbc7fef992adac459ae`, written as JSONL with `messages`
+and `label` fields. Preparation ran separately on Saturn with no protected
+minimum runtime; a lightweight Python container avoided pulling the training
+image just to download inputs.
+
+The run produced 128 responses across four batches (eight prompts, four samples
+each, up to 512 response tokens, Qwen thinking disabled). Saved samples have
+finite rollout log probabilities and both zero and one rewards in every batch.
+All four optimizer updates had finite losses and nonzero gradient norms
+(1.72–2.46). Initial weight synchronization passed upstream's exact tensor
+comparison, and subsequent rollouts used weight versions 2, 3, and 4 without
+mixing versions. FSDP saved model, optimizer, scheduler, RNG, and progress
+checkpoints at updates 2 and 4. This is a lifecycle smoke test, not evidence of
+improved model quality or multi-GPU FSDP sharding correctness.
+An independent [CPU inspection](https://beaker.org/ex/01M4W5K9RBW8NYGDA3V2R95CPM)
+confirmed nonempty model, optimizer, and scheduler shards, their metadata,
+the RNG files, and the expected `iteration`/`next_rollout_id` values in both
+checkpoints. It did not deserialize and restore their training state.
+
+The [restart check](https://beaker.org/ex/01M4W5A4NSGV9NN7W1VXDGXJGB) was canceled
+after five minutes in the queue: scheduler events reported no Holmes node with
+two available slots. It never started. **Checkpoint loading and continued
+training remain unverified**, as do preemption recovery, Megatron, and torchtitan.
+The lock remains a candidate. At this upstream revision, FSDP leaves the
+`global_step` and `micro_step` metadata counters at zero; resume position uses
+`iteration` and `next_rollout_id`. Do not use those unused counters as evidence
+that optimizer updates did or did not run.
+
+Measured costs for this small run:
+
+| Phase | Observed time |
+| --- | --- |
+| Cold Beaker image pull | 7 min 39 s |
+| Process start to first rollout | About 5 min 58 s, including imports, model setup, graph capture, and weight checks |
+| SGLang prefill / decode graph capture | 81.4 s / 4.3 s |
+| First training step, including initial compilation | 43.1 s |
+| Three subsequent training steps | 1.57–1.69 s each; actor training alone 5.8k–7.6k tokens/s |
+| Checkpoint writes | About 16.2 s and 12.1 s |
+
+The trainer reported about 22.5 GiB used before its post-step cache clear and
+12.8 GiB afterward; these are sampled readings, not measured peak memory.
+SGLang's 0.4 static-memory fraction reserved about 105.5 GiB of KV cache on a
+B300, far more than this test used. For small smoke runs, consider
+`sglang_max_total_tokens = "32768"` and
+`sglang_disable_prefill_cuda_graph = true` to limit cache reservation and startup
+work. These settings retain decode CUDA graphs. The tiny sample of warm steps
+is not a sustained-throughput benchmark. No evaluation pass was configured.
