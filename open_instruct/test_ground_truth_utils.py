@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, patch
 from parameterized import parameterized
 
 from open_instruct import ground_truth_utils
-from open_instruct.IFEvalG import instructions_registry
 from open_instruct.ground_truth_utils import (
     F1Verifier,
     GSM8KVerifier,
@@ -20,6 +19,7 @@ from open_instruct.ground_truth_utils import (
     PuzzleMatcherVerifier,
     cleanup_all_llm_judge_clients,
 )
+from open_instruct.IFEvalG import instructions_registry
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -262,6 +262,44 @@ class TestIFEvalGWordCounting(unittest.TestCase):
         )
         self.assertTrue(self.cc.check_following(response))
 
+    def test_counting_composition_reported_example_and_whitespace(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        for divider in ("\n* * *\n", "\n  *  *\t*  \n", "\r\n* * *\r\n"):
+            with self.subTest(divider=divider):
+                response = divider.join(["Cats sleep. Dogs run."] * 3)
+                self.assertTrue(self.cc.check_following(response))
+
+    def test_counting_composition_accepts_outer_dividers(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        response = "\n* * *\n".join(["", *["Cats sleep. Dogs run."] * 3, ""])
+        self.assertTrue(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_inline_or_vertical_dividers(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        for divider in (" * * * ", "\n*\n*\n*\n"):
+            with self.subTest(divider=divider):
+                response = divider.join(["Cats sleep. Dogs run."] * 3)
+                self.assertFalse(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_wrong_structure(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        for paragraphs in (
+            ["Cats sleep. Dogs run."] * 2,
+            ["Cats sleep. Dogs run."] * 4,
+            ["Cats sleep."] * 3,
+            ["Cats sleep. Dogs run.", "", "Cats sleep. Dogs run."],
+        ):
+            with self.subTest(paragraphs=paragraphs):
+                self.assertFalse(self.cc.check_following("\n* * *\n".join(paragraphs)))
+
+    def test_counting_composition_via_ifeval_verifier(self):
+        verifier = ground_truth_utils.IFEvalVerifier()
+        label = str([{"instruction_id": ["count:counting_composition"], "kwargs": [{"n_sent": 2, "n_words": 2}]}])
+        result = verifier(
+            tokenized_prediction=[1, 2, 3], prediction="\n* * *\n".join(["Cats sleep. Dogs run."] * 3), label=label
+        )
+        self.assertEqual(result.score, 1.0)
+
     def test_counting_composition_rejects_spaceless_divider(self):
         # The instruction specifies the "* * *" divider; a "***" response does not follow it.
         self.cc.build_description(n_sent=3, n_words=2)
@@ -293,9 +331,7 @@ class TestIFEvalGWordCounting(unittest.TestCase):
         verifier = ground_truth_utils.IFEvalVerifier()
         label = str([{"instruction_id": ["count:count_unique"], "kwargs": [None]}])
         result = verifier(
-            tokenized_prediction=[1, 2, 3],
-            prediction="Alpha beta gamma. Delta epsilon zeta.",
-            label=label,
+            tokenized_prediction=[1, 2, 3], prediction="Alpha beta gamma. Delta epsilon zeta.", label=label
         )
         self.assertEqual(result.score, 1.0)
 

@@ -2389,9 +2389,9 @@ class CountingCompositionChecker(Instruction):
         Returns:
           True if the response meets the requirements; otherwise, False.
         """
-        # Split on the "* * *" divider this instruction specifies (asterisks
-        # separated by spaces).
-        paragraphs = re.split(r"\s?\* \* \*\s?", value)
+        # Match the instructed spaced divider on its own Markdown line. Allow
+        # horizontal whitespace and CRLF without treating inline stars as dividers.
+        paragraphs = re.split(r"^[ \t]*\*[ \t]+\*[ \t]+\*[ \t]*\r?$", value, flags=re.MULTILINE)
         num_paragraphs = len(paragraphs)
 
         for index, paragraph in enumerate(paragraphs):
