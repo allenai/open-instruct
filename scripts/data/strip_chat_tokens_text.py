@@ -36,6 +36,7 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 DEFAULT_TOKENIZER = "allenai/dolma2-tokenizer-olmo35"
+DEFAULT_TOKENIZER_REVISION = "56415cee534a924b0b777d70a888266f4eef65ec"
 SCHEMA = pa.schema(
     [("id", pa.string()), ("dataset_source", pa.string()), ("text", pa.string()), ("n_tokens", pa.int32())]
 )
@@ -163,6 +164,7 @@ def main() -> None:
     parser.add_argument("--source-revision", default=None)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
+    parser.add_argument("--tokenizer-revision", default=DEFAULT_TOKENIZER_REVISION)
     parser.add_argument("--num-proc", type=int, default=None, help="worker processes (default: one per shard)")
     parser.add_argument("--limit", type=int, default=None, help="rows per shard, for a quick check")
     parser.add_argument("--push-to", default=None)
@@ -171,7 +173,7 @@ def main() -> None:
 
     api = HfApi()
     source_sha = args.source_revision or api.dataset_info(args.source).sha
-    tokenizer_sha = api.model_info(args.tokenizer).sha
+    tokenizer_sha = api.model_info(args.tokenizer, revision=args.tokenizer_revision).sha
     logger.info(f"source {args.source}@{source_sha}, tokenizer {args.tokenizer}@{tokenizer_sha}")
     src = snapshot_download(args.source, repo_type="dataset", revision=source_sha, allow_patterns=["data/*.parquet"])
     files = sorted(glob.glob(os.path.join(src, "data", "*.parquet")))
