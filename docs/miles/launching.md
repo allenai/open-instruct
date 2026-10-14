@@ -139,7 +139,7 @@ verify CUDA initialization and a short training lifecycle on the target hardware
 Size the workload for Jupiter's H100 memory instead of copying B300 memory budgets.
 FlashAttention 4 (`flash_4`, the default elsewhere) supports only Blackwell, so Jupiter (H100) runs
 default `core.attention_backend` to `flash_3` and Saturn (A100) runs to `flash_2`; the pinned runtime
-provides both (see `runtime/miles/Dockerfile.flash-attn-3` and `Dockerfile.flash-attn-2`). An explicit
+provides both through `runtime/miles/Dockerfile`. An explicit
 value takes precedence.
 
 Then follow the image selection and `plan`/`validate`/`run` steps above, using a
