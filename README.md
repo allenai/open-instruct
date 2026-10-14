@@ -98,6 +98,10 @@ bash scripts/train/tulu3/dpo_8b.sh
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
+For supported Olmo MoE models, use the [MILES + OLMo-core integration](docs/miles/grpo.md).
+The existing [Core/vLLM and DeepSpeed/vLLM GRPO workflows](docs/algorithms/grpo.md)
+remain available for dense-model training; the commands below use DeepSpeed/vLLM.
+
 We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_image_and_launch.sh`, which builds the Beaker image from your current commit and runs the chosen script:
 
 ```bash
