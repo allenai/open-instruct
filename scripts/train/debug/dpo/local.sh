@@ -17,4 +17,5 @@ uv run torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --chat_template_name olmo \
     --exp_name "dpo-local-debug-$(date +%s)" \
     --seed 123 \
-    --push_to_hub false
+    --push_to_hub false \
+    --no_try_launch_beaker_eval_jobs

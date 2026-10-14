@@ -188,9 +188,22 @@ class EvalConfig:
     """The priority of auto-launched evaluation jobs"""
 
 
-REFERENCE_LOGPROBS_CACHE_PATH = os.environ.get(
-    "REFERENCE_LOGPROBS_CACHE_PATH", "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
-)
+REFERENCE_LOGPROBS_CACHE_PATH = "/weka/oe-adapt-default/allennlp/deletable_reference_logprobs_cache"
+
+
+def get_reference_logprobs_cache_path() -> pathlib.Path:
+    """Resolve the directory used for caching reference logprobs.
+
+    The `REFERENCE_LOGPROBS_CACHE_PATH` environment variable always wins. On Beaker we keep
+    the shared Weka cache; elsewhere we default to a repo-relative directory so local debug
+    runs (e.g. `scripts/train/debug/dpo/local.sh`) work on machines without Weka mounted.
+    """
+    if env_path := os.environ.get("REFERENCE_LOGPROBS_CACHE_PATH"):
+        return pathlib.Path(env_path)
+    if utils.is_beaker_job():
+        return pathlib.Path(REFERENCE_LOGPROBS_CACHE_PATH)
+    return pathlib.Path("local_reference_logprobs_cache")
+
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
