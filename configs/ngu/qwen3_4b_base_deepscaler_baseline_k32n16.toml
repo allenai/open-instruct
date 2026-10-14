@@ -1,4 +1,4 @@
-# Baseline arm of the attempt-budget comparison on Jupiter H100s: 16 prompts x 32 samples, no NGU,
+# Baseline arm of the attempt-budget comparison on Holmes B300s (Jupiter H100 lacks FlashAttention 2/3 in this image): 16 prompts x 32 samples, no NGU,
 # vs qwen3_4b_base_deepscaler_ngu_budget4_k8n16.toml. Same barrier publication as the NGU arm.
 # Never Give Up (NGU) on Deepscaler with Qwen3-4B-Base: one 8-GPU node, 4 trainer + 4 engines.
 # Matches the open-instruct OLMo-core baseline ai2-llm/open_instruct_internal/cmoi4l53
@@ -15,13 +15,13 @@ source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Base"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-baseline-k32n16"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-baseline-k32n16-r2"
 export_hf = true
 
 [launch]
 workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
-cluster = "ai2/jupiter"
+cluster = "ai2/holmes"
 priority = "high"
 min_runtime = "4h"
 timeout = "72h"
