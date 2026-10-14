@@ -8,7 +8,7 @@ source = "/weka/oe-adapt-default/michaeln/checkpoints/Qwen3-4B-Base"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-smoke-saturn-fa2-r2"
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/qwen3-4b-base-deepscaler-smoke-saturn-fa2-r3"
 export_hf = true
 
 [launch]
@@ -34,6 +34,8 @@ WANDB_API_KEY = "michaeln_WANDB_API_KEY"
 HF_TOKEN = "michaeln_HF_TOKEN"
 
 [launch.env]
+# Saturn's host driver (12.8) is older than the image's CUDA 13 runtime; use its forward-compat libraries.
+LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 
 [data]
