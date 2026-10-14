@@ -115,6 +115,16 @@ def align_eos(target, eos_token):
     workflow.write_json(path, generation_config)
 
 
+def local_fingerprint(original, rewrite):
+    """Name a local checkpoint's prepared copy by its file inventory (sizes, mtimes, small-file hashes).
+
+    Updating the weights or tokenizer in place then selects a fresh prepared directory instead of
+    reusing a stale one."""
+    return workflow.fingerprint(
+        {**workflow.model_identity(original), **({"weight_layout": "text"} if rewrite else {})}
+    )[:12]
+
+
 def prepare(spec):
     assets = Path(spec.output["assets"])
     assets.mkdir(parents=True, exist_ok=True)
@@ -134,13 +144,7 @@ def prepare(spec):
                 if not (original / "config.json").is_file():
                     raise InputError(f"{role}.source {original} is not a Hugging Face checkpoint directory")
                 rewrite = needs_text_key_rewrite(original)
-                stamp = workflow.fingerprint(
-                    {
-                        "path": str(original),
-                        "config": (original / "config.json").read_text(),
-                        **({"weight_layout": "text"} if rewrite else {}),
-                    }
-                )[:12]
+                stamp = local_fingerprint(original, rewrite)
                 identity = {"source": str(original), "revision": "", "thinking": False, "local_fingerprint": stamp}
                 target = assets / f"{original.name}-local-{stamp}"
             else:

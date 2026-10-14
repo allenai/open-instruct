@@ -210,6 +210,20 @@ def test_opd_honors_shared_memory_setting():
     assert task["resources"]["sharedMemory"] == "48 GiB"
 
 
+def test_local_fingerprint_tracks_weights_and_tokenizer(tmp_path):
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "model.safetensors").write_bytes(b"a")
+    (tmp_path / "tokenizer_config.json").write_text("{}")
+    stamps = {opd_prepare.local_fingerprint(tmp_path, False)}
+    assert opd_prepare.local_fingerprint(tmp_path, False) in stamps
+    (tmp_path / "model.safetensors").write_bytes(b"ab")
+    stamps.add(opd_prepare.local_fingerprint(tmp_path, False))
+    (tmp_path / "tokenizer_config.json").write_text('{"eos_token": "x"}')
+    stamps.add(opd_prepare.local_fingerprint(tmp_path, False))
+    stamps.add(opd_prepare.local_fingerprint(tmp_path, True))
+    assert len(stamps) == 4
+
+
 def test_local_checkpoints_resolve_against_the_run_file(tmp_path):
     teacher = tmp_path / "teacher-step_100"
     teacher.mkdir()
