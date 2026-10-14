@@ -19,7 +19,6 @@ from pathlib import Path
 
 from open_instruct.miles.configuration import specs, validation
 from open_instruct.miles.configuration.config import RunConfig
-from open_instruct.miles.distillation import opd_config
 from open_instruct.miles.errors import InputError
 
 
@@ -81,12 +80,18 @@ def execute(parser, options):
         else:
             print(json.dumps(launch.status(config), indent=2))
         return
-    if isinstance(config, opd_config.OPDRunSpec):
+    if isinstance(config, specs.MEGATRON_SPECS):
+        algorithm = config.plan()["algorithm"]
         if options.command == "validate":
-            config.plan()
-            print("OPD schema and allocation validated; runtime/model checks run in the candidate image")
+            print(
+                f"{algorithm.upper()} schema and allocation validated; runtime/model checks run in the candidate image"
+            )
         else:
-            runtime = importlib.import_module("open_instruct.miles.distillation.opd_runtime")
+            runtime = importlib.import_module(
+                "open_instruct.miles.distillation.opd_runtime"
+                if algorithm == "opd"
+                else "open_instruct.miles.megatron_grpo.grpo_runtime"
+            )
             runtime.execute(config)
         return
     workflow = importlib.import_module("open_instruct.miles.execution.workflow")
