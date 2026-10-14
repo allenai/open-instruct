@@ -1,39 +1,51 @@
-# Prepared model/data paths must be replaced before launching.
+# Two-GPU Qwen3-0.6B Megatron smoke recipe exercised on Holmes; see docs/miles/upstream.md.
+# Replace YOUR_USERNAME and prepare the HF model and GSM8K JSONL before launching.
 schema_version = 1
-name = "upstream-megatron-smoke"
+name = "upstream-qwen3-megatron-smoke"
 
 [model]
-source = "/weka/oe-training-default/YOUR_USERNAME/models/Qwen3-0.6B"
+source = "/weka/oe-training-default/YOUR_USERNAME/miles-upstream-smoke/Qwen3-0.6B"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/YOUR_USERNAME/runs/upstream-megatron-smoke"
+root = "/weka/oe-training-default/YOUR_USERNAME/miles-upstream-smoke/megatron"
 
 [trainer]
 backend = "megatron"
 gpus = 1
 trainer_num_nodes = 1
+bf16 = true
 micro_batch_size = 1
-recompute_granularity = "full"
-recompute_method = "uniform"
-recompute_num_layers = 1
+dynamic_batching = true
+max_tokens_per_gpu = 4096
+attention_backend = "flash"
+attention_dropout = 0.0
+hidden_dropout = 0.0
+accumulate_allreduce_grads_in_fp32 = true
+attention_softmax_in_fp32 = true
 
 [inference]
 placement_mode = "disaggregated"
 gpus = 1
 rollout_gpus_per_node = 2
 rollout_tensor_parallel_size = 1
-rollout_batch_size = 4
-samples_per_prompt = 2
-global_batch_size = 8
-max_response_length = 256
+rollout_batch_size = 8
+samples_per_prompt = 4
+global_batch_size = 32
+max_response_length = 512
 sglang_mem_fraction_static = 0.4
+sglang_attention_backend = "flashinfer"
+sglang_cuda_graph_max_bs_decode = 32
+sglang_disable_prefill_cuda_graph = true
+sglang_max_total_tokens = "32768"
 
 [data]
-prompt_data = "/weka/oe-training-default/YOUR_USERNAME/data/math.jsonl"
-input_key = "prompt"
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/miles-upstream-smoke/gsm8k-128.jsonl"
+input_key = "messages"
 label_key = "label"
 apply_chat_template = true
+apply_chat_template_kwargs = {enable_thinking = false}
+rollout_shuffle = true
 
 [training]
 num_rollouts = 4
@@ -42,13 +54,15 @@ save_interval = 2
 [optimizer]
 learning_rate = 0.000001
 lr_decay_style = "constant"
+weight_decay = 0.1
+adam_beta1 = 0.9
+adam_beta2 = 0.98
 kl_loss_coef = 0.0
 
+# Upstream initializes Megatron from HF through mbridge when no saved run exists.
+# Native distributed checkpoints are also accepted here.
 [miles]
-# Convert HF weights with upstream tools/convert_hf_to_torch_dist.py first.
-# Architecture matches upstream scripts/models/qwen3-0.6B.py at the locked SHA.
-load = "/weka/oe-training-default/YOUR_USERNAME/runs/upstream-megatron-smoke/checkpoints"
-ref_load = "/weka/oe-training-default/YOUR_USERNAME/models/Qwen3-0.6B_torch_dist"
+ref_load = "/weka/oe-training-default/YOUR_USERNAME/miles-upstream-smoke/Qwen3-0.6B"
 swiglu = true
 num_layers = 28
 hidden_size = 1024
@@ -64,10 +78,13 @@ rotary_base = 1000000
 vocab_size = 151936
 kv_channels = 128
 qk_layernorm = true
-rm_type = "deepscaler"
+rm_type = "math"
 advantage_estimator = "grpo"
 rollout_temperature = 1.0
 seed = 17
+check_weight_update_equal = true
+load = "/weka/oe-training-default/YOUR_USERNAME/miles-upstream-smoke/megatron/checkpoints"
+save_debug_rollout_data = "/output/rollout-{rollout_id}.pt"
 
 [launch]
 workspace = "ai2/open-instruct-dev"
@@ -79,6 +96,9 @@ timeout = "30m"
 auto_resume = false
 gpus_per_replica = 2
 shared_memory = "32 GiB"
+
+[launch.env]
+PYTHONUNBUFFERED = "1"
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"

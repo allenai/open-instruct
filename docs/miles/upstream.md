@@ -9,8 +9,9 @@ The checked-in lock is a **candidate**. Matching dependency fingerprints and
 passing CPU tests do not establish GPU training correctness. Qualify a short
 rollout/train/weight-update/save/resume lifecycle on the intended hardware before
 long training. No backend or cluster has yet been qualified for this new wrapper.
-The Qwen3-0.6B FSDP smoke test below has passed rollout, training, weight refresh,
-and checkpoint saving on Holmes; this does not validate Megatron or torchtitan.
+The Qwen3-0.6B FSDP and Megatron smoke tests below have passed rollout, training,
+weight refresh, and checkpoint saving on Holmes. Resume, parallel training across
+multiple GPUs, and torchtitan remain unverified.
 
 ## Configuration compatibility
 
@@ -42,14 +43,25 @@ available when the image and its exported parser schemas are refreshed together.
 evaluation, model conversion, and `data.tasks` preparation are not supported by
 this adapter. Existing Core-heavy run files therefore need edits; they are not
 drop-in compatible. Prepare data separately and use upstream reward functions.
-Megatron needs its native architecture arguments and converted checkpoint paths
-in `miles.load`/`miles.ref_load`; see the
+Megatron needs its native architecture arguments. At the pinned upstream
+revision, `miles.ref_load` can point to an HF directory for native initialization
+through mbridge, or to an already converted Megatron checkpoint. Set `miles.load`
+to the run's checkpoint directory for subsequent resume; see the
 [upstream backend guide](https://miles.radixark.com/docs/user-guide/training-backends).
-The [Megatron candidate example](../../configs/miles-upstream/megatron.toml)
-uses Qwen3-0.6B architecture settings from the locked upstream recipe. Convert
-weights inside the runtime before launching, using upstream's
+The [Megatron smoke example](../../configs/miles-upstream/megatron.toml)
+uses Qwen3-0.6B architecture settings from the locked upstream recipe and
+initializes directly from HF weights. A separate conversion job is optional.
+To prepare a Megatron release checkpoint instead, convert weights inside the
+runtime using upstream's
 `tools/convert_hf_to_torch_dist.py` with the arguments produced by
 `python miles/utils/external_utils/model_args_utils.py qwen3-0.6B`.
+Conversion requires a GPU. The direct-HF smoke recipe uses one Megatron trainer
+GPU and one SGLang GPU, BF16, FlashAttention, dynamic batches capped at 4096
+tokens, four samples per prompt, and four GRPO updates. It limits SGLang's KV
+cache to 32768 tokens and disables prefill graph capture to keep this small
+validation bounded; decode graphs remain enabled. Initial weight equality
+checking compares the Megatron-to-SGLang transfer against the HF-loaded model.
+The four-update GPU validation below exercised this direct-HF path successfully.
 
 The adapter validates option syntax against schemas captured from the actual
 image, not Open Instruct's Core option snapshot. Upstream still performs its
@@ -159,7 +171,8 @@ uv run ruff format --check scripts/miles_upstream tests/miles_upstream open_inst
 
 Then exercise FSDP and Megatron on a small supported dense model. Verify finite
 losses and gradients, multiple optimizer updates, rollout weight refresh, a durable
-checkpoint, and successful resume. Megatron also needs conversion validation.
+checkpoint, and successful resume. For Megatron, validate HF initialization and
+weight transfer; also validate standalone conversion if using converted inputs.
 Measure startup/compilation, sustained throughput and memory, and checkpoint/eval
 overhead separately. Keep BF16, efficient attention, batching and data-loading
 settings consistent with the selected upstream recipe. Record image IDs, configs,
@@ -201,7 +214,7 @@ checkpoints. It did not deserialize and restore their training state.
 The [restart check](https://beaker.org/ex/01M4W5A4NSGV9NN7W1VXDGXJGB) was canceled
 after five minutes in the queue: scheduler events reported no Holmes node with
 two available slots. It never started. **Checkpoint loading and continued
-training remain unverified**, as do preemption recovery, Megatron, and torchtitan.
+training remain unverified**, as do preemption recovery and torchtitan.
 The lock remains a candidate. At this upstream revision, FSDP leaves the
 `global_step` and `micro_step` metadata counters at zero; resume position uses
 `iteration` and `next_rollout_id`. Do not use those unused counters as evidence
@@ -226,3 +239,50 @@ B300, far more than this test used. For small smoke runs, consider
 `sglang_disable_prefill_cuda_graph = true` to limit cache reservation and startup
 work. These settings retain decode CUDA graphs. The tiny sample of warm steps
 is not a sustained-throughput benchmark. No evaluation pass was configured.
+
+### Qwen3-0.6B Megatron smoke test (2026-10-13)
+
+[The Megatron run](https://beaker.org/ex/01M4W7DE75JDVZ41RD3F8Q35TT) exited
+successfully on one Holmes node with two B300 GPUs: one Megatron trainer and one
+SGLang rollout worker. It used high priority, `min_runtime = 0`, no automatic
+retry, and a 30-minute timeout. The image, MILES revision, model, and dataset
+were identical to the FSDP run above; Megatron-Core was
+`fd15ee20a4f03b03680529baf4b8f7eeed64df1d`. The
+[Megatron example](../../configs/miles-upstream/megatron.toml) records the exercised
+settings with placeholder WEKA paths. No upstream source changes were needed.
+
+Native mbridge initialization loaded the HF model directly into Megatron.
+The initial Megatron-to-SGLang transfer passed exact equality checking for all
+226 tensors. Four GRPO optimizer updates completed with finite losses and
+nonzero gradient norms (2.01–2.82). The 128 saved responses had finite rollout
+log probabilities and both zero and one rewards in every batch. Rollouts used
+weight versions 1 through 4 without mixing versions. Megatron reported successful
+`torch_dist` checkpoint saves after updates 2 and 4, including distributed
+optimizer state. Its directories are `iter_0000001` and `iter_0000003` because
+this backend passes the zero-based rollout ID to the checkpoint writer.
+The optional independent file inspection was canceled before execution on
+[Saturn](https://beaker.org/ex/01M4W8KEF73WC9FTT65RD5NW5F) and then
+[Jupiter](https://beaker.org/ex/01M4W8NWKBPC06EMVQNXQQ3XXS): scheduler events
+reported unavailable slots, with higher queued work also blocking Jupiter.
+Checkpoint-save evidence for this run is therefore the trainer's completion logs;
+the files have not been independently inspected or restored.
+
+Measured costs for this small run:
+
+| Phase | Observed time |
+| --- | --- |
+| Cold Beaker image pull | 9 min 31 s |
+| Process start to first rollout | About 6 min 1 s, including imports, model setup, graph capture, and weight checks |
+| SGLang decode graph capture | 68.6 s; prefill graph capture disabled |
+| First training step, including initial compilation | 79.1 s |
+| Three subsequent training steps | 0.68–1.03 s each; actor training alone 11.8k–15.3k tokens/s |
+| Checkpoint writes | About 21.8 s and 14.8 s |
+
+The trainer reported 19.2–24.2 GiB used before cache clearing and about 15.5 GiB
+afterward; these are sampled readings, not measured peak memory. SGLang reserved
+3.5 GiB of KV cache with the 32768-token cap. The run took about 8 min 28 s after
+the container started. The three warm steps are too small a sample for a
+sustained-throughput benchmark, and no evaluation pass was configured.
+Checkpoint restoration, preemption recovery, standalone conversion, and
+Megatron tensor/pipeline/data parallelism across multiple trainer GPUs were not
+tested. The runtime lock remains a candidate.
