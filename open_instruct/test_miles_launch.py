@@ -630,3 +630,8 @@ def test_image_wrapper_dispatches_to_package_without_a_debug_script(tmp_path, fa
             *overrides,
         ]
     assert not (launch.ROOT / "should-not-exist").exists()
+
+
+def test_the_preflight_script_accepts_every_backend_the_launcher_emits():
+    source = (Path(launch.__file__).parent / "preflight_attention.py").read_text()
+    assert "choices=config.PREFLIGHT_ATTENTION_BACKENDS" in source
