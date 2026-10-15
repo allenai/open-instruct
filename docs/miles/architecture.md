@@ -113,8 +113,8 @@ rewards are zero. It does not measure model quality or exercise the structured
 CLI's preparation and launch path.
 
 For two-GPU WEKA validation, copy
-[small.toml](../../configs/miles/examples/small.toml) to `runs/`, select an
-established trained hybrid checkpoint such as H045, and follow the
+[h045.toml](../../configs/miles/qualification/h045.toml) to `runs/`, set a fresh
+run name and output directory, and follow the
 [committed-image launcher](launching.md). Keep toy models local. Verify the
 rendered one-trainer/one-serving allocation and retain image, config and
 completion artifacts. Test refresh separately when changing publication
