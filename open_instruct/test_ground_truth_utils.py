@@ -249,7 +249,7 @@ class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
     """Regression test: detectable_format:json_format called json.loads on the response and caught only ValueError,
     so a degenerate, deeply nested response raised RecursionError out of the verifier and stopped an RL run."""
 
-    def test_deeply_nested_response_is_not_json(self):
+    def test_deeply_nested_response_fails_the_constraint(self):
         checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
             "detectable_format:json_format"
         )
