@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
+- Add `--use_cpu_adam` to GRPO to use DeepSpeed's `DeepSpeedCPUAdam` instead of `torch.optim.AdamW`. It requires a DeepSpeed stage and `--deepspeed_offload_optimizer` (the config is rejected otherwise, since `DeepSpeedCPUAdam` only steps CPU parameters), and `--deepspeed_offload_param` now requires `--deepspeed_stage 3` (https://github.com/allenai/open-instruct/pull/1654).
 
 ### Fixed
 - Route the olmo-core GRPO reference-policy and post-parallelization checkpoint loads through the model-type dispatcher, so Olmo Hybrid GDN weights reach their dedicated converter instead of failing in the generic loader (https://github.com/allenai/open-instruct/pull/1844).
@@ -46,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - Bump OLMo-core to the latest `main` commit (`9aa3280`) (https://github.com/allenai/open-instruct/pull/1723).
 - Refactor OLMo-core DPO metrics: reduce token-weighted metrics inline in `train_batch` with a single `all_reduce` over the DP group (matching `GRPOTrainModule`), align wandb keys with `dpo_tune_cache.py` (`train_loss`, `logps/*`, `rewards/*`, `perf/mfu_step`, `perf/tokens_per_second_step`/`_total`), add `train/padding_fraction`, `train/sequences_per_rank`, and `train/global_sequences_per_step` metrics, and make `get_num_sequences` always return an `int` (https://github.com/allenai/open-instruct/pull/1719).
 - Add `ModelConfig.loss_implementation` to select olmo-core's LM loss implementation (e.g. `fused_linear` for Liger FLCE), applied in `setup_model` before the model is built (https://github.com/allenai/open-instruct/pull/1714).
+- GRPO now passes `weight_decay=args.weight_decay` to `torch.optim.AdamW` so both optimizers agree. When `--set_weight_decay_on_bias_and_norm` is off, the single ungrouped parameter set used AdamW's default of 0.01 and now uses `--weight_decay` (default 0.0); the default grouped path sets weight decay per group and is unchanged (https://github.com/allenai/open-instruct/pull/1654).
 
 ### Deprecated
 
