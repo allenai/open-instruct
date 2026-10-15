@@ -15,6 +15,7 @@ from pathlib import Path
 import ray
 import torch
 from datasets import load_dataset
+from miles.utils import arguments
 from olmo_core.config import DType
 from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.nn import attention
@@ -24,7 +25,6 @@ from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from pyarrow import parquet
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from miles.utils import arguments
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.execution.driver import train
 from open_instruct.miles.rewards.verifiers import GSM8KVerifier
@@ -374,7 +374,13 @@ def audit(options):
         for sample in data["samples"]:
             assert sample["prompt"] == prompts[rollout_id]["input"]
             assert sample["label"] == prompts[rollout_id]["label"]
-            assert set(sample["weight_versions"]) == {str(rollout_id)}
+            spans = [span for call in sample["weight_versions"] for span in call]
+            assert spans and {span["version"] for span in spans} == {str(rollout_id)}
+            cursor = len(sample["tokens"]) - sample["response_length"]
+            for span in spans:
+                assert span["abs_start"] == cursor and span["abs_end"] > cursor
+                cursor = span["abs_end"]
+            assert cursor == len(sample["tokens"])
             assert len(sample["rollout_log_probs"]) == sample["response_length"]
             assert torch.isfinite(torch.tensor(sample["rollout_log_probs"])).all()
             if options.routing_replay:
