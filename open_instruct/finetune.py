@@ -52,7 +52,7 @@ from open_instruct.dataset_transformation import (
     TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
     get_cached_dataset_tulu,
-    sft_tokenize_fn_args,
+    sft_transform_fn_args,
     visualize_token,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
@@ -516,7 +516,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.dataset_mixer is not None:
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
-        transform_fn_args = [sft_tokenize_fn_args(args.max_seq_length, args.over_length_strategy), {}]
+        transform_fn_args = sft_transform_fn_args(
+            args.dataset_transform_fn, args.max_seq_length, args.over_length_strategy
+        )
         train_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
