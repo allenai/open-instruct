@@ -64,12 +64,16 @@ def iter_token_normalized_batches(
     if accumulation_steps < 1:
         raise ValueError("gradient_accumulation_steps must be positive")
     iterator = iter(dataloader)
-    while True:
+    exhausted = False
+    while not exhausted:
         batches = []
         for _ in range(accumulation_steps):
             try:
                 batch = next(iterator)
             except StopIteration:
+                # Ulysses resets its underlying iterator before raising. Latch
+                # exhaustion so a partial window cannot restart the next epoch.
+                exhausted = True
                 break
             batches.append(
                 {key: value.cpu() if isinstance(value, torch.Tensor) else value for key, value in batch.items()}

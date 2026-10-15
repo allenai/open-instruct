@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import itertools
 import os
 import tempfile
 import types
@@ -268,6 +269,29 @@ class TestSftLossNormalization(unittest.TestCase):
         self.assertEqual(
             list(sft_loss_utils.skip_first_batches(adapter, accelerator, 3, sp_size=2)), [{"row": 3}, {"row": 4}]
         )
+
+    def test_ulysses_partial_window_does_not_restart_epoch(self):
+        # Use the installed adapter, including its non-sticky StopIteration.
+        # Replace only its single-rank collective transport with CPU copies.
+        batches = _batches()
+        adapter = ulysses_sp.UlyssesSPDataLoaderAdapter(
+            batches, sp_rank=0, sp_group=None, sp_world_size=1, device="cpu"
+        )
+
+        def gather(tensor_list, tensor, group=None):
+            tensor_list[0].copy_(tensor)
+
+        accelerator = types.SimpleNamespace(device=torch.device("cpu"), reduce=lambda tensor, reduction: tensor)
+        with mock.patch.object(ulysses_sp.dist, "all_gather", side_effect=gather):
+            for _ in range(2):
+                # Bound consumption so a regression fails without hanging.
+                result = list(
+                    itertools.islice(
+                        sft_loss_utils.iter_token_normalized_batches(adapter, accelerator, 3), len(batches) + 1
+                    )
+                )
+                self.assertEqual(len(result), len(batches))
+                self.assertEqual([last for _, _, _, last, _ in result], [False, False, True, False, True])
 
     def test_non_sp_resume_uses_prepared_dataloader(self):
         accelerator = Accelerator(cpu=True)

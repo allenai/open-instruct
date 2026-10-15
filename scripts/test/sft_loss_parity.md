@@ -41,3 +41,10 @@ SP controls and the failing BF16 case by appending `diagnostic` to the launch
 command. Diagnostic mode has a 15-minute timeout and a separate success marker;
 it cannot establish full-matrix parity. Failures persist the actual/reference
 raw gradients, norms, maximum-error coordinates and BF16 spacing for analysis.
+
+The initial run also exposed a real loop bug: the Ulysses adapter resets its
+underlying loader when it raises `StopIteration`. After a partial window, the
+buffering helper called it again and silently started another epoch. The helper
+now latches exhaustion; a CPU regression executes the installed adapter across
+two epochs with only its single-rank collective transport replaced. The first
+focused run was stopped during startup to include this correction.
