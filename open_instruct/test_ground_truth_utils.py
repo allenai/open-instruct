@@ -4,6 +4,7 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -228,6 +229,24 @@ class TestLMJudgeVerifier(unittest.TestCase):
     def test_cleanup_helpers_are_safe_noops(self):
         self.assertIsNone(asyncio.run(LMJudgeVerifier.cleanup_all_clients()))
         self.assertIsNone(asyncio.run(cleanup_all_llm_judge_clients()))
+
+
+class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
+    """Regression test (hotfix of allenai/open-instruct#1979 on ea00acebc): detectable_format:json_format caught only
+    ValueError from json.loads, so a deeply nested response raised RecursionError out of the verifier."""
+
+    def test_deeply_nested_response_fails_the_constraint(self):
+        from open_instruct.IFEvalG import instructions_registry
+
+        checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
+            "detectable_format:json_format"
+        )
+        checker.build_description()
+        response = "[" * 100_000 + "]" * 100_000
+        with self.assertRaises(RecursionError):
+            json.loads(response)
+        self.assertFalse(checker.check_following(response))
+        self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
 
 
 class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):

@@ -891,7 +891,10 @@ class JsonFormat(Instruction):
         )
         try:
             json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # Deeply nested output (e.g. "[[[[...") can exceed the JSON decoder's recursion limit. Such output is not
+            # necessarily invalid JSON, but the check cannot confirm it, so it fails this constraint instead of
+            # letting the error escape the verifier and stop training.
             return False
         return True
 
