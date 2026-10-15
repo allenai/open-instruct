@@ -36,7 +36,7 @@ All notable changes to this project will be documented in this file.
 - Fix IFEvalG composition dividers and punctuation-only word counts so compliant responses receive credit; preserve the instructed spaced Markdown separator and cover composition/unique-word rewards with regressions (https://github.com/allenai/open-instruct/pull/1718).
 
 ### Changed
-- Pin the isolated MILES Core integration hooks and align the local tiny hybrid MoE lifecycle fixture with the target architecture (PR link pending).
+- Pin the isolated MILES Core integration hooks and align the local tiny hybrid MoE lifecycle fixture with the target architecture (https://github.com/allenai/open-instruct/pull/1987).
 - Default MILES Jupiter launches to the pinned image's CUDA compatibility library path, while preserving explicit environment overrides (https://github.com/allenai/open-instruct/pull/1924).
 - Scope the MILES recommendation to supported Olmo MoE models and retain Core/vLLM and DeepSpeed/vLLM as current dense-model GRPO workflows in documentation and agent guidance (https://github.com/allenai/open-instruct/pull/1924).
 - Automatically publish stable CUDA 12 and CUDA 13 Beaker image aliases after merge-queue integration tests pass (https://github.com/allenai/open-instruct/pull/1783).
