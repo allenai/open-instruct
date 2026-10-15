@@ -1,6 +1,6 @@
 {
  "version": "v2",
- "description": "o3i7b cell mmlupro on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter, olmo-eval commit, instances; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
+ "description": "o3i7b-dpo cell hmmt26 on released (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
  "tasks": [
   {
    "name": "main",
@@ -17,9 +17,9 @@
     "-O",
     "/results",
     "-m",
-    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0",
+    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released",
     "-t",
-    "mmlu_pro:cot",
+    "hmmt_feb_2026:pass_at_32",
     "-o",
     "temperature=1.0",
     "-o",
@@ -28,10 +28,12 @@
     "max_tokens=32768",
     "-o",
     "top_p=0.95",
+    "-o",
+    "num_samples=16",
     "--experiment-group",
-    "o3i7b-tpu-mmlupro-t10-20261007",
+    "o3i7b-dpo-released-hmmt26-t10-20261008",
     "--experiment-name",
-    "o3i7b-tpu-mmlupro-t10",
+    "o3i7b-dpo-released-hmmt26-t10",
     "--harness",
     "default",
     "-o",
@@ -39,7 +41,7 @@
     "-o",
     "provider.dtype=bfloat16",
     "-o",
-    "provider.num_instances=4",
+    "provider.num_instances=1",
     "-o",
     "provider.package=wheel",
     "-o",
@@ -57,11 +59,11 @@
     "-o",
     "provider.kwargs.enable_prefix_caching=false",
     "-o",
-    "provider.tokenizer=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released",
+    "provider.tokenizer=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released",
     "-o",
     "provider.kwargs.hf_overrides={\"rope_parameters\":{\"rope_type\":\"yarn\",\"factor\":8.0,\"original_max_position_embeddings\":8192,\"attention_factor\":1.2079441541679836,\"beta_fast\":32,\"beta_slow\":1,\"rope_theta\":500000}}",
     "-o",
-    "provider.kwargs.generation_config=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released"
+    "provider.kwargs.generation_config=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released"
    ],
    "envVars": [
     {
@@ -74,7 +76,7 @@
     },
     {
      "name": "GIT_REF",
-     "value": "5ef9cee1cfa4eafd8bb624bd18e2817c74cd54cc"
+     "value": "25ae07aca2194de6238536c73d893913d94757e2"
     },
     {
      "name": "GANTRY_TASK_NAME",
@@ -211,7 +213,7 @@
     "path": "/results"
    },
    "resources": {
-    "gpuCount": 4,
+    "gpuCount": 1,
     "sharedMemory": "10 GiB"
    },
    "context": {

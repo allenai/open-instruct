@@ -1,11 +1,16 @@
-# o3i7b: Olmo 3 7B Instruct SFT, released vs TPU reproduction, on the H051 size-peer battery
+# o3i7b: Olmo 3 7B Instruct SFT and DPO, released vs TPU reproduction, on the H051 size-peer battery
 
-Specs only; nothing has been launched. `mkspecs_o3i7b.py` writes `specs/` (22 specs: 11 cells x 2 models). Its
-docstring lists every deviation (D1-D8). Both models' specs are byte-identical except `-m` and the names.
+`mkspecs_o3i7b.py [sft|dpo]` writes `specs/` (10 cells x 2 models per stage). Its docstring lists every deviation
+(D1-D8). Within a stage, both models' specs are byte-identical except `-m` and the names. Results are on
+allenai/open-instruct#1933; `compare_pairs.py` gives the paired Wald CIs over items joined on `native_id`.
 
-- `released`: `allenai/Olmo-3-7B-Instruct-SFT` @ `e1452fc5`, at `models/olmo3-7b-instruct-sft-released`. Every file
-  was read and hashed after download, and all LFS sha256s match HF (`models/*.receipt.txt`, 2026-10-07 15:40 PDT).
-- `tpu`: `models/olmo3-7b-instruct-sft-tpu-s0` (from `../export_hf.sh`; not exported yet).
+- SFT `released` (`o3i7b-released-*`, run 2026-10-07): `allenai/Olmo-3-7B-Instruct-SFT` @ `e1452fc5`.
+- SFT `tpu` (`o3i7b-s2-tpu-*`): run s2, exported by `../export_hf.sh`. The earlier `o3i7b-tpu-*` cells (s1b) are void:
+  s1b never learned to emit EOS (maxtext 32929a0c), so every sample ran to max_tokens.
+- DPO (`o3i7b-dpo-{released,tpu}-*`): `allenai/Olmo-3-7B-Instruct-DPO` @ `b33130b7` (safetensors only) and TPU run s0.
+
+Released snapshots were downloaded with `download_released.py [sft|dpo]`, which reads and hashes every file
+(`models/*.receipt.txt`).
 
 Launch with `beaker experiment create specs/<name>.json --workspace ai2/olmo-instruct --name <name>`. The budget is
 the workspace default, `ai2/oe-other`, as for the sources. Space launches about 4 min apart, because they share one uv
@@ -22,7 +27,6 @@ released tokenizer and generation_config, with flat YaRN `hf_overrides`.
 | aime26 | aime_2026:pass_at_32 | 25ae07ac | default | T1.0 p0.95 32K, k=16 | 1 | 24h | ~2.5 |
 | hmmt26 | hmmt_feb_2026:pass_at_32 | 25ae07ac | default | T1.0 p0.95 32K, k=16 | 1 | 24h | ~2.5 |
 | gpqa | gpqa_diamond:cot | 25ae07ac | default | T1.0 p0.95 32K, k=8 | 1 | 24h | ~4 |
-| mmlupro | mmlu_pro:cot | 5ef9cee1 (main) | default, 4 instances | T1.0 p0.95 32K, k=1 | 4 | 24h | ~6 |
 | lcb | livecodebench:lite (v3) | 0131141b | codex_python | T1.0 p0.95 (task) 32K, k=8 | 2 | 24h | ~8 |
 | ifeval | ifeval | 25ae07ac | default | T1.0 p1.0 32K | 1 | 24h | ~0.3 |
 | ifbench | ifeval_ood | 25ae07ac | default | T1.0, top_p unset (=1.0) 32K | 1 | 24h | ~0.3 |

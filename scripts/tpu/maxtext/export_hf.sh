@@ -14,7 +14,19 @@ BASE=${3:?base HF model whose config.json describes the architecture}
 GENCFG=${5:-$BASE}
 TOK=${4:?tokenizer dir the run trained with (a PreTrainedTokenizerFast save of allenai/olmo-3-tokenizer-instruct-dev; see README)}
 PY=${PY:-/opt/venvs/maxtext/bin/python}
+HERE=$(cd "$(dirname "$0")" && pwd)
 cd "${MAXTEXT_DIR:-$HOME/repos/maxtext}" # a MaxText checkout at the image's base commit with image/patches/maxtext.patch applied
+# Tunix's DPO trainer nests the policy under "base"; rewrite it in to_maxtext's layout first.
+if $PY - "$PARAMS" <<'PYEOF'; then
+import sys, orbax.checkpoint as ocp
+m = ocp.PyTreeCheckpointer().metadata(sys.argv[1])
+m = m.item_metadata.tree if hasattr(m, "item_metadata") else m.tree
+sys.exit(0 if set(m) == {"base"} else 1)
+PYEOF
+  flat=$(mktemp -d /opt/scratch/tunix.XXXX)
+  JAX_PLATFORMS=cpu $PY "$HERE/tunix_to_maxtext.py" "$PARAMS" "$flat"
+  PARAMS="$flat/0/items"
+fi
 # Runs trained with tensor parallelism use the vocabulary padded to 100352 (resize_vocab.py); trim it back.
 vocab=$($PY - "$PARAMS" <<'PYEOF'
 import sys, orbax.checkpoint as ocp
@@ -28,7 +40,7 @@ PYEOF
 )
 if [[ "$vocab" != "100278" ]]; then
   trimmed=$(mktemp -d /opt/scratch/trim.XXXX)
-  JAX_PLATFORMS=cpu $PY "$(dirname "$0")/resize_vocab.py" "$PARAMS" "$trimmed" 100278
+  JAX_PLATFORMS=cpu $PY "$HERE/resize_vocab.py" "$PARAMS" "$trimmed" 100278
   PARAMS="$trimmed/0/items"
 fi
 JAX_PLATFORMS=cpu $PY -m maxtext.checkpoint_conversion.to_huggingface src/maxtext/configs/base.yml \

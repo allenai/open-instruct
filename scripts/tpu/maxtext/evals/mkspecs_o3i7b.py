@@ -1,10 +1,12 @@
-"""o3i7b eval specs: two dense Olmo 3 7B Instruct SFT checkpoints on the H051 size-peer battery (dry run).
+"""o3i7b eval specs: two dense Olmo 3 7B Instruct SFT (or, with `dpo`, DPO) checkpoints on the H051 size-peer battery
+(dry run).
+  python mkspecs_o3i7b.py [sft|dpo]
 
 Writes specs/<name>.json, one per (model, cell), and prints a table. Launches nothing.
 
 Models (the two specs of a cell are byte-identical except the model path and the names):
   released  allenai/Olmo-3-7B-Instruct-SFT @ e1452fc572d51966ff4aaeb25118b891eb93e549, snapshot on WEKA
-  tpu       the MaxText (TPU) reproduction, exported by ../export_hf.sh (does not exist yet)
+  tpu       the MaxText (TPU) reproduction (SFT: run s2; DPO: run s0), exported by ../export_hf.sh
 
 Like experiments/h051/mkspecs_h051.py (ledger branch emo-vs-noemo-battery), each spec is copied from a working spec
 and changes only what it must; the rest is asserted equal to the source. Sources (the H051 sources, except that the
@@ -47,7 +49,8 @@ jupiter only, MMLU-Pro commit + 4 instances, LCB 6h -> 24h timeout):
      template asks for). olmo-eval's patch_olmo3_tool_parser is NOT used: it also swaps in olmo-eval's own chat
      template, which would break D2.
   D6 RULER provider.max_model_len stays 65536 (the source's), not H051's 131072; the RULER source's urgent/saturn
-     becomes normal/jupiter as in H051; its minRuntime 0s / autoResume true (backfill) is kept as in H051's RULER cells.
+     becomes normal/jupiter as in H051; its minRuntime 0s / autoResume true (backfill-only, which can wait
+     indefinitely) becomes 8h / false like the other cells.
   D7 Gantry-based specs keep the task name "main" (it matches GANTRY_TASK_NAME); H051 renamed it. BFCL's task gets the
      experiment name. ifeval_mt_ood (not an H051 cell; H051 reused existing cells) gets top_p=1.0 like IFEval.
   D8 Not applied: T=1.0 on BFCL and RULER. As in H051, BFCL keeps its task decoding (temperature 0.001, 4096 tokens)
@@ -63,9 +66,18 @@ import yaml
 
 HERE = pathlib.Path("/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals")
 OUT = HERE / "specs"
-DATE = "20261007"  # America/Los_Angeles date the specs were generated; goes into the experiment group
-REL = str(HERE / "models/olmo3-7b-instruct-sft-released")
-MODELS = {"released": REL, "tpu": str(HERE / "models/olmo3-7b-instruct-sft-tpu-s0")}
+STAGE = sys.argv[1] if len(sys.argv) > 1 else "sft"
+assert STAGE in ("sft", "dpo"), STAGE
+# DPO: allenai/Olmo-3-7B-Instruct-DPO @ b33130b7de49f0c2553b5c2b3bc8409ff3e627d1 (download_released.py dpo) against the
+# TPU DPO run (instruct-dpo-4x4x8). Every spec is otherwise built exactly as for SFT.
+# SFT names carry the TPU run (Beaker names are unique per workspace, and o3i7b-tpu-* were the s1b cells).
+PREFIX = "o3i7b-s2" if STAGE == "sft" else "o3i7b-dpo"
+# America/Los_Angeles date the specs were generated; goes into the experiment group.
+DATE = "20261010" if STAGE == "sft" else "20261008"
+REL = str(HERE / f"models/olmo3-7b-instruct-{STAGE}-released")
+# SFT: s2, the first TPU run that trains on every row it loads (maxtext bf717d1d) and on EOS targets (32929a0c).
+TPU_RUN = {"sft": "s2", "dpo": "s0"}[STAGE]
+MODELS = {"released": REL, "tpu": str(HERE / f"models/olmo3-7b-instruct-{STAGE}-tpu-{TPU_RUN}")}
 SRC = {
     "OFF": "/root/handoff/c4/specs/h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json",
     "LCB": "/root/handoff/h045/battery-s34521/lcb-v3-forcedthink-t10.yaml",
@@ -74,7 +86,6 @@ SRC = {
 }
 SRC_MODEL = "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/runs/h045-anchor-emo-olmo35-s34521/hf_step11768"
 C4_TOK = "/weka/oe-adapt-default/abhishekr/handoff/c4/tok-thinkoff"
-MAIN = "5ef9cee1cfa4eafd8bb624bd18e2817c74cd54cc"
 
 # D3: flat YaRN, exactly config.json's rope_scaling plus rope_theta.
 HF_OVERRIDES = {
@@ -118,7 +129,7 @@ CELLS = {
     "aime26": ("OFF", "aime_2026:pass_at_32", REASON + ["num_samples=16"], 1, None),
     "hmmt26": ("OFF", "hmmt_feb_2026:pass_at_32", REASON + ["num_samples=16"], 1, None),
     "gpqa": ("OFF", "gpqa_diamond:cot", REASON + ["num_samples=8"], 1, None),
-    "mmlupro": ("OFF", "mmlu_pro:cot", REASON, 4, MAIN),
+    # mmlupro dropped 2026-10-08: a held-out test set, and too heavy (4 GPUs, 8h+) for development evals.
     "lcb": ("LCB", "livecodebench:lite", ["temperature=1.0", "max_tokens=32768", "num_samples=8"], None, None),
     "ifeval": ("OFF", "ifeval", IF, 1, None),
     "ifbench": ("OFF", "ifeval_ood", ["temperature=1.0", "do_sample=true", "max_tokens=32768"], 1, None),
@@ -203,13 +214,18 @@ def build_olmo_eval(cell, model, name):
     t["context"]["priority"] = "normal"
     t["constraints"]["cluster"] = ["ai2/jupiter"]
     spec["description"] = (
-        f"o3i7b cell {cell} on {model} ({MODELS[model]}); copied from {pathlib.Path(SRC[src_key]).name}"
+        f"{PREFIX} cell {cell} on {model} ({MODELS[model]}); copied from {pathlib.Path(SRC[src_key]).name}"
         f"; changes: model, task, registered sampling, names, normal priority, jupiter"
         + (", olmo-eval commit, instances" if commit else "")
         + (", timeout 24h" if src_key == "LCB" else "")
         + "; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN"
         " hf_overrides (see mkspecs_o3i7b.py D1-D8)."
     )
+    if src_key == "RUL":  # D6
+        t["context"]["minRuntime"], t["context"]["autoResume"] = "8h", False
+        spec["description"] += (
+            " Scheduling: minRuntime 8h, autoResume false (like the other cells) instead of the source's backfill-only 0s."
+        )
     check_olmo_eval(spec, src)
     return spec
 
@@ -222,7 +238,8 @@ def norm_olmo_eval(spec):
     for k in ("timeout",):
         t.pop(k, None)
     t["resources"].pop("gpuCount", None)
-    t["context"].pop("priority", None)
+    for k in ("priority", "minRuntime", "autoResume"):
+        t["context"].pop(k, None)
     t["constraints"].pop("cluster", None)
     out, a, i = [], t["arguments"], 0
     may_change = (
@@ -336,7 +353,7 @@ def build_bfcl(cell, model, name):
     t["context"]["priority"] = "normal"
     t["constraints"]["cluster"] = ["ai2/jupiter"]
     spec["description"] = (
-        f"o3i7b cell {cell} on {model} ({MODELS[model]}); copied from {pathlib.Path(SRC['BFCL']).name}"
+        f"{PREFIX} cell {cell} on {model} ({MODELS[model]}); copied from {pathlib.Path(SRC['BFCL']).name}"
         "; changes: model, names, ladders tar + hero-core + olmoe3 plugins + fla removed, released"
         " tokenizer + generation_config, flat YaRN hf_overrides, tool_call_parser olmo3, no"
         " reasoning_parser (see mkspecs_o3i7b.py D1-D8)."
@@ -368,7 +385,7 @@ def build_bfcl(cell, model, name):
 
 
 def build(cell, model):
-    name = f"o3i7b-{model}-{cell}-t10"
+    name = f"{PREFIX}-{model}-{cell}-t10"
     spec = (build_bfcl if CELLS[cell][0] == "BFCL" else build_olmo_eval)(cell, model, name)
     return name, spec
 

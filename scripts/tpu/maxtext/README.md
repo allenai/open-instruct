@@ -9,12 +9,15 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 
 | Path | What |
 |---|---|
-| `image/` | The training image: upstream MaxText at a pinned commit, plus `patches/maxtext.patch`, Tunix and the post-training dependencies. `build.sh <maxtext commit>` builds it with Cloud Build. |
-| `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. The base is a smoke test on one spot `2x2x4` slice (16 chips) at 4,096 tokens. |
+| `image/` | The training image: upstream MaxText at a pinned commit, plus `patches/maxtext.patch`, Tunix and the post-training dependencies. `build.sh <full maxtext commit SHA>` builds it with Cloud Build; the base image is tagged with the full SHA. |
+| `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. The base is a smoke test on one spot `2x2x4` slice (16 chips) at 4,096 tokens; that spot pool no longer exists, so run the overlays. |
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
+| `k8s/olmo3-dpo/`, `k8s/instruct-dpo-4x4x8/`, `k8s/dpo-smoke-4x4x8/` | DPO on pre-tokenized open-instruct pairs (`data/build_dpo_pretokenized.py`), dpo_norm: the 7B Instruct DPO recipe on one `4x4x8`, and its first 20 steps as a smoke test. |
+| `evals/` | Released-vs-TPU eval specs for SFT and DPO, and `compare_pairs.py` for paired CIs. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
+| `k8s/resume_check.py` | Checks that a resumed run trains on the same batches as the original pass. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |
-| `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. |
+| `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. Tunix DPO checkpoints (policy under `base`) go through `tunix_to_maxtext.py` first. |
 | `parity/` | Token and loss-mask parity against open-instruct's SFT tokenization. |
 
 ## What the patch fixes
@@ -23,6 +26,9 @@ The patch is against MaxText `e259ed61`. The fixes are not upstream yet; diffs a
 
 - **YaRN on full-attention layers only** (AI-Hypercomputer/maxtext#5544), as Olmo 3 was trained. Unpatched, the starting loss is 0.105 nats/token too high.
 - **Chat templating** (AI-Hypercomputer/maxtext#5522). The whole conversation is rendered once. Assistant spans are derived the way open-instruct derives them: common-prefix starts when the prefixes render stably, otherwise token counts with a content check. Messages after the last assistant turn are kept as untrained context. Unpatched, every multi-turn row differs.
+- **Resume skips trained batches.** Tunix skips the batches a restored checkpoint already trained on only when no data hooks are set, and MaxText always sets them. Unpatched, a run restarted after preemption or a slice failure replays the data from the start. `k8s/resume_check.py` validates a resume: `total_weights` depends only on the batch, so it must equal the original pass's at every step both ran.
+- **Only trained rows are loaded.** With a fractional per-device batch (TP4 × FSDP32 at 0.25 sequences per chip) the HF pipeline packed 4 sequences per data host while the loss kept 2, so half of each pass was dropped and the stream ran dry at step 2,464 of 3,336. Two hosts then hit StopIteration, and libtpu reports `SLICE_FAILURE_SW_INJECT_ERROR`, which looks like a hardware fault. Each host now packs only its trained rows.
+- **EOS stays in the loss.** MaxText ignored targets equal to `bos_token_id`, and Olmo's BOS is also its EOS (`<|endoftext|>`), so no SFT model learned to stop: every eval sample ran to `max_tokens`, while the training loss looked normal. Check a new SFT pipeline's P(EOS) after a finished answer before spending eval GPUs.
 - **HF export shape table for Olmo 3** (AI-Hypercomputer/maxtext#5587). MaxText's exported `config.json` is still wrong, so `export_hf.sh` replaces it with the base model's.
 
 ## Traps

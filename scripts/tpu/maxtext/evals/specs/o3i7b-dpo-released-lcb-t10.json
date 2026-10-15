@@ -1,6 +1,6 @@
 {
  "version": "v2",
- "description": "o3i7b cell lcb on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0); copied from lcb-v3-forcedthink-t10.yaml; changes: model, task, registered sampling, names, normal priority, jupiter, timeout 24h; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
+ "description": "o3i7b-dpo cell lcb on released (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released); copied from lcb-v3-forcedthink-t10.yaml; changes: model, task, registered sampling, names, normal priority, jupiter, timeout 24h; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
  "tasks": [
   {
    "name": "main",
@@ -17,7 +17,7 @@
     "-O",
     "/results",
     "-m",
-    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0",
+    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released",
     "-t",
     "livecodebench:lite",
     "-o",
@@ -27,9 +27,9 @@
     "-o",
     "num_samples=8",
     "--experiment-group",
-    "o3i7b-tpu-lcb-t10-20261007",
+    "o3i7b-dpo-released-lcb-t10-20261008",
     "--experiment-name",
-    "o3i7b-tpu-lcb-t10",
+    "o3i7b-dpo-released-lcb-t10",
     "--harness",
     "codex_python",
     "-o",
@@ -65,11 +65,11 @@
     "-o",
     "sandboxes.0.command_timeout=900",
     "-o",
-    "provider.tokenizer=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released",
+    "provider.tokenizer=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released",
     "-o",
     "provider.kwargs.hf_overrides={\"rope_parameters\":{\"rope_type\":\"yarn\",\"factor\":8.0,\"original_max_position_embeddings\":8192,\"attention_factor\":1.2079441541679836,\"beta_fast\":32,\"beta_slow\":1,\"rope_theta\":500000}}",
     "-o",
-    "provider.kwargs.generation_config=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-released"
+    "provider.kwargs.generation_config=/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-dpo-released"
    ],
    "envVars": [
     {

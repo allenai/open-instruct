@@ -1,0 +1,26 @@
+# DPO smoke test on one reserved 4x4x8 slice: the first 20 steps of the full recipe (../instruct-dpo-4x4x8), same
+# layout and LR schedule, so memory, throughput and early loss carry over to it. The spot 2x2x4 pool that
+# ../olmo3-dpo was written for is gone. Shares ConfigMaps with the full run: do not run both at once.
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+resources:
+- ../instruct-dpo-4x4x8
+patches:
+- target: {kind: JobSet, name: olmo3-instruct-dpo}
+  patch: |-
+    - op: replace
+      path: /metadata/name
+      value: olmo3-instruct-dpo-smoke
+    - op: replace
+      path: /spec/failurePolicy/maxRestarts
+      value: 0
+configMapGenerator:
+- name: olmo3-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=olmo3-dpo-smoke-4x4x8
+  - STEPS=20
+  - LR_SCHEDULE_STEPS=2030
+  - EXTRA_ARGS=enable_checkpointing=true checkpoint_period=1000 ici_fsdp_parallelism=128 remat_policy=full attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512

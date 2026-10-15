@@ -1,0 +1,42 @@
+# Olmo 3 7B Instruct DPO on one reserved 4x4x8 v4 slice (128 chips, 32 hosts), reproducing the official recipe
+# (open-instruct scripts/train/olmo3/7b_instruct_dpo.sh with dpo.py's defaults): start from Olmo-3-7B-Instruct-SFT,
+# Dolci-Instruct-DPO, 1 epoch, 16,384-token sequences, 128 pairs per step, dpo_norm with beta 5, LR 1e-6 with 10%
+# linear warmup then linear decay to 0, AdamW (0.9, 0.999) without weight decay or clipping.
+# One pair per chip under FSDP 128. Without packing every sequence is padded to 16,384 tokens; only 5.5% of the
+# slots hold real tokens on this data, so the run is slow (packing that keeps 128 pairs per step is future work).
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+resources:
+- ../olmo3-dpo
+patches:
+- target: {kind: JobSet, name: olmo3-sft-dpo}
+  patch: |-
+    - op: replace
+      path: /metadata/name
+      value: olmo3-instruct-dpo
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/parallelism
+      value: 32
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/completions
+      value: 32
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/nodeSelector/cloud.google.com~1gke-tpu-topology
+      value: 4x4x8
+    # hero preempts post-training and slices fail. A restart resumes from the latest checkpoint, and the patched
+    # data hooks skip the batches it already trained on; check with ../resume_check.py.
+    - op: replace
+      path: /spec/failurePolicy/maxRestarts
+      value: 3
+configMapGenerator:
+- name: olmo3-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=olmo3-7b-instruct-dpo-tpu-s0
+  - TOTAL_DEVICES=128
+  - GLOBAL_BATCH=128
+  # 259,922 pairs / 128, dropping the last partial batch as open-instruct does.
+  - STEPS=2030
+  - EXTRA_ARGS=enable_checkpointing=true checkpoint_period=500 ici_fsdp_parallelism=128 remat_policy=full attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512

@@ -1,6 +1,6 @@
 {
  "version": "v2",
- "description": "o3i7b cell aime25 on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
+ "description": "o3i7b-s2 cell hmmt26 on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s2); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
  "tasks": [
   {
    "name": "main",
@@ -17,9 +17,9 @@
     "-O",
     "/results",
     "-m",
-    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0",
+    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s2",
     "-t",
-    "aime_2025:pass_at_32",
+    "hmmt_feb_2026:pass_at_32",
     "-o",
     "temperature=1.0",
     "-o",
@@ -31,9 +31,9 @@
     "-o",
     "num_samples=16",
     "--experiment-group",
-    "o3i7b-tpu-aime25-t10-20261007",
+    "o3i7b-s2-tpu-hmmt26-t10-20261010",
     "--experiment-name",
-    "o3i7b-tpu-aime25-t10",
+    "o3i7b-s2-tpu-hmmt26-t10",
     "--harness",
     "default",
     "-o",

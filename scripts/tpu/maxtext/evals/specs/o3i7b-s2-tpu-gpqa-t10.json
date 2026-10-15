@@ -1,6 +1,6 @@
 {
  "version": "v2",
- "description": "o3i7b cell gpqa on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
+ "description": "o3i7b-s2 cell gpqa on tpu (/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s2); copied from h045-if-strip32k-off-s34521-ifeval_mt_ood-t10-20261005.json; changes: model, task, registered sampling, names, normal priority, jupiter; Olmo-3.5 plugin stack removed, released tokenizer + generation_config, flat YaRN hf_overrides (see mkspecs_o3i7b.py D1-D8).",
  "tasks": [
   {
    "name": "main",
@@ -17,7 +17,7 @@
     "-O",
     "/results",
     "-m",
-    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s0",
+    "/weka/oe-adapt-default/abhishekr/tpu-posttrain/evals/models/olmo3-7b-instruct-sft-tpu-s2",
     "-t",
     "gpqa_diamond:cot",
     "-o",
@@ -31,9 +31,9 @@
     "-o",
     "num_samples=8",
     "--experiment-group",
-    "o3i7b-tpu-gpqa-t10-20261007",
+    "o3i7b-s2-tpu-gpqa-t10-20261010",
     "--experiment-name",
-    "o3i7b-tpu-gpqa-t10",
+    "o3i7b-s2-tpu-gpqa-t10",
     "--harness",
     "default",
     "-o",
