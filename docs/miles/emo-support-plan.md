@@ -228,6 +228,34 @@ This qualifies the rebased tiny EP1 barrier path. Native save/resume, fresh expo
 reload, distributed EMO training, async refresh and active-metadata real-checkpoint
 execution remain unqualified by this smoke.
 
+## October 14 main rebase validation
+
+PR #1924 merged the MILES integration, without this EMO extension. The extension
+is now based on Open Instruct main `72f460403`, following merge `2e0f2ce07`.
+Core's EMO changes were rebased onto main's Core pin `7e97bc43f`; the MILES
+adapter changes now use the `allenai/miles-olmo-core` repository and its source
+release `4772a6767`. The serving input-aliasing fix is already upstream, so only
+the EMO metadata guard remains on top of olmo-sglang `92b35cdf2`.
+
+The updated runtime pins are Core `5ebc07e396`, MILES `ff575e2ad5` and olmo-sglang
+`3f32dc5f5d`. All three were published on their respective repositories' branches
+`robertb/emo-full-pool-main-20261014`. The binary base remains unchanged, and the
+regenerated argument snapshot differs from main only in its source pins.
+
+Validation passed 872 application CPU tests, 536 runtime tests (59 GPU or
+optional-dependency cases skipped), 87 focused Core construction/export, replay
+and custom-objective tests, and 48 portable serving configuration/routing tests.
+Runtime and dependency tests used the rebased sources mounted in the cached
+binary runtime, without GPU devices. The separate serving model-import/aliasing
+test could not collect there: SGLang's CPU import lacks `fused_moe.silu_and_mul`.
+It is not counted as passing. Application and changed dependency lint,
+application formatting/type checks, generated documentation checks and the
+documentation build passed.
+
+No GPU run was repeated for these revisions. The October 2 smoke remains
+historical evidence; active-metadata real checkpoints, distributed EMO training,
+async refresh and fresh-process recovery still require their own qualification.
+
 ## Comparison with H037 real-checkpoint RL
 
 [Open Instruct issue #1927](https://github.com/allenai/open-instruct/issues/1927)
