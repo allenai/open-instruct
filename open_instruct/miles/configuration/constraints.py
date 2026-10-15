@@ -312,7 +312,7 @@ STRUCTURED_FIELDS = {
         "weka_mounts",
         "workspace",
     },
-    "model": {"source", "format", "hf_template", "reference_hf"},
+    "model": {"source", "format", "hf_template", "reference_hf", "emo_routing_mode"},
     "output": {"export_hf", "hf_dir", "rollout_sample_rate", "root"},
     "conversion": {"hf_output"},
     "compiler_cache": {
