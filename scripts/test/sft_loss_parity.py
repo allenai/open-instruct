@@ -342,7 +342,6 @@ def main(args):
         print("SFT_LOSS_GPU_CASE_PASS " + json.dumps(vars(args)), flush=True)
     accelerator.wait_for_everyone()
     accelerator.end_training()
-    dist.destroy_process_group()
 
 
 if __name__ == "__main__":
