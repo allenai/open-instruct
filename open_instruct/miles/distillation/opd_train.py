@@ -8,7 +8,6 @@ from pathlib import Path
 import ray
 from miles.utils.arguments import parse_args
 from miles.utils.tracking_utils.tracking import finish_tracking
-from scripts.miles import opd_control_runtime
 
 import miles
 from open_instruct.miles.distillation import opd_config, opd_timing
@@ -38,8 +37,6 @@ def main():
             args.eval_function_path = opd_config.ASYNC_ROLLOUT
         namespace = runpy.run_path(str(Path(module_file).resolve().parents[1] / driver))
         train = namespace["train"]
-        if control := os.environ.get("OI_OPD_CONTROL_CONFIG"):
-            opd_control_runtime.install(args, train, control)
         if opd_timing.enabled():
             if not args.fully_async:
                 raise ValueError("OPD pipeline timing currently requires the pinned async driver")

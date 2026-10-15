@@ -18,32 +18,16 @@ A run file selects OPD with `training.algorithm = "opd"`; the default
   shared with GRPO; the old runtime patch bundles are not restored. The OPD route
   additionally installs a pinned `mbridge` revision for Megatron conversion.
 
-The old branch and its run artifacts remain the historical record. Neither its
-GPU results nor primary-branch Core qualifications establish learning parity for
-this combination. The integration must pass runtime checks and an eight-update
-bridge run before the four controlled-exposure arms launch.
+The old branch and its run artifacts remain the historical record. The
+investigation's selection, serving-agreement and repeated-evaluation scripts are
+not part of this integration; they remain at `3c5074c06aa9` above. An
+eight-update Qwen3.5 2B bridge run on this integration tracked that baseline's
+reverse KL; it is a mechanics check, not a learning-parity qualification.
 
 The application modules live in `open_instruct.miles.distillation`. Backend
 dispatch is CPU-safe; importing the planner does not import Megatron or SGLang.
 The async producer and measured queue extend the native MILES lifecycle instead
 of copying the old Core adapter back into Open Instruct.
-
-## Experiment invariants
-
-The bridge repeats the completed eight-update async **drop** baseline: same
-student and teacher checkpoints, prompt source and order seed, four learner GPUs
-(TP2/DP2), three student GPUs, one teacher GPU, 128 prompts with two responses per
-update, 16,384 response tokens, optimizer and token loss settings. It writes a
-fresh output directory. The common evaluator uses the existing frozen panel and
-identical per-response seeds. A runtime upgrade is the treatment; individual
-changes within that upgrade are not isolated by this bridge.
-
-The subsequent 2×2 compares the admitted versus selected frozen prompt cohorts,
-and publication after every update versus every four updates. All four arms must
-use one frozen image. The first arm gates the remaining three on exact cohort
-membership/order, eight optimizer steps, expected policy ages, finite gradients,
-correct teacher advantages, checkpoint completion and fresh export reload.
-This is a control for exposure and policy age, not async throughput.
 
 ## Migrated correctness boundaries
 
