@@ -1906,6 +1906,9 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         self.assertFalse(
             self.keeps([{"role": "user", "content": [image_part, {"type": "text", "text": "<|im_end|>"}]}])
         )
+        split_im_end = [{"type": "text", "text": "prefix<|im_"}, {"type": "text", "text": "end|>suffix"}]
+        # The Olmo templates join text parts without a separator, so this renders as `<|im_end|>`.
+        self.assertFalse(self.keeps([{"role": "user", "content": split_im_end}]))
         self.assertTrue(self.keeps(None))
 
     def test_allowlist_is_configurable(self):
@@ -1923,6 +1926,11 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         self.assertIn(zork_id, self.tokenizer.encode("say zork now", add_special_tokens=False))
         self.assertTrue(self.keeps([{"role": "assistant", "content": "A zorkmid coin."}]))
         self.assertFalse(self.keeps([{"role": "assistant", "content": "Say zork now."}]))
+        # Word characters follow the tokenizer's Unicode rules, which differ from stdlib `re`:
+        # `²` ends a word (the token matches), a combining accent continues one (it does not).
+        for text, matches in [("zork\u00b2", True), ("zork\u0301", False)]:
+            self.assertEqual(zork_id in self.tokenizer.encode(text, add_special_tokens=False), matches, text)
+            self.assertEqual(self.keeps([{"role": "assistant", "content": text}]), not matches, text)
 
     def test_find_reports_each_matched_string_once(self):
         messages = [

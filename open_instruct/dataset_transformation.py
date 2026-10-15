@@ -50,12 +50,13 @@ import json
 import multiprocessing
 import os
 import re
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from functools import cached_property, lru_cache
 from typing import Any, Literal, cast
 
 import numpy as np
+import regex
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
@@ -1916,28 +1917,37 @@ DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT = (
 
 
 @lru_cache(maxsize=16)
-def _added_token_strings_pattern(
-    added_tokens: tuple[tuple[str, bool], ...], allowed: frozenset[str]
-) -> re.Pattern[str] | None:
-    """Regex for `(content, single_word)` added tokens not in `allowed`."""
+def _added_token_strings_pattern(added_tokens: tuple[tuple[str, bool], ...], allowed: frozenset[str]) -> Any:
+    """`regex.Pattern` for `(content, single_word)` added tokens not in `allowed`, or None if none.
+
+    Uses `regex`, whose Unicode `\\w` matches the word characters the `tokenizers` backend
+    uses for `single_word` (stdlib `re` differs on e.g. `²` and combining marks).
+    """
     banned = [(s, single_word) for s, single_word in added_tokens if s and s not in allowed]
     # Longest first, so a string that contains another one is reported whole.
     banned.sort(key=lambda token: len(token[0]), reverse=True)
     # A `single_word` added token never matches inside a word, so only report it at word boundaries.
-    alternatives = [rf"(?<!\w){re.escape(s)}(?!\w)" if single_word else re.escape(s) for s, single_word in banned]
-    return re.compile("|".join(alternatives)) if alternatives else None
+    alternatives = [
+        rf"(?<!\w){regex.escape(s)}(?!\w)" if single_word else regex.escape(s) for s, single_word in banned
+    ]
+    return regex.compile("|".join(alternatives)) if alternatives else None
 
 
-def _content_texts(content: Any) -> Iterator[str]:
-    """The strings a message's `content` renders: a plain string, or the text of list parts."""
+def _content_text(content: Any) -> str:
+    """The text a message's `content` renders: a plain string, or its list parts' text joined.
+
+    Parts are joined without a separator, as the Olmo chat templates render them, so a string
+    split across two parts is still found.
+    """
     if isinstance(content, str):
-        yield content
-    elif isinstance(content, list | tuple):
-        for part in content:
-            if isinstance(part, str):
-                yield part
-            elif isinstance(part, Mapping) and isinstance(part.get("text"), str):
-                yield part["text"]
+        return content
+    if isinstance(content, list | tuple):
+        return "".join(
+            part if isinstance(part, str) else part["text"]
+            for part in content
+            if isinstance(part, str) or (isinstance(part, Mapping) and isinstance(part.get("text"), str))
+        )
+    return ""
 
 
 def find_added_token_strings(
@@ -1960,8 +1970,7 @@ def find_added_token_strings(
     found: set[str] = set()
     for message in messages or []:
         if isinstance(message, Mapping):
-            for text in _content_texts(message.get("content")):
-                found.update(pattern.findall(text))
+            found.update(pattern.findall(_content_text(message.get("content"))))
     return sorted(found)
 
 
