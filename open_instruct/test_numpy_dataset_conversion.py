@@ -418,13 +418,14 @@ _requires_metadata_boundaries = unittest.skipUnless(
 class TestRowAlignedParts(_NumpySftTestBase):
     """Parts of a cache written with `row_aligned_parts` hold whole rows only."""
 
-    def _convert(self, name, row_aligned_parts):
+    def _convert(self, name, row_aligned_parts, rows=None):
+        rows = _CHAT_ROWS if rows is None else rows
         dataset = dataset_transformation.Dataset.from_dict(
             {
-                dataset_transformation.INPUT_IDS_KEY: [tokens for tokens, _ in _CHAT_ROWS],
-                dataset_transformation.ATTENTION_MASK_KEY: [[1] * len(tokens) for tokens, _ in _CHAT_ROWS],
-                dataset_transformation.LABELS_KEY: [labels for _, labels in _CHAT_ROWS],
-                dataset_transformation.DATASET_ORIGIN_KEY: ["chat"] * len(_CHAT_ROWS),
+                dataset_transformation.INPUT_IDS_KEY: [tokens for tokens, _ in rows],
+                dataset_transformation.ATTENTION_MASK_KEY: [[1] * len(tokens) for tokens, _ in rows],
+                dataset_transformation.LABELS_KEY: [labels for _, labels in rows],
+                dataset_transformation.DATASET_ORIGIN_KEY: ["chat"] * len(rows),
             }
         )
         output_dir = pathlib.Path(self.temp_dir.name) / name
@@ -459,6 +460,11 @@ class TestRowAlignedParts(_NumpySftTestBase):
     def _shuffled_rows(self):
         order = dataset_transformation.Dataset.from_dict({"i": list(range(len(_CHAT_ROWS)))}).shuffle(seed=0)["i"]
         return [_CHAT_ROWS[i] for i in order]
+
+    def test_empty_rows_fail_at_write_time(self):
+        for i, rows in enumerate(([([], [])], [_CHAT_ROWS[0], ([], []), _CHAT_ROWS[1]])):
+            with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, "row_aligned_parts.*empty row"):
+                self._convert(f"empty-{i}", row_aligned_parts=True, rows=rows)
 
     def test_each_row_is_one_metadata_line_of_one_part(self):
         parts = self._parts(self._convert("aligned", row_aligned_parts=True))
@@ -699,6 +705,16 @@ class TestFreshRender(_NumpySftTestBase):
 
 
 class TestResumeEquivalence(_NumpySftTestBase):
+    def test_row_aligned_resume_rejects_existing_empty_rows(self):
+        root = pathlib.Path(self.temp_dir.name)
+        tokens, labels, boundaries = (root / name for name in ("tokens.bin", "labels.bin", "boundaries.bin"))
+        np.asarray([1, 2], dtype=np.uint16).tofile(tokens)
+        np.asarray([1, 1], dtype=np.uint8).tofile(labels)
+        np.asarray([[0, 2], [2, 2]], dtype=np.int64).tofile(boundaries)
+        with self.assertRaisesRegex(ValueError, "row_aligned_parts.*empty row"):
+            numpy_dataset_conversion._recover_partial_state(tokens, labels, boundaries, 2, reject_empty_rows=True)
+        self.assertEqual(numpy_dataset_conversion._recover_partial_state(tokens, labels, boundaries, 2), (2, 2))
+
     def _run(self, output_dir, resume, batch_size=10):
         numpy_dataset_conversion.convert_hf_to_numpy_sft(
             output_dir=output_dir,

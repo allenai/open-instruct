@@ -312,6 +312,13 @@ def load_hf_weights_into_olmo_core(
         load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
 
 
+def load_hf_weights_into_model(model: torch.nn.Module, model_name_or_path: str, work_dir: str | None = None) -> None:
+    """Load an HF checkpoint into an olmo-core model through the model-type dispatcher."""
+    model_state_dict = model.state_dict()
+    load_hf_weights_into_olmo_core(model_state_dict, model_name_or_path, work_dir=work_dir)
+    model.load_state_dict(model_state_dict)
+
+
 def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
     """Seed the rows of reserved-slot-promoted tokens on the olmo-core path.
 
@@ -349,9 +356,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     reinitializing all model weights. This reloads the HF checkpoint on top.
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
-    sd = train_module.model.state_dict()
-    load_hf_weights_into_olmo_core(sd, model_name_or_path, work_dir=work_dir)
-    train_module.model.load_state_dict(sd)
+    load_hf_weights_into_model(train_module.model, model_name_or_path, work_dir=work_dir)
 
 
 def build_base_callbacks(
@@ -480,6 +485,8 @@ def use_doc_lens_for_emo_segments(model_config: TransformerConfig) -> int:
 
     EMO routing otherwise splits documents at EOS, which disagrees with metadata document
     boundaries. Returns the number of EMO router configs changed; zero for models without EMO.
+    This setting persists in the saved model config. The supporting OLMo-core runtime must
+    require `doc_lens` in training and fall back to EOS during evaluation when it is absent.
     """
     # Hybrid models (olmo_core_hybrid) give `block` as a dict of named blocks.
     block = model_config.block

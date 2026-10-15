@@ -143,7 +143,11 @@ def _save_tokenizer(tc: dataset_transformation.TokenizerConfig, output_dir: path
 
 
 def _recover_partial_state(
-    tokens_path: pathlib.Path, labels_path: pathlib.Path, boundaries_path: pathlib.Path, token_item_size: int
+    tokens_path: pathlib.Path,
+    labels_path: pathlib.Path,
+    boundaries_path: pathlib.Path,
+    token_item_size: int,
+    reject_empty_rows: bool = False,
 ) -> tuple[int, int]:
     # Boundaries file is the commit log: its last complete (start,end) pair determines how many
     # bytes of tokens/labels are valid; trailing bytes from an incomplete write get truncated.
@@ -166,6 +170,11 @@ def _recover_partial_state(
         return 0, 0
 
     boundaries = np.memmap(boundaries_path, mode="r", dtype=_BOUNDARIES_DTYPE, shape=(num_samples, 2))
+    if reject_empty_rows and np.any(boundaries[:, 0] == boundaries[:, 1]):
+        raise ValueError(
+            "Cannot resume --row_aligned_parts: the partial cache contains an empty row. "
+            "Remove empty rows from the input and restart without --resume."
+        )
     current_position = int(boundaries[-1, 1])
     del boundaries
 
@@ -323,7 +332,7 @@ def convert_hf_to_numpy_sft(
 
     if resume:
         start_idx, current_position = _recover_partial_state(
-            tokens_path, labels_path, boundaries_path, token_item_size
+            tokens_path, labels_path, boundaries_path, token_item_size, reject_empty_rows=row_aligned_parts
         )
         if start_idx > 0:
             logger.info(f"=== RESUMING from partial files: {start_idx:,} samples / {current_position:,} tokens ===")
@@ -375,6 +384,11 @@ def convert_hf_to_numpy_sft(
             for sample_tokens, sample_labels, sample_attention in zip(batch_input_ids, batch_labels, batch_attention):
                 idx += 1
                 sample_length = len(sample_tokens)
+                if row_aligned_parts and sample_length == 0:
+                    raise ValueError(
+                        f"--row_aligned_parts cannot write empty row {idx}: "
+                        "each row must contain at least one token to have a metadata boundary."
+                    )
 
                 tokens_arr = np.asarray(sample_tokens, dtype=token_dtype)
                 labels_arr = np.asarray(sample_labels)
