@@ -30,6 +30,13 @@ compatible tokenizer/chat template. `model.format="olmo_core"` also requires
 Core conversion currently disables forward validation, so conversion success is
 not a numerical or routing-parity certificate.
 
+For checkpoints with active EMO metadata, explicitly select
+`model.emo_routing_mode="full_pool"` and follow the
+[EMO ingestion guide](emo-support-plan.md). This preserves EMO provenance while
+making all experts eligible for token routing. EMO-descended exports with
+absent/null metadata continue through ordinary MoE loading. Prompt-selected
+document pools are a follow-up and are not currently accepted.
+
 Preserve router storage/computation precision and architecture metadata. The
 KDA/latent models expect BF16 stored routers with FP32 router computation; check
 both in a new export. Do not blindly cast a checkpoint to address a mismatch.
