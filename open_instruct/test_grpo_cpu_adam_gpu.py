@@ -13,7 +13,7 @@ from torch import distributed as dist
 
 from open_instruct import grpo_utils, utils
 
-# CPU CI does not install DeepSpeed; CUDA runs must have the real dependency.
+# Allow collection in environments without DeepSpeed; CUDA runs require the real dependency.
 deepspeed = None
 with contextlib.suppress(Exception):
     import deepspeed
@@ -82,6 +82,7 @@ class TestGRPOCPUAdamOffload(unittest.TestCase):
                     for key in ("exp_avg", "exp_avg_sq"):
                         self.assertEqual(state[key].device.type, "cpu")
                         self.assertTrue(torch.isfinite(state[key]).all().item())
+                self.assertTrue(all(state["step"] == 3 for state in optimizer.state.values()))
                 self.assertEqual(engine.global_steps, 3)
                 print(f"CPU_ADAM_OFFLOAD_SMOKE_PASS: steps={engine.global_steps}, losses={losses}")
             finally:

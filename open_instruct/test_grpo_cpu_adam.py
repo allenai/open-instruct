@@ -20,6 +20,10 @@ class TestCpuAdamConfigValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "deepspeed_offload_optimizer"):
             grpo_utils.GRPOExperimentConfig(use_cpu_adam=True, deepspeed_stage=2, deepspeed_offload_optimizer=False)
 
+    def test_optimizer_offload_without_cpu_adam_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "use_cpu_adam"):
+            grpo_utils.GRPOExperimentConfig(use_cpu_adam=False, deepspeed_stage=2, deepspeed_offload_optimizer=True)
+
     def test_cpu_adam_without_deepspeed_stage_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "deepspeed_stage"):
             grpo_utils.GRPOExperimentConfig(use_cpu_adam=True, deepspeed_stage=0, deepspeed_offload_optimizer=True)
