@@ -1,0 +1,327 @@
+"""Use actual MILES samples, buffers, and data cursors at the async boundary."""
+
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+
+import pytest
+import torch
+from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyDataBuffer
+from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
+
+from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
+
+
+def make_source(root, *, load=None, fully_async=True):
+    args = SimpleNamespace(
+        rollout_global_dataset=False,
+        use_miles_dashboard=False,
+        fully_async=fully_async,
+        buffer_filter_path=None,
+        n_samples_per_prompt=2,
+        save=str(root),
+        load=str(load) if load else None,
+        rollout_shuffle=False,
+        start_rollout_id=1 if load else 0,
+    )
+    source = DashboardDrainingRolloutDataSource(args)
+    args.rollout_global_dataset = True
+
+    class Dataset:
+        samples = [Sample(prompt=f"prompt-{i}") for i in range(32)]
+
+        def __len__(self):
+            return len(self.samples)
+
+    source._delegate.dataset = Dataset()
+    return source
+
+
+def test_pending_prompt_cursor_regenerates_without_skipping_or_reusing_output(tmp_path):
+    source = make_source(tmp_path)
+    consumed, active, buffered = source.get_samples(3)
+    source.acknowledge_groups([consumed])
+    active[0].tokens = [10, 20]
+    active[0].response_length = 1
+    active[0].weight_versions = [7]
+    source.add_samples([buffered])
+    source.save(0)
+    restored = make_source(tmp_path, load=tmp_path)
+    restored.load(0)
+    groups = restored.get_samples(3)
+    assert [group[0].prompt for group in groups] == ["prompt-1", "prompt-2", "prompt-3"]
+    assert [sample.index for group in groups for sample in group] == list(range(2, 8))
+    assert all(not sample.tokens and not sample.weight_versions for group in groups for sample in group)
+    restored.acknowledge_groups(groups)
+    restored.save(1)
+    assert (
+        torch.load(tmp_path / "rollout/global_dataset_state_dict_1.pt", weights_only=True)["olmo_async_pending"][
+            "groups"
+        ]
+        == []
+    )
+
+
+@pytest.mark.parametrize("fully_async", [False, True])
+def test_interrupted_cursor_write_preserves_committed_file(tmp_path, monkeypatch, fully_async):
+    source = make_source(tmp_path, fully_async=fully_async)
+    source.add_samples(source.get_samples(1))
+    source.save(0)
+    path = tmp_path / "rollout/global_dataset_state_dict_0.pt"
+    original = path.read_bytes()
+
+    def fail_save(state, stream):
+        stream.write(b"partial")
+        raise OSError("injected interruption")
+
+    monkeypatch.setattr(torch, "save", fail_save)
+    with pytest.raises(OSError, match="interruption"):
+        source.save(0)
+    assert path.read_bytes() == original
+    assert not list(path.parent.glob(".cursor-*"))
+
+
+def test_sync_resume_regenerates_only_buffered_prompts_in_buffer_order(tmp_path):
+    source = make_source(tmp_path, fully_async=False)
+    consumed, filtered, first, second = source.get_samples(4)
+    for group in (first, second):
+        for sample in group:
+            sample.tokens = [10, 20]
+            sample.response = "partial answer"
+            sample.response_length = 1
+            sample.reward = 0.5
+            sample.loss_mask = [1]
+            sample.rollout_log_probs = [-0.5]
+            sample.status = Sample.Status.ABORTED
+            sample.metadata = {"start_rollout_id": 0}
+    source.add_samples([second, first])
+    assert set(source._pending_groups) == {first[0].group_index, second[0].group_index}
+    source.save(0)
+    # Saving must not reset the live buffer or discard its partial generation.
+    assert all(sample.response == "partial answer" for group in source._delegate.buffer for sample in group)
+
+    restored = make_source(tmp_path, load=tmp_path, fully_async=False)
+    restored.load(0)
+    groups = restored.get_samples(3)
+    assert [g[0].prompt for g in groups] == ["prompt-3", "prompt-2", "prompt-4"]
+    assert [s.index for g in groups for s in g] == [6, 7, 4, 5, 8, 9]
+    for group in groups:
+        for sample in group:
+            assert sample.response == "" and sample.response_length == 0
+            assert not sample.tokens and not sample.weight_versions
+            assert sample.reward is None and sample.loss_mask is None
+            assert sample.rollout_log_probs is None
+            assert sample.status == Sample.Status.PENDING
+            assert "start_rollout_id" not in (sample.metadata or {})
+
+    # A group can remain partial across several uninterrupted collections. Its
+    # original prompt, not the latest partial response, must survive a checkpoint.
+    live = source.get_samples(1)
+    assert live == [second]
+    live[0][0].response += " continued"
+    source.add_samples(live)
+    source.save(1)
+    restored = make_source(tmp_path, load=tmp_path, fully_async=False)
+    restored.load(1)
+    assert [g[0].prompt for g in restored._delegate.buffer] == ["prompt-2", "prompt-3"]
+    assert all(not s.response for g in restored._delegate.buffer for s in g)
+
+    # Once those groups finish (or are deliberately filtered), they are not
+    # replayed by the next checkpoint. The ledger must not grow across collections.
+    source.get_samples(2)
+    source.add_samples([])
+    assert source._pending_groups == {}
+    source.save(2)
+    restored.load(2)
+    assert restored.get_buffer_length() == 0
+    assert restored.get_samples(1)[0][0].prompt == "prompt-4"
+
+
+def test_sync_legacy_cursor_warns_and_restores_position(tmp_path, monkeypatch):
+    source = make_source(tmp_path, fully_async=False)
+    source.get_samples(3)
+    source.add_samples([])
+    source.save(0)
+    path = tmp_path / "rollout/global_dataset_state_dict_0.pt"
+    state = torch.load(path, weights_only=True)
+    del state["olmo_sync_pending"]
+    torch.save(state, path)
+    warnings = []
+    monkeypatch.setattr("open_instruct.miles.rollout.data_source.logger.warning", warnings.append)
+    restored = make_source(tmp_path, load=tmp_path, fully_async=False)
+    restored.load(0)
+    assert len(warnings) == 1 and "cannot be recovered" in warnings[0]
+    assert restored.get_samples(1)[0][0].prompt == "prompt-3"
+
+
+@pytest.mark.parametrize("fully_async", [False, True])
+@pytest.mark.parametrize("invalid", ["duplicate", "response", "group_size"])
+def test_resume_rejects_invalid_pending_groups(tmp_path, fully_async, invalid):
+    source = make_source(tmp_path, fully_async=fully_async)
+    source.add_samples(source.get_samples(1))
+    source.save(0)
+    path = tmp_path / "rollout/global_dataset_state_dict_0.pt"
+    state = torch.load(path, weights_only=True)
+    groups = state["olmo_async_pending" if fully_async else "olmo_sync_pending"]["groups"]
+    if invalid == "duplicate":
+        groups.append(groups[0])
+    elif invalid == "response":
+        groups[0][0]["response_length"] = 1
+    else:
+        groups[0].pop()
+    torch.save(state, path)
+    restored = make_source(tmp_path, load=tmp_path, fully_async=fully_async)
+    with pytest.raises(RuntimeError, match="invalid pending prompt group"):
+        restored.load(0)
+
+
+def test_async_buffer_homogeneity_and_optimizer_step_lag_budget():
+    async def exercise():
+        rejected = []
+        args = SimpleNamespace(
+            rollout_batch_size=2,
+            n_samples_per_prompt=2,
+            global_batch_size=2,
+            max_weight_staleness=2,
+            async_data_buffer_capacity_factor=2,
+            dynamic_sampling_filter_path=None,
+            reward_key=None,
+        )
+        buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, rejected.append))
+        assert args.max_weight_staleness == 2
+        assert buffer._delegate._args.max_weight_staleness == 1
+
+        def entry(versions):
+            group = [
+                Sample(
+                    weight_versions=[WeightVersionsPerCall([WeightVersionSpan(str(version), 1, 2)])],
+                    reward=1.0,
+                    status=Sample.Status.COMPLETED,
+                )
+                for version in versions
+            ]
+            return DataBufferInput(prompt_group=group, group=group)
+
+        mixed = entry([1, 2])
+        short = entry([1])
+        short_mixed = entry([1, 2, 2])
+        stale = entry([0, 0])
+        admitted = entry([1, 1])
+        for item in (mixed, short, short_mixed, stale, admitted):
+            await buffer.put(item)
+        assert await asyncio.wait_for(buffer.get(current_version=2), 1) is admitted
+        assert rejected == [mixed.prompt_group, short.prompt_group, short_mixed.prompt_group, stale.prompt_group]
+        counters = ("rejected_policy_groups", "rejected_incomplete_groups", "rejected_mixed_policy_groups")
+        metrics = buffer.get_metrics()
+        assert [metrics[f"rollout/fully_async/{name}"] for name in counters] == [3, 2, 2]
+        metrics = buffer.get_metrics()
+        assert [metrics[f"rollout/fully_async/{name}"] for name in counters] == [0, 0, 0]
+
+    asyncio.run(exercise())
+
+
+def test_async_buffer_accepts_homogeneous_multisegment_trajectories():
+    async def exercise():
+        args = SimpleNamespace(
+            rollout_batch_size=1,
+            n_samples_per_prompt=2,
+            global_batch_size=2,
+            max_weight_staleness=1,
+            async_data_buffer_capacity_factor=1,
+            dynamic_sampling_filter_path=None,
+            reward_key=None,
+        )
+        buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, lambda _: pytest.fail("rejected")))
+        trajectories = [
+            [
+                Sample(
+                    weight_versions=[WeightVersionsPerCall([WeightVersionSpan("3", 1, 2)])],
+                    reward=1.0,
+                    status=Sample.Status.COMPLETED,
+                )
+            ]
+            for _ in range(2)
+        ]
+        item = DataBufferInput(prompt_group=[trajectory[0] for trajectory in trajectories], group=trajectories)
+        await buffer.put(item)
+        assert await asyncio.wait_for(buffer.get(current_version=3), 1) is item
+
+    asyncio.run(exercise())
+
+
+def test_live_cursor_snapshot_is_atomic_and_resume_regenerates_only_unconsumed_groups(tmp_path, monkeypatch):
+    source = make_source(tmp_path)
+    consumed, generating, completed = source.get_samples(3)
+    source.acknowledge_groups([consumed])
+    completed[0].response_length = 2
+    completed[0].tokens = [1, 2, 3]
+    completed[0].weight_versions = [
+        WeightVersionsPerCall([WeightVersionSpan("0", 1, 2), WeightVersionSpan("1", 2, 3)])
+    ]
+    writing, release, admission_attempted = threading.Event(), threading.Event(), threading.Event()
+    original_save = torch.save
+
+    def delayed_write(state, stream):
+        writing.set()
+        assert release.wait(2)
+        return original_save(state, stream)
+
+    def admit_after_snapshot():
+        admission_attempted.set()
+        return source.get_samples(1)
+
+    monkeypatch.setattr(torch, "save", delayed_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        saved = pool.submit(source.save, 0)
+        assert writing.wait(2)
+        admitted = pool.submit(admit_after_snapshot)
+        try:
+            assert admission_attempted.wait(2)
+            assert not admitted.done()  # Cursor and ledger share the same lock.
+            # The actual request can still mutate its own response while saving;
+            # the ledger contains independent pristine prompt copies.
+            generating[0].response_length = 1
+            generating[0].tokens = [7, 8]
+            generating[0].weight_versions = [1]
+        finally:
+            release.set()
+        saved.result(timeout=2)
+        [new_group] = admitted.result(timeout=2)
+    source.acknowledge_groups([completed])
+    assert new_group[0].prompt == "prompt-3"
+
+    restored = make_source(tmp_path, load=tmp_path)
+    restored.load(0)
+    groups = restored.get_samples(3)
+    assert [g[0].prompt for g in groups] == ["prompt-1", "prompt-2", "prompt-3"]
+    assert [s.index for g in groups for s in g] == list(range(2, 8))
+    assert all(not s.tokens and not s.weight_versions and not s.response_length for g in groups for s in g)
+    # Neither a completion/acknowledgement nor new admission after the snapshot
+    # mutates that checkpoint; prompts trained before it are never regenerated.
+    state = torch.load(tmp_path / "rollout/global_dataset_state_dict_0.pt", weights_only=True)
+    assert state["sample_offset"] == 3
+    assert [g[0]["prompt"] for g in state["olmo_async_pending"]["groups"]] == ["prompt-1", "prompt-2"]
+
+
+def test_serving_failure_requeues_pristine_group_with_original_identities(tmp_path):
+    source = make_source(tmp_path)
+    [group] = source.get_samples(1)
+    identities = [sample.index for sample in group]
+    group_id = group[0].group_index
+    for sample in group:
+        sample.tokens = [10, 20]
+        sample.response_length = 1
+        sample.reward = 0.7
+        sample.weight_versions = [7]
+    source.requeue_pending_groups([group_id])
+    [retried] = source.get_samples(1)
+    assert [sample.index for sample in retried] == identities
+    assert retried[0].group_index == group_id
+    assert all(not sample.tokens and not sample.weight_versions and sample.reward is None for sample in retried)
+    assert all(sample.response_length == 0 for sample in retried)
+    assert len(source._pending_groups) == 1
+    assert not source._delegate.buffer
+    source.acknowledge_groups([retried])
+    assert not source._pending_groups
