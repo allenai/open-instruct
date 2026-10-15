@@ -105,6 +105,7 @@ nav:
         - Launching: miles/launching.md
       - Models and training:
         - Models and checkpoints: miles/models-and-checkpoints.md
+        - EMO checkpoint ingestion: miles/emo-support-plan.md
         - Hybrid MoE support: miles/moe-model-support.md
         - Core-compatible serving: miles/core-compatible-serving.md
         - Topology and capacity: miles/topology.md

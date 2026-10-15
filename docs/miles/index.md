@@ -43,6 +43,7 @@ choosing a backend. Introducing MILES does not deprecate the existing GRPO train
 | [Managed judges](managed-judges.md) | Binding named rubrics and placing fixed-weight judge services |
 | [Operations](operations.md) | Reading metrics, diagnosing failures and establishing run completion |
 | [Architecture and development](architecture.md) | Understanding adapter ownership, runtime images and local checks |
+| [EMO support](emo-support-plan.md) | Checkpoint ingestion with full-pool routing and the prompt-selected follow-up |
 | [Long sequences](long-sequences.md) | Choosing prompt/response budgets, admission and memory controls |
 | [Packing](sequence-packing.md) | Understanding document isolation and loss semantics |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
