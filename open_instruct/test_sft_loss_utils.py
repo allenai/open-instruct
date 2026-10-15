@@ -15,6 +15,7 @@ from accelerate.state import AcceleratorState, GradientState
 from accelerate.utils import DistributedType, GradientAccumulationPlugin
 from accelerate.utils.deepspeed import DeepSpeedEngineWrapper
 from deepspeed.runtime.comm import coalesced_collectives
+from deepspeed.runtime.sequence_parallel import ulysses_sp
 from torch import distributed as dist
 from torch import multiprocessing as mp
 from torch.nn import functional as F
@@ -250,6 +251,31 @@ class TestSftLossNormalization(unittest.TestCase):
     def tearDown(self):
         AcceleratorState._reset_state(reset_partial_state=True)
         GradientState._reset_state()
+
+    def test_resume_counts_short_epoch_windows_once(self):
+        # Ten batches at GAS=3 make four updates, not twelve consumed batches.
+        for step, expected in ((0, (0, 0)), (1, (0, 3)), (3, (0, 9)), (4, (1, 0)), (5, (1, 3)), (8, (2, 0))):
+            self.assertEqual(sft_loss_utils.resume_epoch_and_batch(step, 10, 3), expected)
+
+    def test_ulysses_resume_preserves_pending_shards_at_odd_offset(self):
+        accelerator = Accelerator(cpu=True)
+        adapter = ulysses_sp.UlyssesSPDataLoaderAdapter(
+            DataLoader([], batch_size=1), sp_rank=0, sp_group=None, sp_world_size=2, device=torch.device("cpu")
+        )
+        # Real adapter iterator, with already-buffered shards. Its empty backing
+        # loader ends iteration without needing a collective/process group.
+        adapter.micro_batches = [{"row": index} for index in range(5)]
+        self.assertEqual(
+            list(sft_loss_utils.skip_first_batches(adapter, accelerator, 3, sp_size=2)), [{"row": 3}, {"row": 4}]
+        )
+
+    def test_non_sp_resume_uses_prepared_dataloader(self):
+        accelerator = Accelerator(cpu=True)
+        dataloader = accelerator.prepare(DataLoader(_batches(), batch_size=1, collate_fn=_collate_one_batch))
+        remaining = list(sft_loss_utils.skip_first_batches(dataloader, accelerator, 3))
+        self.assertEqual(len(remaining), 2)
+        for actual, expected in zip(remaining, _batches()[3:]):
+            torch.testing.assert_close(actual["labels"], expected["labels"])
 
     def test_accelerate_updates_match_full_batch_with_partial_final_window(self):
         accelerator = Accelerator(

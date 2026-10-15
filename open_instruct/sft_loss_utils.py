@@ -1,11 +1,30 @@
 """Token normalization for the legacy Accelerate/DeepSpeed SFT loop."""
 
 import contextlib
+import itertools
+import math
 from collections.abc import Iterable, Iterator
 
 import torch
 from accelerate import Accelerator
 from accelerate.utils import DistributedType
+
+
+def resume_epoch_and_batch(completed_steps: int, batches_per_epoch: int, accumulation_steps: int) -> tuple[int, int]:
+    # Each epoch can end in a short optimizer window. Multiplying the global
+    # step by GAS would count its nonexistent padding as batches of the next epoch.
+    steps_per_epoch = math.ceil(batches_per_epoch / accumulation_steps)
+    epoch, step_in_epoch = divmod(completed_steps, steps_per_epoch)
+    return epoch, step_in_epoch * accumulation_steps
+
+
+def skip_first_batches(dataloader: Iterable[dict], accelerator: Accelerator, num_batches: int, sp_size: int = 1):
+    if sp_size > 1:
+        # Ulysses is an iterator, not a DataLoader: Accelerate's sampler-based
+        # skipper cannot unwrap it. Skip after sharding so an odd microbatch
+        # offset preserves the pending shards in its refill buffer.
+        return itertools.islice(dataloader, num_batches, None)
+    return accelerator.skip_first_batches(dataloader, num_batches)
 
 
 def count_causal_lm_tokens(batch: dict) -> int:

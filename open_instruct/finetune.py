@@ -787,16 +787,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             resume_batch_idx = 0
             completed_steps = starting_epoch * num_update_steps_per_epoch
         else:
-            # need to multiply `gradient_accumulation_steps` to reflect real steps
-            resume_batch_idx = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
-            starting_epoch = resume_batch_idx // len(train_dataloader)
-            completed_steps = resume_batch_idx // args.gradient_accumulation_steps
-            resume_batch_idx -= starting_epoch * len(train_dataloader)
+            completed_steps = int(training_difference.replace("step_", ""))
+            starting_epoch, resume_batch_idx = sft_loss_utils.resume_epoch_and_batch(
+                completed_steps, len(train_dataloader), args.gradient_accumulation_steps
+            )
 
     else:
         resume_batch_idx = 0
 
-    resume_step = resume_batch_idx // args.gradient_accumulation_steps
+    resume_step = completed_steps
 
     print(f"Starting {starting_epoch=}, {resume_batch_idx=}, {resume_step=}, {completed_steps=}.")
     # update the progress_bar if load from checkpoint
@@ -818,7 +817,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         total_microbatches = 0
         if last_checkpoint_path and resume_batch_idx and not skipped_batches:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint.
-            active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_batch_idx)
+            active_dataloader = sft_loss_utils.skip_first_batches(
+                train_dataloader, accelerator, resume_batch_idx, args.sequence_parallel_size
+            )
             # Only perform this skip once
             skipped_batches = True
         else:
