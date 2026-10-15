@@ -33,9 +33,3 @@ RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
-
-FROM application AS qualification
-# Keep the established tiny MoE fixture with the image instead of depending on
-# an expiring personal WEKA directory. Model seed and public inputs are pinned
-# by the existing consumer fixture; ordinary application images omit this layer.
-RUN python tests/miles/local_moe.py bootstrap /opt/core-rl/test-fixtures/tiny-moe

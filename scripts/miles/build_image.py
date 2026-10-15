@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-image", required=True)
     parser.add_argument("--tag", required=True)
-    parser.add_argument("--target", choices=("runtime-base", "application", "qualification"), default="application")
+    parser.add_argument("--target", choices=("runtime-base", "application"), default="application")
     options = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     lock = json.loads((root / "runtime/miles/runtime.lock.json").read_text())
