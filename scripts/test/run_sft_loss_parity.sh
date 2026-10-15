@@ -29,6 +29,16 @@ run_case() {
         --output "/output/$name" "$@" 2>&1 | tee "/output/$name.log"
 }
 
+mode="${SFT_PARITY_MODE:-full}"
+if [[ "$mode" == diagnostic ]]; then
+    run_case zero2-sp2-fp32 --zero-stage 2 --sp-size 2
+    run_case zero3-sp2-fp32 --zero-stage 3 --sp-size 2
+    run_case zero2-sp2-bf16-diagnostic --zero-stage 2 --sp-size 2 --precision bf16
+    echo 'SFT_LOSS_GPU_DIAGNOSTIC_PASS: three diagnostic cases; full matrix not run'
+    exit 0
+fi
+[[ "$mode" == full ]] || { echo "Unknown parity mode: $mode" >&2; exit 1; }
+
 # Pin sensitivity to unequal token weighting, rather than a startup failure.
 if run_case legacy-control --legacy-control; then
     echo 'ERROR: the old mean-of-microbatch-means control unexpectedly passed'
@@ -47,6 +57,8 @@ run_case ddp
 run_case ddp-sync --sync-each-batch
 run_case zero2 --zero-stage 2
 run_case zero3 --zero-stage 3
+run_case zero2-sp2-fp32 --zero-stage 2 --sp-size 2
+run_case zero3-sp2-fp32 --zero-stage 3 --sp-size 2
 run_case zero2-bf16 --zero-stage 2 --precision bf16
 run_case zero3-bf16 --zero-stage 3 --precision bf16
 run_case zero2-sp2 --zero-stage 2 --sp-size 2 --precision bf16
@@ -66,4 +78,4 @@ run_case zero3-sp2-resume --zero-stage 3 --sp-size 2 --precision bf16 --phase sa
 run_case zero3-sp2-resume --zero-stage 3 --sp-size 2 --precision bf16 --phase resume
 run_case zero3-sp2-liger-resume --zero-stage 3 --sp-size 2 --precision bf16 --liger --phase save
 run_case zero3-sp2-liger-resume --zero-stage 3 --sp-size 2 --precision bf16 --liger --phase resume
-echo 'SFT_LOSS_GPU_PARITY_PASS: 22 positive cases and two rejected negative controls'
+echo 'SFT_LOSS_GPU_PARITY_PASS: 24 positive cases and two rejected negative controls'

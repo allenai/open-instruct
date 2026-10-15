@@ -25,9 +25,19 @@ gradient comparison. A separate doubled-gradient ZeRO-2/BF16 control must also
 fail before clipping; an unrelated launch failure does not count as sensitivity.
 Both ZeRO stages run with BF16, SP on/off and fused loss on/off. Checkpoint
 continuation covers both stages without SP as well as the SP refill cases.
-All 22 positive invocations must emit their pass marker. Source hashes, package
+All 24 positive invocations must emit their pass marker. Source hashes, package
 versions and per-window errors are persisted. No skipped test counts as validation.
 
 This checks numerical correctness and checkpoint continuation, not historical
 Tulu 3 recipe reproduction or downstream quality. It is separate from the full
 GPU pytest suite and must not be cited as `GPU_TESTS` evidence.
+
+## Diagnosing BF16 differences
+
+The first GPU attempt passed six non-SP cases and rejected both negative controls,
+then failed ZeRO-2/SP=2 BF16 at relative L2 0.003247 and max absolute 0.00390625.
+The original limits above remain unchanged for diagnosis. Run only FP32 ZeRO-2/3
+SP controls and the failing BF16 case by appending `diagnostic` to the launch
+command. Diagnostic mode has a 15-minute timeout and a separate success marker;
+it cannot establish full-matrix parity. Failures persist the actual/reference
+raw gradients, norms, maximum-error coordinates and BF16 spacing for analysis.

@@ -67,9 +67,19 @@ def check_close(actual, expected, name, bf16):
     max_error = (actual - expected).abs().max().item()
     relative_limit, absolute_limit = (0.03, 0.002) if bf16 else (0.0001, 0.00001)
     if not torch.isfinite(actual).all() or error > relative_limit or max_error > absolute_limit:
+        index = (actual - expected).abs().argmax().item()
+        value = expected[index].item()
+        diagnostics = dict(
+            index=index,
+            actual=actual[index].item(),
+            expected=value,
+            actual_norm=actual.norm().item(),
+            expected_norm=expected.norm().item(),
+            bf16_spacing=2 ** (math.frexp(abs(value))[1] - 8) if value else 0,
+        )
         raise AssertionError(
             f"PARITY_MISMATCH {name}: relative_l2={error}, max_abs={max_error}, "
-            f"limits=({relative_limit}, {absolute_limit})"
+            f"limits=({relative_limit}, {absolute_limit}), diagnostics={json.dumps(diagnostics)}"
         )
     return dict(relative_l2=error, max_abs=max_error)
 
@@ -246,7 +256,14 @@ def main(args):
             gradient = flatten([ds_utils.safe_get_full_grad(parameter) for parameter in parameters])
         else:
             gradient = flatten([parameter.grad for parameter in parameters])
-        errors = check_close(gradient, expected_gradient, "gradient-before-clipping", bf16)
+        try:
+            errors = check_close(gradient, expected_gradient, "gradient-before-clipping", bf16)
+        except AssertionError:
+            if accelerator.is_main_process:
+                torch.save(
+                    dict(actual=gradient.cpu(), expected=expected_gradient.cpu()), output / "gradient-mismatch.pt"
+                )
+            raise
         errors["unclipped_norm"] = gradient.norm().item()
         assert expected_gradient.norm().item() > CLIP, "The update check must exercise active gradient clipping"
         return errors
