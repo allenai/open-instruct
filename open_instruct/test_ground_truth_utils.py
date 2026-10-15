@@ -20,6 +20,7 @@ from open_instruct.ground_truth_utils import (
     PuzzleMatcherVerifier,
     cleanup_all_llm_judge_clients,
 )
+from open_instruct.IFEvalG import instructions_registry
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -236,8 +237,6 @@ class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
     ValueError from json.loads, so a deeply nested response raised RecursionError out of the verifier."""
 
     def test_deeply_nested_response_fails_the_constraint(self):
-        from open_instruct.IFEvalG import instructions_registry
-
         checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
             "detectable_format:json_format"
         )
