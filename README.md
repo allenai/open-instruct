@@ -31,7 +31,6 @@ docker build . \
     --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
 	--build-arg GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD) \
 	-t open_instruct_dev
-
 ```
 
 
@@ -42,6 +41,19 @@ After having setup the environment, you are ready to launch some experiments. We
 ### Finetuning
 
 **OLMo-core SFT**: For supported models (OLMo, OLMoE, Qwen3), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the list of supported models.
+
+
+### Preference Tuning
+
+We train DPO with `open_instruct/dpo.py`:
+
+```bash
+# Single-GPU DPO smoke test on Beaker (OLMo-2 1B).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh
+
+# Two-node 8xGPU DPO run.
+./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh
+```
 
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
