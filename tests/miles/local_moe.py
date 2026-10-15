@@ -231,6 +231,11 @@ def hybrid(options):
     hf.latent_moe_dim = 64
     hf.use_rope = False
     hf.attention_gate_type = "elementwise"
+    # Eight BF16 softmax scales occupy 16 bytes, preserving grouped-MM weight
+    # alignment in Core's packed parameter buffer even at this tiny width.
+    hf.num_attention_heads = 8
+    hf.num_key_value_heads = 4
+    hf.head_dim = hf.attention_hidden_size // hf.num_attention_heads
     hf.embed_norm = True
     hf.embed_scale = hf.hidden_size**0.5
     hf.qk_norm_per_head_gains = True
