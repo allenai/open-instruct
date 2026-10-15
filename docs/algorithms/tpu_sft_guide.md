@@ -55,8 +55,8 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 **Use `post-training`.** Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
 checkpoint often enough to lose little. Never hold a slice in a way that delays hero.
 
-The recipe needs exactly a `4x4x8`. The bigger slices need a different mesh (`olmo35-cp-ep`, in progress, not
-validated) and give a different data order (see Traps).
+The recipe needs exactly a `4x4x8`. The bigger slices need a different mesh (`olmo35-cp-ep`, parked: its first
+`8x8x8` smoke ran at 476 s/step) and give a different data order (see Traps).
 
 ## 1. Image
 
@@ -207,7 +207,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 ## Changing the recipe
 
 - **Other slice sizes.** The rule `olmo35-ep-as-cp` puts one 64K sequence on 8 chips (KDA's 8 heads) and fills exactly
-  a `4x4x8` at 16 sequences per step. The `8x8x8` and `8x8x16` slices need more chips per sequence (`olmo35-cp-ep`, in
-  progress) and their own same-slice control.
+  a `4x4x8` at 16 sequences per step. The `8x8x8` and `8x8x16` slices need more chips per sequence (`olmo35-cp-ep`,
+  parked) and their own same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
   TPU arms with a TPU control on the same slice shape.
