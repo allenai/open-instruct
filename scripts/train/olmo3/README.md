@@ -38,7 +38,7 @@ This will build an image and launch it. You can also check out the beaker link t
 
 ## Wandb reports
 
-We also have a bunch of Wandb reports for each stage, which contains the same information as above, in a slightly different format: 
+We also have a bunch of Wandb reports for each stage, which contains the same information as above, in a slightly different format:
 
 | experiment name | wandb report |
 |---|---|
