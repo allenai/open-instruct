@@ -1,12 +1,11 @@
 """Bounded HF -> Megatron torch_dist learner conversion on the trainer's TP-only mesh."""
 
 import ast
-import contextlib
 import hashlib
-import os
-import signal
 import subprocess
 from pathlib import Path
+
+from open_instruct.miles.distillation import opd_runtime
 
 # The operands of the pinned converter's automatic pipeline-parallel guard that must remain for the
 # conversion to stay PP1: an explicit PP1 request, a multi-rank world and the CONVERT_KEEP_PP1 escape.
@@ -92,27 +91,5 @@ def verify_keep_pp1(source, filename):
 
 
 def run_conversion(command, environment, stream, *, timeout=1800):
-    """Bound conversion and terminate its whole torchrun tree on failure.
-
-    ``subprocess.run`` kills only the torchrun parent on timeout; its distributed workers can keep
-    the Beaker allocation alive after the workflow fails.
-    """
-    process = subprocess.Popen(
-        command, env=environment, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True
-    )
-    try:
-        returncode = process.wait(timeout=timeout)
-        if returncode:
-            raise subprocess.CalledProcessError(returncode, command)
-    except BaseException:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGTERM)
-        try:
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5)
-        finally:
-            # A terminated torchrun parent is not evidence that its workers exited.
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=5)
-        raise
+    """Bound conversion and terminate its whole torchrun tree afterwards (see ``opd_runtime.run_group``)."""
+    opd_runtime.run_group(command, env=environment, stdout=stream, stderr=subprocess.STDOUT, timeout=timeout)

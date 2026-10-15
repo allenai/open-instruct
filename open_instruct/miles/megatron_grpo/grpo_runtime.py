@@ -14,7 +14,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.distillation import opd_runtime
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.execution import workflow
+from open_instruct.miles.execution import cluster, workflow
 from open_instruct.miles.megatron_grpo import (
     checkpoint_reuse,
     conversion,
@@ -279,4 +279,4 @@ def execute(spec):
             state.update(status="complete", finished_unix=time.time())
             workflow.write_json(root / "workflow.json", state)
         finally:
-            opd_runtime.stop(process)
+            cluster.terminate(process)
