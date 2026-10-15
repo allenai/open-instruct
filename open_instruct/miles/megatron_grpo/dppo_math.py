@@ -7,7 +7,8 @@ verifier-RL teacher run (``--loss_fn dppo --dppo_divergence_type tv --dppo_diver
 
 * ``r_t = pi / mu``,
 * the binary divergence collapses each position to a Bernoulli over {sampled token, the rest}:
-  TV is ``|mu - pi|``; KL is the Bernoulli KL(mu || pi),
+  TV is ``|mu - pi|``; KL is the Bernoulli KL(mu || pi), clamped with float32 epsilon so
+  probability-1 tokens stay finite (Open Instruct's 1e-9 clamp returns NaN there),
 * ``M_t`` drops a token only when its update moves further from the rollout and it is already
   outside the region: ``(A > 0 and r > 1 or A < 0 and r < 1) and D_t > delta``,
 * the per-token loss is ``-M_t * A_t * r_t`` with no symmetric clipping.
@@ -29,19 +30,25 @@ LOG_PROB_FLOOR = -30.0
 
 
 def binary_divergence(behavior_log_probs, policy_log_probs, response_mask, divergence_type):
-    """Per-token Bernoulli divergence between behavior ``mu`` and policy ``pi``; zero off the mask."""
-    eps = 1e-9
+    """Per-token Bernoulli divergence between behavior ``mu`` and policy ``pi``; zero off the mask.
+
+    Computed in float32. KL clamps the probabilities to ``[eps, 1 - eps]`` with float32's machine
+    epsilon. Open Instruct's ``eps = 1e-9`` rounds ``1 - eps`` to 1.0 in float32, so a token with
+    probability 1 gives ``0 * log(0) = NaN``, and ``NaN > threshold`` leaves the update unmasked.
+    """
     # Real log-probabilities are <= 0; clamp so exp() stays in [e^-30, 1] as in Open Instruct.
-    mu = torch.exp(behavior_log_probs.clamp(min=LOG_PROB_FLOOR, max=0.0))
-    pi = torch.exp(policy_log_probs.clamp(min=LOG_PROB_FLOOR, max=0.0))
+    mu = torch.exp(behavior_log_probs.float().clamp(min=LOG_PROB_FLOOR, max=0.0))
+    pi = torch.exp(policy_log_probs.float().clamp(min=LOG_PROB_FLOOR, max=0.0))
     if divergence_type == "tv":
         divergence = (mu - pi).abs()
     elif divergence_type == "kl":
+        eps = torch.finfo(torch.float32).eps
         mu = mu.clamp(eps, 1.0 - eps)
         pi = pi.clamp(eps, 1.0 - eps)
         divergence = mu * (mu.log() - pi.log()) + (1.0 - mu) * ((1.0 - mu).log() - (1.0 - pi).log())
     else:
         raise ValueError(f"DPPO divergence type must be one of {DIVERGENCE_TYPES}, got {divergence_type!r}")
+    divergence = divergence.to(policy_log_probs.dtype)
     return torch.where(response_mask, divergence, torch.zeros_like(divergence))
 
 

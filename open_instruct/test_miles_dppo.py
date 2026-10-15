@@ -138,7 +138,14 @@ def test_mask_matches_open_instruct(divergence_type, seed):
         divergence_threshold=settings.threshold,
     )
     assert torch.equal(mask, expected_mask)
-    torch.testing.assert_close(divergence, expected_divergence, rtol=0, atol=0)
+    # Open Instruct's KL clamp (1e-9) rounds to 1.0 in float32, so policy-probability-1 tokens give
+    # inf (or NaN when the behavior probability is also 1); ours clamps with float32 epsilon and stays finite.
+    finite = expected_divergence.isfinite()
+    assert torch.all(divergence.isfinite())
+    torch.testing.assert_close(divergence[finite], expected_divergence[finite], rtol=1e-5, atol=1e-6)
+    if divergence_type == "tv":
+        assert finite.all()
+        torch.testing.assert_close(divergence, expected_divergence, rtol=0, atol=0)
     # The fixture must exercise both kept and dropped response tokens.
     assert 0 < mask[response_mask].sum() < response_mask.sum()
 
@@ -190,6 +197,33 @@ def test_mask_only_drops_moves_away_from_the_rollout():
     # TV 0.2 > 0.1: drop A>0 with r>1 and A<0 with r<1; keep moves back towards the rollout.
     # TV 0.05 < 0.1: keep both remaining tokens regardless of direction.
     assert mask.tolist() == [[0.0, 1.0, 1.0, 0.0, 1.0, 1.0]]
+
+
+def test_kl_is_finite_at_probability_one_and_zero_for_identical_probabilities():
+    log_probs = torch.tensor([[0.0, -1e-9, -1e-7, -0.5, -10.0, -30.0]])
+    response_mask = torch.ones_like(log_probs).bool()
+    same = dppo_math.binary_divergence(log_probs, log_probs, response_mask, "kl")
+    assert torch.equal(same, torch.zeros_like(same))
+    for behavior, policy in [(log_probs, log_probs.flip(-1)), (log_probs.flip(-1), log_probs)]:
+        divergence = dppo_math.binary_divergence(behavior, policy, response_mask, "kl")
+        assert torch.all(divergence.isfinite()) and torch.all(divergence >= 0)
+    divergence = dppo_math.binary_divergence(log_probs.bfloat16(), log_probs.bfloat16(), response_mask, "kl")
+    assert divergence.dtype == torch.bfloat16 and torch.equal(divergence, torch.zeros_like(divergence))
+
+
+def test_kl_masks_a_move_away_from_a_probability_one_rollout_token():
+    # Behavior probability 1, policy e^-1, A < 0 pushes pi lower still: KL(mu || pi) = 1 > 0.1.
+    behavior = torch.tensor([[0.0]])
+    policy = torch.tensor([[-1.0]], requires_grad=True)
+    advantages = torch.tensor([[-1.0]])
+    settings = dppo_math.Settings("kl", 0.1)
+    loss_t, mask, _, divergence = dppo_math.per_token_loss(
+        policy, behavior, advantages, torch.ones_like(behavior), settings
+    )
+    torch.testing.assert_close(divergence, torch.tensor([[1.0]]), rtol=0, atol=1e-5)
+    assert mask.tolist() == [[0.0]]
+    loss_t.sum().backward()
+    assert policy.grad.tolist() == [[0.0]]
 
 
 def test_settings_round_trip_and_reject_missing_or_invalid_values():
