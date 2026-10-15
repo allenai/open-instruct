@@ -1,0 +1,91 @@
+# Olmo 3.5 (olmoe3: latent MoE + KDA) SFT on one reserved 4x4x8 v4 slice (128 chips, 32 hosts) of gke-tpu-v4,
+# post-training queue. Same launcher as olmo3-sft (train_sft.sh, linked), own ConfigMap names so the two never
+# share settings across restarts.
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: olmo35-sft
+  namespace: olmo
+  labels:
+    kueue.x-k8s.io/queue-name: post-training
+  annotations:
+    # Each replicated job (one per slice) gets a node pool, i.e. a slice, to itself.
+    alpha.jobset.sigs.k8s.io/exclusive-topology: cloud.google.com/gke-nodepool
+spec:
+  failurePolicy:
+    maxRestarts: 3
+  replicatedJobs:
+  - name: slice
+    replicas: 1 # Slices. More than one is a JAX multislice job.
+    template:
+      spec:
+        parallelism: 32 # Hosts per slice.
+        completions: 32
+        backoffLimit: 0 # Multi-host TPU jobs are all-or-nothing; JobSet restarts the whole set.
+        template:
+          metadata:
+            annotations:
+              # GKE's gcsfuse CSI driver adds a sidecar that mounts the data bucket. "0" lifts its resource
+              # limits; the TPU hosts have CPU and memory to spare.
+              gke-gcsfuse/volumes: "true"
+              gke-gcsfuse/cpu-limit: "0"
+              gke-gcsfuse/memory-limit: "0"
+              gke-gcsfuse/ephemeral-storage-limit: "0"
+          spec:
+            # The image's libtpu (0.0.46) only forms a multi-host slice on the host network; on the pod network
+            # TPU backend initialization hangs. A hostNetwork pod skips Workload Identity and acts as the node's
+            # service account, so MaxText's own GCS calls (checkpoints) use that, and terraform/ai2-olmo/main.tf
+            # gives the TPU node accounts the bucket. The gcsfuse mount still authenticates as this service
+            # account (hostNetworkPodKSA below).
+            serviceAccountName: olmo
+            hostNetwork: true
+            dnsPolicy: ClusterFirstWithHostNet # Resolve the JobSet's pod hostnames from the host network.
+            # Never restart a container in place: a failed host fails the Job, and JobSet restarts every slice.
+            restartPolicy: Never
+            nodeSelector:
+              cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
+              cloud.google.com/gke-tpu-topology: 4x4x8
+            containers:
+            - name: maxtext
+              image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+              command: [bash, /launcher/train_sft.sh]
+              envFrom:
+              - configMapRef:
+                  name: olmo35-sft-env
+              env:
+              # Only needed if the tokenizer download gets rate limited. kubectl -n olmo create secret generic
+              # hf-token --from-literal=token=hf_...
+              - name: HF_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: hf-token
+                    key: token
+                    optional: true
+              ports:
+              - containerPort: 8471 # TPU runtime.
+              - containerPort: 8080 # MXLA coordinator.
+              - containerPort: 8431 # TPU metrics.
+              volumeMounts:
+              - name: launcher
+                mountPath: /launcher
+                readOnly: true
+              - name: post-training
+                mountPath: /mnt/post-training
+                readOnly: true
+              resources:
+                limits:
+                  google.com/tpu: 4 # All chips on the host; every TPU container must take the whole host.
+            volumes:
+            - name: launcher
+              configMap:
+                name: olmo35-sft-launcher
+            # The post-training folder of the project bucket, read-only: SFT parquet files and tokenizers.
+            - name: post-training
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                readOnly: true
+                volumeAttributes:
+                  bucketName: ai2-olmo-dev
+                  mountOptions: only-dir=post-training,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
+                  gcsfuseMetadataPrefetchOnMount: "true"
+                  hostNetworkPodKSA: "true" # Authenticate the mount as serviceAccountName despite hostNetwork.
