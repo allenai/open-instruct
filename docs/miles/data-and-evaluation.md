@@ -4,6 +4,33 @@ The structured workflow prepares data in the GPU job where mounts and tokenizer
 are available. It records preparation under the run root; do not place reference
 assistant solutions into training prompts. See [workflow](workflow.md) for paths.
 
+## NGU group and retry metrics
+
+Fully asynchronous rollouts log `rollout/groups/selected/*` before fitting the sample
+budget and `rollout/groups/training/*` after budget trimming and the sample filter.
+Each stage includes `size_mean`, `size_min`, `size_max`, `merged_fraction` (the
+fraction of groups larger than one attempt), and `extra_sample_fraction` (the
+fraction of completions beyond the first attempt per group). The `attempts_1`
+through `attempts_4` buckets report counts and fractions; `attempts_other` bounds
+the metric cardinality for larger or nonstandard groups. With 16 samples per
+attempt, these four buckets correspond to group sizes 16, 32, 48, and 64.
+`rollout/groups/budget_trimmed_samples` counts completions removed to fit the budget.
+
+`chain_retried_fraction` and `chain_attempts_mean` use the chain-wide baseline
+sample count, including completions removed by staleness pruning or budget
+trimming. These stage metrics describe selected/training groups, not all
+prompts attempted by the producer.
+
+`rollout/ngu/*` records producer decisions, including failed chains absent from
+training: `filtered_attempts`, `filter_retries`, `filter_retry_fraction`,
+`budget_exhausted_chains`, `solved_filtered_chains`, `probability_dropped_chains`,
+`stale_retries`, and `recovery_retries`. `accepted_chains`,
+`accepted_retried_chains`, `accepted_retried_fraction`, `accepted_attempts`, and
+`accepted_attempts_mean` describe groups passing the producer filter, before
+queue staleness checks. A stale accepted chain can reopen, so these are
+acceptance decisions rather than unique trained prompts. Counters reset at each
+training collection; `pending_chains` is the current producer inventory.
+
 ## Selecting data
 
 Choose exactly one mode under `[data]`:
