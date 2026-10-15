@@ -169,10 +169,13 @@ def test_option_strings_are_preserved():
         options.encode_options({"rollout_batch_siz": 3})
 
 
-def test_all_starting_profiles_compile():
+def test_all_maintained_profiles_compile():
     root = Path(__file__).parents[1]
     paths = sorted((root / "configs/miles/examples").glob("*.toml"))
     assert {p.stem for p in paths} == {"dev", "small", "medium", "large"}
+    qualification = sorted((root / "configs/miles/qualification").glob("*.toml"))
+    assert {p.stem for p in qualification} == {"h045"}
+    paths += qualification
     assert set((root / "configs/miles").rglob("*.toml")) == set(paths)
     for path in paths:
         assert RunSpec.load(path).compile().plan()["argv"]
