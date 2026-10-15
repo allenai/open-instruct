@@ -358,8 +358,10 @@ def test_center_rewards_before_native_grpo_and_preserve_evidence(tmp_path, monke
         grpo_hooks.post_process(args, samples)
 
 
-@pytest.mark.parametrize("wrong_advantage", [False, True])
-def test_audit_requires_centered_reward_signal_in_trainer_dumps(tmp_path, monkeypatch, wrong_advantage):
+@pytest.mark.parametrize("case", ["mixed", "wrong_advantage", "zero_signal"])
+def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, case):
+    # zero_signal: every group in rollout 1 has equal rewards, so its advantages and gradient norm are zero.
+    wrong_advantage = case == "wrong_advantage"
     doc = document()
     doc["output"] = {"root": str(tmp_path / "run"), "assets": str(tmp_path / "assets")}
     spec = specs.from_dict(doc)
@@ -370,7 +372,7 @@ def test_audit_requires_centered_reward_signal_in_trainer_dumps(tmp_path, monkey
     for step in range(2):
         batch = []
         for index in range(16):
-            reward = float(index == 1)
+            reward = 0.0 if case == "zero_signal" and step == 1 else float(index == 1)
             batch.append(
                 {
                     "sample_index": 16 * step + index,
@@ -385,13 +387,16 @@ def test_audit_requires_centered_reward_signal_in_trainer_dumps(tmp_path, monkey
         records += batch
         indices = [row["sample_index"] for row in batch]
         advantages = [torch.tensor([0.5 if index == 1 else -0.5 if index == 0 else 0.0]) for index in range(16)]
+        if case == "zero_signal" and step == 1:
+            advantages = [torch.tensor([0.0]) for _ in range(16)]
         if wrong_advantage:
             advantages[0] = torch.tensor([0.0])
         # TP2/DP1: one dump per data-parallel rank, keyed by global rank.
         torch.save({"rollout_data": {"sample_indices": indices, "advantages": advantages}}, debug / f"{step}_0.pt")
     (root / grpo_hooks.EVIDENCE).write_text("\n".join(json.dumps(row) for row in records) + "\n")
+    second_norm = 0.0 if case == "zero_signal" else 1.0
     (root / "training.log").write_text(
-        "step 0: {'train/step': 0, 'train/grad_norm': 1.0}\nstep 1: {'train/step': 1, 'train/grad_norm': 1.0}\n"
+        f"step 0: {{'train/step': 0, 'train/grad_norm': 1.0}}\nstep 1: {{'train/step': 1, 'train/grad_norm': {second_norm}}}\n"
     )
     base, export = tmp_path / "base", root / "hf-1"
     base.mkdir()
@@ -414,7 +419,9 @@ def test_audit_requires_centered_reward_signal_in_trainer_dumps(tmp_path, monkey
     else:
         result = grpo_audit.audit(spec, prepared)
         assert result["passed"] and result["teacher"] is None
-        assert [row["mixed_groups"] for row in result["rollouts"]] == [1, 1]
+        zero = case == "zero_signal"
+        assert [row["mixed_groups"] for row in result["rollouts"]] == [1, 0 if zero else 1]
+        assert [row["zero_signal"] for row in result["rollouts"]] == [False, zero]
         assert result["export"]["changed_tensors"] == 1
         assert registries == {"/fixed/registry"}
 

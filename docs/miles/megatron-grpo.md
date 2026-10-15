@@ -103,9 +103,11 @@ responses for every async run.
    pipeline inference honors `CONVERT_KEEP_PP1`;
 4. parses the native arguments in a preflight that asserts the selected
    objective (`fully_async`, `use_rollout_logprobs`, `loss_type`) reached MILES;
-5. trains, then audits optimizer metrics, rescoring of every response,
-   mixed-reward groups and the trainer's advantages in `debug/train_data`
-   against the centered rewards, and completes the HF export;
+5. trains, then audits finite optimizer metrics, rescoring of every response
+   and the trainer's advantages in `debug/train_data` against the centered
+   rewards, and completes the HF export. A rollout whose groups all have equal
+   rewards is recorded as `zero_signal` rather than failed: its advantages and
+   gradient norm are legitimately zero;
 6. reloads the export in a fresh SGLang process and probes a training prompt.
 
 A previously completed, independently load-audited **initial TP2/PP1 native
