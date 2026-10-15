@@ -25,7 +25,7 @@ gradient comparison. A separate doubled-gradient ZeRO-2/BF16 control must also
 fail before clipping; an unrelated launch failure does not count as sensitivity.
 Both ZeRO stages run with BF16, SP on/off and fused loss on/off. Checkpoint
 continuation covers both stages without SP as well as the SP refill cases.
-All 24 positive invocations must emit their pass marker. Source hashes, package
+All 38 positive invocations must emit their pass marker. Source hashes, package
 versions and per-window errors are persisted. No skipped test counts as validation.
 
 This checks numerical correctness and checkpoint continuation, not historical
@@ -48,3 +48,7 @@ buffering helper called it again and silently started another epoch. The helper
 now latches exhaustion; a CPU regression executes the installed adapter across
 two epochs with only its single-rank collective transport replaced. The first
 focused run was stopped during startup to include this correction.
+
+The corrected full matrix retains the original precision limits. Tight FP32
+checks cover SP, fused loss, and the same five save/reload configurations as
+BF16. A per-update epoch-step assertion fails immediately if iteration restarts.

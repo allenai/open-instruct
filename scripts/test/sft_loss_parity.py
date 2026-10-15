@@ -270,6 +270,7 @@ def main(args):
 
     def inspect_update(gradient_errors):
         reference.step()
+        assert reference.steps <= math.ceil(len(dataloader) / GAS), "Iterator exceeded its epoch boundary"
         update_errors = check_close(
             full_parameters() - reference.initial,
             flatten(reference.masters) - reference.initial,

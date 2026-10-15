@@ -67,6 +67,11 @@ run_case zero2-liger --zero-stage 2 --precision bf16 --liger
 run_case zero3-liger --zero-stage 3 --precision bf16 --liger
 run_case zero2-sp2-liger --zero-stage 2 --sp-size 2 --precision bf16 --liger
 run_case zero3-sp2-liger --zero-stage 3 --sp-size 2 --precision bf16 --liger
+# Tight FP32 checks also cover the fused-loss implementation.
+run_case zero2-liger-fp32 --zero-stage 2 --liger
+run_case zero3-liger-fp32 --zero-stage 3 --liger
+run_case zero2-sp2-liger-fp32 --zero-stage 2 --sp-size 2 --liger
+run_case zero3-sp2-liger-fp32 --zero-stage 3 --sp-size 2 --liger
 # Reload into a fresh engine/process group; the saved offset is inside an SP refill.
 run_case zero2-resume --zero-stage 2 --precision bf16 --phase save
 run_case zero2-resume --zero-stage 2 --precision bf16 --phase resume
@@ -78,4 +83,15 @@ run_case zero3-sp2-resume --zero-stage 3 --sp-size 2 --precision bf16 --phase sa
 run_case zero3-sp2-resume --zero-stage 3 --sp-size 2 --precision bf16 --phase resume
 run_case zero3-sp2-liger-resume --zero-stage 3 --sp-size 2 --precision bf16 --liger --phase save
 run_case zero3-sp2-liger-resume --zero-stage 3 --sp-size 2 --precision bf16 --liger --phase resume
-echo 'SFT_LOSS_GPU_PARITY_PASS: 24 positive cases and two rejected negative controls'
+# Repeat checkpoint coverage in FP32 so BF16 tolerances cannot hide weighting errors.
+run_case zero2-resume-fp32 --zero-stage 2 --phase save
+run_case zero2-resume-fp32 --zero-stage 2 --phase resume
+run_case zero3-resume-fp32 --zero-stage 3 --phase save
+run_case zero3-resume-fp32 --zero-stage 3 --phase resume
+run_case zero2-sp2-resume-fp32 --zero-stage 2 --sp-size 2 --phase save
+run_case zero2-sp2-resume-fp32 --zero-stage 2 --sp-size 2 --phase resume
+run_case zero3-sp2-resume-fp32 --zero-stage 3 --sp-size 2 --phase save
+run_case zero3-sp2-resume-fp32 --zero-stage 3 --sp-size 2 --phase resume
+run_case zero3-sp2-liger-resume-fp32 --zero-stage 3 --sp-size 2 --liger --phase save
+run_case zero3-sp2-liger-resume-fp32 --zero-stage 3 --sp-size 2 --liger --phase resume
+echo 'SFT_LOSS_GPU_PARITY_PASS: 38 positive cases and two rejected negative controls'
