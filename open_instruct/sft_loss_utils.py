@@ -10,6 +10,45 @@ from accelerate import Accelerator
 from accelerate.utils import DistributedType
 
 
+class _UlyssesCheckpointMPU:
+    def __init__(self, mpu):
+        self._mpu = mpu
+
+    def get_model_parallel_rank(self):
+        # Ulysses shards sequences, not model weights. ZeRO's DP rank already
+        # identifies each optimizer/parameter shard in checkpoint filenames.
+        return 0
+
+    def __getattr__(self, name):
+        return getattr(self._mpu, name)
+
+
+@contextlib.contextmanager
+def sequence_parallel_checkpoint(model, sequence_parallel_size: int = 1):
+    """Keep Ulysses SP ranks out of DeepSpeed's model-shard checkpoint names.
+
+    DeepSpeed 0.18.4 reports mp_world_size=1 for Ulysses but aliases its MPU
+    model rank to the SP rank. Save writes only model rank zero, then load on
+    nonzero SP ranks indexes past that sole model file. Optimizer filenames
+    are inconsistent too. ZeRO's own optimizers already special-case Ulysses
+    as model rank zero (stage_1_and_2.py and stage3.py). Match that rule only
+    during checkpoint I/O; training's global MPU and SP collectives retain
+    their actual ranks. Older SP checkpoints with mixed MP suffixes require
+    migration before optimizer-state reload; this does not rewrite them.
+    """
+    if sequence_parallel_size == 1:
+        yield
+        return
+    mpu = model.mpu
+    if not hasattr(mpu, "initialize_sequence_parallel") or model.mp_world_size != 1:
+        raise ValueError("Expected Ulysses with unsharded model parallelism for SP checkpointing")
+    model.mpu = _UlyssesCheckpointMPU(mpu)
+    try:
+        yield
+    finally:
+        model.mpu = mpu
+
+
 def resume_epoch_and_batch(completed_steps: int, batches_per_epoch: int, accumulation_steps: int) -> tuple[int, int]:
     # Each epoch can end in a short optimizer window. Multiplying the global
     # step by GAS would count its nonexistent padding as batches of the next epoch.

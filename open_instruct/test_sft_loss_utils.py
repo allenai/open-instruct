@@ -8,6 +8,7 @@ import tempfile
 import types
 import unittest
 from datetime import timedelta
+from pathlib import Path
 from unittest import mock
 
 import torch
@@ -15,8 +16,10 @@ from accelerate import Accelerator
 from accelerate.state import AcceleratorState, GradientState
 from accelerate.utils import DistributedType, GradientAccumulationPlugin
 from accelerate.utils.deepspeed import DeepSpeedEngineWrapper
+from deepspeed.runtime import engine as ds_engine
+from deepspeed.runtime import state_dict_factory
 from deepspeed.runtime.comm import coalesced_collectives
-from deepspeed.runtime.sequence_parallel import ulysses_sp
+from deepspeed.runtime.sequence_parallel import parallel_state_sp, ulysses_sp
 from torch import distributed as dist
 from torch import multiprocessing as mp
 from torch.nn import functional as F
@@ -252,6 +255,80 @@ class TestSftLossNormalization(unittest.TestCase):
     def tearDown(self):
         AcceleratorState._reset_state(reset_partial_state=True)
         GradientState._reset_state()
+
+    def test_ulysses_checkpoint_names_and_model_loader_use_unsharded_model_rank(self):
+        sp_group, dp_group = object(), object()
+        for stage in (2, 3):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                engine = ds_engine.DeepSpeedEngine.__new__(ds_engine.DeepSpeedEngine)
+                torch.nn.Module.__init__(engine)
+                engine.destroy = lambda: None  # Only naming methods are initialized in this CPU fixture.
+                engine.mpu = parallel_state_sp
+                engine.mp_world_size = 1
+                engine.loaded_checkpoint_dp_world_size = 4
+                engine.optimizer = types.SimpleNamespace(dp_process_group=dp_group)
+                engine.zero_optimization_partition_weights = lambda stage=stage: stage == 3
+                engine.load_universal_checkpoint = lambda: False
+                engine.bfloat16_enabled = lambda: False
+                (Path(directory) / "step1").mkdir()
+                optimizer_paths = set()
+
+                rank_state = types.SimpleNamespace(rank=0)
+
+                def get_rank(group=None, state=rank_state):
+                    return state.rank % 2 if group is sp_group else state.rank
+
+                with (
+                    mock.patch.object(parallel_state_sp, "_SEQUENCE_PARALLEL_GROUP", sp_group),
+                    mock.patch.object(parallel_state_sp.dist, "get_rank", side_effect=get_rank),
+                ):
+                    # Execute the installed engine's filename methods, not a
+                    # reimplementation of its MP/SP or ZeRO rank arithmetic.
+                    for rank in range(4):
+                        rank_state.rank = rank
+                        with sft_loss_utils.sequence_parallel_checkpoint(engine, 2):
+                            self.assertEqual(engine.mpu.get_sequence_parallel_rank(), rank % 2)
+                            path = engine._get_zero_ckpt_name(directory, "step1")
+                            optimizer_paths.add(path)
+                            torch.save({}, path)
+                            if stage == 3 or rank == 0:
+                                torch.save(
+                                    {"mp_world_size": 1, "module": {"weight": torch.arange(4)}},
+                                    engine._get_ckpt_name(directory, "step1"),
+                                )
+                        self.assertIs(engine.mpu, parallel_state_sp)
+                    self.assertEqual(len(optimizer_paths), 4)
+                    for rank in range(4):
+                        rank_state.rank = rank
+                        with sft_loss_utils.sequence_parallel_checkpoint(engine, 2):
+                            paths = engine._get_all_ckpt_names(directory, "step1")
+                            loader = state_dict_factory.SDLoaderFactory.get_sd_loader(paths, None)
+                            _, checkpoint, _ = loader.load(engine.mp_world_size, engine.mpu.get_model_parallel_rank())
+                            torch.testing.assert_close(checkpoint["module"]["weight"], torch.arange(4))
+                            self.assertEqual(
+                                set(engine._get_all_zero_checkpoint_names(directory, "step1", False)), optimizer_paths
+                            )
+                        if rank % 2:
+                            # The uncorrected loader indexes beyond its sole
+                            # model checkpoint on each nonzero SP rank.
+                            with self.assertRaises(IndexError):
+                                loader.load(engine.mp_world_size, engine.mpu.get_model_parallel_rank())
+                    with (
+                        self.assertRaisesRegex(RuntimeError, "checkpoint failed"),
+                        sft_loss_utils.sequence_parallel_checkpoint(engine, 2),
+                    ):
+                        raise RuntimeError("checkpoint failed")
+                    self.assertIs(engine.mpu, parallel_state_sp)
+
+    def test_sequence_checkpoint_is_noop_without_sp_and_rejects_tensor_parallelism(self):
+        with sft_loss_utils.sequence_parallel_checkpoint(object()):
+            pass
+        engine = types.SimpleNamespace(mpu=parallel_state_sp, mp_world_size=2)
+        with (
+            self.assertRaisesRegex(ValueError, "unsharded model parallelism"),
+            sft_loss_utils.sequence_parallel_checkpoint(engine, 2),
+        ):
+            self.fail("Unsupported tensor parallelism entered checkpoint I/O")
 
     def test_resume_counts_short_epoch_windows_once(self):
         # Ten batches at GAS=3 make four updates, not twelve consumed batches.

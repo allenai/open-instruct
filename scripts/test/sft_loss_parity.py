@@ -233,7 +233,8 @@ def main(args):
     output.mkdir(parents=True, exist_ok=True)
     checkpoint = output / "checkpoint"
     if args.phase == "resume":
-        accelerator.load_state(str(checkpoint))
+        with sft_loss_utils.sequence_parallel_checkpoint(model, args.sp_size):
+            accelerator.load_state(str(checkpoint))
         reference.load(output / "reference.pt")
         # Exercise the same resume iterator as finetune.py, including an odd
         # skipped SP microbatch count that ends inside the adapter's refill.
@@ -339,9 +340,17 @@ def main(args):
             if not args.zero_stage and last:
                 inspect_update(gradient_errors)
         if last and args.phase == "save":
-            accelerator.save_state(str(checkpoint), safe_serialization=False)
+            with sft_loss_utils.sequence_parallel_checkpoint(model, args.sp_size):
+                accelerator.save_state(str(checkpoint), safe_serialization=False)
             if accelerator.is_main_process:
                 reference.save(output / "reference.pt")
+                if args.sp_size > 1:
+                    files = {path.name for path in checkpoint.rglob("*.pt")}
+                    optimizer_files = {name for name in files if name.endswith("optim_states.pt")}
+                    model_files = {name for name in files if name.endswith("model_states.pt")}
+                    assert len(optimizer_files) == 4, optimizer_files
+                    assert len(model_files) == (4 if args.zero_stage == 3 else 1), model_files
+                    assert all("mp_rank_00_" in name for name in optimizer_files | model_files), files
             accelerator.wait_for_everyone()
             break
     if args.phase != "save":

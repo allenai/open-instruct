@@ -52,3 +52,13 @@ focused run was stopped during startup to include this correction.
 The corrected full matrix retains the original precision limits. Tight FP32
 checks cover SP, fused loss, and the same five save/reload configurations as
 BF16. A per-update epoch-step assertion fails immediately if iteration restarts.
+
+The second attempt passed all 18 numerical configurations and both non-SP BF16
+reloads, then exposed DeepSpeed 0.18.4's SP checkpoint bug: its model-parallel
+world size is one, but checkpoint filenames and selection use the SP rank.
+Checkpoint I/O now uses a temporary engine MPU proxy reporting model rank zero,
+matching ZeRO's own optimizer special case. Global training groups are untouched,
+and `finally` restores the original MPU. This fixes newly written checkpoints;
+older mixed-MP-suffix SP checkpoints need separate migration. Save-time checks
+verify all ZeRO partitions are present with canonical names. Checkpoint pairs
+run before the numerical matrix so a reload failure is reported promptly.

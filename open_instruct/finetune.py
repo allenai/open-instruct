@@ -777,7 +777,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     last_checkpoint_path = get_last_checkpoint_path(args)
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
-        accelerator.load_state(last_checkpoint_path)
+        with sft_loss_utils.sequence_parallel_checkpoint(model, args.sequence_parallel_size):
+            accelerator.load_state(last_checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
         last_checkpoint_path = os.path.basename(last_checkpoint_path)
         training_difference = os.path.splitext(last_checkpoint_path)[0]
@@ -994,7 +995,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     output_dir = f"step_{completed_steps}"
                     if args.output_dir is not None:
                         output_dir = os.path.join(args.output_dir, output_dir)
-                    accelerator.save_state(output_dir)
+                    with sft_loss_utils.sequence_parallel_checkpoint(model, args.sequence_parallel_size):
+                        accelerator.save_state(output_dir)
                     with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                         f.write("COMPLETED")
                     if accelerator.is_local_main_process:
@@ -1008,7 +1010,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            accelerator.save_state(output_dir)
+            with sft_loss_utils.sequence_parallel_checkpoint(model, args.sequence_parallel_size):
+                accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
