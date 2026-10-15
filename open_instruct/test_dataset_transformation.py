@@ -1926,8 +1926,8 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         self.assertIn(zork_id, self.tokenizer.encode("say zork now", add_special_tokens=False))
         self.assertTrue(self.keeps([{"role": "assistant", "content": "A zorkmid coin."}]))
         self.assertFalse(self.keeps([{"role": "assistant", "content": "Say zork now."}]))
-        # Word characters follow the tokenizer's Unicode rules, which differ from stdlib `re`:
-        # `²` ends a word (the token matches), a combining accent continues one (it does not).
+        # The filter defers to the tokenizer's own Unicode word rules: `²` ends a word (the token
+        # matches), a combining accent continues one (it does not).
         for text, matches in [("zork\u00b2", True), ("zork\u0301", False)]:
             self.assertEqual(zork_id in self.tokenizer.encode(text, add_special_tokens=False), matches, text)
             self.assertEqual(self.keeps([{"role": "assistant", "content": text}]), not matches, text)

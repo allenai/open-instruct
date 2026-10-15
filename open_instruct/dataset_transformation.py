@@ -56,7 +56,6 @@ from functools import cached_property, lru_cache
 from typing import Any, Literal, cast
 
 import numpy as np
-import regex
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
@@ -1917,20 +1916,9 @@ DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT = (
 
 
 @lru_cache(maxsize=16)
-def _added_token_strings_pattern(added_tokens: tuple[tuple[str, bool], ...], allowed: frozenset[str]) -> Any:
-    """`regex.Pattern` for `(content, single_word)` added tokens not in `allowed`, or None if none.
-
-    Uses `regex`, whose Unicode `\\w` matches the word characters the `tokenizers` backend
-    uses for `single_word` (stdlib `re` differs on e.g. `²` and combining marks).
-    """
-    banned = [(s, single_word) for s, single_word in added_tokens if s and s not in allowed]
-    # Longest first, so a string that contains another one is reported whole.
-    banned.sort(key=lambda token: len(token[0]), reverse=True)
-    # A `single_word` added token never matches inside a word, so only report it at word boundaries.
-    alternatives = [
-        rf"(?<!\w){regex.escape(s)}(?!\w)" if single_word else regex.escape(s) for s, single_word in banned
-    ]
-    return regex.compile("|".join(alternatives)) if alternatives else None
+def _added_token_strings_pattern(added_strings: tuple[str, ...], allowed: frozenset[str]) -> re.Pattern[str] | None:
+    banned = [s for s in added_strings if s and s not in allowed]
+    return re.compile("|".join(re.escape(s) for s in banned)) if banned else None
 
 
 def _content_text(content: Any) -> str:
@@ -1955,22 +1943,30 @@ def find_added_token_strings(
     tokenizer: PreTrainedTokenizer,
     allowed_strings: Sequence[str] | None = None,
 ) -> list[str]:
-    """Sorted distinct strings from `tokenizer`'s added vocabulary that occur in `messages`' content.
+    """Sorted distinct strings from `tokenizer`'s added vocabulary that `messages`' content encodes to.
 
-    `allowed_strings` defaults to `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`. A
-    `single_word` added token only counts outside a word, where the tokenizer would match it. The
-    added vocabulary is read on every call rather than cached per tokenizer, since promotion into
-    reserved slots edits a tokenizer in place.
+    A substring search finds candidate rows; each candidate's content is then encoded, and a
+    string counts only if its token id comes out. That leaves `single_word`, normalization and
+    the other `AddedToken` matching rules to the tokenizer, and costs an encode only for the rare
+    rows that contain a candidate. `allowed_strings` defaults to
+    `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`. The added vocabulary is read on every call
+    rather than cached per tokenizer, since promotion into reserved slots edits a tokenizer in
+    place.
     """
     allowed = frozenset(DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT if allowed_strings is None else allowed_strings)
-    added_tokens = tuple((token.content, token.single_word) for token in tokenizer.added_tokens_decoder.values())
-    pattern = _added_token_strings_pattern(added_tokens, allowed)
+    added_ids = {token.content: token_id for token_id, token in tokenizer.added_tokens_decoder.items()}
+    pattern = _added_token_strings_pattern(tuple(added_ids), allowed)
     if pattern is None:
         return []
     found: set[str] = set()
     for message in messages or []:
-        if isinstance(message, Mapping):
-            found.update(pattern.findall(_content_text(message.get("content"))))
+        if not isinstance(message, Mapping):
+            continue
+        text = _content_text(message.get("content"))
+        if pattern.search(text) is None:
+            continue
+        encoded = set(tokenizer.encode(text, add_special_tokens=False))
+        found.update(s for s, token_id in added_ids.items() if s not in allowed and s in text and token_id in encoded)
     return sorted(found)
 
 
