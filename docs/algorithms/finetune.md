@@ -198,8 +198,6 @@ bash scripts/train/olmo2/finetune_13b.sh
 
     Based on our internal evaluation, the SFT model is roughly on par with the original `allenai/OLMo-2-1124-7B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
 
-    ![finetune_plot](finetune/olmo2_13b_sft_eval.png)
-
 ???+ info
 
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
