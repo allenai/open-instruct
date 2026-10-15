@@ -90,12 +90,36 @@ therefore does not check GPU kernels, distributed gradients or publication.
 The ordinary Open Instruct GPU CI image does not include the private MILES
 runtime; dedicated runtime checks are a separate maintainer validation step.
 
-For a training lifecycle check, copy [small.toml](../../configs/miles/examples/small.toml)
-to `runs/`, select a compatible tiny checkpoint, and follow the
-[committed-image launcher](launching.md). Verify the rendered replica group and
-retain image, config and completion artifacts. Test refresh separately when
-changing publication behavior; a tiny mechanics check does not establish learning
-quality.
+For a local RTX 4090 lifecycle check, `tests/miles/local_moe.py hybrid` builds a
+seeded, reduced hybrid Olmo MoE from a prepared fixture's tokenizer and task
+slice. It includes a dense KDA first block, a KDA MoE block, and a full-attention
+MoE block, with latent routing, shared experts, attention gates, per-head Q/K
+gains and scalable softmax. The older conventional MoE checkpoint omits several
+of these target components. Use `bootstrap` to prepare the input fixture, then:
+
+```bash
+python tests/miles/local_moe.py hybrid /output/tiny-hybrid --fixture /output/fixture
+export OLMO_SGLANG_CORE_COMPAT=rounding
+python tests/miles/local_moe.py run /output/tiny-hybrid --routing-replay --diagnostic-interval 1
+python tests/miles/local_moe.py run /output/tiny-hybrid --routing-replay --diagnostic-interval 1 --resume
+python tests/miles/local_moe.py audit /output/tiny-hybrid --routing-replay
+```
+
+Run these commands inside the pinned application image with the GPU exposed.
+The small geometry needs explicit compatible rounding because it does not match
+the production geometry's automatic serving profile. This random model checks
+mechanics; router auxiliary losses provide an update signal even when task
+rewards are zero. It does not measure model quality or exercise the structured
+CLI's preparation and launch path.
+
+For two-GPU WEKA validation, copy
+[small.toml](../../configs/miles/examples/small.toml) to `runs/`, select an
+established trained hybrid checkpoint such as H045, and follow the
+[committed-image launcher](launching.md). Keep toy models local. Verify the
+rendered one-trainer/one-serving allocation and retain image, config and
+completion artifacts. Test refresh separately when changing publication
+behavior. Expert-parallel training with separate serving requires at least three
+GPUs and remains a separate qualification case.
 
 ## Documentation checks
 

@@ -15,7 +15,6 @@ from pathlib import Path
 import ray
 import torch
 from datasets import load_dataset
-from miles.utils import arguments
 from olmo_core.config import DType
 from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.nn import attention
@@ -25,6 +24,7 @@ from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from pyarrow import parquet
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from miles.utils import arguments
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.execution.driver import train
 from open_instruct.miles.rewards.verifiers import GSM8KVerifier
@@ -212,23 +212,36 @@ def bootstrap(options):
 
 
 def hybrid(options):
-    """Build a tiny KDA+latent policy using the already prepared public task slice."""
+    """Build a tiny target-family hybrid policy using a prepared task slice.
+
+    Preserve the dense first layer, KDA and full-attention MoE blocks, shared
+    experts, latent routing, and target normalization/gating behavior. Dimensions
+    and layer counts are reduced for a colocated RTX 4090 lifecycle check.
+    """
     root = options.output
     root.mkdir(parents=True, exist_ok=True)
     hf_config_utils._register_olmo3moe_auto_classes()
     hf = Olmo3MoeConfig.from_pretrained(options.fixture / "hf")
-    hf.layer_types = ["linear_attention", "full_attention"]
+    hf.num_hidden_layers = 3
+    hf.layer_types = ["linear_attention", "linear_attention", "full_attention"]
     hf.dense_layers_indices = [0]
     hf.dense_mlp_intermediate_size = 256
-    hf.dense_mlp_uses_shared_experts = True
+    hf.dense_layers_use_shared_expert = True
     hf.shared_expert_intermediate_size = 128
     hf.latent_moe_dim = 64
     hf.use_rope = False
     hf.attention_gate_type = "elementwise"
+    hf.embed_norm = True
+    hf.embed_scale = hf.hidden_size**0.5
+    hf.qk_norm_per_head_gains = True
+    hf.scalable_softmax = True
+    hf.global_load_balancing = True
+    hf.linear_allow_neg_eigval = True
+    hf.rms_norm_eps = 1e-6
     hf.linear_num_key_heads = 8
     hf.linear_num_value_heads = 8
     hf.linear_key_head_dim = 64
-    hf.linear_value_head_dim = 64
+    hf.linear_value_head_dim = 128
     torch.manual_seed(17)
     model = AutoModelForCausalLM.from_config(hf).to(torch.bfloat16)
     with torch.no_grad():
@@ -244,7 +257,7 @@ def hybrid(options):
     (root / "preparation.json").write_text(
         json.dumps(
             dict(
-                source="fresh random KDA + latent MoE; seed 17; public tokenizer/task slice",
+                source="fresh random target-family hybrid MoE; seed 17; prepared tokenizer/task slice",
                 parameters=sum(p.numel() for p in model.parameters()),
                 export_dtype="bfloat16",
             ),
@@ -273,6 +286,7 @@ def run(options):
             reward_config=str(root / "verifiers.json"),
             router_aux_loss_weight=0.01,
             router_z_loss_weight=0.001,
+            filter_zero_std_groups=False,
         ),
         dict(
             hf_checkpoint=str(root / "hf"),
