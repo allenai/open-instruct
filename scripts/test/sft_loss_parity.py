@@ -21,6 +21,7 @@ from torch import distributed as dist
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from transformers import LlamaConfig, LlamaForCausalLM
+from transformers import modeling_utils as hf_modeling_utils
 
 from open_instruct import sft_loss_utils
 
@@ -76,6 +77,7 @@ def check_close(actual, expected, name, bf16):
 class Reference:
     def __init__(self, model):
         self.model = model
+        self.original_sdpa = hf_modeling_utils.ALL_ATTENTION_FUNCTIONS["sdpa"]
         self.parameters = list(model.parameters())
         self.masters = [torch.nn.Parameter(parameter.detach().float().clone()) for parameter in self.parameters]
         self.initial = flatten(self.masters).clone()
@@ -95,7 +97,16 @@ class Reference:
             key: torch.stack([rows[index][key] for index in indices]).to(self.parameters[0].device)
             for key in ("input_ids", "position_ids", "labels")
         }
-        logits = self.model(input_ids=batch["input_ids"], position_ids=batch["position_ids"], use_cache=False).logits
+        # Ulysses overwrites the process-wide attention registry during prepare.
+        # The unsharded reference must keep the original noncollective attention.
+        ulysses_sdpa = hf_modeling_utils.ALL_ATTENTION_FUNCTIONS["sdpa"]
+        try:
+            hf_modeling_utils.ALL_ATTENTION_FUNCTIONS["sdpa"] = self.original_sdpa
+            logits = self.model(
+                input_ids=batch["input_ids"], position_ids=batch["position_ids"], use_cache=False
+            ).logits
+        finally:
+            hf_modeling_utils.ALL_ATTENTION_FUNCTIONS["sdpa"] = ulysses_sdpa
         targets = batch["labels"][..., 1:].reshape(-1)
         loss = F.cross_entropy(logits[..., :-1, :].float().reshape(-1, 64), targets)
         loss.backward()
@@ -235,7 +246,10 @@ def main(args):
             gradient = flatten([ds_utils.safe_get_full_grad(parameter) for parameter in parameters])
         else:
             gradient = flatten([parameter.grad for parameter in parameters])
-        return check_close(gradient, expected_gradient, "gradient-before-clipping", bf16)
+        errors = check_close(gradient, expected_gradient, "gradient-before-clipping", bf16)
+        errors["unclipped_norm"] = gradient.norm().item()
+        assert expected_gradient.norm().item() > CLIP, "The update check must exercise active gradient clipping"
+        return errors
 
     def inspect_update(gradient_errors):
         reference.step()
@@ -297,6 +311,7 @@ def main(args):
                     mean_loss, count, total, accelerator, window_size, args.sp_size, gradient_divisor=divisor
                 )
             )
+            loss = loss * args.loss_scale
             sft_loss_utils.backward_token_normalized_loss(accelerator, loss)
             if not args.zero_stage and last:
                 gradient_errors = inspect_gradients()
@@ -338,6 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--liger", action="store_true")
     parser.add_argument("--sync-each-batch", action="store_true")
     parser.add_argument("--legacy-control", action="store_true")
+    parser.add_argument("--loss-scale", type=float, default=1.0)
     parser.add_argument("--phase", choices=("full", "save", "resume"), default="full")
     parser.add_argument("--output", required=True)
     main(parser.parse_args())

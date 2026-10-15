@@ -36,6 +36,12 @@ if run_case legacy-control --legacy-control; then
 fi
 grep -q 'PARITY_MISMATCH gradient-before-clipping' /output/legacy-control.log
 echo 'SFT_PARITY_NEGATIVE_CONTROL_REJECTED'
+if run_case zero2-bf16-scale-control --zero-stage 2 --precision bf16 --loss-scale 2; then
+    echo 'ERROR: doubled BF16 gradients unexpectedly passed'
+    exit 1
+fi
+grep -q 'PARITY_MISMATCH gradient-before-clipping' /output/zero2-bf16-scale-control.log
+echo 'SFT_PARITY_BF16_SCALE_CONTROL_REJECTED'
 
 run_case ddp
 run_case ddp-sync --sync-each-batch
@@ -54,4 +60,4 @@ run_case zero3-sp2-resume --zero-stage 3 --sp-size 2 --precision bf16 --phase sa
 run_case zero3-sp2-resume --zero-stage 3 --sp-size 2 --precision bf16 --phase resume
 run_case zero3-sp2-liger-resume --zero-stage 3 --sp-size 2 --precision bf16 --liger --phase save
 run_case zero3-sp2-liger-resume --zero-stage 3 --sp-size 2 --precision bf16 --liger --phase resume
-echo 'SFT_LOSS_GPU_PARITY_PASS: 16 positive cases and the rejected legacy control'
+echo 'SFT_LOSS_GPU_PARITY_PASS: 16 positive cases and two rejected negative controls'
