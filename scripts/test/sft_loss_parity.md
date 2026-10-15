@@ -23,7 +23,9 @@ absolute error <= 1e-5; BF16 <= 0.03 and <= 0.002 respectively. Both limits must
 hold. The isolated old mean-of-microbatch-means negative control must fail the
 gradient comparison. A separate doubled-gradient ZeRO-2/BF16 control must also
 fail before clipping; an unrelated launch failure does not count as sensitivity.
-All 16 positive invocations must emit their pass marker. Source hashes, package
+Both ZeRO stages run with BF16, SP on/off and fused loss on/off. Checkpoint
+continuation covers both stages without SP as well as the SP refill cases.
+All 22 positive invocations must emit their pass marker. Source hashes, package
 versions and per-window errors are persisted. No skipped test counts as validation.
 
 This checks numerical correctness and checkpoint continuation, not historical
