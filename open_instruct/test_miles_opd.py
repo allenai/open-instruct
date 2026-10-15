@@ -1,6 +1,7 @@
 """CPU checks for OPD configuration and allocation boundaries."""
 
 import asyncio
+import contextlib
 import copy
 import importlib.util
 import json
@@ -8,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +19,7 @@ from open_instruct.miles.configuration import options, specs
 from open_instruct.miles.distillation import opd_config, opd_launch, opd_prepare, opd_retention, opd_runtime
 from open_instruct.miles.distillation import opd_rewards as rewards
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.execution import launch, workflow
+from open_instruct.miles.execution import cluster, launch, workflow
 
 CONFIG = Path(__file__).resolve().parents[1] / "tests/miles/fixtures/opd/qwen35-4b-tiny.toml"
 PREPARED = {
@@ -208,6 +210,60 @@ def test_opd_honors_shared_memory_setting():
     spec = specs.load(CONFIG, ['launch.shared_memory="48 GiB"'])
     task = launch.specification("test-image", spec)["tasks"][0]
     assert task["resources"]["sharedMemory"] == "48 GiB"
+
+
+def _child_pid(path):
+    deadline = time.monotonic() + 10
+    while not (path.exists() and path.read_text().strip()):
+        assert time.monotonic() < deadline, "child pid was not written"
+        time.sleep(0.05)
+    return int(path.read_text())
+
+
+def _assert_exits(pid):
+    deadline = time.monotonic() + 10
+    stat = Path(f"/proc/{pid}/stat")
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        # A killed child reparented to a slow reaper lingers as a zombie on Linux.
+        with contextlib.suppress(FileNotFoundError):
+            if stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                return
+        assert time.monotonic() < deadline, f"process {pid} survived group cleanup"
+        time.sleep(0.05)
+
+
+@pytest.mark.skipif(
+    sys.platform == "darwin", reason="macOS killpg reports EPERM for a group left with only reparented zombies"
+)
+def test_process_group_cleanup_reaches_children_that_outlive_their_leader(tmp_path):
+    pid_file = tmp_path / "survivor"
+    leader = subprocess.Popen(["sh", "-c", f"sleep 300 & echo $! > {pid_file}"], start_new_session=True)
+    leader.wait(timeout=10)
+    survivor = _child_pid(pid_file)
+    os.kill(survivor, 0)
+    cluster.terminate(leader)
+    _assert_exits(survivor)
+
+
+def test_run_group_timeout_terminates_the_whole_group(tmp_path):
+    pid_file = tmp_path / "worker"
+    with pytest.raises(subprocess.TimeoutExpired):
+        opd_runtime.run_group(["sh", "-c", f"sleep 300 & echo $! > {pid_file}; wait"], timeout=1)
+    _assert_exits(_child_pid(pid_file))
+
+
+@pytest.mark.skipif(
+    sys.platform == "darwin", reason="macOS killpg reports EPERM for a group left with only reparented zombies"
+)
+def test_run_group_raises_on_failure_and_cleans_up(tmp_path):
+    pid_file = tmp_path / "worker"
+    with pytest.raises(subprocess.CalledProcessError):
+        opd_runtime.run_group(["sh", "-c", f"sleep 300 & echo $! > {pid_file}; exit 3"], timeout=30)
+    _assert_exits(_child_pid(pid_file))
 
 
 def test_local_fingerprint_tracks_weights_and_tokenizer(tmp_path):

@@ -4,7 +4,6 @@ import importlib.util
 import json
 import os
 import shlex
-import signal
 import socket
 import subprocess
 import sys
@@ -17,7 +16,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.configuration import options
 from open_instruct.miles.distillation import eopd_math, opd_prepare, opd_retention, opd_selection_audit, opd_timing
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.execution import workflow
+from open_instruct.miles.execution import cluster, workflow
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -56,15 +55,18 @@ def port():
         return sock.getsockname()[1]
 
 
-def stop(process):
-    if process is None or process.poll() is not None:
-        return
-    os.killpg(process.pid, signal.SIGTERM)
+def run_group(command, *, timeout, **kwargs):
+    """Like ``subprocess.run(check=True)``, in a new session whose whole group is terminated afterwards.
+
+    ``subprocess.run`` kills only the immediate child on timeout, so torchrun workers could keep their
+    GPUs; terminating the group also reaps workers that outlive a finished leader."""
+    process = subprocess.Popen(command, start_new_session=True, **kwargs)
     try:
-        process.wait(timeout=30)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=30)
+        returncode = process.wait(timeout=timeout)
+    finally:
+        cluster.terminate(process)
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, command)
 
 
 PROFILES = Path(__file__).resolve().parent / "model_profiles"
@@ -372,9 +374,7 @@ def execute(spec):
             ]
             logger.info("Converting the learner to Megatron")
             with (root / "conversion.log").open("w") as stream:
-                subprocess.run(
-                    command, env=conversion_env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=1800
-                )
+                run_group(command, env=conversion_env, stdout=stream, stderr=subprocess.STDOUT, timeout=1800)
         teacher_port = port()
         url = f"http://127.0.0.1:{teacher_port}"
         teacher_env = environment | {"CUDA_VISIBLE_DEVICES": devices["teacher"]}
@@ -462,7 +462,7 @@ def execute(spec):
             marker = root / "checkpoints/latest_checkpointed_iteration.txt"
             if not marker.exists() or not (root / "teacher-scores.jsonl").exists():
                 raise RuntimeError("Training exited without checkpoint or teacher-score evidence")
-            stop(teacher)
+            cluster.terminate(teacher)
             teacher = None
             subprocess.run(
                 [sys.executable, "-m", "open_instruct.miles.distillation.opd_audit", str(root)],
@@ -514,6 +514,6 @@ def execute(spec):
             state.update(status="complete", finished_unix=time.time())
             workflow.write_json(root / "workflow.json", state)
         finally:
-            stop(learner)
-            stop(teacher)
-            stop(monitor)
+            cluster.terminate(learner)
+            cluster.terminate(teacher)
+            cluster.terminate(monitor)
