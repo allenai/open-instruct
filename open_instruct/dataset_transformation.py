@@ -1916,11 +1916,16 @@ DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT = (
 
 
 @lru_cache(maxsize=16)
-def _added_token_strings_pattern(added_strings: tuple[str, ...], allowed: frozenset[str]) -> re.Pattern[str] | None:
-    banned = [s for s in added_strings if s and s not in allowed]
+def _added_token_strings_pattern(
+    added_tokens: tuple[tuple[str, bool], ...], allowed: frozenset[str]
+) -> re.Pattern[str] | None:
+    """Regex for `(content, single_word)` added tokens not in `allowed`."""
+    banned = [(s, single_word) for s, single_word in added_tokens if s and s not in allowed]
     # Longest first, so a string that contains another one is reported whole.
-    banned.sort(key=len, reverse=True)
-    return re.compile("|".join(re.escape(s) for s in banned)) if banned else None
+    banned.sort(key=lambda token: len(token[0]), reverse=True)
+    # A `single_word` added token never matches inside a word, so only report it at word boundaries.
+    alternatives = [rf"(?<!\w){re.escape(s)}(?!\w)" if single_word else re.escape(s) for s, single_word in banned]
+    return re.compile("|".join(alternatives)) if alternatives else None
 
 
 def _content_texts(content: Any) -> Iterator[str]:
@@ -1942,12 +1947,14 @@ def find_added_token_strings(
 ) -> list[str]:
     """Sorted distinct strings from `tokenizer`'s added vocabulary that occur in `messages`' content.
 
-    `allowed_strings` defaults to `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`. The added
-    vocabulary is read on every call rather than cached per tokenizer, since promotion into
+    `allowed_strings` defaults to `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`. A
+    `single_word` added token only counts outside a word, where the tokenizer would match it. The
+    added vocabulary is read on every call rather than cached per tokenizer, since promotion into
     reserved slots edits a tokenizer in place.
     """
     allowed = frozenset(DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT if allowed_strings is None else allowed_strings)
-    pattern = _added_token_strings_pattern(tuple(tokenizer.get_added_vocab()), allowed)
+    added_tokens = tuple((token.content, token.single_word) for token in tokenizer.added_tokens_decoder.values())
+    pattern = _added_token_strings_pattern(added_tokens, allowed)
     if pattern is None:
         return []
     found: set[str] = set()
@@ -1971,7 +1978,9 @@ def sft_added_token_strings_filter_v1(
     `<|endoftext|>` in an assistant answer is an EOS mid-response, and an `<|im_start|>` in a
     user turn opens a fake turn. `allowed_strings` (default
     `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`) lists the strings a chat template expects
-    inside content. Plain-text look-alikes such as `</s>` are not added tokens and are kept.
+    inside content. The SFT entry points pass this filter no arguments (`sft_transform_fn_args`),
+    so training from the CLI always uses the default allowlist; `allowed_strings` is for direct
+    callers. Plain-text look-alikes such as `</s>` are not added tokens and are kept.
 
     Opt-in. It reads `messages`, which the SFT tokenizers drop, so it has to run before them:
 

@@ -12,7 +12,7 @@ from unittest import mock
 import datasets
 import torch
 from parameterized import parameterized
-from transformers import AutoTokenizer, GPTNeoXTokenizerFast
+from transformers import AddedToken, AutoTokenizer, GPTNeoXTokenizerFast
 from transformers.utils import chat_template_utils
 
 import open_instruct.dataset_transformation
@@ -1914,6 +1914,15 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         self.promote_think_tags()
         think_row = [{"role": "assistant", "content": "<think>x</think>4"}]
         self.assertFalse(self.keeps(think_row, allowed_strings=[]))
+
+    def test_single_word_added_token_only_matches_outside_words(self):
+        self.tokenizer.add_tokens([AddedToken("zork", single_word=True)])
+        zork_id = self.tokenizer.convert_tokens_to_ids("zork")
+        # The tokenizer itself only matches `zork` outside a word; the filter has to agree.
+        self.assertNotIn(zork_id, self.tokenizer.encode("zorkmid", add_special_tokens=False))
+        self.assertIn(zork_id, self.tokenizer.encode("say zork now", add_special_tokens=False))
+        self.assertTrue(self.keeps([{"role": "assistant", "content": "A zorkmid coin."}]))
+        self.assertFalse(self.keeps([{"role": "assistant", "content": "Say zork now."}]))
 
     def test_find_reports_each_matched_string_once(self):
         messages = [
