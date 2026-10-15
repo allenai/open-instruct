@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from open_instruct.miles.configuration import config as miles_config
 from open_instruct.miles.configuration import specs, topology
 from open_instruct.miles.distillation import opd_launch
 from open_instruct.miles.errors import InputError
@@ -79,7 +80,7 @@ def specification(image, spec, *, hostnames=None):
     )
     collect = f"from open_instruct.miles.execution.launch import collect_results; collect_results({spec.output['root']!r}, '/output')"
     preflight = ""
-    if config.core.attention_backend in ("torch", "flash_4"):
+    if config.core.attention_backend in miles_config.PREFLIGHT_ATTENTION_BACKENDS:
         preflight = (
             f"python -m open_instruct.miles.execution.preflight_attention --backend {config.core.attention_backend}\n"
         )
