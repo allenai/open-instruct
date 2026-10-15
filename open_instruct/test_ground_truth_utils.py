@@ -4,6 +4,7 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import json
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -242,6 +243,22 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
+    """Regression test: detectable_format:json_format called json.loads on the response and caught only ValueError,
+    so a degenerate, deeply nested response raised RecursionError out of the verifier and stopped an RL run."""
+
+    def test_deeply_nested_response_fails_the_constraint(self):
+        checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
+            "detectable_format:json_format"
+        )
+        checker.build_description()
+        response = "[" * 100_000 + "]" * 100_000
+        with self.assertRaises(RecursionError):
+            json.loads(response)
+        self.assertFalse(checker.check_following(response))
+        self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
 
 
 class TestIFEvalGWordCounting(unittest.TestCase):
