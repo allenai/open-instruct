@@ -38,9 +38,19 @@ docker build . \
 
 After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](./docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](./docs/tulu1_tulu2.md).
 
+The launch commands below run on Ai2's Beaker clusters. `scripts/train/build_image_and_launch.sh` builds an image from your current commit and passes it to the chosen script. Most of these scripts pass mason's `--preemptible`, so on clusters that enforce priority they run only as backfill and can wait indefinitely. Scripts that launch evals (`--try_launch_beaker_eval_jobs_on_weka`) also need `oe-eval-internal` cloned at the repository root.
+
 ### Finetuning
 
-**OLMo-core SFT**: For supported models (OLMo, OLMoE, Qwen3), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the list of supported models.
+**OLMo-core SFT**: For supported models (OLMo, OLMoE, Qwen3), we recommend the more GPU-efficient [OLMo-core SFT implementation](https://github.com/allenai/OLMo-core/tree/main/src/scripts/train/sft). See `open_instruct/olmo_core_utils.py` for the list of supported models. Our entry point is `open_instruct/olmo_core_finetune.py`:
+
+```bash
+# Single-GPU OLMo-core SFT smoke test on Beaker (Qwen3-0.6B).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh
+
+# Two-node 8xGPU OLMo-core SFT run.
+./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_multinode.sh
+```
 
 
 ### Preference Tuning
@@ -58,7 +68,7 @@ We train DPO with `open_instruct/dpo.py`:
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
-We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_image_and_launch.sh`, which builds the Beaker image from your current commit and runs the chosen script:
+We train with `open_instruct/grpo_fast.py`:
 
 ```bash
 # Single-GPU smoke test on Beaker (small model, fast).
@@ -93,6 +103,27 @@ To run on all files (recommended after initial setup):
 ```bash
 uv run pre-commit run --all-files
 ```
+
+### Repo structure
+```
+├── assets/                     <- Images, licenses, etc.
+├── configs/
+|     ├── beaker_configs/       <- AI2 Beaker configs
+|     ├── ds_configs/           <- DeepSpeed configs
+|     └── train_configs/        <- Training configs
+├── decontamination/            <- Scripts for measuring train-eval overlap
+├── docs/                       <- Documentation (MkDocs)
+├── human_eval/                 <- Human evaluation interface (not maintained)
+├── open_instruct/              <- Source code (training scripts and utilities)
+├── scripts/
+|     ├── train/                <- Training launch scripts; debug/ has smoke tests
+|     ├── eval/                 <- Evaluation scripts
+|     └── data/                 <- Dataset preparation scripts
+├── tests/                      <- Additional tests (most live next to the code)
+├── mason.py                    <- Beaker job launcher
+└── Dockerfile                  <- Dockerfile
+```
+
 
 ## Licensing
 
