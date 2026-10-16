@@ -16,7 +16,8 @@ from torch.distributed.checkpoint import FileSystemReader
 from open_instruct import atomic_think, logger_utils, olmo_core_utils
 
 logger = logger_utils.setup_logger(__name__)
-ARMS = ("gate-reference", "gate-probed")
+DEFAULT_ARMS = ("gate-reference", "gate-probed")
+ARMS = (*DEFAULT_ARMS, "gate-reference-repeat", "gate-resumed", "gate-resumed-unprobed")
 CONFIG = "scripts/train/debug/kda_hero_small_sft.json"
 MANIFEST = "scripts/train/atomic_think/probes.json"
 
@@ -56,7 +57,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
+    parser.add_argument("--arms", nargs="+", choices=ARMS, default=DEFAULT_ARMS)
     args = parser.parse_args()
+    if len(set(args.arms)) != len(args.arms):
+        parser.error("Each checkpoint arm may be requested only once")
     train.prepare_training_environment(seed=33333, shared_filesystem=True)
     try:
         if dist.get_world_size() != 1:
@@ -84,7 +88,7 @@ def main():
             "arms": {},
             "scope": "Frozen inference only",
         }
-        for arm in ARMS:
+        for arm in args.arms:
             checkpoint = args.root / arm / "step4" / "model_and_optim"
             expected = json.loads((args.root / arm / "atomic-audit" / "state-step4-rank0.json").read_text())
             check_checkpoint_coverage(module, str(checkpoint))
