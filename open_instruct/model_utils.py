@@ -279,10 +279,10 @@ def initialize_promoted_token_embeddings(model: torch.nn.Module, tokenizer) -> i
     """Seed the embedding (and output) rows of reserved-slot-promoted tokens from their pieces.
 
     A promoted token takes over a slot the pretraining data never emitted, so its row holds
-    whatever initialization and weight decay left there. Seeding it with the mean of the rows
-    for the ids the string used to tokenize into (`<th`, `ink`, `>` for `<think>`) starts it
-    somewhere the model already associates with the tag, so a short SFT budget measures the
-    tokenization change rather than the cost of learning an embedding from scratch.
+    whatever initialization and weight decay left there. The mean of the rows for the
+    former pieces (`<th`, `ink`, `>` for `<think>`) is an initialization heuristic, not
+    an equivalent representation of the sequence or a learned reasoning boundary.
+    SFT must learn the new token's input representation and output probability.
 
     A no-op when the tokenizer promoted nothing. Returns the number of rows written.
     """

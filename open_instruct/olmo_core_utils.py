@@ -24,7 +24,7 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
-from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig, assign_full_tensor_to_dtensor
+from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -37,7 +37,7 @@ from olmo_core.train.train_module.transformer.config import (
     TransformerContextParallelConfig,
     TransformerDataParallelConfig,
 )
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -399,42 +399,60 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
     matrices = promoted_token_matrices(train_module.model)
     for weight in matrices:
         model_utils.seed_embedding_rows(weight, rows)
-    sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
+    sync_promoted_token_optimizer_rows(getattr(train_module, "optim", None), matrices, [target for target, _ in rows])
 
     logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
     return len(rows)
 
 
-def sync_optimizer_main_params(optimizer, params: list[torch.Tensor]) -> None:
-    """Make an OLMoDDPOptimizer's main copies of `params` match the params after an in-place edit.
+def sync_promoted_token_optimizer_rows(optimizer, matrices: list[torch.Tensor], token_ids: list[int]) -> None:
+    """Update only promoted rows in OLMoDDP's separate FP32 master weights.
 
-    That optimizer (MoE v2 models) owns the weights: each `step()` writes its `<name>.main`
-    states back over the model. For bf16 params -- hero-small's -- those are separate fp32
-    copies filled when the base checkpoint loaded, so an edit to the model alone is undone on
-    step 1; for fp32 params they are views of the params and this copy is a no-op. Other
-    optimizers read the params themselves and need nothing.
+    Standard optimizers use the model parameters directly and need no synchronization.
+    The experimental OLMoDDP runtime instead stores flattened masters in ``states``
+    under ``<parameter name>.main``. Its next step copies those masters back to the
+    model, so edits must reach them too. Copying whole BF16 model matrices back would
+    round *all* vocabulary rows, including rows this operation must never change.
 
-    Afterwards each synced main must equal its param exactly, or the run dies at startup. Only
-    the synced matrices are checked: every other bf16 param differs from its fp32 main by
-    rounding, so the optimizer's own all-param check holds only right after construction.
+    Preserve the existing initialization policy: copy the already seeded model rows,
+    retaining every other master value and all optimizer moments exactly. This helper
+    deliberately does not import the experimental optimizer or change runtime pins.
     """
+    if not token_ids:
+        return
     states = getattr(optimizer, "states", None)
     if states is None:
         return
-    targets = {id(param) for param in params}
-    synced: list[tuple[str, torch.Tensor]] = []
+    targets = {id(weight): weight for weight in matrices}
+    matched = {}
     for group in optimizer.param_groups:
-        for name, param in group["named_params"].items():
-            if id(param) in targets:
-                assign_full_tensor_to_dtensor(dst=states[f"{name}.main"], src=param.data.float().reshape(-1))
-                synced.append((name, param))
-    if len(synced) != len(targets):
-        raise RuntimeError(f"Found optimizer main params for {len(synced)} of {len(targets)} seeded matrices")
-    for name, param in synced:
-        main = states[f"{name}.main"].full_tensor().reshape(-1)
-        if not torch.equal(main, param.data.float().reshape(-1)):
-            raise RuntimeError(f"{name}: optimizer main param does not match the seeded param after the sync")
-    logger.info(f"Synced {len(synced)} optimizer main param(s) with the seeded rows; each matches its main exactly")
+        for name, param in group.get("named_params", {}).items():
+            if id(param) not in targets:
+                continue
+            key = f"{name}.main"
+            if key not in states:
+                raise ValueError(f"Missing optimizer master weights for promoted parameter {name}")
+            master = states[key]
+            if master.numel() != param.numel():
+                raise ValueError(f"Optimizer master shape does not match promoted parameter {name}")
+            matched[id(param)] = (param, master)
+    if matched.keys() != targets.keys():
+        raise ValueError(f"Found optimizer masters for {len(matched)} of {len(targets)} promoted matrices")
+
+    with torch.no_grad():
+        for param, master in matched.values():
+            source = param.data.full_tensor() if isinstance(param.data, DTensor) else param.data
+            full = master.full_tensor() if isinstance(master, DTensor) else master
+            # Clone even for replicated masters: never mutate a full_tensor() alias
+            # before every rank participates in redistribution.
+            updated = full.clone().reshape(source.shape)
+            updated[token_ids] = source[token_ids].to(device=updated.device, dtype=updated.dtype)
+            updated = updated.reshape(master.shape)
+            if isinstance(master, DTensor):
+                master.copy_(distribute_tensor(updated, master.device_mesh, master.placements))
+            else:
+                master.copy_(updated)
+    logger.info("Synced only %s promoted rows in %s optimizer master matrices", len(token_ids), len(matched))
 
 
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:

@@ -42,6 +42,34 @@ def _sharded_worker(rank: int, world_size: int, init_file: str, out_dir: str) ->
         dist.destroy_process_group()
 
 
+def _master_sync_worker(rank: int, world_size: int, init_file: str) -> None:
+    dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=world_size)
+    try:
+        mesh = init_device_mesh("cpu", (world_size,))
+        for sharded_model in (False, True):
+            original = reference_matrix() + 0.00013
+            data = original.bfloat16()
+            if sharded_model:
+                data = distribute_tensor(data, mesh, [Shard(0)])
+            param = torch.nn.Parameter(data)
+            # Flat master shards have different boundaries from vocabulary shards.
+            master = distribute_tensor(original.flatten().clone(), mesh, [Shard(0)])
+            optimizer = types.SimpleNamespace(
+                states={"embedding.main": master}, param_groups=[{"named_params": {"embedding": param}}]
+            )
+            model_utils.seed_embedding_rows(param, ROWS)
+            olmo_core_utils.sync_promoted_token_optimizer_rows(optimizer, [param], [row for row, _ in ROWS])
+            expected = original.clone()
+            seeded = param.data.full_tensor() if sharded_model else param.data
+            for row, _ in ROWS:
+                expected[row] = seeded[row].float()
+            torch.testing.assert_close(master.full_tensor().reshape_as(expected), expected, rtol=0, atol=0)
+            # A copy-back must preserve the initialized model exactly.
+            torch.testing.assert_close(master.full_tensor().reshape_as(expected).bfloat16(), seeded, rtol=0, atol=0)
+    finally:
+        dist.destroy_process_group()
+
+
 class TestSeedEmbeddingRowsUnsharded(unittest.TestCase):
     def test_target_row_is_the_mean_of_its_sources(self):
         matrix = reference_matrix()
@@ -101,6 +129,16 @@ class TestSeedEmbeddingRowsSharded(unittest.TestCase):
                 actual = torch.load(os.path.join(directory, f"rank{rank}.pt"), weights_only=True)
                 torch.testing.assert_close(actual, expected, msg=f"rank {rank} disagrees")
 
+    def test_flat_master_shards_preserve_unrelated_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mp.start_processes(
+                _master_sync_worker,
+                args=(self.world_size, os.path.join(directory, "rendezvous")),
+                nprocs=self.world_size,
+                join=True,
+                start_method="spawn",
+            )
+
 
 class _StubTokenizer:
     def __init__(self, rows):
@@ -148,6 +186,79 @@ class TestOlmoCoreSeeding(unittest.TestCase):
         original = train_module.model.embeddings.weight.clone()
         self.assertEqual(olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer([])), 0)
         torch.testing.assert_close(train_module.model.embeddings.weight, original)
+
+
+class TestPromotedOptimizerMasters(unittest.TestCase):
+    def make_module(self, tied=False):
+        module = _StubTrainModule(tie_word_embeddings=tied)
+        matrices = {"embedding": module.model.embeddings, "head": module.model.lm_head.w_out}
+        named, states = {}, {}
+        for index, (name, holder) in enumerate(matrices.items()):
+            if tied and name == "head":
+                holder.weight = matrices["embedding"].weight
+                continue
+            original = reference_matrix() + 0.00013 + index * 0.0713
+            holder.weight = torch.nn.Parameter(original.bfloat16())
+            named[name] = holder.weight
+            states[f"{name}.main"] = original.flatten().clone()
+            states[f"{name}.exp_avg"] = torch.full_like(original.flatten(), 0.003)
+            states[f"{name}.exp_avg_sq"] = torch.full_like(original.flatten(), 0.007)
+        module.optim = types.SimpleNamespace(states=states, param_groups=[{"named_params": named}])
+        return module
+
+    def test_changes_only_promoted_rows_and_preserves_moments(self):
+        for tied in (False, True):
+            with self.subTest(tied=tied):
+                module = self.make_module(tied)
+                before = {name: value.clone() for name, value in module.optim.states.items()}
+                params = module.optim.param_groups[0]["named_params"]
+                model_before = {name: param.detach().clone() for name, param in params.items()}
+                keep = torch.ones(VOCAB, dtype=torch.bool)
+                keep[[row for row, _ in ROWS]] = False
+                olmo_core_utils.initialize_promoted_token_embeddings(module, _StubTokenizer(ROWS))
+                for name, param in params.items():
+                    master = module.optim.states[f"{name}.main"].view(VOCAB, HIDDEN)
+                    original = before[f"{name}.main"].view(VOCAB, HIDDEN)
+                    self.assertTrue(torch.equal(master[keep], original[keep]))
+                    self.assertTrue(torch.equal(param.detach()[keep], model_before[name][keep]))
+                    for target, sources in ROWS:
+                        expected = model_before[name][list(sources)].float().mean(0).bfloat16()
+                        self.assertTrue(torch.equal(master[target], expected.float()))
+                        self.assertTrue(torch.equal(param[target], expected))
+                    # The old whole-matrix copy fails the exact preservation assertion.
+                    self.assertFalse(torch.equal(original[keep], param.detach()[keep].float()))
+                    # Simulate the optimizer's copy-back: initialization survives.
+                    param.data.copy_(master.bfloat16())
+                    self.assertTrue(torch.equal(param.detach()[keep], model_before[name][keep]))
+                for name, value in before.items():
+                    if not name.endswith(".main"):
+                        self.assertTrue(torch.equal(module.optim.states[name], value))
+
+    def test_disabled_preserves_all_optimizer_values(self):
+        module = self.make_module()
+        before = {name: value.clone() for name, value in module.optim.states.items()}
+        self.assertEqual(olmo_core_utils.initialize_promoted_token_embeddings(module, _StubTokenizer([])), 0)
+        for name, value in before.items():
+            self.assertTrue(torch.equal(module.optim.states[name], value))
+
+    def test_missing_master_fails_before_any_master_changes(self):
+        module = self.make_module()
+        before = module.optim.states["embedding.main"].clone()
+        del module.optim.states["head.main"]
+        with self.assertRaisesRegex(ValueError, "Missing optimizer master"):
+            olmo_core_utils.initialize_promoted_token_embeddings(module, _StubTokenizer(ROWS))
+        self.assertTrue(torch.equal(module.optim.states["embedding.main"], before))
+
+    def test_unmatched_parameter_fails(self):
+        module = self.make_module()
+        del module.optim.param_groups[0]["named_params"]["head"]
+        with self.assertRaisesRegex(ValueError, "1 of 2"):
+            olmo_core_utils.initialize_promoted_token_embeddings(module, _StubTokenizer(ROWS))
+
+    def test_standard_optimizer_needs_no_master_sync(self):
+        module = self.make_module()
+        module.optim = torch.optim.AdamW(module.optim.param_groups[0]["named_params"].values())
+        self.assertEqual(olmo_core_utils.initialize_promoted_token_embeddings(module, _StubTokenizer(ROWS)), len(ROWS))
 
 
 class _StubDDPOptimizer:
@@ -210,7 +321,7 @@ class TestOptimizerMainParamSync(unittest.TestCase):
 
     def test_a_seeded_matrix_the_optimizer_does_not_own_raises(self):
         train_module = self._train_module(include_head=False)
-        with self.assertRaisesRegex(RuntimeError, "1 of 2 seeded matrices"):
+        with self.assertRaisesRegex(ValueError, "1 of 2 promoted matrices"):
             olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
 
 
