@@ -19,6 +19,8 @@ ARMS = (
     "atomic-safe",
     "atomic-historical",
     "control-repeat",
+    "gate-reference-repeat",
+    "gate-resumed-unprobed",
 )
 
 

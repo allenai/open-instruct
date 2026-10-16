@@ -11,7 +11,15 @@ def main():
     parser.add_argument(
         "--arm",
         required=True,
-        choices=("gate", "control", "rounding-only", "atomic-safe", "atomic-historical", "control-repeat"),
+        choices=(
+            "gate",
+            "gate-repeat",
+            "control",
+            "rounding-only",
+            "atomic-safe",
+            "atomic-historical",
+            "control-repeat",
+        ),
     )
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--minutes", type=int, required=True)

@@ -12,6 +12,22 @@ from open_instruct import atomic_think
 ARMS = ("control", "rounding-only", "atomic-safe", "atomic-historical", "control-repeat")
 
 
+def link_reference_packing(root, name):
+    """Reuse the validated packing in a fresh diagnostic's own loader directory."""
+    source = (root / "gate-reference" / "dataset-common").resolve(strict=True)
+    if not source.is_dir():
+        raise ValueError(f"Reference packing is not a directory: {source}")
+    output = root / name
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / "dataset-common"
+    try:
+        target.symlink_to(source, target_is_directory=True)
+    except FileExistsError:
+        # Both node leaders execute this setup; accept only the same link.
+        if not target.is_symlink() or target.resolve() != source:
+            raise ValueError(f"Diagnostic packing differs from reference: {target}") from None
+
+
 def train(root, name, mode, steps, probes, save_interval, resume=None, state_steps=()):
     output = root / name
     output.mkdir(parents=True, exist_ok=True)
@@ -159,7 +175,7 @@ def verify_gate(root):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("arm", choices=("gate", *ARMS))
+    parser.add_argument("arm", choices=("gate", "gate-repeat", *ARMS))
     parser.add_argument("root", type=Path)
     args = parser.parse_args()
     args.root.mkdir(parents=True, exist_ok=True)
@@ -177,6 +193,22 @@ def main():
             state_steps=[3, 4],
         )
         verify_gate(args.root)
+    elif args.arm == "gate-repeat":
+        # Diagnose a failed exact gate without changing training or probe code.
+        # These are prerequisite controls, never the scientific A-repeat arm.
+        for name in ("gate-reference-repeat", "gate-resumed-unprobed"):
+            link_reference_packing(args.root, name)
+        train(args.root, "gate-reference-repeat", "control", 4, [999999], 4, state_steps=[3, 4])
+        train(
+            args.root,
+            "gate-resumed-unprobed",
+            "control",
+            4,
+            [999999],
+            4,
+            resume=args.root / "gate-reference" / "step2",
+            state_steps=[3, 4],
+        )
     else:
         mode = "control" if args.arm == "control-repeat" else args.arm
         train(args.root, args.arm, mode, 512, [0, 1, 2, 10, 100, 353, 512], 512)
