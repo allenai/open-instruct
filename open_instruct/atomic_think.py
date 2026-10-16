@@ -259,7 +259,8 @@ class AtomicAuditCallback(Callback):
                 {
                     "model": {name: tensor_hash(p) for name, p in module.model.state_dict().items()},
                     "optimizer": {name: tensor_hash(p) for name, p in module.optim.states.items()},
-                    "lr": [group["lr"] for group in module.optim.param_groups],
+                    # Compiled optimizers keep LR as a scalar tensor.
+                    "lr": [float(group["lr"]) for group in module.optim.param_groups],
                     "step": self.step,
                 },
             )

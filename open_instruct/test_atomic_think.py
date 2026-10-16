@@ -101,3 +101,22 @@ def test_resume_rejects_changed_arm_or_schedule():
     for state in ({"mode": "control", "horizon": 11768}, {"mode": "atomic-safe", "horizon": 512}):
         with pytest.raises(ValueError, match="Resume changed"):
             callback.load_state_dict(state)
+
+
+@pytest.mark.parametrize("tensor_lr", [False, True])
+def test_state_audit_serializes_learning_rate_without_mutating_training(tmp_path, tensor_lr):
+    model = torch.nn.Linear(4, 2)
+    lr = torch.tensor(5e-5) if tensor_lr else 5e-5
+    master = model.weight.detach().clone()
+    optimizer = SimpleNamespace(states={"weight.main": master}, param_groups=[{"lr": lr}])
+    callback = atomic_think.AtomicAuditCallback(output_dir=str(tmp_path), state_steps=[3])
+    callback.trainer = SimpleNamespace(global_step=3, train_module=SimpleNamespace(model=model, optim=optimizer))
+    before = {name: value.clone() for name, value in model.state_dict().items()}
+    callback.post_step()
+    report = json.loads((tmp_path / "state-step3-rank0.json").read_text())
+    assert report["lr"] == [float(lr)]
+    assert report["step"] == 3
+    assert report["optimizer"]["weight.main"] == atomic_think.tensor_hash(master)
+    assert optimizer.param_groups[0]["lr"] is lr
+    for name, value in model.state_dict().items():
+        assert torch.equal(value, before[name])
