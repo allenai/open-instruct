@@ -1,6 +1,7 @@
 """Attach privileged-context teacher scores to fresh, bare-question rollouts."""
 
 import asyncio
+import fractions
 import functools
 import hashlib
 import importlib
@@ -156,7 +157,9 @@ def tail_negative(behavior, length, fraction=0.2, value=0.5):
     if not all(math.isfinite(score) and score <= 0 for score in behavior):
         raise ValueError("Tail-negative log probabilities must be finite and nonpositive")
     # Python's stable sort resolves equal log probabilities by earlier position.
-    selected = sorted(range(length), key=lambda index: behavior[index])[: math.ceil(fraction * length)]
+    # Exact rational ceil(fraction * length), so no fraction can gain a token from float rounding.
+    count = math.ceil(fractions.Fraction(str(fraction)) * length)
+    selected = sorted(range(length), key=lambda index: behavior[index])[:count]
     pressure = [0.0] * length
     for index in selected:
         pressure[index] = value

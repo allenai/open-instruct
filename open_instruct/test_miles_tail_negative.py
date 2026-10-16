@@ -232,3 +232,10 @@ def test_tailneg_cluster_starts_no_teacher_and_propagates_objective(tmp_path, mo
     assert started["ray"]["CUDA_VISIBLE_DEVICES"] == "0,1,2,3,4,5,6,7"
     assert json.loads(started["ray"][config.ENV]) == spec.teacher
     assert not (tmp_path / "teacher.json").exists()
+
+
+def test_tail_count_is_exact_ceiling():
+    for length in range(1, 5001):
+        pressure = hooks.tail_negative([-1.0] * length, length, 0.2, 0.5)
+        assert sum(1 for value in pressure if value) == -(-length // 5)
+    assert sum(hooks.tail_negative([-1.0] * 10, 10, 0.3, 0.5)) == 0.5 * 3
