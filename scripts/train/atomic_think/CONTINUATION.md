@@ -15,6 +15,14 @@ training receipts. It checks the next scheduled LR without modifying the live
 optimizer, then checks the first batch against the restored loader position.
 These are runtime guards; CPU tests alone do not qualify a real 16-GPU restore.
 
+The first `20261016b` continuation attempts stopped before any update because the
+auxiliary-state verifier used PyTorch's generic filesystem reader on Core's
+storage metadata (`_StorageInfo.transform_descriptors` missing). The verifier now
+uses Core's paired reader. Its regression test writes with Core's actual writer;
+the previous test's generic PyTorch writer failed to exercise this incompatibility.
+No model, optimizer, schedule, tokenization or saved checkpoint is changed by this
+reader correction. Replacement attempts must still pass every restoration guard.
+
 Full checkpoints and state hashes are retained every 1024 updates and at 11768.
 The first twelve resumed batches, checkpoint batches and final three batches are
 audited. This avoids extending the short-run `step >= 510` audit to every long-run

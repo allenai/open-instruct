@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import torch
+from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.distributed.utils import get_rank, get_world_size
 from olmo_core.optim import LinearWithWarmup
-from torch.distributed import checkpoint as distributed_checkpoint
 
 
 def equal_tree(left, right):
@@ -104,7 +104,9 @@ def verify(trainer, checkpoint, mode, horizon, tensor_hash):
     if {name: tensor_hash(value) for name, value in module.optim.states.items()} != expected["optimizer"]:
         raise ValueError("Restored FP32 masters, moments or optimizer steps differ")
     aux = {module.optim.LOSSES_STATE_DICT_KEY: [], module.optim.GRAD_NORMS_STATE_DICT_KEY: []}
-    distributed_checkpoint.load(aux, checkpoint_id=str(path / "model_and_optim"))
+    # Match the native writer. Torch's generic filesystem reader cannot read
+    # Core's storage metadata in the pinned training runtime.
+    core_checkpoint.load_state_dict(path / "model_and_optim", aux)
     actual_aux = {
         module.optim.LOSSES_STATE_DICT_KEY: [float(v.detach().cpu()) for v in module.optim._losses],
         module.optim.GRAD_NORMS_STATE_DICT_KEY: [float(v.detach().cpu()) for v in module.optim._grad_norms],

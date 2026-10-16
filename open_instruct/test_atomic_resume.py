@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.optim import LinearWithWarmup
-from torch.distributed import checkpoint as distributed_checkpoint
 
 from open_instruct import atomic_resume
 
@@ -93,7 +93,9 @@ def test_native_auxiliary_load_and_master_corruption_detection(tmp_path, monkeyp
         )
     )
     aux = {"__moe_skip_step_losses": [1.0, 2.0], "__moe_skip_step_grad_norms": [3.0]}
-    distributed_checkpoint.save(aux, checkpoint_id=checkpoint / "model_and_optim")
+    # Production checkpoints use Core's writer and storage metadata, which differ
+    # from torch's generic filesystem format in the pinned training runtime.
+    core_checkpoint.save_state_dict(checkpoint / "model_and_optim", aux)
     native = trainer_state()
     native["callbacks"] = {"atomic_audit": {"mode": "control", "horizon": 11768, "offline": True}}
     torch.save(native, checkpoint / "train/rank0.pt")
