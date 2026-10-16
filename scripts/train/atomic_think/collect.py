@@ -27,6 +27,7 @@ def collect(root, output, arms, steps):
     if root == output or root in output.parents or output in root.parents:
         raise ValueError("Collection destination must be separate from the source tree")
     selected = [root / "packing-receipt.json"]
+    selected.extend(root.glob("dataset-*.json"))
     selected.extend(root.glob("gate-passed-node*.json"))
     for arm in arms:
         if arm not in ARMS:

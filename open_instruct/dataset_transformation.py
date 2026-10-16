@@ -2259,11 +2259,18 @@ def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     The hash includes DATASET_CACHE_VERSION to invalidate old caches when
     transformation logic changes significantly.
     """
+    # Preserve tokenizer resolution before serializing either configuration.
+    _ = tc.tokenizer
+    dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
+    return compute_config_hash_from_dicts(dc_dicts, tc)
+
+
+def compute_config_hash_from_dicts(dc_dicts: list[dict], tc: TokenizerConfig) -> str:
+    """Hash already-resolved dataset metadata using the same cache identity."""
     # Resolve the tokenizer before snapshotting tc: loading it populates
     # tc.tokenizer_files_hash, so hashing a pristine tc would give a different
     # result than hashing the same tc after any tc.tokenizer access.
     chat_template = getattr(tc.tokenizer, "chat_template", None)
-    dc_dicts = [_get_serializable_dataset_config_dict(dc, exclude_none=True) for dc in dcs]
     tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
     try:
         chat_template_str = json.dumps(chat_template, sort_keys=True)

@@ -54,6 +54,7 @@ from open_instruct import (
     logger_utils,
     numpy_dataset_conversion,
     olmo_core_utils,
+    resolved_sft_dataset,
     utils,
 )
 
@@ -143,6 +144,10 @@ class SFTConfig:
     atomic_probe_manifest: str | None = None
     """Frozen, tokenized H077 probe JSON, shared by all arms."""
     atomic_probe_steps: list[int] = dataclasses.field(default_factory=lambda: [0, 1, 2, 10, 100, 353, 512])
+    sft_dataset_manifest: str | None = None
+    """Read CPU-resolved raw-dataset metadata; still verify the exact tokenizer/cache identity."""
+    write_sft_dataset_manifest: str | None = None
+    """Write resolved metadata during --cache_dataset_only; never permitted during training."""
 
 
 @dataclasses.dataclass
@@ -157,6 +162,8 @@ class SFTArguments:
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
+    if args.sft.write_sft_dataset_manifest and (not args.dataset.cache_dataset_only or args.sft.sft_dataset_manifest):
+        raise ValueError("Writing a dataset manifest requires cache-only mode without an input manifest")
     atomic_think.validate_config(args.sft, args.training, tc)
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
@@ -170,14 +177,30 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         {},
     ]
 
-    dcs = dataset_transformation.load_dataset_configs(
-        dataset_mixer_list=args.dataset.mixer_list,
-        dataset_mixer_list_splits=args.dataset.mixer_list_splits,
-        dataset_transform_fn=args.dataset.transform_fn,
-        transform_fn_args=transform_fn_args,
-        target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
-    )
-    cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
+    dataset_request = {
+        "dataset_mixer_list": args.dataset.mixer_list,
+        "dataset_mixer_list_splits": args.dataset.mixer_list_splits,
+        "dataset_transform_fn": args.dataset.transform_fn,
+        "transform_fn_args": transform_fn_args,
+        "target_columns": list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+        "dataset_config_seed": 42,
+    }
+    dcs = None
+    if args.sft.sft_dataset_manifest:
+        cache_hash, manifest_hash = resolved_sft_dataset.read(args.sft.sft_dataset_manifest, dataset_request, tc)
+        logger.info(
+            "Verified resolved SFT dataset manifest %s (SHA256 %s)", args.sft.sft_dataset_manifest, manifest_hash
+        )
+    else:
+        dcs = dataset_transformation.load_dataset_configs(
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
+            dataset_transform_fn=args.dataset.transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+            dataset_config_seed=42,
+        )
+        cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
     seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
     numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
     # A launch that must reuse one specific cache names it, and dies here -- before tokenizing,
@@ -192,7 +215,13 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             if _numpy_dir_is_populated(numpy_dir):
                 logger.info(f"Numpy SFT files already present at {numpy_dir}; nothing to do.")
             else:
+                if args.sft.sft_dataset_manifest:
+                    raise FileNotFoundError("Resolved metadata requires an already populated NumPy cache")
                 _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
+            if args.sft.write_sft_dataset_manifest:
+                assert dcs is not None
+                resolved_sft_dataset.write(args.sft.write_sft_dataset_manifest, dataset_request, dcs, tc)
+                logger.info("Saved resolved SFT dataset manifest to %s", args.sft.write_sft_dataset_manifest)
             logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
         return
 

@@ -152,6 +152,29 @@ identical token IDs across arms. This limits the routing conclusion to this
 mathematical-text sample; it does not establish broad quality preservation.
 Another 64 reference-solution contexts include both tags and token offsets.
 
+GPU startup reads a CPU-resolved dataset manifest instead of reopening the raw
+Hugging Face Arrow dataset on every rank. The manifest pins resolved dataset
+metadata and the original cache hash. Training checks the complete dataset
+request, current tokenizer/template, cache-format version, expected NumPy-cache
+name, and populated shard set. It therefore selects the same cached examples
+without needing raw Arrow data. Existing launches without a manifest retain
+their original resolution behavior.
+
+After the stopped `20261015b` validation, prepare a fresh run root using its
+verified packing copies and recorded command:
+
+```bash
+UV_NO_SYNC=1 ./scripts/train/build_image_and_launch.sh --cuda-version 13 \
+  scripts/train/atomic_think/launch_diagnose.sh 20261015b ai2/saturn \
+  --prepare-root /weka/oe-training-default/robertb/atomic-think-h077/20261015c
+```
+
+This CPU job resolves both tokenization variants, checks their expected hashes,
+writes `dataset-original.json` and `dataset-atomic.json`, verifies both manifest
+read paths, and creates fresh arm directories linked to the verified packing.
+It refuses to overwrite an existing run root. Wait for its successful receipt
+before submitting the new GPU validation.
+
 After a job has stopped writing, collect its diagnostic artifacts with shared CPU
 capacity; native checkpoints remain on WEKA. For the validation run:
 

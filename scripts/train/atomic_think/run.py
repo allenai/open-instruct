@@ -79,6 +79,8 @@ def train(root, name, mode, steps, probes, save_interval, resume=None, state_ste
         "1.0",
         "--local_cache_dir",
         "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
+        "--sft_dataset_manifest",
+        str(root / ("dataset-atomic.json" if atomic else "dataset-original.json")),
         "--seed",
         "33333",
         "--data_loader_seed",
