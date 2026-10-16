@@ -62,3 +62,19 @@ def test_corrupt_payload_and_wrong_dataset_rejected(dataset, tmp_path):
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="another dataset"):
         packed_sample_cache.CachedPackedFSLDataset(dataset, directory)
+
+
+def test_stage_cache_publishes_only_verified_local_payload(dataset, tmp_path):
+    source, destination = tmp_path / "source", tmp_path / "local"
+    packed_sample_cache.build_cache(dataset, [0], source, provenance={}, workers=1)
+    receipt = packed_sample_cache.stage_cache(source, destination)
+    assert receipt["files"] == json.loads((source / "manifest.json").read_text())["files"]
+    assert torch.equal(
+        packed_sample_cache.CachedPackedFSLDataset(dataset, destination)[0]["input_ids"], dataset[0]["input_ids"]
+    )
+    with (source / "input_ids.npy").open("ab") as stream:
+        stream.write(b"corrupt")
+    failed = tmp_path / "failed"
+    with pytest.raises(ValueError, match="staging hash mismatch"):
+        packed_sample_cache.stage_cache(source, failed)
+    assert not (failed / "manifest.json").exists()

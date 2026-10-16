@@ -4,6 +4,7 @@ import concurrent.futures
 import copy
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,29 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 FIELDS = {"input_ids", "label_mask", "doc_lens"}
 DOC_DTYPES = {"torch.int32": torch.int32, "torch.int64": torch.int64}
+
+
+def stage_cache(source, destination):
+    """Copy a completed cache to node-local storage and verify every payload byte."""
+    source, destination = Path(source), Path(destination)
+    manifest_bytes = (source / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if manifest["version"] != 1 or set(manifest["files"]) != {"input_ids.npy", "label_mask.npy"}:
+        raise ValueError("Unsupported packed cache files")
+    destination.mkdir(parents=True, exist_ok=False)
+    for name, expected in manifest["files"].items():
+        path = destination / name
+        shutil.copyfile(source / name, path)
+        with path.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                raise ValueError(f"Packed cache staging hash mismatch: {name}")
+    (destination / "manifest.json").write_bytes(manifest_bytes)
+    return {
+        "source": str(source),
+        "destination": str(destination),
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "files": manifest["files"],
+    }
 
 
 def tensor_hash(value):
