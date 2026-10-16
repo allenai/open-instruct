@@ -42,6 +42,9 @@ SCHEMA = pa.schema(
 )
 BATCH_ROWS = 2000
 ROLE_HEADER = re.compile(r"<\|im_start\|>[a-z_]+\n?")
+# The source model occasionally emits the template's own tokens inside its text (tmax-sft-big has
+# "<think><|im_start|>THOUGHT: ..."); such bare occurrences are chat tokens too and are removed.
+BARE_IM_START = re.compile(r"<\|im_start\|>")
 LITERALS = ("<|im_end|>", "<|endoftext|>", "<think>", "</think>")
 LEFTOVER = re.compile(r"<\|im_start\|>|<\|im_end\|>|<\|endoftext\|>|</?think>")
 # Other <|…|> strings are content (one simfc row quotes <|endoffile|>); they are kept and counted.
@@ -57,25 +60,29 @@ def _get_tokenizer(name: str, revision: str):
     return _tokenizer
 
 
-def strip_chat_tokens(text: str) -> str:
+def strip_chat_tokens(text: str) -> tuple[str, bool]:
+    """Return the stripped text and whether a bare chat token (outside a role header) was removed."""
     text = ROLE_HEADER.sub("", text)
+    stray = bool(BARE_IM_START.search(text))
+    text = BARE_IM_START.sub("", text)
     for literal in LITERALS:
         text = text.replace(literal, "")
-    return text.strip("\n")
+    return text.strip("\n"), stray
 
 
-def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int, int, int, int, int]:
+def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int, int, int, int, int, int]:
     path, out_dir, tokenizer_name, tokenizer_revision, limit = args
     tokenizer = _get_tokenizer(tokenizer_name, tokenizer_revision)
     dst = os.path.join(out_dir, "data", os.path.basename(path))
-    n_rows = n_tokens_total = n_tokens_max = n_tokens_before = n_other_special = 0
+    n_rows = n_tokens_total = n_tokens_max = n_tokens_before = n_other_special = n_stray = 0
     with pq.ParquetWriter(dst, SCHEMA, compression="zstd") as writer:
         for batch in pq.ParquetFile(path).iter_batches(batch_size=BATCH_ROWS):
             out: dict[str, list] = {"id": [], "dataset_source": [], "text": [], "n_tokens": []}
             for row in batch.to_pylist():
                 if limit is not None and n_rows >= limit:
                     break
-                text = strip_chat_tokens(row["text"])
+                text, stray = strip_chat_tokens(row["text"])
+                n_stray += stray
                 if LEFTOVER.search(text):
                     raise ValueError(f"chat markup survived in row {row['id']}: {LEFTOVER.search(text).group(0)!r}")
                 if OTHER_SPECIAL.search(text):
@@ -93,7 +100,7 @@ def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int
                 writer.write_table(pa.table(out, schema=SCHEMA))
             if limit is not None and n_rows >= limit:
                 break
-    return dst, n_rows, n_tokens_total, n_tokens_max, n_tokens_before, n_other_special
+    return dst, n_rows, n_tokens_total, n_tokens_max, n_tokens_before, n_other_special, n_stray
 
 
 def write_readme(out_dir: pathlib.Path, prov: dict[str, Any]) -> None:
@@ -142,7 +149,9 @@ out of `text`; everything else is verbatim, in the same order, with the same `id
   `<|im_start|>environment`, together with the newline that follows each, and the turn terminator
   `<|im_end|>`;
 - the end-of-document token `<|endoftext|>`;
-- the reasoning delimiters `<think>` and `</think>`; the reasoning text between them is kept.
+- the reasoning delimiters `<think>` and `</think>`; the reasoning text between them is kept;
+- the same tokens where the source model emitted them inside its own text, outside any role
+  header ({prov["rows_with_stray_chat_tokens_in_content"]:,} rows).
 
 ## What was kept
 
@@ -196,13 +205,15 @@ def main() -> None:
         "max_tokens": max(r[3] for r in results),
         "tokens_before": sum(r[4] for r in results),
         "rows_with_other_special_strings": sum(r[5] for r in results),
+        "rows_with_stray_chat_tokens_in_content": sum(r[6] for r in results),
         "removed": ["<|im_start|>{role}\\n", "<|im_end|>", "<|endoftext|>", "<think>", "</think>"],
     }
     (out_dir / "provenance.json").write_text(json.dumps(prov, indent=1))
     write_readme(out_dir, prov)
     logger.info(
         f"{prov['rows']:,} rows, {prov['tokens']:,} tokens (source {prov['tokens_before']:,}), max {prov['max_tokens']:,}; "
-        f"{prov['rows_with_other_special_strings']:,} rows keep other <|…|> strings that are content, not markup"
+        f"{prov['rows_with_other_special_strings']:,} rows keep other <|…|> strings that are content, not markup; "
+        f"{prov['rows_with_stray_chat_tokens_in_content']:,} rows had stray chat tokens inside content removed"
     )
     if args.push_to:
         if args.limit is not None:
