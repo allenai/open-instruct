@@ -151,3 +151,20 @@ The ordinary probe consists of 128 held-out MATH-500 problem statements, with
 identical token IDs across arms. This limits the routing conclusion to this
 mathematical-text sample; it does not establish broad quality preservation.
 Another 64 reference-solution contexts include both tags and token offsets.
+
+After a job has stopped writing, collect its diagnostic artifacts with shared CPU
+capacity; native checkpoints remain on WEKA. For the validation run:
+
+```bash
+UV_NO_SYNC=1 ./scripts/train/build_image_and_launch.sh --cuda-version 13 \
+  scripts/train/atomic_think/launch_collect.sh 20261015b gate \
+  --arms gate-reference gate-probed gate-resumed --steps 0 1 2
+```
+
+The collector starts on Saturn with high priority, no resource reservation, no
+protected runtime and a 30-minute timeout. Its result dataset contains the audit
+JSON files, selected raw probe captures, training logs and a checksum receipt.
+It also collects available partial artifacts from failed jobs; a collection
+receipt does not certify successful training or complete probes. The ledger's
+analysis checks capture completeness separately. As for training, publish the
+historical-runtime overlay for the current commit before invoking the launcher.
