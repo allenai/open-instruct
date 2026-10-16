@@ -28,7 +28,19 @@ def link_reference_packing(root, name):
             raise ValueError(f"Diagnostic packing differs from reference: {target}") from None
 
 
-def train(root, name, mode, steps, probes, save_interval, resume=None, state_steps=(), offline=False):
+def train(
+    root,
+    name,
+    mode,
+    steps,
+    probes,
+    save_interval,
+    resume=None,
+    state_steps=(),
+    offline=False,
+    packed_cache=None,
+    data_root=None,
+):
     output = root / name
     output.mkdir(parents=True, exist_ok=True)
     atomic = mode.startswith("atomic-")
@@ -96,7 +108,7 @@ def train(root, name, mode, steps, probes, save_interval, resume=None, state_ste
         "--local_cache_dir",
         "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
         "--sft_dataset_manifest",
-        str(root / ("dataset-atomic.json" if atomic else "dataset-original.json")),
+        str((data_root or root) / ("dataset-atomic.json" if atomic else "dataset-original.json")),
         "--seed",
         "33333",
         "--data_loader_seed",
@@ -118,6 +130,8 @@ def train(root, name, mode, steps, probes, save_interval, resume=None, state_ste
         cmd += ["--atomic_state_steps", *map(str, state_steps)]
     if offline:
         cmd += ["--atomic_probe_offline"]
+    if packed_cache is not None:
+        cmd += ["--packed_sample_cache", str(packed_cache)]
     rank = os.environ["BEAKER_REPLICA_RANK"]
     atomic_think.write_json(output / f"command-node{rank}.json", cmd)
     start = time.time()
