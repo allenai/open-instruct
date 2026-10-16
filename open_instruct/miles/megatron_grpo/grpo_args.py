@@ -24,6 +24,17 @@ def preflight_code(spec):
     )
 
 
+def checkpointed_rollouts(spec):
+    """Rollouts a launch will not replay: the latest checkpoint's rollout ID plus one when resuming, else 0.
+
+    MILES saves the Megatron checkpoint for rollout ``r`` as iteration ``r`` and restarts at
+    ``start_rollout_id = r + 1``."""
+    marker = Path(spec.output["root"]) / "checkpoints/latest_checkpointed_iteration.txt"
+    if not (spec.document["training"]["resume"] and marker.exists()):
+        return 0
+    return int(marker.read_text().strip()) + 1
+
+
 def native_arguments(spec, prepared, checkpoint, architecture):
     doc, root = spec.document, Path(spec.output["root"])
     inf, training, trainer, opt, tracking, objective = (
@@ -118,7 +129,7 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         values["custom-async-data-buffer-path"] = opd_config.ASYNC_BUFFER
     if opt["lr_decay_style"] != "constant":
         values["lr-decay-iters"] = training["num_rollouts"]
-    resume = training["resume"] and (root / "checkpoints/latest_checkpointed_iteration.txt").exists()
+    resume = checkpointed_rollouts(spec) > 0
     if resume:
         # Megatron restores weights, optimizer and RNG; MILES restores the data cursor. The
         # scheduler switch below stops MILES stepping the restored LR schedule a second time.
