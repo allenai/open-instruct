@@ -10,6 +10,7 @@ spec="/tmp/h077-${run_id}-${arm}-${label}.json"
 python scripts/train/atomic_think/spec.py --image "$image" --arm "$arm" --run-id "$run_id" --minutes "$minutes" --output "$spec"
 python - "$spec" "$arm" "$@" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +22,8 @@ root = task['arguments'][1]
 task['command'] = ['torchrun', '--standalone', '--nproc_per_node=1', 'scripts/train/atomic_think/offline_probe.py']
 task['arguments'] = [root, sys.argv[2], *sys.argv[3:]]
 task['resources']['gpuCount'] = 1
+if os.environ.get('H077_OFFLINE_HOST'):
+    task['constraints']['hostname'] = [os.environ['H077_OFFLINE_HOST']]
 task.pop('replicas')
 task.pop('leaderSelection')
 task.pop('synchronizedStartTimeout')
