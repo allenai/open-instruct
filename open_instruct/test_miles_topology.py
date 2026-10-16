@@ -26,6 +26,7 @@ def test_packing_preserves_trainer_order_and_whole_engines(
         launch={"gpus_per_replica": 8},
         output={"root": "/weka/run"},
         judges={},
+        teacher={},
         compile=lambda: SimpleNamespace(
             miles={
                 "actor_num_nodes": trainer_nodes,

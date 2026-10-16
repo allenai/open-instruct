@@ -5,6 +5,7 @@ import functools
 import hashlib
 import importlib
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -31,6 +32,19 @@ def resources(serialized, learner):
 
 
 async def reward(args, sample, **kwargs):
+    service = json.loads(os.environ[config.ENV])
+    if service.get("objective") == "tail_negative":
+        sample.opd_reverse_kl = tail_negative(
+            sample.rollout_log_probs, sample.response_length, service["tail_fraction"], service["tail_value"]
+        )
+        sample.train_metadata = dict(
+            sample.train_metadata or {},
+            opd_objective="tail_negative",
+            opd_tail_fraction=service["tail_fraction"],
+            opd_tail_value=service["tail_value"],
+            opd_behavior_log_probs=list(sample.rollout_log_probs),
+        )
+        return await rewards.registered_reward(args, sample, **kwargs)
     service, tokenizer, limit = resources(os.environ[config.ENV], args.hf_checkpoint)
     if sample.response_length <= 0:
         raise ValueError("Distillation requires a nonempty student response")
@@ -135,12 +149,37 @@ async def reward(args, sample, **kwargs):
     return task_reward
 
 
+def tail_negative(behavior, length, fraction=0.2, value=0.5):
+    """Transport positive pressure: native MILES subtracts it from advantages."""
+    if length <= 0 or behavior is None or len(behavior) != length:
+        raise ValueError("Tail-negative requires generation-time log probabilities for every response token")
+    if not all(math.isfinite(score) and score <= 0 for score in behavior):
+        raise ValueError("Tail-negative log probabilities must be finite and nonpositive")
+    # Python's stable sort resolves equal log probabilities by earlier position.
+    selected = sorted(range(length), key=lambda index: behavior[index])[: math.ceil(fraction * length)]
+    pressure = [0.0] * length
+    for index in selected:
+        pressure[index] = value
+    return pressure
+
+
 def post_process(args, samples, **kwargs):
     records = []
     for sample in samples:
-        if sample.teacher_log_probs is None or len(sample.teacher_log_probs) != sample.response_length:
+        is_tail = sample.train_metadata.get("opd_objective") == "tail_negative"
+        if is_tail:
+            pressure = sample.opd_reverse_kl
+            expected = tail_negative(
+                sample.rollout_log_probs,
+                sample.response_length,
+                sample.train_metadata["opd_tail_fraction"],
+                sample.train_metadata["opd_tail_value"],
+            )
+            if pressure is None or list(pressure) != expected:
+                raise ValueError("Tail-negative pressure must match the selected response tokens and values")
+        elif sample.teacher_log_probs is None or len(sample.teacher_log_probs) != sample.response_length:
             raise ValueError("Teacher scores must cover every generated response token")
-        if not bool(torch.isfinite(sample.teacher_log_probs).all()):
+        if not is_tail and not bool(torch.isfinite(sample.teacher_log_probs).all()):
             raise ValueError("Teacher scores must be finite")
         if sample.train_metadata.get("opd_objective") == "cancel_answer_positive":
             pressure = sample.opd_reverse_kl
@@ -156,7 +195,11 @@ def post_process(args, samples, **kwargs):
                 "response_token_ids": sample.tokens[-sample.response_length :],
                 "status": str(sample.status),
                 "task_reward": sample.get_reward_value(args),
-                "teacher_log_probs": sample.teacher_log_probs.tolist(),
+                **(
+                    {"opd_reverse_kl": sample.opd_reverse_kl}
+                    if is_tail
+                    else {"teacher_log_probs": sample.teacher_log_probs.tolist()}
+                ),
                 "weight_versions": [call.to_dicts() for call in sample.weight_versions],
                 **sample.train_metadata,
             }
@@ -170,6 +213,7 @@ def post_process(args, samples, **kwargs):
             for record in records:
                 arrays = {
                     "teacher_log_probs",
+                    "opd_reverse_kl",
                     "opd_answer_log_probs",
                     "opd_behavior_log_probs",
                     "opd_unscaled_pressure",

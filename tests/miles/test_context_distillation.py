@@ -144,7 +144,7 @@ def test_privileged_context_is_scoring_only_and_truncated_loss_is_retained(monke
             return [10, 11, 12]
 
     service = {"max_context_length": 100, "request_timeout": 10, "source": "/frozen", "endpoint": "http://teacher"}
-    monkeypatch.setenv("OI_MILES_OPD_TEACHER", "test")
+    monkeypatch.setenv("OI_MILES_OPD_TEACHER", json.dumps(service))
     monkeypatch.setattr(hooks, "resources", lambda *args: (service, Tokenizer(), asyncio.Semaphore(1)))
 
     async def post(url, payload, timeout_secs):
@@ -197,7 +197,7 @@ def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens
         "kl_coef": 0.5,
         "calibrate_initial": calibrate,
     }
-    monkeypatch.setenv("OI_MILES_OPD_TEACHER", "test")
+    monkeypatch.setenv("OI_MILES_OPD_TEACHER", json.dumps(service))
     monkeypatch.setattr(hooks, "resources", lambda *args: (service, Tokenizer(), asyncio.Semaphore(1)))
     requests = []
 
@@ -245,3 +245,83 @@ def test_two_context_cancellation_is_transported_once_and_keeps_truncated_tokens
     )
     assert advantages[0].tolist() == [0.0, -0.5]
     assert not advantages[0].requires_grad
+
+
+@pytest.mark.parametrize(
+    "behavior,expected",
+    [
+        ([-3.0, -1.0, -3.0, -3.0, -0.5, -2.0], [0.5, 0.0, 0.5, 0.0, 0.0, 0.0]),
+        ([-1.0, -5.0, -5.0, -2.0], [0.0, 0.5, 0.0, 0.0]),
+        ([-3.0], [0.5]),
+        ([-1.0, -2.0, -3.0, -4.0, -5.0], [0.0, 0.0, 0.0, 0.0, 0.5]),
+    ],
+)
+def test_tail_negative_selection_is_per_response_and_stable(behavior, expected):
+    hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
+    assert hooks.tail_negative(behavior, len(behavior)) == expected
+
+
+@pytest.mark.parametrize(
+    "behavior,length", [(None, 1), ([], 0), ([-1.0], 2), ([float("nan")], 1), ([float("-inf")], 1), ([0.1], 1)]
+)
+def test_tail_negative_rejects_missing_or_invalid_behavior(behavior, length):
+    hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
+    with pytest.raises(ValueError):
+        hooks.tail_negative(behavior, length)
+
+
+def test_tail_negative_hook_has_no_teacher_and_native_advantages_are_negative(monkeypatch, tmp_path):
+    torch = pytest.importorskip("torch")
+    hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
+    opd = pytest.importorskip("miles.backends.training_utils.loss_hub.opd")
+    service = hooks.config.parse({"teacher": {"objective": "tail_negative"}}, tmp_path)
+    monkeypatch.setenv(hooks.config.ENV, json.dumps(service))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Tail-negative must not load a teacher/tokenizer or request teacher scores")
+
+    async def observed_reward(*args, **kwargs):
+        return 1.0
+
+    monkeypatch.setattr(hooks, "resources", forbidden)
+    monkeypatch.setattr(hooks.on_policy_distillation, "_post_json", forbidden)
+    monkeypatch.setattr(hooks.AutoTokenizer, "from_pretrained", forbidden)
+    monkeypatch.setattr(hooks.rewards, "registered_reward", observed_reward)
+    args = SimpleNamespace(save=str(tmp_path / "checkpoints"), opd_kl_coef=1.0)
+    samples = []
+    for index, behavior in enumerate([[-3.0, -1.0, -3.0, -3.0, -0.5, -2.0], [-2.0]]):
+        length = len(behavior)
+        sample = SimpleNamespace(
+            index=index,
+            metadata={},
+            tokens=[7, 8] + list(range(length)),
+            response_length=length,
+            rollout_log_probs=behavior,
+            teacher_log_probs=None,
+            opd_reverse_kl=None,
+            train_metadata={},
+            loss_mask=[1] * length,
+            status="TRUNCATED",
+            weight_versions=[],
+            get_reward_value=lambda args: 1.0,
+        )
+        assert asyncio.run(hooks.reward(args, sample)) == 1.0
+        assert sample.teacher_log_probs is None
+        assert sample.tokens == [7, 8] + list(range(length)) and sample.loss_mask == [1] * length
+        samples.append(sample)
+    assert hooks.post_process(args, samples) == ([1.0, 1.0], [0.0, 0.0])
+    transported = [torch.tensor(s.opd_reverse_kl, requires_grad=True) for s in samples]
+    advantages = [torch.zeros(s.response_length) for s in samples]
+    opd.apply_opd_kl_to_advantages(
+        args, {"opd_reverse_kl": transported}, advantages, [torch.full((s.response_length,), -99.0) for s in samples]
+    )
+    assert advantages[0].tolist() == [-0.5, 0.0, -0.5, 0.0, 0.0, 0.0]
+    assert advantages[1].tolist() == [-0.5]
+    assert all(not adv.requires_grad for adv in advantages)
+    records = [json.loads(line) for line in (tmp_path / "teacher-scores.jsonl").read_text().splitlines()]
+    assert all("teacher_log_probs" not in record and "opd_teacher_source" not in record for record in records)
+    assert records[0]["opd_reverse_kl"] == samples[0].opd_reverse_kl
+    for pressure in (None, [0.5], [float("nan")] * 6, [-0.5] * 6, [0.5] * 6, [0.0, 0.0, 0.5, 0.5, 0.0, 0.0]):
+        samples[0].opd_reverse_kl = pressure
+        with pytest.raises(ValueError, match="Tail-negative pressure"):
+            hooks.post_process(args, samples)

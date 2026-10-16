@@ -1,4 +1,4 @@
-"""Configure a frozen scoring teacher without changing the Core trainer."""
+"""Configure teacher scoring or teacher-free pressure without changing Core."""
 
 import copy
 from pathlib import Path
@@ -10,10 +10,29 @@ ENV = "OI_MILES_OPD_TEACHER"
 HOOK = "open_instruct.miles.distillation.hooks"
 
 
+def requires_teacher(teacher):
+    return bool(teacher) and teacher.get("objective", "full") != "tail_negative"
+
+
 def parse(document, base):
     teacher = copy.deepcopy(document.get("teacher", {}))
     if not teacher:
         return {}
+    validation.mapping(teacher, "teacher")
+    if teacher.get("objective") == "tail_negative":
+        defaults = dict(
+            objective="tail_negative", gpus=0, tensor_parallel_size=0, kl_coef=1.0, tail_fraction=0.2, tail_value=0.5
+        )
+        validation.fields(teacher, "teacher", set(defaults))
+        teacher = defaults | teacher
+        for name in ("gpus", "tensor_parallel_size"):
+            validation.integer(teacher[name], f"teacher.{name}", minimum=0)
+            if teacher[name] != 0:
+                raise InputError(f"tail_negative requires teacher.{name}=0")
+        validation.number(teacher["kl_coef"], "teacher.kl_coef", exclusive_min=True)
+        validation.number(teacher["tail_fraction"], "teacher.tail_fraction", exclusive_min=True, maximum=1)
+        validation.number(teacher["tail_value"], "teacher.tail_value", exclusive_min=True)
+        return teacher
     defaults = dict(
         gpus=1,
         tensor_parallel_size=1,
@@ -26,7 +45,6 @@ def parse(document, base):
         pressure_clip=None,
         calibrate_initial=False,
     )
-    validation.mapping(teacher, "teacher")
     validation.fields(teacher, "teacher", set(defaults) | {"source"})
     teacher = defaults | teacher
     source = validation.text(teacher.get("source"), "teacher.source")
@@ -37,7 +55,7 @@ def parse(document, base):
         raise InputError("teacher.calibrate_initial must be boolean")
     validation.number(teacher["kl_coef"], "teacher.kl_coef", exclusive_min=True)
     if teacher["objective"] not in {"full", "cancel_answer_positive"}:
-        raise InputError("teacher.objective must be full or cancel_answer_positive")
+        raise InputError("teacher.objective must be full, cancel_answer_positive or tail_negative")
     if teacher["pressure_clip"] is not None:
         validation.number(teacher["pressure_clip"], "teacher.pressure_clip", exclusive_min=True)
         if teacher["objective"] != "cancel_answer_positive":

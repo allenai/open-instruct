@@ -279,7 +279,7 @@ def run(path):
             {"address": address, "head": head, "ray_devices": ray_devices, "judge_devices": judges, "layout": layout},
         )
         env = dict(os.environ)
-        if spec.teacher:
+        if distillation.requires_teacher(spec.teacher):
             devices = judges.pop("__opd_teacher__")
             port = next(ports)
             service = dict(spec.teacher, endpoint=f"http://{address}:{port}")
@@ -308,6 +308,8 @@ def run(path):
             )
             supervisor.health["opd_teacher"] = f"http://127.0.0.1:{port}/health"
             env[distillation.ENV] = json.dumps(service)
+        elif spec.teacher:
+            env[distillation.ENV] = json.dumps(spec.teacher)
         registry = judging.registry(spec.judges)
         health = {}
         for name, devices in judges.items():

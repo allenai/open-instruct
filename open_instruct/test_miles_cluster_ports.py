@@ -44,6 +44,7 @@ def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkey
         output={"root": str(tmp_path)},
         launch={"auto_resume": False, "coordination": {"startup_timeout": 30}},
         judges={},
+        teacher={},
     )
     node = {"ray_gpus": 1}
     commands = {}
