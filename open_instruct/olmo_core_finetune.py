@@ -54,6 +54,7 @@ from open_instruct import (
     logger_utils,
     numpy_dataset_conversion,
     olmo_core_utils,
+    packed_sample_cache,
     resolved_sft_dataset,
     utils,
 )
@@ -150,6 +151,8 @@ class SFTConfig:
     """Read CPU-resolved raw-dataset metadata; still verify the exact tokenizer/cache identity."""
     write_sft_dataset_manifest: str | None = None
     """Write resolved metadata during --cache_dataset_only; never permitted during training."""
+    packed_sample_cache: str | None = None
+    """Optional exact packed-sample cache; preserves native dataset identity and loader order."""
 
 
 @dataclasses.dataclass
@@ -316,6 +319,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     np_dataset = np_dataset_config.build()
     np_dataset.prepare()
+    if args.sft.packed_sample_cache:
+        np_dataset = packed_sample_cache.CachedPackedFSLDataset(np_dataset, args.sft.packed_sample_cache)
 
     global_batch_size_seqs = rank_batch_size_seqs * dp_world_size
 
