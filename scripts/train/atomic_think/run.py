@@ -198,7 +198,7 @@ def main():
         # These are prerequisite controls, never the scientific A-repeat arm.
         for name in ("gate-reference-repeat", "gate-resumed-unprobed"):
             link_reference_packing(args.root, name)
-        train(args.root, "gate-reference-repeat", "control", 4, [999999], 4, state_steps=[3, 4])
+        train(args.root, "gate-reference-repeat", "control", 4, [999999], 2, state_steps=[3, 4])
         train(
             args.root,
             "gate-resumed-unprobed",
