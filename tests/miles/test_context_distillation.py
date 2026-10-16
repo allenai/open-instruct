@@ -325,3 +325,11 @@ def test_tail_negative_hook_has_no_teacher_and_native_advantages_are_negative(mo
         samples[0].opd_reverse_kl = pressure
         with pytest.raises(ValueError, match="Tail-negative pressure"):
             hooks.post_process(args, samples)
+
+
+def test_tail_count_is_exact_ceiling():
+    hooks = pytest.importorskip("open_instruct.miles.distillation.hooks")
+    for length in range(1, 5001):
+        pressure = hooks.tail_negative([-1.0] * length, length, 0.2, 0.5)
+        assert sum(1 for value in pressure if value) == -(-length // 5)
+    assert sum(hooks.tail_negative([-1.0] * 10, 10, 0.3, 0.5)) == 0.5 * 3
