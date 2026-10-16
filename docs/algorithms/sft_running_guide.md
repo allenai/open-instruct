@@ -39,7 +39,10 @@ The cache key hashes the tokenizer config, mixer, transform functions,
 `max_seq_length` and seed. Both jobs read those from shared variables at the top of
 the script so they cannot drift — if you change one, change it once, and re-tokenize.
 Any divergence produces a different key and training fails as though tokenization
-never ran.
+never ran. Never symlink a cache built at a shorter `max_seq_length` into a longer
+run's cache path: its rows were truncated at tokenize time and training doesn't
+check, so the run trains on short data while its config and logs report the long
+length.
 
 Wait for this job to reach exit 0 before launching step 2.
 
