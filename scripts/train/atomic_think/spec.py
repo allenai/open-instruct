@@ -50,11 +50,7 @@ def main():
                 ],
                 "result": {"path": "/output"},
                 "resources": {"gpuCount": 8, "sharedMemory": "10240 MB"},
-                "context": {
-                    "priority": "urgent",
-                    "minRuntime": f"{args.minutes}m",
-                    "autoResume": False,
-                },
+                "context": {"priority": "urgent", "minRuntime": f"{args.minutes}m", "autoResume": False},
                 "constraints": {"cluster": ["ai2/holmes"]},
                 "hostNetworking": True,
                 "propagateFailure": True,
