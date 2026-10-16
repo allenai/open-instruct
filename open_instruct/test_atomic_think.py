@@ -103,6 +103,33 @@ def test_resume_rejects_changed_arm_or_schedule():
             callback.load_state_dict(state)
 
 
+def test_long_audit_is_bounded_and_first_resumed_batch_is_checked(tmp_path):
+    callback = atomic_think.AtomicAuditCallback(offline=True, batch_steps=[513, 11768], output_dir=str(tmp_path))
+    callback.trainer = SimpleNamespace(global_step=513)
+    batch = {"input_ids": torch.tensor([[1, 2, 3]])}
+    callback._resume_receipt = {
+        "next_step": 513,
+        "expected_first_batch": {k: atomic_think.tensor_hash(v) for k, v in batch.items()},
+    }
+    with pytest.raises(ValueError, match="First resumed batch"):
+        callback.pre_step({"input_ids": torch.tensor([[3, 2, 1]])})
+    callback.pre_step(batch)
+    assert (tmp_path / "resume-first-batch-step513-rank0.json").exists()
+    assert (tmp_path / "batch-step513-rank0.json").exists()
+    callback.trainer.global_step = 514
+    callback.pre_step(batch)
+    assert not (tmp_path / "batch-step514-rank0.json").exists()
+    callback.trainer.global_step = 11768
+    callback.pre_step(batch)
+    assert (tmp_path / "batch-step11768-rank0.json").exists()
+
+
+def test_required_resume_check_cannot_fall_back_to_fresh_training():
+    callback = atomic_think.AtomicAuditCallback(offline=True, verify_resume=True)
+    with pytest.raises(ValueError, match="qualification did not run"):
+        callback.pre_train()
+
+
 def test_offline_audit_hashes_without_forward_or_optimizer_access(tmp_path):
     model = torch.nn.Linear(4, 2)
     model.register_forward_pre_hook(lambda *_: pytest.fail("Offline audit ran a forward pass"))

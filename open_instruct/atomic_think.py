@@ -18,13 +18,15 @@ from olmo_core.train.utils import EnvRngStates
 from torch import nn
 from torch.distributed.tensor import DTensor
 
-from open_instruct import logger_utils, model_utils
+from open_instruct import atomic_resume, logger_utils, model_utils
 
 logger = logger_utils.setup_logger(__name__)
 MODES = ("control", "rounding-only", "atomic-safe", "atomic-historical")
 
 
 def validate_config(sft, training, tokenizer_config):
+    if getattr(sft, "atomic_verify_resume", False) and not getattr(sft, "atomic_probe_offline", False):
+        raise ValueError("Resume qualification requires offline atomic auditing")
     if getattr(sft, "atomic_probe_offline", False) and sft.atomic_audit_mode is None:
         raise ValueError("Offline atomic probes require an audit mode")
     if getattr(sft, "atomic_probe_offline", False):
@@ -239,7 +241,11 @@ class AtomicAuditCallback(Callback):
     state_steps: list[int] = field(default_factory=list)
     model_state_steps: list[int] = field(default_factory=list)
     offline: bool = False
+    verify_resume: bool = False
+    batch_steps: list[int] | None = None
     _manifest_hash: str = ""
+    _resume_receipt: dict | None = None
+    _first_resume_batch_checked: bool = False
 
     def state_dict(self):
         return {
@@ -258,6 +264,8 @@ class AtomicAuditCallback(Callback):
         self._manifest_hash = state["manifest_hash"]
 
     def pre_train(self):
+        if self.verify_resume and self._resume_receipt is None:
+            raise ValueError("Required native resume qualification did not run")
         if self.offline and self.steps:
             raise ValueError("Offline measurement must not run probes in the trainer")
         if self.manifest:
@@ -269,7 +277,22 @@ class AtomicAuditCallback(Callback):
         self.record_model_state()
 
     def pre_step(self, batch):
-        if self.step in self.steps or self.step in self.model_state_steps or self.step <= 12 or self.step >= 510:
+        if self._resume_receipt is not None and not self._first_resume_batch_checked:
+            hashes = {key: tensor_hash(value) for key, value in batch.items() if isinstance(value, torch.Tensor)}
+            if (
+                self.step != self._resume_receipt["next_step"]
+                or hashes != self._resume_receipt["expected_first_batch"]
+            ):
+                raise ValueError("First resumed batch differs from the restored data position")
+            write_json(
+                Path(self.output_dir) / f"resume-first-batch-step{self.step}-rank{get_rank()}.json",
+                {"step": self.step, "hashes": hashes, "matched": True},
+            )
+            self._first_resume_batch_checked = True
+        audit_batch = (
+            self.step <= 12 or self.step >= 510 if self.batch_steps is None else self.step in self.batch_steps
+        )
+        if self.step in self.steps or self.step in self.model_state_steps or audit_batch:
             hashes = {key: tensor_hash(value) for key, value in batch.items() if isinstance(value, torch.Tensor)}
             write_json(Path(self.output_dir) / f"batch-step{self.step}-rank{get_rank()}.json", hashes)
 
@@ -301,6 +324,11 @@ class AtomicAuditCallback(Callback):
         return hashes
 
     def post_checkpoint_loaded(self, path):
+        if self.verify_resume:
+            self._resume_receipt = atomic_resume.verify(self.trainer, path, self.mode, self.horizon, tensor_hash)
+            write_json(
+                Path(self.output_dir) / f"resume-verified-step{self.step}-rank{get_rank()}.json", self._resume_receipt
+            )
         write_json(
             Path(self.output_dir) / f"restore-step{self.step}-rank{get_rank()}.json",
             {"checkpoint": str(path), "step": self.step, "mode": self.mode, "horizon": self.horizon},

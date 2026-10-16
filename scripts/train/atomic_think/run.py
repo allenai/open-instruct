@@ -40,7 +40,11 @@ def train(
     offline=False,
     packed_cache=None,
     data_root=None,
+    verify_resume=False,
+    batch_steps=None,
 ):
+    if verify_resume and (resume is None or not offline):
+        raise ValueError("Qualified continuation requires an explicit resume and offline measurements")
     output = root / name
     output.mkdir(parents=True, exist_ok=True)
     atomic = mode.startswith("atomic-")
@@ -130,6 +134,10 @@ def train(
         cmd += ["--atomic_state_steps", *map(str, state_steps)]
     if offline:
         cmd += ["--atomic_probe_offline"]
+    if verify_resume:
+        cmd += ["--atomic_verify_resume"]
+    if batch_steps is not None:
+        cmd += ["--atomic_batch_steps", *map(str, batch_steps)]
     if packed_cache is not None:
         cmd += ["--packed_sample_cache", str(packed_cache)]
     rank = os.environ["BEAKER_REPLICA_RANK"]

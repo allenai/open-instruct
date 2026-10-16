@@ -147,6 +147,10 @@ class SFTConfig:
     atomic_probe_steps: list[int] = dataclasses.field(default_factory=lambda: [0, 1, 2, 10, 100, 353, 512])
     atomic_probe_offline: bool = False
     """Save native measurement checkpoints and model hashes instead of probing inside training."""
+    atomic_verify_resume: bool = False
+    """Require exact native model/optimizer/trainer restoration before H077 continuation."""
+    atomic_batch_steps: list[int] | None = None
+    """Explicit bounded batch audit steps; None preserves the original short-run audit."""
     sft_dataset_manifest: str | None = None
     """Read CPU-resolved raw-dataset metadata; still verify the exact tokenizer/cache identity."""
     write_sft_dataset_manifest: str | None = None
@@ -454,6 +458,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             state_steps=args.sft.atomic_state_steps,
             model_state_steps=args.sft.atomic_probe_steps if args.sft.atomic_probe_offline else [],
             offline=args.sft.atomic_probe_offline,
+            verify_resume=args.sft.atomic_verify_resume,
+            batch_steps=args.sft.atomic_batch_steps,
             output_dir=os.path.join(args.checkpoint.output_dir, "atomic-audit"),
         )
         if args.sft.atomic_probe_offline:

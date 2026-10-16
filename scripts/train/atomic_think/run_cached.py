@@ -12,20 +12,25 @@ from scripts.train.atomic_think import run
 from open_instruct import atomic_think, packed_sample_cache
 
 
-def prepare(root, arm, data_root, cache, local):
+def prepare(root, arm, data_root, cache, local, *, expected_samples=8448, manifest_sha256=None):
     output = root / arm
     output.mkdir(parents=True, exist_ok=True)
     if list(output.glob("step*")) or list(output.glob("completion-node*.json")):
         raise FileExistsError("Fresh cached run refuses existing checkpoints or completion records")
     atomic = arm.startswith("atomic-")
     kind = "atomic" if atomic else "original"
-    manifest = json.loads((cache / "manifest.json").read_text())
+    manifest_bytes = (cache / "manifest.json").read_bytes()
+    if expected_samples != 8448 and not manifest_sha256:
+        raise ValueError("Longer prefixes require a registered manifest hash")
+    if manifest_sha256 is not None and hashlib.sha256(manifest_bytes).hexdigest() != manifest_sha256:
+        raise ValueError("Cache differs from registered manifest hash")
+    manifest = json.loads(manifest_bytes)
     if (
         manifest["provenance"]["kind"] != kind
         or manifest["provenance"]["epoch"] != 1
         or manifest["provenance"]["data_loader_seed"] != 34521
         or manifest["provenance"]["global_batch_tokens"] != 1048576
-        or len(manifest["rows"]) != 8448
+        or len(manifest["rows"]) != expected_samples
     ):
         raise ValueError("Sample cache differs from registered H077 training prefix")
     source = (data_root / ("atomic-safe" if atomic else "control") / "dataset-common").resolve(strict=True)
