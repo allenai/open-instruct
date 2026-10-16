@@ -35,8 +35,7 @@ initialization and a short training run when the image or driver changes. See
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
-- To run `./scripts/train/build_image_and_launch.sh`, first commit all changes. The ordinary launcher supports `--cuda-version 12|13` before the script path; CUDA 13 images are intended for compatible clusters such as `ai2/holmes`. MILES uses the separate `--miles` dispatch and pinned runtime.
-- Launch experiment scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13] $SOME_SCRIPT`.
+- Launch Beaker experiment and test scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13] SCRIPT` after committing all changes. CUDA 13 images are for compatible clusters such as `ai2/holmes`. MILES uses `--miles CONFIG` and its pinned runtime.
 - For the Core/vLLM and DeepSpeed/vLLM GRPO workflows, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
@@ -48,12 +47,6 @@ initialization and a short training run when the image or driver changes. See
   - `scripts/train/debug/dpo/local.sh`: local single GPU (no Beaker).
   - `scripts/train/debug/dpo/single_gpu.sh`: single GPU on Beaker.
   - `scripts/train/debug/dpo/multi_node.sh`: two 8x GPU nodes on Beaker.
-- For GRPO with vLLM inference, launch tool use experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/tools/olmo_3_parser_multigpu.sh`.
-- For GRPO with vLLM inference, launch multi-node non-tool experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh`.
-- Launch OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft.sh`.
-- Launch multi-node OLMo-core SFT experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_multinode.sh`.
-- Launch DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/single_gpu.sh`.
-- Launch multi-node DPO experiments by running `./scripts/train/build_image_and_launch.sh scripts/train/debug/dpo/multi_node.sh`.
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
 - When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
 - If you are given a Beaker URL (`beaker.org` or `beaker.allen.ai`), use the Beaker CLI tool to interact with it.
