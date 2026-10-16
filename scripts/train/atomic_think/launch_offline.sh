@@ -23,7 +23,7 @@ task['command'] = ['torchrun', '--standalone', '--nproc_per_node=1', 'scripts/tr
 task['arguments'] = [root, sys.argv[2], *sys.argv[3:]]
 task['resources']['gpuCount'] = 1
 if os.environ.get('H077_OFFLINE_HOST'):
-    task['constraints']['hostname'] = [os.environ['H077_OFFLINE_HOST']]
+    task['constraints'] = {'hostname': [os.environ['H077_OFFLINE_HOST']]}
 task.pop('replicas')
 task.pop('leaderSelection')
 task.pop('synchronizedStartTimeout')
