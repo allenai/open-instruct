@@ -52,15 +52,15 @@ def main():
                 "resources": {"gpuCount": 8, "sharedMemory": "10240 MB"},
                 "context": {
                     "priority": "urgent",
-                    "minRuntime": args.minutes * 60 * 1_000_000_000,
+                    "minRuntime": f"{args.minutes}m",
                     "autoResume": False,
                 },
                 "constraints": {"cluster": ["ai2/holmes"]},
                 "hostNetworking": True,
                 "propagateFailure": True,
                 "propagatePreemption": True,
-                "synchronizedStartTimeout": 600_000_000_000,
-                "timeout": args.minutes * 60 * 1_000_000_000,
+                "synchronizedStartTimeout": "10m",
+                "timeout": f"{args.minutes}m",
             }
         ],
         "retry": {"allowedTaskRetries": 0},
