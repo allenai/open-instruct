@@ -16,6 +16,9 @@ spec['description'] = 'H077 reproduce raw-dataset cache startup with stack dumps
 task = spec['tasks'][0]
 task['name'] = 'diagnose'
 task['command'] = ['python', 'scripts/train/atomic_think/diagnose_startup.py']
+# Match the training spec exactly: HF_HOME alone selects its datasets subfolder,
+# whereas historical GPU launches explicitly use HF_HOME itself for Arrow data.
+task['envVars'].append({'name': 'HF_DATASETS_CACHE', 'value': '/weka/oe-adapt-default/allennlp/.cache/huggingface'})
 task['timeout'] = '10m'
 path.write_text(json.dumps(spec, indent=2) + '\n')
 PY
