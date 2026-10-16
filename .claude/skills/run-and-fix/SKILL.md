@@ -3,7 +3,7 @@ name: run-and-fix
 description: Run the three GRPO (non-MILES) debug scripts on Beaker in order, fix failures, and add the runs to the PR body. Use when asked to run the GRPO debug scripts.
 ---
 
-Please run, in order, the following scripts:
+Commit all changes, then launch each of these with `./scripts/train/build_image_and_launch.sh <script>`, in order:
 
 1. `scripts/train/debug/single_gpu_on_beaker.sh`
 2. `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`

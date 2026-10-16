@@ -3,7 +3,7 @@ name: run-all-dpo
 description: Run the single-GPU then multi-node DPO debug scripts on Beaker, fix failures, and add the runs to the PR body. Use when asked to run the DPO debug scripts.
 ---
 
-Run the following scripts, in order:
+Commit all changes, then launch each of these with `./scripts/train/build_image_and_launch.sh <script>`, in order:
 
 1. `scripts/train/debug/dpo/single_gpu.sh`
 2. `scripts/train/debug/dpo/multi_node.sh`
