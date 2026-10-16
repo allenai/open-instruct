@@ -44,7 +44,8 @@ case "$ARM" in
     # Same tokenizer, template and cache machinery as the H038/H049 arms; LR comes from the caller
     # (the Tmax SFT recipe is 2e-5, 2 epochs; steps = ceil(2 x cache tokens / 1,048,576) via
     # TRAIN_FULL_STEPS). Run with ROW_ALIGNED_PARTS=1 DOCB=1 as H049's nemo-docb.
-    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both|olmo35-tmax-sft|olmo35-tmax-glm52|olmo35-tmax-big)
+    # H062: the Sera-4.6-Lite-47000 rows of tmax-sft-big-oi alone (allenai/tmax-sft-big-sera-oi), same recipe.
+    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both|olmo35-tmax-sft|olmo35-tmax-glm52|olmo35-tmax-big|olmo35-tmax-sera)
         IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE="${H038_CACHE:-}"
         export TOKENIZER=allenai/dolma2-tokenizer-olmo35
         export TOKENIZER_REVISION=8b9717061fae09d5be814373d189919a62a9a00d
@@ -57,6 +58,7 @@ case "$ARM" in
             olmo35-tmax-sft) FULL_MIXER="allenai/tmax-sft-oi 1.0" ;;
             olmo35-tmax-glm52) FULL_MIXER="allenai/tmax-sft-glm-52-oi 1.0" ;;
             olmo35-tmax-big) FULL_MIXER="allenai/tmax-sft-big-oi 1.0" ;;
+            olmo35-tmax-sera) FULL_MIXER="allenai/tmax-sft-big-sera-oi 1.0" ;;
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
@@ -65,7 +67,7 @@ case "$ARM" in
                 echo "H038_CACHE=$ARM_CACHE is an olmo123 cache; the olmo35 arms need their own" >&2; exit 1 ;;
         esac
         ;;
-    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both|-tmax-sft|-tmax-glm52|-tmax-big])" >&2; exit 1 ;;
+    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both|-tmax-sft|-tmax-glm52|-tmax-big|-tmax-sera])" >&2; exit 1 ;;
 esac
 # H049: ROW_ALIGNED_PARTS=1 tokenizes/trains on the row-aligned layout ("-rowaligned" cache),
 # DOCB=1 takes document boundaries from its per-row metadata instead of EOS (needs
