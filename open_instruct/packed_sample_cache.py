@@ -182,8 +182,13 @@ class CachedPackedFSLDataset(NumpyPackedFSLDataset):
     def __init__(self, source, directory):
         self.__dict__.update(source.__dict__)
         self._native_source = source
-        directory = Path(directory)
-        manifest = json.loads((directory / "manifest.json").read_text())
+        self._cache_directory = Path(directory).resolve()
+        manifest_bytes = (self._cache_directory / "manifest.json").read_bytes()
+        self._cache_manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+        self._open_cache(json.loads(manifest_bytes))
+
+    def _open_cache(self, manifest):
+        source, directory = self._native_source, self._cache_directory
         if (
             manifest["version"] != 1
             or manifest["dataset_fingerprint"] != source.fingerprint
@@ -207,6 +212,22 @@ class CachedPackedFSLDataset(NumpyPackedFSLDataset):
         self._cached_rows = {entry["index"]: (row, entry) for row, entry in enumerate(rows)}
         if len(self._cached_rows) != len(rows):
             raise ValueError("Duplicate packed sample cache index")
+
+    def __getstate__(self):
+        # NumPy memmap pickling copies the complete array and restores an
+        # anonymous allocation. Core spawns loader workers, so transmitting the
+        # full cache would multiply its RAM and IPC cost by every worker/rank.
+        state = self.__dict__.copy()
+        for name in ("_cached_tokens", "_cached_masks", "_cached_rows"):
+            state.pop(name)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        manifest_bytes = (self._cache_directory / "manifest.json").read_bytes()
+        if hashlib.sha256(manifest_bytes).hexdigest() != self._cache_manifest_sha256:
+            raise ValueError("Packed cache manifest changed during worker startup")
+        self._open_cache(json.loads(manifest_bytes))
 
     @property
     def fingerprint(self):

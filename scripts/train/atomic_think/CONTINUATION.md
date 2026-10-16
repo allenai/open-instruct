@@ -23,6 +23,18 @@ the previous test's generic PyTorch writer failed to exercise this incompatibili
 No model, optimizer, schedule, tokenization or saved checkpoint is changed by this
 reader correction. Replacement attempts must still pass every restoration guard.
 
+The `20261016c` replacements passed restoration and dry-run but were stopped
+before first-batch qualification after the full-cache worker-startup defect was
+identified. Core uses spawned loader workers; default NumPy memmap pickling
+serializes the entire array and restores an anonymous allocation. This copied
+the roughly 57.5-GiB cache per worker, unlike the intended shared file mapping.
+The adapter now excludes mapped arrays and row metadata from worker serialization,
+reopens the same read-only files, and verifies the pinned manifest again. Tests
+cover actual spawned Core-loader resumption, native fallback, and corruption.
+`cache_spawn_smoke.py` must pass on both full registered caches before replacing
+the long GPU pair. It checks ranks 0/15 with four workers and batches 513-516,
+measures serialized loader size and startup time, and preserves all sample hashes.
+
 Full checkpoints and state hashes are retained every 1024 updates and at 11768.
 The first twelve resumed batches, checkpoint batches and final three batches are
 audited. This avoids extending the short-run `step >= 510` audit to every long-run

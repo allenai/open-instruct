@@ -1,9 +1,11 @@
 import json
+import pickle
 
 import numpy as np
 import pytest
 import torch
 from olmo_core import data
+from olmo_core.data import data_loader
 
 from open_instruct import packed_sample_cache
 
@@ -114,3 +116,92 @@ def test_interrupted_cache_resumes_verified_rows_without_rereading(dataset, tmp_
     cached = packed_sample_cache.CachedPackedFSLDataset(dataset, directory)
     for index in (0, 1):
         assert torch.equal(cached[index]["input_ids"], dataset[index]["input_ids"])
+
+
+def test_pickle_reopens_cache_files_instead_of_copying_arrays(dataset, tmp_path):
+    directory = tmp_path / "cache"
+    packed_sample_cache.build_cache(dataset, [0], directory, provenance={}, workers=1)
+    cached = packed_sample_cache.CachedPackedFSLDataset(dataset, directory)
+    restored = pickle.loads(pickle.dumps(cached))
+    assert restored._cached_tokens.filename is not None
+    assert restored._cached_masks.filename is not None
+    assert restored._cached_tokens.mode == restored._cached_masks.mode == "r"
+    assert restored.fingerprint == cached.fingerprint
+    for index in range(len(dataset)):
+        for key, value in cached[index].items():
+            if isinstance(value, torch.Tensor):
+                assert torch.equal(restored[index][key], value)
+
+
+def test_pickled_cache_rejects_changed_manifest_and_payload(dataset, tmp_path):
+    directory = tmp_path / "cache"
+    packed_sample_cache.build_cache(dataset, [0], directory, provenance={}, workers=1)
+    saved = pickle.dumps(packed_sample_cache.CachedPackedFSLDataset(dataset, directory))
+    path = directory / "manifest.json"
+    original = path.read_bytes()
+    path.write_bytes(original + b"\n")
+    with pytest.raises(ValueError, match="manifest changed"):
+        pickle.loads(saved)
+    path.write_bytes(original)
+    values = np.load(directory / "input_ids.npy", mmap_mode="r+")
+    values[0, 0] += 1
+    values.flush()
+    with pytest.raises(ValueError, match="integrity failure"):
+        pickle.loads(saved)[0]
+
+
+def _check_spawned_cache_mapping(_worker_id):
+    cached = torch.utils.data.get_worker_info().dataset
+    assert cached._cached_tokens.filename is not None and cached._cached_tokens.mode == "r"
+    assert cached._cached_masks.filename is not None and cached._cached_masks.mode == "r"
+
+
+def test_spawned_workers_preserve_cached_and_fallback_samples(dataset, tmp_path):
+    directory = tmp_path / "cache"
+    packed_sample_cache.build_cache(dataset, [0], directory, provenance={}, workers=1)
+    cached = packed_sample_cache.CachedPackedFSLDataset(dataset, directory)
+    loader = torch.utils.data.DataLoader(
+        cached,
+        batch_size=None,
+        num_workers=2,
+        multiprocessing_context="spawn",
+        worker_init_fn=_check_spawned_cache_mapping,
+    )
+    observed = list(loader)
+    assert len(observed) == len(dataset)
+    for index, item in enumerate(observed):
+        expected = dataset[index]
+        assert item.keys() == expected.keys()
+        for key, value in expected.items():
+            if isinstance(value, torch.Tensor):
+                assert torch.equal(item[key], value)
+
+
+def test_core_loader_can_resume_through_spawned_cache_workers(dataset, tmp_path):
+    directory = tmp_path / "cache"
+    packed_sample_cache.build_cache(dataset, list(range(len(dataset))), directory, provenance={}, workers=1)
+    cached = packed_sample_cache.CachedPackedFSLDataset(dataset, directory)
+    loader = data_loader.NumpyFSLDataLoader(
+        dataset,
+        global_batch_size=8,
+        work_dir=tmp_path / "loader",
+        seed=34521,
+        dp_world_size=1,
+        dp_rank=0,
+        num_workers=2,
+        collator=data.DataCollator(pad_token_id=0, vocab_size=32),
+    )
+    loader.dataset = cached
+    loader.reshuffle(epoch=1)
+    loader.batches_processed = 1
+    expected = loader[1]
+    # Core inherits the process start method chosen by prepare_training_environment.
+    torch.multiprocessing.set_start_method("spawn", force=True)
+    iterator = iter(loader)
+    actual = next(iterator)
+    iterator.close()
+    assert actual.keys() == expected.keys()
+    for key, value in expected.items():
+        if isinstance(value, torch.Tensor):
+            assert torch.equal(actual[key], value)
+    assert loader.batches_processed == 2
