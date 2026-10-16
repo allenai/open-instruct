@@ -3,6 +3,7 @@
 import argparse
 import gc
 import hashlib
+import json
 import multiprocessing
 import pickle
 import resource
@@ -37,9 +38,17 @@ def main():
         manifest = (directory / "manifest.json").read_bytes()
         if hashlib.sha256(manifest).hexdigest() != expected:
             raise ValueError("Wrong registered full cache")
-        dataset, loader, _ = prepare_samples.build_source(args.data_root, kind)
+        dataset, loader, indices = prepare_samples.build_source(args.data_root, kind)
+        if hashlib.sha256(indices.tobytes()).hexdigest() != json.loads(manifest)["provenance"]["global_order_sha256"]:
+            raise ValueError("Native global order differs from the registered cache")
         cached = packed_sample_cache.CachedPackedFSLDataset(dataset, directory)
+        if len(cached) != len(dataset):
+            raise ValueError("Cache wrapper changed native dataset size")
         loader.dataset = cached
+        # This read-only smoke process has no trainer-owned output directory.
+        # Use the independently reconstructed and hash-verified native order,
+        # rather than requiring a previously saved loader index file.
+        loader._global_indices = indices
         loader.num_workers = 4
         payload = pickle.dumps(loader)
         mapped_bytes = cached._cached_tokens.nbytes + cached._cached_masks.nbytes
