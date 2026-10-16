@@ -53,6 +53,26 @@ def check_checkpoint_coverage(module, checkpoint):
         raise ValueError(f"Checkpoint omits model state: {missing[:5]}")
 
 
+def build_module():
+    config = olmo_core_utils.get_transformer_config(CONFIG, vocab_size=100352, attn_backend="flash_2")
+    model = config.build(init_device="meta")
+    module_config = olmo_core_utils.build_ddp_train_module_config(
+        CONFIG,
+        rank_microbatch_size=65536,
+        max_sequence_length=65536,
+        learning_rate=5e-5,
+        weight_decay=0.0,
+        scheduler=None,
+        max_grad_norm=1.0,
+        compile_model=False,
+        ac_config=None,
+    )
+    module = module_config.build(model, eval_only=True)
+    if module.optim is not None:
+        raise RuntimeError("Frozen diagnostic unexpectedly built an optimizer")
+    return module
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
@@ -65,22 +85,7 @@ def main():
     try:
         if dist.get_world_size() != 1:
             raise ValueError("Frozen diagnostic requires exactly one process")
-        config = olmo_core_utils.get_transformer_config(CONFIG, vocab_size=100352, attn_backend="flash_2")
-        model = config.build(init_device="meta")
-        module_config = olmo_core_utils.build_ddp_train_module_config(
-            CONFIG,
-            rank_microbatch_size=65536,
-            max_sequence_length=65536,
-            learning_rate=5e-5,
-            weight_decay=0.0,
-            scheduler=None,
-            max_grad_norm=1.0,
-            compile_model=False,
-            ac_config=None,
-        )
-        module = module_config.build(model, eval_only=True)
-        if module.optim is not None:
-            raise RuntimeError("Frozen diagnostic unexpectedly built an optimizer")
+        module = build_module()
         manifest_hash = hashlib.sha256(Path(MANIFEST).read_bytes()).hexdigest()
         report: dict[str, Any] = {
             "manifest_hash": manifest_hash,

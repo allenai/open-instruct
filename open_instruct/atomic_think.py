@@ -25,6 +25,17 @@ MODES = ("control", "rounding-only", "atomic-safe", "atomic-historical")
 
 
 def validate_config(sft, training, tokenizer_config):
+    if getattr(sft, "atomic_probe_offline", False) and sft.atomic_audit_mode is None:
+        raise ValueError("Offline atomic probes require an audit mode")
+    if getattr(sft, "atomic_probe_offline", False):
+        steps = sft.atomic_probe_steps
+        if (
+            training.max_train_steps is None
+            or not steps
+            or len(set(steps)) != len(steps)
+            or any(step < 0 or step > training.max_train_steps for step in steps)
+        ):
+            raise ValueError("Offline measurement steps must be unique and within the bounded training run")
     if sft.scheduler_horizon is not None:
         if training.lr_scheduler_type not in ("linear", "cosine"):
             raise ValueError("A fixed scheduler horizon requires linear or cosine scheduling")
@@ -226,44 +237,68 @@ class AtomicAuditCallback(Callback):
     steps: list[int] = field(default_factory=list)
     output_dir: str = "atomic-audit"
     state_steps: list[int] = field(default_factory=list)
+    model_state_steps: list[int] = field(default_factory=list)
+    offline: bool = False
     _manifest_hash: str = ""
 
     def state_dict(self):
-        return {"mode": self.mode, "horizon": self.horizon, "manifest_hash": self._manifest_hash}
+        return {
+            "mode": self.mode,
+            "horizon": self.horizon,
+            "manifest_hash": self._manifest_hash,
+            "offline": self.offline,
+        }
 
     def load_state_dict(self, state_dict):
         state = state_dict
         if state["mode"] != self.mode or state["horizon"] != self.horizon:
             raise ValueError("Resume changed the audit arm or scheduler horizon")
+        if state.get("offline", False) != self.offline:
+            raise ValueError("Resume changed the offline measurement protocol")
         self._manifest_hash = state["manifest_hash"]
 
     def pre_train(self):
+        if self.offline and self.steps:
+            raise ValueError("Offline measurement must not run probes in the trainer")
         if self.manifest:
             current = hashlib.sha256(Path(self.manifest).read_bytes()).hexdigest()
             if self._manifest_hash and self._manifest_hash != current:
                 raise ValueError("Resume changed the probe manifest")
             self._manifest_hash = current
         self.probe()
+        self.record_model_state()
 
     def pre_step(self, batch):
-        if self.step in self.steps or self.step <= 12 or self.step >= 510:
+        if self.step in self.steps or self.step in self.model_state_steps or self.step <= 12 or self.step >= 510:
             hashes = {key: tensor_hash(value) for key, value in batch.items() if isinstance(value, torch.Tensor)}
             write_json(Path(self.output_dir) / f"batch-step{self.step}-rank{get_rank()}.json", hashes)
 
     def post_step(self):
         self.probe()
+        model_hashes = self.record_model_state()
         if self.step in self.state_steps:
             module = cast(OLMoDDPTrainModule, self.trainer.train_module)
             write_json(
                 Path(self.output_dir) / f"state-step{self.step}-rank{get_rank()}.json",
                 {
-                    "model": {name: tensor_hash(p) for name, p in module.model.state_dict().items()},
+                    "model": model_hashes or {name: tensor_hash(p) for name, p in module.model.state_dict().items()},
                     "optimizer": {name: tensor_hash(p) for name, p in module.optim.states.items()},
                     # Compiled optimizers keep LR as a scalar tensor.
                     "lr": [float(group["lr"]) for group in module.optim.param_groups],
                     "step": self.step,
                 },
             )
+
+    def record_model_state(self):
+        if self.step not in self.model_state_steps:
+            return
+        module = cast(OLMoDDPTrainModule, self.trainer.train_module)
+        hashes = {name: tensor_hash(value) for name, value in module.model.state_dict().items()}
+        write_json(
+            Path(self.output_dir) / f"model-state-step{self.step}-rank{get_rank()}.json",
+            {"step": self.step, "mode": self.mode, "manifest_hash": self._manifest_hash, "model": hashes},
+        )
+        return hashes
 
     def post_checkpoint_loaded(self, path):
         write_json(
@@ -272,6 +307,8 @@ class AtomicAuditCallback(Callback):
         )
 
     def probe(self):
+        if self.offline:
+            return
         if not self.manifest or self.step not in self.steps:
             return
         module = cast(OLMoDDPTrainModule, self.trainer.train_module)

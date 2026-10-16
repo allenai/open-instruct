@@ -34,7 +34,7 @@ import os
 import pathlib
 import re
 import shlex
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -144,6 +144,8 @@ class SFTConfig:
     atomic_probe_manifest: str | None = None
     """Frozen, tokenized H077 probe JSON, shared by all arms."""
     atomic_probe_steps: list[int] = dataclasses.field(default_factory=lambda: [0, 1, 2, 10, 100, 353, 512])
+    atomic_probe_offline: bool = False
+    """Save native measurement checkpoints and model hashes instead of probing inside training."""
     sft_dataset_manifest: str | None = None
     """Read CPU-resolved raw-dataset metadata; still verify the exact tokenizer/cache identity."""
     write_sft_dataset_manifest: str | None = None
@@ -443,10 +445,15 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             mode=args.sft.atomic_audit_mode,
             horizon=args.sft.scheduler_horizon,
             manifest=args.sft.atomic_probe_manifest,
-            steps=args.sft.atomic_probe_steps,
+            steps=[] if args.sft.atomic_probe_offline else args.sft.atomic_probe_steps,
             state_steps=args.sft.atomic_state_steps,
+            model_state_steps=args.sft.atomic_probe_steps if args.sft.atomic_probe_offline else [],
+            offline=args.sft.atomic_probe_offline,
             output_dir=os.path.join(args.checkpoint.output_dir, "atomic-audit"),
         )
+        if args.sft.atomic_probe_offline:
+            checkpointer = trainer_callbacks["checkpointer"]
+            checkpointer.fixed_steps = sorted({step for step in args.sft.atomic_probe_steps if step > 0})
 
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
@@ -501,6 +508,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         if row_check is not None:
             row_check.record_seeded()
             trainer.add_callback("promoted_row_step_check", row_check)
+
+    if args.sft.atomic_probe_offline:
+        checkpointer = cast(callbacks.CheckpointerCallback, trainer.callbacks["checkpointer"])
+        checkpointer.pre_train_checkpoint = not resumed and 0 in args.sft.atomic_probe_steps
 
     logger.info("Starting training...")
     trainer.fit()

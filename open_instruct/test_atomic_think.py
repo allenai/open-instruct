@@ -103,6 +103,30 @@ def test_resume_rejects_changed_arm_or_schedule():
             callback.load_state_dict(state)
 
 
+def test_offline_audit_hashes_without_forward_or_optimizer_access(tmp_path):
+    model = torch.nn.Linear(4, 2)
+    model.register_forward_pre_hook(lambda *_: pytest.fail("Offline audit ran a forward pass"))
+    callback = atomic_think.AtomicAuditCallback(offline=True, model_state_steps=[0, 1], output_dir=str(tmp_path))
+    callback.trainer = SimpleNamespace(global_step=0, train_module=SimpleNamespace(model=model))
+    before = {name: atomic_think.tensor_hash(value) for name, value in model.state_dict().items()}
+    rng = torch.get_rng_state().clone()
+    callback.pre_train()
+    callback.trainer.global_step = 1
+    callback.post_step()
+    for step in (0, 1):
+        report = json.loads((tmp_path / f"model-state-step{step}-rank0.json").read_text())
+        assert report["model"] == before
+        assert report["step"] == step
+    assert torch.equal(torch.get_rng_state(), rng)
+    assert not list(tmp_path.glob("probe-*"))
+    assert callback.state_dict()["offline"] is True
+    with pytest.raises(ValueError, match="offline measurement"):
+        callback.load_state_dict({"mode": "control", "horizon": 11768, "manifest_hash": ""})
+    callback.steps = [1]
+    with pytest.raises(ValueError, match="must not run probes"):
+        callback.pre_train()
+
+
 @pytest.mark.parametrize("tensor_lr", [False, True])
 def test_state_audit_serializes_learning_rate_without_mutating_training(tmp_path, tensor_lr):
     model = torch.nn.Linear(4, 2)

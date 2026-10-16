@@ -28,7 +28,7 @@ def link_reference_packing(root, name):
             raise ValueError(f"Diagnostic packing differs from reference: {target}") from None
 
 
-def train(root, name, mode, steps, probes, save_interval, resume=None, state_steps=()):
+def train(root, name, mode, steps, probes, save_interval, resume=None, state_steps=(), offline=False):
     output = root / name
     output.mkdir(parents=True, exist_ok=True)
     atomic = mode.startswith("atomic-")
@@ -116,6 +116,8 @@ def train(root, name, mode, steps, probes, save_interval, resume=None, state_ste
         cmd += ["--resume_from_checkpoint", str(resume)]
     if state_steps:
         cmd += ["--atomic_state_steps", *map(str, state_steps)]
+    if offline:
+        cmd += ["--atomic_probe_offline"]
     rank = os.environ["BEAKER_REPLICA_RANK"]
     atomic_think.write_json(output / f"command-node{rank}.json", cmd)
     start = time.time()
@@ -211,7 +213,7 @@ def main():
         )
     else:
         mode = "control" if args.arm == "control-repeat" else args.arm
-        train(args.root, args.arm, mode, 512, [0, 1, 2, 10, 100, 353, 512], 512)
+        train(args.root, args.arm, mode, 512, [0, 1, 2, 10, 100, 353, 512], 512, state_steps=[256, 512], offline=True)
 
 
 if __name__ == "__main__":
