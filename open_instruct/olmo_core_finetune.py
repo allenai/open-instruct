@@ -29,6 +29,7 @@ import dataclasses
 import datetime
 import glob
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -47,7 +48,14 @@ from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, te
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct import (
+    atomic_think,
+    dataset_transformation,
+    logger_utils,
+    numpy_dataset_conversion,
+    olmo_core_utils,
+    utils,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -126,6 +134,15 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
+    atomic_audit_mode: str | None = None
+    """H077 only: control, rounding-only, atomic-safe, or atomic-historical."""
+    scheduler_horizon: int | None = None
+    """Fix the LR horizon independently of the stopping step for partial SFT."""
+    atomic_state_steps: list[int] = dataclasses.field(default_factory=list)
+    """Expensive complete state hashes for the short checkpoint/noninterference gate only."""
+    atomic_probe_manifest: str | None = None
+    """Frozen, tokenized H077 probe JSON, shared by all arms."""
+    atomic_probe_steps: list[int] = dataclasses.field(default_factory=lambda: [0, 1, 2, 10, 100, 353, 512])
 
 
 @dataclasses.dataclass
@@ -140,9 +157,14 @@ class SFTArguments:
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
+    atomic_think.validate_config(args.sft, args.training, tc)
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
+    if args.sft.atomic_probe_manifest:
+        manifest = json.loads(pathlib.Path(args.sft.atomic_probe_manifest).read_text())
+        if tc.tokenizer_files_hash != manifest["tokenizer_files_hash"]:
+            raise ValueError("Training tokenizer differs from the frozen probe tokenizer")
     transform_fn_args = [
         dataset_transformation.sft_tokenize_fn_args(args.training.max_seq_length, args.training.over_length_strategy),
         {},
@@ -278,8 +300,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             "Use more data, or lower --gradient_accumulation_steps / --per_device_train_batch_size."
         )
     scheduler = olmo_core_utils.build_scheduler(
-        args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
+        args.training.lr_scheduler_type, args.training.warmup_ratio, args.sft.scheduler_horizon or effective_steps
     )
+    if args.sft.scheduler_horizon is not None:
+        scheduler.t_max = args.sft.scheduler_horizon
 
     max_grad_norm = (
         args.training.max_grad_norm if args.training.max_grad_norm and args.training.max_grad_norm > 0 else None
@@ -356,6 +380,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     run_name = args.tracking.run_name or f"sft-{os.path.basename(args.model.model_name_or_path)}"
     config_dict = dataclasses.asdict(args)
+    if args.sft.atomic_audit_mode is not None:
+        config_dict["tokenizer"] = dataclasses.asdict(tc)
+        if is_main_process:
+            tc.tokenizer.save_pretrained(os.path.join(args.checkpoint.output_dir, "tokenizer"))
 
     if is_main_process:
         olmo_core_utils.write_provenance_readme(
@@ -380,6 +408,16 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
+    if args.sft.atomic_audit_mode is not None:
+        assert args.sft.scheduler_horizon is not None
+        trainer_callbacks["atomic_audit"] = atomic_think.AtomicAuditCallback(
+            mode=args.sft.atomic_audit_mode,
+            horizon=args.sft.scheduler_horizon,
+            manifest=args.sft.atomic_probe_manifest,
+            steps=args.sft.atomic_probe_steps,
+            state_steps=args.sft.atomic_state_steps,
+            output_dir=os.path.join(args.checkpoint.output_dir, "atomic-audit"),
+        )
 
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
@@ -421,7 +459,16 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # rows have been trained since they were seeded.
     if not resumed:
         row_check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, tc.tokenizer)
-        olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
+        if args.sft.atomic_audit_mode is None:
+            olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
+        else:
+            atomic_think.initialize_arm(
+                train_module,
+                tc.tokenizer,
+                args.sft.atomic_audit_mode,
+                os.path.join(args.checkpoint.output_dir, "atomic-audit"),
+                olmo_core_utils.sync_promoted_token_optimizer_rows,
+            )
         if row_check is not None:
             row_check.record_seeded()
             trainer.add_callback("promoted_row_step_check", row_check)

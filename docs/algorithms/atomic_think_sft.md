@@ -131,3 +131,23 @@ nearly tied scores per example; the latter could increase routing sensitivity.
 Compare against the model's normal traffic as well as uniform traffic. A separate
 objective must teach the output rows when to emit the boundaries. A short phase
 training only the new rows is an experimental option, not yet implemented here.
+
+## Registered launch
+
+The experiment is H077, preregistered in
+[ledger PR 318](https://github.com/allenai/olmo-post-training-ledger/pull/318).
+`scripts/train/atomic_think/` contains its frozen probe manifest, runtime overlay,
+allocated-urgent Beaker spec and bounded gate/panel runner. The overlay derives
+from the actual H030 image rather than rebuilding historical dependencies.
+
+The gate runs four uninterrupted updates without probes, four with probes, and
+resumes the reference at step two for two more updates. Exact batch, LR, model
+and optimizer-state hashes must agree at steps three and four; otherwise stop
+and investigate reproducibility before the 512-update panel. Checkpoint saving
+is synchronous. Every scientific arm saves step 512 permanently, step 256 as
+a recovery checkpoint, and the tokenizer alongside its full configuration.
+
+The ordinary probe consists of 128 held-out MATH-500 problem statements, with
+identical token IDs across arms. This limits the routing conclusion to this
+mathematical-text sample; it does not establish broad quality preservation.
+Another 64 reference-solution contexts include both tags and token offsets.
