@@ -115,9 +115,12 @@ Responsibilities:
 - Serves data via `get_data(rank, step)` RPC — blocks until the requested step is ready
 - Cleans up old steps after they are consumed
 
-**Active sampling:** When `active_sampling=True`, the DataPrep actor can re-enqueue
-prompts that are difficult (low solve rate) for re-generation instead of discarding
-them. Prompts above `no_resampling_pass_rate` are permanently excluded.
+**Active sampling:** When `active_sampling=True`, a group whose rewards have zero
+std does not count toward the step's `num_unique_prompts_rollout`; the actor keeps
+consuming groups (each consumed group triggers a fresh draw from the dataloader) until
+enough *informative* groups exist. The dropped prompt is not re-enqueued and no group
+is topped up; it simply comes back in a later epoch. Prompts whose solve rate is
+above `no_resampling_pass_rate` are permanently excluded from the dataloader.
 
 ### 2.4 `ActorManager` (actor_manager.py)
 
@@ -522,7 +525,7 @@ From `GRPOExperimentConfig` (grpo_utils.py) and `StreamingConfig` (data_loader.p
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--active_sampling` | False | Re-enqueue difficult prompts for more rollouts |
+| `--active_sampling` | False | Keep sampling new prompts until the batch has `num_unique_prompts_rollout` non-zero-std groups (filtered groups don't count) |
 | `--filter_zero_std_samples` | True | Drop groups where all rollouts scored the same |
 | `--no_resampling_pass_rate` | None | Exclude prompts above this solve rate from resampling |
 

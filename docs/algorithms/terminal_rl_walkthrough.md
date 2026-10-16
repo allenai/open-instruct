@@ -363,8 +363,24 @@ the same number of them or the job wedges. The 4 SP ranks of a DP group all call
   `--checkpoint_state_freq`. On resume the loop re-prefills 128 prompts from the restored
   position. Everything in `prompt_Q`, in flight in vLLM, or sitting in
   `inference_results_Q` at kill time is **lost and regenerated**, so a resume costs about
-  `async_steps` steps of rollout compute. The `no_resampling_pass_rate` exclusion set is
-  not in `HFDataLoader.state_dict`, so solved-out prompts come back after a resume.
+  `async_steps` steps of rollout compute. The `no_resampling_pass_rate` exclusion set
+  *is* part of `HFDataLoader.state_dict` (`excluded_indices`), so solved-out prompts stay
+  excluded across a resume.
+
+### 4.6 What happens to a zero-variance prompt
+
+Nothing clever. When a group comes back with $\sigma_g = 0$ the whole group is dropped
+and the loop asks the dataloader for the **next** prompt; it never re-enqueues the same
+one, and it never tops up a group with extra samples. Every prompt that is ever
+generated gets exactly `num_samples_per_prompt_rollout` fresh rollouts. The dropped
+prompt stays in the dataset and is drawn again in a later epoch (the dataloader is a
+shuffled, without-replacement epoch iterator), where it again costs a full group. The
+only per-prompt memory is `no_resampling_pass_rate`: a group whose solve rate is at or
+above that threshold has its index excluded for the rest of the run. Nothing excludes
+all-*failed* prompts, so a task the policy cannot solve is re-rolled once per epoch
+forever. The one thing that does get re-enqueued is a group dropped for **staleness**
+(older than `async_steps`), and even then it is a new dataloader draw, not the same
+prompt.
 
 ---
 
