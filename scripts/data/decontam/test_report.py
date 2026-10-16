@@ -339,5 +339,100 @@ class AdapterTests(unittest.TestCase):
                 report.table_counts(text)
 
 
+@unittest.skipUnless(
+    all(os.environ.get(key) for key in ("DECON_REAL_BINARY", "DECON_REAL_CONFIG", "DECON_REAL_COMMIT")),
+    "Set DECON_REAL_BINARY, DECON_REAL_CONFIG and DECON_REAL_COMMIT for the real-matcher smoke test",
+)
+class RealMatcherSmokeTest(unittest.TestCase):
+    def test_synthetic_literal_match_and_unrelated_control(self):
+        binary = Path(os.environ["DECON_REAL_BINARY"]).resolve()
+        config = Path(os.environ["DECON_REAL_CONFIG"]).resolve()
+        commit = os.environ["DECON_REAL_COMMIT"]
+        self.assertRegex(commit, r"^[0-9a-f]{40}$")
+        questions = [
+            (
+                "Describe how a clockmaker would diagnose a brass pendulum regulator whose temperature compensation "
+                "changes after replacing the suspension spring. Discuss the measured oscillation period, humidity "
+                "inside the cabinet, thermal expansion of the bob, friction around the pivot, and a reproducible "
+                "sequence of workshop observations before choosing an adjustment."
+            ),
+            (
+                "Explain the ecological relationships among bioluminescent plankton, coral larvae, deepwater "
+                "currents, and nocturnal reef predators during an unusually prolonged lunar eclipse. Identify "
+                "possible nutrient transport mechanisms, distinguish competing migration hypotheses, propose "
+                "sampling locations across the continental shelf, and describe measurements that would separate "
+                "light sensitivity from seasonal population changes."
+            ),
+        ]
+        control = (
+            "Write a fictional museum inventory describing ceramic bowls, embroidered cushions, wooden picture "
+            "frames, painted umbrellas, silver teaspoons, linen curtains, woven baskets, velvet slippers, "
+            "marble chessboards, folded maps, carved buttons, stained glass ornaments, and leather notebooks. "
+            "Arrange the imaginary objects by their display labels and invent a brief cheerful visitor story."
+        )
+        self.assertTrue(all(len(question.split()) > 40 for question in questions))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            references = root / "references"
+            references.mkdir()
+            reference = references / "synthetic.jsonl"
+            reference.write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "eval_key": "synthetic-smoke",
+                            "eval_instance_index": index,
+                            "doc_id": index + 1,
+                            "question": question,
+                        }
+                    )
+                    + "\n"
+                    for index, question in enumerate(questions)
+                )
+            )
+            manifest = root / "reference-pins.json"
+            manifest.write_text(json.dumps({reference.name: sha(reference.read_bytes())}))
+            source = root / "synthetic-input.jsonl"
+            source.write_text("".join(json.dumps(sample(prompt)) + "\n" for prompt in (questions[0], control)))
+            work = root / "run"
+            args = argparse.Namespace(
+                source=[source],
+                decon_binary=binary,
+                decon_binary_sha256=sha(binary.read_bytes()),
+                decon_repo_sha=commit,
+                config=config,
+                config_sha256=sha(config.read_bytes()),
+                evals_dir=references,
+                reference_manifest=manifest,
+                work_dir=work,
+            )
+            receipt, code = report.run_audit(args)
+            # Retain only text-free hashes/counts in CI logs; raw matcher artifacts stay private.
+            print(json.dumps({"real_matcher_smoke_receipt": receipt}, sort_keys=True))
+            self.assertEqual(code, 1, receipt)
+            self.assertTrue(receipt["complete"], receipt)
+            self.assertEqual(receipt["mode"], "report_only")
+            self.assertEqual(receipt["review_status"], "needs_review")
+            coverage = receipt["coverage"]
+            self.assertEqual(coverage["expected_training_rows"], 2)
+            self.assertEqual(coverage["processed_training_rows"], 2)
+            self.assertEqual(coverage["expected_reference_rows"], 2)
+            self.assertEqual(coverage["examined_reference_rows"], 2)
+            self.assertEqual(coverage["indexed_reference_rows"], 2)
+            candidates = [json.loads(line) for line in (work / "candidates.jsonl").read_text().splitlines()]
+            self.assertTrue(candidates)
+            self.assertEqual(
+                {
+                    (row["source_ordinal"], row["source_row"], row["eval_key"], row["eval_instance_index"])
+                    for row in candidates
+                },
+                {(0, 0, "synthetic-smoke", 0)},
+            )
+            self.assertEqual(candidates[0]["sha256"], sha(source.read_bytes().splitlines(keepends=True)[0]))
+            public = json.dumps(receipt) + json.dumps(candidates)
+            for text in (*questions, control, str(root), source.name, "SECRET_SOURCE_ID", "SECRET_ASSISTANT"):
+                self.assertNotIn(text, public)
+
+
 if __name__ == "__main__":
     unittest.main()

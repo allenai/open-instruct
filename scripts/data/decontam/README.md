@@ -71,6 +71,25 @@ Run isolated tests without repository pytest fixtures:
 python -m unittest discover -s scripts/data/decontam -p 'test_*.py'
 ```
 
-Tests use a fake executable and a planted literal to verify adapter extraction,
-row mapping, privacy and failure behavior. They do not validate decon's matching
-algorithm or replace a pinned real-executable smoke run.
+The default tests use a fake executable and a planted literal to verify adapter
+extraction, row mapping, privacy and failure behavior. An optional integration
+test uses only synthetic long questions, an exact planted question, and an
+unrelated control with a real executable:
+
+```sh
+DECON_REAL_BINARY=/tools/decon \
+DECON_REAL_CONFIG=/tools/decon-source/config/default.yaml \
+DECON_REAL_COMMIT=FULL_40_CHARACTER_COMMIT \
+python -m unittest discover -s scripts/data/decontam -p 'test_*.py'
+```
+
+All three variables are required; without them the real-matcher test is skipped.
+The `Decon adapter` CI workflow builds the pinned public decon revision with its
+lockfile using Rust `1.99.0` and Python `3.12` on an Ubuntu CPU runner and
+enables this test. It prints only the
+sanitized aggregate receipt, retaining binary/config/adapter/reference hashes and
+coverage counts in the CI log. Raw prompts, matcher reports and logs are not
+published. A new or pending CI job does not qualify the executable: require that
+job to pass before claiming the smoke succeeded. This narrow smoke verifies the
+adapter contract on synthetic data; it does not establish broad matcher recall,
+full dataset coverage, or release readiness.
