@@ -63,22 +63,74 @@ def bounded_samples(dataset, indices, workers):
                     pending[pool.submit(dataset.__getitem__, index)] = new_row
 
 
-def build_cache(dataset, indices, output, *, provenance, workers=8):
+def build_cache(dataset, indices, output, *, provenance, workers=8, resume=False, checkpoint_interval=128):
     """Materialize a bounded selection; publish the manifest only after verification."""
     output = Path(output)
-    output.mkdir(parents=True, exist_ok=False)
     indices = [int(index) for index in indices]
-    if not indices or len(set(indices)) != len(indices) or workers < 1:
+    if not indices or len(set(indices)) != len(indices) or workers < 1 or checkpoint_interval < 1:
         raise ValueError("Require unique nonempty indices and positive worker count")
     if any(index < 0 or index >= len(dataset) for index in indices):
         raise ValueError("Sample index outside source dataset")
     # Materialize lazy metadata once before sharing this read-only dataset with threads.
     _ = dataset.source_size_groups, dataset.source_instance_offsets
     shape = (len(indices), dataset.sequence_length)
-    tokens = np.lib.format.open_memmap(output / "input_ids.npy", mode="w+", dtype=np.uint32, shape=shape)
-    masks = np.lib.format.open_memmap(output / "label_mask.npy", mode="w+", dtype=np.bool_, shape=shape)
-    rows = [None] * len(indices)
-    for finished, (row, item) in enumerate(bounded_samples(dataset, indices, workers), 1):
+    identity = {
+        "version": 1,
+        "dataset_fingerprint": dataset.fingerprint,
+        "dataset_instances": len(dataset),
+        "sequence_length": dataset.sequence_length,
+        "source_paths": [str(path) for path in dataset.paths],
+        "label_mask_paths": [str(path) for path in (dataset._label_mask_paths or [])],
+        "provenance": provenance,
+    }
+    progress_path = output / "progress.json"
+    if resume:
+        if (output / "manifest.json").exists():
+            raise FileExistsError("Cache is already complete; consume its manifest instead of rebuilding")
+        progress = json.loads(progress_path.read_text())
+        if progress["identity"] != identity or progress["indices"] != indices:
+            raise ValueError("Incomplete cache belongs to another dataset or sample selection")
+        tokens = np.load(output / "input_ids.npy", mmap_mode="r+", allow_pickle=False)
+        masks = np.load(output / "label_mask.npy", mmap_mode="r+", allow_pickle=False)
+        if tokens.shape != shape or masks.shape != shape or tokens.dtype != np.uint32 or masks.dtype != np.bool_:
+            raise ValueError("Invalid incomplete cache arrays")
+        rows = progress["rows"]
+        if len(rows) != len(indices):
+            raise ValueError("Invalid incomplete cache row count")
+        for row, entry in enumerate(rows):
+            if entry is None:
+                continue
+            restored = {
+                "input_ids": torch.tensor(tokens[row].astype(np.int64)),
+                "label_mask": torch.tensor(masks[row]),
+                "doc_lens": torch.tensor(entry["doc_lens"], dtype=DOC_DTYPES[entry["doc_lens_dtype"]]),
+            }
+            if entry["index"] != indices[row] or entry["hashes"] != {
+                key: tensor_hash(value) for key, value in restored.items()
+            }:
+                raise ValueError("Incomplete cache row failed integrity verification")
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+        tokens = np.lib.format.open_memmap(output / "input_ids.npy", mode="w+", dtype=np.uint32, shape=shape)
+        masks = np.lib.format.open_memmap(output / "label_mask.npy", mode="w+", dtype=np.bool_, shape=shape)
+        rows = [None] * len(indices)
+
+    def save_progress():
+        tokens.flush()
+        masks.flush()
+        temporary = output / "progress.partial.json"
+        temporary.write_text(
+            json.dumps({"identity": identity, "indices": indices, "rows": rows}, separators=(",", ":")) + "\n"
+        )
+        temporary.replace(progress_path)
+
+    save_progress()
+    pending_rows = [row for row, entry in enumerate(rows) if entry is None]
+    completed = len(rows) - len(pending_rows)
+    logger.info("Verified %s existing cached samples; %s remain", completed, len(pending_rows))
+    pending_indices = [indices[row] for row in pending_rows]
+    for finished, (pending_row, item) in enumerate(bounded_samples(dataset, pending_indices, workers), 1):
+        row = pending_rows[pending_row]
         if set(item) not in (FIELDS, FIELDS | {"metadata"}):
             raise ValueError(f"Unsupported packed sample fields: {set(item)}")
         if item["input_ids"].dtype != torch.long or str(item["doc_lens"].dtype) not in DOC_DTYPES:
@@ -108,25 +160,16 @@ def build_cache(dataset, indices, output, *, provenance, workers=8):
             if metadata != item["metadata"]:
                 raise ValueError("Sample metadata changed during serialization")
             rows[row]["metadata"] = metadata
-        if finished % 128 == 0 or finished == len(indices):
-            logger.info("Verified packed sample cache: %s/%s", finished, len(indices))
+        if finished % checkpoint_interval == 0 or finished == len(pending_indices):
+            save_progress()
+            logger.info("Verified packed sample cache: %s/%s", completed + finished, len(indices))
     tokens.flush()
     masks.flush()
     files = {}
     for name in ("input_ids.npy", "label_mask.npy"):
         with (output / name).open("rb") as stream:
             files[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-    manifest = {
-        "version": 1,
-        "dataset_fingerprint": dataset.fingerprint,
-        "dataset_instances": len(dataset),
-        "sequence_length": dataset.sequence_length,
-        "source_paths": [str(path) for path in dataset.paths],
-        "label_mask_paths": [str(path) for path in (dataset._label_mask_paths or [])],
-        "provenance": provenance,
-        "files": files,
-        "rows": rows,
-    }
+    manifest = {**identity, "files": files, "rows": rows}
     temporary = output / "manifest.partial.json"
     temporary.write_text(json.dumps(manifest, separators=(",", ":")) + "\n")
     temporary.replace(output / "manifest.json")

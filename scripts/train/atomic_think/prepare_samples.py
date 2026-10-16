@@ -71,17 +71,20 @@ def main():
     parser.add_argument("kind", choices=("original", "atomic"))
     parser.add_argument("--batches", type=int, default=528)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     if not 1 <= args.batches <= 528 or not 1 <= args.workers <= 16:
         parser.error("Bounded preparation requires 1–528 batches and 1–16 workers")
     torch.set_num_threads(1)
     dataset, loader, indices = build_source(args.root, args.kind)
-    output = args.root / f"sample-cache-{args.kind}"
+    output = args.output or args.root / f"sample-cache-{args.kind}"
     manifest = packed_sample_cache.build_cache(
         dataset,
         indices[: args.batches * 16],
         output,
         workers=args.workers,
+        resume=args.resume,
         provenance={
             "kind": args.kind,
             "epoch": 1,
