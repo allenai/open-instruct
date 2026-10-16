@@ -1,4 +1,4 @@
-"""Render unallocated CPU preparation on Saturn, with explicit Jupiter fallback."""
+"""Render shared CPU preparation on Saturn, with explicit Jupiter fallback."""
 
 import json
 import sys
@@ -21,14 +21,20 @@ spec = {
                 {"name": "HF_TOKEN", "secret": "robertb_HF_TOKEN"},
                 {"name": "HF_HOME", "value": "/weka/oe-adapt-default/allennlp/.cache/huggingface"},
                 {"name": "HF_HUB_CACHE", "value": "/weka/oe-adapt-default/allennlp/.cache/hub"},
-                {"name": "OLMO_DATA_PREP_WORKERS", "value": "4"},
+                {"name": "OLMO_DATA_PREP_WORKERS", "value": "1"},
+                {"name": "OMP_NUM_THREADS", "value": "1"},
+                {"name": "MKL_NUM_THREADS", "value": "1"},
+                {"name": "OPENBLAS_NUM_THREADS", "value": "1"},
+                {"name": "TOKENIZERS_PARALLELISM", "value": "false"},
             ],
             "datasets": [
                 {"mountPath": f"/weka/{name}", "source": {"weka": name}}
                 for name in ("oe-adapt-default", "oe-training-default")
             ],
             "result": {"path": "/output"},
-            "resources": {"cpuCount": 8, "memory": "64 GiB", "gpuCount": 0},
+            # Explicit CPU/RAM reservations consume whole slots on GPU nodes.
+            # This bounded index-copy job uses shared CPU capacity instead.
+            "resources": {},
             "context": {"priority": "high", "autoResume": False},
             "constraints": {"cluster": [cluster]},
             "timeout": "30m",
