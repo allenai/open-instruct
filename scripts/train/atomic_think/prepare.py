@@ -40,6 +40,7 @@ def main():
             long_doc_strategy=oc_data.LongDocStrategy.truncate,
             sequence_length=65536,
         ).build()
+        assert isinstance(dataset, oc_data.NumpyPackedFSLDataset)
         assert len(dataset.paths) == 85, f"Unexpected shard count: {len(dataset.paths)}"
         files = []
         # Core derives these names from source paths, sizes, sequence length,
