@@ -95,6 +95,22 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
+# Beaker accepts min runtimes of 0 (unallocated, backfill only) or between 5 minutes and 8 hours.
+MIN_RUNTIME_LOWER_BOUND_NS = 5 * 60 * 1_000_000_000
+MIN_RUNTIME_UPPER_BOUND_NS = 8 * 60 * 60 * 1_000_000_000
+
+
+def parse_min_runtime(min_runtime_str: str) -> str:
+    """Validate a Beaker min runtime duration string such as '30m' or '2h'."""
+    try:
+        nanoseconds = beaker.common.to_nanoseconds(min_runtime_str)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid min runtime: {min_runtime_str}") from e
+    if nanoseconds != 0 and not MIN_RUNTIME_LOWER_BOUND_NS <= nanoseconds <= MIN_RUNTIME_UPPER_BOUND_NS:
+        raise argparse.ArgumentTypeError(f"Min runtime must be 0 or between 5m and 8h, got: {min_runtime_str}")
+    return min_runtime_str
+
+
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
 # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
@@ -165,6 +181,19 @@ def get_args():
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    parser.add_argument(
+        "--min_runtime",
+        type=parse_min_runtime,
+        default=None,
+        help="Minimum runtime before the job can be preempted, as a duration string (e.g., '30m', '2h'). "
+        "Must be 0 or between 5m and 8h. A value above 0 runs as an allocated job, which needs an allocation "
+        "on the cluster; 0 runs as unallocated backfill. Mutually exclusive with --preemptible.",
+    )
+    parser.add_argument(
+        "--auto_resume",
+        action="store_true",
+        help="If given, Beaker requeues the job after it is preempted. Requires --min_runtime.",
+    )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -223,6 +252,10 @@ def get_args():
     )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
+    if mason_args.min_runtime is not None and mason_args.preemptible:
+        parser.error("--min_runtime and --preemptible are mutually exclusive")
+    if mason_args.auto_resume and mason_args.min_runtime is None:
+        parser.error("--auto_resume requires --min_runtime")
     commands = parse_commands(command_args)
 
     def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
@@ -573,6 +606,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     return full_command
 
 
+def make_task_context(args) -> beaker.BeakerTaskContext:
+    priority = beaker.BeakerJobPriority[args.priority]
+    if args.min_runtime is None:
+        return beaker.BeakerTaskContext(priority=priority, preemptible=args.preemptible)
+    # Beaker rejects specs that mix the legacy preemptible field with minRuntime/autoResume.
+    return beaker.BeakerTaskContext(priority=priority, min_runtime=args.min_runtime, auto_resume=args.auto_resume)
+
+
 def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in launch_utils.INTERCONNECT_CLUSTERS for c in args.cluster):
@@ -600,9 +641,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket, args.extra_weka_buckets),
-        context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
-        ),
+        context=make_task_context(args),
         constraints=constraints,
         env_vars=get_env_vars(
             args.pure_docker_mode,
