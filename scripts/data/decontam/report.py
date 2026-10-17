@@ -13,6 +13,31 @@ import sys
 import unicodedata
 from pathlib import Path
 
+# decon 0.3 defaults (src/common/detection_config.rs, src/common/text.rs) for the settings mirrored here.
+DEFAULT_NGRAM_SIZE = 5
+DEFAULT_PUNCTUATION = "!'\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\u201c\u201d\u2018\u2019\u2014"
+# A run of characters outside Unicode White_Space, which decon's Rust `\s` uses. Python's `\s` and
+# str.split() also break on U+001C..U+001F, so they would overcount words.
+MATCHER_WORD = re.compile(r"[^\t\n\x0b\x0c\r \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+")
+CONFIG_LINE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*):(?:[ \t]+(.*))?")
+MATCHER_ERROR = re.compile(
+    r"^\s*(?:error\b|tokenization failed\b|thread '[^'\n]*' panicked\b)", re.IGNORECASE | re.MULTILINE
+)
+COUNT_LABELS = {
+    "training_lines": "Training lines",
+    "reference_lines_examined": "Total lines examined",
+    "reference_lines_indexed": "Lines indexed",
+    "contaminated_matches": "Contaminated matches",
+}
+# decon prints these index-summary rows only when they are nonzero.
+SKIP_LABELS = {
+    "reference_lines_skipped": "Lines skipped",
+    "reference_duplicates": "- Duplicates",
+    "reference_below_min_tokens": "- Below minimum tokens",
+    "reference_below_min_unique_words": "- Below min unique words",
+}
+REFERENCE_TEXT_FIELDS = ("question", "answer", "passage")
+
 
 class AuditError(Exception):
     """A fixed, text-free failure code safe to include in a receipt."""
@@ -28,11 +53,19 @@ def check_hex(value, length):
     return value
 
 
+def normalized_text(value):
+    """Apply the newline and NFC normalization shared by training and reference text."""
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = unicodedata.normalize("NFC", value)
+    return normalized, normalized != value
+
+
 def normalized_prompt(row):
+    """Return the joined system/user prompt and whether NFC normalization changed it."""
     if not isinstance(row, dict) or not isinstance(row.get("messages"), list) or not row["messages"]:
         raise AuditError("invalid_messages")
     parts = []
-    has_user = False
+    has_user = non_nfc = False
     for message in row["messages"]:
         if (
             not isinstance(message, dict)
@@ -45,13 +78,15 @@ def normalized_prompt(row):
         content = message.get("content")
         if not isinstance(content, str):
             raise AuditError("invalid_prompt_content")
-        content = unicodedata.normalize("NFC", content.replace("\r\n", "\n").replace("\r", "\n")).strip()
+        content, changed = normalized_text(content)
+        content = content.strip()
         if content:
             parts.append(content)
             has_user |= message["role"] == "user"
+            non_nfc |= changed
     if not has_user:
         raise AuditError("empty_user_prompt")
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), non_nfc
 
 
 def json_integer(token):
@@ -67,7 +102,51 @@ def json_line(raw):
         raise AuditError("invalid_jsonl") from None
 
 
-def stage_sources(paths, training, mapping):
+def yaml_string(raw):
+    double = re.fullmatch(r'"((?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*)"(?:[ \t]+#.*)?', raw)
+    if double is not None:
+        return json.loads(f'"{double.group(1)}"', strict=False)
+    single = re.fullmatch(r"'((?:[^']|'')*)'(?:[ \t]+#.*)?", raw)
+    if single is not None:
+        return single.group(1).replace("''", "'")
+    raise AuditError("unsupported_config_syntax")
+
+
+def config_settings(payload):
+    """Read ngram_size and punctuation_chars from decon's flat YAML config, rejecting syntax not decoded here."""
+    try:
+        lines = re.split(r"\r\n|\r|\n", payload.decode("utf-8"))
+    except UnicodeError:
+        raise AuditError("unsupported_config_syntax") from None
+    values = {}
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = CONFIG_LINE.fullmatch(line.rstrip())
+        if match is None or match.group(1) in values:
+            raise AuditError("unsupported_config_syntax")
+        value = (match.group(2) or "").strip()
+        if value.startswith(('"', "'")):
+            yaml_string(value)  # Quoted scalars must close on their own line.
+        values[match.group(1)] = value
+    ngram_size = DEFAULT_NGRAM_SIZE
+    if "ngram_size" in values:
+        number = re.fullmatch(r"([1-9][0-9]{0,5})(?:[ \t]+#.*)?", values["ngram_size"])
+        if number is None:
+            raise AuditError("unsupported_config_syntax")
+        ngram_size = int(number.group(1))
+    punctuation = DEFAULT_PUNCTUATION
+    if "punctuation_chars" in values:
+        punctuation = yaml_string(values["punctuation_chars"])
+    return ngram_size, str.maketrans(dict.fromkeys(punctuation, " "))
+
+
+def matcher_words(text, punctuation_table):
+    """Count words as decon's clean_text leaves them. Each such word becomes at least one matcher token."""
+    return len(MATCHER_WORD.findall(text.lower().translate(punctuation_table)))
+
+
+def stage_sources(paths, training, mapping, min_tokens, punctuation_table):
     sources = []
     names = {}
     mapping.execute(
@@ -80,11 +159,11 @@ def stage_sources(paths, training, mapping):
         names[name] = ordinal
         original_hash = hashlib.sha256()
         staged_hash = hashlib.sha256()
-        rows = 0
+        rows = non_nfc_rows = possibly_short_rows = 0
         with path.open("rb") as source, (training / name).open("wb") as output:
             for row_number, raw in enumerate(source):
                 original_hash.update(raw)
-                text = normalized_prompt(json_line(raw))
+                text, non_nfc = normalized_prompt(json_line(raw))
                 encoded = (json.dumps({"text": text}, ensure_ascii=False) + "\n").encode("utf-8")
                 output.write(encoded)
                 staged_hash.update(encoded)
@@ -92,6 +171,8 @@ def stage_sources(paths, training, mapping):
                     "INSERT INTO rows VALUES (?,?,?,?)", (ordinal, row_number, digest(raw), digest(text.encode()))
                 )
                 rows += 1
+                non_nfc_rows += non_nfc
+                possibly_short_rows += matcher_words(text, punctuation_table) < min_tokens
         if not rows:
             raise AuditError("empty_source_file")
         sources.append(
@@ -100,6 +181,8 @@ def stage_sources(paths, training, mapping):
                 "original_sha256": original_hash.hexdigest(),
                 "normalized_jsonl_sha256": staged_hash.hexdigest(),
                 "rows": rows,
+                "non_nfc_rows": non_nfc_rows,
+                "rows_possibly_below_min_tokens": possibly_short_rows,
             }
         )
     mapping.commit()
@@ -128,54 +211,75 @@ def stage_references(evals_dir, manifest_path, destination):
         payload = path.read_bytes()
         if digest(payload) != expected:
             raise AuditError("reference_hash_mismatch")
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(payload)
-        opener = gzip.open if relative.endswith(".gz") else open
-        rows = 0
-        with opener(target, "rb") as stream:
-            for raw in stream:
-                row = json_line(raw)
-                if not isinstance(row, dict):
-                    raise AuditError("invalid_reference_row")
-                key, index, question = row.get("eval_key"), row.get("eval_instance_index"), row.get("question")
-                if (
-                    not isinstance(key, str)
-                    or not key
-                    or type(index) is not int
-                    or not 0 <= index <= 0xFFFFFFFFFFFFFFFF
-                    or not isinstance(question, str)
-                    or not question.strip()
-                ):
-                    raise AuditError("invalid_reference_row")
-                document_id = row.get("doc_id")
-                if type(document_id) is not int or not 0 <= document_id < 0xFFFFFFFF:
-                    raise AuditError("invalid_reference_document_id")
-                if document_id in document_ids:
-                    raise AuditError("duplicate_reference_document_id")
-                document_ids.add(document_id)
-                if (key, index) in identities:
-                    raise AuditError("ambiguous_reference_identity")
-                identities.add((key, index))
-                rows += 1
+        data = gzip.decompress(payload) if relative.endswith(".gz") else payload
+        # decon reads lines split on LF only, like file iteration; bytes.splitlines would also split on CR.
+        lines = data.split(b"\n")
+        if lines[-1] == b"":
+            lines.pop()
+        staged = bytearray()
+        rows = non_nfc_rows = 0
+        for raw in lines:
+            row = json_line(raw)
+            if not isinstance(row, dict):
+                raise AuditError("invalid_reference_row")
+            key, index, question = row.get("eval_key"), row.get("eval_instance_index"), row.get("question")
+            if (
+                not isinstance(key, str)
+                or not key
+                or type(index) is not int
+                or not 0 <= index <= 0xFFFFFFFFFFFFFFFF
+                or not isinstance(question, str)
+                or not question.strip()
+            ):
+                raise AuditError("invalid_reference_row")
+            document_id = row.get("doc_id")
+            if type(document_id) is not int or not 0 <= document_id < 0xFFFFFFFF:
+                raise AuditError("invalid_reference_document_id")
+            if document_id in document_ids:
+                raise AuditError("duplicate_reference_document_id")
+            document_ids.add(document_id)
+            if (key, index) in identities:
+                raise AuditError("ambiguous_reference_identity")
+            identities.add((key, index))
+            non_nfc = False
+            for field in REFERENCE_TEXT_FIELDS:
+                if isinstance(row.get(field), str):
+                    row[field], changed = normalized_text(row[field])
+                    non_nfc |= changed
+            staged += (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+            rows += 1
+            non_nfc_rows += non_nfc
         if not rows:
             raise AuditError("empty_reference_file")
-        references.append({"reference_ordinal": ordinal, "sha256": expected, "rows": rows})
+        (destination / f"reference{ordinal:06d}.jsonl").write_bytes(staged)
+        references.append(
+            {
+                "reference_ordinal": ordinal,
+                "sha256": expected,
+                "staged_sha256": digest(staged),
+                "rows": rows,
+                "non_nfc_rows": non_nfc_rows,
+            }
+        )
     return references, identities
 
 
 def table_counts(stdout):
     counts = {}
-    for label in ("Training lines", "Lines indexed", "Total lines examined", "Contaminated matches"):
+    for key, label in {**COUNT_LABELS, **SKIP_LABELS}.items():
         values = re.findall(r"^\s*│\s*" + re.escape(label) + r"\s+([0-9][0-9,]*)\s*│\s*$", stdout, re.MULTILINE)
+        if not values and key in SKIP_LABELS:
+            counts[key] = 0
+            continue
         if len(values) != 1 or re.fullmatch(r"(?:[0-9]+|[1-9][0-9]{0,2}(?:,[0-9]{3})+)", values[0]) is None:
             raise AuditError("missing_or_ambiguous_matcher_table")
-        counts[label] = int(values[0].replace(",", ""))
+        counts[key] = int(values[0].replace(",", ""))
     return counts
 
 
 def sanitized_candidates(report_dir, names, mapping, identities):
-    candidates = []
+    """Return one text-free row per (training row, eval item), counting decon's matches at different offsets."""
+    positions = {}
     for path in sorted(report_dir.rglob("*.jsonl")):
         if path.is_symlink():
             raise AuditError("invalid_report_file")
@@ -196,25 +300,27 @@ def sanitized_candidates(report_dir, names, mapping, identities):
                     or (key, index) not in identities
                 ):
                     raise AuditError("unmapped_matcher_candidate")
-                hashes = mapping.execute(
-                    "SELECT raw_sha,text_sha FROM rows WHERE source=? AND row=?", (names[name], line)
-                ).fetchone()
-                if hashes is None:
-                    raise AuditError("unmapped_matcher_candidate")
-                candidates.append(
-                    {
-                        "source_ordinal": names[name],
-                        "source_row": line,
-                        "sha256": hashes[0],
-                        "normalized_text_sha256": hashes[1],
-                        "eval_key": key,
-                        "eval_instance_index": index,
-                    }
-                )
-    return sorted(
-        candidates,
-        key=lambda row: (row["source_ordinal"], row["source_row"], row["eval_key"], row["eval_instance_index"]),
-    )
+                pair = (names[name], line, key, index)
+                positions[pair] = positions.get(pair, 0) + 1
+    candidates = []
+    for (source, line, key, index), count in sorted(positions.items()):
+        hashes = mapping.execute(
+            "SELECT raw_sha,text_sha FROM rows WHERE source=? AND row=?", (source, line)
+        ).fetchone()
+        if hashes is None:
+            raise AuditError("unmapped_matcher_candidate")
+        candidates.append(
+            {
+                "source_ordinal": source,
+                "source_row": line,
+                "sha256": hashes[0],
+                "normalized_text_sha256": hashes[1],
+                "eval_key": key,
+                "eval_instance_index": index,
+                "positions": count,
+            }
+        )
+    return candidates
 
 
 def private_workdir(path):
@@ -228,13 +334,14 @@ def private_workdir(path):
 
 def run_audit(args):
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": "report_only",
         "review_status": "needs_review",
         "complete": False,
         "issues": [],
         "sources": [],
         "references": [],
+        "candidate_pairs": 0,
         "candidate_matches": 0,
         "coverage": {
             "expected_training_rows": None,
@@ -244,6 +351,14 @@ def run_audit(args):
             "examined_reference_rows": None,
             "indexed_reference_rows": None,
             "missing_reference_rows": None,
+        },
+        # Rows decon skips by design. They were not checked for overlap and need separate review.
+        "coverage_limits": {
+            "training_rows_below_min_tokens": None,
+            "training_rows_possibly_below_min_tokens": None,
+            "reference_rows_below_min_tokens": None,
+            "reference_rows_below_min_unique_words": None,
+            "reference_rows_duplicate": None,
         },
     }
     work = None
@@ -266,20 +381,30 @@ def run_audit(args):
             "decon_repository_commit": check_hex(args.decon_repo_sha, 40),
             "config_sha256": check_hex(args.config_sha256, 64),
         }
-        for source, target, expected in (
-            (args.decon_binary, work / "decon", args.decon_binary_sha256),
-            (args.config, work / "config.yaml", args.config_sha256),
+        payloads = {}
+        for name, source, expected in (
+            ("decon", args.decon_binary, args.decon_binary_sha256),
+            ("config.yaml", args.config, args.config_sha256),
         ):
-            payload = source.read_bytes()
-            if digest(payload) != expected:
+            payloads[name] = source.read_bytes()
+            if digest(payloads[name]) != expected:
                 raise AuditError("binary_or_config_hash_mismatch")
-            target.write_bytes(payload)
+            (work / name).write_bytes(payloads[name])
         os.chmod(work / "decon", 0o700)
+        ngram_size, punctuation_table = config_settings(payloads["config.yaml"])
+        # decon skips training lines with fewer than 2 * ngram_size tokens.
+        receipt["matcher_settings"] = {"ngram_size": ngram_size, "training_min_tokens": 2 * ngram_size}
+        receipt["effective_cli_overrides"]["ngram_size"] = ngram_size
         with sqlite3.connect(work / "mapping.sqlite3") as mapping:
-            receipt["sources"], names = stage_sources(args.source, training, mapping)
-            receipt["coverage"]["expected_training_rows"] = sum(source["rows"] for source in receipt["sources"])
+            receipt["sources"], names = stage_sources(
+                args.source, training, mapping, 2 * ngram_size, punctuation_table
+            )
+            coverage = receipt["coverage"]
+            limits = receipt["coverage_limits"]
+            coverage["expected_training_rows"] = sum(source["rows"] for source in receipt["sources"])
+            possibly_short = sum(source["rows_possibly_below_min_tokens"] for source in receipt["sources"])
             receipt["references"], identities = stage_references(args.evals_dir, args.reference_manifest, references)
-            receipt["coverage"]["expected_reference_rows"] = sum(ref["rows"] for ref in receipt["references"])
+            coverage["expected_reference_rows"] = sum(ref["rows"] for ref in receipt["references"])
             command = [
                 str(work / "decon"),
                 "detect",
@@ -297,6 +422,9 @@ def run_audit(args):
                 "false",
                 "--index-passages",
                 "false",
+                # Same value as the config; passing it guarantees the skip bound uses decon's setting.
+                "--ngram-size",
+                str(ngram_size),
             ]
             with (work / "stdout.log").open("wb") as stdout, (work / "stderr.log").open("wb") as stderr:
                 result = subprocess.run(
@@ -311,29 +439,48 @@ def run_audit(args):
             }
             if result.returncode:
                 receipt["issues"].append("matcher_nonzero_exit")
-            if re.search(
-                r"^\s*(?:error\b|tokenization failed\b)", stdout + "\n" + stderr, re.IGNORECASE | re.MULTILINE
-            ):
+            if MATCHER_ERROR.search(stdout + "\n" + stderr):
                 receipt["issues"].append("matcher_reported_error")
             counts = table_counts(stdout)
             receipt["matcher_counts"] = counts
-            coverage = receipt["coverage"]
             coverage.update(
                 {
-                    "processed_training_rows": counts["Training lines"],
-                    "missing_training_rows": max(0, coverage["expected_training_rows"] - counts["Training lines"]),
-                    "examined_reference_rows": counts["Total lines examined"],
-                    "indexed_reference_rows": counts["Lines indexed"],
-                    "missing_reference_rows": max(0, coverage["expected_reference_rows"] - counts["Lines indexed"]),
+                    "processed_training_rows": counts["training_lines"],
+                    "missing_training_rows": max(0, coverage["expected_training_rows"] - counts["training_lines"]),
+                    "examined_reference_rows": counts["reference_lines_examined"],
+                    "indexed_reference_rows": counts["reference_lines_indexed"],
+                    "missing_reference_rows": max(
+                        0, coverage["expected_reference_rows"] - counts["reference_lines_indexed"]
+                    ),
                 }
             )
-            if counts["Training lines"] != coverage["expected_training_rows"]:
+            # decon reports no count for short training lines. Attribute the gap to that rule only when it
+            # fits within the rows that could be that short; a longer row is never skipped by it.
+            training_gap = coverage["expected_training_rows"] - counts["training_lines"]
+            limits["training_rows_possibly_below_min_tokens"] = possibly_short
+            if 0 <= training_gap <= possibly_short:
+                limits["training_rows_below_min_tokens"] = training_gap
+            else:
                 receipt["issues"].append("incomplete_training_coverage")
-            if not counts["Lines indexed"] == counts["Total lines examined"] == coverage["expected_reference_rows"]:
+            reference_skips = (
+                counts["reference_duplicates"]
+                + counts["reference_below_min_tokens"]
+                + counts["reference_below_min_unique_words"]
+            )
+            if (
+                counts["reference_lines_examined"] != coverage["expected_reference_rows"]
+                or counts["reference_lines_indexed"] + reference_skips != coverage["expected_reference_rows"]
+                or counts["reference_lines_skipped"] != reference_skips
+            ):
                 receipt["issues"].append("incomplete_reference_coverage")
+            else:
+                limits["reference_rows_below_min_tokens"] = counts["reference_below_min_tokens"]
+                limits["reference_rows_below_min_unique_words"] = counts["reference_below_min_unique_words"]
+                limits["reference_rows_duplicate"] = counts["reference_duplicates"]
             candidates = sanitized_candidates(reports, names, mapping, identities)
-            receipt["candidate_matches"] = len(candidates)
-            if len(candidates) != counts["Contaminated matches"]:
+            receipt["candidate_pairs"] = len(candidates)
+            receipt["candidate_matches"] = sum(row["positions"] for row in candidates)
+            if receipt["candidate_matches"] != counts["contaminated_matches"]:
                 receipt["issues"].append("candidate_count_mismatch")
         receipt["complete"] = not receipt["issues"]
     except AuditError as exc:

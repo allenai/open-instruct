@@ -18,13 +18,23 @@ report = util.module_from_spec(SPEC)
 SPEC.loader.exec_module(report)
 
 FAKE = """#!{python}
-import json, pathlib, sys
+import json, pathlib, sys, unicodedata
 args = sys.argv[1:]
 assert args[0] == "detect" and "--purify" not in args
 assert args[args.index("--content-key")+1] == "text"
 for flag in ["--index-answers", "--index-passages"]:
     assert args[args.index(flag)+1] == "false"
-config = json.loads(pathlib.Path(args[args.index("--config")+1]).read_text())
+config = {{}}
+for line in pathlib.Path(args[args.index("--config")+1]).read_text().splitlines():
+    key, value = line.split(": ", 1)
+    config[key] = json.loads(value)
+assert int(args[args.index("--ngram-size")+1]) == config.get("ngram_size", 5)
+reference_rows = 0
+for path in sorted(pathlib.Path(args[args.index("--evals-dir")+1]).glob("*.jsonl")):
+    for line in path.read_text().splitlines():
+        question = json.loads(line)["question"]
+        assert unicodedata.is_normalized("NFC", question) and chr(13) not in question
+        reference_rows += 1
 training = pathlib.Path(args[args.index("--training-dir")+1])
 reports = pathlib.Path(args[args.index("--report-output-dir")+1])
 files = sorted(training.glob("*.jsonl"))
@@ -51,11 +61,22 @@ if config.get("stdout_error"):
     print("Error processing reference PRIVATE_PATH")
 if config.get("tokenization_failure"):
     print("Tokenization failed PRIVATE_PATH", file=sys.stderr)
+if config.get("panic"):
+    print("thread '<unnamed>' panicked at src/PRIVATE_PATH.rs:1:1:", file=sys.stderr)
 if not config.get("missing_table"):
-    for label, value in [("Training lines",len(rows)-config.get("skip_training",0)),
-                         ("Lines indexed",config.get("reference_rows",1)-config.get("skip_reference",0)),
-                         ("Total lines examined",config.get("reference_rows",1)),
-                         ("Contaminated matches",len(candidates)+config.get("extra_matches",0))]:
+    examined = reference_rows - config.get("silent_reference_drop", 0)
+    skips = [("- Duplicates", config.get("reference_duplicates", 0)),
+             ("- Below minimum tokens", config.get("reference_short", 0)),
+             ("- Below min unique words", config.get("reference_few_words", 0))]
+    skipped = sum(value for _, value in skips)
+    counts = [("Total lines examined", examined),
+              ("Lines indexed", examined - skipped - config.get("skip_reference", 0))]
+    if skipped:
+        counts.append(("Lines skipped", skipped + config.get("skip_total_error", 0)))
+        counts += [(label, value) for label, value in skips if value]
+    counts += [("Training lines", len(rows) - config.get("skip_training", 0)),
+               ("Contaminated matches", len(candidates) + config.get("extra_matches", 0))]
+    for label, value in counts:
         print("│ " + label + "  " + str(value) + " │")
 sys.exit(config.get("returncode",0))
 """
@@ -85,7 +106,7 @@ class AdapterTests(unittest.TestCase):
         self.binary.write_text(FAKE.format(python=sys.executable))
         os.chmod(self.binary, 0o700)
         self.config = self.root / "config.yaml"
-        self.config.write_text("{}")
+        self.config.write_text("")
         self.references = self.root / "evals"
         self.references.mkdir()
         self.reference = self.references / "heldout.jsonl"
@@ -109,8 +130,9 @@ class AdapterTests(unittest.TestCase):
         path = path or self.source
         path.write_text("".join(json.dumps(row) + "\n" for row in rows))
 
-    def run_adapter(self, config=None, **overrides):
-        self.config.write_text(json.dumps(config or {}))
+    def run_adapter(self, fake=None, **overrides):
+        # Flat YAML the adapter's config reader accepts; the fake matcher decodes each value as JSON.
+        self.config.write_text("".join(f"{key}: {json.dumps(value)}\n" for key, value in (fake or {}).items()))
         args = argparse.Namespace(
             source=[self.source],
             decon_binary=self.binary,
@@ -137,7 +159,7 @@ class AdapterTests(unittest.TestCase):
                 {"role": "user", "content": "  question  "},
             ]
         }
-        self.assertEqual(report.normalized_prompt(row), "résume\ncontext\n\nquestion")
+        self.assertEqual(report.normalized_prompt(row), ("résume\ncontext\n\nquestion", True))
 
     def test_complete_without_candidates_is_still_report_only(self):
         receipt, code, work = self.run_adapter()
@@ -150,8 +172,9 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(receipt["adapter_sha256"], sha(Path(report.__file__).read_bytes()))
         self.assertEqual(
             receipt["effective_cli_overrides"],
-            {"content_key": "text", "index_answers": False, "index_passages": False, "purify": False},
+            {"content_key": "text", "index_answers": False, "index_passages": False, "purify": False, "ngram_size": 5},
         )
+        self.assertEqual(set(receipt["coverage_limits"].values()), {0})
 
     def test_planted_literal_maps_source_and_zero_based_row(self):
         self.write_source([sample(), sample("PLANTED_LITERAL prompt in row one")])
@@ -165,8 +188,9 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(rows[0]["sha256"], sha(self.source.read_bytes().splitlines(keepends=True)[1]))
         self.assertEqual(
             rows[0]["normalized_text_sha256"],
-            sha(report.normalized_prompt(sample("PLANTED_LITERAL prompt in row one")).encode()),
+            sha(report.normalized_prompt(sample("PLANTED_LITERAL prompt in row one"))[0].encode()),
         )
+        self.assertEqual([row["positions"] for row in rows], [1, 1])
         self.assertEqual(receipt["sources"][0]["original_sha256"], sha(self.source.read_bytes()))
 
     def test_receipts_never_copy_private_text_paths_or_source_ids(self):
@@ -190,6 +214,7 @@ class AdapterTests(unittest.TestCase):
         for index, (config, issue) in enumerate(
             (
                 ({"returncode": 7}, "matcher_nonzero_exit"),
+                ({"panic": True}, "matcher_reported_error"),
                 ({"soft_failure": True}, "matcher_reported_error"),
                 ({"stdout_error": True}, "matcher_reported_error"),
                 ({"tokenization_failure": True}, "matcher_reported_error"),
@@ -208,6 +233,102 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(receipt["complete"])
         self.assertNotIn("matcher_reported_error", receipt["issues"])
+
+    def test_duplicate_match_positions_are_one_candidate(self):
+        self.write_source([sample("PLANTED_LITERAL prompt matched at two offsets")])
+        receipt, code, work = self.run_adapter({"targets": [[0, 0], [0, 0]]})
+        self.assertEqual(code, 1)
+        self.assertEqual((receipt["candidate_pairs"], receipt["candidate_matches"]), (1, 2))
+        rows = [json.loads(line) for line in (work / "candidates.jsonl").read_text().splitlines()]
+        self.assertEqual([(row["source_row"], row["positions"]) for row in rows], [(0, 2)])
+
+    def test_counted_skips_are_coverage_limits_not_errors(self):
+        self.write_source([sample(), sample("hi")])
+        base = json.loads(self.reference.read_text())
+        self.write_references({"heldout.jsonl": [dict(base, doc_id=i, eval_instance_index=i) for i in range(4)]})
+        config = {"skip_training": 1, "reference_duplicates": 1, "reference_short": 1, "reference_few_words": 1}
+        receipt, code, _ = self.run_adapter(config)
+        self.assertEqual(code, 0, receipt)
+        self.assertTrue(receipt["complete"])
+        self.assertEqual(receipt["issues"], [])
+        self.assertEqual(
+            receipt["coverage_limits"],
+            {
+                "training_rows_below_min_tokens": 1,
+                "training_rows_possibly_below_min_tokens": 1,
+                "reference_rows_below_min_tokens": 1,
+                "reference_rows_below_min_unique_words": 1,
+                "reference_rows_duplicate": 1,
+            },
+        )
+        self.assertEqual(receipt["matcher_settings"], {"ngram_size": 5, "training_min_tokens": 10})
+        # With 1-grams the 3-word row is long enough that decon cannot have skipped it as short.
+        receipt, code, _ = self.run_adapter(dict(config, ngram_size=1), work_dir=self.root / "ngram-one")
+        self.assertEqual((code, receipt["issues"]), (2, ["incomplete_training_coverage"]))
+        self.assertIsNone(receipt["coverage_limits"]["training_rows_below_min_tokens"])
+
+    def test_unexplained_reference_counts_fail_closed(self):
+        row = json.loads(self.reference.read_text())
+        self.write_references({"heldout.jsonl": [row, dict(row, doc_id=2, eval_instance_index=4)]})
+        base = {"reference_short": 1}
+        for index, extra in enumerate(({"silent_reference_drop": 1}, {"skip_total_error": 1}, {"skip_reference": 1})):
+            with self.subTest(extra=extra):
+                receipt, code, _ = self.run_adapter(dict(base, **extra), work_dir=self.root / f"refcount{index}")
+                self.assertEqual((code, receipt["issues"]), (2, ["incomplete_reference_coverage"]))
+                self.assertIsNone(receipt["coverage_limits"]["reference_rows_below_min_tokens"])
+
+    def test_reference_text_is_normalized_like_training(self):
+        row = json.loads(self.reference.read_text())
+        row["question"] = "re\u0301sume\r\nheldout question with enough distinct words"
+        self.reference.write_text(json.dumps(row) + "\n")
+        self.manifest.write_text(json.dumps({self.reference.name: sha(self.reference.read_bytes())}))
+        self.write_source([sample("re\u0301sume prompt with enough words to check")])
+        receipt, code, work = self.run_adapter()
+        self.assertEqual(code, 0, receipt)
+        staged = work / "references" / "reference000000.jsonl"
+        self.assertEqual(
+            json.loads(staged.read_text())["question"], "résume\nheldout question with enough distinct words"
+        )
+        reference = receipt["references"][0]
+        self.assertEqual(
+            (reference["sha256"], reference["staged_sha256"]),
+            (sha(self.reference.read_bytes()), sha(staged.read_bytes())),
+        )
+        self.assertEqual((reference["non_nfc_rows"], receipt["sources"][0]["non_nfc_rows"]), (1, 1))
+
+    def test_config_reader_mirrors_decon_settings_and_rejects_other_syntax(self):
+        ngram, table = report.config_settings(
+            b"# comment\n"
+            b"training_dir:  # unset\n"
+            b"ngram_size: 3  # n\n"
+            b'punctuation_chars: "!\\"#\\\\\\u2014"  # quoted\n'
+            b"evals_dir: bundled-evals\n"
+        )
+        self.assertEqual((ngram, "".join(sorted(map(chr, table)))), (3, '!"#\\\u2014'))
+        self.assertEqual(report.config_settings(b"")[0], 5)
+        self.assertEqual(report.config_settings(b"punctuation_chars: '-'''\n")[1], {ord("-"): " ", ord("'"): " "})
+        for payload in (
+            b"ngram_size: 5\nngram_size: 6\n",
+            b"ngram_size: five\n",
+            b"ngram_size: 0x5\n",
+            b"nested:\n  ngram_size: 3\n",
+            b'punctuation_chars: "\\x41"\n',
+            b"punctuation_chars: -\n",
+            b'evals_dir: "unterminated\n  continued"\n',
+            b"{}\n",
+        ):
+            with self.subTest(payload=payload), self.assertRaises(report.AuditError):
+                report.config_settings(payload)
+        default_table = report.config_settings(b"")[1]
+        self.assertEqual(report.matcher_words("Hello, world\u2014again!", default_table), 3)
+        self.assertEqual(report.matcher_words("a\x1cb c\u3000d", default_table), 3)
+
+    def test_unsupported_config_fails_before_matching(self):
+        config = self.root / "nested.yaml"
+        config.write_text("nested:\n  ngram_size: 3\n")
+        receipt, code, work = self.run_adapter(config=config, config_sha256=sha(config.read_bytes()))
+        self.assertEqual((code, receipt["issues"]), (2, ["unsupported_config_syntax"]))
+        self.assertFalse((work / "stdout.log").exists())
 
     def test_skip_training_count_fails_closed(self):
         receipt, code, _ = self.run_adapter({"skip_training": 1})
@@ -386,7 +507,14 @@ class AdapterTests(unittest.TestCase):
             os.umask(previous)
 
     def test_table_parser_rejects_duplicate_or_malformed_counts(self):
-        for text in ("│ Training lines 1 │\n" * 2, "│ Training lines 1,2 │\n"):
+        table = "".join(f"│ {label} 1,000 │\n" for label in report.COUNT_LABELS.values())
+        counts = report.table_counts(table)
+        self.assertEqual((counts["training_lines"], counts["reference_duplicates"]), (1000, 0))
+        for text in (
+            table + "│ Training lines 1 │\n",
+            table.replace("1,000", "1,2", 1),
+            table + "│ - Duplicates 1 │\n" * 2,
+        ):
             with self.assertRaises(report.AuditError):
                 report.table_counts(text)
 
@@ -428,24 +556,29 @@ class RealMatcherSmokeTest(unittest.TestCase):
             references = root / "references"
             references.mkdir()
             reference = references / "synthetic.jsonl"
+            # Rows 1 and 2 share a fingerprint, so decon drops row 2 as a duplicate; row 3 is below its
+            # default 20-token reference minimum.
+            short_question = "Name one synthetic color."
+            rows = [
+                {"question": questions[0]},
+                {"question": questions[1], "fingerprint": "synthetic-fingerprint"},
+                {"question": questions[1], "fingerprint": "synthetic-fingerprint"},
+                {"question": short_question},
+            ]
             reference.write_text(
                 "".join(
-                    json.dumps(
-                        {
-                            "eval_key": "synthetic-smoke",
-                            "eval_instance_index": index,
-                            "doc_id": index + 1,
-                            "question": question,
-                        }
-                    )
+                    json.dumps(dict(row, eval_key="synthetic-smoke", eval_instance_index=index, doc_id=index + 1))
                     + "\n"
-                    for index, question in enumerate(questions)
+                    for index, row in enumerate(rows)
                 )
             )
             manifest = root / "reference-pins.json"
             manifest.write_text(json.dumps({reference.name: sha(reference.read_bytes())}))
             source = root / "synthetic-input.jsonl"
-            source.write_text("".join(json.dumps(sample(prompt)) + "\n" for prompt in (questions[0], control)))
+            # The last prompt is below decon's 2 * ngram_size training-token minimum.
+            short_prompt = "Short synthetic note."
+            prompts = (questions[0], control, short_prompt)
+            source.write_text("".join(json.dumps(sample(prompt)) + "\n" for prompt in prompts))
             work = root / "run"
             args = argparse.Namespace(
                 source=[source],
@@ -466,11 +599,21 @@ class RealMatcherSmokeTest(unittest.TestCase):
             self.assertEqual(receipt["mode"], "report_only")
             self.assertEqual(receipt["review_status"], "needs_review")
             coverage = receipt["coverage"]
-            self.assertEqual(coverage["expected_training_rows"], 2)
+            self.assertEqual(coverage["expected_training_rows"], 3)
             self.assertEqual(coverage["processed_training_rows"], 2)
-            self.assertEqual(coverage["expected_reference_rows"], 2)
-            self.assertEqual(coverage["examined_reference_rows"], 2)
+            self.assertEqual(coverage["expected_reference_rows"], 4)
+            self.assertEqual(coverage["examined_reference_rows"], 4)
             self.assertEqual(coverage["indexed_reference_rows"], 2)
+            self.assertEqual(
+                receipt["coverage_limits"],
+                {
+                    "training_rows_below_min_tokens": 1,
+                    "training_rows_possibly_below_min_tokens": 1,
+                    "reference_rows_below_min_tokens": 1,
+                    "reference_rows_below_min_unique_words": 0,
+                    "reference_rows_duplicate": 1,
+                },
+            )
             candidates = [json.loads(line) for line in (work / "candidates.jsonl").read_text().splitlines()]
             self.assertTrue(candidates)
             self.assertEqual(
@@ -482,7 +625,15 @@ class RealMatcherSmokeTest(unittest.TestCase):
             )
             self.assertEqual(candidates[0]["sha256"], sha(source.read_bytes().splitlines(keepends=True)[0]))
             public = json.dumps(receipt) + json.dumps(candidates)
-            for text in (*questions, control, str(root), source.name, "SECRET_SOURCE_ID", "SECRET_ASSISTANT"):
+            for text in (
+                *prompts,
+                *questions,
+                short_question,
+                str(root),
+                source.name,
+                "SECRET_SOURCE_ID",
+                "SECRET_ASSISTANT",
+            ):
                 self.assertNotIn(text, public)
 
 
