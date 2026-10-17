@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Reconcile MILES Megatron verifier-GRPO reward evidence with the latest checkpoint before training, so a preempted and resumed run passes its audit instead of counting the replayed rollout's records twice (https://github.com/allenai/open-instruct/pull/2003).
+- Build the MILES runtime image for `linux/amd64` explicitly, so `scripts/miles/build_image.py` on an Apple-silicon Mac resolves the local amd64 base image instead of looking for an arm64 one on Docker Hub (https://github.com/allenai/open-instruct/pull/1973).
 - Route the olmo-core GRPO reference-policy and post-parallelization checkpoint loads through the model-type dispatcher, so Olmo Hybrid GDN weights reach their dedicated converter instead of failing in the generic loader (https://github.com/allenai/open-instruct/pull/1844).
 - SFT and DPO use explicit generation ranges for assistant labels, preserving thinker content and BOS-prefixed templates. External templates with stable turn boundaries support last-turn labeling, including Olmo 3.5-style reasoning and tool calls; closing EOS/ChatML tokens outside generation blocks are rejected. Dataset caches are invalidated for the changed labels (https://github.com/allenai/open-instruct/pull/1879).
 - Zephyr's separator newline after EOS is now masked rather than trained. Empty rendered SFT rows are safely filtered, and `over_length_strategy="drop"` also detects left truncation (https://github.com/allenai/open-instruct/pull/1879).
