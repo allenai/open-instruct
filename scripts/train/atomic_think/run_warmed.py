@@ -65,22 +65,25 @@ def main():
         4,
         resume=args.root / "fresh" / args.arm / "step2",
     )
-    rank = int(os.environ["BEAKER_REPLICA_RANK"])
+    qualify_node(args.root, args.arm, args.manifest_sha256, int(os.environ["BEAKER_REPLICA_RANK"]))
+
+
+def qualify_node(root, arm, manifest_sha256, rank):
     for worker in range(rank * 8, rank * 8 + 8):
-        source = args.root / "fresh" / args.arm / "atomic-audit"
-        destination = args.root / "resumed" / args.arm / "atomic-audit"
+        source = root / "fresh" / arm / "atomic-audit"
+        destination = root / "resumed" / arm / "atomic-audit"
         receipt = json.loads((source / f"warmup-handoff-rank{worker}.json").read_text())
-        if receipt["manifest_sha256"] != args.manifest_sha256:
+        if receipt["manifest_sha256"] != manifest_sha256:
             raise ValueError("Wrong initialization identity")
         if (destination / f"warmup-handoff-rank{worker}.json").exists():
             raise ValueError("Resume reinjected warmup")
-        restored = json.loads((destination / f"restore-step2-rank{worker}.json").read_text())
+        restored = json.loads((destination / f"resume-verified-step2-rank{worker}.json").read_text())
         if not restored["trainer_state_including_rng_exact"] or not restored["optimizer_auxiliary_state_exact"]:
             raise ValueError("Resume qualification failed")
     atomic_think.write_json(
-        args.root / f"qualification-node{rank}.json",
+        root / f"qualification-node{rank}.json",
         {
-            "manifest_sha256": args.manifest_sha256,
+            "manifest_sha256": manifest_sha256,
             "checks": [
                 "FP32 handoff exact",
                 "unrelated optimizer states unchanged",
