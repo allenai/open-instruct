@@ -2,6 +2,10 @@
 
 # Training Open Instruction-Following Language Models
 
+<p align="center">
+  <b>English</b> · <a href="README.zh.md">简体中文</a>
+</p>
+
 This repo serves as an open effort on instruction-tuning and post-training popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
 
 1. Code for finetuning language models with latest techniques and instruction datasets in a unified format.
