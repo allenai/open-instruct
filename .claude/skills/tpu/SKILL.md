@@ -26,8 +26,6 @@ Rules an agent follows:
   a shape.
 - **Set `CLOUDSDK_CORE_ACCOUNT`** to the agent service account in every process that calls kubectl or gcloud,
   background watchers included. The user login lapses daily and kubectl then fails silently.
-- **Hosts without tzdata print UTC for `TZ=America/Los_Angeles`** (Ai2's Beaker session images). Convert times by hand, or use Python's `zoneinfo`
-  with the `tzdata` package.
 - **Kill processes by PID, not `pkill -f`,** inside `bash -c`.
 
 When the run answers a research question, the experiment ledger's rules apply too (olmo-post-training-ledger,

@@ -21,7 +21,7 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 
 ## Before you start
 
-- **IAM on the `ai2-olmo` GCP project**, e.g. `roles/container.developer` (members of `olmo@allenai.org` have Editor).
+- **IAM on the `ai2-olmo` GCP project**, e.g. `roles/container.developer`.
 - **A network the cluster accepts.** [allenai/olmo-gcp-infra's README](https://github.com/allenai/olmo-gcp-infra#connecting-to-gke-tpu-v4)
   lists them: the office IPs, its Tailscale exit nodes, and Beaker sessions on `ai2/hammond`. From anywhere else, use the
   DNS endpoint (`--dns-endpoint`). Then:
@@ -171,8 +171,9 @@ gcloud storage cp -r gs://ai2-olmo-dev/post-training/runs/<run>/checkpoints/<ste
 python scripts/tpu/maxtext/olmo35/export_maxtext_to_hf.py <local dir>/model_params <reference HF dir> <out>
 ```
 
-The reference directory supplies tensor names, `config.json`, modeling code, tokenizer and chat template. Use H045's
-own export,
+The reference directory supplies tensor names, `config.json`, modeling code, tokenizer and chat template. Use an HF
+export of the same model with the matching tokenizer and chat template, and choose `<out>` under your own output
+location. One existing reference export is H045's:
 `/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/runs/h045-anchor-emo-olmo35-s34521/hf_step11768`.
 Its `config.json` is the HF model config, unlike the run directory's OLMo-core training config. The exporter is
 bit-exact on all 23,441 tensors. For Olmo 3, use `export_hf.sh`, which also takes the base model's `config.json`,
@@ -216,8 +217,6 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   session lost its node on 2026-10-16). Keep any record a rule depends on in a source that survives it.
 - **hostNetwork.** The image's libtpu forms a multi-host slice only on the host network. Keep `hostNetwork: true` and
   `dnsPolicy: ClusterFirstWithHostNet`.
-- **No tzdata.** On hosts without tzdata (Ai2's Beaker session images), `TZ=America/Los_Angeles date` silently prints
-  UTC, including in `watch_jobset.sh`'s timestamps.
 - **`pgrep -f` / `pkill -f` inside `bash -c`** match their own command line: loops never end and kills hit the caller.
   Use PIDs.
 
