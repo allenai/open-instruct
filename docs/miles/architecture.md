@@ -39,6 +39,17 @@ select `application` and reuse that layer through Docker caching. The immutable
 binary base in the lock is unchanged; the prepared layer is not interchangeable
 with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
 
+The main `runtime/miles/Dockerfile` adds FlashAttention 2 and 3 to the original
+binary base. Its separate `flash-attention-build` stage compiles FA3 from an
+immutable source commit against that base's Torch/CUDA libraries, and downloads
+checksum-verified FA2 and FA4 wheels. The runtime stage installs FA3 and FA2,
+then restores FA4's overlapping files. Source trees, compiler outputs and wheels
+stay in the build stage. A cold build needs network access and CUDA compilation
+time, but no GPU; Docker caches this work independently of application changes.
+FA3 compilation defaults to two jobs (`FLASH_ATTENTION_MAX_JOBS` build argument).
+Build-time imports check that the extensions load; submitted jobs run the GPU
+forward/backward preflight for the selected backend.
+
 ```bash
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
