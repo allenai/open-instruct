@@ -20,7 +20,7 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 ## Configure your run
 
 Copy an overlay, give the JobSet and ConfigMaps unique names, and set a unique `RUN_NAME` before applying it with
-`kubectl apply -k <overlay>`. The Olmo 3.5 template refuses to launch with `RUN_NAME=CHANGE_ME`, so a new run cannot
+`kubectl apply -k <overlay>`. The templates refuse to launch with `RUN_NAME=CHANGE_ME`, so a new run cannot
 accidentally reuse the historical reference run's checkpoint directory. It pins the restore-fix image for resumes.
 The two `k8s/*/train_sft.sh` copies must stay identical; check with
 `diff k8s/olmo3-sft/train_sft.sh k8s/olmo35-sft-4x4x8/train_sft.sh` after editing either.

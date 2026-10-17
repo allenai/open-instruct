@@ -17,7 +17,7 @@ configMapGenerator:
   - train_sft.sh
 - name: olmo3-sft-env
   literals:
-  - RUN_NAME=olmo3-sft-dolci-smoke
+  - RUN_NAME=CHANGE_ME
   - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-1025-7b/0/items
   - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo-3-instruct-dev-fixed

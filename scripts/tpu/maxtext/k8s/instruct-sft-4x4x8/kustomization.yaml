@@ -37,7 +37,7 @@ configMapGenerator:
 - name: olmo3-sft-env
   behavior: merge
   literals:
-  - RUN_NAME=olmo3-7b-instruct-sft-tpu-s0b
+  - RUN_NAME=CHANGE_ME
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-7b-think-sft/0/items
   - TRAIN_FILES=/mnt/post-training/data/dolci-instruct-sft-shuf-s0/*.parquet
   - TOTAL_DEVICES=128

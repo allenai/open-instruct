@@ -98,6 +98,7 @@ def executable(path, source):
     "state,api_error,log_error,expected",
     [
         ("Completed", "0", "0", 0),
+        ("Completed", "once", "0", 0),
         ("Failed", "0", "0", 1),
         ("", "0", "0", 124),
         ("", "42", "0", 42),
@@ -109,10 +110,17 @@ def test_watcher_reports_outcome(tmp_path, state, api_error, log_error, expected
         tmp_path / "kubectl",
         """#!/bin/bash
 case "$*" in
-  *"get jobset"*) printf '%s' "$FAKE_STATE"; exit "$API_ERROR" ;;
+  *"get jobset"*)
+    if [[ "$API_ERROR" == once ]]; then
+      if [[ ! -e "$FAIL_ONCE" ]]; then touch "$FAIL_ONCE"; exit 42; fi
+      printf '%s' "$FAKE_STATE"; exit 0
+    fi
+    printf '%s' "$FAKE_STATE"; exit "$API_ERROR" ;;
   *"get pods"*"-o name"*) echo pod/test ;;
   *"get pods"*) echo 'test 1/1 Running 0' ;;
-  *"logs"*) echo 'step log'; exit "$LOG_ERROR" ;;
+  *"logs"*)
+    [[ "$*" != *--request-timeout* ]] || exit 99
+    echo 'step log'; exit "$LOG_ERROR" ;;
   *) exit 99 ;;
 esac
 """,
@@ -123,6 +131,7 @@ esac
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "FAKE_STATE": state,
         "API_ERROR": api_error,
+        "FAIL_ONCE": str(tmp_path / "failed-once"),
         "LOG_ERROR": log_error,
         "RUNS_DIR": str(tmp_path / "logs"),
     }
@@ -134,10 +143,40 @@ esac
         timeout=15,
     )
     assert result.returncode == expected, result.stdout + result.stderr
-    if api_error == "0" and log_error == "0":
+    if log_error == "0":
         assert (tmp_path / "logs/run/test.log").read_text() == "step log\n"
-    if api_error != "0":
+    if api_error == "42":
         assert "state=running" not in result.stdout
+
+
+def test_watcher_collects_other_pods_after_one_log_failure(tmp_path):
+    executable(
+        tmp_path / "kubectl",
+        """#!/bin/bash
+case "$*" in
+  *"get jobset"*) echo Completed ;;
+  *"get pods"*"-o name"*) printf 'pod/bad\npod/good\n' ;;
+  *"get pods"*) echo 'good 1/1 Running 0' ;;
+  *"logs pod/bad"*) exit 1 ;;
+  *"logs pod/good"*) echo 'good log' ;;
+  *) exit 99 ;;
+esac
+""",
+    )
+    logs = tmp_path / "logs/run"
+    logs.mkdir(parents=True)
+    (logs / "bad.log").write_text("previous snapshot")
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "RUNS_DIR": str(tmp_path / "logs")}
+    result = subprocess.run(
+        ["bash", str(SCRIPTS / "k8s/watch_jobset.sh"), "job", "run", "1"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 1
+    assert (logs / "good.log").read_text() == "good log\n"
+    assert (logs / "bad.log").read_text() == "previous snapshot"
 
 
 @pytest.mark.parametrize("image", ["image", "image-olmo35-rf"])
@@ -196,7 +235,7 @@ def checkpoint_stubs(monkeypatch, state):
 
     class Manager:
         def __init__(self, *args, **kwargs):
-            pass
+            saved["out"] = args[0]
 
         def save(self, step, args):
             saved.update(args)
@@ -218,7 +257,8 @@ def checkpoint_stubs(monkeypatch, state):
 
 
 @pytest.mark.parametrize("wrapped", [False, True])
-def test_resize_handles_tunix_and_converter_layouts(monkeypatch, tmp_path, wrapped):
+@pytest.mark.parametrize("remote", [False, True])
+def test_resize_handles_tunix_and_converter_layouts(monkeypatch, tmp_path, wrapped, remote):
     def leaf(value):
         return {"value": value} if wrapped else value
 
@@ -228,9 +268,11 @@ def test_resize_handles_tunix_and_converter_layouts(monkeypatch, tmp_path, wrapp
     }
     state = params if wrapped else {"params": {"params": params}}
     saved = checkpoint_stubs(monkeypatch, state)
-    monkeypatch.setattr(sys, "argv", ["resize_vocab.py", "source", str(tmp_path / "out"), "3"])
+    out = "gs://test-bucket/new-checkpoint" if remote else str(tmp_path / "out")
+    monkeypatch.setattr(sys, "argv", ["resize_vocab.py", "source", out, "3"])
     runpy.run_path(str(SCRIPTS / "resize_vocab.py"), run_name="__main__")
     result = saved["items"] if wrapped else saved["items"]["params"]["params"]
+    assert saved["out"] == out
     embedding = result["token_embedder"]["embedding"]
     kernel = result["decoder"]["logits_dense"]["kernel"]
     if wrapped:

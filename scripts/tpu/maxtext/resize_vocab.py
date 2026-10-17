@@ -15,7 +15,9 @@ import jax
 import numpy as np
 from orbax import checkpoint as ocp
 
-src, out, n = sys.argv[1], str(Path(sys.argv[2]).resolve()), int(sys.argv[3])
+src, out, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+if "://" not in out:
+    out = str(Path(out).resolve())
 if n <= 0:
     raise ValueError("new vocab size must be positive")
 ckpt = ocp.PyTreeCheckpointer()

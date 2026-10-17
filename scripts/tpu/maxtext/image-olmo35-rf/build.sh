@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build the Olmo post-training MaxText image with Cloud Build. The image-builder service account cannot read
-# uploaded source, so the Dockerfile and patches/ travel inside the build config as a base64 tarball, split into
+# Build the Olmo post-training MaxText image with Cloud Build. To avoid requiring access to uploaded source,
+# the Dockerfile and patches/ travel inside the build config as a base64 tarball, split into
 # steps of < 10,000 characters (Cloud Build's per-argument limit) that append to one file in the shared workspace.
 #   ./build.sh   (H072: r2's image + the batch-hash logging patch)
 set -euo pipefail
