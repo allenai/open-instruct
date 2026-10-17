@@ -159,6 +159,7 @@ missing = sorted(set(p) - used)
 assert not missing, f"OLMo-core tensors not converted: {missing[:20]}"
 tree = jax.tree.map(lambda x: np.ascontiguousarray(x, dtype=np.float32), tree)
 mgr = ocp.CheckpointManager(out, item_names=("items",))
-mgr.save(0, args=ocp.args.Composite(items=ocp.args.PyTreeSave({"params": {"params": tree}})))
+if not mgr.save(0, args=ocp.args.Composite(items=ocp.args.PyTreeSave({"params": {"params": tree}}))):
+    sys.exit(f"{out} already holds step 0; convert into a new directory")
 mgr.wait_until_finished()
 print(f"wrote {out}/0/items")

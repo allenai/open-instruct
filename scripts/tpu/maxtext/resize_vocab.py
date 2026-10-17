@@ -45,6 +45,7 @@ old = (embedding["value"] if isinstance(embedding, dict) else embedding).shape[0
 p["token_embedder"]["embedding"] = resize(p["token_embedder"]["embedding"], 0)
 p["decoder"]["logits_dense"]["kernel"] = resize(p["decoder"]["logits_dense"]["kernel"], 1)
 mgr = ocp.CheckpointManager(out, item_names=("items",))
-mgr.save(0, args=ocp.args.Composite(items=ocp.args.PyTreeSave(state)))
+if not mgr.save(0, args=ocp.args.Composite(items=ocp.args.PyTreeSave(state))):
+    sys.exit(f"{out} already holds step 0; resize into a new directory")
 mgr.wait_until_finished()
 print(f"vocab {old} -> {n}: wrote {out}/0/items")

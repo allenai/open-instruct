@@ -221,7 +221,7 @@ done
     assert not list(tmp_path.glob("maxtext-build.*"))
 
 
-def checkpoint_stubs(monkeypatch, state):
+def checkpoint_stubs(monkeypatch, state, saves=True):
     saved = {}
 
     def tree_map(fn, value, is_leaf=None):
@@ -238,7 +238,9 @@ def checkpoint_stubs(monkeypatch, state):
             saved["out"] = args[0]
 
         def save(self, step, args):
-            saved.update(args)
+            if saves:
+                saved.update(args)
+            return saves  # orbax returns False when the step already exists
 
         def wait_until_finished(self):
             pass
@@ -279,6 +281,17 @@ def test_resize_handles_tunix_and_converter_layouts(monkeypatch, tmp_path, wrapp
         embedding, kernel = embedding["value"], kernel["value"]
     np.testing.assert_array_equal(embedding, np.arange(8).reshape(4, 2)[:3])
     np.testing.assert_array_equal(kernel, np.arange(8).reshape(2, 4)[:, :3])
+
+
+def test_resize_refuses_existing_step(monkeypatch, tmp_path):
+    params = {
+        "token_embedder": {"embedding": np.arange(8).reshape(4, 2)},
+        "decoder": {"logits_dense": {"kernel": np.arange(8).reshape(2, 4)}},
+    }
+    checkpoint_stubs(monkeypatch, {"params": {"params": params}}, saves=False)
+    monkeypatch.setattr(sys, "argv", ["resize_vocab.py", "source", str(tmp_path / "out"), "3"])
+    with pytest.raises(SystemExit, match="already holds step 0"):
+        runpy.run_path(str(SCRIPTS / "resize_vocab.py"), run_name="__main__")
 
 
 def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch, tmp_path):

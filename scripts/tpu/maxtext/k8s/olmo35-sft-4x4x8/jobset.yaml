@@ -47,7 +47,7 @@ spec:
               cloud.google.com/gke-tpu-topology: 4x4x8
             containers:
             - name: maxtext
-              image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+              image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain # tag pinned by kustomization.yaml images:; apply with kubectl apply -k, not -f
               command: [bash, /launcher/train_sft.sh]
               envFrom:
               - configMapRef:
