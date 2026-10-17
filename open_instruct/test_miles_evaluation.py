@@ -301,7 +301,8 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     )
     driver = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(driver)
-    monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=Mock(side_effect=[0, 2])))
+    clock = SimpleNamespace(time=Mock(return_value=1000), monotonic=Mock(return_value=0))
+    monkeypatch.setattr(driver, "time", clock)
     monkeypatch.setattr(driver, "stage", lambda *a, **kw: nullcontext())
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
     monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a, **kw: None)
@@ -318,6 +319,8 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     monkeypatch.setattr(evaluation, "submit", blocked_submit)
 
     async def train_step(rollout_id, batch):
+        if stop_mode == "deadline":
+            clock.monotonic.return_value = 2
         target = evaluation.snapshot(run.output["root"], (rollout_id + 1) * 2)
         target.mkdir(parents=True)
         (target / ".complete").touch()

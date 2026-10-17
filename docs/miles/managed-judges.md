@@ -196,6 +196,8 @@ prompt nor final-answer whitespace is normalized by the judge adapter.
 Every new training server must replay the sealed H086 controls before its ready
 marker is published. This reads `oe-eval-default` and requires exact 540/540
 parsed-label identity, pinned manifest/labels, ids/hashes, and identical prompts.
+Submission requires a `launch.weka_mounts` entry with `weka = "oe-eval-default"`
+and `mount_path = "/weka/oe-eval-default"` for these controls.
 The report lives under `OUTPUT/cluster/ATTEMPT/h087-qualification-*.json`.
 For standalone qualification inside the image, run
 `python scripts/miles/h087_qualify_adapter.py --out /output/qualification` on one
@@ -204,8 +206,11 @@ replace qualification of the eventual training server process.
 
 Existing `rollout/general_judge/*` metrics describe consumed samples; skipped
 samples are counted separately. H087 also uses one CPU Ray actor to count all
-logical judge requests, including filtered groups, and enforce client concurrency
-32 across workers. Retries stay within the same logical request; `attempts` counts
+logical judge requests, including filtered groups. Each worker admits at most
+32 logical requests on its local event loop with an asyncio semaphore shared
+across clients. Cancellation releases admission locally; counter updates are
+fire-and-forget and never hold scoring slots while waiting for the metrics actor.
+Retries stay within the same logical request; `attempts` counts
 grading attempts (including failures during context checks). `completed` includes all terminal requests and `failed`
 is a subset. At each optimizer boundary the driver logs `h087_judge_boundary`
 JSON with cumulative arrivals/completions/failures/skips, queued/in-flight counts,

@@ -1,5 +1,6 @@
 """H087's binary prompt-level loose constraint pass times the H080 yes verdict."""
 
+import asyncio
 import dataclasses
 import hashlib
 import importlib
@@ -10,6 +11,16 @@ from open_instruct import logger_utils
 from open_instruct.miles.rewards import general_judge, h080, judge_metrics, judge_registry, task_verifiers
 
 logger = logger_utils.setup_logger(__name__)
+_ADMISSION = None
+
+
+def _admission(limit):
+    """Share admission across clients on the worker's event loop, never in Ray."""
+    global _ADMISSION
+    loop = asyncio.get_running_loop()
+    if _ADMISSION is None or _ADMISSION[0] is not loop:
+        _ADMISSION = (loop, {})
+    return _ADMISSION[1].setdefault(limit, asyncio.Semaphore(limit))
 
 
 def client_config(service, endpoint):
@@ -39,9 +50,14 @@ class VerdictClient:
         prompt = h080.render_prompt(conversation, response)
         metrics = self.metrics if self.metrics is not None else judge_metrics.tracker()
         started = time.monotonic()
-        ticket = await metrics.begin(self.config.max_concurrent_calls)
+        semaphore = _admission(self.config.max_concurrent_calls)
+        metrics.arrive()
+        admitted = None
         attempts, label, terminal_error = [], None, None
         try:
+            await semaphore.acquire()
+            admitted = time.monotonic()
+            metrics.admit()
             for attempt in range(3):
                 evidence = {"attempt": attempt + 1}
                 try:
@@ -87,7 +103,15 @@ class VerdictClient:
                 raise terminal_error
             return record
         finally:
-            await metrics.finish(ticket, label is not None, len(attempts))
+            if admitted is not None:
+                semaphore.release()
+            finished = time.monotonic()
+            metrics.finish(
+                label is not None,
+                len(attempts),
+                finished - started,
+                finished - admitted if admitted is not None else None,
+            )
 
 
 async def score_prompt(config, conversation, response, *, policy, metadata, name):

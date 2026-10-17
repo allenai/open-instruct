@@ -324,7 +324,7 @@ async def _score(args, sample):
         ]
         for spec in metadata["verifiers"]:
             if isinstance(registry[spec["name"]], if_gate_yes.IfGateYesVerifier):
-                await judge_metrics.tracker().skip()
+                judge_metrics.tracker().skip()
                 metadata.setdefault("verifier_diagnostics", {})[spec["name"]] = {
                     "kind": "general_judge",
                     "status": "skipped",

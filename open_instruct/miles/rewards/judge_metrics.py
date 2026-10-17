@@ -1,6 +1,6 @@
 """Live H087 request accounting, including grades discarded by group filtering.
 
-One CPU Ray actor owns the counters and the global 32-call client admission limit.
+One CPU Ray actor owns the counters; admission stays local to each caller process.
 Sample diagnostics alone cannot measure arrivals or backlog at optimizer boundaries.
 """
 
@@ -8,7 +8,10 @@ import asyncio
 import collections
 import importlib
 import time
-import uuid
+
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
 
 ACTOR = "open-instruct-if-gate-yes-metrics"
 NAMESPACE = "open-instruct-rewards"
@@ -44,43 +47,32 @@ def consumed_metrics(samples):
 
 class JudgeMetrics:
     def __init__(self):
-        self.condition = asyncio.Condition()
         self.arrived = self.completed = self.failed = self.skipped = self.attempts = 0
-        self.queued = 0
-        self.active = {}
+        self.queued = self.in_flight = 0
         self.latency_sum = self.latency_max = self.service_sum = 0.0
         self.started_unix = time.time()
 
-    async def begin(self, limit=32):
-        started = time.monotonic()
+    def arrive(self):
         self.arrived += 1
         self.queued += 1
-        async with self.condition:
-            try:
-                await self.condition.wait_for(lambda: len(self.active) < limit)
-            except BaseException:
-                self.completed += 1
-                self.failed += 1
-                raise
-            finally:
-                self.queued -= 1
-            ticket = uuid.uuid4().hex
-            self.active[ticket] = (started, time.monotonic())
-            return ticket
 
-    async def finish(self, ticket, success, attempts):
-        async with self.condition:
-            started, admitted = self.active.pop(ticket)
-            elapsed = time.monotonic() - started
-            self.completed += 1  # all terminal requests; failed is a subset
-            self.failed += int(not success)
-            self.attempts += attempts
-            self.latency_sum += elapsed
-            self.latency_max = max(self.latency_max, elapsed)
-            self.service_sum += time.monotonic() - admitted
-            self.condition.notify_all()
+    def admit(self):
+        self.queued -= 1
+        self.in_flight += 1
 
-    async def skip(self):
+    def finish(self, success, attempts, elapsed, service=None):
+        if service is None:  # cancelled before local admission
+            self.queued -= 1
+        else:
+            self.in_flight -= 1
+            self.service_sum += service
+        self.completed += 1  # all terminal requests; failed is a subset
+        self.failed += int(not success)
+        self.attempts += attempts
+        self.latency_sum += elapsed
+        self.latency_max = max(self.latency_max, elapsed)
+
+    def skip(self):
         self.skipped += 1
 
     async def snapshot(self):
@@ -89,8 +81,8 @@ class JudgeMetrics:
             "completed": self.completed,
             "failed": self.failed,
             "queued": self.queued,
-            "in_flight": len(self.active),
-            "backlog": self.queued + len(self.active),
+            "in_flight": self.in_flight,
+            "backlog": self.queued + self.in_flight,
             "skipped": self.skipped,
             "attempts": self.attempts,
             "latency_seconds_sum": self.latency_sum,
@@ -106,14 +98,25 @@ class _Remote:
     def __init__(self, actor):
         self.actor = actor
 
-    async def begin(self, limit=32):
-        return await self.actor.begin.remote(limit)
+    def _send(self, method, *args):
+        # Never await counters: cancellation or a slow/dead actor must not hold
+        # an admission slot or stall reward scoring.
+        try:
+            getattr(self.actor, method).remote(*args)
+        except Exception:
+            logger.warning("Could not send judge metrics event %s", method, exc_info=True)
 
-    async def finish(self, ticket, success, attempts):
-        return await self.actor.finish.remote(ticket, success, attempts)
+    def arrive(self):
+        self._send("arrive")
 
-    async def skip(self):
-        return await self.actor.skip.remote()
+    def admit(self):
+        self._send("admit")
+
+    def finish(self, success, attempts, elapsed, service=None):
+        self._send("finish", success, attempts, elapsed, service)
+
+    def skip(self):
+        self._send("skip")
 
     async def snapshot(self):
         return await self.actor.snapshot.remote()
@@ -122,9 +125,7 @@ class _Remote:
 def start():
     """Driver calls once before any rollout workers start; no GPU resource claim."""
     ray = importlib.import_module("ray")
-    return (
-        ray.remote(JudgeMetrics).options(name=ACTOR, namespace=NAMESPACE, num_cpus=0, max_concurrency=100000).remote()
-    )
+    return ray.remote(JudgeMetrics).options(name=ACTOR, namespace=NAMESPACE, num_cpus=0, max_concurrency=1).remote()
 
 
 def tracker():

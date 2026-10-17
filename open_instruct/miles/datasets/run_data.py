@@ -271,7 +271,7 @@ def _adopt(data, tokenizer, template, inputs):
                     "metadata": metadata,
                 }
             )
-    return partitions, {"source_manifest": manifest, "template_sha256": _sha(template.encode())}, None
+    return partitions, {"source_manifest": manifest, "template_sha256": _sha(template.encode())}, None, template
 
 
 def _prepared(data, inputs):
@@ -438,7 +438,7 @@ def prepare_data(
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template
     if data.get("rl_manifest") is not None:
-        partitions, provenance, registry = _adopt(data, tokenizer, template, inputs)
+        partitions, provenance, registry, template = _adopt(data, tokenizer, template, inputs)
     elif data.get("prompt_data") is not None:
         partitions, provenance, registry = _prepared(data, inputs)
     else:

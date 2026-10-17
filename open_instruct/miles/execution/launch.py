@@ -14,6 +14,7 @@ from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import workflow
+from open_instruct.miles.rewards import judge_registry, judging
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -47,6 +48,16 @@ def specification(image, spec, *, hostnames=None):
             )
 
     check_mounts(spec.to_dict())
+    # These mandatory inputs are implicit in the per-process qualification,
+    # so checking only paths in the submitted configuration misses them.
+    if (
+        judge_registry.gate_bindings(judging.registry(spec.judges))
+        and {"weka": "oe-eval-default", "mount_path": "/weka/oe-eval-default"} not in mounts
+    ):
+        raise InputError(
+            "IF gate qualification requires launch.weka_mounts with weka='oe-eval-default' "
+            "and mount_path='/weka/oe-eval-default' for the sealed H086 controls."
+        )
     if spec.evaluation["mode"] == "background" and not any(
         Path(spec.output["root"]).is_relative_to(mount["mount_path"]) for mount in mounts
     ):

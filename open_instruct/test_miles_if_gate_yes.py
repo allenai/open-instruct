@@ -316,10 +316,10 @@ def test_pinned_client_has_literal_600_second_timeout(monkeypatch):
 def test_live_metrics_measure_queued_and_in_flight_and_skips():
     async def run():
         metrics = judge_metrics.JudgeMetrics()
-        first = await metrics.begin(limit=1)
-        pending = asyncio.create_task(metrics.begin(limit=1))
-        await asyncio.sleep(0)
-        await metrics.skip()
+        metrics.arrive()
+        metrics.admit()
+        metrics.arrive()
+        metrics.skip()
         state = await metrics.snapshot()
         assert (state["arrived"], state["queued"], state["in_flight"], state["backlog"], state["skipped"]) == (
             2,
@@ -328,9 +328,9 @@ def test_live_metrics_measure_queued_and_in_flight_and_skips():
             2,
             1,
         )
-        await metrics.finish(first, True, 1)
-        second = await pending
-        await metrics.finish(second, False, 3)
+        metrics.finish(True, 1, 2, 1)
+        metrics.admit()
+        metrics.finish(False, 3, 4, 2)
         state = await metrics.snapshot()
         assert (state["arrived"], state["completed"], state["failed"], state["attempts"], state["backlog"]) == (
             2,
@@ -342,6 +342,110 @@ def test_live_metrics_measure_queued_and_in_flight_and_skips():
         assert state["latency_seconds_sum"] >= state["service_seconds_sum"] >= 0
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_repeated_cancellation_during_admission_does_not_leak_slots(monkeypatch, remote):
+    async def run():
+        counters = judge_metrics.JudgeMetrics()
+
+        class RemoteMethod:
+            def __init__(self, method):
+                self.method = method
+
+            def remote(self, *args):
+                self.method(*args)
+                # Model a Ray call whose response never arrives. Admission and
+                # cleanup must not wait for any actor response.
+                return asyncio.get_running_loop().create_future()
+
+        actor = SimpleNamespace(
+            **{name: RemoteMethod(getattr(counters, name)) for name in ("arrive", "admit", "finish")}
+        )
+        metrics = judge_metrics._Remote(actor) if remote else counters
+        release = asyncio.Event()
+        active = peak = requests = 0
+
+        async def request(*args):
+            nonlocal active, peak, requests
+            active += 1
+            requests += 1
+            peak = max(peak, active)
+            try:
+                await release.wait()
+                return "Verdict: yes"
+            finally:
+                active -= 1
+
+        monkeypatch.setattr(general_judge, "async_request", request)
+        config = if_gate_yes.client_config(h080.SERVICE, "http://judge/v1")
+
+        def grade():
+            # New clients must share the same process-local admission limit.
+            return asyncio.create_task(if_gate_yes.VerdictClient(config, metrics).grade("user:\nx", "y"))
+
+        holders = [grade() for _ in range(32)]
+        await asyncio.sleep(0)
+        assert active == 32
+        for _ in range(4):
+            waiting = [grade() for _ in range(64)]
+            await asyncio.sleep(0)
+            state = await counters.snapshot()
+            assert (state["queued"], state["in_flight"]) == (64, 32)
+            for task in waiting:
+                task.cancel()
+            outcomes = await asyncio.gather(*waiting, return_exceptions=True)
+            assert all(isinstance(outcome, asyncio.CancelledError) for outcome in outcomes)
+            state = await counters.snapshot()
+            assert (state["queued"], state["in_flight"]) == (0, 32)
+            assert requests == 32
+        # Cancel waiters after release wakes them but before they can resume;
+        # asyncio.Semaphore must return those grants to the available pool.
+        woken = [grade() for _ in range(32)]
+        await asyncio.sleep(0)
+        for task in holders:
+            task.cancel()
+        await asyncio.sleep(0)
+        for task in woken:
+            task.cancel()
+        await asyncio.gather(*holders, *woken, return_exceptions=True)
+        assert requests == 32
+        assert (await counters.snapshot())["backlog"] == 0
+        # Fill all 32 slots again and queue another full batch; all must finish.
+        continuing = [grade() for _ in range(64)]
+        await asyncio.sleep(0)
+        assert active == 32
+        assert (await counters.snapshot())["queued"] == 32
+        release.set()
+        records = await asyncio.wait_for(asyncio.gather(*continuing), timeout=2)
+        assert all(record["label"] == "yes" for record in records)
+        state = await counters.snapshot()
+        assert state["arrived"] == state["completed"] == 32 + 4 * 64 + 32 + 64
+        assert state["failed"] == 32 + 4 * 64 + 32
+        assert state["backlog"] == state["queued"] == state["in_flight"] == 0
+        assert requests == 96 and peak == 32
+
+    asyncio.run(run())
+
+
+def test_failed_metrics_delivery_cannot_block_grading(monkeypatch):
+    def unavailable(*args):
+        raise RuntimeError("metrics actor unavailable")
+
+    method = SimpleNamespace(remote=unavailable)
+    metrics = judge_metrics._Remote(SimpleNamespace(arrive=method, admit=method, finish=method, skip=method))
+
+    async def request(*args):
+        return "Verdict: yes"
+
+    monkeypatch.setattr(general_judge, "async_request", request)
+    metrics.skip()
+    record = asyncio.run(
+        if_gate_yes.VerdictClient(if_gate_yes.client_config(h080.SERVICE, "http://judge/v1"), metrics).grade(
+            "user:\nx", "y"
+        )
+    )
+    assert record["label"] == "yes"
 
 
 def test_consumed_metrics_never_count_skips_as_grades():

@@ -98,6 +98,36 @@ def test_manifest_adoption_preserves_template_targets_and_resume(environment, tm
     assert registry["gsm8k"]["factory"] == "open_instruct.miles.rewards.verifiers.GSM8KVerifier"
 
 
+@pytest.mark.parametrize("manifest_template", [False, True])
+def test_gate_conversation_validation_uses_effective_manifest_template(environment, tmp_path, manifest_template):
+    path = source_manifest(tmp_path, template=manifest_template)
+    manifest = json.loads(path.read_text())
+    for artifact in manifest["artifacts"].values():
+        source = path.parent / artifact["path"]
+        row = json.loads(source.read_text())
+        row["metadata"]["judge_conversation"] = row["messages"]
+        row["metadata"]["verifiers"] = [
+            {"name": "ifeval", "target": {"instruction_id": ["keywords:existence"], "kwargs": [{"keywords": ["ok"]}]}}
+        ]
+        raw = (json.dumps(row) + "\n").encode()
+        source.write_bytes(raw)
+        artifact["sha256"] = hashlib.sha256(raw).hexdigest()
+    path.write_text(json.dumps(manifest))
+    hf, output, tokenizer = environment
+    registry = {"ifeval": {"factory": "open_instruct.miles.rewards.if_gate_yes.IfGateYesVerifier"}}
+    result = run_data.prepare_data(
+        {"rl_manifest": str(path)}, hf, output, max_prompt_length=2000, seed=17, registry_overrides=registry
+    )
+    row = json.loads(Path(result["prompt_data"]).read_text())
+    template = "original template" if manifest_template else tokenizer.chat_template
+    assert row["input"] == f"{template}|train original wrapped prompt|assistant:"
+    assert row["metadata"]["judge_conversation"] == [{"role": "user", "content": "train original wrapped prompt"}]
+    assert (
+        json.loads(Path(result["manifest"]).read_text())["provenance"]["template_sha256"]
+        == hashlib.sha256(template.encode()).hexdigest()
+    )
+
+
 @pytest.mark.parametrize("target", ["input", "output", "tokenizer"])
 def test_resume_rejects_changed_inputs_or_outputs(environment, tmp_path, target):
     path = source_manifest(tmp_path)

@@ -13,6 +13,7 @@ import pytest
 
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import launch, submit, workflow
+from open_instruct.miles.rewards import h080
 
 IMAGE_ID = "01M2931KARFP3Y2W2FPADGRFEP"
 
@@ -122,6 +123,35 @@ def test_every_weka_input_and_output_requires_mount_coverage(tmp_path, section):
         launch.specification(IMAGE_ID, run)
     run.launch["weka_mounts"].append({"weka": "other-data", "mount_path": "/weka/other-data"})
     assert len(launch.specification(IMAGE_ID, run)["tasks"][0]["datasets"]) == 2
+
+
+@pytest.mark.parametrize("invalid_mount", [None, "wrong_path", "wrong_source"])
+def test_gate_qualification_requires_eval_mount_before_submission(tmp_path, invalid_mount):
+    run = spec(
+        tmp_path,
+        inference={"placement_mode": "disaggregated", "gpus": 1},
+        launch={"gpus_per_replica": 8},
+        judges={"general": h080.SERVICE},
+        rubrics={"gate": {"profile": h080.PROFILE, "max_response_tokens": 16, "temperature": 0.0}},
+        judging={"bindings": {"ifeval": {"judge": "general", "rubric": "gate"}}},
+    )
+    # All explicit model/data/output/judge paths are covered by this mount.
+    # Qualification's H086 controls are implicit and need an additional mount.
+    assert {mount["weka"] for mount in run.launch["weka_mounts"]} == {"oe-training-default"}
+    if invalid_mount is not None:
+        run.launch["weka_mounts"].append(
+            {
+                "weka": "other-data" if invalid_mount == "wrong_source" else "oe-eval-default",
+                "mount_path": "/weka/other-data" if invalid_mount == "wrong_path" else "/weka/oe-eval-default",
+            }
+        )
+    with pytest.raises(ValueError, match="IF gate qualification.*launch.weka_mounts"):
+        launch.specification(IMAGE_ID, run)
+    if invalid_mount is not None:
+        run.launch["weka_mounts"].pop()
+    run.launch["weka_mounts"].append({"weka": "oe-eval-default", "mount_path": "/weka/oe-eval-default"})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert {"mountPath": "/weka/oe-eval-default", "source": {"weka": "oe-eval-default"}} in task["datasets"]
 
 
 def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_path, monkeypatch):
