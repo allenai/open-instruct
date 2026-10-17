@@ -352,13 +352,21 @@ def run(path):
             ]
         else:
             ray_command += ["--address", ray_address]
-        print(f"Replica {rank}: starting Ray with {node['ray_gpus']} policy GPUs", flush=True)
-        supervisor.start("ray", ray_command, env)
+        # A judge-only replica has no policy GPUs. If it joined Ray, actors that need no GPU (the worker
+        # manager) could be placed there and fail without an accelerator, so it serves its judge outside Ray.
+        if node["ray_gpus"] or address == head:
+            print(f"Replica {rank}: starting Ray with {node['ray_gpus']} policy GPUs", flush=True)
+            supervisor.start("ray", ray_command, env)
+        else:
+            print(f"Replica {rank}: judge-only, not joining Ray", flush=True)
         env["RAY_ADDRESS"] = ray_address
         if address == head:
             # Run readiness/probes in a child so heartbeats and failure monitoring
             # continue while Ray or HTTP operations block.
-            write(root / "expected-ray.json", {ip: n["ray_gpus"] for ip, n in assignments.items()})
+            write(
+                root / "expected-ray.json",
+                {ip: n["ray_gpus"] for ip, n in assignments.items() if n["ray_gpus"] or ip == head},
+            )
             supervisor.run_child(
                 "readiness",
                 [sys.executable, "-m", "open_instruct.miles.execution.cluster", str(path), "--probe", str(root)],
