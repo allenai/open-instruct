@@ -33,7 +33,8 @@ The schema matches the tagged run files. Beyond the shared OPD sections
 `launch`, `[miles]`):
 
 - `model.source` is a prepared local HF directory; `model.architecture` is
-  `qwen3.5-2B` (the exercised recipe) or `qwen3-1.7B`. An optional inline
+  `qwen3.5-2B` (the exercised recipe), `qwen3.5-4B`, `qwen3.5-9B` or `qwen3-1.7B`.
+  The 4B and 9B profiles come from the pinned MILES and need a mechanics run first. An optional inline
   `[model.native_checkpoint]` table reuses an audited initial TP2/PP1 release
   (see below).
 - `[objective]` owns the loss: `policy_loss = "ppo"` (MILES' clipped surrogate
@@ -46,7 +47,9 @@ The schema matches the tagged run files. Beyond the shared OPD sections
   response is graded whether or not it was truncated (the tagged runs' behavior).
 - `data.prompt_data`, `data.eval_prompt_data` name/path pairs and the trusted
   `data.reward_config` registry are required;
-  `scripts/miles/prepare_qwen35_math_prompts.py` writes them.
+  `scripts/miles/prepare_qwen35_math_prompts.py` writes them for math, and
+  `scripts/miles/prepare_dolci_rl_prompts.py` for the Dolci-Think-RL math,
+  instruction-following and code domains and their mixes.
 
 The contract owns one optimizer update and one weight publication per rollout,
 within-prompt centered verifier rewards, no reference KL or entropy bonus, Adam

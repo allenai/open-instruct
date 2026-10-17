@@ -141,7 +141,7 @@ def test_reject_opd_and_silent_objective_changes(field, value):
         lambda d: d["inference"].update(samples_per_prompt=1),
         lambda d: d["trainer"].update(gpus=3),
         lambda d: d["launch"].update(gpus_per_replica=8),
-        lambda d: d["model"].update(architecture="qwen3.5-4B"),
+        lambda d: d["model"].update(architecture="qwen3.5-27B"),
         lambda d: d["model"].update(source="Qwen/Qwen3-1.7B"),
         lambda d: d["output"].update(assets="/run/fresh/assets"),
         lambda d: d["training"].update(keep_checkpoints=2),

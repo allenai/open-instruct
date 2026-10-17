@@ -10,8 +10,9 @@ from open_instruct.miles.distillation import opd_config
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.megatron_grpo import checkpoint_reuse, dppo_settings
 
-# Megatron profile -> the HF ``model_type`` its learner checkpoint must declare.
-ARCHITECTURES = {"qwen3-1.7B": "qwen3", "qwen3.5-2B": "qwen3_5"}
+# Megatron profile -> the HF ``model_type`` its learner checkpoint must declare. Only qwen3.5-2B
+# has run on this route; the others need a mechanics run first (``plan`` warns).
+ARCHITECTURES = {"qwen3-1.7B": "qwen3", "qwen3.5-2B": "qwen3_5", "qwen3.5-4B": "qwen3_5", "qwen3.5-9B": "qwen3_5"}
 # ``ppo``: MILES' clipped policy loss. ``dppo``: Open Instruct's DPPO trust-region mask
 # (megatron_grpo.dppo_loss), which needs the rollout engine's behavior log-probs.
 POLICY_LOSSES = ("ppo", "dppo")
