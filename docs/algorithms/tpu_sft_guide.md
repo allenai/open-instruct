@@ -71,7 +71,7 @@ fix for resuming from a checkpoint (without it, restore runs out of HBM) and bat
 unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. Use it for every new run. The
 Olmo 3 image is built by `image/build.sh <maxtext commit>`.
 
-To build a new image, run `build.sh` from Hammond. Cloud Build carries the context base64-encoded inside the build
+To build a new image, run `build.sh` from any host with `gcloud` (a Beaker session works). Cloud Build carries the context base64-encoded inside the build
 config. The agent service account cannot act as the `image-builder` account the script names; drop that
 `serviceAccount:` line and the default build account works.
 
@@ -105,8 +105,8 @@ broken conversions.
 
 MaxText streams parquet files. Its shuffle only permutes files and mixes a small buffer, and hub shards are grouped by
 source, so shuffle globally first. `olmo35/build_full_dolci_think.py` (Olmo 3.5) and `data/build_full_dolci.py`
-(Olmo 3) write N shuffled shards. They read the HF hub cache under `/opt/scratch` on Hammond; change that path when
-running elsewhere. Upload the shards to `gs://ai2-olmo-dev/post-training/data/<name>/`. Ledger experiments shard each
+(Olmo 3) write N shuffled shards. They read the HF hub cache at a hardcoded `/opt/scratch/hf` (the `src` and `cache_dir`
+lines); change it to your host's cache. Upload the shards to `gs://ai2-olmo-dev/post-training/data/<name>/`. Ledger experiments shard each
 arm and seed into 512 files with `experiments/h067/shard.py` in olmo-post-training-ledger.
 
 The tokenizer is a directory on the bucket. For Olmo 3.5, `olmo35/tok_oi35.py` saves H045's tokenizer and template
@@ -212,12 +212,12 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   32.17 GB vs 31.75 GB of HBM); 3.0 compiles, and the runs peaked at 2.39-2.84.
 - **GCS egress quota.** Two big slices loading the base checkpoint at once hit `google_egress_bandwidth` (us-central2)
   and failed at startup. Stagger big-slice launches.
-- **Hammond is a single point of failure.** Watchers and log tailers on Hammond die with its Beaker session (10-16 node
-  loss). Keep any record a rule depends on in a source that survives it.
+- **The control host is a single point of failure.** Watchers and log tailers die with the host they run on (a Beaker
+  session lost its node on 2026-10-16). Keep any record a rule depends on in a source that survives it.
 - **hostNetwork.** The image's libtpu forms a multi-host slice only on the host network. Keep `hostNetwork: true` and
   `dnsPolicy: ClusterFirstWithHostNet`.
-- **Hammond has no tzdata.** `TZ=America/Los_Angeles date` silently prints UTC there, including in `watch_jobset.sh`'s
-  timestamps.
+- **No tzdata.** On hosts without tzdata (Ai2's Beaker session images), `TZ=America/Los_Angeles date` silently prints
+  UTC, including in `watch_jobset.sh`'s timestamps.
 - **`pgrep -f` / `pkill -f` inside `bash -c`** match their own command line: loops never end and kills hit the caller.
   Use PIDs.
 
