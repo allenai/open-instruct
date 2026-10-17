@@ -80,7 +80,9 @@ def test_image_build_passes_token_as_secret(monkeypatch, credential_source):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     if credential_source != "gh":
         monkeypatch.setenv(credential_source, "test-token")
-    monkeypatch.setattr(sys, "argv", ["build_image.py", "--base-image", "base", "--tag", "result"])
+    monkeypatch.setattr(
+        sys, "argv", ["build_image.py", "--base-image", "base", "--tag", "result", "--flash-attention-max-jobs", "1"]
+    )
 
     def output(args, **kwargs):
         if args[:3] == ["docker", "image", "inspect"]:
@@ -97,5 +99,69 @@ def test_image_build_passes_token_as_secret(monkeypatch, credential_source):
     args, kwargs = calls[0]
     assert args[args.index("--platform") + 1] == "linux/amd64"
     assert args[args.index("--secret") + 1] == "id=github_token,env=MILES_BUILD_GITHUB_TOKEN"
+    assert f"RUNTIME_INPUTS={build_image.runtime_inputs_digest(root)}" in args
+    assert "FLASH_ATTENTION_MAX_JOBS=1" in args
     assert "test-token" not in str(args)
     assert kwargs["env"]["MILES_BUILD_GITHUB_TOKEN"] == "test-token"
+
+
+def test_runtime_inputs_digest_ignores_only_the_application_stage(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    for relative in ["runtime/miles", "scripts/miles/prepare_runtime.py"]:
+        source, target = root / relative, tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        (shutil.copytree if source.is_dir() else shutil.copy)(source, target)
+    digest = build_image.runtime_inputs_digest(tmp_path)
+    assert digest == build_image.runtime_inputs_digest(root)
+    dockerfile = tmp_path / "runtime/miles/Dockerfile"
+    dockerfile.write_text(dockerfile.read_text() + "RUN true\n")
+    assert build_image.runtime_inputs_digest(tmp_path) == digest
+    dockerfile.write_text(dockerfile.read_text().replace("FROM runtime-base AS application", "RUN true\n&"))
+    assert build_image.runtime_inputs_digest(tmp_path) != digest
+    for changed in ["runtime/miles/runtime.lock.json", "scripts/miles/prepare_runtime.py"]:
+        copy = tmp_path / changed
+        original = copy.read_text()
+        copy.write_text(original + " ")
+        assert build_image.runtime_inputs_digest(tmp_path) != build_image.runtime_inputs_digest(root)
+        copy.write_text(original)
+
+
+def run_runtime_base_build(monkeypatch, labels):
+    root = Path(__file__).resolve().parents[1]
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "argv", ["build_image.py", "--runtime-base", "published-base", "--tag", "result"])
+
+    def output(args, **kwargs):
+        if args[:3] == ["docker", "image", "inspect"]:
+            assert args[3] == "published-base"
+            return json.dumps(labels(build_image.runtime_inputs_digest(root)))
+        assert args[:2] == ["git", "rev-parse"], "an application build on a runtime base needs no GitHub token"
+        return "application-revision"
+
+    calls = []
+    monkeypatch.setattr(build_image.subprocess, "check_output", output)
+    monkeypatch.setattr(build_image.subprocess, "run", lambda args, **kwargs: calls.append(args))
+    build_image.main()
+    return calls[0]
+
+
+def test_application_build_reuses_a_matching_runtime_base(monkeypatch):
+    args = run_runtime_base_build(monkeypatch, lambda digest: {build_image.RUNTIME_INPUTS_LABEL: digest})
+    assert args[args.index("--build-context") + 1] == "runtime-base=docker-image://published-base"
+    assert args[args.index("--target") + 1] == "application"
+    assert "--secret" not in args and not any(arg.startswith("BASE_IMAGE=") for arg in args)
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        lambda digest: {build_image.RUNTIME_INPUTS_LABEL: "0" * 64},
+        lambda digest: None,
+        lambda digest: {build_image.RUNTIME_INPUTS_LABEL: digest, build_image.REVISION_LABEL: "abc"},
+    ],
+    ids=["other-inputs", "unlabelled", "application-image"],
+)
+def test_application_build_refuses_other_runtime_bases(monkeypatch, labels):
+    with pytest.raises(ValueError, match="runtime"):
+        run_runtime_base_build(monkeypatch, labels)

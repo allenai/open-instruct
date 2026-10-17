@@ -68,6 +68,32 @@ sibling code. build_image checks the immutable base Docker ID. For actual
 submission use the [committed-image launcher](launching.md), not a one-off Beaker
 command with different mounts or source provenance.
 
+### Building in CI on a published runtime base
+
+The `MILES Image` GitHub Actions workflow (`workflow_dispatch`) builds the
+application image for any branch without a local Docker build. It pulls a
+published runtime base from Beaker, builds only the `application` stage with
+`build_image.py --runtime-base`, and publishes the result; the run summary prints
+the immutable image ID for `MILES_EXISTING_IMAGE`. That build compiles nothing
+and needs no private-source access.
+
+A runtime base records a digest of the files that determine it (everything under
+`runtime/miles/`, with the Dockerfile cut before the application stage, plus
+`scripts/miles/prepare_runtime.py`) as the `org.allenai.miles.runtime-inputs`
+label. `--runtime-base` refuses a base whose digest differs from the checkout's,
+and refuses an application image. After changing any of those files, build and
+publish a new runtime base:
+
+```bash
+python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE \
+    --target runtime-base --tag open-instruct-miles-runtime-base
+beaker image create open-instruct-miles-runtime-base -n NAME -w ai2/open-instruct-dev
+```
+
+Then run the workflow with that image's Beaker ID as `runtime_base`.
+`--flash-attention-max-jobs` sets FA3 compile parallelism; on a memory-limited
+build host (such as an 8 GB Docker Desktop VM), use 1.
+
 ## Local development
 
 The ordinary CPU suite covers configuration, planning, launch specifications,

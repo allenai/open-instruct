@@ -1,0 +1,90 @@
+name: MILES Image
+
+# Builds the MILES application image for the selected ref on a published runtime base
+# and publishes it to Beaker, so launches do not depend on a local Docker build. The
+# runtime base (FlashAttention, locked private sources) is built and published
+# separately with `build_image.py --target runtime-base`; see docs/miles/architecture.md.
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_base:
+        description: Beaker image ID of the published MILES runtime base
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  publish-miles-image:
+    name: Publish MILES image
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Pull runtime base
+        env:
+          RUNTIME_BASE: ${{ inputs.runtime_base }}
+        run: |
+          if [[ ! "$RUNTIME_BASE" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]]; then
+            echo "runtime_base must be an immutable Beaker image ID, not an alias."
+            exit 1
+          fi
+          beaker image pull "$RUNTIME_BASE" miles-runtime-base:ci
+          df -h /
+
+      - name: Build application image
+        id: build
+        run: |
+          SHA=$(git rev-parse HEAD)
+          IMAGE="open-instruct-miles-core-${SHA:0:12}"
+          python3 scripts/miles/build_image.py --runtime-base miles-runtime-base:ci --tag "$IMAGE"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish image to Beaker
+        id: publish
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+          SHA: ${{ steps.build.outputs.sha }}
+          RUNTIME_BASE: ${{ inputs.runtime_base }}
+        run: |
+          DESCRIPTION="Experimental MILES/Core integration; open-instruct commit ${SHA}"
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+          if EXISTING=$(beaker image get "${BEAKER_USER}/${IMAGE}" --format json 2>/dev/null); then
+            if [[ "$(jq -r '.[0].description // ""' <<< "$EXISTING")" != "$DESCRIPTION" ]]; then
+              echo "${BEAKER_USER}/${IMAGE} exists with different metadata."
+              exit 1
+            fi
+            echo "Reusing the image already published for ${SHA}."
+          else
+            beaker image create --name "$IMAGE" --description "$DESCRIPTION" "$IMAGE"
+          fi
+          IMAGE_ID=$(beaker image get "${BEAKER_USER}/${IMAGE}" --format json | jq -r '.[0].id')
+          echo "image_id=${IMAGE_ID}" >> "$GITHUB_OUTPUT"
+          {
+            echo "MILES image for \`${SHA}\` on runtime base \`${RUNTIME_BASE}\`: \`${IMAGE_ID}\`"
+            echo
+            echo "Launch with \`MILES_EXISTING_IMAGE=${IMAGE_ID} ./scripts/train/build_image_and_launch.sh --miles CONFIG\`."
+          } >> "$GITHUB_STEP_SUMMARY"
