@@ -171,6 +171,11 @@ def execute(spec):
                 check=True,
                 timeout=180,
             )
+        replayed = grpo_hooks.reconcile_evidence(
+            root, grpo_args.checkpointed_rollouts(spec), inf["rollout_batch_size"] * inf["samples_per_prompt"]
+        )
+        if replayed:
+            logger.info("Moved %s verifier records of replayed rollouts to %s", replayed, root / grpo_hooks.REPLAYED)
         process = None
         try:
             with (root / "training.log").open("a") as stream:

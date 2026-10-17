@@ -84,12 +84,15 @@ def audit(spec, prepared):
             }
         )
     export = opd_audit.complete_export(root, Path(prepared["model"]), count - 1)
+    replayed = root / grpo_hooks.REPLAYED
     result = {
         "passed": True,
         "algorithm": "grpo",
         "teacher": None,
         "optimizer": steps,
         "rollouts": rollouts,
+        # Records of rollouts a resumed trainer replayed; grpo_hooks.reconcile_evidence set them aside.
+        "replayed_records": len(replayed.read_text().splitlines()) if replayed.exists() else 0,
         "export": export,
         "limits": "Mechanics audit; no learned-quality or trainer/inference numerical-equivalence claim.",
     }

@@ -186,12 +186,38 @@ def test_resume_restores_checkpoint_without_restepping_the_scheduler(tmp_path):
     doc["training"]["resume"] = True
     spec = specs.from_dict(doc)
     assert "--load" not in grpo_args.native_arguments(spec, PREPARED, "/converted/native", [])
+    assert grpo_args.checkpointed_rollouts(spec) == 0
     marker = tmp_path / "root/checkpoints/latest_checkpointed_iteration.txt"
     marker.parent.mkdir(parents=True)
     marker.write_text("3")
     args = grpo_args.native_arguments(spec, PREPARED, "/converted/native", [])
     assert flag_value(args, "--load") == str(tmp_path / "root/checkpoints")
     assert "--use-checkpoint-opt-param-scheduler" in args
+    # MILES resumes at the checkpoint's rollout ID plus one; without resume it restarts at 0.
+    assert grpo_args.checkpointed_rollouts(spec) == 4
+    doc["training"]["resume"] = False
+    assert grpo_args.checkpointed_rollouts(specs.from_dict(doc)) == 0
+
+
+def test_reconcile_evidence_keeps_checkpointed_rollouts_and_sets_replayed_records_aside(tmp_path):
+    evidence, replayed = tmp_path / grpo_hooks.EVIDENCE, tmp_path / grpo_hooks.REPLAYED
+    assert grpo_hooks.reconcile_evidence(tmp_path, 0, 2) == 0
+    with pytest.raises(ValueError, match="missing"):
+        grpo_hooks.reconcile_evidence(tmp_path, 1, 2)
+    # Rollouts 0 and 1 checkpointed; rollout 2 was scored, then the job stopped mid-write in rollout 3.
+    lines = [json.dumps({"sample_index": index}) + "\n" for index in range(6)]
+    evidence.write_text("".join(lines) + '{"sample_index": 6')
+    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 3
+    assert evidence.read_text() == "".join(lines[:4])
+    assert replayed.read_text() == "".join(lines[4:]) + '{"sample_index": 6\n'
+    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 0
+    assert evidence.read_text() == "".join(lines[:4])
+    with pytest.raises(ValueError, match="missing records"):
+        grpo_hooks.reconcile_evidence(tmp_path, 3, 2)
+    # A partial line inside the checkpointed rollouts is lost evidence, not a replay.
+    evidence.write_text("".join(lines[:3]) + '{"sample_index": 3')
+    with pytest.raises(ValueError, match="missing records"):
+        grpo_hooks.reconcile_evidence(tmp_path, 2, 2)
 
 
 def test_serving_passthrough_replaces_the_wrapper_default(tmp_path):
@@ -358,42 +384,59 @@ def test_center_rewards_before_native_grpo_and_preserve_evidence(tmp_path, monke
         grpo_hooks.post_process(args, samples)
 
 
-@pytest.mark.parametrize("case", ["mixed", "wrong_advantage", "zero_signal"])
+def _evidence_rows(step, rewards):
+    return [
+        {
+            "sample_index": 16 * step + index,
+            "tokens": [1, 2, 3],
+            "response_length": 1,
+            "response": "answer",
+            "status": "completed",
+            "reward": reward,
+            "metadata": {"query": "question", "expected_reward": reward},
+        }
+        for index, reward in enumerate(rewards)
+    ]
+
+
+def _append_evidence(root, rows):
+    with (root / grpo_hooks.EVIDENCE).open("a") as stream:
+        stream.write("".join(json.dumps(row) + "\n" for row in rows))
+
+
+@pytest.mark.parametrize("case", ["mixed", "wrong_advantage", "zero_signal", "replayed"])
 def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, case):
     # zero_signal: every group in rollout 1 has equal rewards, so its advantages and gradient norm are zero.
+    # replayed: the job stopped after scoring rollout 1 and resumed from the rollout 0 checkpoint.
     wrong_advantage = case == "wrong_advantage"
     doc = document()
     doc["output"] = {"root": str(tmp_path / "run"), "assets": str(tmp_path / "assets")}
+    doc["training"]["resume"] = case == "replayed"
     spec = specs.from_dict(doc)
     root = Path(spec.output["root"])
     debug = root / "debug/train_data"
     debug.mkdir(parents=True)
-    records = []
+    stale = _evidence_rows(1, [float(index == 0) for index in range(16)])
     for step in range(2):
-        batch = []
-        for index in range(16):
-            reward = 0.0 if case == "zero_signal" and step == 1 else float(index == 1)
-            batch.append(
-                {
-                    "sample_index": 16 * step + index,
-                    "tokens": [1, 2, 3],
-                    "response_length": 1,
-                    "response": "answer",
-                    "status": "completed",
-                    "reward": reward,
-                    "metadata": {"query": "question", "expected_reward": reward},
-                }
-            )
-        records += batch
+        if case == "replayed" and step == 1:
+            _append_evidence(root, stale)
+            torch.save({"rollout_data": {"sample_indices": [], "advantages": []}}, debug / "1_0.pt")
+            marker = root / "checkpoints/latest_checkpointed_iteration.txt"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("0")
+            assert grpo_hooks.reconcile_evidence(root, grpo_args.checkpointed_rollouts(spec), 16) == 16
+        batch = _evidence_rows(
+            step, [0.0 if case == "zero_signal" and step == 1 else float(index == 1) for index in range(16)]
+        )
+        _append_evidence(root, batch)
         indices = [row["sample_index"] for row in batch]
         advantages = [torch.tensor([0.5 if index == 1 else -0.5 if index == 0 else 0.0]) for index in range(16)]
         if case == "zero_signal" and step == 1:
             advantages = [torch.tensor([0.0]) for _ in range(16)]
         if wrong_advantage:
             advantages[0] = torch.tensor([0.0])
-        # TP2/DP1: one dump per data-parallel rank, keyed by global rank.
+        # TP2/DP1: one dump per data-parallel rank, keyed by global rank. A replay overwrites it.
         torch.save({"rollout_data": {"sample_indices": indices, "advantages": advantages}}, debug / f"{step}_0.pt")
-    (root / grpo_hooks.EVIDENCE).write_text("\n".join(json.dumps(row) for row in records) + "\n")
     second_norm = 0.0 if case == "zero_signal" else 1.0
     (root / "training.log").write_text(
         f"step 0: {{'train/step': 0, 'train/grad_norm': 1.0}}\nstep 1: {{'train/step': 1, 'train/grad_norm': {second_norm}}}\n"
@@ -423,7 +466,16 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
         assert [row["mixed_groups"] for row in result["rollouts"]] == [1, 0 if zero else 1]
         assert [row["zero_signal"] for row in result["rollouts"]] == [False, zero]
         assert result["export"]["changed_tensors"] == 1
+        assert result["replayed_records"] == (16 if case == "replayed" else 0)
         assert registries == {"/fixed/registry"}
+    if case == "replayed":
+        # Without reconciliation the stale rollout 1 records stay and the audit rejects the count.
+        evidence = (root / grpo_hooks.EVIDENCE).read_text().splitlines(keepends=True)
+        (root / grpo_hooks.EVIDENCE).write_text(
+            "".join(evidence[:16]) + "".join(json.dumps(row) + "\n" for row in stale) + "".join(evidence[16:])
+        )
+        with pytest.raises(ValueError, match="does not cover"):
+            grpo_audit.audit(spec, prepared)
 
 
 def test_conversion_tp_only_mesh_matches_trainer():

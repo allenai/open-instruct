@@ -22,6 +22,7 @@ REWARD_CONFIG_ENV = "OI_GRPO_REWARD_CONFIG"
 ZERO_TRUNCATED_ENV = "OI_GRPO_REWARD_ZERO_TRUNCATED"
 FINAL_ANSWER_ONLY_ENV = "OI_GRPO_REWARD_FINAL_ANSWER_ONLY"
 EVIDENCE = "verifier-rewards.jsonl"
+REPLAYED = "verifier-rewards.replayed.jsonl"
 
 
 def reward_environment(registry, reward_gates):
@@ -31,6 +32,33 @@ def reward_environment(registry, reward_gates):
         ZERO_TRUNCATED_ENV: "1" if reward_gates["zero_truncated"] else "0",
         FINAL_ANSWER_ONLY_ENV: "1" if reward_gates["final_answer_only"] else "0",
     }
+
+
+def reconcile_evidence(root, rollouts, batch):
+    """Keep exactly ``rollouts`` complete rollouts of verifier evidence; return how many records moved.
+
+    ``post_process`` appends a rollout's records before that rollout's training is checkpointed, so a
+    preempted run leaves records for rollouts the resumed trainer replays. The hook is not told the
+    rollout ID, but it writes one fixed-size batch per rollout in rollout order, so the first
+    ``rollouts * batch`` lines are the checkpointed rollouts. Later lines, including a partial write,
+    move to ``REPLAYED`` for inspection and the replay appends their replacements.
+    """
+    path = Path(root) / EVIDENCE
+    if not path.exists():
+        if rollouts:
+            raise ValueError("Verifier evidence is missing for checkpointed rollouts")
+        return 0
+    with path.open("r+b") as stream:
+        for _ in range(rollouts * batch):
+            if not stream.readline().endswith(b"\n"):
+                raise ValueError("Verifier evidence is missing records for checkpointed rollouts")
+        boundary = stream.tell()
+        tail = stream.read()
+        if tail:
+            with (Path(root) / REPLAYED).open("ab") as replayed:
+                replayed.write(tail if tail.endswith(b"\n") else tail + b"\n")
+            stream.truncate(boundary)
+    return len(tail.splitlines())
 
 
 def scoring_args(args=None, environment=None):
