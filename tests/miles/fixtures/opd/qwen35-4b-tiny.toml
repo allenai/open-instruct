@@ -1,0 +1,34 @@
+# Experimental text-only, sampled-token OPD: 4B learner and 9B teacher.
+# Two updates exercise conversion, scoring, weight publication and export.
+schema_version = 1
+name = "qwen35-4b-opd-tiny-20260914"
+
+[training]
+algorithm = "opd"
+num_rollouts = 2
+save_interval = 1
+
+[trainer]
+backend = "megatron"
+
+[output]
+root = "/weka/oe-training-default/robertb/open-instruct/opd/runs/tiny-20260914-a"
+assets = "/weka/oe-training-default/robertb/open-instruct/opd/assets-qwen35-v1"
+
+[data]
+seed = 17
+shuffle = true
+
+[[data.tasks]]
+task = "gsm8k"
+train_count = 16
+eval_count = 8
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "1h"
+timeout = "3h"
+auto_resume = false
