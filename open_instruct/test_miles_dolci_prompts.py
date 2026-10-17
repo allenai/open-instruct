@@ -6,11 +6,13 @@ import pytest
 from scripts.miles import prepare_dolci_rl_prompts as dolci
 
 from open_instruct import ground_truth_utils
+from open_instruct.code_utils import code_utils
 from open_instruct.miles.distillation import opd_runtime
 from open_instruct.miles.megatron_grpo import grpo_config
 from open_instruct.miles.rewards import code_rewards, rewards
 
 SOURCE = {"source": "allenai/Dolci-Think-RL-7B", "revision": "0" * 40}
+COMPRESSED = code_utils.encode_tests([{"input": "1\n", "output": "2"}])
 IF_TARGET = repr(
     [{"instruction_id": ["change_case:english_lowercase", "punctuation:no_comma"], "kwargs": [None, None]}]
 )
@@ -41,6 +43,8 @@ def source_row(name, truth, prompt="user: Solve it.", **extra):
         ("ifeval", IF_TARGET, "ifeval", IF_TARGET),
         ("code", json.dumps(["assert f() == 1"]), "code", ["assert f() == 1"]),
         ("code_stdio", json.dumps([{"input": "1\n", "output": "2"}]), "code", [{"input": "1\n", "output": "2"}]),
+        # The execution service decodes this form itself, so it passes through unchanged.
+        ("code_stdio", COMPRESSED, "code", COMPRESSED),
     ],
 )
 def test_render_row_keeps_open_instruct_verifier_and_target(name, truth, domain, target):
@@ -60,6 +64,7 @@ def test_render_row_keeps_open_instruct_verifier_and_target(name, truth, domain,
         (source_row("math", "1", prompt="system: Be brief."), "not_single_user_turn"),
         (source_row("code", "not json"), "malformed_target"),
         (source_row("code", "[]"), "malformed_target"),
+        (source_row("code_stdio", "eJxLTEoGAAJNASc="), "malformed_target"),
         (source_row("ifeval", repr([{"instruction_id": ["a"], "kwargs": []}])), "malformed_target"),
         ({**source_row("math", "1"), "dataset": ["math", "ifeval"]}, "not_single_verifier"),
         ({**source_row("math", "1"), "ground_truth": ["1", "2"]}, "not_single_target"),

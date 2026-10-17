@@ -24,10 +24,13 @@ Example (inside the Miles image, writing to WEKA):
 
 import argparse
 import ast
+import base64
+import binascii
 import hashlib
 import json
 import random
 import re
+import zlib
 from pathlib import Path
 
 import datasets
@@ -92,10 +95,28 @@ def verifier_target(name, ground_truth):
             raise ValueError("ifeval target needs matching nonempty instruction_id and kwargs lists")
         return ground_truth
     # code and code_stdio: the execution service takes the list of tests itself.
-    tests = json.loads(ground_truth)
+    try:
+        tests = json.loads(ground_truth)
+    except json.JSONDecodeError:
+        return compressed_tests(ground_truth)
     if not isinstance(tests, list) or not tests:
         raise ValueError(f"{name} target must be a nonempty list of tests")
     return tests
+
+
+def compressed_tests(ground_truth):
+    """A base64 zlib-compressed pickled test list, passed to the execution service unchanged.
+
+    The service's ``decode_tests`` unpacks this form (``code_utils.encode_tests``); some
+    Dolci code sources ship it. Preparation checks the encoding but never unpickles it.
+    """
+    try:
+        raw = zlib.decompress(base64.b64decode(ground_truth, validate=True))
+    except (binascii.Error, zlib.error) as error:
+        raise ValueError("code target is neither a JSON test list nor compressed tests") from error
+    if not raw.startswith(b"\x80"):
+        raise ValueError("compressed code target is not a pickle")
+    return ground_truth
 
 
 def render_row(row, tokenizer, source):
