@@ -19,7 +19,10 @@ CACHE_HASHES = {
 def launch(root, arm, manifest, manifest_sha, steps, resume=None):
     data_root = BASE_ROOT / "20261015d"
     cache = data_root / ("sample-cache-atomic-r2" if arm == "atomic-safe" else "sample-cache-original")
-    local = Path("/tmp") / f"warmed-samples-{os.environ['BEAKER_JOB_ID']}"
+    # Qualification runs fresh and resumed phases in the same Beaker job.
+    # Staging deliberately refuses existing directories, so each phase needs
+    # its own destination even though both read the same immutable cache.
+    local = Path("/tmp") / f"warmed-samples-{os.environ['BEAKER_JOB_ID']}-{root.name}"
     receipt = run_cached.prepare(root, arm, data_root, cache, local, manifest_sha256=CACHE_HASHES[arm])
     rank = os.environ["BEAKER_REPLICA_RANK"]
     atomic_think.write_json(root / arm / f"cache-staging-node{rank}.json", receipt)

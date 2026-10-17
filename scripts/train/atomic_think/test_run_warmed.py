@@ -3,9 +3,20 @@ from scripts.train.atomic_think import run_warmed
 
 def test_warmed_sft_keeps_baseline_order_and_handoff_on_resume(tmp_path, monkeypatch):
     calls = []
+    staged = set()
+
+    def prepare(*args, **kwargs):
+        # Match stage_cache's refusal to reuse a destination. The qualification
+        # must support both phases within one job without overwriting staging.
+        local = args[4]
+        if local in staged:
+            raise FileExistsError(local)
+        staged.add(local)
+        return {"sha": kwargs["manifest_sha256"]}
+
     monkeypatch.setenv("BEAKER_JOB_ID", "job")
     monkeypatch.setenv("BEAKER_REPLICA_RANK", "0")
-    monkeypatch.setattr(run_warmed.run_cached, "prepare", lambda *args, **kwargs: {"sha": kwargs["manifest_sha256"]})
+    monkeypatch.setattr(run_warmed.run_cached, "prepare", prepare)
     monkeypatch.setattr(run_warmed.run, "train", lambda *args, **kwargs: calls.append((args, kwargs)))
     manifest = tmp_path / "manifest.json"
     run_warmed.launch(tmp_path / "fresh", "atomic-safe", manifest, "a" * 64, 512)
@@ -16,3 +27,4 @@ def test_warmed_sft_keeps_baseline_order_and_handoff_on_resume(tmp_path, monkeyp
     source = tmp_path / "fresh/atomic-safe/step2"
     run_warmed.launch(tmp_path / "resumed", "atomic-safe", manifest, "a" * 64, 4, source)
     assert calls[-1][1]["verify_resume"] and calls[-1][1]["resume"] == source
+    assert len(staged) == 2
