@@ -659,6 +659,27 @@ class TestModelDims(unittest.TestCase):
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
 
+class TestGetGlobalBatchLengths(unittest.TestCase):
+    def test_lengths_counted_once_across_ranks(self):
+        """Every learner rank gets the same global metrics dict from the
+        DataPreparationActor, so the per-sample lengths must be counted exactly
+        once — not once per rank (which inflates num_step_tokens, TPS, and MFU
+        by the number of ranks)."""
+        prompt_lengths = [3, 5, 8]
+        response_lengths = [7, 11, 13, 17, 19, 23]
+        num_ranks = 4
+        array_metrics = [
+            {"batch/prompt_lengths": list(prompt_lengths), "batch/response_lengths": list(response_lengths)}
+            for _ in range(num_ranks)
+        ]
+
+        got_prompts, got_responses = utils.get_global_batch_lengths(array_metrics)
+
+        self.assertEqual(got_prompts, prompt_lengths)
+        self.assertEqual(got_responses, response_lengths)
+        self.assertEqual(sum(got_prompts) + sum(got_responses), sum(prompt_lengths) + sum(response_lengths))
+
+
 class TestModelDimsFromHFConfig(unittest.TestCase):
     def test_from_hf_config_with_sliding_window(self):
         config = SimpleNamespace(
