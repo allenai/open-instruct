@@ -133,6 +133,7 @@ class AdapterTests(unittest.TestCase):
                 {"role": "system", "content": "  re\u0301sume\r\ncontext  "},
                 {"role": "assistant", "content": None},
                 {"role": "tool", "content": "SECRET"},
+                {"role": "environment", "content": ["SECRET_TOOL_OUTPUT"]},
                 {"role": "user", "content": "  question  "},
             ]
         }
@@ -186,13 +187,19 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("SECRET_ASSISTANT", (work / "training" / "source000000.jsonl").read_text())
 
     def test_nonzero_and_soft_failures(self):
-        for index, config in enumerate(
-            ({"returncode": 7}, {"soft_failure": True}, {"stdout_error": True}, {"tokenization_failure": True})
+        for index, (config, issue) in enumerate(
+            (
+                ({"returncode": 7}, "matcher_nonzero_exit"),
+                ({"soft_failure": True}, "matcher_reported_error"),
+                ({"stdout_error": True}, "matcher_reported_error"),
+                ({"tokenization_failure": True}, "matcher_reported_error"),
+            )
         ):
             with self.subTest(config=config):
                 receipt, code, _ = self.run_adapter(config, work_dir=self.root / f"failure{index}")
                 self.assertEqual(code, 2)
                 self.assertFalse(receipt["complete"])
+                self.assertEqual(receipt["issues"], [issue])
 
     def test_error_word_in_a_workdir_path_is_not_a_matcher_error(self):
         parent = self.root / "test-error"
@@ -230,6 +237,7 @@ class AdapterTests(unittest.TestCase):
                 json.dumps({"messages": [{"role": "assistant", "content": "answer"}]}).encode(),
                 json.dumps({"messages": [{"role": "user", "content": []}]}).encode(),
                 json.dumps({"messages": [{"role": ["user"], "content": "invalid role"}]}).encode(),
+                json.dumps({"messages": [{"role": "developer", "content": "unknown role"}]}).encode(),
                 b"[" * 2000 + b"]" * 2000,
             )
         ):
@@ -268,6 +276,50 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("duplicate_reference_document_id", receipt["issues"])
         self.assertFalse((work / "stdout.log").exists())
+
+    def write_references(self, files):
+        for path in self.references.iterdir():
+            path.unlink()
+        for name, rows in files.items():
+            (self.references / name).write_text("".join(json.dumps(row) + "\n" for row in rows))
+        self.manifest.write_text(json.dumps({name: sha((self.references / name).read_bytes()) for name in files}))
+
+    def test_reference_collisions_and_inventory_fail_before_matching(self):
+        base = json.loads(self.reference.read_text())
+        other = dict(base, eval_key="heldout-v2", doc_id=2)
+        cases = (
+            ({"a.jsonl": [base], "b.jsonl": [dict(other, doc_id=1)]}, None, "duplicate_reference_document_id"),
+            ({"a.jsonl": [base], "b.jsonl": [dict(base, doc_id=2)]}, None, "ambiguous_reference_identity"),
+            ({"a.jsonl": [base], "b.jsonl": [other]}, ["b.jsonl"], "reference_manifest_mismatch"),
+            ({"a.jsonl": [base], "b.jsonl": [other]}, {"b.jsonl": "0" * 64}, "reference_hash_mismatch"),
+            ({"a.jsonl": [base], "b.json": [other]}, None, "unsupported_reference_file"),
+        )
+        for index, (files, manifest_change, issue) in enumerate(cases):
+            with self.subTest(issue=issue):
+                self.write_references(files)
+                manifest = json.loads(self.manifest.read_text())
+                if isinstance(manifest_change, list):
+                    for name in manifest_change:
+                        del manifest[name]
+                elif manifest_change:
+                    manifest.update(manifest_change)
+                self.manifest.write_text(json.dumps(manifest))
+                receipt, code, work = self.run_adapter(work_dir=self.root / f"refs{index}")
+                self.assertEqual(code, 2)
+                self.assertEqual(receipt["issues"], [issue])
+                self.assertFalse((work / "stdout.log").exists())
+        self.write_references({"a.jsonl": [base]})
+        (self.references / "b.jsonl").symlink_to(self.references / "a.jsonl")
+        manifest = json.loads(self.manifest.read_text())
+        self.manifest.write_text(json.dumps(dict(manifest, **{"b.jsonl": manifest["a.jsonl"]})))
+        receipt, code, _ = self.run_adapter(work_dir=self.root / "refs-symlink")
+        self.assertEqual((code, receipt["issues"]), (2, ["unsupported_reference_file"]))
+
+    def test_symlinked_source_is_rejected(self):
+        link = self.root / "linked.jsonl"
+        link.symlink_to(self.source)
+        receipt, code, _ = self.run_adapter(source=[link])
+        self.assertEqual((code, receipt["issues"]), (2, ["invalid_source_file"]))
 
     def test_out_of_range_reference_instance_index_fails_before_matching(self):
         row = json.loads(self.reference.read_text())
