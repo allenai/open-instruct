@@ -55,8 +55,10 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 **Use `post-training`.** Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
 checkpoint often enough to lose little. Never hold a slice in a way that delays hero.
 
-The recipe needs exactly a `4x4x8`. The bigger slices need a different mesh (`olmo35-cp-ep`, parked: its first
-`8x8x8` smoke ran at 476 s/step) and give a different data order (see Traps).
+The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The `8x8x8`
+runs the same mesh at 64 rows per step, which is a different recipe (H078's 4x batch). Running the 16-row recipe on a
+big slice needs `olmo35-cp-ep`, which splits each row 32 ways and changes the MoE load-balance term. Measured meshes are
+in [Changing the recipe](#changing-the-recipe).
 
 ## 1. Image
 
@@ -147,6 +149,11 @@ with H045's `train/CE loss`, never Tunix's `loss`, which adds the MoE load-balan
 A healthy Olmo 3.5 run: `REQUIRED_RBF` (the MoE buffer factor that would have dropped no token) stays below the
 configured `ragged_buffer_factor=2.5`. r2's maximum was 2.24.
 
+`REQUIRED_RBF` is logged every step by JAX process 0 only, and that is often not pod `slice-0-0`: find the pod whose log
+has it. Kubelet keeps about 700 steps of each pod's log, and the agent service account cannot read Cloud Logging. So
+if a rule needs every step's value, stream that pod with `kubectl logs -f` from step 1. A watcher polling
+`kubectl logs` every 5 minutes lost 14 steps at one rotation (H078 bb4-lr1e4-s0), and the run had to be relaunched.
+
 ## 6. Checkpoints, preemption and resume
 
 - `enable_checkpointing=true` is required even if you want no checkpoints. Without it, `jax.distributed` is never
@@ -197,6 +204,16 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   different, still valid, data order. Keep every arm of a comparison, and its control, on the same slice shape.
 - **Zero steps, exit 0.** `train_sft` exits 0 with no steps when the data iterator fails. The launcher's step guard
   catches it; keep that guard.
+- **KDA all-gathers on a new mesh.** Under `olmo35-cp-ep` on the `8x8x8`, the KDA chunk scan's inputs and states were
+  sharded on the chunk axis, so XLA all-gathered them inside every scan iteration: 97.6% of a 475 s step. Logical
+  constraints in `_delta_rule_chunked_subblock` (abhishekraok/maxtext c5f1251d) bring the step to 3.33 s. CPU runs never
+  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh.
+- **Compile-time HBM.** At 64 rows on the `8x8x8`, `ragged_buffer_factor=4.0` failed to compile (HLO temporaries
+  32.17 GB vs 31.75 GB of HBM); 3.0 compiles, and the runs peaked at 2.39-2.84.
+- **GCS egress quota.** Two big slices loading the base checkpoint at once hit `google_egress_bandwidth` (us-central2)
+  and failed at startup. Stagger big-slice launches.
+- **Hammond is a single point of failure.** Watchers and log tailers on Hammond die with its Beaker session (10-16 node
+  loss). Keep any record a rule depends on in a source that survives it.
 - **hostNetwork.** The image's libtpu forms a multi-host slice only on the host network. Keep `hostNetwork: true` and
   `dnsPolicy: ClusterFirstWithHostNet`.
 - **Hammond has no tzdata.** `TZ=America/Los_Angeles date` silently prints UTC there, including in `watch_jobset.sh`'s
@@ -206,8 +223,18 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 
 ## Changing the recipe
 
-- **Other slice sizes.** The rule `olmo35-ep-as-cp` puts one 64K sequence on 8 chips (KDA's 8 heads) and fills exactly
-  a `4x4x8` at 16 sequences per step. The `8x8x8` and `8x8x16` slices need more chips per sequence (`olmo35-cp-ep`,
-  parked) and their own same-slice control.
+- **Other slice sizes and meshes.** `olmo35-ep-as-cp` puts one 64K row on 8 chips (KDA's 8 heads). Measured on Olmo 3.5
+  small with 65,536-token rows:
+
+  | slice | mesh | rows/step | s/step | tokens/s/chip | status |
+  |---|---|---|---|---|---|
+  | `4x4x8` | `olmo35-ep-as-cp`, fsdp 16 x expert 8 | 16 | 3.94 | 2,080 | r2 and A0'; the recipe |
+  | `8x8x8` | `olmo35-ep-as-cp`, fsdp 64 x expert 8 | 64 | 4.28 | 1,910 | H078's 4x batch; `ragged_buffer_factor=3.0` |
+  | `8x8x8` | `olmo35-cp-ep` + c5f1251d | 16 | 3.33 | 620 | runs, but numerics differ from the `4x4x8` (#1933) |
+  | `8x8x16` | `olmo35-cp-ep`, fsdp 64 x context 2 x expert 8 | 64 | - | - | never reached step 1 (egress quota, then a TPU core halt) |
+
+  Each mesh was picked to keep r2's per-device layout, not tuned. No sweep of the parallelism split, remat policy or
+  per-device batch has been run, so these are known-good points, not optima. Any other slice or mesh needs its own
+  same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
   TPU arms with a TPU control on the same slice shape.
