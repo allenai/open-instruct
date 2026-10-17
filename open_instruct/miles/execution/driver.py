@@ -15,19 +15,22 @@ from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
-from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
+from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking, log
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_metrics, judge_registry
+from open_instruct.miles.rewards import general_judge, judge_metrics, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args, *, export_hf=None):
+    guarded_judge = bool(judge_registry.gate_bindings()) and general_judge.failure_policy(args) == "zero_guarded"
+    if guarded_judge and args.rollout_batch_size * args.n_samples_per_prompt != args.global_batch_size:
+        raise ValueError("H087 zero_guarded requires one optimizer update per collection for judge failure windows")
     startup_started_unix = float(os.environ.get("OI_MILES_JOB_STARTED_UNIX", time.time()))
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
@@ -44,6 +47,8 @@ async def train(args, *, export_hf=None):
     init_tracking(args)
     define_step_key_metric_group("errors", "errors/elapsed_seconds")
     judge_counters = judge_metrics.start() if judge_registry.gate_bindings() else None
+    if judge_counters is not None:
+        define_step_key_metric_group("judge", "judge/step")
     manager = None
     inference = None
     learner = None
@@ -152,7 +157,7 @@ async def train(args, *, export_hf=None):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
                 if judge_counters is not None:
-                    counters = await judge_counters.snapshot.remote()
+                    counters = await judge_counters.optimizer_boundary.remote()
                     now = time.monotonic()
                     counters.update(
                         step=rollout_id + 1,
@@ -161,6 +166,16 @@ async def train(args, *, export_hf=None):
                         startup_t0_seconds=counters["unix"] - startup_started_unix if not completed[:-1] else None,
                     )
                     logger.info("h087_judge_boundary %s", json.dumps(counters, allow_nan=False))
+                    log(
+                        args,
+                        {
+                            **{k: v for k, v in counters.items() if k.startswith("judge/")},
+                            "judge/step": rollout_id + 1,
+                        },
+                        step_key="judge/step",
+                    )
+                    if guarded_judge:
+                        judge_metrics.check_failure_guard(counters)
                     last_boundary = now
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.

@@ -16,6 +16,24 @@ logger = logger_utils.setup_logger(__name__)
 ACTOR = "open-instruct-if-gate-yes-metrics"
 NAMESPACE = "open-instruct-rewards"
 _LOCAL = None
+FAILURE_WINDOW_UPDATES = 50
+FAILURE_MIN_REQUESTS = 1000
+
+
+def check_failure_guard(counters):
+    """Called by the driver after logging an awaited optimizer-boundary snapshot."""
+    requests = counters["judge_requests_window"]
+    failures = counters["terminal_failures_window"]
+    updates = counters["judge_window_updates"]
+    if requests < FAILURE_MIN_REQUESTS:
+        return
+    # Compare integers so exactly one failure per 200 requests never trips.
+    if failures * 200 > requests:
+        raise RuntimeError(
+            f"H087 zero_guarded judge failure guard: {failures}/{requests} terminal failures "
+            f"({counters['judge/terminal_failure_rate_window']:.3%}) over {updates} consecutive optimizer updates "
+            "exceeds 0.5%; stopping training"
+        )
 
 
 def consumed_metrics(samples):
@@ -51,6 +69,13 @@ class JudgeMetrics:
         self.queued = self.in_flight = 0
         self.latency_sum = self.latency_max = self.service_sum = 0.0
         self.started_unix = time.time()
+        self.judge_requests = self.terminal_failures = 0
+        self._last_requests = self._last_failures = 0
+        self._updates = collections.deque(maxlen=FAILURE_WINDOW_UPDATES)
+        self.requests_by_family = collections.Counter()
+        self.failures_by_family = collections.Counter()
+        self.requests_by_instruction = collections.Counter()
+        self.failures_by_instruction = collections.Counter()
 
     def arrive(self):
         self.arrived += 1
@@ -60,7 +85,7 @@ class JudgeMetrics:
         self.queued -= 1
         self.in_flight += 1
 
-    def finish(self, success, attempts, elapsed, service=None):
+    def finish(self, success, attempts, elapsed, service=None, terminal_failure=None, instruction_ids=()):
         if service is None:  # cancelled before local admission
             self.queued -= 1
         else:
@@ -71,11 +96,33 @@ class JudgeMetrics:
         self.attempts += attempts
         self.latency_sum += elapsed
         self.latency_max = max(self.latency_max, elapsed)
+        # Cancelled requests and fatal context/programming errors retain their
+        # existing backlog accounting but cannot dilute the guarded denominator.
+        if terminal_failure is not None:
+            self.judge_requests += 1
+            self.terminal_failures += int(terminal_failure)
+            # One logical request counts once for each distinct instruction and
+            # family it carries, regardless of retries or repeated constraints.
+            instructions = set(instruction_ids)
+            families = {instruction.partition(":")[0] for instruction in instructions}
+            self.requests_by_family.update(families)
+            self.requests_by_instruction.update(instructions)
+            if terminal_failure:
+                self.failures_by_family.update(families)
+                self.failures_by_instruction.update(instructions)
 
     def skip(self):
         self.skipped += 1
 
+    async def optimizer_boundary(self):
+        """Close one update, including requests from groups later filtered out."""
+        self._updates.append((self.judge_requests - self._last_requests, self.terminal_failures - self._last_failures))
+        self._last_requests, self._last_failures = self.judge_requests, self.terminal_failures
+        return await self.snapshot()
+
     async def snapshot(self):
+        requests = sum(update[0] for update in self._updates)
+        failures = sum(update[1] for update in self._updates)
         return {
             "arrived": self.arrived,
             "completed": self.completed,
@@ -91,6 +138,21 @@ class JudgeMetrics:
             "service_seconds_sum": self.service_sum,
             "started_unix": self.started_unix,
             "unix": time.time(),
+            "judge_requests": self.judge_requests,
+            "judge_requests_window": requests,
+            "terminal_failures_window": failures,
+            "judge_window_updates": len(self._updates),
+            "judge/terminal_failures": self.terminal_failures,
+            "judge/terminal_failure_rate_window": failures / requests if requests else 0.0,
+            **{
+                f"judge/{kind}_by_{scope}/{key}": counts[key]
+                for scope, requests_by_key, failures_by_key in (
+                    ("family", self.requests_by_family, self.failures_by_family),
+                    ("instruction", self.requests_by_instruction, self.failures_by_instruction),
+                )
+                for key in sorted(requests_by_key)
+                for kind, counts in (("requests", requests_by_key), ("terminal_failures", failures_by_key))
+            },
         }
 
 
@@ -112,8 +174,8 @@ class _Remote:
     def admit(self):
         self._send("admit")
 
-    def finish(self, success, attempts, elapsed, service=None):
-        self._send("finish", success, attempts, elapsed, service)
+    def finish(self, success, attempts, elapsed, service=None, terminal_failure=None, instruction_ids=()):
+        self._send("finish", success, attempts, elapsed, service, terminal_failure, instruction_ids)
 
     def skip(self):
         self._send("skip")

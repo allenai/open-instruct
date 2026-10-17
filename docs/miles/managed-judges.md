@@ -187,6 +187,17 @@ to `OI_MILES_JUDGE_FAILURE_POLICY=raise`: exhausted transport or parsing failure
 halt scoring, including when P=0, with failure diagnostics and no quality zero.
 Every failed attempt is logged, including grades from groups later filtered out.
 
+The IF adapter also accepts `zero` (always continue with reward 0 after three
+failed attempts) and opt-in `zero_guarded`. With `zero_guarded`, an exhausted
+request receives reward 0 and keeps all attempt evidence in
+`verifier_diagnostics`. At each optimizer boundary, training halts if terminal
+failures exceed 0.5% of completed logical judge requests in the latest 50 updates.
+Before 50 updates, the guard uses cumulative counts. Every window requires at
+least 1,000 requests before halting. Exactly 0.5% is allowed. Retries count as one request;
+skips, cancellations and fatal context/programming errors do not enter this
+rate. The existing boundary hook requires one optimizer update per collection;
+`zero_guarded` rejects other batch configurations. The default remains `raise`.
+
 Prepared rows use raw `metadata.query` for H070 single-turn inputs. For other
 conversations, preserve raw structured turns in `metadata.judge_conversation`.
 Preparation re-renders these turns with the policy template and requires exact
@@ -214,7 +225,18 @@ Retries stay within the same logical request; `attempts` counts
 grading attempts (including failures during context checks). `completed` includes all terminal requests and `failed`
 is a subset. At each optimizer boundary the driver logs `h087_judge_boundary`
 JSON with cumulative arrivals/completions/failures/skips, queued/in-flight counts,
-backlog, attempts, latency, and step duration. The first record's startup t0 runs
-from cluster-bootstrap entry to the first completed optimizer step. This hook
-requires one optimizer update per collection, as in H087. Native dynamic-filter
+backlog, attempts, latency, and step duration.
+The boundary also logs and tracks cumulative `judge/terminal_failures` and
+`judge/terminal_failure_rate_window` for the completed update window.
+Diagnostic cumulative counts use `judge/requests_by_family/<family>` and
+`judge/terminal_failures_by_family/<family>`, with matching compact scalar counts
+under `*_by_instruction/<instruction_id>`. The family is the instruction ID's
+prefix before `:`. Each logical request counts once per distinct instruction and
+family it carries, including when P=0 or its group is later filtered; retries,
+skips, cancellations and fatal errors do not inflate these counts. Family rates
+are diagnostic only and never feed the failure guard. All these scalar counters
+appear in the boundary JSON and per-update tracking metrics for smoke analysis.
+The first record's startup t0 runs from cluster-bootstrap entry to the first
+completed optimizer step. This hook requires one optimizer update per collection,
+as in H087. Native dynamic-filter
 and refill diagnostics remain in the full driver log.

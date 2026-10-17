@@ -46,7 +46,7 @@ class VerdictClient:
         self.config = config
         self.metrics = metrics
 
-    async def grade(self, conversation, response):
+    async def grade(self, conversation, response, *, instruction_ids=()):
         prompt = h080.render_prompt(conversation, response)
         metrics = self.metrics if self.metrics is not None else judge_metrics.tracker()
         started = time.monotonic()
@@ -54,6 +54,7 @@ class VerdictClient:
         metrics.arrive()
         admitted = None
         attempts, label, terminal_error = [], None, None
+        terminal_failure = None
         try:
             await semaphore.acquire()
             admitted = time.monotonic()
@@ -68,7 +69,7 @@ class VerdictClient:
                         evidence["error"] = "parse"
                 except RuntimeError as error:
                     evidence.update(error=str(error), diagnostics=getattr(error, "diagnostics", {}))
-                    # The training caller raises on exhausted transport/parse failures;
+                    # The training caller selects the exhausted-request policy;
                     # overflow and configuration/programming failures are always fatal.
                     terminal_error = error
                 attempts.append(evidence)
@@ -94,6 +95,7 @@ class VerdictClient:
                 "temperature": self.config.temperature,
                 "max_tokens": self.config.max_tokens,
                 "context_checked": self.config.check_context,
+                "instruction_ids": sorted(set(instruction_ids)),
             }
             if (
                 label is None
@@ -101,6 +103,7 @@ class VerdictClient:
                 and not isinstance(terminal_error, general_judge.JudgeResponseError)
             ):
                 raise terminal_error
+            terminal_failure = label is None
             return record
         finally:
             if admitted is not None:
@@ -111,13 +114,15 @@ class VerdictClient:
                 len(attempts),
                 finished - started,
                 finished - admitted if admitted is not None else None,
+                terminal_failure,
+                instruction_ids,
             )
 
 
-async def score_prompt(config, conversation, response, *, policy, metadata, name):
-    if policy not in ("zero", "raise"):
-        raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
-    record = await VerdictClient(config).grade(conversation, response)
+async def score_prompt(config, conversation, response, *, policy, metadata, name, instruction_ids=()):
+    if policy not in ("zero", "zero_guarded", "raise"):
+        raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero', 'zero_guarded' or 'raise'")
+    record = await VerdictClient(config).grade(conversation, response, instruction_ids=instruction_ids)
     record["failure_policy"] = policy
     metadata.setdefault("verifier_diagnostics", {})[name] = record
     if record["label"] is None:
@@ -183,6 +188,7 @@ class IfGateYesVerifier(task_verifiers.ManifestIFVerifier):
                 policy=general_judge.failure_policy(args, default="raise"),
                 metadata=sample.metadata,
                 name=self.name,
+                instruction_ids=task_verifiers.if_constraint_bundle(target)["instruction_id"],
             )
         finally:
             record = sample.metadata.get("verifier_diagnostics", {}).get(self.name)

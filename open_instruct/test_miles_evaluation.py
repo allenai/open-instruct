@@ -18,6 +18,7 @@ from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner, evaluation_submit
+from open_instruct.miles.rewards import judge_metrics
 
 
 @pytest.fixture
@@ -237,8 +238,8 @@ def test_evaluator_command_keeps_task_overrides(run):
     assert "--save-predictions" in args
 
 
-@pytest.mark.parametrize("stop_mode", ("complete", "deadline", "debug"))
-def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode):
+@pytest.fixture
+def cpu_driver(monkeypatch):
     # Import the real driver with CPU stand-ins for the external actor runtime.
     imported = {}
 
@@ -293,6 +294,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         define_step_key_metric_group=lambda *a: None,
         finish_tracking=lambda: None,
         init_tracking=lambda args: None,
+        log=Mock(),
     )
     module("miles.backends.core_utils.publication.rolling_publication", RollingPublication=Mock())
     # Load under a private module name so monkeypatch cleanup leaves no stale driver.
@@ -307,6 +309,13 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
     monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a, **kw: None)
     monkeypatch.setattr(driver.startup_cache, "finish", AsyncMock())
+    return SimpleNamespace(driver=driver, manager=manager, learner=learner, clock=clock, shared=shared)
+
+
+@pytest.mark.parametrize("stop_mode", ("complete", "deadline", "debug"))
+def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode, cpu_driver):
+    driver, manager, learner = cpu_driver.driver, cpu_driver.manager, cpu_driver.learner
+    clock, shared = cpu_driver.clock, cpu_driver.shared
     entered, release = threading.Event(), threading.Event()
     worker_threads = []
 
@@ -380,6 +389,99 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         release.set()
         for thread in worker_threads:
             thread.join(2)
+
+
+@pytest.mark.parametrize("policy", ("raise", "zero", "zero_guarded"))
+def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(cpu_driver, monkeypatch, caplog, policy):
+    driver, manager, learner = cpu_driver.driver, cpu_driver.manager, cpu_driver.learner
+    caplog.set_level("INFO", logger=driver.logger.name)
+    metrics = judge_metrics.JudgeMetrics()
+    for index in range(1000):
+        metrics.arrive()
+        metrics.admit()
+        failed = index < 6
+        metrics.finish(
+            not failed,
+            3 if failed else 1,
+            1.0,
+            1.0,
+            terminal_failure=failed,
+            instruction_ids=["detectable_content:postscript", "keywords:existence"],
+        )
+    boundary = AsyncMock(side_effect=metrics.optimizer_boundary)
+    monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
+    monkeypatch.setattr(
+        driver.judge_metrics, "start", lambda: SimpleNamespace(optimizer_boundary=SimpleNamespace(remote=boundary))
+    )
+    monkeypatch.setattr(driver, "EvalDispatcher", Mock(return_value=SimpleNamespace(drain=AsyncMock())))
+    args = SimpleNamespace(
+        llm_judge_failure_policy=policy,
+        olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0),
+        fully_async=False,
+        offload_rollout=False,
+        check_weight_update_equal=False,
+        start_rollout_id=0,
+        num_rollout=2,
+        rollout_batch_size=8,
+        n_samples_per_prompt=4,
+        global_batch_size=32,
+        save_trigger_sentinel=None,
+        save_interval=None,
+        update_weights_interval=1,
+        eval_interval=None,
+        debug_exit_after_rollout=None,
+    )
+    if policy == "zero_guarded":
+        with pytest.raises(RuntimeError, match="zero_guarded.*6/1000.*stopping training"):
+            asyncio.run(driver.train(args))
+        assert learner.train.await_count == boundary.await_count == 1
+        driver.startup_cache.finish.assert_awaited_once_with(args, success=False)
+    else:
+        assert asyncio.run(driver.train(args))["completed_rollout_ids"] == [0, 1]
+        assert learner.train.await_count == boundary.await_count == 2
+        driver.startup_cache.finish.assert_awaited_once_with(args, success=True)
+    driver.log.assert_any_call(
+        args,
+        {
+            "judge/terminal_failures": 6,
+            "judge/terminal_failure_rate_window": 0.006,
+            **{
+                f"judge/{kind}_by_{scope}/{key}": value
+                for scope, keys in (
+                    ("family", ["detectable_content", "keywords"]),
+                    ("instruction", ["detectable_content:postscript", "keywords:existence"]),
+                )
+                for key in keys
+                for kind, value in (("requests", 1000), ("terminal_failures", 6))
+            },
+            "judge/step": 1,
+        },
+        step_key="judge/step",
+    )
+    # smoke_check.read_log accepts a Ray/logger prefix and raw-decodes the JSON
+    # immediately after this marker. Verify actual emitted lines, including the
+    # failure that stops training, rather than only the actor's snapshot.
+    lines = [record.getMessage() for record in caplog.records if "h087_judge_boundary " in record.getMessage()]
+    emitted = json.JSONDecoder().raw_decode(lines[0].split("h087_judge_boundary ", 1)[1].lstrip())[0]
+    assert emitted["step"] == 1
+    assert emitted["judge_requests"] == 1000
+    assert emitted["judge/terminal_failures"] == 6
+    assert emitted["judge/requests_by_family/detectable_content"] == 1000
+    assert emitted["judge/terminal_failures_by_family/detectable_content"] == 6
+    assert emitted["judge/terminal_failures_by_instruction/detectable_content:postscript"] == 6
+    manager.dispose.remote.assert_awaited_once()
+    learner.dispose.assert_awaited_once()
+
+
+def test_driver_rejects_inexact_guard_update_boundaries(cpu_driver, monkeypatch):
+    driver = cpu_driver.driver
+    monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
+    args = SimpleNamespace(
+        llm_judge_failure_policy="zero_guarded", rollout_batch_size=8, n_samples_per_prompt=8, global_batch_size=32
+    )
+    with pytest.raises(ValueError, match="one optimizer update per collection"):
+        asyncio.run(driver.train(args))
+    driver.placement_group.create_rollout_components.assert_not_awaited()
 
 
 @pytest.mark.parametrize("value", (0, -1, True, float("inf"), float("nan")))

@@ -194,7 +194,7 @@ def test_h070_pre_gates_do_not_call_either_scorer(gate, monkeypatch, status, res
     assert sample.metadata["verifier_diagnostics"]["ifeval"]["status"] == "skipped"
 
 
-@pytest.mark.parametrize("policy", ["zero", "raise"])
+@pytest.mark.parametrize("policy", ["zero", "zero_guarded", "raise"])
 def test_retry_exhaustion_follows_failure_policy(monkeypatch, policy):
     replies = iter(["invalid", "Verdict: maybe", "explanation"])
 
@@ -211,7 +211,7 @@ def test_retry_exhaustion_follows_failure_policy(monkeypatch, policy):
         metadata=metadata,
         name="ifeval",
     )
-    if policy == "zero":
+    if policy != "raise":
         assert asyncio.run(operation) == 0
     else:
         with pytest.raises(general_judge.JudgeResponseError):
@@ -219,6 +219,64 @@ def test_retry_exhaustion_follows_failure_policy(monkeypatch, policy):
     record = metadata["verifier_diagnostics"]["ifeval"]
     assert record["label"] is None and len(record["attempts"]) == 3
     assert record["status"] == "judge_error"
+
+
+@pytest.mark.parametrize("finish_reason", ["stop", "length"])
+def test_training_zero_guarded_preserves_capped_reply_evidence(gate, monkeypatch, caplog, finish_reason):
+    args, sample = gate
+    reply = "Verdict: partial\n\nP.S. THE FUNCTION CALCULATES THE GROW"
+    sample.response = "reasoning</think>final\n\nP.S. THE FUNCTION CALCULATES THE GROW"
+    sample.metadata["verifiers"][0]["target"] = {
+        "instruction_id": ["detectable_content:postscript"],
+        "kwargs": [{"postscript_marker": "P.S."}],
+    }
+    monkeypatch.setenv("OI_MILES_JUDGE_FAILURE_POLICY", "zero_guarded")
+    metrics = judge_metrics.JudgeMetrics()
+    monkeypatch.setattr(judge_metrics, "tracker", lambda: metrics)
+    completions = []
+
+    def post(url, **kwargs):
+        if url.endswith("/tokenize"):
+            payload = {"count": 20}
+        else:
+            completions.append(kwargs["json"])
+            payload = {"choices": [{"finish_reason": finish_reason, "message": {"content": reply}}]}
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: payload)
+
+    monkeypatch.setattr(general_judge, "_get_session", lambda: SimpleNamespace(post=post))
+
+    async def run():
+        before = await metrics.snapshot()
+        assert await rewards.registered_reward(args, sample) == 0
+        counters = await metrics.optimizer_boundary()
+        judge_metrics.check_failure_guard(counters)
+        assert counters["judge_requests_window"] == 1
+        assert counters["judge/terminal_failures"] - before["judge/terminal_failures"] == 1
+        assert counters["attempts"] == 3
+        assert counters["judge/terminal_failures_by_family/detectable_content"] == 1
+        assert counters["judge/requests_by_family/detectable_content"] == 1
+        assert counters["judge/terminal_failures_by_instruction/detectable_content:postscript"] == 1
+        assert counters["judge/requests_by_instruction/detectable_content:postscript"] == 1
+
+    asyncio.run(run())
+    assert len(completions) == 3 and all(request == completions[0] for request in completions)
+    assert completions[0]["temperature"] == 0 and completions[0]["max_tokens"] == 16
+    record = sample.metadata["verifier_diagnostics"]["ifeval"]
+    assert record["failure_policy"] == "zero_guarded"
+    assert record["label"] is None and record["status"] == "judge_error"
+    assert record["fallback_reward"] == 0 and record["constraint_pass"] == 1
+    assert len(record["attempts"]) == 3
+    assert record["instruction_ids"] == ["detectable_content:postscript"]
+    for attempt in record["attempts"]:
+        if finish_reason == "length":
+            assert attempt["error"] == "judge response did not complete normally"
+            assert attempt["diagnostics"]["raw_reply"] == reply
+            assert attempt["diagnostics"]["finish_reason"] == "length"
+            assert attempt["diagnostics"]["max_tokens"] == 16
+        else:
+            assert attempt["reply"] == reply and attempt["error"] == "parse"
+    assert caplog.text.count("H087 judge failed attempt:") == 3
+    assert "P.S. THE FUNCTION CALCULATES THE GROW" in caplog.text
 
 
 @pytest.mark.parametrize("policy", [None, "raise"])
