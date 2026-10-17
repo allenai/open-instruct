@@ -50,6 +50,7 @@ from olmo_core.train.checkpoint import CheckpointerConfig
 
 from open_instruct import (
     atomic_think,
+    atomic_warmup,
     dataset_transformation,
     logger_utils,
     numpy_dataset_conversion,
@@ -138,6 +139,9 @@ class SFTConfig:
     directory's provenance README so any copy of a checkpoint traces back to it."""
     atomic_audit_mode: str | None = None
     """H077 only: control, rounding-only, atomic-safe, or atomic-historical."""
+    warmup_manifest: str | None = None
+    """Pinned FP32 warmup matrices for fresh SFT initialization; never reapplied on resume."""
+    warmup_manifest_sha256: str | None = None
     scheduler_horizon: int | None = None
     """Fix the LR horizon independently of the stopping step for partial SFT."""
     atomic_state_steps: list[int] = dataclasses.field(default_factory=list)
@@ -466,6 +470,15 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             checkpointer = trainer_callbacks["checkpointer"]
             checkpointer.fixed_steps = sorted({step for step in args.sft.atomic_probe_steps if step > 0})
 
+    if bool(args.sft.warmup_manifest) != bool(args.sft.warmup_manifest_sha256):
+        raise ValueError("Warmup initialization requires both manifest and SHA256")
+    if args.sft.warmup_manifest:
+        if use_hf_ckpt or args.sft.atomic_audit_mode not in ("control", "atomic-safe"):
+            raise ValueError("Warmup handoff requires native control/atomic-safe SFT")
+        if not re.fullmatch(r"[0-9a-f]{64}", args.sft.warmup_manifest_sha256):
+            raise ValueError("Invalid warmup manifest SHA256")
+        trainer_callbacks["warmup_identity"] = atomic_warmup.WarmupIdentity(args.sft.warmup_manifest_sha256)
+
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
         load_strategy=LoadStrategy.never,
@@ -504,7 +517,25 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # trainer was built, the olmo-core path just above, and the trainer is configured with
     # LoadStrategy.never so fit() loads nothing of its own. Skipped when resuming, since those
     # rows have been trained since they were seeded.
-    if not resumed:
+    if resumed and args.sft.warmup_manifest and not trainer_callbacks["warmup_identity"].restored:
+        raise ValueError("Checkpoint did not restore the requested warmup identity")
+    if not resumed and args.sft.warmup_manifest:
+        manifest, matrices = atomic_warmup.load_manifest(
+            args.sft.warmup_manifest,
+            args.sft.warmup_manifest_sha256,
+            args.model.model_name_or_path,
+            tc.tokenizer,
+            args.sft.atomic_audit_mode,
+        )
+        atomic_warmup.inject(
+            train_module,
+            manifest,
+            matrices,
+            os.path.join(args.checkpoint.output_dir, "atomic-audit"),
+            args.sft.warmup_manifest_sha256,
+        )
+        del matrices
+    elif not resumed:
         row_check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, tc.tokenizer)
         if args.sft.atomic_audit_mode is None:
             olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)

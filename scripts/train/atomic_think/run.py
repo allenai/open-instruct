@@ -42,6 +42,8 @@ def train(
     data_root=None,
     verify_resume=False,
     batch_steps=None,
+    warmup_manifest=None,
+    warmup_manifest_sha256=None,
 ):
     if verify_resume and (resume is None or not offline):
         raise ValueError("Qualified continuation requires an explicit resume and offline measurements")
@@ -126,6 +128,10 @@ def train(
         "--atomic_probe_steps",
         *map(str, probes),
     ]
+    if bool(warmup_manifest) != bool(warmup_manifest_sha256):
+        raise ValueError("Warmup manifest and digest must be supplied together")
+    if warmup_manifest:
+        cmd += ["--warmup_manifest", str(warmup_manifest), "--warmup_manifest_sha256", warmup_manifest_sha256]
     if atomic:
         cmd += ["--reserved_slot_tokens", "<think>", "</think>"]
     if resume:
