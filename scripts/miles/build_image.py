@@ -48,7 +48,9 @@ def runtime_inputs_digest(root):
 
 
 def image_labels(image):
-    output = subprocess.check_output(["docker", "image", "inspect", image, "--format", "{{json .Config.Labels}}"], text=True)
+    output = subprocess.check_output(
+        ["docker", "image", "inspect", image, "--format", "{{json .Config.Labels}}"], text=True
+    )
     return json.loads(output) or {}
 
 
@@ -96,7 +98,9 @@ def main():
             ["docker", "image", "inspect", options.base_image, "--format", "{{.Id}}"], text=True
         ).strip()
         if actual != lock["base_image"]["docker_id"]:
-            raise ValueError("Base image differs from runtime.lock.json; qualify a new runtime before changing the pin")
+            raise ValueError(
+                "Base image differs from runtime.lock.json; qualify a new runtime before changing the pin"
+            )
         build_args += ["--build-arg", f"BASE_IMAGE={options.base_image}", "--build-arg", f"RUNTIME_INPUTS={inputs}"]
         if options.flash_attention_max_jobs is not None:
             build_args += ["--build-arg", f"FLASH_ATTENTION_MAX_JOBS={options.flash_attention_max_jobs}"]
