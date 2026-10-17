@@ -1,8 +1,10 @@
 """Check that registered verifier rewards, centered GRPO advantages and weights reached training."""
 
 import asyncio
+import collections
 import json
 import math
+import random
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,6 +32,48 @@ def expected_advantages(rows, fanout, std_normalization):
     return expected, mixed
 
 
+# Rescoring every record serially against the remote code service takes hours on a long run, and
+# the registered verifiers are not deterministic: an IFEval instruction stored without kwargs draws
+# random parameters, language detection is unseeded, and the code service's per-test time limit
+# passes or fails a borderline program depending on load. A wiring fault (wrong target, verifier or gate) disagrees on
+# far more than this fraction of a verifier's records; the audit reports every disagreement it accepts.
+RESCORE_SAMPLE = 4096
+RESCORE_CONCURRENCY = 32
+RESCORE_TOLERANCE = 0.01
+
+
+def rescore(scoring, records):
+    """Independently rescore a fixed sample of records and bound the disagreement per verifier."""
+    chosen = sorted(random.Random(0).sample(range(len(records)), min(len(records), RESCORE_SAMPLE)))
+
+    async def score_all():
+        gate = asyncio.Semaphore(RESCORE_CONCURRENCY)
+
+        async def score(index):
+            record = records[index]
+            metadata = {key: value for key, value in record["metadata"].items() if key != "verifier_diagnostics"}
+            async with gate:
+                return await rewards.registered_reward(
+                    scoring, SimpleNamespace(**record | {"metadata": metadata}, prompt=metadata.get("query", ""))
+                )
+
+        return await asyncio.gather(*(score(index) for index in chosen))
+
+    checked, mismatches = collections.Counter(), collections.defaultdict(list)
+    for index, value in zip(chosen, asyncio.run(score_all()), strict=True):
+        record = records[index]
+        name = "+".join(sorted(verifier["name"] for verifier in record["metadata"].get("verifiers", []))) or "unnamed"
+        checked[name] += 1
+        if value != record["reward"]:
+            mismatches[name].append({"index": index, "trained": record["reward"], "rescored": value})
+    for name, rows in mismatches.items():
+        if len(rows) > RESCORE_TOLERANCE * checked[name]:
+            raise ValueError(
+                f"Independent registered verifier rescore differs for {len(rows)} of {checked[name]} {name} records"
+            )
+    return {"tolerance": RESCORE_TOLERANCE, "checked": dict(checked), "mismatches": dict(mismatches)}
+
+
 def audit(spec, prepared):
     root = Path(spec.output["root"])
     count = spec.document["training"]["num_rollouts"]
@@ -44,16 +88,7 @@ def audit(spec, prepared):
     scoring = grpo_hooks.scoring_args(
         environment=grpo_hooks.reward_environment(prepared["data"]["reward_config"], spec.document["reward"])
     )
-
-    async def rescore():
-        for record in records:
-            value = await rewards.registered_reward(
-                scoring, SimpleNamespace(**record, prompt=record["metadata"].get("query", ""))
-            )
-            if value != record["reward"]:
-                raise ValueError("Independent registered verifier rescore differs")
-
-    asyncio.run(rescore())
+    rescored = rescore(scoring, records)
     rollouts = []
     for rollout_id in range(count):
         rows = records[rollout_id * batch : (rollout_id + 1) * batch]
@@ -94,6 +129,7 @@ def audit(spec, prepared):
         # Records of rollouts a resumed trainer replayed; grpo_hooks.reconcile_evidence set them aside.
         "replayed_records": len(replayed.read_text().splitlines()) if replayed.exists() else 0,
         "export": export,
+        "rescore": rescored,
         "limits": "Mechanics audit; no learned-quality or trainer/inference numerical-equivalence claim.",
     }
     workflow.write_json(root / "audit.json", result)

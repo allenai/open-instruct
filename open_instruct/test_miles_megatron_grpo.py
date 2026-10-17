@@ -468,6 +468,7 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
         assert result["export"]["changed_tensors"] == 1
         assert result["replayed_records"] == (16 if case == "replayed" else 0)
         assert registries == {"/fixed/registry"}
+        assert result["rescore"]["checked"] == {"unnamed": 32} and not result["rescore"]["mismatches"]
     if case == "replayed":
         # Without reconciliation the stale rollout 1 records stay and the audit rejects the count.
         evidence = (root / grpo_hooks.EVIDENCE).read_text().splitlines(keepends=True)
@@ -476,6 +477,29 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
         )
         with pytest.raises(ValueError, match="does not cover"):
             grpo_audit.audit(spec, prepared)
+
+
+def test_audit_rescore_bounds_verifier_noise(monkeypatch):
+    records = [
+        {"reward": 1.0, "metadata": {"query": "q", "verifiers": [{"name": name}], "verifier_diagnostics": {}}}
+        for name in ["math"] * 50 + ["ifeval"] * 50
+    ]
+    flipped = {75}
+
+    async def registered_reward(args, sample, **kwargs):
+        assert "verifier_diagnostics" not in sample.metadata
+        # One IFEval record flips on rescore, as a nondeterministic check can.
+        return 0.0 if sample.index in flipped else sample.reward
+
+    for index, record in enumerate(records):
+        record["index"] = index
+    monkeypatch.setattr(grpo_audit.rewards, "registered_reward", registered_reward)
+    with pytest.raises(ValueError, match="1 of 50 ifeval records"):
+        grpo_audit.rescore(SimpleNamespace(), records)
+    monkeypatch.setattr(grpo_audit, "RESCORE_TOLERANCE", 0.05)
+    result = grpo_audit.rescore(SimpleNamespace(), records)
+    assert result["checked"] == {"math": 50, "ifeval": 50}
+    assert result["mismatches"] == {"ifeval": [{"index": 75, "trained": 1.0, "rescored": 0.0}]}
 
 
 def test_conversion_tp_only_mesh_matches_trainer():
