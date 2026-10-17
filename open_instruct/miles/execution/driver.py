@@ -1,5 +1,6 @@
 """MILES orchestration with explicit Core publication and checkpoint boundaries."""
 
+import asyncio
 import json
 import os
 import time
@@ -22,13 +23,29 @@ from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import general_judge, judge_metrics, judge_registry
+from open_instruct.miles.rewards import if_gate_yes, judge_metrics, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
+JUDGE_GUARD_POLL_SECONDS = 1.0
+
+
+async def _collect_with_failure_guard(manager, rollout_id, judge_counters):
+    """A stream of filtered zero-reward groups must not bypass the failure guard."""
+    collection = asyncio.ensure_future(manager.get.remote(rollout_id))
+    try:
+        while True:
+            done, _ = await asyncio.wait({collection}, timeout=JUDGE_GUARD_POLL_SECONDS)
+            if done:
+                return collection.result()
+            judge_metrics.check_failure_guard(await judge_counters.pending_window.remote())
+    finally:
+        if not collection.done():
+            collection.cancel()
+        await asyncio.gather(collection, return_exceptions=True)
 
 
 async def train(args, *, export_hf=None):
-    guarded_judge = bool(judge_registry.gate_bindings()) and general_judge.failure_policy(args) == "zero_guarded"
+    guarded_judge = bool(judge_registry.gate_bindings()) and if_gate_yes.failure_policy() == "zero_guarded"
     if guarded_judge and args.rollout_batch_size * args.n_samples_per_prompt != args.global_batch_size:
         raise ValueError("H087 zero_guarded requires one optimizer update per collection for judge failure windows")
     startup_started_unix = float(os.environ.get("OI_MILES_JOB_STARTED_UNIX", time.time()))
@@ -149,7 +166,10 @@ async def train(args, *, export_hf=None):
             with stage(args, "generation_wait", rollout_id):
                 if rolling is None:
                     await inference.prepare_rollout(rollout_id)
-                batch = await manager.get.remote(rollout_id)
+                if guarded_judge:
+                    batch = await _collect_with_failure_guard(manager, rollout_id, judge_counters)
+                else:
+                    batch = await manager.get.remote(rollout_id)
             if args.offload_rollout:
                 await inference.offload()
             try:

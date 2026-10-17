@@ -5,6 +5,7 @@ import dataclasses
 import hashlib
 import importlib
 import json
+import os
 import time
 
 from open_instruct import logger_utils
@@ -12,6 +13,12 @@ from open_instruct.miles.rewards import general_judge, h080, judge_metrics, judg
 
 logger = logger_utils.setup_logger(__name__)
 _ADMISSION = None
+FAILURE_POLICY_ENV = "OI_MILES_IF_GATE_FAILURE_POLICY"
+
+
+def failure_policy():
+    """IF-only policy; other named judges retain their independent zero/raise policy."""
+    return os.environ.get(FAILURE_POLICY_ENV, "raise")
 
 
 def _admission(limit):
@@ -121,7 +128,7 @@ class VerdictClient:
 
 async def score_prompt(config, conversation, response, *, policy, metadata, name, instruction_ids=()):
     if policy not in ("zero", "zero_guarded", "raise"):
-        raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero', 'zero_guarded' or 'raise'")
+        raise ValueError(f"{FAILURE_POLICY_ENV} must be 'zero', 'zero_guarded' or 'raise'")
     record = await VerdictClient(config).grade(conversation, response, instruction_ids=instruction_ids)
     record["failure_policy"] = policy
     metadata.setdefault("verifier_diagnostics", {})[name] = record
@@ -185,7 +192,7 @@ class IfGateYesVerifier(task_verifiers.ManifestIFVerifier):
                 resolved[0],
                 conversation,
                 response,
-                policy=general_judge.failure_policy(args, default="raise"),
+                policy=failure_policy(),
                 metadata=sample.metadata,
                 name=self.name,
                 instruction_ids=task_verifiers.if_constraint_bundle(target)["instruction_id"],

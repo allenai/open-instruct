@@ -168,3 +168,53 @@ def test_only_completed_grades_enter_guard_and_snapshot_does_not_advance_updates
             judge_metrics.check_failure_guard(counters)
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("failures", [5, 6])
+def test_pending_window_obeys_threshold_without_completing_an_update(failures):
+    async def run():
+        metrics = judge_metrics.JudgeMetrics()
+        complete_requests(metrics, 999, failures)
+        for _ in range(60):
+            judge_metrics.check_failure_guard(await metrics.pending_window())
+        complete_requests(metrics, 1, 0)
+        pending = await metrics.pending_window()
+        assert pending["judge_window_updates"] == 1
+        assert pending["judge_requests_window"] == 1000
+        if failures == 6:
+            with pytest.raises(RuntimeError, match="6/1000.*pending update"):
+                judge_metrics.check_failure_guard(pending)
+        else:
+            judge_metrics.check_failure_guard(pending)
+        assert (await metrics.snapshot())["judge_window_updates"] == 0
+        closed = await metrics.optimizer_boundary()
+        assert closed["judge_requests_window"] == 1000
+        assert closed["terminal_failures_window"] == failures
+        assert closed["judge_window_updates"] == 1
+
+    asyncio.run(run())
+
+
+def test_pending_window_keeps_only_49_completed_updates_and_never_ages_them():
+    async def run():
+        metrics = judge_metrics.JudgeMetrics()
+        complete_requests(metrics, 10000, 0)
+        await metrics.optimizer_boundary()
+        for _ in range(49):
+            complete_requests(metrics, 20, 0)
+            await metrics.optimizer_boundary()
+        complete_requests(metrics, 20, 6)
+        for _ in range(60):
+            pending = await metrics.pending_window()
+            assert pending["judge_window_updates"] == 50
+            assert pending["judge_requests_window"] == 1000
+            with pytest.raises(RuntimeError, match="6/1000"):
+                judge_metrics.check_failure_guard(pending)
+        closed = await metrics.snapshot()
+        assert closed["judge_requests_window"] == 10980
+        assert closed["terminal_failures_window"] == 0
+        boundary = await metrics.optimizer_boundary()
+        assert boundary["judge_requests_window"] == pending["judge_requests_window"]
+        assert boundary["terminal_failures_window"] == pending["terminal_failures_window"]
+
+    asyncio.run(run())

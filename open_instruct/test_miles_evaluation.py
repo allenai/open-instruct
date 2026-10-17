@@ -18,7 +18,7 @@ from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner, evaluation_submit
-from open_instruct.miles.rewards import judge_metrics
+from open_instruct.miles.rewards import general_judge, h080, if_gate_yes, judge_metrics
 
 
 @pytest.fixture
@@ -410,12 +410,12 @@ def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(cpu_driver,
         )
     boundary = AsyncMock(side_effect=metrics.optimizer_boundary)
     monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", policy)
     monkeypatch.setattr(
         driver.judge_metrics, "start", lambda: SimpleNamespace(optimizer_boundary=SimpleNamespace(remote=boundary))
     )
     monkeypatch.setattr(driver, "EvalDispatcher", Mock(return_value=SimpleNamespace(drain=AsyncMock())))
     args = SimpleNamespace(
-        llm_judge_failure_policy=policy,
         olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0),
         fully_async=False,
         offload_rollout=False,
@@ -476,12 +476,91 @@ def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(cpu_driver,
 def test_driver_rejects_inexact_guard_update_boundaries(cpu_driver, monkeypatch):
     driver = cpu_driver.driver
     monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
-    args = SimpleNamespace(
-        llm_judge_failure_policy="zero_guarded", rollout_batch_size=8, n_samples_per_prompt=8, global_batch_size=32
-    )
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", "zero_guarded")
+    args = SimpleNamespace(rollout_batch_size=8, n_samples_per_prompt=8, global_batch_size=32)
     with pytest.raises(ValueError, match="one optimizer update per collection"):
         asyncio.run(driver.train(args))
     driver.placement_group.create_rollout_components.assert_not_awaited()
+
+
+def test_driver_halts_while_if_only_collection_discards_all_zero_groups(cpu_driver, monkeypatch, caplog):
+    driver, manager, learner = cpu_driver.driver, cpu_driver.manager, cpu_driver.learner
+    caplog.set_level("ERROR")
+    metrics = judge_metrics.JudgeMetrics()
+    boundary = AsyncMock(side_effect=metrics.optimizer_boundary)
+    pending = AsyncMock(side_effect=metrics.pending_window)
+    cancelled = Mock()
+    discarded = []
+    config = if_gate_yes.client_config(h080.SERVICE, "http://judge.invalid/v1")
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", "zero_guarded")
+    monkeypatch.setattr(judge_metrics, "tracker", lambda: metrics)
+    monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
+    monkeypatch.setattr(driver, "JUDGE_GUARD_POLL_SECONDS", 0.001)
+    monkeypatch.setattr(
+        driver.judge_metrics,
+        "start",
+        lambda: SimpleNamespace(
+            optimizer_boundary=SimpleNamespace(remote=boundary), pending_window=SimpleNamespace(remote=pending)
+        ),
+    )
+    monkeypatch.setattr(driver, "EvalDispatcher", Mock(return_value=SimpleNamespace(drain=AsyncMock())))
+
+    async def request(*args):
+        return "invalid"
+
+    monkeypatch.setattr(general_judge, "async_request", request)
+    args = SimpleNamespace(
+        olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0, filter_zero_std_groups=True),
+        fully_async=False,
+        offload_rollout=False,
+        check_weight_update_equal=False,
+        start_rollout_id=0,
+        num_rollout=2,
+        rollout_batch_size=8,
+        n_samples_per_prompt=4,
+        global_batch_size=32,
+        eval_interval=None,
+    )
+
+    async def collect(rollout_id):
+        try:
+            while True:
+                group = [
+                    await if_gate_yes.score_prompt(
+                        config, "user:\nx", "y", policy=if_gate_yes.failure_policy(), metadata={}, name="ifeval"
+                    )
+                    for _ in range(args.n_samples_per_prompt)
+                ]
+                assert group == [0.0] * args.n_samples_per_prompt
+                if args.olmo_core.filter_zero_std_groups and min(group) == max(group):
+                    discarded.append(group)
+                else:
+                    return group
+                # Stop producing at the minimum denominator, leaving get pending.
+                if metrics.judge_requests == 1000:
+                    await asyncio.Event().wait()
+                await asyncio.sleep(0)
+        finally:
+            cancelled()
+
+    manager.get.remote.side_effect = collect
+
+    async def run():
+        with pytest.raises(RuntimeError, match="zero_guarded.*1000/1000.*pending update.*stopping training"):
+            await asyncio.wait_for(driver.train(args), timeout=2)
+        counters = await metrics.snapshot()
+        assert counters["judge_window_updates"] == 0
+        assert counters["judge_requests"] == counters["judge/terminal_failures"] == 1000
+
+    asyncio.run(run())
+    assert len(discarded) == 250
+    assert pending.await_count > 0
+    boundary.assert_not_awaited()
+    learner.train.assert_not_awaited()
+    cancelled.assert_called_once()
+    driver.startup_cache.finish.assert_awaited_once_with(args, success=False)
+    manager.dispose.remote.assert_awaited_once()
+    learner.dispose.assert_awaited_once()
 
 
 @pytest.mark.parametrize("value", (0, -1, True, float("inf"), float("nan")))

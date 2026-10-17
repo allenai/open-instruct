@@ -183,7 +183,7 @@ The vendored H080 prompt is checked against SHA256
 The complete role-labelled conversation and extracted final text enter it
 verbatim; parsing full-matches `Verdict: (yes|partial|no)\.?` case-insensitively
 after stripping the reply. There are three attempts total. The IF adapter defaults
-to `OI_MILES_JUDGE_FAILURE_POLICY=raise`: exhausted transport or parsing failures
+to `OI_MILES_IF_GATE_FAILURE_POLICY=raise`: exhausted transport or parsing failures
 halt scoring, including when P=0, with failure diagnostics and no quality zero.
 Every failed attempt is logged, including grades from groups later filtered out.
 
@@ -195,8 +195,14 @@ failures exceed 0.5% of completed logical judge requests in the latest 50 update
 Before 50 updates, the guard uses cumulative counts. Every window requires at
 least 1,000 requests before halting. Exactly 0.5% is allowed. Retries count as one request;
 skips, cancellations and fatal context/programming errors do not enter this
-rate. The existing boundary hook requires one optimizer update per collection;
+rate. While collection is pending, the driver also checks once per second using
+the latest 49 completed updates plus the current pending update. Polling never
+advances the window, so filtering all-zero groups cannot starve the guard.
+The boundary hook requires one optimizer update per collection;
 `zero_guarded` rejects other batch configurations. The default remains `raise`.
+This setting applies only to IF gate-yes bindings. Other judge profiles retain
+`OI_MILES_JUDGE_FAILURE_POLICY` (or `llm_judge_failure_policy`), accepting `zero`
+and `raise`, with the existing default of `zero`.
 
 Prepared rows use raw `metadata.query` for H070 single-turn inputs. For other
 conversations, preserve raw structured turns in `metadata.judge_conversation`.

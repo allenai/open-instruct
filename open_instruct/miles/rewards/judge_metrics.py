@@ -21,7 +21,7 @@ FAILURE_MIN_REQUESTS = 1000
 
 
 def check_failure_guard(counters):
-    """Called by the driver after logging an awaited optimizer-boundary snapshot."""
+    """Check either a closed optimizer window or the live collection window."""
     requests = counters["judge_requests_window"]
     failures = counters["terminal_failures_window"]
     updates = counters["judge_window_updates"]
@@ -29,11 +29,23 @@ def check_failure_guard(counters):
         return
     # Compare integers so exactly one failure per 200 requests never trips.
     if failures * 200 > requests:
+        pending = " (including the pending update)" if counters.get("judge_pending_update") else ""
         raise RuntimeError(
             f"H087 zero_guarded judge failure guard: {failures}/{requests} terminal failures "
-            f"({counters['judge/terminal_failure_rate_window']:.3%}) over {updates} consecutive optimizer updates "
+            f"({counters['judge/terminal_failure_rate_window']:.3%}) over {updates} consecutive optimizer updates{pending} "
             "exceeds 0.5%; stopping training"
         )
+
+
+def _window_counters(updates):
+    requests = sum(update[0] for update in updates)
+    failures = sum(update[1] for update in updates)
+    return {
+        "judge_requests_window": requests,
+        "terminal_failures_window": failures,
+        "judge_window_updates": len(updates),
+        "judge/terminal_failure_rate_window": failures / requests if requests else 0.0,
+    }
 
 
 def consumed_metrics(samples):
@@ -121,8 +133,6 @@ class JudgeMetrics:
         return await self.snapshot()
 
     async def snapshot(self):
-        requests = sum(update[0] for update in self._updates)
-        failures = sum(update[1] for update in self._updates)
         return {
             "arrived": self.arrived,
             "completed": self.completed,
@@ -139,11 +149,8 @@ class JudgeMetrics:
             "started_unix": self.started_unix,
             "unix": time.time(),
             "judge_requests": self.judge_requests,
-            "judge_requests_window": requests,
-            "terminal_failures_window": failures,
-            "judge_window_updates": len(self._updates),
+            **_window_counters(self._updates),
             "judge/terminal_failures": self.terminal_failures,
-            "judge/terminal_failure_rate_window": failures / requests if requests else 0.0,
             **{
                 f"judge/{kind}_by_{scope}/{key}": counts[key]
                 for scope, requests_by_key, failures_by_key in (
@@ -154,6 +161,12 @@ class JudgeMetrics:
                 for kind, counts in (("requests", requests_by_key), ("terminal_failures", failures_by_key))
             },
         }
+
+    async def pending_window(self):
+        """Read the last 49 closed updates plus the pending one, without closing it."""
+        updates = list(self._updates)[-(FAILURE_WINDOW_UPDATES - 1) :]
+        updates.append((self.judge_requests - self._last_requests, self.terminal_failures - self._last_failures))
+        return {**_window_counters(updates), "judge_pending_update": True}
 
 
 class _Remote:

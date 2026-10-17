@@ -230,7 +230,7 @@ def test_training_zero_guarded_preserves_capped_reply_evidence(gate, monkeypatch
         "instruction_id": ["detectable_content:postscript"],
         "kwargs": [{"postscript_marker": "P.S."}],
     }
-    monkeypatch.setenv("OI_MILES_JUDGE_FAILURE_POLICY", "zero_guarded")
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", "zero_guarded")
     metrics = judge_metrics.JudgeMetrics()
     monkeypatch.setattr(judge_metrics, "tracker", lambda: metrics)
     completions = []
@@ -285,9 +285,9 @@ def test_training_zero_guarded_preserves_capped_reply_evidence(gate, monkeypatch
 def test_training_retry_exhaustion_halts_even_zero_pass(gate, monkeypatch, policy, failure, constraint_pass):
     args, sample = gate
     if policy is None:
-        monkeypatch.delenv("OI_MILES_JUDGE_FAILURE_POLICY", raising=False)
+        monkeypatch.delenv("OI_MILES_IF_GATE_FAILURE_POLICY", raising=False)
     else:
-        monkeypatch.setenv("OI_MILES_JUDGE_FAILURE_POLICY", policy)
+        monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", policy)
     if not constraint_pass:
         sample.metadata["verifiers"][0]["target"]["kwargs"] = [{"keywords": ["pear"]}]
     seen = []
@@ -307,6 +307,46 @@ def test_training_retry_exhaustion_halts_even_zero_pass(gate, monkeypatch, polic
     assert record["status"] == "judge_error" and record["label"] is None
     assert record["constraint_pass"] == constraint_pass
     assert "fallback_reward" not in record
+
+
+@pytest.mark.parametrize("general_policy", [None, "zero", "raise"])
+def test_mixed_registry_keeps_if_guard_independent_of_general_policy(gate, monkeypatch, general_policy):
+    args, sample = gate
+    args.olmo_core.reward_final_answer_only = False
+    sample.response = "final"
+    document = registry_document()
+    document["rubrics"]["quality"] = {"profile": "open-instruct/general-quality"}
+    document["judging"]["bindings"]["general-quality"] = {"judge": "general", "rubric": "quality"}
+    sections = judging.parse(document)
+    value = judging.registry(sections)
+    value["judges"]["general"]["endpoint"] = "http://judge.invalid/v1"
+    monkeypatch.setenv(judging.REGISTRY_ENV, json.dumps(value))
+    Path(args.olmo_core.reward_config).write_text(json.dumps(judge_registry.verifier_overrides(sections)))
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", "zero_guarded")
+    if general_policy is None:
+        monkeypatch.delenv("OI_MILES_JUDGE_FAILURE_POLICY", raising=False)
+    else:
+        monkeypatch.setenv("OI_MILES_JUDGE_FAILURE_POLICY", general_policy)
+    quality_sample = copy.deepcopy(sample)
+    quality_sample.metadata.update(judge_query="User request", verifiers=[{"name": "general-quality", "target": None}])
+    calls = []
+
+    def request(config, prompt):
+        calls.append(config.max_tokens)
+        return "Verdict: yes" if config.max_tokens == 16 else '{"SCORE": 8}'
+
+    monkeypatch.setattr(general_judge, "_request", request)
+    assert asyncio.run(rewards.registered_reward(args, [sample, quality_sample])) == [1.0, 0.8]
+    assert sorted(calls)[0] == 16 and len(calls) == 2
+    assert sample.metadata["verifier_diagnostics"]["ifeval"]["failure_policy"] == "zero_guarded"
+    assert quality_sample.metadata["verifier_diagnostics"]["general-quality"]["status"] == "ok"
+    assert general_judge.failure_policy(args) == (general_policy or "zero")
+
+
+def test_if_policy_does_not_inherit_general_judge_settings(monkeypatch):
+    monkeypatch.delenv("OI_MILES_IF_GATE_FAILURE_POLICY", raising=False)
+    monkeypatch.setenv("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
+    assert if_gate_yes.failure_policy() == "raise"
 
 
 def test_retry_can_recover_without_becoming_partial_credit(monkeypatch):
