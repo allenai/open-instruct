@@ -28,14 +28,7 @@ def bound(name):
 
 
 def gate_bindings(value=None):
-    value = value if value is not None else registry()
-    if value is None:
-        return set()
-    return {
-        name
-        for name, binding in value["bindings"].items()
-        if value["rubrics"][binding["rubric"]]["profile"] == h080.PROFILE
-    }
+    return judging.gate_bindings(value if value is not None else registry())
 
 
 def verifier_overrides(sections):

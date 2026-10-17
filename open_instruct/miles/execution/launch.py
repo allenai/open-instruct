@@ -14,7 +14,7 @@ from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import workflow
-from open_instruct.miles.rewards import judge_registry, judging
+from open_instruct.miles.rewards import judging
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -51,7 +51,7 @@ def specification(image, spec, *, hostnames=None):
     # These mandatory inputs are implicit in the per-process qualification,
     # so checking only paths in the submitted configuration misses them.
     if (
-        judge_registry.gate_bindings(judging.registry(spec.judges))
+        judging.gate_bindings(judging.registry(spec.judges))
         and {"weka": "oe-eval-default", "mount_path": "/weka/oe-eval-default"} not in mounts
     ):
         raise InputError(

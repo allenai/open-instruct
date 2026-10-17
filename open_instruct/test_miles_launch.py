@@ -379,3 +379,9 @@ def test_image_wrapper_dispatches_to_package_without_a_debug_script(tmp_path, fa
             *overrides,
         ]
     assert not (launch.ROOT / "should-not-exist").exists()
+
+
+def test_launch_imports_without_site_packages():
+    # The submission CLI runs in a minimal Python with no third-party packages.
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run([sys.executable, "-S", "-c", "import open_instruct.miles.execution.launch"], cwd=root, check=True)

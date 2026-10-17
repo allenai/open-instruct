@@ -150,3 +150,14 @@ def registry(sections):
             "bindings": sections["judging"]["bindings"],
         }
     )
+
+
+def gate_bindings(value):
+    """Names bound to the IF gate-yes profile; dependency-free so submission can inspect it."""
+    if value is None:
+        return set()
+    return {
+        name
+        for name, binding in value["bindings"].items()
+        if value["rubrics"][binding["rubric"]]["profile"] == h080.PROFILE
+    }
