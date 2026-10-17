@@ -1,17 +1,23 @@
 """Tokenize a stratified sample of local Dolci-Instruct-SFT rows with open-instruct's SFT path.
-Strata: tool rows (function_calls / functions / environment), system-prompt rows, multi-turn rows, the rest."""
+Strata: tool rows (function_calls / functions / environment), system-prompt rows, multi-turn rows, the rest.
+  tok_oi_local.py <per stratum> <out.jsonl> <parquet path or glob> [more paths/globs]
+"""
 
 import glob
 import json
 import random
 import sys
 
-import pyarrow.parquet as pq
+from pyarrow import parquet as pq
 
 from open_instruct import dataset_transformation as dt
 
+if len(sys.argv) < 4:
+    raise SystemExit("usage: tok_oi_local.py <per stratum> <out.jsonl> <parquet path or glob> [more paths/globs]")
 per, out = int(sys.argv[1]), sys.argv[2]
-P = sorted(glob.glob("/opt/scratch/hf/hub/datasets--allenai--Dolci-Instruct-SFT/snapshots/*/data/*.parquet"))
+P = sorted({path for pattern in sys.argv[3:] for path in glob.glob(pattern)})
+if not P:
+    raise SystemExit("no parquet files matched")
 tok = dt.TokenizerConfig(
     tokenizer_name_or_path="allenai/olmo-3-tokenizer-instruct-dev", chat_template_name="tokenizer_default"
 ).tokenizer
@@ -19,7 +25,7 @@ tok = dt.TokenizerConfig(
 
 def stratum(msgs):
     roles = [m["role"] for m in msgs]
-    if any(m.get("function_calls") or m.get("functions") for m in msgs) or "environment" in roles:
+    if any(m.get("function_calls") or m.get("functions") for m in msgs) or "environment" in roles or "tool" in roles:
         return "tool"
     if roles[0] == "system":
         return "system"

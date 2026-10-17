@@ -10,12 +10,42 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 | Path | What |
 |---|---|
 | `image/` | The training image: upstream MaxText at a pinned commit, plus our MaxText patch, Tunix and the post-training dependencies. `build.sh <maxtext commit>` builds it with Cloud Build. |
-| `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. The base is a smoke test on one spot `2x2x4` slice (16 chips) at 4,096 tokens. |
+| `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. Historical smoke base on a `2x2x4` slice (16 chips), which is no longer available; use the `4x4x8` overlay. |
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |
 | `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. |
 | `parity/` | Token and loss-mask parity against open-instruct's SFT tokenization. |
+
+## Configure your run
+
+Copy an overlay, give the JobSet and ConfigMaps unique names, and set a unique `RUN_NAME` before applying it with
+`kubectl apply -k <overlay>`. The Olmo 3.5 template refuses to launch with `RUN_NAME=CHANGE_ME`, so a new run cannot
+accidentally reuse the historical reference run's checkpoint directory. It pins the restore-fix image for resumes.
+The two `k8s/*/train_sft.sh` copies must stay identical; check with
+`diff k8s/olmo3-sft/train_sft.sh k8s/olmo35-sft-4x4x8/train_sft.sh` after editing either.
+
+Data builders use the standard HF cache settings (`HF_HOME`, `HF_DATASETS_CACHE`) and load one dataset revision.
+Pin it with `--revision <dataset commit>`, or pass explicit local parquet paths/globs with `--data-files`:
+
+```bash
+python data/build_full_dolci.py <new shard dir> 128 0 --revision <dataset commit>
+python olmo35/build_full_dolci_think.py <new shard dir> 512 0 --data-files '/your/data/*.parquet'
+python data/count_tokens.py <shard dir> 32768 <tokenizer dir> --output <lengths.npy>
+python parity/tok_oi_local.py 100 <sample.jsonl> '/your/data/*.parquet'
+```
+
+Shard output directories must be new or empty, and token counts refuse to overwrite an existing lengths file.
+Export destinations are chosen by the caller. For Olmo 3, set `MAXTEXT_DIR` to a MaxText checkout at the pinned
+revision and optionally `PY` to its Python executable; temporary files use `TMPDIR`. Olmo 3.5 exports accept either
+a single-file or sharded HF reference and copy its metadata without copying the reference weights.
+
+Image builds use the base commit from `maxtext_source`; an optional commit argument must match that pin.
+They use Cloud Build's default service account unless `BUILD_SERVICE_ACCOUNT` names another authorized account
+(a full `projects/<project>/serviceAccounts/<email>` resource). No source changes are needed to switch accounts.
+
+The watcher uses the caller's timezone and includes the UTC offset. Set `KUBE_CONTEXT` or `RUNS_DIR` to override
+the cluster context or local log directory. It exits nonzero on a failed job, timeout, or Kubernetes API error.
 
 ## What the patch fixes
 

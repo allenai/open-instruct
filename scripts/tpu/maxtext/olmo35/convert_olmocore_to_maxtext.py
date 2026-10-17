@@ -21,8 +21,9 @@ import json
 import os
 import sys
 
+import jax
 import numpy as np
-import orbax.checkpoint as ocp
+from orbax import checkpoint as ocp
 
 src, masters, out = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(os.path.join(src, "config.json")) as f:
@@ -143,8 +144,6 @@ def layer(i):
         }
     return lt
 
-
-import jax  # noqa: E402
 
 tree["decoder"]["layers_0"] = {f"layer_{i}": layer(i) for i in range(min(CYCLE, L))}
 if L > CYCLE:

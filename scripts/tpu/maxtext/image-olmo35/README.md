@@ -8,4 +8,4 @@ path, `max_num_checkpoints_to_keep` in SFT, and the block-doubling inverse index
 miscompiles on TPU v4). The patch is `git diff 51f8cc4b 9f55e7b6 -- src` on abhishekraok/maxtext (branch `olmo35-posttrain-perf`),
 written by `fetch_patches.sh` from `maxtext_source`. It covers `src/` only: the base image has no top-level `scripts/`.
 
-    cp ../image/build.sh . && ./build.sh 51f8cc4b7f4fc9976c3ab5eb2855ebc876c5e9d2   # -> maxtext-posttrain:51f8cc4b-p907d86f3
+    ./build.sh   # -> maxtext-posttrain:51f8cc4b-p907d86f3 (base from maxtext_source)

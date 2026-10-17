@@ -19,11 +19,13 @@ import sys
 
 import jax
 import numpy as np
-import orbax.checkpoint as ocp
 import torch
+from orbax import checkpoint as ocp
 from safetensors.torch import save_file
 
-src, ref, out = sys.argv[1], sys.argv[2], sys.argv[3]
+src, ref, out = sys.argv[1], sys.argv[2], os.path.abspath(sys.argv[3])
+if os.path.exists(out) and (not os.path.isdir(out) or os.listdir(out)):
+    raise ValueError("out must be a new or empty directory; do not mix exports")
 CYCLE = 8
 
 ckpt = ocp.PyTreeCheckpointer()
@@ -41,9 +43,17 @@ def drop_rngs(t):  # Tunix also saves the modules' RNG streams (moe_block/rngs/*
 
 p = drop_rngs(p)
 
-with open(os.path.join(ref, "model.safetensors"), "rb") as f:
-    n = struct.unpack("<Q", f.read(8))[0]
-    target = {k: v["shape"] for k, v in json.loads(f.read(n)).items() if k != "__metadata__"}
+index_path = os.path.join(ref, "model.safetensors.index.json")
+if os.path.exists(index_path):
+    with open(index_path) as f:
+        reference_shards = sorted(set(json.load(f)["weight_map"].values()))
+else:
+    reference_shards = ["model.safetensors"]
+target = {}
+for shard in reference_shards:
+    with open(os.path.join(ref, shard), "rb") as f:
+        n = struct.unpack("<Q", f.read(8))[0]
+        target.update({k: v["shape"] for k, v in json.loads(f.read(n)).items() if k != "__metadata__"})
 with open(os.path.join(ref, "config.json")) as f:
     cfg = json.load(f)
 V, L = cfg["vocab_size"], cfg["num_hidden_layers"]
@@ -131,6 +141,11 @@ tensors = {
 }
 save_file(tensors, os.path.join(out, "model.safetensors"), metadata={"format": "pt"})
 for f in os.listdir(ref):
-    if f != "model.safetensors" and os.path.isfile(os.path.join(ref, f)):
+    # Copy model/tokenizer metadata, never the reference's weights or an index pointing to them.
+    if f.endswith((".safetensors", ".bin", ".safetensors.index.json", ".bin.index.json")):
+        continue
+    if os.path.isfile(os.path.join(ref, f)):
         shutil.copy(os.path.join(ref, f), os.path.join(out, f))
+    elif f == "chat_templates":
+        shutil.copytree(os.path.join(ref, f), os.path.join(out, f))
 print(f"wrote {len(tensors)} tensors to {out}")

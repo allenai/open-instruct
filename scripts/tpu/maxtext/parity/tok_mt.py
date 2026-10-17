@@ -2,6 +2,7 @@
 
 import collections
 import json
+import os
 import sys
 
 import transformers
@@ -15,10 +16,7 @@ tok = (transformers.PreTrainedTokenizerFast if FIX else transformers.AutoTokeniz
 print("tokenizer class", type(tok).__name__)
 pad_id = tok.pad_token_id if tok.pad_token_id is not None else tok.unk_token_id
 mask = u.SFTPromptMasking(
-    "messages",
-    completion_only=True,
-    max_target_length=int(__import__("os").environ.get("TOKMT_MAXLEN", 32768)),
-    unk_id=-100,
+    "messages", completion_only=True, max_target_length=int(os.environ.get("TOKMT_MAXLEN", 32768)), unk_id=-100
 )
 stats = collections.Counter()
 examples = []
@@ -37,11 +35,7 @@ for r in rows:
         examples.append((r["i"], "error", str(e)[:200]))
         continue
     ex = u.tokenization(
-        ex,
-        tok,
-        truncation=False,
-        max_length=int(__import__("os").environ.get("TOKMT_MAXLEN", 32768)),
-        column_names=["messages"],
+        ex, tok, truncation=False, max_length=int(os.environ.get("TOKMT_MAXLEN", 32768)), column_names=["messages"]
     )
     o = mask.map(ex)
     mt_ids, mt_lab = o["inputs"].tolist(), o["targets"].tolist()

@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 import torch
-import torch.distributed.checkpoint as dcp
+from torch.distributed import checkpoint as dcp
 
 src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)

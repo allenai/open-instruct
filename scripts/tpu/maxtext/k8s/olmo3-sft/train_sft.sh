@@ -8,6 +8,10 @@ set -f # EXTRA_ARGS is split on spaces below; keep values like logical_axis_rule
 
 : "${RUN_NAME:?}" "${OUTPUT_DIR:?}" "${LOAD_PARAMETERS_PATH:?}" "${TOKENIZER_PATH:?}" "${TRAIN_FILES:?}"
 : "${TOTAL_DEVICES:?}" "${GLOBAL_BATCH:?}" "${STEPS:?}"
+if [[ "$RUN_NAME" == CHANGE_ME ]]; then
+  echo "Set RUN_NAME to a unique name in your overlay before launching" >&2
+  exit 2
+fi
 MODEL_NAME="${MODEL_NAME:-olmo3-7b}"
 SEQ_LEN="${SEQ_LEN:-4096}"
 LR="${LR:-8e-5}"
@@ -28,7 +32,7 @@ print($GLOBAL_BATCH // int(slots))")
 
 # The image (maxtext-posttrain, scripts/tpu/maxtext/image) carries the MaxText patches; fail fast if it doesn't.
 python3 -c "from maxtext.input_pipeline import input_pipeline_utils as u; assert hasattr(u, '_split_conversation_into_segments')"
-models_dir=$(python3 -c "import os, maxtext.models; print(os.path.dirname(maxtext.models.__file__))")
+models_dir=$(python3 -c "import os; from maxtext import models; print(os.path.dirname(models.__file__))")
 
 cat <<INFO
 === Olmo 3 SFT (MaxText) ===
