@@ -13,7 +13,7 @@ from pathlib import Path
 
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import task_verifiers
+from open_instruct.miles.rewards import h080, task_verifiers
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -223,6 +223,14 @@ def _verify_row(row, tokenizer, limit, known):
         raise InputError("Prepared prompt token IDs differ under this tokenizer/template")
     metadata["run_prompt_tokens"] = len(ids)
     metadata["run_prompt_token_ids_sha256"] = _sha(_encoded(ids))
+
+
+def _verify_gate_conversation(row, tokenizer, template, gate_names):
+    if not any(spec["name"] in gate_names for spec in row["metadata"]["verifiers"]):
+        return
+    messages = h080.sample_messages(row["metadata"])
+    if _render(messages, tokenizer, template) != row["input"]:
+        raise InputError("IF gate judge conversation does not reproduce the complete policy input; preserve all turns")
 
 
 def _adopt(data, tokenizer, template, inputs):
@@ -440,6 +448,12 @@ def prepare_data(
             {name: {"factory": factory} for name, factory in FACTORIES.items()} if registry is None else registry
         ) | registry_overrides
     known = registry if registry is not None else FACTORIES
+    gate_names = {
+        name
+        for name, spec in known.items()
+        if isinstance(spec, dict)
+        and spec.get("factory") == "open_instruct.miles.rewards.if_gate_yes.IfGateYesVerifier"
+    }
     if not partitions.get("train"):
         raise InputError("Preparation requires nonempty training data")
     train_prompts, eval_prompts = set(), set()
@@ -448,6 +462,7 @@ def prepare_data(
         for index, row in enumerate(rows, 1):
             try:
                 _verify_row(row, tokenizer, max_prompt_length, known)
+                _verify_gate_conversation(row, tokenizer, template, gate_names)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
             (train_prompts if split == "train" else eval_prompts).add(row["input"])

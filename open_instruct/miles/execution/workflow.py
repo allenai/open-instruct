@@ -303,13 +303,9 @@ def execute(spec):
             seed=planned.miles.get("seed", 17),
             **(
                 {
-                    "registry_overrides": {
-                        name: {
-                            "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
-                            "config": {"name": name},
-                        }
-                        for name in spec.judges["judging"]["bindings"]
-                    }
+                    "registry_overrides": importlib.import_module(
+                        "open_instruct.miles.rewards.judge_registry"
+                    ).verifier_overrides(spec.judges)
                 }
                 if spec.judges["judging"]["bindings"]
                 else {}

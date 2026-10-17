@@ -134,3 +134,82 @@ late probe results from retired incarnations. This fix does not independently
 qualify engine replacement or enable fault tolerance. The bounded named-judge
 exercise and its failed attempts are recorded in the
 [measurement note](https://github.com/allenai/open-instruct/blob/813bd5988beb16be5b4d879ee3e2c49d8d859ee5/docs/miles/measurements/multinode-judges-20260912.md).
+
+## IF gate-yes reward
+
+The opt-in `open-instruct/if-gate-yes` rubric binds an IF verifier name to a
+composite reward: binary prompt-level loose constraint pass P multiplied by one
+only for a parsed `yes`; `partial` and `no` multiply by zero. P requires every
+constraint to pass at least one of the eight IFEval loose response variants,
+using the same instruction registry and checker functions as `ManifestIFVerifier`.
+Its fractional constraint score C remains a separate diagnostic. Every eligible
+IF response is judged, including P=0. Truncated responses and missing/empty final
+sections retain the bridge's pre-scoring zero gates and are not judged.
+
+Use this registry entry in the trusted `reward_config` JSON:
+
+```json
+{"ifeval": {"factory": "open_instruct.miles.rewards.if_gate_yes.IfGateYesVerifier", "config": {"name": "ifeval"}}}
+```
+
+Keep any other registry entries, including maths, unchanged. Bind `ifeval` to
+`rubrics.gate_yes` and the managed H066/H086 service:
+
+```toml
+[rubrics.gate_yes]
+profile = "open-instruct/if-gate-yes"
+max_response_tokens = 16
+temperature = 0.0
+seed = 1
+max_concurrent_calls = 32
+
+[judging.bindings.ifeval]
+judge = "general"
+rubric = "gate_yes"
+
+[launch.env]
+OI_MILES_JUDGE_FAILURE_POLICY = "raise"
+```
+
+The profile validates Qwen3-32B revision `9216db5781bf21249d130ec9da846c4624c16137`,
+SGLang TP1, YaRN context 131072, `qwen3-no-thinking`, server concurrency 16,
+timeout 600, and H066 production's prepared directory (see `rewards/h080.py`).
+The client seed is independent of the training seed. Both context tokenization
+and completion have a literal 600-second timeout, unaffected by the infrastructure
+timeout multiplier. Context overflow never truncates the evidence and remains fatal.
+
+The vendored H080 prompt is checked against SHA256
+`133a5e5448fff28da6b848efefb303fd7bd51dc27d37981e48054db90555cb36`.
+The complete role-labelled conversation and extracted final text enter it
+verbatim; parsing full-matches `Verdict: (yes|partial|no)\.?` case-insensitively
+after stripping the reply. There are three attempts total. The IF adapter defaults
+to `OI_MILES_JUDGE_FAILURE_POLICY=raise`: exhausted transport or parsing failures
+halt scoring, including when P=0, with failure diagnostics and no quality zero.
+Every failed attempt is logged, including grades from groups later filtered out.
+
+Prepared rows use raw `metadata.query` for H070 single-turn inputs. For other
+conversations, preserve raw structured turns in `metadata.judge_conversation`.
+Preparation re-renders these turns with the policy template and requires exact
+equality to the policy input, preventing silent loss of earlier turns. Neither
+prompt nor final-answer whitespace is normalized by the judge adapter.
+
+Every new training server must replay the sealed H086 controls before its ready
+marker is published. This reads `oe-eval-default` and requires exact 540/540
+parsed-label identity, pinned manifest/labels, ids/hashes, and identical prompts.
+The report lives under `OUTPUT/cluster/ATTEMPT/h087-qualification-*.json`.
+For standalone qualification inside the image, run
+`python scripts/miles/h087_qualify_adapter.py --out /output/qualification` on one
+GPU; it uses the same managed server command and adapter client. This does not
+replace qualification of the eventual training server process.
+
+Existing `rollout/general_judge/*` metrics describe consumed samples; skipped
+samples are counted separately. H087 also uses one CPU Ray actor to count all
+logical judge requests, including filtered groups, and enforce client concurrency
+32 across workers. Retries stay within the same logical request; `attempts` counts
+grading attempts (including failures during context checks). `completed` includes all terminal requests and `failed`
+is a subset. At each optimizer boundary the driver logs `h087_judge_boundary`
+JSON with cumulative arrivals/completions/failures/skips, queued/in-flight counts,
+backlog, attempts, latency, and step duration. The first record's startup t0 runs
+from cluster-bootstrap entry to the first completed optimizer step. This hook
+requires one optimizer update per collection, as in H087. Native dynamic-filter
+and refill diagnostics remain in the full driver log.

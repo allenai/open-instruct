@@ -68,6 +68,7 @@ class GeneralJudgeConfig:
     seed: int
     max_concurrent_calls: int
     check_context: bool = False
+    scale_timeout: bool = True
 
 
 def general_judge_config(args: Any) -> GeneralJudgeConfig:
@@ -185,6 +186,16 @@ def _get_executor(max_workers: int) -> ThreadPoolExecutor:
     return executor
 
 
+async def async_request(config, prompt):
+    return await asyncio.get_running_loop().run_in_executor(
+        _get_executor(config.max_concurrent_calls), _request, config, prompt
+    )
+
+
+def failure_policy(args, default="zero"):
+    return getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", default)
+
+
 def count_prompt_tokens(config: GeneralJudgeConfig, prompt: str) -> int:
     """Count the complete chat request with the serving tokenizer/template."""
     response = infra_timeouts.request(
@@ -194,6 +205,7 @@ def count_prompt_tokens(config: GeneralJudgeConfig, prompt: str) -> int:
         json={"model": config.model, "messages": [{"role": "user", "content": prompt}], "add_generation_prompt": True},
         headers={"Authorization": f"Bearer {config.api_key}"},
         timeout=config.timeout,
+        scale_timeout=config.scale_timeout,
     )
     response.raise_for_status()
     count = response.json()["count"]
@@ -232,6 +244,7 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
             },
             headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
             timeout=config.timeout,
+            scale_timeout=config.scale_timeout,
         )
         response.raise_for_status()
         payload = response.json()
@@ -283,7 +296,7 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
         prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=str(sample.response), target=target)
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
-    policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
+    policy = failure_policy(args)
     if policy not in {"zero", "raise"}:
         raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
     started = time.monotonic()

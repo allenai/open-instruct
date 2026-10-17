@@ -50,11 +50,11 @@ def watch(operation, *, previous_timeout=None):
             logger.warning("Slow infrastructure operation finished: operation=%s elapsed_s=%.1f", operation, elapsed)
 
 
-def request(session, method, url, *, timeout, **kwargs):
+def request(session, method, url, *, timeout, scale_timeout=True, **kwargs):
     parsed = urlsplit(url)
     operation = f"HTTP {method.upper()} {parsed.hostname}:{parsed.port}{parsed.path}"
     with watch(operation, previous_timeout=timeout):
-        return getattr(session, method)(url, timeout=seconds(timeout), **kwargs)
+        return getattr(session, method)(url, timeout=seconds(timeout) if scale_timeout else timeout, **kwargs)
 
 
 async def wait_for(awaitable, timeout, *, operation):

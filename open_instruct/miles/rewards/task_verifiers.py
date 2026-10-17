@@ -57,24 +57,29 @@ class R1FormatVerifier(MultiplicationVerifier):
         return RewardResult(float(re.match(r".*?</think>\s*<answer>.*?</answer>", prediction, re.DOTALL) is not None))
 
 
+def if_constraint_bundle(target):
+    """Normalize the constraint formats accepted by H070's manifest verifier."""
+    if isinstance(target, str):
+        try:
+            target = json.loads(target)
+        except ValueError:
+            target = ast.literal_eval(target)
+    if isinstance(target, list):
+        if len(target) != 1:
+            raise InputError("IF target requires exactly one constraint bundle")
+        target = target[0]
+        if isinstance(target, str):
+            target = json.loads(target)
+    if not isinstance(target, dict) or "instruction_id" not in target or "kwargs" not in target:
+        raise InputError("IF target requires instruction_id and kwargs")
+    return target
+
+
 class ManifestIFVerifier(MultiplicationVerifier):
     """Translate canonical baseline constraint targets to OI's legacy list wrapper."""
 
     async def async_call(self, tokens, prediction, label, **kwargs):
-        target = label
-        if isinstance(target, str):
-            try:
-                target = json.loads(target)
-            except ValueError:
-                target = ast.literal_eval(target)
-        if isinstance(target, list):
-            if len(target) != 1:
-                raise InputError("IF target requires exactly one constraint bundle")
-            target = target[0]
-            if isinstance(target, str):
-                target = json.loads(target)
-        if not isinstance(target, dict) or "instruction_id" not in target or "kwargs" not in target:
-            raise InputError("IF target requires instruction_id and kwargs")
+        target = if_constraint_bundle(label)
         # Grading imports math/NLP dependencies; defer them so dataset planning
         # and the lightweight preparation verifiers work without that stack.
         factory = importlib.import_module("open_instruct.ground_truth_utils").IFEvalVerifier

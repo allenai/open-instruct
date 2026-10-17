@@ -1,5 +1,6 @@
 """MILES orchestration with explicit Core publication and checkpoint boundaries."""
 
+import json
 import os
 import time
 from functools import partial
@@ -21,11 +22,13 @@ from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.rewards import judge_metrics, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args, *, export_hf=None):
+    startup_started_unix = float(os.environ.get("OI_MILES_JOB_STARTED_UNIX", time.time()))
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     stopped_for_time = False
@@ -40,6 +43,7 @@ async def train(args, *, export_hf=None):
     object_store.init_instance(args, contribute_segment=False)
     init_tracking(args)
     define_step_key_metric_group("errors", "errors/elapsed_seconds")
+    judge_counters = judge_metrics.start() if judge_registry.gate_bindings() else None
     manager = None
     inference = None
     learner = None
@@ -133,6 +137,7 @@ async def train(args, *, export_hf=None):
                 await evaluation.dispatch(
                     args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
                 )
+        last_boundary = time.monotonic()
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
@@ -146,6 +151,17 @@ async def train(args, *, export_hf=None):
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
+                if judge_counters is not None:
+                    counters = await judge_counters.snapshot.remote()
+                    now = time.monotonic()
+                    counters.update(
+                        step=rollout_id + 1,
+                        step_seconds=now - last_boundary,
+                        startup_started_unix=startup_started_unix,
+                        startup_t0_seconds=counters["unix"] - startup_started_unix if not completed[:-1] else None,
+                    )
+                    logger.info("h087_judge_boundary %s", json.dumps(counters, allow_nan=False))
+                    last_boundary = now
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.
                 startup_cache.publish_progress(args, rollout_id)

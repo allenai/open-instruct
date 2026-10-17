@@ -1,0 +1,67 @@
+[
+  {
+    "name": "fresh b2",
+    "messages": "Explain π in one sentence.",
+    "conversation": "user:\nExplain π in one sentence.",
+    "response": " π is a circle’s circumference divided by its diameter.\n",
+    "prompt": "You are grading whether an AI assistant's final response accomplishes what the user asked for.\n\nConversation (the last user turn is the request being graded; earlier turns are context):\n<conversation>\nuser:\nExplain π in one sentence.\n</conversation>\n\nAssistant's final response:\n<response>\n π is a circle’s circumference divided by its diameter.\n\n</response>\n\nThe user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.\n\n- yes: the response accomplishes the task.\n- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.\n- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.\n\nReply with exactly one line: \"Verdict: yes\", \"Verdict: partial\" or \"Verdict: no\".\n",
+    "prompt_sha256": "b16610d778900ebc0bf52e05b68ae2251a55ebcefe521ac81a4c192bf779a922"
+  },
+  {
+    "name": "off-topic a",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Preserve every turn.\n"
+      },
+      {
+        "role": "user",
+        "content": "Count these: {x}\n"
+      },
+      {
+        "role": "assistant",
+        "content": "Earlier answer."
+      },
+      {
+        "role": "user",
+        "content": "Now write a poem.\n\n"
+      }
+    ],
+    "conversation": "system:\nPreserve every turn.\n\n\nuser:\nCount these: {x}\n\n\nassistant:\nEarlier answer.\n\nuser:\nNow write a poem.\n\n",
+    "response": "keywords only",
+    "prompt": "You are grading whether an AI assistant's final response accomplishes what the user asked for.\n\nConversation (the last user turn is the request being graded; earlier turns are context):\n<conversation>\nsystem:\nPreserve every turn.\n\n\nuser:\nCount these: {x}\n\n\nassistant:\nEarlier answer.\n\nuser:\nNow write a poem.\n\n\n</conversation>\n\nAssistant's final response:\n<response>\nkeywords only\n</response>\n\nThe user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.\n\n- yes: the response accomplishes the task.\n- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.\n- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.\n\nReply with exactly one line: \"Verdict: yes\", \"Verdict: partial\" or \"Verdict: no\".\n",
+    "prompt_sha256": "1f521e0a39c0d0f82f8607df6b54a163fafeb623b579865fb299400d176daeea"
+  },
+  {
+    "name": "hand short",
+    "messages": "What is 2 + 2?",
+    "conversation": "user:\nWhat is 2 + 2?",
+    "response": "4",
+    "prompt": "You are grading whether an AI assistant's final response accomplishes what the user asked for.\n\nConversation (the last user turn is the request being graded; earlier turns are context):\n<conversation>\nuser:\nWhat is 2 + 2?\n</conversation>\n\nAssistant's final response:\n<response>\n4\n</response>\n\nThe user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.\n\n- yes: the response accomplishes the task.\n- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.\n- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.\n\nReply with exactly one line: \"Verdict: yes\", \"Verdict: partial\" or \"Verdict: no\".\n",
+    "prompt_sha256": "a5f2f004a8d52af1cb393893e53afff18c47a87111ad2eff6a61bfa2351c8454"
+  },
+  {
+    "name": "hand gaming",
+    "messages": "Write an essay.",
+    "conversation": "user:\nWrite an essay.",
+    "response": "essay essay essay",
+    "prompt": "You are grading whether an AI assistant's final response accomplishes what the user asked for.\n\nConversation (the last user turn is the request being graded; earlier turns are context):\n<conversation>\nuser:\nWrite an essay.\n</conversation>\n\nAssistant's final response:\n<response>\nessay essay essay\n</response>\n\nThe user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.\n\n- yes: the response accomplishes the task.\n- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.\n- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.\n\nReply with exactly one line: \"Verdict: yes\", \"Verdict: partial\" or \"Verdict: no\".\n",
+    "prompt_sha256": "979b94c86589ebe42799d53a3389796e258c63a57b5a59bfdff0781510a80d2d"
+  },
+  {
+    "name": "whitespace",
+    "messages": " user:\n literal role marker\r\n",
+    "conversation": "user:\n user:\n literal role marker\r\n",
+    "response": "\n  final  \n",
+    "prompt": "You are grading whether an AI assistant's final response accomplishes what the user asked for.\n\nConversation (the last user turn is the request being graded; earlier turns are context):\n<conversation>\nuser:\n user:\n literal role marker\r\n\n</conversation>\n\nAssistant's final response:\n<response>\n\n  final  \n\n</response>\n\nThe user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.\n\n- yes: the response accomplishes the task.\n- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.\n- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.\n\nReply with exactly one line: \"Verdict: yes\", \"Verdict: partial\" or \"Verdict: no\".\n",
+    "prompt_sha256": "1a7ca6e76aedb9119ab72c1e02a09eacba120a93a64a9dd561496d35fa602787"
+  },
+  {
+    "name": "empty-response",
+    "messages": "Answer the question.",
+    "conversation": "user:\nAnswer the question.",
+    "response": "",
+    "prompt": "You are grading whether an AI assistant's final response accomplishes what the user asked for.\n\nConversation (the last user turn is the request being graded; earlier turns are context):\n<conversation>\nuser:\nAnswer the question.\n</conversation>\n\nAssistant's final response:\n<response>\n\n</response>\n\nThe user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.\n\n- yes: the response accomplishes the task.\n- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.\n- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.\n\nReply with exactly one line: \"Verdict: yes\", \"Verdict: partial\" or \"Verdict: no\".\n",
+    "prompt_sha256": "eff0784cb44e875822b6d0afc1439c7d9458d0e0cd6fb4c40832e0865243d082"
+  }
+]

@@ -24,7 +24,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import general_judge, judge_registry
+from open_instruct.miles.rewards import general_judge, if_gate_yes, judge_metrics, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -322,6 +322,14 @@ async def _score(args, sample):
             {"name": spec["name"], "score": 0.0, "weight": spec.get("weight", 1.0), "cost": 0.0}
             for spec in metadata["verifiers"]
         ]
+        for spec in metadata["verifiers"]:
+            if isinstance(registry[spec["name"]], if_gate_yes.IfGateYesVerifier):
+                await judge_metrics.tracker().skip()
+                metadata.setdefault("verifier_diagnostics", {})[spec["name"]] = {
+                    "kind": "general_judge",
+                    "status": "skipped",
+                    "skip_reason": reason,
+                }
         return 0.0
     components = []
     total = 0.0
@@ -334,6 +342,12 @@ async def _score(args, sample):
             # Text math verifiers do not use token IDs. Never pass the hidden
             # reasoning's tokens alongside an extracted final-answer string.
             tokens = []
+        if isinstance(registry[name], if_gate_yes.IfGateYesVerifier):
+            score = await registry[name].score_sample(args, sample, tokens, response, copy.deepcopy(spec["target"]))
+            score = _finite(score, "verifier score")
+            total += weight * score
+            components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
+            continue
         if judge_registry.bound(name):
             if args.olmo_core.reward_final_answer_only:
                 raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")

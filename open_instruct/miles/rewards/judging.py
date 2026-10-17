@@ -6,12 +6,14 @@ from urllib.parse import urlsplit
 
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.rewards import h080
 
 REGISTRY_ENV = "OI_MILES_JUDGE_REGISTRY"
 PROFILES = {
     "open-instruct/" + name: name
     for name in ("general-quality", "general-quality_ref", "general-web_instruct_general_verifier")
 }
+PROFILES["open-instruct/if-gate-yes"] = "if-gate-yes"
 
 
 def parse(document):
@@ -97,7 +99,11 @@ def parse(document):
                 raise InputError("external judge cannot specify managed placement fields")
     for name, rubric in rubrics.items():
         validation.mapping(rubric, f"rubrics.{name}")
-        validation.fields(rubric, f"rubrics.{name}", {"profile", "max_response_tokens", "temperature"})
+        validation.fields(
+            rubric,
+            f"rubrics.{name}",
+            {"profile", "max_response_tokens", "temperature", "seed", "max_concurrent_calls"},
+        )
         if rubric.get("profile") not in PROFILES:
             raise InputError("rubric requires a supported open-instruct/general-* profile")
         rubric.setdefault("max_response_tokens", 2048)
@@ -106,6 +112,18 @@ def parse(document):
         validation.number(rubric["temperature"], f"rubrics.{name}.temperature")
         if rubric["temperature"] < 0:
             raise InputError("rubric temperature must be nonnegative")
+        if rubric["profile"] == "open-instruct/if-gate-yes":
+            rubric.setdefault("seed", 1)
+            rubric.setdefault("max_concurrent_calls", 32)
+            if (
+                rubric["max_response_tokens"],
+                rubric["temperature"],
+                rubric["seed"],
+                rubric["max_concurrent_calls"],
+            ) != (16, 0.0, 1, 32):
+                raise InputError(
+                    "if-gate-yes requires max_response_tokens=16, temperature=0, seed=1, max_concurrent_calls=32"
+                )
     for name, binding in bindings.items():
         validation.mapping(binding, f"binding {name}")
         validation.fields(binding, f"binding {name}", {"judge", "rubric"})
@@ -113,6 +131,10 @@ def parse(document):
             raise InputError(f"binding {name} references an unknown judge or rubric")
         if rubrics[binding["rubric"]]["max_response_tokens"] >= judges[binding["judge"]]["max_context_length"]:
             raise InputError("judge output reservation must be smaller than its context")
+        if rubrics[binding["rubric"]]["profile"] == "open-instruct/if-gate-yes":
+            expected = h080.SERVICE
+            if any(judges[binding["judge"]].get(key) != value for key, value in expected.items()):
+                raise InputError("if-gate-yes requires the pinned H066/H086 managed judge service")
     if judges and not bindings:
         raise InputError("named judges require explicit verifier bindings")
     return {"judges": judges, "rubrics": rubrics, "judging": {"bindings": bindings}}

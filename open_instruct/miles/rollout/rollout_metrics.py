@@ -16,6 +16,7 @@ from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles.rewards import judge_metrics
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -74,20 +75,7 @@ def math_verifier_metrics(samples) -> dict[str, float]:
 
 
 def general_judge_metrics(samples) -> dict[str, float]:
-    records = [
-        record
-        for sample in samples
-        for record in ((getattr(sample, "metadata", None) or {}).get("verifier_diagnostics") or {}).values()
-        if isinstance(record, dict) and record.get("kind") == "general_judge"
-    ]
-    if not records:
-        return {}
-    failures = sum(record.get("status") == "judge_error" for record in records)
-    return {
-        "rollout/general_judge/samples": len(records),
-        "rollout/general_judge/errors": failures,
-        "rollout/general_judge/error_fraction": failures / len(records),
-    }
+    return judge_metrics.consumed_metrics(samples)
 
 
 def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_time) -> bool:

@@ -1,0 +1,19 @@
+You are grading whether an AI assistant's final response accomplishes what the user asked for.
+
+Conversation (the last user turn is the request being graded; earlier turns are context):
+<conversation>
+{conversation}
+</conversation>
+
+Assistant's final response:
+<response>
+{response}
+</response>
+
+The user's message may contain formatting, length, keyword or style constraints. A program checks those separately: do not grade them, and do not give credit for satisfying them. Grade only whether the response does the user's underlying task: it delivers the content that was asked for (the answer, story, essay, rewrite, list, explanation, code, and so on), on the requested subject, coherently and usably. A brief response is fine when the user asked for brevity.
+
+- yes: the response accomplishes the task.
+- partial: it addresses the task but omits a substantial part of what was asked, or contains significant errors.
+- no: it does not accomplish the task. Examples: off-topic text, a fragment, filler or a keyword list that only imitates the requested format, a restatement of the instructions, garbled or repetitive text, a refusal of a benign request, or an empty response.
+
+Reply with exactly one line: "Verdict: yes", "Verdict: partial" or "Verdict: no".

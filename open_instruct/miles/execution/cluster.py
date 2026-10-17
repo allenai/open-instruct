@@ -26,7 +26,7 @@ from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import rendezvous
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry, judge_server, judging
+from open_instruct.miles.rewards import h087_qualification, judge_registry, judge_server, judging
 
 
 def write(path, value):
@@ -216,6 +216,7 @@ class Supervisor:
 
 
 def run(path):
+    job_started_unix = time.time()
     spec = RunSpec.load(path)
     layout = topology.plan(spec)
     if (Path(spec.output["root"]) / "workflow.json").exists() and not spec.launch["auto_resume"]:
@@ -267,6 +268,7 @@ def run(path):
             {"address": address, "head": head, "ray_devices": ray_devices, "judge_devices": judges, "layout": layout},
         )
         env = dict(os.environ)
+        env["OI_MILES_JOB_STARTED_UNIX"] = str(job_started_unix)
         registry = judging.registry(spec.judges)
         health = {}
         for name, devices in judges.items():
@@ -292,6 +294,18 @@ def run(path):
 
             supervisor.wait(ready)
             supervisor.health[name] = url
+            if any(
+                registry["bindings"][binding]["judge"] == name for binding in judge_registry.gate_bindings(registry)
+            ):
+                # This exact process must qualify before any rollout begins. A
+                # standalone qualification of a different process is insufficient.
+                asyncio.run(
+                    h087_qualification.qualify(
+                        registry["judges"][name],
+                        registry["judges"][name]["endpoint"],
+                        root / f"h087-qualification-{name}-{rank}.json",
+                    )
+                )
             write(root / f"judge-ready-{name}.json", {"endpoint": registry["judges"][name]["endpoint"]})
         for name, service in registry["judges"].items():
             if service["mode"] == "managed":

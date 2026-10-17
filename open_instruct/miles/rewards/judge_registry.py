@@ -2,13 +2,14 @@
 
 import asyncio
 import dataclasses
+import importlib
 import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
 from urllib import request
 
-from open_instruct.miles.rewards import general_judge, judging
+from open_instruct.miles.rewards import general_judge, h080, judging
 
 
 def registry():
@@ -26,6 +27,31 @@ def bound(name):
     return value is not None and name in value["bindings"]
 
 
+def gate_bindings(value=None):
+    value = value if value is not None else registry()
+    if value is None:
+        return set()
+    return {
+        name
+        for name, binding in value["bindings"].items()
+        if value["rubrics"][binding["rubric"]]["profile"] == h080.PROFILE
+    }
+
+
+def verifier_overrides(sections):
+    value = judging.registry(sections)
+    gates = gate_bindings(value)
+    return {
+        name: {
+            "factory": "open_instruct.miles.rewards.if_gate_yes.IfGateYesVerifier"
+            if name in gates
+            else "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+            "config": {"name": name},
+        }
+        for name in value["bindings"]
+    }
+
+
 def resolve_request(args, name, query, prediction, target):
     value = registry()
     if value is None:
@@ -33,6 +59,17 @@ def resolve_request(args, name, query, prediction, target):
     binding = value["bindings"][name]
     service, rubric = value["judges"][binding["judge"]], value["rubrics"][binding["rubric"]]
     kind = judging.PROFILES[rubric["profile"]]
+    if kind == "if-gate-yes":
+        adapter = importlib.import_module("open_instruct.miles.rewards.if_gate_yes")
+        prompt = h080.render_prompt(query, prediction)
+        return (
+            adapter.client_config(service, service["endpoint"]),
+            prompt,
+            h080.PROMPT_SHA256,
+            "h080-verdict",
+            binding,
+            h080.PROMPT_SHA256,
+        )
     if kind != "general-quality" and (target is None or target == ""):
         raise ValueError(f"{name} requires a reference target")
     prompt, digest = general_judge.build_judge_prompt(kind, query=query, prediction=prediction, target=target)
@@ -66,6 +103,9 @@ def validate_data(prepared, value):
                             raise ValueError(f"Missing named judge binding for {name}")
                         continue
                     seen.add(name)
+                    if name in gate_bindings(value):
+                        h080.sample_conversation(metadata)
+                        continue
                     if not isinstance(metadata.get("judge_query"), str) or not metadata["judge_query"]:
                         raise ValueError("Judged data requires the preserved full metadata.judge_query")
                     profile = value["rubrics"][value["bindings"][name]["rubric"]]["profile"]
@@ -92,6 +132,10 @@ async def probe(output):
         scores = []
         for response in ("The capital of France is Paris.", "The capital of France is Saturn, a type of sandwich."):
             sample = SimpleNamespace(response=response, metadata={"judge_query": "What is the capital of France?"})
+            if name in gate_bindings(value):
+                # The exact 540-control replay already ran on the service owner.
+                # Do not send canary grades before the driver's metrics actor exists.
+                continue
             score = await general_judge.general_judge_score(
                 SimpleNamespace(seed=1, llm_judge_failure_policy="raise"), sample, name=name, target="Paris."
             )
@@ -106,7 +150,7 @@ async def probe(output):
             )
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         Path(output).write_text(json.dumps(reports, indent=2))
-        if scores[0] <= scores[1]:
+        if scores and scores[0] <= scores[1]:
             raise RuntimeError(f"Judge known-answer contrast failed for {name}")
     return reports
 
