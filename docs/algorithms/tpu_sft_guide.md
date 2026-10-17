@@ -4,11 +4,11 @@ Olmo 3.5 small (the 4T EMO base) on Dolci-Think with H045's recipe, on **one TPU
 the `gke-tpu-v4` cluster, through MaxText + Tunix.
 
 Measured cost and outcome: 11,768 steps of 16 × 65,536 tokens at a median 3.94 s/step, 13.5 h wall clock from submit
-to the last step. The loss matches H045's GPU runs (parity windows in open-instruct#1933). The GPU recipe takes 5 h 54 m on
+to the last step. The loss matches H045's GPU runs (parity windows in [open-instruct#1933](https://github.com/allenai/open-instruct/issues/1933)). The GPU recipe takes 5 h 54 m on
 2×8 H100, so the TPU path is slower per run. Its advantage is capacity: four of these runs fit at once without
 touching Beaker.
 
-The recipe is [`scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8/`](https://github.com/allenai/open-instruct/tree/main/scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8).
+The recipe is `scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8/`.
 Its `kustomization.yaml` header records why each setting is what it is; read it before editing. Olmo 3 7B has its
 own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2x4` slice, which no longer exists. `scripts/tpu/maxtext/README.md` lists the MaxText patches.
 
@@ -17,7 +17,7 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 | Run | What it is |
 |---|---|
 | `olmo35-sft-h045-tpu-full-r2` | This recipe, verbatim: the TPU replica of the ledger's H045 anchor (arm `anchor-emo-olmo35-tpu`). 0 restarts, final CE 0.9245. HF export: `/weka/oe-adapt-default/abhishekr/tpu-posttrain/hf/olmo35-sft-h045-tpu-full-r2-step11768`. |
-| H067, H072 (olmo-post-training-ledger) | The same recipe with other data: arms, seeds, resumes and their checks are recorded in those hypothesis files and in open-instruct#1976 and #1977. |
+| H067, H072 (olmo-post-training-ledger) | The same recipe with other data: arms, seeds, resumes and their checks are recorded in those hypothesis files and in [open-instruct#1976](https://github.com/allenai/open-instruct/issues/1976) and [#1977](https://github.com/allenai/open-instruct/issues/1977). |
 
 ## Before you start
 
@@ -137,8 +137,8 @@ kubectl -n olmo get jobset <name>          # TERMINALSTATE, RESTARTS, SUSPENDED 
 kubectl -n olmo get pods -l jobset.sigs.k8s.io/jobset-name=<name>
 ```
 
-Startup takes ~35 min: the 32 pods start a few minutes after admission, then the model compiles and the first step runs. `k8s/watch_jobset.sh
-<jobset> <run> [max minutes]` saves every pod's log when the JobSet ends. Pod logs vanish once the JobSet is deleted
+Startup takes ~35 min: the 32 pods start a few minutes after admission, then the model compiles and the first step runs. `k8s/watch_jobset.sh <jobset> <run> [max minutes]`
+saves every pod's log when the JobSet ends. Pod logs vanish once the JobSet is deleted
 or restarted, so save them before either.
 
 ## 5. Read the loss
