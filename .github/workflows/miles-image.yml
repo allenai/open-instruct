@@ -11,6 +11,9 @@ on:
         description: Beaker image ID of the published MILES runtime base
         required: true
         type: string
+  # TEMP: validate on the PR before merge; remove before merging.
+  pull_request:
+    paths: [".github/workflows/miles-image.yml"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,7 +48,7 @@ jobs:
 
       - name: Pull runtime base
         env:
-          RUNTIME_BASE: ${{ inputs.runtime_base }}
+          RUNTIME_BASE: ${{ inputs.runtime_base || '01M55QF7G6HXX1JX8AS50ZWHGW' }}
         run: |
           if [[ ! "$RUNTIME_BASE" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]]; then
             echo "runtime_base must be an immutable Beaker image ID, not an alias."
@@ -68,7 +71,7 @@ jobs:
         env:
           IMAGE: ${{ steps.build.outputs.image }}
           SHA: ${{ steps.build.outputs.sha }}
-          RUNTIME_BASE: ${{ inputs.runtime_base }}
+          RUNTIME_BASE: ${{ inputs.runtime_base || '01M55QF7G6HXX1JX8AS50ZWHGW' }}
         run: |
           DESCRIPTION="Experimental MILES/Core integration; open-instruct commit ${SHA}"
           BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
