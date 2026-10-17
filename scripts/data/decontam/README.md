@@ -3,11 +3,13 @@
 `report.py` wraps an independently built, pinned decon 0.3 executable. It does not
 implement a matcher, remove data, or make release, quality, or legal decisions.
 Every receipt says `report_only` and `needs_review`, including zero-candidate runs.
+It is separate from the older Elasticsearch-based overlap scripts in `decontamination/`.
 
 Provide uncompressed JSONL files containing `messages`. The adapter joins nonempty
 system and user contents in conversation order with two newlines, normalizes CR/LF
-to LF and Unicode to NFC, and trims each included message. Assistant and tool
-contents are excluded. Each row needs a nonempty user message; malformed and blank
+to LF and Unicode to NFC, and trims each included message. Assistant, tool and
+environment (Olmo chat templates' tool-output role) contents are excluded; any
+other role aborts the run. Each row needs a nonempty user message; malformed and blank
 rows abort instead of shifting row numbers. Candidate rows use **zero-based physical
 source row numbers**, source ordinals, original-line and normalized-text SHA256s,
 and reference eval keys/indices. Original source IDs and paths are not exported.

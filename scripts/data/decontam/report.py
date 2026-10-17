@@ -37,7 +37,7 @@ def normalized_prompt(row):
         if (
             not isinstance(message, dict)
             or not isinstance(message.get("role"), str)
-            or message["role"] not in {"system", "user", "assistant", "tool"}
+            or message["role"] not in {"system", "user", "assistant", "tool", "environment"}
         ):
             raise AuditError("invalid_message_role")
         if message["role"] not in {"system", "user"}:
