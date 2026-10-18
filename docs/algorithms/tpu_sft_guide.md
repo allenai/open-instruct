@@ -75,9 +75,12 @@ step time over steps 31-100, so a stalled step counts at its full cost.
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
-- **Either slice works for a 64-row recipe.** Without the shim the `8x8x8` costs ~1.09x the chip-hours of the
-  `4x4x8` and finishes a run ~3.6x sooner (H088, allenai/open-instruct#2020). It cannot run the 16-row recipe at
-  that rate (see [Changing the recipe](#changing-the-recipe)).
+- **Either slice works for a 64-row recipe.** Without the shim the `8x8x8` is projected at ~1.09x the chip-hours of
+  the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
+  not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
+  10-18). The `8x8x8`'s stall rate over a whole run without the shim is not measured. A same-day paired run would
+  establish it. The `8x8x8` cannot run the 16-row recipe at that rate (see
+  [Changing the recipe](#changing-the-recipe)).
 - **On the `8x8x8`, don't run the data-order shim (`MAXTEXT_R2_DATA_EMULATION`) or `MAXTEXT_LOG_BATCH_HASH=1`,** (asynchronous
   hash logging may be enough, untested; H088 removed both together). With both, one step in eight stalled for 20-35 s, at the same steps in
   every run, and H078's runs cost 1.8-1.9x the chip-hours of a `4x4x8`. In xprof the stall is one host's input
