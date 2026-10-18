@@ -60,25 +60,34 @@ runs the same mesh at 64 rows per step, which is a different recipe (H078's 4x b
 big slice needs `olmo35-cp-ep`, which splits each row 32 ways and changes the MoE load-balance term. Measured meshes are
 in [Changing the recipe](#changing-the-recipe).
 
-## Cost: use the `4x4x8`
+## Cost per slice
 
-Same recipe and tokens per run (12.3B), from TensorBoard `perf/*` on finished runs (2026-10-15 to 10-18):
+From TensorBoard `perf/*`. Throughput is tokens per chip-second: tokens per device per step divided by the mean
+step time over steps 31-100, so a stalled step counts at its full cost.
 
-| slice | rows/step | median s/step | tokens/s/chip | TFLOP/s/chip | steps over 3x median | wall, step 1 to end | chip-hours |
-|---|---|---|---|---|---|---|---|
-| `4x4x8` (A0', H076, H082; 6 runs) | 16 | 3.90 | 2,100 | 10.5 | 2-6 per run | 13.2-13.4 h | ~1,700 |
-| `8x8x8` (H078, 2 runs) | 64 | 4.27 | 1,920 | 9.6 | 322-384 (11-13%) | 5.8-6.3 h | ~3,000-3,200 |
+| slice | config | rows/step | median s/step | tokens/s/chip | steps over 3x median |
+|---|---|---|---|---|---|
+| `4x4x8` | the recipe (A0') | 16 | 3.88 | 2,055 | 0 |
+| `8x8x8` | H078's config, with the data-order shim (H088 opt-a) | 64 | 4.28 | 1,386 | 4.3% (13% over H078's whole runs) |
+| `8x8x8` | same, no shim and no batch hashes (H088 opt-b) | 64 | 4.23 | 1,887 | 0 |
+| `8x8x8` | opt-b + `remat_policy=save_dot_except_mlp` (H088 opt-c) | 64 | 4.18 | 1,900 | 0; a tie, keep `full` |
 
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
-- The `8x8x8` finishes 2.2x sooner but costs 1.8-1.9x the chip-hours. Its steady-state rate per chip is only 9% lower:
-  the rest is stalls, where one step in eight takes 20-35 s instead of 4.3 s (2.1-2.5 h per run). The stall sits
-  inside the device step (batch handed over to loss read back on host 0), not in data loading or checkpointing; the
-  cause is not known. Without it the `8x8x8` would cost ~1.1x the chip-hours at 3.5x the speed, so fix it before
-  using a big slice again.
-- Both slices run at ~4% of v4's 275 TFLOP/s bf16 peak by MaxText's own FLOP count. No mesh, remat or per-device
-  batch sweep has been run (see [Changing the recipe](#changing-the-recipe)).
+- **Either slice works for a 64-row recipe.** Without the shim the `8x8x8` costs ~1.09x the chip-hours of the
+  `4x4x8` and finishes a run ~3.6x sooner (H088, allenai/open-instruct#2020). It cannot run the 16-row recipe at
+  that rate (see [Changing the recipe](#changing-the-recipe)).
+- **On the `8x8x8`, don't run the data-order shim (`MAXTEXT_R2_DATA_EMULATION`) or `MAXTEXT_LOG_BATCH_HASH=1`,** (asynchronous
+  hash logging may be enough, untested; H088 removed both together). With both, one step in eight stalled for 20-35 s, at the same steps in
+  every run, and H078's runs cost 1.8-1.9x the chip-hours of a `4x4x8`. In xprof the stall is one host's input
+  pipeline (grain `process_prefetch` waiting 29 s) while every TPU waits for its batch in `jit__device_put_reshard`.
+  The HF input pipeline allows at most one grain worker, so more workers are not a fix.
+- **Keep `remat_policy=full`.** Saving dot outputs except the MLP's gained 0.7%, with the same loss.
+- Outside stalls a step is ~4.0 s of device compute and ~0.2-0.5 s idle. FSDP all-gather waits are ~16% of the
+  compute, and `num_vocab_tiling=16` costs ~4% (the 205 MB embedding is all-gathered and its gradient all-reduced
+  96 times a step).
+- Both slices run at ~4% of v4's 275 TFLOP/s bf16 peak by MaxText's own FLOP count.
 - `jax` `memory_stats()` peaks (0.9-2.3 GiB) leave out XLA temporaries: the same `8x8x8` config needed 32.17 GB at
   compile with `ragged_buffer_factor=4.0`. Read HBM headroom from the compile error or xprof, not from those lines.
 
@@ -256,7 +265,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   | slice | mesh | rows/step | s/step | tokens/s/chip | status |
   |---|---|---|---|---|---|
   | `4x4x8` | `olmo35-ep-as-cp`, fsdp 16 x expert 8 | 16 | 3.94 | 2,080 | r2 and A0'; the recipe |
-  | `8x8x8` | `olmo35-ep-as-cp`, fsdp 64 x expert 8 | 64 | 4.28 | 1,910 | H078's 4x batch; `ragged_buffer_factor=3.0`; stalls, see [Cost](#cost-use-the-4x4x8) |
+  | `8x8x8` | `olmo35-ep-as-cp`, fsdp 64 x expert 8 | 64 | 4.28 | 1,910 | H078's 4x batch; `ragged_buffer_factor=3.0`; 1,887 tokens/s/chip without the shim, see [Cost](#cost-per-slice) |
   | `8x8x8` | `olmo35-cp-ep` + c5f1251d | 16 | 3.33 | 620 | runs, but numerics differ from the `4x4x8` (#1933) |
   | `8x8x16` | `olmo35-cp-ep`, fsdp 64 x context 2 x expert 8 | 64 | - | - | never reached step 1 (egress quota, then a TPU core halt) |
 

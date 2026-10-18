@@ -17,8 +17,10 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Use a `4x4x8`.** The `8x8x8` costs 1.8-1.9x the chip-hours per token for the same recipe (guide: Cost). Don't
-  move a run to a bigger slice to finish sooner.
+- **Pick the slice by cost** (guide: Cost per slice). The 16-row recipe needs a `4x4x8`. A 64-row recipe on the
+  `8x8x8` costs ~1.09x the `4x4x8`'s chip-hours and finishes ~3.6x sooner, but only without the data-order shim
+  (`MAXTEXT_R2_DATA_EMULATION`) and `MAXTEXT_LOG_BATCH_HASH=1`. With them a step in eight stalls 20-35 s
+  (1.8-1.9x the chip-hours).
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
   does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). None of them has been tuned. A new slice or
