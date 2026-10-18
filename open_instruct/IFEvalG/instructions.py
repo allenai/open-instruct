@@ -891,7 +891,8 @@ class JsonFormat(Instruction):
         )
         try:
             json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # Deeply nested arrays exceed the decoder's recursion limit; treat them as invalid JSON.
             return False
         return True
 

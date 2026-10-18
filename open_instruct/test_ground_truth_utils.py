@@ -244,6 +244,14 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         self.assertEqual(result.score, 0.0)
 
 
+class TestIFEvalGJsonFormat(unittest.TestCase):
+    def test_deeply_nested_json_is_rejected_not_raised(self):
+        checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"]("json")
+        self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
+        self.assertFalse(checker.check_following("[" * 100_000 + "]" * 100_000))
+        self.assertFalse(checker.check_following("not json"))
+
+
 class TestIFEvalGWordCounting(unittest.TestCase):
     """Regression tests: `count:counting_composition` and `count:count_unique` used
     nltk.word_tokenize, which emits punctuation (".", ",") as standalone tokens. That
