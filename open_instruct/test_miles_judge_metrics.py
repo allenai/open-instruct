@@ -1,6 +1,7 @@
 """Guard completed logical judge requests across optimizer boundaries."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -218,3 +219,63 @@ def test_pending_window_keeps_only_49_completed_updates_and_never_ages_them():
         assert boundary["terminal_failures_window"] == pending["terminal_failures_window"]
 
     asyncio.run(run())
+
+
+def boundary_line(step, requests, failures, unix):
+    counters = {"step": step, "judge_requests": requests, "judge/terminal_failures": failures, "unix": unix}
+    return f"2026-10-18 INFO driver.py:199 - h087_judge_boundary {json.dumps(counters)}\n"
+
+
+def write_driver_log(root, attempt, boundaries):
+    """boundaries: (step, cumulative requests, cumulative failures, unix) within one attempt."""
+    log = root / "cluster" / attempt / "replica" / "driver-1.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("".join(boundary_line(*b) for b in boundaries))
+
+
+def test_resume_at_u76_rebuilds_the_runs_window_from_driver_logs(tmp_path):
+    # Attempt 1 reached u99 (1,000 requests each, a failure every 10th update); its u76-u99 are lost.
+    write_driver_log(tmp_path, "a1", [(s, 1000 * s, s // 10, 1000.0 + s) for s in range(1, 100)])
+    history = judge_metrics.resume_history(tmp_path, 75)
+    assert len(history) == judge_metrics.FAILURE_WINDOW_UPDATES and history[-1] == (1000, 0)
+    assert history[-6] == (1000, 1)  # u70
+    metrics = judge_metrics.JudgeMetrics()
+    metrics.seed_window(history)
+    # u76 pending: u27..u75 closed plus the pending update, never a fresh window.
+    complete_requests(metrics, 991, 9)
+    window = asyncio.run(metrics.pending_window())
+    assert window["judge_window_updates"] == judge_metrics.FAILURE_WINDOW_UPDATES
+    assert window["judge_requests_window"] == 1000 * 49 + 991
+    assert window["terminal_failures_window"] == 5 + 9  # u30, u40, u50, u60, u70 and the pending update
+    # Nine failures in the first resumed update no longer halt (H087 s18, 10-18).
+    judge_metrics.check_failure_guard(window)
+    # Without the rebuilt window the same update trips, as it did.
+    fresh = judge_metrics.JudgeMetrics()
+    complete_requests(fresh, 1005, 9)
+    with pytest.raises(RuntimeError, match="exceeds 0.5%"):
+        judge_metrics.check_failure_guard(asyncio.run(fresh.pending_window()))
+
+
+def test_replayed_updates_and_persisted_records_supersede_lost_attempts(tmp_path):
+    write_driver_log(tmp_path, "a1", [(s, 10 * s, 0, 100.0 + s) for s in range(1, 80)])
+    # Attempt 2 resumed from u75 and replayed u76-u77 with failures.
+    write_driver_log(tmp_path, "a2", [(76, 10, 2, 900.0), (77, 20, 3, 901.0)])
+    judge_metrics.record_update(tmp_path, 77, 30, 7, 950.0)
+    history = judge_metrics.resume_history(tmp_path, 77)
+    assert history[-2:] == [(10, 2), (30, 7)]
+
+
+def test_resume_before_u50_stays_cumulative_from_u1(tmp_path):
+    for step in range(1, 31):
+        judge_metrics.record_update(tmp_path, step, 40, int(step == 3), float(step))
+    history = judge_metrics.resume_history(tmp_path, 30)
+    assert len(history) == 30 and sum(r for r, _ in history) == 1200 and sum(f for _, f in history) == 1
+    assert judge_metrics.resume_history(tmp_path, 0) == []
+
+
+def test_missing_record_refuses_to_start(tmp_path):
+    write_driver_log(tmp_path, "a1", [(s, 10 * s, 0, float(s)) for s in range(1, 60) if s != 40])
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        judge_metrics.resume_history(tmp_path, 59)
+    with pytest.raises(RuntimeError, match="refusing to start"):
+        judge_metrics.resume_history(tmp_path / "empty", 10)

@@ -10,7 +10,7 @@ import threading
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
@@ -392,7 +392,9 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
 
 
 @pytest.mark.parametrize("policy", ("raise", "zero", "zero_guarded"))
-def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(cpu_driver, monkeypatch, caplog, policy):
+def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(
+    cpu_driver, monkeypatch, caplog, policy, tmp_path
+):
     driver, manager, learner = cpu_driver.driver, cpu_driver.manager, cpu_driver.learner
     caplog.set_level("INFO", logger=driver.logger.name)
     metrics = judge_metrics.JudgeMetrics()
@@ -425,6 +427,7 @@ def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(cpu_driver,
         rollout_batch_size=8,
         n_samples_per_prompt=4,
         global_batch_size=32,
+        save=str(tmp_path / "checkpoints"),
         save_trigger_sentinel=None,
         save_interval=None,
         update_weights_interval=1,
@@ -436,6 +439,10 @@ def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(cpu_driver,
             asyncio.run(driver.train(args))
         assert learner.train.await_count == boundary.await_count == 1
         driver.startup_cache.finish.assert_awaited_once_with(args, success=False)
+        # The halting update is persisted under the run's update number for a later resume.
+        assert [json.loads(line) for line in (tmp_path / judge_metrics.GUARD_RECORD).read_text().splitlines()] == [
+            {"step": 1, "requests": 1000, "failures": 6, "unix": ANY}
+        ]
     else:
         assert asyncio.run(driver.train(args))["completed_rollout_ids"] == [0, 1]
         assert learner.train.await_count == boundary.await_count == 2
@@ -483,7 +490,7 @@ def test_driver_rejects_inexact_guard_update_boundaries(cpu_driver, monkeypatch)
     driver.placement_group.create_rollout_components.assert_not_awaited()
 
 
-def test_driver_halts_while_if_only_collection_discards_all_zero_groups(cpu_driver, monkeypatch, caplog):
+def test_driver_halts_while_if_only_collection_discards_all_zero_groups(cpu_driver, monkeypatch, caplog, tmp_path):
     driver, manager, learner = cpu_driver.driver, cpu_driver.manager, cpu_driver.learner
     caplog.set_level("ERROR")
     metrics = judge_metrics.JudgeMetrics()
@@ -519,6 +526,7 @@ def test_driver_halts_while_if_only_collection_discards_all_zero_groups(cpu_driv
         rollout_batch_size=8,
         n_samples_per_prompt=4,
         global_batch_size=32,
+        save=str(tmp_path / "checkpoints"),
         eval_interval=None,
     )
 
@@ -618,3 +626,22 @@ def test_all_writers_define_training_and_background_axes():
         "perf/*": {"step_metric": "rollout/step", "step_sync": True},
         "eval/*": {"step_metric": "eval/checkpoint_update", "step_sync": False},
     }
+
+
+def test_driver_resume_refuses_to_start_without_the_runs_guard_window(cpu_driver, monkeypatch, tmp_path):
+    driver = cpu_driver.driver
+    monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", "zero_guarded")
+    placement = Mock()
+    monkeypatch.setattr(driver.wiring, "launch_worker_manager", placement)
+    args = SimpleNamespace(
+        olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0),
+        start_rollout_id=75,
+        rollout_batch_size=8,
+        n_samples_per_prompt=4,
+        global_batch_size=32,
+        save=str(tmp_path / "checkpoints"),
+    )
+    with pytest.raises(RuntimeError, match="updates 26..75.*refusing to start"):
+        asyncio.run(driver.train(args))
+    placement.assert_not_called()

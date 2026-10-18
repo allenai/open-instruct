@@ -49,6 +49,9 @@ async def train(args, *, export_hf=None):
     if guarded_judge and args.rollout_batch_size * args.n_samples_per_prompt != args.global_batch_size:
         raise ValueError("H087 zero_guarded requires one optimizer update per collection for judge failure windows")
     startup_started_unix = float(os.environ.get("OI_MILES_JOB_STARTED_UNIX", time.time()))
+    run_root = Path(args.save).parent
+    # Rebuild before placement so a run whose window cannot be restored fails fast.
+    guard_history = judge_metrics.resume_history(run_root, args.start_rollout_id) if guarded_judge else []
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     stopped_for_time = False
@@ -66,6 +69,14 @@ async def train(args, *, export_hf=None):
     judge_counters = judge_metrics.start() if judge_registry.gate_bindings() else None
     if judge_counters is not None:
         define_step_key_metric_group("judge", "judge/step")
+    if guard_history:
+        await judge_counters.seed_window.remote(guard_history)
+        logger.info(
+            "H087 judge failure guard resumed at update %d with %d prior updates: %s",
+            args.start_rollout_id + 1,
+            len(guard_history),
+            json.dumps(judge_metrics.window_counters(guard_history)),
+        )
     manager = None
     inference = None
     learner = None
@@ -160,6 +171,7 @@ async def train(args, *, export_hf=None):
                     args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
                 )
         last_boundary = time.monotonic()
+        recorded_requests = recorded_failures = 0
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
@@ -195,6 +207,15 @@ async def train(args, *, export_hf=None):
                         step_key="judge/step",
                     )
                     if guarded_judge:
+                        requests, failures = counters["judge_requests"], counters["judge/terminal_failures"]
+                        judge_metrics.record_update(
+                            run_root,
+                            rollout_id + 1,
+                            requests - recorded_requests,
+                            failures - recorded_failures,
+                            counters["unix"],
+                        )
+                        recorded_requests, recorded_failures = requests, failures
                         judge_metrics.check_failure_guard(counters)
                     last_boundary = now
                 # Persist newly compiled kernels even when model checkpointing is

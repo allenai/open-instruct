@@ -7,7 +7,10 @@ Sample diagnostics alone cannot measure arrivals or backlog at optimizer boundar
 import asyncio
 import collections
 import importlib
+import json
+import re
 import time
+from pathlib import Path
 
 from open_instruct import logger_utils
 
@@ -18,6 +21,10 @@ NAMESPACE = "open-instruct-rewards"
 _LOCAL = None
 FAILURE_WINDOW_UPDATES = 50
 FAILURE_MIN_REQUESTS = 1000
+# Per-update guard counters, keyed by the run's update number, so a resumed
+# attempt continues the run's window instead of starting a fresh one.
+GUARD_RECORD = Path("judge-guard") / "updates.jsonl"
+BOUNDARY_LOG = re.compile(r"h087_judge_boundary (\{.*\})\s*$")
 
 
 def check_failure_guard(counters):
@@ -37,7 +44,7 @@ def check_failure_guard(counters):
         )
 
 
-def _window_counters(updates):
+def window_counters(updates):
     requests = sum(update[0] for update in updates)
     failures = sum(update[1] for update in updates)
     return {
@@ -46,6 +53,75 @@ def _window_counters(updates):
         "judge_window_updates": len(updates),
         "judge/terminal_failure_rate_window": failures / requests if requests else 0.0,
     }
+
+
+def record_update(root, step, requests, failures, unix):
+    """Append one closed update's guard counters to the run root (driver only)."""
+    path = Path(root) / GUARD_RECORD
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps({"step": step, "requests": requests, "failures": failures, "unix": unix}) + "\n")
+
+
+def _latest(updates, update):
+    # A step replayed after a resume supersedes the lost attempt's copy.
+    current = updates.get(update["step"])
+    if current is None or update["unix"] >= current["unix"]:
+        updates[update["step"]] = update
+
+
+def _recorded_updates(root):
+    path = Path(root) / GUARD_RECORD
+    updates = {}
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            if line.strip():
+                _latest(updates, json.loads(line))
+    return updates
+
+
+def _logged_updates(root):
+    """Per-update counters from earlier attempts' driver logs (cumulative within each attempt)."""
+    updates = {}
+    for log in sorted(Path(root).glob("cluster/*/*/driver-*.log")):
+        boundaries = []
+        with log.open(errors="replace") as f:
+            for line in f:
+                if match := BOUNDARY_LOG.search(line):
+                    boundaries.append(json.loads(match[1]))
+        previous_requests = previous_failures = 0
+        for b in sorted(boundaries, key=lambda b: b["step"]):
+            requests, failures = b["judge_requests"], b["judge/terminal_failures"]
+            _latest(
+                updates,
+                {
+                    "step": b["step"],
+                    "requests": requests - previous_requests,
+                    "failures": failures - previous_failures,
+                    "unix": b["unix"],
+                },
+            )
+            previous_requests, previous_failures = requests, failures
+    return updates
+
+
+def resume_history(root, completed_updates):
+    """The run's last FAILURE_WINDOW_UPDATES closed updates before a resume, oldest first.
+
+    Before update 50 the window is cumulative from update 1. Persisted records win over
+    driver logs; a missing update refuses the start rather than opening a fresh window.
+    """
+    if completed_updates < 1:
+        return []
+    updates = {**_logged_updates(root), **_recorded_updates(root)}
+    steps = range(max(1, completed_updates - FAILURE_WINDOW_UPDATES + 1), completed_updates + 1)
+    if missing := [s for s in steps if s not in updates]:
+        raise RuntimeError(
+            f"H087 judge failure guard cannot rebuild the run window before update {completed_updates + 1}: "
+            f"no counters for updates {missing[0]}..{missing[-1]} ({len(missing)} missing) in "
+            f"{Path(root) / GUARD_RECORD} or driver logs; refusing to start"
+        )
+    return [(updates[s]["requests"], updates[s]["failures"]) for s in steps]
 
 
 def consumed_metrics(samples):
@@ -126,6 +202,11 @@ class JudgeMetrics:
     def skip(self):
         self.skipped += 1
 
+    def seed_window(self, updates):
+        """Restore the run's closed-update window on resume; counters since the restart start at zero."""
+        self._updates.clear()
+        self._updates.extend(tuple(update) for update in updates)
+
     async def optimizer_boundary(self):
         """Close one update, including requests from groups later filtered out."""
         self._updates.append((self.judge_requests - self._last_requests, self.terminal_failures - self._last_failures))
@@ -149,7 +230,7 @@ class JudgeMetrics:
             "started_unix": self.started_unix,
             "unix": time.time(),
             "judge_requests": self.judge_requests,
-            **_window_counters(self._updates),
+            **window_counters(self._updates),
             "judge/terminal_failures": self.terminal_failures,
             **{
                 f"judge/{kind}_by_{scope}/{key}": counts[key]
@@ -166,7 +247,7 @@ class JudgeMetrics:
         """Read the last 49 closed updates plus the pending one, without closing it."""
         updates = list(self._updates)[-(FAILURE_WINDOW_UPDATES - 1) :]
         updates.append((self.judge_requests - self._last_requests, self.terminal_failures - self._last_failures))
-        return {**_window_counters(updates), "judge_pending_update": True}
+        return {**window_counters(updates), "judge_pending_update": True}
 
 
 class _Remote:
