@@ -17,6 +17,10 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
+- **Use a `4x4x8`.** The `8x8x8` costs 1.8-1.9x the chip-hours per token for the same recipe (guide: Cost). Don't
+  move a run to a bigger slice to finish sooner.
+- **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
+  does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). None of them has been tuned. A new slice or
   mesh needs an xprof of one TPU step first (in-loop all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
