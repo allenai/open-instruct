@@ -55,12 +55,19 @@ def window_counters(updates):
     }
 
 
-def record_update(root, step, requests, failures, unix):
+def run_identity(root):
+    """The run's first start time (attempts.json), so records from another run in the same root never count."""
+    path = Path(root) / "attempts.json"
+    return json.loads(path.read_text())[0]["started_unix"] if path.is_file() else None
+
+
+def record_update(root, run, step, requests, failures, unix):
     """Append one closed update's guard counters to the run root (driver only)."""
     path = Path(root) / GUARD_RECORD
     path.parent.mkdir(parents=True, exist_ok=True)
+    record = {"run": run, "step": step, "requests": requests, "failures": failures, "unix": unix}
     with path.open("a") as f:
-        f.write(json.dumps({"step": step, "requests": requests, "failures": failures, "unix": unix}) + "\n")
+        f.write(json.dumps(record) + "\n")
 
 
 def _latest(updates, update):
@@ -70,51 +77,73 @@ def _latest(updates, update):
         updates[update["step"]] = update
 
 
-def _recorded_updates(root):
+def _recorded_updates(root, run):
+    """Intact records of this run; a torn or foreign line is skipped, never trusted."""
     path = Path(root) / GUARD_RECORD
     updates = {}
     if path.is_file():
-        for line in path.read_text().splitlines():
-            if line.strip():
-                _latest(updates, json.loads(line))
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                record = json.loads(line)
+                if record["run"] == run:
+                    _latest(updates, {k: record[k] for k in ("step", "requests", "failures", "unix")})
+            except (ValueError, KeyError, TypeError):
+                logger.warning("Skipping unusable judge guard record: %r", line[:200])
     return updates
 
 
-def _logged_updates(root):
-    """Per-update counters from earlier attempts' driver logs (cumulative within each attempt)."""
+def _logged_updates(root, steps):
+    """Per-update counters for `steps` from earlier attempts' driver logs (cumulative within each attempt).
+
+    A delta is trusted only from an attempt's first boundary (it carries startup_t0_seconds, and
+    counters start at zero) or from the immediately preceding update in the same log.
+    """
     updates = {}
     for log in sorted(Path(root).glob("cluster/*/*/driver-*.log")):
-        boundaries = []
+        boundaries = {}
         with log.open(errors="replace") as f:
             for line in f:
                 if match := BOUNDARY_LOG.search(line):
-                    boundaries.append(json.loads(match[1]))
-        previous_requests = previous_failures = 0
-        for b in sorted(boundaries, key=lambda b: b["step"]):
-            requests, failures = b["judge_requests"], b["judge/terminal_failures"]
+                    try:
+                        b = json.loads(match[1])
+                        boundaries[b["step"]] = (b["judge_requests"], b["judge/terminal_failures"], b)
+                    except (ValueError, KeyError, TypeError):
+                        logger.warning("Skipping unusable judge boundary in %s", log)
+        for step in steps:
+            if step not in boundaries:
+                continue
+            requests, failures, b = boundaries[step]
+            if b.get("startup_t0_seconds") is not None:
+                previous = (0, 0)
+            elif step - 1 in boundaries:
+                previous = boundaries[step - 1][:2]
+            else:
+                continue
             _latest(
                 updates,
                 {
-                    "step": b["step"],
-                    "requests": requests - previous_requests,
-                    "failures": failures - previous_failures,
+                    "step": step,
+                    "requests": requests - previous[0],
+                    "failures": failures - previous[1],
                     "unix": b["unix"],
                 },
             )
-            previous_requests, previous_failures = requests, failures
     return updates
 
 
-def resume_history(root, completed_updates):
+def resume_history(root, run, completed_updates):
     """The run's last FAILURE_WINDOW_UPDATES closed updates before a resume, oldest first.
 
-    Before update 50 the window is cumulative from update 1. Persisted records win over
-    driver logs; a missing update refuses the start rather than opening a fresh window.
+    Before update 50 the window is cumulative from update 1. Persisted records come first and
+    driver logs fill only the updates they lack; a missing update refuses the start rather than
+    opening a fresh window.
     """
     if completed_updates < 1:
         return []
-    updates = {**_logged_updates(root), **_recorded_updates(root)}
     steps = range(max(1, completed_updates - FAILURE_WINDOW_UPDATES + 1), completed_updates + 1)
+    updates = _recorded_updates(root, run)
+    if lacking := [s for s in steps if s not in updates]:
+        updates.update(_logged_updates(root, lacking))
     if missing := [s for s in steps if s not in updates]:
         raise RuntimeError(
             f"H087 judge failure guard cannot rebuild the run window before update {completed_updates + 1}: "

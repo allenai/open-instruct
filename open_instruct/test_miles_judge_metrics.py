@@ -221,23 +221,33 @@ def test_pending_window_keeps_only_49_completed_updates_and_never_ages_them():
     asyncio.run(run())
 
 
-def boundary_line(step, requests, failures, unix):
-    counters = {"step": step, "judge_requests": requests, "judge/terminal_failures": failures, "unix": unix}
+def boundary_line(step, requests, failures, unix, first=False):
+    counters = {
+        "step": step,
+        "judge_requests": requests,
+        "judge/terminal_failures": failures,
+        "unix": unix,
+        "startup_t0_seconds": 60.0 if first else None,
+    }
     return f"2026-10-18 INFO driver.py:199 - h087_judge_boundary {json.dumps(counters)}\n"
 
 
-def write_driver_log(root, attempt, boundaries):
+def write_driver_log(root, attempt, boundaries, first=True):
     """boundaries: (step, cumulative requests, cumulative failures, unix) within one attempt."""
     log = root / "cluster" / attempt / "replica" / "driver-1.log"
     log.parent.mkdir(parents=True)
-    log.write_text("".join(boundary_line(*b) for b in boundaries))
+    log.write_text("".join(boundary_line(*b, first=first and i == 0) for i, b in enumerate(boundaries)))
+    return log
+
+
+RUN = 1760000000.0
 
 
 def test_resume_at_u76_rebuilds_the_runs_window_from_driver_logs(tmp_path):
     # Attempt 1 reached u99 (1,000 requests each, a failure every 10th update); its u76-u99 are lost.
     write_driver_log(tmp_path, "a1", [(s, 1000 * s, s // 10, 1000.0 + s) for s in range(1, 100)])
-    history = judge_metrics.resume_history(tmp_path, 75)
-    assert len(history) == judge_metrics.FAILURE_WINDOW_UPDATES and history[-1] == (1000, 0)
+    history = judge_metrics.resume_history(tmp_path, RUN, 75)
+    assert len(history) == judge_metrics.FAILURE_WINDOW_UPDATES and history[0] == history[-1] == (1000, 0)
     assert history[-6] == (1000, 1)  # u70
     metrics = judge_metrics.JudgeMetrics()
     metrics.seed_window(history)
@@ -249,6 +259,10 @@ def test_resume_at_u76_rebuilds_the_runs_window_from_driver_logs(tmp_path):
     assert window["terminal_failures_window"] == 5 + 9  # u30, u40, u50, u60, u70 and the pending update
     # Nine failures in the first resumed update no longer halt (H087 s18, 10-18).
     judge_metrics.check_failure_guard(window)
+    # Closing u76 drops u26: the closed window is u27..u76.
+    closed = asyncio.run(metrics.optimizer_boundary())
+    assert closed["judge_window_updates"] == 50 and closed["judge_requests_window"] == 1000 * 49 + 991
+    judge_metrics.check_failure_guard(closed)
     # Without the rebuilt window the same update trips, as it did.
     fresh = judge_metrics.JudgeMetrics()
     complete_requests(fresh, 1005, 9)
@@ -260,22 +274,59 @@ def test_replayed_updates_and_persisted_records_supersede_lost_attempts(tmp_path
     write_driver_log(tmp_path, "a1", [(s, 10 * s, 0, 100.0 + s) for s in range(1, 80)])
     # Attempt 2 resumed from u75 and replayed u76-u77 with failures.
     write_driver_log(tmp_path, "a2", [(76, 10, 2, 900.0), (77, 20, 3, 901.0)])
-    judge_metrics.record_update(tmp_path, 77, 30, 7, 950.0)
-    history = judge_metrics.resume_history(tmp_path, 77)
-    assert history[-2:] == [(10, 2), (30, 7)]
+    assert judge_metrics.resume_history(tmp_path, RUN, 77)[-2:] == [(10, 2), (10, 1)]
+    judge_metrics.record_update(tmp_path, RUN, 77, 30, 7, 950.0)
+    assert judge_metrics.resume_history(tmp_path, RUN, 77)[-2:] == [(10, 2), (30, 7)]
 
 
 def test_resume_before_u50_stays_cumulative_from_u1(tmp_path):
     for step in range(1, 31):
-        judge_metrics.record_update(tmp_path, step, 40, int(step == 3), float(step))
-    history = judge_metrics.resume_history(tmp_path, 30)
+        judge_metrics.record_update(tmp_path, RUN, step, 40, int(step == 3), float(step))
+    history = judge_metrics.resume_history(tmp_path, RUN, 30)
     assert len(history) == 30 and sum(r for r, _ in history) == 1200 and sum(f for _, f in history) == 1
-    assert judge_metrics.resume_history(tmp_path, 0) == []
+    assert judge_metrics.resume_history(tmp_path, RUN, 0) == []
+    metrics = judge_metrics.JudgeMetrics()
+    metrics.seed_window(history)
+    complete_requests(metrics, 40, 0)
+    closed = asyncio.run(metrics.optimizer_boundary())
+    assert closed["judge_window_updates"] == 31 and closed["judge_requests_window"] == 1240
 
 
 def test_missing_record_refuses_to_start(tmp_path):
     write_driver_log(tmp_path, "a1", [(s, 10 * s, 0, float(s)) for s in range(1, 60) if s != 40])
+    # u41's delta needs u40's cumulative counters, so u40 and u41 are both unrecoverable.
+    with pytest.raises(RuntimeError, match="updates 40..41 \\(2 missing\\).*refusing to start"):
+        judge_metrics.resume_history(tmp_path, RUN, 59)
     with pytest.raises(RuntimeError, match="refusing to start"):
-        judge_metrics.resume_history(tmp_path, 59)
-    with pytest.raises(RuntimeError, match="refusing to start"):
-        judge_metrics.resume_history(tmp_path / "empty", 10)
+        judge_metrics.resume_history(tmp_path / "empty", RUN, 10)
+
+
+def test_log_suffix_without_its_attempt_start_never_inflates_a_delta(tmp_path):
+    # Codex review: records u1-u49 at 20 requests, then a log whose earlier lines are lost begins at u50
+    # with the attempt's cumulative (1000, 6). Assigning all 1,000 requests to u50 would hide a trip.
+    for step in range(1, 50):
+        judge_metrics.record_update(tmp_path, RUN, step, 20, 0, float(step))
+    write_driver_log(tmp_path, "a1", [(50, 1000, 6, 50.0), (51, 1020, 6, 51.0)], first=False)
+    with pytest.raises(RuntimeError, match="updates 50..50.*refusing to start"):
+        judge_metrics.resume_history(tmp_path, RUN, 51)
+
+
+def test_torn_and_foreign_records_are_skipped_and_logs_fill_only_the_gaps(tmp_path):
+    for step in range(26, 76):
+        judge_metrics.record_update(tmp_path, RUN, step, 1000, 0, float(step))
+    judge_metrics.record_update(tmp_path, RUN + 1, 75, 1, 1, 999.0)  # another run's stale record
+    with (tmp_path / judge_metrics.GUARD_RECORD).open("a") as f:
+        f.write('{"run": 1760000000.0, "step": 76, "requ')  # torn append
+    # A malformed old driver log must not matter when the records are complete.
+    log = tmp_path / "cluster" / "a0" / "replica" / "driver-1.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("h087_judge_boundary {not json}\n")
+    assert judge_metrics.resume_history(tmp_path, RUN, 75) == [(1000, 0)] * 50
+
+
+def test_run_identity_reads_the_first_attempt(tmp_path):
+    assert judge_metrics.run_identity(tmp_path) is None
+    (tmp_path / "attempts.json").write_text(
+        json.dumps([{"attempt": 0, "started_unix": RUN}, {"attempt": 1, "started_unix": 2.0}])
+    )
+    assert judge_metrics.run_identity(tmp_path) == RUN

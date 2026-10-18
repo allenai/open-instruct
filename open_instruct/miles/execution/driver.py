@@ -51,7 +51,10 @@ async def train(args, *, export_hf=None):
     startup_started_unix = float(os.environ.get("OI_MILES_JOB_STARTED_UNIX", time.time()))
     run_root = Path(args.save).parent
     # Rebuild before placement so a run whose window cannot be restored fails fast.
-    guard_history = judge_metrics.resume_history(run_root, args.start_rollout_id) if guarded_judge else []
+    run_identity = judge_metrics.run_identity(run_root)
+    guard_history = (
+        judge_metrics.resume_history(run_root, run_identity, args.start_rollout_id) if guarded_judge else []
+    )
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     stopped_for_time = False
@@ -210,6 +213,7 @@ async def train(args, *, export_hf=None):
                         requests, failures = counters["judge_requests"], counters["judge/terminal_failures"]
                         judge_metrics.record_update(
                             run_root,
+                            run_identity,
                             rollout_id + 1,
                             requests - recorded_requests,
                             failures - recorded_failures,

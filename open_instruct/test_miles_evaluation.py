@@ -441,7 +441,7 @@ def test_driver_judge_guard_halts_only_zero_guarded_and_runs_cleanup(
         driver.startup_cache.finish.assert_awaited_once_with(args, success=False)
         # The halting update is persisted under the run's update number for a later resume.
         assert [json.loads(line) for line in (tmp_path / judge_metrics.GUARD_RECORD).read_text().splitlines()] == [
-            {"step": 1, "requests": 1000, "failures": 6, "unix": ANY}
+            {"run": None, "step": 1, "requests": 1000, "failures": 6, "unix": ANY}
         ]
     else:
         assert asyncio.run(driver.train(args))["completed_rollout_ids"] == [0, 1]
@@ -645,3 +645,49 @@ def test_driver_resume_refuses_to_start_without_the_runs_guard_window(cpu_driver
     with pytest.raises(RuntimeError, match="updates 26..75.*refusing to start"):
         asyncio.run(driver.train(args))
     placement.assert_not_called()
+
+
+def test_driver_resume_seeds_the_runs_guard_window_before_the_first_update(cpu_driver, monkeypatch, tmp_path):
+    driver, learner = cpu_driver.driver, cpu_driver.learner
+    (tmp_path / "attempts.json").write_text(json.dumps([{"attempt": 0, "started_unix": 7.0}]))
+    # u1 (before the resume) had 9 failures in 1,000; u2 alone has 2 in 1,000 (0.2%, passes),
+    # but the run's window u1-u2 is 11/2,000 (0.55%) and must halt.
+    judge_metrics.record_update(tmp_path, 7.0, 1, 1000, 9, 1.0)
+    metrics = judge_metrics.JudgeMetrics()
+    for index in range(1000):
+        metrics.arrive()
+        metrics.admit()
+        metrics.finish(index >= 2, 1, 1.0, 1.0, terminal_failure=index < 2)
+    monkeypatch.setattr(driver.judge_registry, "gate_bindings", lambda: {"ifeval"})
+    monkeypatch.setenv("OI_MILES_IF_GATE_FAILURE_POLICY", "zero_guarded")
+    monkeypatch.setattr(
+        driver.judge_metrics,
+        "start",
+        lambda: SimpleNamespace(
+            optimizer_boundary=SimpleNamespace(remote=AsyncMock(side_effect=metrics.optimizer_boundary)),
+            seed_window=SimpleNamespace(remote=AsyncMock(side_effect=metrics.seed_window)),
+        ),
+    )
+    monkeypatch.setattr(driver, "EvalDispatcher", Mock(return_value=SimpleNamespace(drain=AsyncMock())))
+    args = SimpleNamespace(
+        olmo_core=SimpleNamespace(publication_mode="barrier", diagnostic_interval=0),
+        fully_async=False,
+        offload_rollout=False,
+        check_weight_update_equal=False,
+        start_rollout_id=1,
+        num_rollout=2,
+        rollout_batch_size=8,
+        n_samples_per_prompt=4,
+        global_batch_size=32,
+        save=str(tmp_path / "checkpoints"),
+        save_trigger_sentinel=None,
+        save_interval=None,
+        update_weights_interval=1,
+        eval_interval=None,
+        debug_exit_after_rollout=None,
+    )
+    with pytest.raises(RuntimeError, match="11/2000 .*over 2 consecutive optimizer updates.*stopping training"):
+        asyncio.run(driver.train(args))
+    assert learner.train.await_count == 1
+    records = [json.loads(line) for line in (tmp_path / judge_metrics.GUARD_RECORD).read_text().splitlines()]
+    assert records[-1] == {"run": 7.0, "step": 2, "requests": 1000, "failures": 2, "unix": ANY}
