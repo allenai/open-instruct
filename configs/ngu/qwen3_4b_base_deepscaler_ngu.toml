@@ -1,0 +1,142 @@
+# Never Give Up (NGU) on Deepscaler with Qwen3-4B-Base: one 8-GPU node, 4 trainer + 4 engines.
+# Matches the open-instruct OLMo-core baseline ai2-llm/open_instruct_internal/cmoi4l53
+# (qwen3_4b_base_deepscaler_oc_2k_baseline_dapo_n8_k16) except for the unused-samples handler,
+# MILES-native 1/0 rewards (open-instruct uses 10/0) and the default grad clip of 1.0 (cmoi4l53 used 5).
+# Kept outside configs/miles, which holds only the maintained starters. Prepare data first with
+# scripts/data/miles/prepare_deepscaler.py, which renders qwen_instruct_user_boxed_math prompts.
+# For the baseline arm set async_unused_samples_handler = "retry" and drop the ngu_* options.
+schema_version = 1
+name = "qwen3-4b-base-deepscaler-ngu-r01"
+
+[model]
+source = "/weka/oe-adapt-default/YOUR_USERNAME/checkpoints/Qwen3-4B-Base"
+format = "hf"
+
+[output]
+root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/qwen3-4b-base-deepscaler-ngu-r01"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "4h"
+timeout = "72h"
+auto_resume = true
+gpus_per_replica = 8
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[launch.secrets]
+WANDB_API_KEY = "YOUR_USERNAME_WANDB_API_KEY"
+HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
+
+[launch.env]
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+
+[data]
+# deepscaler-10k-qwen3-4b-base-32samples-quartiles; eval on allenai/aime_2025_openinstruct.
+prompt_data = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler-10k-base-01/train.jsonl"
+eval_prompt_data = ["aime_2025", "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler-10k-base-01/eval-aime_2025.jsonl"]
+# Math verifier scores 1/0.
+reward_config = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/data/deepscaler-10k-base-01/verifiers.json"
+seed = 1
+shuffle = true
+
+[training]
+# filter_zero_std_samples with active_sampling; NGU retries the groups this filter rejects.
+filter_zero_std_groups = true
+# total_episodes 256000 / (8 prompts x 16 samples)
+num_rollouts = 2000
+skip_eval_before_train = false
+# local_eval_every / save_freq
+eval_interval = 100
+save_checkpoints = true
+save_interval = 100
+
+[trainer]
+# num_learners_per_node 4, pack_length 10240
+gpus = 4
+trainer_num_nodes = 1
+expert_parallel_size = 1
+micro_batch_size = 1
+sequence_packing = true
+packing_max_tokens = 10240
+activation_recompute = true
+
+[inference]
+# vllm_num_engines 4, TP 1; response_length 8192, max_prompt_token_length 2048
+placement_mode = "disaggregated"
+gpus = 4
+rollout_tensor_parallel_size = 1
+rollout_batch_size = 8
+samples_per_prompt = 16
+global_batch_size = 128
+max_response_length = 8192
+max_context_length = 10240
+radix_cache = true
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+# AdamW betas (0.9, 0.999), constant lr, no warmup or weight decay; default clip_grad 1.0.
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+# loss_fn dapo: clip_lower 0.2, clip_higher 0.272
+eps_clip = 0.2
+eps_clip_high = 0.272
+
+[tracking]
+wandb_mode = "online"
+wandb_team = "ai2-llm"
+wandb_project = "open_instruct_internal"
+# One group per arm with no random suffix, so the wandb run name is exactly this.
+wandb_group = "qwen3-4b-base-deepscaler_ngu_r01"
+
+[core]
+checkpoint_keep_last = 3
+# NGU on Core supports barrier publication only (refresh would mirror --inflight_updates).
+publication_mode = "barrier"
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+
+[miles]
+wandb_random_suffix = false
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+rollout_temperature = 1.0
+rollout_top_p = 1.0
+rollout_seed = 1
+seed = 1
+rollout_max_prompt_len = 2048
+# advantage_normalization_type centered: subtract the group mean, no std division.
+disable_grpo_std_normalization = true
+# loss_denominator token: normalize by response tokens, not responses.
+calculate_per_token_loss = true
+# use_rho_correction with rho_clamp_upper_bound 2.
+tis_clip = 2.0
+# eval_pass_at_k 32, eval_top_p 0.95, eval_response_length 8192, temperature 1.
+eval_temperature = 1.0
+eval_top_p = 0.95
+n_samples_per_eval_prompt = 32
+eval_max_response_len = 8192
+ngu_requeue_probability = 0.875
+ngu_solved_reward = 1.0
+
+[async]
+fully_async = true
+# async_steps 4
+max_weight_staleness = 4
+async_unused_samples_handler = "never_give_up"
+off_policy_correction = "tis"
