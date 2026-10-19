@@ -96,7 +96,7 @@ before building, including mount coverage. The MILES image wrapper passes the
 frozen configuration directly to `open_instruct.miles.execution.submit`; no
 debug launch script is involved.
 
-## Jupiter CUDA compatibility
+## Jupiter and Saturn CUDA compatibility
 
 For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` or `"ai2/saturn"` (both have
 CUDA 12.8 host drivers) automatically sets the compatibility library path inside the Beaker job. The resolved value appears
@@ -136,7 +136,7 @@ switch cannot be combined with `--miles`. The override uses compatibility
 libraries already present in the image; it does not upgrade the host driver or
 establish support for arbitrary image/driver combinations. After changing either,
 verify CUDA initialization and a short training lifecycle on the target hardware.
-Size the workload for Jupiter's H100 memory instead of copying B300 memory budgets.
+Size the workload for the selected H100 or A100 instead of copying B300 memory budgets.
 FlashAttention 4 (`flash_4`, the default elsewhere) supports only Blackwell, so Jupiter (H100) runs
 default `core.attention_backend` to `flash_3` and Saturn (A100) runs to `flash_2`; the pinned runtime
 provides both through `runtime/miles/Dockerfile`. An explicit
