@@ -44,7 +44,7 @@ def test_preparation_rejects_ambiguous_targets(monkeypatch):
 
 
 def test_deepscaler_recipe_uses_16_prompts_and_32_samples():
-    path = Path(__file__).resolve().parents[1] / "configs/miles/examples/qwen3_4b_deepscaler.toml"
+    path = Path(__file__).resolve().parents[1] / "configs/miles/benchmarks/qwen3_4b_deepscaler.toml"
     config = RunSpec.load(path).compile()
     assert config.miles["rollout_batch_size"] == 16
     assert config.miles["n_samples_per_prompt"] == 32
