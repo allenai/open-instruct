@@ -1,23 +1,25 @@
-# Smoke test of the FlashAttention 2 runtime on Saturn A100s: the 16 x 32 Deepscaler baseline
-# (qwen3_4b_base_deepscaler_baseline_k32n16.toml) for 5 rollouts.
+# Qwen3-4B-Base Deepscaler: 16 prompts x 32 samples per rollout on one 8-GPU node.
+# Four trainer GPUs and four inference engines; global batch size 512.
+# Prepare train/AIME 2025 data with scripts/data/miles/prepare_deepscaler.py.
+# Replace YOUR_USERNAME and select a fresh output directory before launching.
 schema_version = 1
-name = "qwen3-4b-base-deepscaler-smoke-saturn-fa2"
+name = "qwen3-4b-base-deepscaler"
 
 [model]
 source = "/weka/oe-adapt-default/YOUR_USERNAME/checkpoints/Qwen3-4B-Base"
 format = "hf"
 
 [output]
-root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/qwen3-4b-base-deepscaler-smoke-saturn-fa2-r3"
+root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/qwen3-4b-base-deepscaler"
 export_hf = true
 
 [launch]
 workspace = "ai2/open-instruct-dev"
 budget = "ai2/oe-other"
-cluster = "ai2/saturn"
+cluster = "ai2/holmes"
 priority = "high"
-min_runtime = "1h"
-timeout = "3h"
+min_runtime = "4h"
+timeout = "72h"
 auto_resume = true
 gpus_per_replica = 8
 
@@ -48,8 +50,8 @@ shuffle = true
 [training]
 # Drop constant-reward groups and replenish the accepted batch.
 filter_zero_std_groups = true
-# Five rollouts of 16 prompts.
-num_rollouts = 5
+# 1,000 rollouts of 16 prompts x 32 completions.
+num_rollouts = 1000
 skip_eval_before_train = false
 # local_eval_every / save_freq
 eval_interval = 100
@@ -96,12 +98,12 @@ eps_clip_high = 0.272
 wandb_mode = "online"
 wandb_team = "ai2-llm"
 wandb_project = "open_instruct_internal"
-# One group per arm with no random suffix, so the wandb run name is exactly this.
-wandb_group = "qwen3-4b-base-deepscaler_smoke_saturn_fa2"
+# Use the configured run group without a random suffix.
+wandb_group = "qwen3-4b-base-deepscaler"
 
 [core]
 checkpoint_keep_last = 3
-# Barrier publication keeps this short hardware smoke check simple.
+# Publish weights between generation phases.
 publication_mode = "barrier"
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0

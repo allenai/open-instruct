@@ -1,10 +1,10 @@
-"""Deepscaler preparation keeps targets out of prompts and recipes independent of NGU."""
+"""Deepscaler preparation and the standard 16x32 recipe."""
 
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from scripts.miles import prepare_deepscaler
+from scripts.data.miles import prepare_deepscaler
 
 from open_instruct.miles.configuration.run_spec import RunSpec
 
@@ -43,11 +43,10 @@ def test_preparation_rejects_ambiguous_targets(monkeypatch):
         list(prepare_deepscaler.rows("train", "dataset", Tokenizer(), 2))
 
 
-@pytest.mark.parametrize(
-    "recipe", ["qwen3_4b_base_deepscaler_baseline", "qwen3_4b_base_deepscaler_baseline_k32n16", "smoke_saturn_fa2"]
-)
-def test_baseline_recipes_do_not_require_ngu(recipe):
-    path = Path(__file__).resolve().parents[1] / "configs/ngu" / f"{recipe}.toml"
+def test_deepscaler_recipe_uses_16_prompts_and_32_samples():
+    path = Path(__file__).resolve().parents[1] / "configs/miles/examples/qwen3_4b_deepscaler.toml"
     config = RunSpec.load(path).compile()
+    assert config.miles["rollout_batch_size"] == 16
+    assert config.miles["n_samples_per_prompt"] == 32
+    assert config.miles["global_batch_size"] == 512
     assert config.miles["async_unused_samples_handler"] == "retry"
-    assert not any(key.startswith("ngu_") for key in config.miles)

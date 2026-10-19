@@ -367,7 +367,7 @@ def test_explicit_prepared_input_and_tracking_disable(tmp_path):
 def test_all_researcher_examples_compile_to_native_arguments():
     root = Path(__file__).parents[1] / "configs" / "miles"
     paths = sorted((root / "examples").glob("*.toml"))
-    assert {path.stem for path in paths} == {"dev", "small", "medium", "large"}
+    assert {path.stem for path in paths} == {"dev", "small", "medium", "large", "qwen3_4b_deepscaler"}
     for path in paths:
         run = RunSpec.load(path)
         config = run.compile()
@@ -383,8 +383,12 @@ def test_all_researcher_examples_compile_to_native_arguments():
         if config.miles["fully_async"]:
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
-            assert config.core.publication_mode == "refresh"
-            assert config.core.max_policy_lag == 6
+            if path.stem == "qwen3_4b_deepscaler":
+                assert config.core.publication_mode == "barrier"
+                assert config.core.max_policy_lag == 4
+            else:
+                assert config.core.publication_mode == "refresh"
+                assert config.core.max_policy_lag == 6
         else:
             assert config.core.publication_mode == "barrier"
             assert config.core.filter_zero_std_groups is False

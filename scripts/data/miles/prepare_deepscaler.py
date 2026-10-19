@@ -11,7 +11,7 @@ verifiers.json into OUTPUT, for [data] prompt_data / eval_prompt_data / reward_c
 Prompts longer than --max-prompt-tokens are dropped, matching open-instruct's
 rlvr_max_length_filter_v1; MILES rejects over-long prompts instead of skipping them.
 
-Usage: python scripts/miles/prepare_deepscaler.py /weka/.../data/deepscaler-10k-base-01 --tokenizer /weka/.../Qwen3-4B-Base
+Usage: python scripts/data/miles/prepare_deepscaler.py /weka/.../data/deepscaler-10k-base-01 --tokenizer /weka/.../Qwen3-4B-Base
 """
 
 import argparse
