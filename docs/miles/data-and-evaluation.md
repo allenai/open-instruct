@@ -4,6 +4,70 @@ The structured workflow prepares data in the GPU job where mounts and tokenizer
 are available. It records preparation under the run root; do not place reference
 assistant solutions into training prompts. See [workflow](workflow.md) for paths.
 
+## Never Give Up and rejected groups
+
+The opt-in NGU handler is supplied by the pinned MILES runtime. Select it for a
+fully asynchronous, disaggregated Core run with fixed global batch size, barrier
+publication and a dynamic group filter. For example:
+
+```toml
+[training]
+filter_zero_std_groups = true
+
+[async]
+fully_async = true
+async_unused_samples_handler = "never_give_up"
+
+[core]
+publication_mode = "barrier"
+
+[miles]
+ngu_max_budget = 4
+ngu_solved_reward = 1.0
+```
+
+The budget counts attempts, including the first attempt; with eight samples per
+attempt, a budget of four permits up to 32 samples for a chain. As an alternative,
+set `ngu_requeue_probability` in [0, 1] and omit `ngu_max_budget`. These controls
+are mutually exclusive. Rewards and `ngu_solved_reward` must use the same scale.
+The handler combines attempts rejected by the group filter, retires solved or
+exhausted chains, prunes stale attempts, and trims accepted samples to the fixed
+training budget. Ordinary `retry` and `drop` handling remain available.
+
+Partial rollouts, custom buffers, dynamic global batches on Core, and Core
+refresh/engine-drain publication are outside this recipe's supported scope.
+Runtime checks are authoritative; CPU option recognition does not establish
+support for every combination. The comparison recipes live beside the independent
+[Deepscaler example](../../configs/miles/benchmarks/README.md). Their data preparation and
+training geometry are documented there.
+
+## NGU group and retry metrics
+
+Fully asynchronous rollouts log `rollout/groups/selected/*` before fitting the sample
+budget and `rollout/groups/training/*` after budget trimming and the sample filter.
+Each stage includes `size_mean`, `size_min`, `size_max`, `merged_fraction` (the
+fraction of groups larger than one attempt), and `extra_sample_fraction` (the
+fraction of completions beyond the first attempt per group). The `attempts_1`
+through `attempts_4` buckets report counts and fractions; `attempts_other` bounds
+the metric cardinality for larger or nonstandard groups. With 16 samples per
+attempt, these four buckets correspond to group sizes 16, 32, 48, and 64.
+`rollout/groups/budget_trimmed_samples` counts completions removed to fit the budget.
+
+`chain_retried_fraction` and `chain_attempts_mean` use the chain-wide baseline
+sample count, including completions removed by staleness pruning or budget
+trimming. These stage metrics describe selected/training groups, not all
+prompts attempted by the producer.
+
+`rollout/ngu/*` records producer decisions, including failed chains absent from
+training: `filtered_attempts`, `filter_retries`, `filter_retry_fraction`,
+`budget_exhausted_chains`, `solved_filtered_chains`, `probability_dropped_chains`,
+`stale_retries`, and `recovery_retries`. `accepted_chains`,
+`accepted_retried_chains`, `accepted_retried_fraction`, `accepted_attempts`, and
+`accepted_attempts_mean` describe groups passing the producer filter, before
+queue staleness checks. A stale accepted chain can reopen, so these are
+acceptance decisions rather than unique trained prompts. Counters reset at each
+training collection; `pending_chains` is the current producer inventory.
+
 ## Selecting data
 
 Choose exactly one mode under `[data]`:
