@@ -12,6 +12,8 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 | `image/` | The training image: upstream MaxText at a pinned commit, plus our MaxText patch, Tunix and the post-training dependencies. `build.sh <maxtext commit>` builds it with Cloud Build. |
 | `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. Historical smoke base on a `2x2x4` slice (16 chips), which is no longer available; use the `4x4x8` overlay. |
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
+| `k8s/olmo35-sft-4x4x8/` | Overlay: the Olmo 3.5 hero-small SFT recipe (16 rows of 65,536 tokens, 11,768 steps) on one `4x4x8` slice. Start here: it is the cheapest per chip-hour. |
+| `k8s/olmo35-sft-8x8x8/` | Overlay: the same budget at 64 rows and 2,942 steps on one `8x8x8` (512 chips), for when no `4x4x8` is free. ~1.09x the chip-hours, ~3.6x sooner (projected); its data order differs, so compare it only with a same-slice control. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |
 | `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. |
@@ -22,8 +24,8 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 Copy an overlay, give the JobSet and ConfigMaps unique names, and set a unique `RUN_NAME` before applying it with
 `kubectl apply -k <overlay>`. The templates refuse to launch with `RUN_NAME=CHANGE_ME`, so a new run cannot
 accidentally reuse the historical reference run's checkpoint directory. It pins the restore-fix image for resumes.
-The two `k8s/*/train_sft.sh` copies must stay identical; check with
-`diff k8s/olmo3-sft/train_sft.sh k8s/olmo35-sft-4x4x8/train_sft.sh` after editing either.
+Every `k8s/*/train_sft.sh` copy must stay identical; check with
+`for f in k8s/*/train_sft.sh; do diff -q k8s/olmo3-sft/train_sft.sh $f; done` after editing one.
 
 Data builders use the standard HF cache settings (`HF_HOME`, `HF_DATASETS_CACHE`) and load one dataset revision.
 Pin it with `--revision <dataset commit>`, or pass explicit local parquet paths/globs with `--data-files`:
