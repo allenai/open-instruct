@@ -15,7 +15,7 @@ from unittest import mock
 from olmo_core import data as oc_data
 from parameterized import parameterized
 
-from open_instruct import olmo_core_finetune, olmo_core_utils
+from open_instruct import olmo_core_finetune, olmo_core_utils, utils
 
 
 def _touch(path: str) -> None:
@@ -74,7 +74,7 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
 
 
 class DocumentBoundariesFromMetadataTest(unittest.TestCase):
-    def test_default_cache_dir_is_unchanged(self) -> None:
+    def test_legacy_layout_cache_dir_is_unchanged(self) -> None:
         # The Dolci-Think cache that H038 and H045 trained on.
         self.assertEqual(
             olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, False),
@@ -87,7 +87,7 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
         )
 
-    def test_default_adds_no_dataset_config_arguments(self) -> None:
+    def test_eos_scan_adds_no_dataset_config_arguments(self) -> None:
         self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, False), {})
         # The EOS arm of a row-aligned cache reads it exactly as today.
         self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, True), {})
@@ -110,7 +110,42 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
         ):
             olmo_core_finetune._document_boundary_kwargs(True, True)
 
-    def test_default_dataset_config_matches_previous_arguments(self) -> None:
+    def test_defaults_read_boundaries_from_metadata(self) -> None:
+        sft = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,)).parse_args_into_dataclasses([])[0]
+        self.assertTrue(sft.row_aligned_parts)
+        self.assertTrue(sft.document_boundaries_from_metadata)
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, sft.row_aligned_parts),
+            "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
+        )
+        self.assertEqual(
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts),
+            {"use_array_if_local": False},
+        )
+
+    def test_opt_out_reproduces_previous_behaviour(self) -> None:
+        """--no_row_aligned_parts --no_document_boundaries_from_metadata reads the pre-flip cache
+        directory with no extra dataset arguments, so its config and packing caches are unchanged."""
+        parser = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,))
+        sft = parser.parse_args_into_dataclasses(["--no_row_aligned_parts", "--no_document_boundaries_from_metadata"])[
+            0
+        ]
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, sft.row_aligned_parts),
+            "/cache/numpy_sft/1edd51f3e3-6068a350",
+        )
+        self.assertEqual(
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts),
+            {},
+        )
+
+    def test_opting_out_of_row_alignment_alone_fails(self) -> None:
+        parser = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,))
+        sft = parser.parse_args_into_dataclasses(["--no_row_aligned_parts"])[0]
+        with self.assertRaisesRegex(ValueError, "--no_document_boundaries_from_metadata"):
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts)
+
+    def test_eos_scan_dataset_config_matches_previous_arguments(self) -> None:
         tokenizer = oc_data.TokenizerConfig(vocab_size=128, eos_token_id=2, pad_token_id=1)
         config = olmo_core_finetune._numpy_dataset_config(
             "/data", tokenizer, work_dir="/work", sequence_length=64, document_boundary_kwargs={}
