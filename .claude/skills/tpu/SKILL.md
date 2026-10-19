@@ -17,9 +17,10 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Pick the slice by cost** (guide: Cost per slice). The 16-row recipe needs a `4x4x8`. A 64-row recipe on the
-  `8x8x8` is projected at ~1.09x the `4x4x8`'s chip-hours, ~3.6x sooner (steady state, not yet a measured
-  whole run), but only without the data-order shim
+- **Start on a `4x4x8`; use the `8x8x8` only when no `4x4x8` is free** (guide: Cost per slice). The `4x4x8` is the
+  cheapest per chip-hour. The `8x8x8` overlay (`k8s/olmo35-sft-8x8x8/`, 64 rows) is projected at ~1.09x the chip-hours,
+  ~3.6x sooner (steady state, not yet a measured whole run). Its data order differs from the `4x4x8`'s, so compare it
+  only with a control on the same slice. The 1.09x holds only without the data-order shim
   (`MAXTEXT_R2_DATA_EMULATION`) and `MAXTEXT_LOG_BATCH_HASH=1`. With them a step in eight stalls 20-35 s
   (1.8-1.9x the chip-hours).
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet

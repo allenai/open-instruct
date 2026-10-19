@@ -75,8 +75,10 @@ step time over steps 31-100, so a stalled step counts at its full cost.
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
-- **Either slice works for a 64-row recipe.** Without the shim the `8x8x8` is projected at ~1.09x the chip-hours of
-  the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
+- **Start on a `4x4x8`; take the `8x8x8` only when no `4x4x8` is free.** The `4x4x8` is the cheapest per chip-hour.
+  The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
+  differs from the `4x4x8` recipe's, so an arm on it needs a control on the same slice and config. Without the shim
+  the `8x8x8` is projected at ~1.09x the chip-hours of the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
   not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
   10-18). The `8x8x8`'s stall rate over a whole run without the shim is not measured. A same-day paired run would
   establish it. The `8x8x8` cannot run the 16-row recipe at that rate (see
