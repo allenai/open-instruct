@@ -2389,13 +2389,16 @@ class CountingCompositionChecker(Instruction):
         Returns:
           True if the response meets the requirements; otherwise, False.
         """
-        paragraphs = re.split(r"\s?\*\*\*\s?", value)
+        # Match the instructed spaced divider on its own Markdown line. Allow
+        # horizontal whitespace and CRLF without treating inline stars as dividers.
+        paragraphs = re.split(r"^[ \t]*\*[ \t]+\*[ \t]+\*[ \t]*\r?$", value, flags=re.MULTILINE)
         num_paragraphs = len(paragraphs)
 
         for index, paragraph in enumerate(paragraphs):
             if not paragraph.strip():
                 if index == 0 or index == len(paragraphs) - 1:
                     num_paragraphs -= 1
+                    continue
                 else:
                     return False
 
@@ -2406,8 +2409,9 @@ class CountingCompositionChecker(Instruction):
                 return False
 
             for sentence in sentences:
-                words = instructions_util.nltk.word_tokenize(sentence)
-                num_words = len(words)
+                # split_into_sentences keeps each sentence's terminal ".", which
+                # must not count toward the n_words total.
+                num_words = len(instructions_util.word_tokens(sentence))
 
                 if num_words != self._n_words:
                     return False
@@ -2432,7 +2436,9 @@ class CountUniqueChecker(Instruction):
 
     def check_following(self, value):
         """Checks that the response contains unique words."""
-        words = instructions_util.nltk.word_tokenize(value)
+        # Compare words only; pure-punctuation tokens (".", ",") must not count as
+        # repeated words.
+        words = instructions_util.word_tokens(value)
         unique_words = set(words)
         return len(words) == len(unique_words)
 
