@@ -1,11 +1,13 @@
 import pathlib
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import torch
 
 import open_instruct.model_utils
-from open_instruct.model_utils import Batch, TensorCache
+from open_instruct.model_utils import Batch, TensorCache, uses_olmo3_generation_config
 
 
 class TestBatchSlicing(unittest.TestCase):
@@ -120,6 +122,48 @@ class TestTensorCache(unittest.TestCase):
             result = loaded_cache[torch.tensor([1, 3])]
             self.assertTrue(torch.allclose(result["chosen_logps"], torch.tensor([2.0, 4.0])))
             self.assertTrue(torch.allclose(result["rejected_logps"], torch.tensor([0.2, 0.4])))
+
+
+class TestUsesOlmo3GenerationConfig(unittest.TestCase):
+    def test_olmo_template_name(self):
+        tokenizer = MagicMock()
+        tokenizer.chat_template = "User: {{ content }}"
+        self.assertTrue(uses_olmo3_generation_config("olmo123", tokenizer))
+
+    def test_hybrid_model_type_with_tokenizer_default(self):
+        tokenizer = MagicMock()
+        tokenizer.chat_template = None
+        model = SimpleNamespace(config=SimpleNamespace(model_type="olmo_hybrid"))
+        self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
+
+    def test_olmo_tokenizer_with_resolved_im_end_template(self):
+        tokenizer = MagicMock()
+        tokenizer.name_or_path = "allenai/olmo-3-tokenizer-instruct-dev"
+        tokenizer.chat_template = "<|im_start|>assistant\n{{ content }}<|im_end|>"
+        model = SimpleNamespace(config=SimpleNamespace(model_type="llama", _name_or_path="/weka/HYBRID_INSTRUCT_SFT"))
+        self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
+
+    def test_non_olmo_chatml_template_does_not_use_olmo_generation_config(self):
+        tokenizer = MagicMock()
+        tokenizer.name_or_path = "Qwen/Qwen2.5-7B-Instruct"
+        tokenizer.chat_template = "<|im_start|>assistant\n{{ content }}<|im_end|>"
+        model = SimpleNamespace(config=SimpleNamespace(model_type="qwen2"))
+        self.assertFalse(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
+
+    def test_deepspeed_wrapped_olmo_hybrid_model_is_detected(self):
+        tokenizer = MagicMock()
+        tokenizer.chat_template = None
+        model = SimpleNamespace(
+            config={"train_batch_size": 8}, module=SimpleNamespace(config=SimpleNamespace(model_type="olmo_hybrid"))
+        )
+        self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
+
+    def test_non_olmo_template_without_im_end(self):
+        tokenizer = MagicMock()
+        tokenizer.chat_template = "{{ messages }}"
+        model = SimpleNamespace(config=SimpleNamespace(model_type="llama"))
+        self.assertFalse(uses_olmo3_generation_config("tulu", tokenizer, model))
+        self.assertFalse(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
 
 
 if __name__ == "__main__":
