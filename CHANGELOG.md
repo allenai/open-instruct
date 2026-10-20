@@ -39,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - Fix IFEvalG composition dividers and punctuation-only word counts so compliant responses receive credit; preserve the instructed spaced Markdown separator and cover composition/unique-word rewards with regressions (https://github.com/allenai/open-instruct/pull/1718).
 
 ### Changed
+- olmo-core SFT now takes document boundaries from the per-row metadata by default: `--row_aligned_parts` and `--document_boundaries_from_metadata` default to true, so a multi-turn row is no longer split at each non-final assistant EOS, and rows ending without EOS no longer merge into the next. The cache moves to the `-rowaligned` directory, so each recipe re-tokenizes once. `--no_row_aligned_parts --no_document_boundaries_from_metadata` restores the previous layout and EOS scan (https://github.com/allenai/open-instruct/pull/2028).
 - Bump OLMo-core from fa6c5014 (v2.5.0) to 6ac500d8 (v2.6.0), the merge of allenai/OLMo-core#843, so olmo-core SFT can take document boundaries from the numpy metadata files (`use_array_if_local`) (https://github.com/allenai/open-instruct/pull/2027).
 - Default MILES Jupiter launches to the pinned image's CUDA compatibility library path, while preserving explicit environment overrides (https://github.com/allenai/open-instruct/pull/1924).
 - Scope the MILES recommendation to supported Olmo MoE models and retain Core/vLLM and DeepSpeed/vLLM as current dense-model GRPO workflows in documentation and agent guidance (https://github.com/allenai/open-instruct/pull/1924).
