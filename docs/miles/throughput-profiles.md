@@ -93,6 +93,8 @@ admission is too low.
 * Use dynamic-row Core kernels and persistent Triton caching. Cache namespaces
   include source/configuration identity; new configurations can still start cold.
 * Publish every optimizer step using flattened 1-GiB buckets and per-expert export.
+* Leave `core.scoring_pass_required` at its default `false`. Recipes copied from trainer-comparison
+  campaigns may force it; check `plan` output under `scoring_pass` before launching.
 * Disabling activation recomputation can help short contexts when memory allows;
   restore it for long contexts or smaller memory budgets.
 * Keep the completed FIFO to one collection. A large explicit producer budget can
