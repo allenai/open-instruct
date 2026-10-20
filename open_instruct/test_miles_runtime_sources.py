@@ -95,6 +95,7 @@ def test_image_build_passes_token_as_secret(monkeypatch, credential_source):
     monkeypatch.setattr(build_image.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
     build_image.main()
     args, kwargs = calls[0]
+    assert args[args.index("--platform") + 1] == "linux/amd64"
     assert args[args.index("--secret") + 1] == "id=github_token,env=MILES_BUILD_GITHUB_TOKEN"
     assert "test-token" not in str(args)
     assert kwargs["env"]["MILES_BUILD_GITHUB_TOKEN"] == "test-token"
