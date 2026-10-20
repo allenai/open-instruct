@@ -1,0 +1,13 @@
+{
+  "tulu": "4a1fedf9e96f51b0169f022adfa2264695770a5c33cdb025f4fd0af0f313e229",
+  "tulu_thinker": "01b4a98bd156ae116d24da9b7de85c012bbf7e2662efbad36f2514d011389a0e",
+  "tulu_thinker_r1_style": "75d796c880dc54f93d02103b7a3760130b93e3eb6b58c30ee30ba0f94b216647",
+  "olmo": "7e49513064d4962b320dc9ee5b2d9991656d55e6dac6ba1d6145cdc1b042836f",
+  "olmo_old": "7e49513064d4962b320dc9ee5b2d9991656d55e6dac6ba1d6145cdc1b042836f",
+  "olmo_thinker": "eeaa59740636cd33fb061fc47240066619e188a5a9b2e6b9b17993f7ac3b5d2d",
+  "olmo_thinker_no_think_7b": "844b4bf90129332e713d70a643ef176c5c969b2380ccc11d12f58cec77a299e8",
+  "olmo_thinker_no_think_sft_tokenization": "c57b709df5447e6f6f8d899a23ee08faa549492c86f35580041aa7e0f0a9edd0",
+  "olmo_thinker_remove_intermediate_thinking": "eeaa59740636cd33fb061fc47240066619e188a5a9b2e6b9b17993f7ac3b5d2d",
+  "zephyr": "deaedce55e57e0e914adffb9c49b14e7dc6513f93baa905dce008fb69f4c2429",
+  "simple_chat": "be6893930b7a70a512f31cf29165677ca77297b8c3f086dd77eb8be29e6104a5"
+}

@@ -36,6 +36,11 @@ You can run `python scripts/data/finetune_dataset_transformation.py` to see the 
 ![dataset](dataset/sft.png)
 
 
+`--chat_template_name` must be a `CHAT_TEMPLATES` key, or `tokenizer_default`
+to use the tokenizer's own template. Omitting the flag is the same as
+`tokenizer_default`. An unrecognised name raises. `dataset_statistics.json`
+records the resolved source (`registry:<name>` or `tokenizer:<path>`) and hash.
+
 You can also use a different `chat_template_name`. For example,
 
 ```python
@@ -50,3 +55,28 @@ would give us
 
 
 ![dataset](dataset/sft2.png)
+
+## Making a tag a single token
+
+A tag the tokenizer splits into several pieces is a training/inference mismatch whenever its
+last piece merges with the text that follows it. `<think>` is `<th` `ink` `>` in the Olmo
+vocabularies, and the BPE merges that `>` forward: `>\n` is one token, so is `>\n\n`, and so is
+`></`. A generation prompt ending in `<think>` therefore cannot produce the first token of any
+turn whose reasoning starts on the next line, or whose think block is empty.
+
+`reserved_slot_tokens` fixes this by renaming unused `<|extra_id_N|>` entries in place:
+
+```python
+tc = TokenizerConfig(
+    # ...
+    reserved_slot_tokens=["<think>", "</think>"],
+)
+```
+
+Because the slots already exist, `vocab_size` and olmo-core's `padded_vocab_size()` are
+unchanged, so no checkpoint is resized. The SFT trainer seeds each promoted row with the mean of
+the rows for the pieces the string used to tokenize into. The promoted tokens are not marked
+special, so `skip_special_tokens=True` decoding still shows them.
+
+Setting this changes the token sequence of every turn containing the tag, so it changes the
+dataset cache key. Leaving it unset keeps both.
