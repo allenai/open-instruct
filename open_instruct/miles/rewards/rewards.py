@@ -36,6 +36,11 @@ _MATH_FACTORIES = {
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.ground_truth_utils.StrictMathVerifier",
 }
+# SGLang rollouts keep the stop token in the response text (``no_stop_trim`` with special
+# tokens kept), but Open Instruct verifiers expect the detokenized answer that the vLLM
+# trainers pass them. Without this, end-anchored checks such as IFEval's
+# ``startend:quotation`` or ``detectable_format:json_format`` can never pass.
+_END_OF_TURN_TOKENS = ("<|im_end|>", "<|endoftext|>", "<|end_of_text|>", "<|eot_id|>", "</s>")
 _POOLS = weakref.WeakKeyDictionary()
 _CHILDREN = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
@@ -301,6 +306,13 @@ def _registry(path):
     return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
 
 
+def _strip_end_of_turn(response):
+    """Remove the trailing stop tokens that SGLang leaves in the response text."""
+    while ending := next((token for token in _END_OF_TURN_TOKENS if response.endswith(token)), None):
+        response = response.removesuffix(ending)
+    return response
+
+
 async def _score(args, sample):
     registry = _registry(args.olmo_core.reward_config)
     metadata = sample.metadata
@@ -313,7 +325,7 @@ async def _score(args, sample):
         weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
-    response = sample.response
+    response = _strip_end_of_turn(sample.response)
     if args.olmo_core.reward_zero_truncated and status == "truncated":
         reason = "truncated"
     elif args.olmo_core.reward_final_answer_only:

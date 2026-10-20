@@ -107,3 +107,23 @@ def test_dictionary_targets_survive_repeated_and_shared_ifeval_scoring(tmp_path)
             assert [sample.metadata["reward_components"][0]["score"] for sample in samples] == [1.0, 1.0, 0.0]
 
     asyncio.run(score_twice())
+
+
+@pytest.mark.parametrize("ending", ["", "<|im_end|>", "<|endoftext|>", "<|im_end|><|endoftext|>"])
+@pytest.mark.parametrize("final_answer_only", [False, True])
+def test_end_anchored_ifeval_checks_ignore_the_rollout_stop_token(tmp_path, ending, final_answer_only):
+    # SGLang rollouts keep the stop token in the response text; graders must not see it.
+    registry = tmp_path / "verifiers.json"
+    registry.write_text(json.dumps({"ifeval": {"factory": "open_instruct.ground_truth_utils.IFEvalVerifier"}}))
+    args = SimpleNamespace(
+        olmo_core=CoreConfig(reward_config=str(registry), reward_final_answer_only=final_answer_only)
+    )
+    label = str([{"instruction_id": ["startend:quotation", "detectable_format:json_format"], "kwargs": [None, None]}])
+    sample = SimpleNamespace(
+        tokens=[1, 2, 3],
+        response_length=3,
+        response='<think>Quote some JSON.</think>"{\\"a\\": 1}"' + ending,
+        prompt="Wrap your JSON answer in double quotes.",
+        metadata={"verifiers": [{"name": "ifeval", "target": label}]},
+    )
+    assert asyncio.run(rewards.registered_reward(args, [sample])) == [1.0]
