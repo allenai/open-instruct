@@ -6,11 +6,15 @@ merge `>Ċ`, `>ĊĊ` and `></`.
 """
 
 import dataclasses
+import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import torch
 from parameterized import parameterized
+from scripts.tokenizers import export_chat_template
 from tokenizers import AddedToken, Tokenizer, decoders, models, pre_tokenizers
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
@@ -76,6 +80,101 @@ def is_token_prefix(tokenizer, prompt: str, continuation: str) -> bool:
 CONTINUATIONS = [" Okay, so", "\nOkay, so", "\n\nOkay", "Okay", "</think>The answer", "\n</think>\n\nThe answer"]
 
 GENERATION_PROMPT = "<|im_start|>assistant\n<think>"
+
+
+class TestOlmo35Thinking(unittest.TestCase):
+    @parameterized.expand([("ordinary", False), ("atomic", True)])
+    def test_render_matches_historical_template(self, _name, atomic):
+        legacy_template = (Path(__file__).parent / "test_data/olmo35_chat_template.jinja").read_text()
+        tokenizer = build_tokenizer(chat_template=dataset_transformation.CHAT_TEMPLATES["olmo35"])
+        if atomic:
+            dataset_transformation.promote_tokens_into_reserved_slots(tokenizer, THINK_TAGS)
+        for tag in THINK_TAGS:
+            ids = tokenizer.encode(tag, add_special_tokens=False)
+            self.assertEqual(len(ids) == 1, atomic)
+
+        tools = [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]
+        conversations = [
+            [{"role": "user", "content": "QUESTION"}],
+            [
+                {"role": "system", "content": "SYSTEM"},
+                {"role": "user", "content": "QUESTION"},
+                {"role": "assistant", "reasoning_content": " REASON\n", "content": "ANSWER"},
+                {"role": "user", "content": "FOLLOWUP"},
+            ],
+            [
+                {"role": "user", "content": "QUESTION"},
+                {
+                    "role": "assistant",
+                    "content": "<think>REASON</think>",
+                    "tool_calls": [
+                        {"type": "function", "function": {"name": "lookup", "arguments": {"query": "VALUE"}}}
+                    ],
+                },
+                {"role": "tool", "content": "RESULT"},
+            ],
+        ]
+        for messages in conversations:
+            for available_tools in (None, tools):
+                for generation_prompt in (False, True):
+                    with self.subTest(messages=messages, tools=available_tools, generation_prompt=generation_prompt):
+                        kwargs = {"tools": available_tools, "add_generation_prompt": generation_prompt}
+                        legacy = tokenizer.apply_chat_template(
+                            messages, chat_template=legacy_template, tokenize=False, **kwargs
+                        )
+                        default = tokenizer.apply_chat_template(messages, tokenize=False, **kwargs)
+                        enabled = tokenizer.apply_chat_template(
+                            messages, tokenize=False, enable_thinking=True, **kwargs
+                        )
+                        disabled = tokenizer.apply_chat_template(
+                            messages, tokenize=False, enable_thinking=False, **kwargs
+                        )
+                        self.assertEqual(default.encode(), legacy.encode())
+                        self.assertEqual(enabled, legacy)
+                        expected = legacy + "</think>" if generation_prompt else legacy
+                        self.assertEqual(disabled, expected)
+                        if generation_prompt:
+                            self.assertTrue(enabled.endswith(GENERATION_PROMPT))
+                        ids = tokenizer.apply_chat_template(
+                            messages, return_dict=False, enable_thinking=False, **kwargs
+                        )
+                        self.assertEqual(ids, tokenizer.encode(expected, add_special_tokens=False))
+                        self.assertEqual(tokenizer.decode(ids), expected)
+                        if atomic and generation_prompt:
+                            on_ids = tokenizer.apply_chat_template(
+                                messages, return_dict=False, enable_thinking=True, **kwargs
+                            )
+                            self.assertEqual(ids, on_ids + tokenizer.encode("</think>", add_special_tokens=False))
+
+    @parameterized.expand([("ordinary", False), ("atomic", True)])
+    def test_production_template_exports_and_survives_save_reload(self, _name, atomic):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            build_tokenizer().save_pretrained(source)
+            tokenizer = dataset_transformation.TokenizerConfig(
+                tokenizer_name_or_path=str(source),
+                chat_template_name="olmo35",
+                reserved_slot_tokens=THINK_TAGS if atomic else None,
+            ).tokenizer
+            self.assertEqual(tokenizer.chat_template, dataset_transformation.CHAT_TEMPLATES["olmo35"])
+
+            exported = Path(directory) / "olmo35.jinja"
+            with mock.patch.object(sys, "argv", ["export_chat_template", "olmo35", "--output", str(exported)]):
+                export_chat_template.main()
+            self.assertEqual(exported.read_text(), tokenizer.chat_template)
+            tokenizer.chat_template = exported.read_text()
+            saved = Path(directory) / "saved"
+            tokenizer.save_pretrained(saved)
+            reloaded = AutoTokenizer.from_pretrained(saved, local_files_only=True)
+            messages = [{"role": "user", "content": "QUESTION"}]
+            for thinking in (True, False):
+                kwargs = {"add_generation_prompt": True, "enable_thinking": thinking}
+                text = reloaded.apply_chat_template(messages, tokenize=False, **kwargs)
+                self.assertTrue(text.endswith(GENERATION_PROMPT + ("" if thinking else "</think>")))
+                self.assertEqual(
+                    reloaded.apply_chat_template(messages, return_dict=False, **kwargs),
+                    tokenizer.apply_chat_template(messages, return_dict=False, **kwargs),
+                )
 
 
 class TestReachabilityWithoutPromotion(unittest.TestCase):

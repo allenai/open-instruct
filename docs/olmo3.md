@@ -44,6 +44,10 @@ Use Olmo 3.5 tokenizer revision **`8b9717061fae09d5be814373d189919a62a9a00d` or 
 
 **Note on `chat_template.jinja` vs `tokenizer_config.json`:** When a HuggingFace repo contains both a `chat_template.jinja` file and a `chat_template` field in `tokenizer_config.json`, `transformers` prioritizes `chat_template.jinja`. Keep both in sync, or only use one. The `diff_tokenizers.py` script compares both files.
 
+**Olmo 3.5 thinking switch:** Select the repository-owned template with `--chat_template_name olmo35`. Its default generation prompt remains `<|im_start|>assistant\n<think>`. Passing `enable_thinking=False` to `tokenizer.apply_chat_template(..., add_generation_prompt=True)` appends only `</think>`, closing the empty reasoning block. Existing messages and renders without a generation prompt are unchanged. This works with ordinary BPE tags and with `--reserved_slot_tokens '<think>' '</think>'`.
+
+Export the same production template with `uv run python scripts/tokenizers/export_chat_template.py olmo35 --output olmo35.jinja`. Training saves the selected template with its tokenizer; the exported Jinja file can also be passed to `--export-chat-template` in checkpoint converters that support template-only overrides. Selecting `tokenizer_default` continues to use the tokenizer's own template, so existing Hub tokenizers and checkpoint exports must be updated separately. Evaluation providers must forward `chat_template_kwargs={"enable_thinking": False}` to use the switch.
+
 ---
 
 There are two main issues that lead to all the floating chat templates: one, the <think> token chopping in the tokenization script where our code incorrectly masks the first <think> token as part of the prompt, and two, the identity issue which means we should train and release with different system prompts.
