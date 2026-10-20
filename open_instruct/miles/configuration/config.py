@@ -15,6 +15,9 @@ from open_instruct.miles.configuration import async_capacity, constraints, graph
 from open_instruct.miles.configuration import options as cli_options
 from open_instruct.miles.errors import InputError
 
+# Core attention backends the startup preflight exercises before loading the policy.
+PREFLIGHT_ATTENTION_BACKENDS = ("torch", "flash_2", "flash_3", "flash_4")
+
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 FINISHED_STD_FILTER = "open_instruct.miles.rewards.truncation.filter_finished_reward_variance"
 EXCLUDE_TRUNCATED = "open_instruct.miles.rewards.truncation.exclude_truncated"
