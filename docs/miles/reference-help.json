@@ -38,7 +38,7 @@
     "row_specialization": "static specializes no-gradient SwiGLU on capacity; dynamic avoids capacity-specific compilation. Independent of arithmetic flags.",
     "scoring_check_interval": "Periodic standalone-versus-training score check; startup/resume also checks the first update.",
     "scoring_check_tolerance": "Allowed absolute difference for the standalone/training scoring check.",
-    "scoring_pass_required": "Force standalone scoring even when the recipe permits skipping it.",
+    "scoring_pass_required": "Default false (skip when redundant). True forces an extra full forward pass every update; use it only for like-for-like trainer comparisons or debugging, not for throughput-sensitive runs.",
     "sequence_packing": "Pack complete samples within each optimizer partition using document-isolated attention/KDA and replay alignment.",
     "snapshot_capacity": "Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store.",
     "stream_moe_export": "Stream MoE tensors during HF-layout publication to reduce export memory.",

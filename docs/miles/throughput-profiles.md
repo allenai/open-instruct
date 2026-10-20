@@ -101,7 +101,7 @@ admission is too low.
 * In qualified long runs, use `check_weight_update_equal = false`. The optional
   startup snapshot/reset audit remains enabled in the dev mechanics example.
   Turning it off does not remove required publication acknowledgments.
-* Leave `core.scoring_pass_required = false`: the recipe selects whether a
+* Leave `core.scoring_pass_required` at its default `false`: the recipe selects whether a
   standalone pre-update scoring forward is needed. One optimizer step per
   collection with no KL in advantages can reuse the training forward. Multiple
   optimizer steps, KL requirements and runtime guards still require their scores.
@@ -109,6 +109,8 @@ admission is too low.
   reuse on the first update of each process, including resume, without repeating
   the audit during steady training. Enable periodic checks during qualification.
   This does not disable TIS or replace trainer scores with serving scores.
+  Recipes copied from trainer-comparison
+  campaigns may force it; check `plan` output under `scoring_pass` before launching.
 * Disabling activation recomputation can help short contexts when memory allows;
   restore it for long contexts or smaller memory budgets.
 * Keep the completed FIFO to one collection. A large explicit producer budget can
