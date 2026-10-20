@@ -50,7 +50,7 @@ For inference with a released checkpoint, use the chat template that ships with 
 
 ## Wandb reports
 
-We also have a bunch of Wandb reports for each stage, which contains the same information as above, in a slightly different format: 
+We also have a bunch of Wandb reports for each stage, which contains the same information as above, in a slightly different format:
 
 | experiment name | wandb report |
 |---|---|
