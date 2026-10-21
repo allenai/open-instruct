@@ -46,8 +46,11 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 
 ## What the cluster is
 
-`gke-tpu-v4` holds 2,048 reserved v4 chips at 4 per host: four `4x4x8` slices (128 chips), one `8x8x8` (512) and one
-`8x8x16` (1,024). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
+`gke-tpu-v4` holds 4,096 reserved v4 chips at 4 per host. Since 2026-10-21 they are cut into seven `4x4x8` slices
+(128 chips) and three `8x8x16` (1,024), with 128 chips held back so GKE can auto-repair failed nodes; the `8x8x8` is
+gone. The layout changes as the cluster's admins reslice it, so check it before planning:
+`kubectl get nodes -L cloud.google.com/gke-nodepool --no-headers | awk '{print $NF}' | sort | uniq -c` (32 hosts per
+`4x4x8`, 256 per `8x8x16`). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
 
 | Queue | Who | Preempted by |
 |---|---|---|
@@ -58,9 +61,11 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 **Use `post-training`.** Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
 checkpoint often enough to lose little. Never hold a slice in a way that delays hero.
 
-The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The `8x8x8`
-runs the same mesh at 64 rows per step, which is a different recipe (H078's 4x batch). Running the 16-row recipe on a
-big slice needs `olmo35-cp-ep`, which splits each row 32 ways and changes the MoE load-balance term. Measured meshes are
+The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The
+measurements below on the former `8x8x8` ran the same mesh at 64 rows per step, which is a different recipe (H078's 4x
+batch). On the former `8x8x8`, the
+measured 16-row configuration used `olmo35-cp-ep`, splitting each row 32 ways and changing the MoE load-balance term.
+No validated 16-row configuration for the `8x8x16` is documented here. Measured meshes are
 in [Changing the recipe](#changing-the-recipe).
 
 ## Cost per slice
@@ -78,16 +83,16 @@ step time over steps 31-100, so a stalled step counts at its full cost.
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
-- **Start on a `4x4x8`; take the `8x8x8` only when no `4x4x8` is free.** The `4x4x8` is the cheapest per chip-hour.
-  The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
-  differs from the `4x4x8` recipe's, so an arm on it needs a control on the same slice and config. Without the shim
+- **Use a `4x4x8` for this recipe.** Among the measured configurations it used the fewest chip-hours per token; no
+  throughput is measured here for the `8x8x16`, which is hero's and borrowed only. The `8x8x8` was split into
+  `4x4x8`s on 2026-10-21, so the `8x8x8` results below are historical. The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
+  differs from the `4x4x8` recipe's, so an arm on it needed a control on the same slice and config. Without the shim
   the `8x8x8` is projected at ~1.09x the chip-hours of the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
   not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
-  10-18). The `8x8x8`'s stall rate over a whole run without the shim is not measured. A same-day paired run would
-  establish it. The `8x8x8` cannot run the 16-row recipe at that rate (see
+  10-18). The `8x8x8`'s stall rate over a whole run without the shim is not measured. The `8x8x8` could not run the 16-row recipe at that rate (see
   [Changing the recipe](#changing-the-recipe)).
-- **On the `8x8x8`, don't run the data-order shim (`MAXTEXT_R2_DATA_EMULATION`) or `MAXTEXT_LOG_BATCH_HASH=1`,** (asynchronous
-  hash logging may be enough, untested; H088 removed both together). With both, one step in eight stalled for 20-35 s, at the same steps in
+- **Historical `8x8x8` input stalls.** H088 removed the data-order shim (`MAXTEXT_R2_DATA_EMULATION`) and
+  `MAXTEXT_LOG_BATCH_HASH=1` together, so their separate contributions are not isolated. With both, one step in eight stalled for 20-35 s, at the same steps in
   every run, and H078's runs cost 1.8-1.9x the chip-hours of a `4x4x8`. In xprof the stall is one host's input
   pipeline (grain `process_prefetch` waiting 29 s) while every TPU waits for its batch in `jit__device_put_reshard`.
   The HF input pipeline allows at most one grain worker, so more workers are not a fix.
@@ -248,6 +253,14 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   restore-fix image.
 - **Data order depends on slice shape.** Batches are packed per data host, so a different host count gives a
   different, still valid, data order. Keep every arm of a comparison, and its control, on the same slice shape.
+- **Context parallelism with load balancing gives a wrong forward.** With `ici_context_parallelism` > 1 and MaxText's
+  default `context_parallel_load_balance=True`, dense Olmo 3 7B's step-1 CE on a fixed packed batch was off by +0.39
+  (cp4) and +1.98 (cp8) against an HF forward; cp4 with `context_parallel_load_balance=False` matches it (0.919794 vs
+  0.919799). The suspected cause, from the code, is that the SFT input path never applies the load-balancing reorder
+  that attention then assumes; upstream confirmation is pending. Turn load balancing off, and check step-1
+  `LOSS-PARTS` CE against an HF forward of the same batch before trusting any new mesh. The recipe's
+  `olmo35-ep-as-cp` uses the expert axis rather than `ici_context_parallelism`; on Olmo 3.5 small its step-1 CE
+  matched an HF forward of the same 64 rows (1.077855 vs 1.077850).
 - **Zero steps, exit 0.** `train_sft` exits 0 with no steps when the data iterator fails. The launcher's step guard
   catches it; keep that guard.
 - **KDA all-gathers on a new mesh.** Under `olmo35-cp-ep` on the `8x8x8`, the KDA chunk scan's inputs and states were
