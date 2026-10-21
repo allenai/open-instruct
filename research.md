@@ -2,6 +2,24 @@
 
 Questions/ideas being pursued. One section per idea, each linking to its section(s) in `experiment.md`.
 
+## Olmo Hybrid release checkpoint inputs
+
+**Status:** REFERENCE — inputs documented; training integration not yet validated.
+
+[HYBRID_CHECKPOINTS.md](HYBRID_CHECKPOINTS.md) records Yasha's primary and science
+release layouts, the authoritative Weka maps, final primary steps, and the pinned
+transformers/vLLM plugins and evaluation settings. October 21 inspection confirmed
+the primary mirror counts but found that the science handoff inventory had drifted:
+the map declares 1,523 checkpoints across 60 arms, the HF mirror has 939 directories,
+and the stated native science mirror is absent. Directory counts are not load tests.
+
+The sampled configs use `mainline_ladder`, while this branch's existing hybrid
+weight/config handling targets `olmo_hybrid_small` and the older sibling `stepN-hf`
+layout. Plugin/runtime and path-handling integration is required before treating
+these release artifacts as supported training inputs. Sampled release tokenizers
+also lack a chat template, so the old SFT thinking prompts must not be assumed.
+No training checkpoint was selected and no run was launched for this reference.
+
 ## Hammond checkout comparison
 
 **Status:** RESOLVED
