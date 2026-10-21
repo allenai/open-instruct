@@ -441,6 +441,7 @@ case "$MODE" in
         --local_cache_dir $LOCAL_CACHE_DIR \
         --seed $SEED \
         --data_loader_seed "${DATA_LOADER_SEED:-34521}" \
+        ${EXTRA_NUMPY_DIRS:+--extra_numpy_dirs $EXTRA_NUMPY_DIRS} \
         --output_dir "$OUTPUT_DIR_ARG"
     ;;
 
