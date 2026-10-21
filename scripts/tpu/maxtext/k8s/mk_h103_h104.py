@@ -9,7 +9,7 @@ import pathlib, sys
 
 K = pathlib.Path(__file__).parent
 BIG = "51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3"
-DC = BIG + "-dcf0497f75"  # BIG + the logging-only log_moe_dropped_tokens probe (abhishekraok/maxtext 4abbbe73; H103 Amendment 1)
+DC = BIG + "-dc88c6c7ea"  # BIG + the logging-only log_moe_dropped_tokens probe (abhishekraok/maxtext 1e612a76; H103 Amendment 1)
 FILES = ("jobset.yaml", "kustomization.yaml", "train_sft.sh")
 
 
