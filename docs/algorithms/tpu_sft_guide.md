@@ -37,6 +37,9 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
   `CLOUDSDK_CORE_ACCOUNT` to it in every process, background watchers included. Move
   `~/.kube/gke_gcloud_auth_plugin_cache` aside when switching identity, or kubectl keeps the cached one. People log in
   with their own account.
+- **Agents.** Claude Code and Codex in this repo load a summary of this guide's rules from the
+  [`tpu` skill](https://github.com/allenai/open-instruct/blob/main/.claude/skills/tpu/SKILL.md). Update it when you change
+  a rule here.
 - **Where things live.** Everything is in `us-central2`. Data, tokenizers and checkpoints are in `gs://ai2-olmo-dev/post-training/`,
   and the nodes mount it at `/mnt/post-training` through gcsfuse. Images are in
   `us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain`.
