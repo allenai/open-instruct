@@ -260,6 +260,13 @@ class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
         self.assertFalse(checker.check_following(response))
         self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
 
+    def test_legacy_json_verifier_rejects_deep_nesting(self):
+        verifier = ground_truth_utils.IFEvalVerifierOld()
+        response = "[" * 100_000 + "]" * 100_000
+        self.assertEqual(verifier([], response, {"func_name": "validate_json_format"}).score, 0.0)
+        self.assertEqual(verifier([], '{"a": [1, 2]}', {"func_name": "validate_json_format"}).score, 1.0)
+        self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
+
 
 class TestIFEvalGWordCounting(unittest.TestCase):
     """Regression tests: `count:counting_composition` and `count:count_unique` used
