@@ -4,11 +4,12 @@ H103: from h078/bb4-lr1e4-s<seed> (6a38852e). Only RUN_NAME/names, checkpoint_pe
 ragged_buffer_factor F and num_vocab_tiling T change. P1 smokes: 5 steps, scratch output, no checkpoint, maxRestarts 0.
 H104: from h089/olmo3-7b-s<seed> (2a6be850, copied to h089src/). GLOBAL_BATCH 64, STEPS = LR_SCHEDULE_STEPS 2942, LR 1e-4,
 the r2 data shim 8:2:128:32:4 (hashing stays on), the big-slice image, and P1 candidate A/B/C's slice and mesh.
-  python mk_h103_h104.py h103-p1 | h103-prod <seed> <F> <T> <suffix> | h104-p1 | h104-prod <cand> <seed>"""
+  python mk_h103_h104.py h103-p1 | h103-prod <seed> <F> <T> <suffix> | h103-prod-dc <seed> <suffix> | h104-p1 | h104-prod <cand> <seed>"""
 import pathlib, sys
 
 K = pathlib.Path(__file__).parent
 BIG = "51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3"
+DC = BIG + "-dcf0497f75"  # BIG + the logging-only log_moe_dropped_tokens probe (abhishekraok/maxtext 4abbbe73; H103 Amendment 1)
 FILES = ("jobset.yaml", "kustomization.yaml", "train_sft.sh")
 
 
@@ -28,7 +29,7 @@ def write(src, dst, old, new, edit, head):
     print(dst)
 
 
-def h103(seed, F, T, name, smoke):
+def h103(seed, F, T, name, smoke, dropcount=False, smoke_steps=5):
     src = K / f"h078/bb4-lr1e4-s{seed}"
 
     def edit(f, t):
@@ -40,17 +41,22 @@ def h103(seed, F, T, name, smoke):
             if smoke:
                 t = sub(t, "  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs\n",
                         "  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch\n")
-                t = sub(t, "  - STEPS=2942\n", "  - STEPS=5\n")
+                t = sub(t, "  - STEPS=2942\n", f"  - STEPS={smoke_steps}\n")
                 t = sub(t, " checkpoint_period=250 ", " checkpoint_period=100000 ")
             else:
                 t = sub(t, " checkpoint_period=250 ", " checkpoint_period=200 ")
+        if f == "kustomization.yaml" and dropcount:
+            t = sub(t, " log_required_ragged_buffer_factor=true ", " log_required_ragged_buffer_factor=true log_moe_dropped_tokens=true ")
+            t = sub(t, f"  newTag: {BIG}\n", f"  newTag: {DC}\n")
+        if f == "kustomization.yaml":
             for keep in ("  - GLOBAL_BATCH=64\n", "  - LR=1e-4\n", "  - LR_SCHEDULE_STEPS=2942\n",
-                         "  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32:4\n", f"  newTag: {BIG}\n"):
+                         "  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32:4\n", f"  newTag: {DC if dropcount else BIG}\n"):
                 assert keep in t, keep
         return t
 
     head = (f"# H103 {name} (tpu-worker, 2026-10-21; mk_h103_h104.py): H078's bb4-lr1e4-s{seed} with ragged_buffer_factor {F},\n"
-            f"# num_vocab_tiling {T}{', a 5-step P1 compile smoke (scratch, no checkpoint)' if smoke else ', checkpoint_period 200'}.\n")
+            f"# num_vocab_tiling {T}{f', a {smoke_steps}-step smoke (scratch, no checkpoint)' if smoke else ', checkpoint_period 200'}"
+            f"{'; Amendment 1: log_moe_dropped_tokens on the dropcount image' if dropcount else ''}.\n")
     write(src, K / "h103" / name, f"h078-bb4-lr1e4-s{seed}", f"h103-{name}", edit, head)
 
 
@@ -106,6 +112,12 @@ if mode == "h103-p1":
 elif mode == "h103-prod":
     seed, F, T, suffix = int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
     h103(seed, F, T, f"bb4-lr1e4-s{seed}{suffix}", False)
+elif mode == "h103-prod-dc":  # H103 Amendment 1: factor 3.0 (s0r's), every step's dropped rows logged
+    seed, suffix = int(sys.argv[2]), sys.argv[3]
+    h103(seed, "3.0", 16, f"bb4-lr1e4-s{seed}{suffix}", False, dropcount=True)
+elif mode == "h103-dc-smoke":  # Amendment 1 positive control: seed 1 at factor F on the dropcount image
+    F, steps = sys.argv[2], int(sys.argv[3])
+    h103(1, F, 16, f"dc-f{F.replace('.', '')}-s1", True, dropcount=True, smoke_steps=steps)
 elif mode == "h104-p1":
     for c in MESH:
         h104(c, 0, f"p1-{c.lower()}", True)
