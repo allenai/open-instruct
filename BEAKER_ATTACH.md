@@ -86,7 +86,10 @@ The local-only commit fixes evaluation launch scripts; cluster-only work include
 GRPO/GDN fixes, chat templates, Dolci scoring, and expanded experiment notes.
 
 See [the comparison run log](experiment.md#hammond-checkout-comparison-2026-10-21)
-for the findings. No branches or working files were synchronized.
+for the findings. The subsequent synchronization merged both histories on
+`hybrid-small-suite`, preserving the local evaluation fix and cluster work.
+Use `git rev-parse HEAD` and `git status --short --branch` in each checkout
+to verify their current commit and working-tree state.
 
 ## Relation to the coworker example
 

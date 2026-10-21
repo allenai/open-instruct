@@ -7,6 +7,7 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 
 import os
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 import ray
@@ -15,6 +16,7 @@ import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.attention.recurrent import GatedDeltaNetConfig
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -34,8 +36,8 @@ from open_instruct.grpo_callbacks import (
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
-    olmo_core_to_hf_name,
 )
+from open_instruct.grpo_name_mapping import olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
@@ -129,6 +131,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
+        self.gdn_layer_indices = frozenset(
+            idx
+            for idx, block_config in enumerate(self.model_config.resolved_block_configs)
+            if isinstance(block_config.sequence_mixer, GatedDeltaNetConfig)
+        )
+        self.name_mapper = partial(olmo_core_to_hf_name, gdn_layer_indices=self.gdn_layer_indices)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
@@ -369,7 +377,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(
-                name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
+                name=self.run_name,
+                project=self.wandb_project,
+                entity=self.wandb_entity,
+                config=self.json_config,
+                tags=utils.get_wandb_tags(extra_tags=[self.grpo_config.exp_name]),
             )
 
         if self.rank == 0 and self.eval_dataset is not None and self.grpo_config.local_eval_every > 0:

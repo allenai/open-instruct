@@ -1,0 +1,28 @@
+version: v2
+budget: ai2/oe-other
+description: "vLLM server for Qwen3-32B general-quality LLM judge (hosted_vllm/Qwen/Qwen3-32B)"
+tasks:
+  - name: "vllm-job"
+    image:
+      beaker: michaeln/open-instruct-integration-test-hybrid-small-suite-cuda12
+    hostNetworking: true
+    command: ["/bin/sh", "-c"]
+    arguments:
+      [
+        "VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
+            --tensor-parallel-size 2 \
+            --max-model-len 32768 \
+            --trust-remote-code \
+            --port 8001 \
+            --enforce-eager"
+      ]
+    constraints:
+      cluster:
+        - ai2/saturn
+        - ai2/jupiter
+        - ai2/ceres
+    resources:
+      gpuCount: 2
+    context:
+      priority: urgent
+      preemptible: False

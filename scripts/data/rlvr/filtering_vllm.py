@@ -58,12 +58,16 @@ def main():
         tokenizer.chat_template = CHAT_TEMPLATES[args.chat_template]
 
     # 3. Build prompts
+    # Only drop a trailing assistant turn (SFT-style messages ending in a completion to
+    # generate from); RLVR-style prompt-only datasets already end in a user turn and must
+    # be kept intact.
+    def prompt_messages(messages):
+        if len(messages) > 1 and messages[-1]["role"] == "assistant":
+            return messages[:-1]
+        return messages
+
     prompts = [
-        tokenizer.apply_chat_template(
-            sample["messages"][:-1] if len(sample["messages"]) > 1 else sample["messages"],
-            add_generation_prompt=True,
-            tokenize=False,
-        )
+        tokenizer.apply_chat_template(prompt_messages(sample["messages"]), add_generation_prompt=True, tokenize=False)
         for sample in subset
     ]
     # 4. vLLM bulk generate
