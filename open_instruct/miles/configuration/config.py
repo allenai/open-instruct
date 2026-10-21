@@ -99,8 +99,22 @@ class CoreConfig:
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
     selection_table: str | None = None
     selection_sha256: str | None = None
+    # Opening response text assigned to the first opener_seeds_per_group samples of
+    # every prompt group, rotating through opener_seeds across groups. Seeded tokens
+    # are scored by the serving policy and trained as response tokens. Refresh only.
+    opener_seeds: tuple[str, ...] = ()
+    opener_seeds_per_group: int = 0
 
     def __post_init__(self):
+        if isinstance(self.opener_seeds, list):
+            object.__setattr__(self, "opener_seeds", tuple(self.opener_seeds))
+        if not isinstance(self.opener_seeds, tuple) or not all(
+            isinstance(text, str) and text for text in self.opener_seeds
+        ):
+            raise constraints.error("core.opener_seeds must be a list of nonempty strings")
+        if len(set(self.opener_seeds)) != len(self.opener_seeds):
+            raise constraints.error("core.opener_seeds must not repeat an opener")
+        validation.integer(self.opener_seeds_per_group, "core.opener_seeds_per_group", minimum=0)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -358,6 +372,10 @@ class RunConfig:
         cli_options.encode_options(self.miles)
         if (self.core.selection_table is None) != (self.core.selection_sha256 is None):
             raise constraints.error("core.selection_table and core.selection_sha256 must be set together")
+        if bool(self.core.opener_seeds) != (self.core.opener_seeds_per_group > 0):
+            raise constraints.error(
+                "core.opener_seeds and a positive core.opener_seeds_per_group must be set together"
+            )
         if (self.core.records_responses == "sample") != (self.core.records_response_sample_rate is not None):
             raise constraints.error(
                 'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
@@ -504,6 +522,15 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         if self.core.publication_mode == "refresh":
             self._validate_refresh(options, collection, samples)
+        if self.core.opener_seeds:
+            if self.core.publication_mode != "refresh":
+                raise constraints.error(
+                    'core.opener_seeds requires core.publication_mode="refresh"', constraints.Category.NOT_IMPLEMENTED
+                )
+            if self.core.opener_seeds_per_group >= options.get("n_samples_per_prompt", 1):
+                raise constraints.error(
+                    "core.opener_seeds_per_group must leave at least one unseeded sample per prompt group"
+                )
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
 
@@ -627,6 +654,10 @@ class RunConfig:
             core.pop("expert_balance_layer_stride")
             core.pop("expert_balance_search_proposals")
             core.pop("expert_balance_search_seconds")
+        if not self.core.opener_seeds:
+            # Preserve the pre-feature native argv when opener seeding is disabled.
+            core.pop("opener_seeds")
+            core.pop("opener_seeds_per_group")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,
