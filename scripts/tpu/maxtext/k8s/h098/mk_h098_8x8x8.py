@@ -1,4 +1,7 @@
-"""H098 lr2x-7b seed 0 on the 8x8x8 (H098's allowed placement, gated by the 7B 8x8x8 probe and the offline CPU replay of
+"""SUPERSEDED 2026-10-21, do not apply: dense 7B CP>1 gives a wrong step-1 CE on the same batch (H089 4x4x8
+FSDP16 x TP8: ce 0.919794; 8x8x8 probe CP4: 1.310774; CP8: 2.896670), so this CP4 overlay is ineligible.
+
+H098 lr2x-7b seed 0 on the 8x8x8 (H098's allowed placement, gated by the 7B 8x8x8 probe and the offline CPU replay of
 the shim loader; ledger experiments/tpu-7b-8x8x8-probe): H098's s0 overlay (lr2x-7b-s0) with only the slice items
 changed, as the probe's p7b-shim overlay: topology 8x8x8, 128 hosts, TOTAL_DEVICES 512, PER_DEVICE_BATCH 1/32 (still
 16 x 65,536 tokens/step), mesh FSDP16 x TP8 x CP4 with allow_split_physical_axes, the r2 data shim
