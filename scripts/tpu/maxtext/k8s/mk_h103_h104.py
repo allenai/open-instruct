@@ -4,7 +4,7 @@ H103: from h078/bb4-lr1e4-s<seed> (6a38852e). Only RUN_NAME/names, checkpoint_pe
 ragged_buffer_factor F and num_vocab_tiling T change. P1 smokes: 5 steps, scratch output, no checkpoint, maxRestarts 0.
 H104: from h089/olmo3-7b-s<seed> (2a6be850, copied to h089src/). GLOBAL_BATCH 64, STEPS = LR_SCHEDULE_STEPS 2942, LR 1e-4,
 the r2 data shim 8:2:128:32:4 (hashing stays on), the big-slice image, and P1 candidate A/B/C's slice and mesh.
-  python mk_h103_h104.py h103-p1 | h103-prod <seed> <F> <T> <suffix> | h103-prod-dc <seed> <suffix> | h104-p1 | h104-prod <cand> <seed>"""
+  python mk_h103_h104.py h103-p1 | h103-prod <seed> <F> <T> <suffix> | h103-prod-dc <seed> <suffix> | h104-p1 | h104-smoke <cand> | h104-prod <cand> <seed>"""
 import pathlib, sys
 
 K = pathlib.Path(__file__).parent
@@ -64,6 +64,8 @@ MESH = {  # candidate: (topology, hosts, devices, per-device batch, mesh args, c
     "A": ("8x8x8", 128, 512, "0.125", "ici_fsdp_parallelism=16 ici_tensor_parallelism=8 ici_context_parallelism=4 allow_split_physical_axes=true", 100),
     "B": ("8x8x8", 128, 512, "0.125", "ici_fsdp_parallelism=64 ici_tensor_parallelism=8 allow_split_physical_axes=true", 100),
     "C": ("8x8x16", 256, 1024, "0.0625", "ici_fsdp_parallelism=64 ici_tensor_parallelism=8 ici_context_parallelism=2 allow_split_physical_axes=true", 180),
+    # F1 (2026-10-21, after the 8x8x8 was resliced): AOT compile on CPU fits (temp 19.2 GB vs mesh B's 35.7), ~4.5 s/step est.
+    "F1": ("8x8x16", 256, 1024, "0.0625", "ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true", 200),
 }
 
 
@@ -121,6 +123,9 @@ elif mode == "h103-dc-smoke":  # Amendment 1 positive control: seed 1 at factor 
 elif mode == "h104-p1":
     for c in MESH:
         h104(c, 0, f"p1-{c.lower()}", True)
+elif mode == "h104-smoke":  # one candidate's 30-step smoke
+    cand = sys.argv[2]
+    h104(cand, 0, f"p1-{cand.lower()}", True)
 elif mode == "h104-prod":
     cand, seed = sys.argv[2], int(sys.argv[3])
     h104(cand, seed, f"bb4-lr1e4-7b-{cand.lower()}-s{seed}", False)
