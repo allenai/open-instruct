@@ -390,7 +390,7 @@ def validate_sections(text: str, N: int, section_splitter: str) -> bool:
 def validate_json_format(text: str) -> bool:
     try:
         json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
     return True
 

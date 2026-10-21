@@ -4,10 +4,13 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import json
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import nltk
 from parameterized import parameterized
 
 from open_instruct import ground_truth_utils
@@ -19,6 +22,7 @@ from open_instruct.ground_truth_utils import (
     PuzzleMatcherVerifier,
     cleanup_all_llm_judge_clients,
 )
+from open_instruct.IFEvalG import instructions_registry
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -239,6 +243,134 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
+    """Regression test: detectable_format:json_format called json.loads on the response and caught only ValueError,
+    so a degenerate, deeply nested response raised RecursionError out of the verifier and stopped an RL run."""
+
+    def test_deeply_nested_response_fails_the_constraint(self):
+        checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
+            "detectable_format:json_format"
+        )
+        checker.build_description()
+        response = "[" * 100_000 + "]" * 100_000
+        with self.assertRaises(RecursionError):
+            json.loads(response)
+        self.assertFalse(checker.check_following(response))
+        self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
+
+    def test_legacy_json_verifier_rejects_deep_nesting(self):
+        verifier = ground_truth_utils.IFEvalVerifierOld()
+        response = "[" * 100_000 + "]" * 100_000
+        self.assertEqual(verifier([], response, {"func_name": "validate_json_format"}).score, 0.0)
+        self.assertEqual(verifier([], '{"a": [1, 2]}', {"func_name": "validate_json_format"}).score, 1.0)
+        self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
+
+
+class TestIFEvalGWordCounting(unittest.TestCase):
+    """Regression tests: `count:counting_composition` and `count:count_unique` used
+    nltk.word_tokenize, which emits punctuation (".", ",") as standalone tokens. That
+    made "exactly N words per sentence" off by one and any multi-sentence response look
+    like it had duplicate words. The checkers now count only word tokens (instructions_util.word_tokens)."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            nltk.data.find("tokenizers/punkt_tab/english/")
+        except LookupError:
+            resource_dir = tempfile.TemporaryDirectory(prefix="ifevalg-nltk-")
+            cls.addClassCleanup(resource_dir.cleanup)
+            nltk.download("punkt_tab", download_dir=resource_dir.name, quiet=True, raise_on_error=True)
+            nltk.data.path.insert(0, resource_dir.name)
+            cls.addClassCleanup(nltk.data.path.remove, resource_dir.name)
+
+    def setUp(self):
+        self.cc = instructions_registry.INSTRUCTION_DICT["count:counting_composition"]("count:counting_composition")
+        self.cu = instructions_registry.INSTRUCTION_DICT["count:count_unique"]("count:count_unique")
+
+    def test_counting_composition_compliant_with_spaced_divider(self):
+        # 3 paragraphs, 3 sentences each, 2 words each, using the "* * *" divider the prompt asks for.
+        self.cc.build_description(n_sent=3, n_words=2)
+        response = (
+            "Cats run. Dogs jump. Birds fly.\n\n* * *\n\n"
+            "Fish swim. Foxes leap. Owls hoot.\n\n* * *\n\n"
+            "Apes climb. Bats hang. Eels glide."
+        )
+        self.assertTrue(self.cc.check_following(response))
+
+    def test_counting_composition_reported_example_and_whitespace(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        for divider in ("\n* * *\n", "\n  *  *\t*  \n", "\r\n* * *\r\n"):
+            with self.subTest(divider=divider):
+                response = divider.join(["Cats sleep. Dogs run."] * 3)
+                self.assertTrue(self.cc.check_following(response))
+
+    def test_counting_composition_accepts_outer_dividers(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        response = "\n* * *\n".join(["", *["Cats sleep. Dogs run."] * 3, ""])
+        self.assertTrue(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_inline_or_vertical_dividers(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        for divider in (" * * * ", "\n*\n*\n*\n"):
+            with self.subTest(divider=divider):
+                response = divider.join(["Cats sleep. Dogs run."] * 3)
+                self.assertFalse(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_wrong_structure(self):
+        self.cc.build_description(n_sent=2, n_words=2)
+        for paragraphs in (
+            ["Cats sleep. Dogs run."] * 2,
+            ["Cats sleep. Dogs run."] * 4,
+            ["Cats sleep."] * 3,
+            ["Cats sleep. Dogs run.", "", "Cats sleep. Dogs run."],
+        ):
+            with self.subTest(paragraphs=paragraphs):
+                self.assertFalse(self.cc.check_following("\n* * *\n".join(paragraphs)))
+
+    def test_counting_composition_via_ifeval_verifier(self):
+        verifier = ground_truth_utils.IFEvalVerifier()
+        label = str([{"instruction_id": ["count:counting_composition"], "kwargs": [{"n_sent": 2, "n_words": 2}]}])
+        result = verifier(
+            tokenized_prediction=[1, 2, 3], prediction="\n* * *\n".join(["Cats sleep. Dogs run."] * 3), label=label
+        )
+        self.assertEqual(result.score, 1.0)
+
+    def test_counting_composition_rejects_spaceless_divider(self):
+        # The instruction specifies the "* * *" divider; a "***" response does not follow it.
+        self.cc.build_description(n_sent=3, n_words=2)
+        response = (
+            "Cats run. Dogs jump. Birds fly.\n\n***\n\n"
+            "Fish swim. Foxes leap. Owls hoot.\n\n***\n\n"
+            "Apes climb. Bats hang. Eels glide."
+        )
+        self.assertFalse(self.cc.check_following(response))
+
+    def test_counting_composition_rejects_wrong_word_count(self):
+        self.cc.build_description(n_sent=3, n_words=2)
+        response = (
+            "Cats run fast. Dogs jump. Birds fly.\n\n* * *\n\n"  # first sentence has 3 words
+            "Fish swim. Foxes leap. Owls hoot.\n\n* * *\n\n"
+            "Apes climb. Bats hang. Eels glide."
+        )
+        self.assertFalse(self.cc.check_following(response))
+
+    def test_count_unique_allows_unique_multi_sentence(self):
+        self.cu.build_description()
+        self.assertTrue(self.cu.check_following("Alpha beta gamma. Delta epsilon zeta."))
+
+    def test_count_unique_rejects_repeated_word(self):
+        self.cu.build_description()
+        self.assertFalse(self.cu.check_following("The sun is hot. The moon is cold."))  # "The"/"is" repeat
+
+    def test_count_unique_via_ifeval_verifier(self):
+        verifier = ground_truth_utils.IFEvalVerifier()
+        label = str([{"instruction_id": ["count:count_unique"], "kwargs": [None]}])
+        result = verifier(
+            tokenized_prediction=[1, 2, 3], prediction="Alpha beta gamma. Delta epsilon zeta.", label=label
+        )
+        self.assertEqual(result.score, 1.0)
 
 
 if __name__ == "__main__":
