@@ -71,6 +71,32 @@ temperature/top-p 1 and top-k -1. See [configuration](configuration.md) and
 A configured refresh mode does not prove a particular short run actually crossed
 a policy boundary; inspect retained token spans and `refresh_scores` observations.
 
+### Opener seeds
+
+Refresh can start some responses from chosen opening text, so that alternative
+openers are explored on every prompt instead of only those the policy already
+prefers:
+
+```toml
+[core]
+opener_seeds = ["\n", " Okay", "Okay"]
+opener_seeds_per_group = 2
+```
+
+The first `opener_seeds_per_group` samples of each prompt group receive an opener,
+rotating through the list by prompt-group identity; the remaining samples are
+unchanged. The producer scores the opener under the serving policy in a
+prefill-only request, then generates from it. Opener tokens are response tokens:
+they are rewarded, trained, and carry the scored behavior log probabilities and
+the policy version that scored them, so TIS treats them as on-policy draws. The
+recorded tokens and scores are kept in sample metadata as `response_seed_scored`.
+
+An opener must tokenize the same way alone as after the prompt; text that merges
+with the end of the prompt (for example a newline after a bare `>`) is rejected.
+Openers count against `max_response_length`, at least one sample per group must
+stay unseeded, and seeding requires `publication_mode="refresh"`. Leaving both
+fields unset keeps the native arguments and producer behavior unchanged.
+
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted
