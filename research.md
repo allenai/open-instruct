@@ -2,6 +2,29 @@
 
 Questions/ideas being pursued. One section per idea, each linking to its section(s) in `experiment.md`.
 
+## Hammond checkout comparison
+
+**Status:** RESOLVED
+
+The checkouts differ. The cluster checkout is named `nit-open-instruct` at
+`/weka/oe-adapt-default/michaeln/nit-open-instruct`, on `hybrid-small-suite` at
+`e2d831a5ca7ad8d62ff3e554460753ec17ae62bb`. Local HEAD is
+`9584735ef421640cc282b19fccaf0f9223466e36` on the same branch. Both working trees
+were clean before the local comparison documentation was added.
+
+The cluster has 76 commits after `8fc89d9584913b93d56f46cf6b566b7a316140ff`,
+including GRPO/GDN weight-sync and activation-checkpointing changes, chat-template
+handling, Dolci scoring scripts, and extensive run findings. Local has a separate
+evaluation-launch fix touching `scripts/eval/oe-eval.sh` and
+`scripts/submit_eval_jobs.py`. These changes need reconciliation before treating
+the two checkouts as interchangeable. No branch or working files were synced.
+
+The old session died October 17; the approved replacement is
+`01M5FZAJ0GKWGRBYFRCHCW3CCG`. [BEAKER_ATTACH.md](BEAKER_ATTACH.md) records how to
+attach and the stale `--host-networking` option in `beakernew`.
+
+See [experiment.md#hammond-checkout-comparison-2026-10-21](experiment.md#hammond-checkout-comparison-2026-10-21).
+
 ## OLMo-hybrid 275M small suite: GRPO on GSM8K
 
 **Status:** ACTIVE

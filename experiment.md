@@ -33,3 +33,37 @@ Related: [research.md#olmo-hybrid-275m-small-suite-grpo-on-gsm8k](research.md#ol
 - Launch: `./scripts/train/build_image_and_launch.sh scripts/train/debug/olmo_hybrid_275m_4gpu_gsm8k.sh`
 - Beaker: [01KY2MJSAHCXYFG0ZABBDQDHAW](https://beaker.org/ex/01KY2MJSAHCXYFG0ZABBDQDHAW)
 - Result: TBD (run in progress)
+
+## Hammond checkout comparison 2026-10-21
+
+Related: [research.md#hammond-checkout-comparison](research.md#hammond-checkout-comparison).
+
+- Control session only, not a training run or GPU test.
+- Beaker: [01M5FZAJ0GKWGRBYFRCHCW3CCG](https://beaker.org/job/01M5FZAJ0GKWGRBYFRCHCW3CCG).
+- Launch: the `beaker session create` command in [BEAKER_ATTACH.md](BEAKER_ATTACH.md#replace-an-ended-session), matching `beakernew` except the unsupported `--host-networking` flag.
+- Config: `ai2/hammond`, workspace `ai2/michaeln`, budget `ai2/oe-other`, priority
+  `low`, image `ai2/cuda12.8-dev-ubuntu22.04-notorch`, detached/bare, no explicit
+  CPU/memory/GPU request or timeout. Existing Weka/secret mounts retained.
+- User explicitly approved creating the replacement session. Previous session
+  `01M46TWNTH609VQJD2KAM06MAT` was canceled October 17 when its node became unavailable.
+- Result: session ready on `hammond-cs-aus-452.reviz.ai2.in`. The persistent
+  checkout is `/weka/oe-adapt-default/michaeln/nit-open-instruct`, branch
+  `hybrid-small-suite`, clean working tree, HEAD
+  `e2d831a5ca7ad8d62ff3e554460753ec17ae62bb`. Local HEAD before documentation edits
+  was `9584735ef421640cc282b19fccaf0f9223466e36`, also clean.
+- Cluster changes since local's parent `8fc89d9584913b93d56f46cf6b566b7a316140ff`:
+  76 commits, 27 files, 2,103 insertions and 85 deletions. Includes GRPO/GDN
+  mapping and checkpointing changes, template handling, Dolci scoring scripts,
+  a general `gsm8k_grpo.sh`, and expanded experiment/research logs.
+- Local's additional commit changes two evaluation launch files:
+  `scripts/eval/oe-eval.sh` and `scripts/submit_eval_jobs.py` (717 insertions,
+  212 deletions). Neither is in the cluster's changed-file list from that parent.
+- Exact comparison: 1 local-only commit and 76 cluster-only commits, merge base
+  `8fc89d9584913b93d56f46cf6b566b7a316140ff`. Local HEAD to cluster HEAD changes
+  29 files with 2,315 insertions and 802 deletions.
+- A cluster GitHub fetch stalled and was stopped; a temporary small Git bundle
+  was transferred to compare local history without changing the remote branch
+  or working tree. No training or GPU tests were launched.
+- Local validation: Ruff lint/format checks, `ty check`, four focused CPU tests
+  in `open_instruct/test_grpo_fast_resource_plan.py`, and MkDocs build passed
+  (MkDocs emitted existing link/deprecation warnings).
