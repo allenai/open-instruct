@@ -783,3 +783,19 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
   in FP32 (rtol 5e-4 / atol 1e-3), reports FlashAttention FP16 differences, and
   independently gates FlashAttention BF16 next-token KL < 1e-3 per position.
   The full-length optimizer test and export/reload remain required; training is pending.
+
+### GPU gate attempt 3
+
+- [Beaker](https://beaker.org/ex/01M5H1TK0Q7VAZG446WG6BC6ZT), code
+  `6802233b0`: **PASSED**, 1 actual CUDA test, exit 0, 307.21s.
+- Before update: FP32 math max absolute error 0.00067067; FP16 FlashAttention
+  max error 0.019531; BF16 cross-backend max KL 0.00055496. BF16-vs-FP16
+  reference drift within HF 0.00043708 and native 0.00034995.
+- Full 2560-token BF16 CE loss 13.774601; finite backward, AdamW parameter update,
+  HF export and reload passed. After update: FP32 math max error 0.00140429
+  (within relative+absolute bound); BF16 cross-backend max KL 0.00053793.
+- Follow-up concern: after the synthetic update, HF BF16-vs-FP16 max KL rose to
+  0.18166320 (native 0.19600232), despite both backends agreeing at each precision.
+  This probe used lr 1e-4, 100x the production 1e-6. Before starting the long run,
+  repeat at the actual production learning rate and report both BF16 and FP16
+  against FP32 to identify relevant precision sensitivity. No production math changed.

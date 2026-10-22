@@ -47,6 +47,9 @@ def assert_release_parity(native, hf, tokens):
         actual = native(tokens).float()
     expected_logprobs = expected.log_softmax(-1)
     actual_logprobs = actual.log_softmax(-1)
+    reference_logprobs = expected_fp32.log_softmax(-1)
+    bf16_reference_kl = (reference_logprobs.exp() * (reference_logprobs - expected_logprobs)).sum(-1)
+    fp16_reference_kl = (reference_logprobs.exp() * (reference_logprobs - expected_fp16.log_softmax(-1))).sum(-1)
     kl = (expected_logprobs.exp() * (expected_logprobs - actual_logprobs)).sum(-1)
     hf_precision_kl = (expected_logprobs.exp() * (expected_logprobs - expected_fp16.log_softmax(-1))).sum(-1)
     native_precision_kl = (actual_logprobs.exp() * (actual_logprobs - actual_fp16.log_softmax(-1))).sum(-1)
@@ -55,6 +58,10 @@ def assert_release_parity(native, hf, tokens):
         f"mean_kl={kl.mean().item():.8f} max_kl={kl.max().item():.8f} "
         f"hf_precision_kl={hf_precision_kl.max().item():.8f} "
         f"native_precision_kl={native_precision_kl.max().item():.8f}",
+        flush=True,
+    )
+    print(
+        f"FP32 reference max_kl: BF16={bf16_reference_kl.max().item():.8f} FP16={fp16_reference_kl.max().item():.8f}",
         flush=True,
     )
     assert torch.isfinite(kl).all()
@@ -86,7 +93,7 @@ def test_release_parity_update_and_export_reload(tmp_path):
     del hf
 
     native.train()
-    optimizer = torch.optim.AdamW(native.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(native.parameters(), lr=1e-6)
     before = native.lm_head.norm.weight.detach().clone()
     with torch.autocast("cuda", dtype=torch.bfloat16):
         logits = native(tokens)
