@@ -443,6 +443,7 @@ case "$MODE" in
         ${TOKENIZER_REVISION_FLAGS[@]+"${TOKENIZER_REVISION_FLAGS[@]}"} \
         ${RESERVED_SLOT_FLAGS[@]+"${RESERVED_SLOT_FLAGS[@]}"} \
         ${ROW_BOUNDARY_FLAGS[@]+"${ROW_BOUNDARY_FLAGS[@]}"} \
+        ${EXTRA_NUMPY_DIRS:+--extra_numpy_dirs $EXTRA_NUMPY_DIRS} \
         --max_seq_length "$SEQ" \
         --per_device_train_batch_size 1 \
         --gradient_accumulation_steps $GRAD_ACCUM \
