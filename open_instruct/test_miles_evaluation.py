@@ -329,11 +329,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         imported[name] = value
         return value
 
-    manager = SimpleNamespace(
-        get=SimpleNamespace(remote=AsyncMock(return_value={})),
-        dispose=SimpleNamespace(remote=AsyncMock()),
-        save=SimpleNamespace(remote=AsyncMock()),
-    )
+    manager = SimpleNamespace(get=AsyncMock(return_value={}), dispose=AsyncMock(), save=AsyncMock())
     learner = SimpleNamespace(
         update_weights=AsyncMock(),
         train=AsyncMock(),
@@ -352,7 +348,9 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     )
     module("miles")
     module(
-        "miles.ray", placement_group=placement, wiring=SimpleNamespace(launch_worker_manager=lambda *a, **kw: workers)
+        "miles.ray",
+        placement_group=placement,
+        wiring=SimpleNamespace(launch_worker_manager=lambda *a, **kw: workers, shutdown_worker_manager=AsyncMock()),
     )
     module("miles.ray.rollout")
     shared = Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
@@ -365,7 +363,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         ),
     )
     module("miles.utils.data", remove_rollout_data_refs=lambda *a: None)
-    module("miles.utils.hf_config", HF_EXPORT_COMPLETE_MARKER=".complete")
+    module("miles.utils.hf_utils.config", HF_EXPORT_COMPLETE_MARKER=".complete")
     module("miles.utils.misc", should_run_periodic_action=lambda *a: False)
     module("miles.utils.tracking_utils")
     module(
@@ -442,7 +440,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         assert learner.train.await_count == len(expected)
         assert result["stopped_for_time"] == deadline_stop
         if deadline_stop:
-            manager.save.remote.assert_awaited_once_with(0)
+            manager.save.assert_awaited_once_with(0)
             learner.save_model.assert_awaited_once_with(0, force_sync=True)
             learner.finalize_checkpoint.assert_awaited_once_with(0)
         if stop_mode == "deadline_off_cadence" and export_hf is None:
