@@ -338,7 +338,19 @@ successfully after about 14 minutes. All 16 responses hit the 128-token limit an
 received zero task rewards; the updates had entropy gradients, so this validates
 integration rather than learning. That image still had the older router wheel;
 its passing run does not qualify the subsequent router replacement.
-Candidate image identities and exact build revision are recorded in `runtime/miles/candidate-image.json` after publication.
-Use its `application.beaker` ID with `MILES_EXISTING_IMAGE` to select that exact
-image. This candidate is not a claim that the trained H045 or distributed gates
-have passed.
+The router replacement passed the real-router CPU regression; the old wheel
+failed the same test with the tokenizer error. The updated runtime also passed
+the local 4090 qualification in 425 seconds: all 560 model/Adam tensors matched
+exactly between three uninterrupted updates and two plus a fresh-process resumed
+third update, both exports matched, and maximum train/serving log-probability
+error was 0.01161 (limit 0.05). This fixture exercises the Core/Miles/SGLang
+lifecycle; the separate real-router test covers HTTP registration and forwarding.
+The final image adds only test updates to the GPU-tested application and passed
+596 optional CPU-compatible runtime tests (57 skipped). Open-Instruct's Miles
+CPU suite passed 956 tests (one skipped). Numerical tolerances were unchanged.
+
+Candidate image identities and exact build revisions are recorded in
+`runtime/miles/candidate-image.json`. Use its `application.beaker` ID with
+`MILES_EXISTING_IMAGE` to select that image. The final router image has not repeated
+the trained H045 Blackwell run; multi-node qualification and learning remain
+outside these short integration checks.

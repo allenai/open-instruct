@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "status": "Ray-before-W&B fix: local CPU and Saturn/WEKA logging checks passed; replacement H045 Blackwell exercise queued",
+  "status": "Published; CPU and local GPU qualification passed. Earlier H045 Blackwell and Saturn logging runs passed before the router replacement.",
   "application": {
-    "beaker": "01M5JDNZ4CC08QQQAB6SHCP4Y8",
-    "docker_id": "sha256:20636b5a6c57e14c517603b97e8c333947c35a5abd0e5376db6d01d3052c2885",
-    "source_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
-    "branch": "codex/miles-v012-runtime"
+    "beaker": "01M5JR2WB3AEW2M9PHADKFJKGA",
+    "docker_id": "sha256:76c74f86ef3197e44aa386e05006c585b6bfb2caea3afbfea8177e53f52505e4",
+    "source_revision": "7aeaf73cde16d089f67bcb146c8da898f7310c9b",
+    "branch": "codex/miles-v012-runtime-pr"
   },
   "base_image": {
     "beaker": "01M5J4F4AZHR12WEQ1X54FGDN6",
@@ -35,21 +35,25 @@
   "olmo_sglang_pull_request": "https://github.com/allenai/olmo-sglang/pull/8",
   "validation": {
     "cpu_contracts": {
-      "command": "python -m pytest open_instruct/test_miles*.py tests/miles_upstream -q",
-      "passed": 896,
-      "source_revision": "8fdcdadc0ddeb7aa10b03e8bf6a192d4ae4bfbde"
+      "command": "python -m pytest open_instruct/test_miles*.py -q",
+      "passed": 956,
+      "skipped": 1,
+      "seconds": 29.52,
+      "source_revision": "7aeaf73cde16d089f67bcb146c8da898f7310c9b"
     },
     "runtime_contracts": {
-      "source_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
-      "passed": 93,
-      "command": "python -m pytest tests/miles/test_tracking_lifecycle.py tests/miles/test_lifecycle.py tests/miles/test_qualification_checks.py --require-miles-runtime -q -p no:cacheprovider",
-      "note": "Passed inside the rebuilt image with embedded sources and no source mounts."
+      "source_revision": "7aeaf73cde16d089f67bcb146c8da898f7310c9b",
+      "image": "sha256:76c74f86ef3197e44aa386e05006c585b6bfb2caea3afbfea8177e53f52505e4",
+      "passed": 596,
+      "skipped": 57,
+      "seconds": 147.5,
+      "command": "python -m pytest tests/miles --ignore=tests/miles/test_opd_attention.py --tb=short --require-miles-runtime -q -p no:cacheprovider",
+      "note": "Embedded application and test sources; no source mounts. CUDA hidden. GPU-only OPD attention excluded; other unavailable GPU contracts skipped."
     },
     "ruff": "passed",
-    "application_types": "passed",
     "reference_generation": "passed",
     "embedded_image_provenance": {
-      "application_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
+      "application_revision": "7aeaf73cde16d089f67bcb146c8da898f7310c9b",
       "sources": {
         "olmo-core": "7e97bc43ff25d080ae4fd0eab1050a79caf80e55",
         "miles": "9ea6759fd872e78516decc45a684183f77918e14",
@@ -60,20 +64,31 @@
         "flashinfer-python": "0.6.18",
         "flashinfer-cubin": "0.6.18",
         "torch": "2.13.0+cu130",
-        "sglang-kernel": "0.4.7"
+        "sglang-kernel": "0.4.7",
+        "sglang-router": "0.3.2"
       }
     },
     "training_exercise": {
       "experiment": "01M5JE15RBBZMZTKJ5ASMM1XGS",
       "url": "https://beaker.org/ex/01M5JE15RBBZMZTKJ5ASMM1XGS",
-      "status": "queued as of 2026-10-22T18:56:00Z",
+      "status": "passed",
       "cluster": "ai2/holmes",
       "workspace": "ai2/olmo-instruct",
       "gpus": 2,
       "model": "trained H045",
       "bf16_gemm_backend": "auto",
       "wandb_mode": "offline",
-      "requested_updates": 2
+      "requested_updates": 2,
+      "exit_code": 0,
+      "completed_optimizer_steps": 2,
+      "image": "01M5JDNZ4CC08QQQAB6SHCP4Y8",
+      "source_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
+      "responses": 16,
+      "prompts": 8,
+      "response_token_limit": 128,
+      "all_responses_truncated": true,
+      "task_rewards": "all zero",
+      "scope": "Trained H045 startup, two optimizer steps, weight publication/comparison and offline W&B; entropy gradients, not task learning. Predates router wheel replacement; final router image not rerun on Blackwell."
     },
     "targeted_cpu_contracts": {
       "source_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
@@ -85,7 +100,7 @@
       "passed": true,
       "case": "all",
       "fixture": "tests/miles/qualification/runner.py",
-      "total_command_seconds": 419.57302461657673,
+      "total_command_seconds": 424.9976010294631,
       "control_updates": 3,
       "resume_updates": "2 + resume 1",
       "compared_tensors": 560,
@@ -104,9 +119,9 @@
         "export_exact": true,
         "max_logprob_error": 0.011607646942138672
       },
-      "scope": "Toy hybrid-MoE lifecycle, checkpoint/export, scoring and paired resume; not learning or cross-container repeatability evidence.",
-      "source_revision": "98dff7d56dd8770c97f2ce84f695d382810c720f",
-      "image": "sha256:a83f8d9e04d3d5295ff710c33dbd7577de802059d7c7e0415f0b52836b0ebfd0"
+      "scope": "Embedded toy hybrid-MoE lifecycle, checkpoint/export, scoring and paired resume. Final 7aeaf73 image differs only in test files; production application and runtime dependencies identical. Not learning or cross-container repeatability evidence; HTTP router separately tested.",
+      "source_revision": "6b538afd4a2a6ddc51f9d44774eacf03563b719d",
+      "image": "sha256:3df073e834ec9ab1bed30a1c6333768ee6d3b8c4c422851bbd13c74f6b566d7e"
     },
     "offline_tracking_processes": {
       "passed": true,
@@ -136,7 +151,15 @@
         "exit_code": 1,
         "failure": "Test launch wrapper omitted parent directory creation for pytest --basetemp on WEKA; corrected before replacement."
       }
-    }
+    },
+    "router_regression": {
+      "passed": true,
+      "test": "tests/miles/test_router_http_runtime.py",
+      "new_wheel": "passed; also included in final 596-test embedded suite",
+      "old_wheel": "negative control failed with unknown generation tag during tokenizer registration",
+      "scope": "Real CPU router subprocess, fake HTTP engine; register, forward token IDs, remove worker. Preserves checkpoint generation tags."
+    },
+    "application_types": "passed: ty check open_instruct/miles --config src.exclude=[]"
   },
   "receipt_note": "This receipt is committed after the image build; source_revision identifies the exact application code embedded in the image.",
   "previous_training_attempts": [
@@ -176,6 +199,19 @@
       "docker_id": "sha256:a83f8d9e04d3d5295ff710c33dbd7577de802059d7c7e0415f0b52836b0ebfd0",
       "source_revision": "98dff7d56dd8770c97f2ce84f695d382810c720f",
       "branch": "codex/miles-v012-runtime"
+    },
+    {
+      "beaker": "01M5JDNZ4CC08QQQAB6SHCP4Y8",
+      "docker_id": "sha256:20636b5a6c57e14c517603b97e8c333947c35a5abd0e5376db6d01d3052c2885",
+      "source_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
+      "branch": "codex/miles-v012-runtime"
     }
-  ]
+  ],
+  "router_wheel": {
+    "version": "0.3.2",
+    "sha256": "28fede513319fcff4a38e5d859589498799c2e2861cc25d78ed371b3aaf3d192",
+    "source_revision": "a0cf7da533105d8d8da13119700934fb0c6e10d7",
+    "included_fix": "8ecf98086b15942b097a212006dc138ed4252751",
+    "note": "Current upstream Miles wheel bundle, pinned by exact hash; not a claim of identical bytes to the original v0.1.2 release bundle."
+  }
 }
