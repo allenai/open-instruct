@@ -302,8 +302,10 @@ exercised separately on Blackwell.
 Tracking initializes before launching the Miles worker manager so the serialized
 worker arguments include the primary W&B run ID, including in offline mode.
 
-The earlier source-mounted 4090 qualification passed; a newly built application
-image still needs its own exercise. Candidate image identities and exact build
+The rebuilt FlashInfer/tracking candidate passed the embedded lifecycle contracts
+and the local 4090 qualification with three uninterrupted updates versus two plus
+resume: all 560 compared checkpoint tensors matched exactly. The trained H045
+two-GPU Blackwell exercise is pending. Candidate image identities and exact build
 revision are recorded in `runtime/miles/candidate-image.json` after publication.
 Use its `application.beaker` ID with `MILES_EXISTING_IMAGE` to select that exact
 image. This candidate is not a claim that the trained H045 or distributed gates
