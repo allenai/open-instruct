@@ -39,7 +39,7 @@ from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-from open_instruct import logger_utils
+from open_instruct import hybrid_models, logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
@@ -178,6 +178,8 @@ class Batch:
 class ModelConfig:
     model_name_or_path: str
     """The model checkpoint for weights initialization."""
+    native_model_config: str | None = None
+    """Explicit native OLMo-core config.json for release checkpoints copied outside their paired tree."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None
@@ -217,6 +219,7 @@ class ModelConfig:
     """use nested quantization"""
 
     def __post_init__(self):
+        hybrid_models.register_models()
         if self.attn_implementation is None:
             self.attn_implementation = detect_attn_implementation()
 

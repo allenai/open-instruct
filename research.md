@@ -4,7 +4,7 @@ Questions/ideas being pursued. One section per idea, each linking to its section
 
 ## Olmo Hybrid release checkpoint inputs
 
-**Status:** REFERENCE — inputs documented; training integration not yet validated.
+**Status:** CPU VALIDATED — release integration implemented; GPU validation pending.
 
 [HYBRID_CHECKPOINTS.md](HYBRID_CHECKPOINTS.md) records Yasha's primary and science
 release layouts, the authoritative Weka maps, final primary steps, and the pinned
@@ -13,12 +13,55 @@ the primary mirror counts but found that the science handoff inventory had drift
 the map declares 1,523 checkpoints across 60 arms, the HF mirror has 939 directories,
 and the stated native science mirror is absent. Directory counts are not load tests.
 
-The sampled configs use `mainline_ladder`, while this branch's existing hybrid
-weight/config handling targets `olmo_hybrid_small` and the older sibling `stepN-hf`
-layout. Plugin/runtime and path-handling integration is required before treating
-these release artifacts as supported training inputs. Sampled release tokenizers
-also lack a chat template, so the old SFT thinking prompts must not be assumed.
-No training checkpoint was selected and no run was launched for this reference.
+October 22 integration pins the release plugins plus stock transformers/vLLM,
+registers both architecture names, supports paired release-tree native configs
+and an explicit config override, and reuses the verified hybrid tensor mapping
+for initialization, publication, and export. All 192 real 275m HF tensor names and
+shapes match HF/native meta models. The explicit base prompt is
+`Question: <question>\nAnswer:`. Earlier SFT thinking prompts are not assumed.
+
+The proposed input is primary 275m midtrain final `step0038147`. A one-GPU
+actual-weight parity/update/export test and a two-GPU 20-update GSM8K launcher are
+prepared. The latter disables zero-variance filtering to bound the smoke; zero
+reward can still mean zero learning. No new GPU allocation has been made.
+See [the preparation/validation log](experiment.md#olmo-hybrid-release-275m-rl-preparation-2026-10-22).
+
+## MILES migration for Olmo Hybrid release models
+
+**Status:** ASSESSED — keep the current backend for the first 275m baseline.
+
+The MILES integration checkout at `2fd9ca6bededc1d424e501bf0f56c9e8ac7fe806`
+pins MILES `4772a6767f1079eb3548d680c59fe98e481d6ff5`, OLMo-core
+`7e97bc43ff25d080ae4fd0eab1050a79caf80e55`, and olmo-sglang
+`92b35cdf2771353a9e2c527a5b96b29cbb3d38c8`. Inspection of those pins, rather
+than only the newer local MILES worktree, found:
+
+- The dense HF factory covers llama/qwen3/olmo2/olmo3 and rejects mainline_ladder.
+  An explicit native model config bypasses construction but not the generic HF
+  import/export converter. The hybrid mapping must be added to initialization,
+  streamed publication, export, and worker registration.
+- The pinned olmo-sglang extension implements Olmo3Moe/KDA. The pinned stock
+  SGLang model list has no MainlineLadder or OlmoHybrid executor. The vLLM plugin
+  cannot be used directly by SGLang. A serving port needs GDN/negative-eigenvalue
+  recurrence, convolution/decode state, NoPE gated attention, peri-norm blocks,
+  and embedding normalization, followed by HF/Core prefill/decode/logprob parity
+  and post-publication checks. Shared recurrent-attention vocabulary does not
+  make KDA and this GDN checkpoint interchangeable.
+- Structured config, math/GSM8K data/rewards, save/resume, producer backfill,
+  bounded staleness, and refresh already exist. Those are reusable infrastructure,
+  not model support. The prepared MILES GSM8K verifier normalizes numeric answer
+  formatting, whereas the legacy verifier compares extracted strings; match that
+  behavior deliberately in any learning comparison.
+
+Recommendation: first qualify this branch's short 275m smoke, then consider a
+bounded MainlineLadder port if many hybrid runs, NGU, or fully async experiments
+justify it. The serving/numerical-validation work dominates the migration; this
+is a model-integration project, not a TOML-only switch. No speedup for 275m is
+established by the existing Qwen/Olmo MoE MILES experiments.
+
+Pinned sources: [MILES dense factory and interchange](https://github.com/allenai/miles-olmo-core/blob/4772a6767f1079eb3548d680c59fe98e481d6ff5/miles/backends/core_utils/standard_models.py),
+[olmo-sglang supported architecture](https://github.com/allenai/olmo-sglang/tree/92b35cdf2771353a9e2c527a5b96b29cbb3d38c8),
+and [the pinned SGLang model implementations](https://github.com/sgl-project/sglang/tree/3145136dcd1238754e0ea2b2ffd546532119c71c/python/sglang/srt/models).
 
 ## Hammond checkout comparison
 

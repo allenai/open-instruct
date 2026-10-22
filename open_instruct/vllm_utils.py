@@ -1215,6 +1215,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    mamba_ssm_cache_dtype: str = "auto",
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1303,6 +1304,7 @@ def create_vllm_engines(
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
+                mamba_ssm_cache_dtype=mamba_ssm_cache_dtype,
             )
         )
 

@@ -690,3 +690,41 @@ Related: [research.md#hammond-checkout-comparison](research.md#hammond-checkout-
   `tests/test_olmo_core_utils.py`, and `open_instruct/test_grpo_fast_resource_plan.py`.
   The evaluation shell script passed `bash -n`, and the Python evaluation launcher
   passed compilation. These are static/CPU checks, not GPU training validation.
+
+## Olmo Hybrid release 275m RL preparation 2026-10-22
+
+Related: [research.md#olmo-hybrid-release-checkpoint-inputs](research.md#olmo-hybrid-release-checkpoint-inputs).
+
+- Preparation only; no GPU allocation or training experiment submitted.
+- Input: `/weka/oe-training-default/yashasbls/hybridish-local/hf/v1/275m/midtrain/step0038147`;
+  native config is in the matching `olmo-core/v1` tree. Only metadata/tokenizer
+  files and the safetensors header were copied to local `/tmp` for CPU checks;
+  checkpoint weights stayed on Weka.
+- Runtime: transformers 5.15.1, stock vLLM 0.19.1, both release plugins pinned to
+  `0fb485ce38733103f7da73973cdf0e74b0fc75db`, native OLMo-core pinned to
+  `098b7db005e2a77fd4fa1a490e2cda3406b4ec1a`. Legacy architecture registration retained.
+- Validation: 50 distinct focused CPU regressions passed across the combined
+  regression run and subsequent two classifier cases; the CUDA-only test skipped.
+  All 192 released tensor names/shapes match both meta models. Ruff format/lint,
+  compilation, ty, shell syntax, and MkDocs build passed. The existing tokenizer
+  LFS fixture was downloaded with its SHA256 checked for the tokenizer tests,
+  then its original pointer restored. New locked dependencies were tested in
+  `.venv-release`, leaving the previous shared `.venv` untouched.
+- Launcher arguments were captured without invoking Mason, then parsed through
+  the actual GRPO dataclass parser: 20 updates, 4 prompts × 4 completions, 320
+  total episodes, base `Question: ...\nAnswer:` prompt, 512/2048 prompt/response
+  tokens, packing budget 4096, 1 learner/1 rollout engine, BF16 compute, lr 1e-6,
+  beta 0, no reference policy, no zero-std filtering/refill, one async batch.
+- Planned smoke: 2 A100 80GB GPUs on Saturn, workspace `ai2/open-instruct-dev`,
+  budget `ai2/oe-other`, normal priority, preemptible, no minimum-runtime promise,
+  two-hour timeout, no automatic retries/resume, native save every ten steps and
+  final HF export. Output: `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/<run-name>`.
+- Build without allocating GPUs: `./scripts/train/build_image_and_launch.sh --build-only`.
+  Private plugin fetches use an ephemeral BuildKit GitHub-token secret.
+- GPU gate (separate from training):
+  `GPU_TEST_CLUSTER=ai2/saturn GPU_TEST_TIMEOUT=1h GPU_TEST_BUDGET=ai2/oe-other ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh open_instruct/test_hybrid_release_gpu.py`.
+  One A100 80GB, urgent/preemptible, no guaranteed minimum runtime, zero retries.
+  Tests actual-weight HF/Core parity, a synthetic full-length gradient/optimizer
+  update, and HF export/reload. GPU gate and end-to-end RL validation remain pending.
+- Smoke command after the gate passes:
+  `./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_release_275m_smoke.sh`.

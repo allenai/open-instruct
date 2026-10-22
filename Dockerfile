@@ -63,7 +63,7 @@ RUN curl --silent \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
     && rm beaker.tar.gz
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /uvx /bin/
 
 WORKDIR /stage/
 
@@ -74,8 +74,12 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    --mount=type=secret,id=github_token,env=GH_TOKEN \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=credential.https://github.com.helper \
+    GIT_CONFIG_VALUE_0='!f() { if [ "$1" = get ]; then printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; fi; }; f' \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
 

@@ -1,0 +1,154 @@
+{
+  "model": {
+    "d_model": 640,
+    "vocab_size": 100352,
+    "n_layers": 10,
+    "block": {
+      "sequence_mixer": {
+        "n_heads": 8,
+        "n_v_heads": 8,
+        "head_dim": 128,
+        "expand_v": 2.0,
+        "allow_neg_eigval": true,
+        "conv_size": 4,
+        "conv_bias": false,
+        "norm_eps": 1e-05,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.attention.recurrent.GatedDeltaNetConfig",
+        "type": "gated_delta_net"
+      },
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-06,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "feed_forward": {
+        "hidden_size": 5120,
+        "name": "default",
+        "bias": false,
+        "dtype": "float32",
+        "activation": "silu",
+        "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
+      },
+      "name": "peri_norm",
+      "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
+    },
+    "lm_head": {
+      "name": "default",
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-06,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "bias": false,
+      "dtype": "float32",
+      "loss_implementation": "default",
+      "_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig"
+    },
+    "embedding_norm": {
+      "name": "rms",
+      "eps": 1e-06,
+      "bias": false,
+      "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+    },
+    "name": "default",
+    "dtype": "float32",
+    "init_method": "normal",
+    "init_seed": 0,
+    "init_std": 0.02,
+    "block_overrides": {
+      "4": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 8,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "flash_3",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "feed_forward": {
+          "hidden_size": 5120,
+          "name": "default",
+          "bias": false,
+          "dtype": "float32",
+          "activation": "silu",
+          "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
+        },
+        "name": "peri_norm",
+        "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
+      },
+      "9": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 8,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "flash_3",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "feed_forward": {
+          "hidden_size": 5120,
+          "name": "default",
+          "bias": false,
+          "dtype": "float32",
+          "activation": "silu",
+          "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
+        },
+        "name": "peri_norm",
+        "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
+      }
+    },
+    "embed_scale": 25.298221281347036,
+    "_CLASS_": "olmo_core.nn.transformer.config.TransformerConfig"
+  }
+}

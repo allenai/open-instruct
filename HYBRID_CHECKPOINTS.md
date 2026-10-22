@@ -161,16 +161,46 @@ The sampled primary and science 275m midtrain tokenizers have no `chat_template`
 Do not carry over the older SFT checkpoints' `<think>` prompt convention without
 an explicit training/prompt-format decision.
 
-This branch still pins the older transformers/vLLM/OLMo-core forks in
-`pyproject.toml`. Its hybrid weight-mapping dispatch in
-`open_instruct/olmo_core_utils.py` recognizes `olmo_hybrid_small`, and native
-config discovery expects a `stepN-hf` directory beside `stepN`. The release
-layout instead separates `hf/v1/.../stepNNNNNNN` and
-`olmo-core/v1/.../stepNNNNNNN`. **Changing only `MODEL_PATH` in the existing
-GSM8K script does not establish support for these release artifacts.**
+The October 22 integration pins transformers 5.15.1, stock vLLM 0.19.1, and both
+release plugins. The native OLMo-core fork stays pinned at
+`098b7db005e2a77fd4fa1a490e2cda3406b4ec1a`. HF registration also preserves the
+earlier `olmo_hybrid_small` model name. The hybrid mapping now handles both names,
+and native config discovery supports both the legacy sibling `stepN-hf` layout
+and the paired release trees. For a checkpoint copied elsewhere, GRPO accepts
+`--native_model_config /path/to/native/config.json`.
 
-Before using them for training, align plugin/runtime versions and validate
-registration, native config resolution, HF/native weight conversion, rollout
-weight synchronization, tokenizer/prompt handling, and checkpoint export/reload
-for the selected input. This update records the inputs and integration gap;
-it does not install the plugins, change the training runtime, or launch a run.
+Metadata-only regression tests compare the real 275m checkpoint's 192 tensor
+names/shapes against independently built HF and native meta models. They also
+check conversion roundtrips, checkpoint-wrapper names, and both registrations.
+This is not GPU training or numerical-parity proof.
+
+The dedicated smoke script uses an explicit `gsm8k_base` prompt:
+`Question: <question>\nAnswer:`. It uses no SFT chat or thinking tokens. It runs
+20 updates with 4 prompts × 4 responses, BF16 compute, 512-token prompt and
+2,048-token response budgets, and one learner plus one vLLM engine. Zero-variance
+groups are retained so a low-accuracy base model cannot stall refill indefinitely;
+all-zero-reward batches can therefore produce zero policy gradients. This tests
+integration, not meaningful GSM8K improvement. Outputs go to
+`/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/<run-name>`.
+
+After committing and reviewing resource allocation, the workflow is:
+
+```bash
+# Build/upload a current image without submitting an experiment.
+./scripts/train/build_image_and_launch.sh --build-only
+
+# One-GPU gate: actual-weight HF/native parity, a full-2560-token optimizer update,
+# and HF export/reload. This is the GPU test script, not a training experiment.
+GPU_TEST_CLUSTER=ai2/saturn GPU_TEST_TIMEOUT=1h GPU_TEST_BUDGET=ai2/oe-other \
+  ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh \
+  open_instruct/test_hybrid_release_gpu.py
+
+# Two-GPU, 20-update RL smoke after the GPU gate passes.
+./scripts/train/build_image_and_launch.sh \
+  scripts/train/olmo-hybrid-small/gsm8k_release_275m_smoke.sh
+```
+
+The smoke uses Saturn, normal priority, preemption enabled, no guaranteed minimum
+runtime, a two-hour cap, and no automatic retries/resume. It saves native state
+every ten steps and exports final HF weights. The bounded GPU preflight and smoke
+must pass before calling this checkpoint/runtime combination training-validated.

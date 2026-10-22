@@ -22,6 +22,7 @@ local_dataset_cache/
 # because uv builds venvs whose bin/python symlinks to the host interpreter, and
 # the dangling symlink fails the COPY checksum ("... .venv/bin/python: not found").
 **/.venv/
+**/.venv-*/
 **/venv/
 **/ENV/
 **/env/

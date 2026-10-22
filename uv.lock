@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 4
 requires-python = "==3.12.*"
 resolution-markers = [
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -17,7 +17,7 @@ conflicts = [[
 ]]
 
 [manifest]
-overrides = [{ name = "transformers", git = "https://github.com/yashassamaga/transformers.git?rev=hybrid-small-suite" }]
+overrides = [{ name = "transformers", specifier = "==5.15.1" }]
 
 [[package]]
 name = "absl-py"
@@ -51,7 +51,7 @@ wheels = [
 [[package]]
 name = "ai2-olmo-core"
 version = "2.4.0"
-source = { git = "https://github.com/YashasSamaga/OLMo-core.git?rev=hybrid-final#098b7db005e2a77fd4fa1a490e2cda3406b4ec1a" }
+source = { git = "https://github.com/YashasSamaga/OLMo-core.git?rev=098b7db005e2a77fd4fa1a490e2cda3406b4ec1a#098b7db005e2a77fd4fa1a490e2cda3406b4ec1a" }
 dependencies = [
     { name = "bettermap" },
     { name = "cached-path" },
@@ -70,6 +70,60 @@ dependencies = [
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "ai2-olmo-core", extras = ["beaker", "comet", "dev", "dion", "eval", "fa4", "fla", "torchao", "transformers", "wandb"], marker = "extra == 'all'" },
+    { name = "ai2-olmo-eval", marker = "extra == 'eval'", specifier = "==0.9.0" },
+    { name = "beaker-gantry", marker = "extra == 'beaker'", specifier = ">=3.4.3,<4.0" },
+    { name = "beaker-py", marker = "extra == 'beaker'", specifier = ">=2.5.4,<3.0" },
+    { name = "bettermap" },
+    { name = "black", marker = "extra == 'dev'", specifier = ">=23.1,<24.0" },
+    { name = "boto3", marker = "extra == 'dev'" },
+    { name = "build", marker = "extra == 'dev'" },
+    { name = "cached-path", specifier = ">=1.7.2" },
+    { name = "comet-ml", marker = "extra == 'comet'" },
+    { name = "dataclass-extensions", specifier = ">=0.3.0" },
+    { name = "dion", marker = "sys_platform == 'linux' and extra == 'dion'", git = "https://github.com/microsoft/dion.git?rev=7452a5823cf9655b93c3f1d8020b4ebb2535239b" },
+    { name = "filelock", specifier = ">=3.4,<4.0" },
+    { name = "flash-attn-4", marker = "sys_platform == 'linux' and extra == 'fa4'", specifier = ">=4.0.0b4" },
+    { name = "flash-linear-attention", marker = "extra == 'fla'", specifier = "==0.4.2" },
+    { name = "furo", marker = "extra == 'dev'", specifier = "==2024.8.6" },
+    { name = "gitpython", marker = "extra == 'beaker'", specifier = ">=3.0,<4.0" },
+    { name = "google-cloud-compute", marker = "extra == 'beaker'" },
+    { name = "google-cloud-storage", marker = "extra == 'dev'" },
+    { name = "importlib-resources" },
+    { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12,<5.14" },
+    { name = "liger-kernel", marker = "sys_platform == 'linux'" },
+    { name = "matplotlib", marker = "extra == 'dev'" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0,<1.4" },
+    { name = "myst-parser", marker = "extra == 'dev'", specifier = ">=1.0,<3.0" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-memray", marker = "extra == 'dev'" },
+    { name = "pytest-sphinx", marker = "extra == 'dev'" },
+    { name = "pytest-xdist", marker = "extra == 'dev'" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "rich" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "safetensors" },
+    { name = "setuptools", marker = "extra == 'dev'" },
+    { name = "sphinx", marker = "extra == 'dev'", specifier = ">=6.0,<=8.1.3" },
+    { name = "sphinx-autobuild", marker = "extra == 'dev'" },
+    { name = "sphinx-autodoc-typehints", marker = "extra == 'dev'", specifier = "==1.23.3" },
+    { name = "sphinx-copybutton", marker = "extra == 'dev'" },
+    { name = "sphinx-inline-tabs", marker = "extra == 'dev'" },
+    { name = "torch", specifier = ">=2.6.0" },
+    { name = "torchao", marker = "extra == 'torchao'", specifier = "==0.15.0" },
+    { name = "transformers", marker = "extra == 'transformers'" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=1.11.0" },
+    { name = "wandb", marker = "extra == 'wandb'" },
+    { name = "wheel", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev", "beaker", "comet", "dion", "eval", "fa4", "fla", "torchao", "transformers", "wandb", "all"]
 
 [[package]]
 name = "aiofiles"
@@ -2917,8 +2971,11 @@ dependencies = [
     { name = "torchvision", version = "0.25.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torchvision", version = "0.25.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "transformers" },
+    { name = "transformers-plugin" },
     { name = "uvicorn" },
-    { name = "vllm", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "vllm", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "vllm", version = "0.19.1+cu130", source = { registry = "https://wheels.vllm.ai/0.19.1/cu130" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "vllm-plugin", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "wandb" },
 ]
 
@@ -2940,7 +2997,7 @@ cuda12 = [
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torchaudio", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torchvision", version = "0.25.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "vllm", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 cuda13 = [
     { name = "flash-attn", version = "2.8.3+cu130torch2.10", source = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -2948,7 +3005,7 @@ cuda13 = [
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torchaudio", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torchvision", version = "0.25.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "vllm", version = "0.19.1+cu130", source = { registry = "https://wheels.vllm.ai/0.19.1/cu130" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 dev = [
     { name = "beaker-py" },
@@ -2960,88 +3017,6 @@ dev = [
     { name = "rich" },
     { name = "ruff" },
     { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", git = "https://github.com/YashasSamaga/OLMo-core.git?rev=hybrid-final" },
-    { name = "antlr4-python3-runtime", specifier = "==4.11" },
-    { name = "authlib", marker = "extra == 'dr-tulu'" },
-    { name = "backoff", specifier = ">=2.2.1" },
-    { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
-    { name = "datasets", specifier = ">=4.0.0" },
-    { name = "debugpy", specifier = ">=1.8.13" },
-    { name = "deepspeed", specifier = ">=0.18.3" },
-    { name = "docker", specifier = ">=7.0.0" },
-    { name = "dr-agent", marker = "extra == 'dr-tulu'" },
-    { name = "fastapi", specifier = ">=0.100.0" },
-    { name = "flash-attn", marker = "platform_machine != 'aarch64' and sys_platform != 'darwin'", specifier = ">=2.8.3" },
-    { name = "flash-attn-4", marker = "sys_platform != 'darwin'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl" },
-    { name = "flash-linear-attention", specifier = ">=0.5.0" },
-    { name = "hf-transfer", specifier = ">=0.1.8" },
-    { name = "immutabledict", specifier = "==1.2.0" },
-    { name = "langdetect", specifier = "==1.0.9" },
-    { name = "liger-kernel", marker = "sys_platform != 'darwin'", specifier = ">=0.7.0" },
-    { name = "litellm", specifier = ">=1.72.0,<1.75.2" },
-    { name = "matplotlib", specifier = ">=3.9.3" },
-    { name = "mcp", specifier = ">=1.9.0" },
-    { name = "multiprocess", specifier = "<0.70.18" },
-    { name = "nltk", specifier = ">=3.9.1" },
-    { name = "numpy", specifier = ">=2" },
-    { name = "nvitop", specifier = ">=1.4.2" },
-    { name = "openenv-core", specifier = ">=0.2.1" },
-    { name = "packaging", specifier = ">=24.2" },
-    { name = "peft", specifier = ">=0.13.2" },
-    { name = "pyarrow", specifier = ">=20.0.0" },
-    { name = "pydantic", marker = "extra == 'code'", specifier = ">=2.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "ray", extras = ["default"], specifier = ">=2.49.2" },
-    { name = "requests", marker = "extra == 'code'", specifier = ">=2.28.0" },
-    { name = "scipy", marker = "extra == 'dr-tulu'" },
-    { name = "setuptools", specifier = ">=75.6.0,<80.0.0" },
-    { name = "tensorboard", specifier = ">=2.18.0" },
-    { name = "tilelang", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.1.0" },
-    { name = "torch", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'", specifier = ">=2.10.0" },
-    { name = "torch", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchaudio", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'", specifier = ">=2.10.0" },
-    { name = "torchaudio", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "torchvision", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'", specifier = ">=0.25.0" },
-    { name = "torchvision", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "transformers", git = "https://github.com/yashassamaga/transformers.git?rev=hybrid-small-suite" },
-    { name = "uvicorn", specifier = ">=0.20.0" },
-    { name = "vllm", marker = "sys_platform != 'darwin'", git = "https://github.com/YashasSamaga/vllm.git?rev=olmo-hybrid-small" },
-    { name = "wandb", specifier = "==0.23.1" },
-]
-provides-extras = ["code", "dr-tulu"]
-
-[package.metadata.requires-dev]
-cuda12 = [
-    { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl" },
-    { name = "flash-attn-3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl" },
-    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "open-instruct", group = "cuda12" } },
-    { name = "torchaudio", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "open-instruct", group = "cuda12" } },
-    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "open-instruct", group = "cuda12" } },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", git = "https://github.com/YashasSamaga/vllm.git?rev=olmo-hybrid-small" },
-]
-cuda13 = [
-    { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl" },
-    { name = "flash-attn-3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl" },
-    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "open-instruct", group = "cuda13" } },
-    { name = "torchaudio", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=2.10.0", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "open-instruct", group = "cuda13" } },
-    { name = "torchvision", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "open-instruct", group = "cuda13" } },
-    { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", git = "https://github.com/YashasSamaga/vllm.git?rev=olmo-hybrid-small" },
-]
-dev = [
-    { name = "beaker-py", specifier = ">=2.7.0" },
-    { name = "mkdocs-material", specifier = ">=9.6.8" },
-    { name = "parameterized", specifier = ">=0.9.0" },
-    { name = "pre-commit", specifier = ">=4.5.0" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "responses", specifier = ">=0.25.8" },
-    { name = "rich", specifier = ">=13.7.0" },
-    { name = "ruff", specifier = ">=0.11.13" },
-    { name = "ty", specifier = ">=0.0.1a13" },
 ]
 
 [[package]]
@@ -4319,16 +4294,16 @@ wheels = [
 
 [[package]]
 name = "safetensors"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/29/9c/6e74567782559a63bd040a236edca26fd71bc7ba88de2ef35d75df3bca5e/safetensors-0.7.0.tar.gz", hash = "sha256:07663963b67e8bd9f0b8ad15bb9163606cd27cc5a1b96235a50d8369803b96b0", size = 200878, upload-time = "2025-11-19T15:18:43.199Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/06/f955dbbb1859e3bd23c8ac6141af5106e7ad5fedec4a3a6e3d60f94b7001/safetensors-0.8.0.tar.gz", hash = "sha256:fabaf3e0f18a6618d9b36560682562157f77c2b71fcffc7b432be2baed9d753d", size = 325846, upload-time = "2026-06-09T07:52:25.563Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/47/aef6c06649039accf914afef490268e1067ed82be62bcfa5b7e886ad15e8/safetensors-0.7.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:c82f4d474cf725255d9e6acf17252991c3c8aac038d6ef363a4bf8be2f6db517", size = 467781, upload-time = "2025-11-19T15:18:35.84Z" },
-    { url = "https://files.pythonhosted.org/packages/e8/00/374c0c068e30cd31f1e1b46b4b5738168ec79e7689ca82ee93ddfea05109/safetensors-0.7.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:94fd4858284736bb67a897a41608b5b0c2496c9bdb3bf2af1fa3409127f20d57", size = 447058, upload-time = "2025-11-19T15:18:34.416Z" },
-    { url = "https://files.pythonhosted.org/packages/f1/06/578ffed52c2296f93d7fd2d844cabfa92be51a587c38c8afbb8ae449ca89/safetensors-0.7.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e07d91d0c92a31200f25351f4acb2bc6aff7f48094e13ebb1d0fb995b54b6542", size = 491748, upload-time = "2025-11-19T15:18:09.79Z" },
-    { url = "https://files.pythonhosted.org/packages/a0/60/429e9b1cb3fc651937727befe258ea24122d9663e4d5709a48c9cbfceecb/safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:dac7252938f0696ddea46f5e855dd3138444e82236e3be475f54929f0c510d48", size = 507152, upload-time = "2025-11-19T15:18:33.023Z" },
-    { url = "https://files.pythonhosted.org/packages/06/87/d26d8407c44175d8ae164a95b5a62707fcc445f3c0c56108e37d98070a3d/safetensors-0.7.0-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:cdab83a366799fa730f90a4ebb563e494f28e9e92c4819e556152ad55e43591b", size = 674060, upload-time = "2025-11-19T15:18:37.211Z" },
-    { url = "https://files.pythonhosted.org/packages/4a/d8/0c8a7dc9b41dcac53c4cbf9df2b9c83e0e0097203de8b37a712b345c0be5/safetensors-0.7.0-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:b0f6d66c1c538d5a94a73aa9ddca8ccc4227e6c9ff555322ea40bdd142391dd4", size = 677368, upload-time = "2025-11-19T15:18:41.627Z" },
+    { url = "https://files.pythonhosted.org/packages/39/a0/f718cda65b05407d228f97602cf60dca269c979867aa5beb25410de26cd3/safetensors-0.8.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:c554f85858e05226d3c2828e32395e677434685d6d94594a41643361c5e837f0", size = 473568, upload-time = "2026-06-09T07:52:18.829Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/b1/fa7c600e7dceae12e9606c7578cbc9ff1e1ed55844883ee5c92205e86226/safetensors-0.8.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:c80201d22cbf405b80647a60ada77bba06c8fba2da2743ba1e89cdcc39a81f25", size = 484562, upload-time = "2026-06-09T07:52:17.518Z" },
+    { url = "https://files.pythonhosted.org/packages/09/7d/65a7de0af421317bb36a067241e4235fff194eed60b961ed6d3f59a3fc60/safetensors-0.8.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7a46e5ff292c356d6991e60942ba7f79817682d3a2cef0702136448cb9c4d235", size = 502844, upload-time = "2026-06-09T07:52:07.624Z" },
+    { url = "https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774", size = 516040, upload-time = "2026-06-09T07:52:16.29Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/43/bf38443278eab4b1be1fce2931e2b012ad9cb7df52ada751d0aab8f7659a/safetensors-0.8.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:87eec7ffed2b809f05a398a8becb7d013f19f7837cd15d9748580d6cf30dbaf4", size = 678670, upload-time = "2026-06-09T07:52:20.032Z" },
+    { url = "https://files.pythonhosted.org/packages/27/43/41c1621732edd934d868a00d1b891584c892a7b62a9aab82ea5a0a5623ee/safetensors-0.8.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:8e080062fcde23be189565e1c3305d16751a218ecf9412c8601e64204eb6f846", size = 722361, upload-time = "2026-06-09T07:52:23.924Z" },
 ]
 
 [[package]]
@@ -4942,8 +4917,8 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.8.0.dev0"
-source = { git = "https://github.com/yashassamaga/transformers.git?rev=hybrid-small-suite#bbfacdafa2371c6f06c57006bae4cd05982d6396" }
+version = "5.15.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy" },
@@ -4954,6 +4929,27 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
     { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/92/c50c61da7046bbb59a4d011291aeadcfb4d7980ab36fdb31e93823a3fb93/transformers-5.15.1.tar.gz", hash = "sha256:27c996bd9075ddc82d40f8590dfdc81ea45f611bfca477e0db5d7fd257a482f7", size = 9378434, upload-time = "2026-08-19T11:28:20.33Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/41/c4/a12e1d9b387fb0c40a57116db82b457e8c771cb419163cda29204d74a595/transformers-5.15.1-py3-none-any.whl", hash = "sha256:b7cdf238ff583e3a58dbc7fa34da1aaf091ce063141f65a30538160bd5afe93f", size = 11749582, upload-time = "2026-08-19T11:28:16.726Z" },
+]
+
+[[package]]
+name = "transformers-plugin"
+version = "0.0.0"
+source = { git = "https://github.com/allenai/scaling-ladders.git?subdirectory=ladders%2Fmainline%2Ftransformers_plugin&rev=0fb485ce38733103f7da73973cdf0e74b0fc75db#0fb485ce38733103f7da73973cdf0e74b0fc75db" }
+dependencies = [
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and extra != 'group-13-open-instruct-cuda12' and extra != 'group-13-open-instruct-cuda13') or sys_platform != 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "transformers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "torch", specifier = ">=2.6.0" },
+    { name = "transformers", specifier = ">=5.12" },
 ]
 
 [[package]]
@@ -5110,81 +5106,181 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.1.dev15375+g79d31a3f9.cu128"
-source = { git = "https://github.com/YashasSamaga/vllm.git?rev=olmo-hybrid-small#79d31a3f9f3917a9bbd210efe52621f8fbbdefec" }
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "platform_machine == 'aarch64' and sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "aiohttp", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "anthropic", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "blake3", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "cachetools", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "cbor2", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "cloudpickle", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "compressed-tensors", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "depyf", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "diskcache", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "einops", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "fastapi", extra = ["standard"], marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "filelock", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "flashinfer-cubin", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "flashinfer-python", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "gguf", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "ijson", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "lark", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "llguidance", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "lm-format-enforcer", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "mcp", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "mistral-common", extra = ["image"], marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "model-hosting-container-standards", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "msgspec", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "ninja", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "numba", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "numpy", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "nvidia-cudnn-frontend", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "nvidia-cutlass-dsl", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "openai", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "openai-harmony", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "opencv-python-headless", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "opentelemetry-api", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "opentelemetry-exporter-otlp", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "opentelemetry-sdk", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "opentelemetry-semantic-conventions-ai", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "outlines-core", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "partial-json-parser", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "pillow", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "prometheus-client", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "prometheus-fastapi-instrumentator", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "protobuf", version = "6.33.5", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "psutil", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "py-cpuinfo", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "pybase64", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "pydantic", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "python-json-logger", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "pyyaml", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "pyzmq", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "quack-kernels", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "regex", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "requests", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "sentencepiece", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "setproctitle", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "setuptools", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "six", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "tiktoken", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "tokenizers", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "aiohttp", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "anthropic", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "blake3", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "cachetools", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "cbor2", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "cloudpickle", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "compressed-tensors", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "depyf", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "diskcache", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "einops", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "fastapi", extra = ["standard"], marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "filelock", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "flashinfer-cubin", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "flashinfer-python", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "gguf", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "ijson", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "lark", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "llguidance", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "lm-format-enforcer", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "mcp", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "mistral-common", extra = ["image"], marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "model-hosting-container-standards", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "msgspec", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "ninja", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "numba", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "numpy", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "nvidia-cudnn-frontend", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "nvidia-cutlass-dsl", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "openai", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "openai-harmony", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opencv-python-headless", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-api", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-exporter-otlp", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-sdk", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-semantic-conventions-ai", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "outlines-core", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "partial-json-parser", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pillow", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "prometheus-client", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "prometheus-fastapi-instrumentator", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "protobuf", version = "6.33.5", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "psutil", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "py-cpuinfo", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pybase64", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pydantic", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "python-json-logger", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pyyaml", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pyzmq", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "quack-kernels", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "regex", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "requests", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "sentencepiece", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "setproctitle", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "setuptools", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "six", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "tiktoken", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "tokenizers", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda12' and extra != 'group-13-open-instruct-cuda13') or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torchaudio", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda12' and extra != 'group-13-open-instruct-cuda13') or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torchaudio", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "torchaudio", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torchaudio", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torchvision", version = "0.25.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda12' and extra != 'group-13-open-instruct-cuda13') or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torchvision", version = "0.25.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "torchvision", version = "0.25.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "tqdm", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "transformers", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "typing-extensions", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "watchfiles", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "xgrammar", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torchvision", version = "0.25.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "tqdm", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "transformers", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "typing-extensions", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "watchfiles", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "xgrammar", marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/a8/49/60a2a962ecbf780c8fbfd0d5548b208d654d5c4267df94d8d93883641431/vllm-0.19.1.tar.gz", hash = "sha256:9fb88ce6b50991eba41d183584f65f51d7f6015d86a42cdabf79c1c8bd5d66fa", size = 31105401, upload-time = "2026-04-18T05:50:15.143Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/4c/26c426103c58ac8d98435fe63c7758a2f289b5481a08be19e9c9fe29a4c2/vllm-0.19.1-cp38-abi3-manylinux_2_31_aarch64.whl", hash = "sha256:c8dde3c9af20f00a644e64a50ebe43948f2921bab3ffd5407d634c15836cb181", size = 385252556, upload-time = "2026-04-18T05:49:16.101Z" },
+    { url = "https://files.pythonhosted.org/packages/78/20/f41216b79c87372a9d03175f36fa1411ee61059ce8c557d2691722ea4aae/vllm-0.19.1-cp38-abi3-manylinux_2_31_x86_64.whl", hash = "sha256:71a87f46cafab4489c69a5c5c83b870d0235e5694d8222303d460576293dc719", size = 433132101, upload-time = "2026-04-18T05:49:54.202Z" },
+]
+
+[[package]]
+name = "vllm"
+version = "0.19.1+cu130"
+source = { registry = "https://wheels.vllm.ai/0.19.1/cu130" }
+resolution-markers = [
+    "platform_machine == 'x86_64' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "aiohttp", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "anthropic", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "blake3", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "cachetools", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "cbor2", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "cloudpickle", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "compressed-tensors", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "depyf", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "diskcache", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "einops", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "fastapi", extra = ["standard"], marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "filelock", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "flashinfer-cubin", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "flashinfer-python", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "gguf", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "ijson", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "lark", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "llguidance", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "lm-format-enforcer", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "mcp", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "mistral-common", extra = ["image"], marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "model-hosting-container-standards", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "msgspec", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "ninja", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "numba", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "numpy", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "nvidia-cudnn-frontend", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "nvidia-cutlass-dsl", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "openai", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "openai-harmony", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opencv-python-headless", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-api", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-exporter-otlp", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-sdk", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "opentelemetry-semantic-conventions-ai", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "outlines-core", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "partial-json-parser", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pillow", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "prometheus-client", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "prometheus-fastapi-instrumentator", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "protobuf", version = "6.33.5", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "psutil", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "py-cpuinfo", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pybase64", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pydantic", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "python-json-logger", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pyyaml", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "pyzmq", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "quack-kernels", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "regex", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "requests", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "sentencepiece", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "setproctitle", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "setuptools", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "six", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "tiktoken", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "tokenizers", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torchaudio", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "torchvision", version = "0.25.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "tqdm", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "transformers", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "typing-extensions", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "watchfiles", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "xgrammar", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+]
+wheels = [
+    { url = "https://wheels.vllm.ai/b1388b1fbf5aaef47937fabe98931211684666a6/vllm-0.19.1%2Bcu130-cp38-abi3-manylinux_2_35_aarch64.whl" },
+    { url = "https://wheels.vllm.ai/b1388b1fbf5aaef47937fabe98931211684666a6/vllm-0.19.1%2Bcu130-cp38-abi3-manylinux_2_35_x86_64.whl" },
+]
+
+[[package]]
+name = "vllm-plugin"
+version = "0.0.0"
+source = { git = "https://github.com/allenai/scaling-ladders.git?subdirectory=ladders%2Fmainline%2Fvllm_plugin&rev=0fb485ce38733103f7da73973cdf0e74b0fc75db#0fb485ce38733103f7da73973cdf0e74b0fc75db" }
+dependencies = [
+    { name = "vllm", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "vllm", version = "0.19.1+cu130", source = { registry = "https://wheels.vllm.ai/0.19.1/cu130" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "vllm", specifier = ">=0.18" }]
 
 [[package]]
 name = "wandb"

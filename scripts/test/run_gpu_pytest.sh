@@ -22,6 +22,18 @@ case "$BEAKER_IMAGE" in
         ;;
 esac
 
+if [[ -n "${GPU_TEST_CLUSTER:-}" ]]; then
+    CLUSTERS=("$GPU_TEST_CLUSTER")
+fi
+TIMEOUT_ARGS=()
+if [[ -n "${GPU_TEST_TIMEOUT:-}" ]]; then
+    TIMEOUT_ARGS=(--timeout "$GPU_TEST_TIMEOUT")
+fi
+BUDGET_ARGS=()
+if [[ -n "${GPU_TEST_BUDGET:-}" ]]; then
+    BUDGET_ARGS=(--budget "$GPU_TEST_BUDGET")
+fi
+
 CLUSTER_ARGS=()
 for cluster in "${CLUSTERS[@]}"; do
     CLUSTER_ARGS+=(--cluster "$cluster")
@@ -40,6 +52,9 @@ uv run python mason.py \
        --max_retries 0 \
        --no-host-networking \
        --gpus 1 \
+       --no_auto_dataset_cache \
+       "${TIMEOUT_ARGS[@]}" \
+       "${BUDGET_ARGS[@]}" \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" \
        -- bash scripts/test/run_gpu_tests.sh "${PYTEST_ARGS[@]}"

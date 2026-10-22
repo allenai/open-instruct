@@ -34,7 +34,7 @@ from olmo_core.train.train_module.transformer import (
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 from torch.distributed.tensor import DTensor, distribute_tensor
 
-from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
+from open_instruct import hybrid_models, logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -402,13 +402,27 @@ def _load_native_transformer_config(model_name_or_path: str, attn_backend: str |
     tagged dict) used to train it, so we can deserialize it directly instead of requiring a
     hardcoded named preset (there is no `olmo_hybrid_small` preset in `TransformerConfig`).
 
-    Returns None if `model_name_or_path` doesn't look like such a checkpoint.
+    Also supports paired release trees (hf/v1/... and olmo-core/v1/...) and an
+    explicit native config.json path. Returns None for unrelated checkpoint layouts.
     """
     path = Path(model_name_or_path)
-    if not path.is_dir() or not path.name.endswith("-hf"):
-        return None
-    native_dir = path.with_name(path.name[: -len("-hf")])
-    config_path = native_dir / "config.json"
+    if path.is_file() and path.suffix == ".json":
+        config_path = path
+    elif path.is_dir() and path.name.endswith("-hf"):
+        config_path = path.with_name(path.name[: -len("-hf")]) / "config.json"
+    else:
+        config_path = None
+        for parent in path.parents:
+            if parent.name == "hf" and path.relative_to(parent).parts[0] == "v1":
+                config_path = parent.with_name("olmo-core") / path.relative_to(parent) / "config.json"
+                break
+        if config_path is None:
+            return None
+        if not config_path.is_file():
+            raise FileNotFoundError(
+                f"Native release config not found at '{config_path}'. Mount the paired olmo-core tree "
+                "or pass --native_model_config /path/to/native/config.json on the GRPO launcher."
+            )
     if not config_path.is_file():
         return None
     with open(config_path) as f:
@@ -463,6 +477,7 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
 def setup_model(
     model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
 ) -> tuple[Transformer, TransformerConfig]:
+    hybrid_models.register_models()
     model_name_or_path = model_config_args.model_name_or_path
     if is_hf_checkpoint(model_name_or_path):
         logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
@@ -629,8 +644,9 @@ def _strip_checkpoint_wrapper(name: str) -> str:
 
 def is_hybrid_small_checkpoint(model_name_or_path: str) -> bool:
     """Whether an HF checkpoint uses the OLMo-hybrid small suite architecture."""
+    hybrid_models.register_models()
     hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-    return getattr(hf_config, "model_type", None) == HYBRID_SMALL_MODEL_TYPE
+    return getattr(hf_config, "model_type", None) in hybrid_models.HYBRID_MODEL_TYPES
 
 
 def _hybrid_small_layer_mapping(layer_type: str) -> dict[str, str]:
@@ -719,7 +735,7 @@ def load_hf_model_with_hybrid_support(
     callers must apply the result with ``model.load_state_dict(model_state_dict)``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-    if getattr(hf_config, "model_type", None) != HYBRID_SMALL_MODEL_TYPE:
+    if getattr(hf_config, "model_type", None) not in hybrid_models.HYBRID_MODEL_TYPES:
         load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
         return
 
@@ -744,7 +760,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    if getattr(hf_config, "model_type", None) == HYBRID_SMALL_MODEL_TYPE:
+    if getattr(hf_config, "model_type", None) in hybrid_models.HYBRID_MODEL_TYPES:
         converted = convert_hybrid_small_state_to_hf(olmo_core_state, hf_config.num_hidden_layers)
     else:
         converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
@@ -782,7 +798,7 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    if getattr(hf_config, "model_type", None) == HYBRID_SMALL_MODEL_TYPE:
+    if getattr(hf_config, "model_type", None) in hybrid_models.HYBRID_MODEL_TYPES:
         converted = convert_hybrid_small_state_to_hf(state_dict, hf_config.num_hidden_layers)
     else:
         converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)

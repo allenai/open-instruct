@@ -139,7 +139,9 @@ def main(
     pprint([args, model_config])
 
     oc_model_config = olmo_core_utils.ModelConfig(
-        model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
+        model_name_or_path=model_config.model_name_or_path,
+        config_name=model_config.native_model_config,
+        attn_implementation=model_config.attn_implementation,
     )
     _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
     olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
@@ -259,6 +261,7 @@ def main(
         vllm_config=vllm_config,
         tokenizer=tokenizer,
         attn_implementation=model_config.attn_implementation,
+        native_model_config=model_config.native_model_config,
     )
     logger.info("======== Policy group created =========")
 
@@ -292,6 +295,7 @@ def main(
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
         vllm_attention_backend=vllm_config.vllm_attention_backend,
+        mamba_ssm_cache_dtype=vllm_config.vllm_mamba_ssm_cache_dtype,
         inflight_updates=streaming_config.inflight_updates,
         reward_config=reward_config,
         train_dataset=train_dataset,

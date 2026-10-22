@@ -1,0 +1,74 @@
+"""Actual release-weight parity, full-length update, and HF reload on one GPU."""
+
+import os
+from pathlib import Path
+
+import pytest
+import torch
+from torch.nn import functional as F
+from transformers import AutoModelForCausalLM
+
+from open_instruct import hybrid_models, olmo_core_utils
+from open_instruct.dataset_transformation import TokenizerConfig
+
+CHECKPOINT = Path(
+    os.environ.get(
+        "OI_HYBRID_RELEASE_CHECKPOINT",
+        "/weka/oe-training-default/yashasbls/hybridish-local/hf/v1/275m/midtrain/step0038147",
+    )
+)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires a CUDA GPU")
+@pytest.mark.skipif(not CHECKPOINT.is_dir(), reason="Requires the release checkpoint Weka mount")
+def test_release_parity_update_and_export_reload(tmp_path):
+    hybrid_models.register_models()
+    torch.manual_seed(1)
+    native, config = olmo_core_utils.setup_model(
+        olmo_core_utils.ModelConfig(model_name_or_path=str(CHECKPOINT), attn_implementation="flash_2"),
+        init_device="meta",
+    )
+    native.to_empty(device="cuda")
+    state = native.state_dict()
+    olmo_core_utils.load_hf_model_with_hybrid_support(str(CHECKPOINT), state, work_dir=str(tmp_path))
+    native.load_state_dict(state, strict=True)
+    del state
+    tokenizer = TokenizerConfig(tokenizer_name_or_path=str(CHECKPOINT), chat_template_name="gsm8k_base").tokenizer
+    tokens = torch.randint(0, config.vocab_size, (1, 2560), device="cuda")
+
+    native.eval()
+    hf = AutoModelForCausalLM.from_pretrained(str(CHECKPOINT), dtype=torch.float32, attn_implementation="eager")
+    hf.to("cuda").eval()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        expected = hf(tokens[:, :16], use_cache=False).logits.float()
+        actual = native(tokens[:, :16]).float()
+    torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.05)
+    del hf
+
+    native.train()
+    optimizer = torch.optim.AdamW(native.parameters(), lr=1e-4)
+    before = native.lm_head.norm.weight.detach().clone()
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        logits = native(tokens)
+        loss = F.cross_entropy(logits[:, :-1].float().reshape(-1, config.vocab_size), tokens[:, 1:].reshape(-1))
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert all(torch.isfinite(p.grad).all() for p in native.parameters() if p.grad is not None)
+    optimizer.step()
+    assert not torch.equal(before, native.lm_head.norm.weight)
+    optimizer.zero_grad(set_to_none=True)
+    del logits, loss
+
+    native.eval()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        updated = native(tokens[:, :16]).float()
+    cpu_state = {name: value.detach().cpu() for name, value in native.state_dict().items()}
+    output = tmp_path / "export"
+    olmo_core_utils.save_state_dict_as_hf(cpu_state, str(output), str(CHECKPOINT), tokenizer)
+    restored = AutoModelForCausalLM.from_pretrained(str(output), dtype=torch.float32, attn_implementation="eager")
+    restored.to("cuda").eval()
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        reloaded = restored(tokens[:, :16], use_cache=False).logits.float()
+    torch.testing.assert_close(updated, reloaded, rtol=0.02, atol=0.05)
+    assert restored.config.model_type == "mainline_ladder"
+    assert torch.cuda.max_memory_allocated() > 0

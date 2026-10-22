@@ -63,7 +63,7 @@ from rich.text import Text
 from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
-from open_instruct import launch_utils, logger_utils
+from open_instruct import hybrid_models, launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -150,6 +150,14 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
 # For Olmo 3 tokenizer settings and chat template decisions, see:
 # docs/olmo3.md (https://allenai.github.io/open-instruct/olmo3/#tokenizer-settings)
 CHAT_TEMPLATES = {
+    "gsm8k_base": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}{{ 'Question: ' + message['content'] + '\nAnswer:' }}"
+        "{% elif message['role'] == 'assistant' %}{{ ' ' + message['content'] }}"
+        "{% if not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% else %}{{ raise_exception('gsm8k_base supports user/assistant messages only') }}{% endif %}"
+        "{% endfor %}"
+    ),
     "simple_concat_with_space": (
         "{% for message in messages %}"
         "{{ ' ' if not loop.first else '' }}"
@@ -984,6 +992,7 @@ class TokenizerConfig:
 
     @cached_property
     def tokenizer(self):
+        hybrid_models.register_models()
         if self.tokenizer_name_or_path is None:
             raise ValueError("tokenizer_name_or_path must be set")
         files_hash = get_files_hash_if_exists(

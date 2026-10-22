@@ -68,6 +68,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         vllm_config: data_loader_lib.VLLMConfig,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
+        native_model_config: str | None = None,
     ):
         super().__init__(world_size, rank, local_rank, master_addr, master_port)
         self.local_world_size = local_world_size
@@ -78,6 +79,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.streaming_config = streaming_config
         self.vllm_config = vllm_config
         self.attn_implementation = attn_implementation
+        self.native_model_config = native_model_config
 
         self.ref_policy = None
         self.name_mapper = olmo_core_to_hf_name
@@ -127,7 +129,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
         model_config_args = olmo_core_utils.ModelConfig(
-            model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
+            model_name_or_path=self.model_name_or_path,
+            config_name=self.native_model_config,
+            attn_implementation=self.attn_implementation,
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
@@ -463,6 +467,7 @@ class OLMoCoreModelGroup:
         vllm_config: data_loader_lib.VLLMConfig,
         tokenizer: transformers.PreTrainedTokenizer,
         attn_implementation: model_utils.AttentionBackendName,
+        native_model_config: str | None = None,
     ):
         self.pg = pg
         self.num_gpus_per_node = num_gpus_per_node
@@ -489,6 +494,7 @@ class OLMoCoreModelGroup:
             "vllm_config": vllm_config,
             "tokenizer": tokenizer,
             "attn_implementation": attn_implementation,
+            "native_model_config": native_model_config,
         }
 
         node_idx, local_rank, local_world_size = get_node_info(0, num_gpus_per_node)

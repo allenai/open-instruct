@@ -1376,6 +1376,7 @@ def create_model_and_optimizer(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         vllm_attention_backend=vllm_config.vllm_attention_backend,
+        mamba_ssm_cache_dtype=vllm_config.vllm_mamba_ssm_cache_dtype,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 
