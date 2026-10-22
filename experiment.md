@@ -733,3 +733,27 @@ Related: [research.md#olmo-hybrid-release-checkpoint-inputs](research.md#olmo-hy
   update, and HF export/reload. GPU gate and end-to-end RL validation remain pending.
 - Smoke command after the gate passes:
   `./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_release_275m_smoke.sh`.
+
+
+## Olmo Hybrid release 275m GSM8K 1000 updates 2026-10-22
+
+Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume).
+
+- User authorized the one-A100 gate, then 1,000 updates on two A100 80GB GPUs if it passes.
+  Workspace `ai2/open-instruct-dev`, cluster `ai2/saturn`, budget `ai2/oe-other`.
+- Launcher: `scripts/train/olmo-hybrid-small/gsm8k_release_275m.sh`. Full GSM8K train
+  and platinum test splits; same base prompt, correctness-only GRPO (beta 0), lr 1e-6,
+  four prompts x four completions, 16,000 episodes = 1,000 learner updates.
+- One learner / one vLLM engine; 512 prompt / 2048 response tokens; no zero-variance
+  filtering; preemptible normal priority; three automatic retries; 24h per-attempt cap.
+- Native model/optimizer/trainer/data-preparation checkpoint every 100 updates,
+  loaded automatically with `LoadStrategy.if_available`; latest checkpoints remain
+  under the launch's stable `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/<run-name>/native`.
+  W&B ID is stable across Beaker restarts. At most 99 completed updates can be lost
+  between scheduled checkpoints (plus any in-progress update).
+- Resume audit found the initial serving-weight sync preceded Trainer.fit's checkpoint
+  load. Fixed VLLMWeightSyncCallback.pre_train to republish restored weights/step before
+  requesting resumed training data. CPU regression covers fresh and restored startup.
+- Previous image `01M5H054GQTHEWEXE1ZT4M81H3` passed offline container registration
+  and ten CPU release tests; CUDA test skipped on CPU. Rebuild required for resume fix.
+- Launch IDs/results will be appended after submission. Gate remains a prerequisite.

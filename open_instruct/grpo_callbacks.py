@@ -121,10 +121,20 @@ class VLLMWeightSyncCallback(Callback):
     def train_module(self) -> TransformerTrainModule:
         return cast(TransformerTrainModule, self.trainer.train_module)
 
+    def pre_train(self) -> None:
+        # Trainer.fit() restores the checkpoint after the driver's initial sync.
+        # Publish restored weights before the data loader requests resumed rollouts.
+        if self.trainer.checkpoint_loaded:
+            logger.info("Publishing restored policy at step %s to vLLM", self.trainer.global_step)
+            self._sync_weights()
+
     def post_step(self) -> None:
         if self.trainer.global_step % self.sync_interval != 0:
             return
 
+        self._sync_weights()
+
+    def _sync_weights(self) -> None:
         torch.cuda.empty_cache()
 
         broadcast_refs = vllm_utils.broadcast_weights_to_vllm(

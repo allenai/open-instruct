@@ -770,3 +770,21 @@ during push and needs a re-run (with the persistence fix above) to actually prod
 `mnoukhov/dolci_think_rl_7b_messages_hybrid_275m_scored`.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
+
+
+## Olmo Hybrid release 275m GSM8K learning and resume
+
+**Status:** ACTIVE — user authorized GPU gate, followed by 1,000 updates if it passes.
+
+Does correctness-only GRPO on the primary 275m midtrain release improve held-out
+GSM8K accuracy, and does the run restore policy/optimizer/data state after preemption?
+The recipe uses full train/eval splits, four prompts x four samples, and 1,000 updates,
+with native checkpoints every 100 updates. All-zero correctness groups are retained
+so collection terminates; that can still produce no learning signal.
+
+Resume audit finding: the old initial vLLM broadcast ran before native Trainer.fit
+restored its checkpoint. A pre-train callback now republishes restored weights and
+model step before resumed rollouts are requested. This fixes the first resumed batch
+using the original release policy. GPU/restart qualification remains pending.
+
+See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).
