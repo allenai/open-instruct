@@ -103,6 +103,32 @@ Openers count against `max_response_length`, at least one sample per group must
 stay unseeded, and seeding requires `publication_mode="refresh"`. Leaving both
 fields unset keeps the native arguments and producer behavior unchanged.
 
+### Opener branches
+
+Instead of fixed text, refresh can choose openers per prompt from the serving policy
+(first-token exploration):
+
+```toml
+[core]
+opener_branches = 4
+opener_pool = 20
+```
+
+Before each prompt group is generated, prefill-only probes read the policy's most
+likely openers for that prompt. An opener runs to the first token that completes
+visible text, so whitespace is part of it (` Okay`, `Okay` and a newline followed
+by `Okay` are distinct) and special tokens are excluded. Of the `opener_pool` most
+likely openers, `opener_branches` are drawn uniformly without replacement, and the
+group's samples are split evenly across them as token-id response seeds. The
+candidate pool, the draw and the probe's policy version are kept in sample metadata
+as `opener_branches`.
+
+The draw ignores the policy's probabilities, so a rare candidate is tried as often
+as the favorite, and no correction is applied for it. `n_samples_per_prompt` must be
+a multiple of `opener_branches`, and branches cannot be combined with
+`opener_seeds`. Leaving `opener_branches` at zero keeps the native arguments and
+producer behavior unchanged.
+
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted
