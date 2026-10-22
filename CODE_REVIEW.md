@@ -18,9 +18,14 @@ and enter the pull request number. This also supports PRs from forks. The action
 requires a triggering user with repository write access and uses OpenAI API
 billing. It does not use `CLAUDE_CODE_OAUTH_TOKEN`.
 
-Reviews are on demand, with a 20-minute job timeout. Codex reads these criteria
+PR #1986 also runs automatically when opened, updated, reopened, or marked ready
+for review, provided it is not a draft and its branch belongs to this repository.
+This lets us validate the integration before merging; other PRs remain on demand.
+The setup PR uses its own workflow and instructions for this bootstrap run.
+
+Reviews have a 20-minute job timeout. Codex reads these criteria
 and `.github/codex/review-prompt.md` from the selected workflow revision, inspects
-the PR's exact commits without checking out or running its code, and returns an
+the PR's exact commits without running its code, and returns an
 advisory GitHub review. A separate job posts the result with Codex attribution;
 it skips publishing if the PR has closed or its head has changed. Reviews do not
 approve PRs or request changes. Rerun the workflow after new commits when needed.

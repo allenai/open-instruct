@@ -1,6 +1,10 @@
 name: Codex review
 
 on:
+  # Bootstrap validation before this workflow exists on the default branch.
+  # The job guard limits automatic reviews to the same-repository setup PR.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -11,11 +15,16 @@ on:
 permissions: {}
 
 concurrency:
-  group: codex-review-${{ inputs.pr_number }}
+  group: codex-review-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.number == 1986 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -30,7 +39,7 @@ jobs:
         id: pr
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         with:
           script: |
             const value = process.env.PR_NUMBER;
@@ -54,12 +63,13 @@ jobs:
             exit 1
           fi
 
-      # Load instructions from the maintainer-selected workflow revision, never
-      # from the PR being reviewed. No PR code is checked out or executed.
+      # Manual runs use the maintainer-selected workflow revision. The bootstrap
+      # run uses this same-repository setup PR so its new instructions are tested.
+      # Neither path executes repository code.
       - name: Check out review instructions and repository history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -85,7 +95,7 @@ jobs:
             Base commit: ${{ steps.pr.outputs.base }}
             Head commit: ${{ steps.pr.outputs.head }}
             Inspect the diff with git diff BASE...HEAD using those exact commits.
-            The working tree contains the workflow revision, not the PR head.
+            The working tree contains the workflow revision; do not assume it is the PR head.
             Read PR source with git show HEAD:path/to/file using the head SHA above.
 
   publish:
