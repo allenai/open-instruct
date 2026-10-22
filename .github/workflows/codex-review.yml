@@ -1,8 +1,7 @@
 name: Codex review
 
 on:
-  # Bootstrap validation before this workflow exists on the default branch.
-  # The job guard limits automatic reviews to the same-repository setup PR.
+  # Automatically review non-draft PRs from this repository.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -22,8 +21,7 @@ jobs:
   prepare:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.number == 1986 &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.pull_request.head.repo.full_name == github.repository &&
        !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -86,9 +84,7 @@ jobs:
             exit 1
           fi
 
-      # Manual runs use the maintainer-selected workflow revision. The bootstrap
-      # run uses this same-repository setup PR so its new instructions are tested.
-      # Neither path executes repository code.
+      # Automatic runs use the PR head; manual runs use the selected workflow revision.
       - name: Check out review instructions and repository history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
