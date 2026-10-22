@@ -303,6 +303,9 @@ Local Ray initializes before W&B so its workers do not inherit the driver's loca
 W&B service connection. Tracking then initializes before launching the Miles worker
 manager so serialized worker arguments include the primary W&B run ID, including
 in offline mode. An already connected Ray cluster is preserved.
+`tests/miles/test_tracking_offline_runtime.py` exercises this startup order with
+real CPU Ray and offline W&B processes inside the optional runtime test group;
+it does not load models or allocate GPUs.
 
 The rebuilt FlashInfer/tracking candidate passed the embedded lifecycle contracts
 and the local 4090 qualification with three uninterrupted updates versus two plus
