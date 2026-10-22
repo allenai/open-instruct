@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "status": "Candidate ready for user-specified training exercise; no training job launched from this image",
+  "application": {
+    "beaker": "01M5J4REE1EVJCK184F7976BCB",
+    "docker_id": "sha256:e96c20b6650df9c2a0f57b0224fef4eec027fc69cbcfbb329b243552c0d88601",
+    "source_revision": "8fdcdadc0ddeb7aa10b03e8bf6a192d4ae4bfbde",
+    "branch": "codex/miles-v012-runtime"
+  },
+  "base_image": {
+    "beaker": "01M5J4F4AZHR12WEQ1X54FGDN6",
+    "docker_id": "sha256:5504c7a84a6ac31272f7b5b6ba778ce688f17d7942e088f96074977cc7827e8b"
+  },
+  "sources": {
+    "olmo-core": {
+      "repository": "https://github.com/allenai/Olmo-core.git",
+      "revision": "7e97bc43ff25d080ae4fd0eab1050a79caf80e55"
+    },
+    "miles": {
+      "repository": "https://github.com/allenai/miles-olmo-core.git",
+      "revision": "9ea6759fd872e78516decc45a684183f77918e14",
+      "private": true
+    },
+    "olmo-sglang": {
+      "repository": "https://github.com/allenai/olmo-sglang.git",
+      "revision": "109f881dc1fa8acdb16bc2717a910f01958d79c9",
+      "private": true
+    },
+    "sglang": {
+      "repository": "https://github.com/sgl-project/sglang.git",
+      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+    }
+  },
+  "miles_tag": "v0.1.2",
+  "olmo_sglang_pull_request": "https://github.com/allenai/olmo-sglang/pull/8",
+  "validation": {
+    "cpu_contracts": {
+      "command": "python -m pytest open_instruct/test_miles*.py tests/miles_upstream -q",
+      "passed": 896
+    },
+    "runtime_contracts": {
+      "command": "python -m pytest tests/miles/test_lifecycle.py tests/miles/test_qualification_checks.py --require-miles-runtime -q -p no:cacheprovider",
+      "passed": 81,
+      "source_revision": "e3604ff328b0ffcc308e43a25ce9242e2bf6ba73",
+      "note": "Passed in an image with embedded sources. Final build differs only by the CPU evaluation test-double fix; application runtime, scripts, dedicated runtime tests, and lock are identical."
+    },
+    "ruff": "passed",
+    "application_types": "passed",
+    "reference_generation": "passed",
+    "embedded_image_provenance": {
+      "application_revision": "8fdcdadc0ddeb7aa10b03e8bf6a192d4ae4bfbde",
+      "sources": {
+        "olmo-core": "7e97bc43ff25d080ae4fd0eab1050a79caf80e55",
+        "miles": "9ea6759fd872e78516decc45a684183f77918e14",
+        "olmo-sglang": "109f881dc1fa8acdb16bc2717a910f01958d79c9",
+        "sglang": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+      },
+      "imports": {
+        "open_instruct": "/opt/core-rl/open_instruct/__init__.py",
+        "miles": "/opt/core-rl/sources/miles/miles/__init__.py",
+        "olmo_core": "/opt/core-rl/sources/olmo-core/src/olmo_core/__init__.py",
+        "olmo_sglang": "/opt/core-rl/sources/olmo-sglang/src/olmo_sglang/__init__.py",
+        "sglang": "/opt/core-rl/sources/sglang/python/sglang/__init__.py"
+      },
+      "parser_actions": 1534,
+      "sglang_kernel": "0.4.7"
+    },
+    "training_exercise": "pending"
+  },
+  "receipt_note": "This receipt is committed after the image build; source_revision identifies the exact application code embedded in the image."
+}
