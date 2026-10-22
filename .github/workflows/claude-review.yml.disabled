@@ -1,5 +1,5 @@
 # Disabled until a valid CLAUDE_CODE_OAUTH_TOKEN is available.
-# Restore the .yml extension to enable this workflow; see CODE_REVIEW.md.
+# Add or replace the Actions secret, then restore the .yml extension to enable.
 name: Claude review
 
 on:
@@ -122,10 +122,24 @@ jobs:
             --max-turns 30
             --json-schema '{"type":"object","properties":{"review":{"type":"string","minLength":1}},"required":["review"],"additionalProperties":false}'
           prompt: |
-            You are Claude performing a GitHub Actions review. Read and follow CODE_REVIEW.md.
+            Review using the shared criteria in CODE_REVIEW.md.
             Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.
             Base commit: ${{ steps.pr.outputs.base }}
             Head commit: ${{ steps.pr.outputs.head }}
+
+            Focus on architecture, edge cases, and whether tests and documentation
+            support the change's behavioral claims. Prefer fixes using existing patterns.
+
+            Read .review-input/pr.diff for the exact diff, .review-input/head/ for PR
+            source, and .review-input/base/ for source at the merge base. Symlinks and
+            submodules are not materialized; their changes remain visible in the diff.
+            The top-level working tree is not necessarily the PR head.
+
+            Return Markdown in the structured output's review field. For each finding,
+            cite the original repository path and line (omit .review-input/head/),
+            explain the trigger and impact, and suggest a practical fix when clear.
+            Describe what you checked and any verification limits.
+            The publishing job adds attribution and the reviewed commit to your output.
 
       - name: Report Claude failure details
         if: failure() && steps.claude.outcome == 'failure'

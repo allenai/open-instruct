@@ -123,10 +123,27 @@ jobs:
               "additionalProperties": false
             }
           prompt: |
-            You are Codex performing a GitHub Actions review. Read and follow CODE_REVIEW.md.
+            Review using the shared criteria in CODE_REVIEW.md.
             Review PR #${{ needs.prepare.outputs.pr_number }} in ${{ github.repository }}.
             Base commit: ${{ needs.prepare.outputs.base_sha }}
             Head commit: ${{ needs.prepare.outputs.head_sha }}
+
+            Focus on correctness and regressions. For training changes, consider
+            numerical behavior, distributed coordination, checkpoint/resume,
+            data handling, and effects on unrelated trainers.
+
+            The working tree contains the workflow revision, not necessarily the PR head.
+            Inspect git diff BASE...HEAD using the exact SHAs above, and read PR source
+            with git show HEAD:path/to/file using the supplied head SHA.
+
+            Return JSON with verdict and review fields. Put the Markdown review in review,
+            citing repository paths and lines, triggers, impact, and practical fixes.
+            Describe what you checked and any verification limits.
+            Choose APPROVE when the review is complete with no blocking findings or
+            material unresolved uncertainty; optional suggestions do not prevent approval.
+            Choose REQUEST_CHANGES for a significant correctness problem under the shared
+            criteria, or COMMENT when the review is incomplete or needs human judgment.
+            The publishing job adds attribution and the reviewed commit to your output.
 
   publish:
     needs: [prepare, review]
