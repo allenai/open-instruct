@@ -799,3 +799,29 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
   This probe used lr 1e-4, 100x the production 1e-6. Before starting the long run,
   repeat at the actual production learning rate and report both BF16 and FP16
   against FP32 to identify relevant precision sensitivity. No production math changed.
+
+### Production-rate GPU gate and 1000-update launch
+
+- [GPU test](https://beaker.org/ex/01M5H2C69J8HBS8F70X3HT2K3C), code
+  `fe8ae0ba7`, image `01M5H2BXPNCMGW951BABKEPJGF`: **PASSED**, exit 0,
+  1 actual CUDA test, 383.41s. No skip.
+- Before the update: FP32 HF/native math max absolute logit difference 0.00067067;
+  BF16 HF/native max next-token KL 0.00055496; BF16 vs FP32 max KL 0.00047473.
+- Full 2560-token BF16 CE loss 13.773473, finite backward, AdamW at production
+  lr 1e-6 changed parameters; HF export/reload passed. After update/reload:
+  FP32 HF/native max error 0.00114083 (within relative+absolute bound), BF16
+  HF/native max KL 0.00044331, BF16 vs FP32 max KL 0.00051355, FP16 vs FP32
+  max KL 0.00006948. The earlier 100x-larger synthetic update's large precision
+  sensitivity did not reproduce at the production rate. This qualifies native/HF
+  interchange and a synthetic update, not task learning or a preemption restart.
+- [Training](https://beaker.org/ex/01M5HYS6EMRWQ01SDFJW85F1GF), submitted after
+  the gate passed, code `fe8ae0ba7`, same validated image.
+- Command: `RUN_NAME=hybrid-release-275m-gsm8k-1k-20261022-140323 ./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_release_275m.sh`.
+- Verified stored experiment spec: 2 GPUs, Saturn, normal priority, workspace
+  `ai2/open-instruct-dev`, budget `ai2/oe-other`, `minRuntime: 0s`, `autoResume: true`,
+  3 retries, 24h per-attempt cap. Exact 16,000 / (4 x 4) = 1,000 updates; native
+  checkpoints every 100; `WANDB_RESUME=allow`, fixed W&B ID `yibm1xmx`.
+- Durable checkpoint path: `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/hybrid-release-275m-gsm8k-1k-20261022-140323/native`.
+- Initial status: **QUEUED**. Scheduler reports all 27 matching Saturn nodes lack
+  sufficient slots for two GPUs. End-to-end RL and actual preemption recovery
+  remain unvalidated until the run executes.

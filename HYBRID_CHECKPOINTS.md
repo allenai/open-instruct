@@ -172,7 +172,10 @@ and the paired release trees. For a checkpoint copied elsewhere, GRPO accepts
 Metadata-only regression tests compare the real 275m checkpoint's 192 tensor
 names/shapes against independently built HF and native meta models. They also
 check conversion roundtrips, checkpoint-wrapper names, and both registrations.
-This is not GPU training or numerical-parity proof.
+These metadata checks alone are not GPU proof. The actual-weight
+[275m GPU gate](https://beaker.org/ex/01M5H2C69J8HBS8F70X3HT2K3C) subsequently
+passed FP32 math-attention parity, BF16 distribution agreement, a full 2560-token
+optimizer update at lr 1e-6, and HF export/reload. End-to-end RL is still pending.
 
 The dedicated smoke script uses an explicit `gsm8k_base` prompt:
 `Question: <question>\nAnswer:`. It uses no SFT chat or thinking tokens. It runs
@@ -204,3 +207,13 @@ The smoke uses Saturn, normal priority, preemption enabled, no guaranteed minimu
 runtime, a two-hour cap, and no automatic retries/resume. It saves native state
 every ten steps and exports final HF weights. The bounded GPU preflight and smoke
 must pass before calling this checkpoint/runtime combination training-validated.
+
+
+For the user-authorized 1,000-update run, use
+`scripts/train/olmo-hybrid-small/gsm8k_release_275m.sh` through the same build/launch
+wrapper. It uses full GSM8K train/platinum eval splits, native checkpoints every
+100 updates, automatic resume from the stable Weka path, three retries, and a 24h
+per-attempt cap. The [submitted run](https://beaker.org/ex/01M5HYS6EMRWQ01SDFJW85F1GF)
+is queued for two Saturn A100 80GB GPUs. The earlier 20-update smoke was superseded
+by this request. Neither completed RL training nor actual preemption recovery is
+claimed by the synthetic GPU gate. See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).

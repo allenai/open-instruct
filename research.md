@@ -4,7 +4,7 @@ Questions/ideas being pursued. One section per idea, each linking to its section
 
 ## Olmo Hybrid release checkpoint inputs
 
-**Status:** CPU VALIDATED — release integration implemented; GPU validation pending.
+**Status:** GPU GATE PASSED — native/HF parity, update, export/reload validated; RL queued.
 
 [HYBRID_CHECKPOINTS.md](HYBRID_CHECKPOINTS.md) records Yasha's primary and science
 release layouts, the authoritative Weka maps, final primary steps, and the pinned
@@ -20,10 +20,11 @@ for initialization, publication, and export. All 192 real 275m HF tensor names a
 shapes match HF/native meta models. The explicit base prompt is
 `Question: <question>\nAnswer:`. Earlier SFT thinking prompts are not assumed.
 
-The proposed input is primary 275m midtrain final `step0038147`. A one-GPU
-actual-weight parity/update/export test and a two-GPU 20-update GSM8K launcher are
-prepared. The latter disables zero-variance filtering to bound the smoke; zero
-reward can still mean zero learning. No new GPU allocation has been made.
+The proposed input is primary 275m midtrain final `step0038147`. The one-GPU
+actual-weight parity/update/export test passed at the production learning rate.
+The user then requested a two-GPU, 1,000-update run with native checkpoints every
+100 updates and automatic resume. That run is queued on Saturn. Zero-variance
+filtering is disabled; zero reward can still mean zero learning.
 See [the preparation/validation log](experiment.md#olmo-hybrid-release-275m-rl-preparation-2026-10-22).
 
 ## MILES migration for Olmo Hybrid release models
@@ -774,7 +775,7 @@ See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](exper
 
 ## Olmo Hybrid release 275m GSM8K learning and resume
 
-**Status:** ACTIVE — user authorized GPU gate, followed by 1,000 updates if it passes.
+**Status:** ACTIVE — GPU gate passed; 1,000-update run queued for two Saturn A100s.
 
 Does correctness-only GRPO on the primary 275m midtrain release improve held-out
 GSM8K accuracy, and does the run restore policy/optimizer/data state after preemption?
@@ -782,13 +783,21 @@ The recipe uses full train/eval splits, four prompts x four samples, and 1,000 u
 with native checkpoints every 100 updates. All-zero correctness groups are retained
 so collection terminates; that can still produce no learning signal.
 
-Resume audit finding: the old initial vLLM broadcast ran before native Trainer.fit
-restored its checkpoint. A pre-train callback now republishes restored weights and
-model step before resumed rollouts are requested. This fixes the first resumed batch
-using the original release policy. GPU/restart qualification remains pending. The first CUDA gate failed BF16
-pointwise HF/native logit parity (max absolute difference 0.140625; 1.1% outside
-tolerance), before reaching update/export checks. FP16 reduced max absolute error to 0.019531 but missed a tighter pointwise
-threshold at 40 / 1,605,632 values. A full-FP32 math-attention structural check
-and BF16 distribution diagnostics are required before launching training.
+Resume finding: the old initial vLLM broadcast ran before native Trainer.fit restored
+its checkpoint. A pre-train callback now republishes restored weights and model step
+before resumed rollouts are requested. Fresh/resumed CPU regressions pass. Actual
+preemption recovery is pending; the stored Beaker spec enables autoResume, the Weka
+checkpoint directory remains fixed, and W&B uses one stable ID across restarts.
 
+Numerical finding: BF16 eager/FlashAttention pointwise logit comparisons were too
+strict near zero. FP32 math-attention interchange passed; at production lr 1e-6,
+a full 2560-token BF16 backward/update and HF export/reload passed. After the update,
+HF/native BF16 max next-token KL was 0.00044331 and BF16/FP32 max KL 0.00051355.
+A synthetic probe at 100x production lr showed much larger precision sensitivity;
+that did not reproduce at the production rate. These are short synthetic checks,
+not GSM8K learning or full serving/decode qualification.
+
+[GPU gate](https://beaker.org/ex/01M5H2C69J8HBS8F70X3HT2K3C) passed.
+[Training](https://beaker.org/ex/01M5HYS6EMRWQ01SDFJW85F1GF) is queued because the
+27 matching Saturn nodes lack two free slots. No end-to-end RL result is claimed.
 See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).
