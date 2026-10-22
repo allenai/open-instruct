@@ -173,9 +173,7 @@ def test_all_starting_profiles_compile():
     root = Path(__file__).parents[1]
     paths = sorted((root / "configs/miles/examples").glob("*.toml"))
     assert {p.stem for p in paths} == {"dev", "small", "medium", "large"}
-    qualification_paths = set((root / "configs/miles/qualification").glob("*.toml"))
-    assert {p.stem for p in qualification_paths} == {"h045"}
-    assert set((root / "configs/miles").rglob("*.toml")) == set(paths) | qualification_paths
+    assert set((root / "configs/miles").rglob("*.toml")) == set(paths)
     for path in paths:
         assert RunSpec.load(path).compile().plan()["argv"]
 
