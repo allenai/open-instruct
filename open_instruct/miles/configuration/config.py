@@ -104,6 +104,12 @@ class CoreConfig:
     # are scored by the serving policy and trained as response tokens. Refresh only.
     opener_seeds: tuple[str, ...] = ()
     opener_seeds_per_group: int = 0
+    # First-token exploration: before each prompt group, read the serving policy's
+    # opener_pool most likely openers (whitespace plus first word) for the prompt,
+    # draw opener_branches of them uniformly, and split the group evenly across
+    # them as response seeds. Refresh only; 0 disables.
+    opener_branches: int = 0
+    opener_pool: int = 20
 
     def __post_init__(self):
         if isinstance(self.opener_seeds, list):
@@ -115,6 +121,8 @@ class CoreConfig:
         if len(set(self.opener_seeds)) != len(self.opener_seeds):
             raise constraints.error("core.opener_seeds must not repeat an opener")
         validation.integer(self.opener_seeds_per_group, "core.opener_seeds_per_group", minimum=0)
+        validation.integer(self.opener_branches, "core.opener_branches", minimum=0)
+        validation.integer(self.opener_pool, "core.opener_pool", minimum=1)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -531,6 +539,18 @@ class RunConfig:
                 raise constraints.error(
                     "core.opener_seeds_per_group must leave at least one unseeded sample per prompt group"
                 )
+        if self.core.opener_branches:
+            if self.core.publication_mode != "refresh":
+                raise constraints.error(
+                    'core.opener_branches requires core.publication_mode="refresh"',
+                    constraints.Category.NOT_IMPLEMENTED,
+                )
+            if self.core.opener_seeds:
+                raise constraints.error("core.opener_branches and core.opener_seeds cannot be combined")
+            if self.core.opener_pool < self.core.opener_branches:
+                raise constraints.error("core.opener_pool must be at least core.opener_branches")
+            if options.get("n_samples_per_prompt", 1) % self.core.opener_branches:
+                raise constraints.error("n_samples_per_prompt must be a multiple of core.opener_branches")
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
 
@@ -663,6 +683,9 @@ class RunConfig:
             # Preserve the pre-feature native argv when opener seeding is disabled.
             core.pop("opener_seeds")
             core.pop("opener_seeds_per_group")
+        if not self.core.opener_branches:
+            core.pop("opener_branches")
+            core.pop("opener_pool")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,
