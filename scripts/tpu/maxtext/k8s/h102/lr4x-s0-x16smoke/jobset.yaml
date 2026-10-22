@@ -13,7 +13,7 @@ metadata:
     alpha.jobset.sigs.k8s.io/exclusive-topology: cloud.google.com/gke-nodepool
 spec:
   failurePolicy:
-    maxRestarts: 0
+    maxRestarts: 2
   replicatedJobs:
   - name: slice
     replicas: 1 # Slices. More than one is a JAX multislice job.

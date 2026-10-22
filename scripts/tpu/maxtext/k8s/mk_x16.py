@@ -2,13 +2,14 @@
 registered 4x4x8 overlay with only: the -x16 name, 1,024 chips and 256 hosts, ep-as-cp fsdp 16 x expert 64
 (per_device_batch_size 0.015625), ragged_buffer_factor 5.0 with log_moe_dropped_tokens, the big-slice data shim
 (MAXTEXT_R2_DATA_EMULATION=8:2:128:32, r2's exact batches), the drop-count image and checkpoint_period 150.
-A smoke variant (-x16smoke) writes to the scratch bucket, never restarts and never checkpoints in its window.
+A preflight variant (-x16smoke) writes to the scratch bucket, retries only for infrastructure (maxRestarts 2) and
+never checkpoints in its window.
   python mk_x16.py <k8s dir>"""
 import pathlib, sys
 
 K = pathlib.Path(sys.argv[1])
 TAG = "51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea"  # H103 s1n16's image: restore fix, big-slice shim, drop count
-RUNS = [("h102", f"{a}-s{s}") for a in ("lr4x", "lr3x") for s in (0, 1)] + [("h083", f"sci-s{s}") for s in (0, 1)]
+RUNS = [("h102", f"{a}-s{s}") for a in ("lr4x", "lr3x") for s in (0, 1)] + [("h083", f"sci-s{s}") for s in (0, 1)] + [("h076", "lr2x-s0")]  # h076: the placement control
 
 
 def make(h, run, smoke):
@@ -40,7 +41,7 @@ def make(h, run, smoke):
                     ("        completions: 32\n", "        completions: 256\n"),
                     ("cloud.google.com/gke-tpu-topology: 4x4x8\n", "cloud.google.com/gke-tpu-topology: 8x8x16\n")]
             if smoke:
-                subs.append(("    maxRestarts: 3\n", "    maxRestarts: 0\n"))
+                subs.append(("    maxRestarts: 3\n", "    maxRestarts: 2\n"))  # infrastructure retries (restore-lock rule)
         for a, b in subs:
             assert t.count(a) == 1, (h, run, f, a)
             t = t.replace(a, b)
@@ -55,4 +56,4 @@ def make(h, run, smoke):
 
 for h, run in RUNS:
     make(h, run, smoke=False)
-make("h102", "lr4x-s0", smoke=True)
+    make(h, run, smoke=True)
