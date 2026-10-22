@@ -54,7 +54,7 @@ ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 ENV CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 # Align the remaining serving requirements with the pinned SGLang source.
 RUN uv pip install --system --no-deps \
-    "apache-tvm-ffi==0.1.11" "humming-kernels[cu13]==0.1.12" "nvshmem4py-cu13==0.4.1" \
+    "apache-tvm-ffi==0.1.11" "humming-kernels[cu13]==0.1.12" "nvshmem4py-cu13==0.4.1" "Cython==3.3.0" \
     "sentencepiece==0.2.1" "sgl-deep-ep==0.1.2" "sgl-deep-gemm==0.2.0" \
     "smg-grpc-servicer==0.9.0" "tilelang==0.1.12" "xgrammar==0.2.7"
 
