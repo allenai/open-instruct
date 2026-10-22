@@ -1,5 +1,5 @@
 # H104 bb4-lr1e4-7b-f1-s0 (tpu-worker, 2026-10-21; mk_h103_h104.py): H089's olmo3-7b-s0 at 4x batch (64 rows, 2942 steps,
-# peak 1e-4), r2 data shim 8:2:128:32:4, candidate F1: 8x8x16, ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true; checkpoint_period 200.
+# peak 1e-4), r2 data shim 8:2:128:32:4, candidate F1: 8x8x16, ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true; checkpoint_period 120.
 # Olmo 3 7B (allenai/Olmo-3-1025-7B@a81bae42) SFT on one 4x4x8 v4 slice with A0''s recipe (ledger H067) and only the
 # base swapped: A0''s cleaned Dolci-Think stream, the olmo35 tokenizer and template (Olmo-3-1025-7B's tokenizer.json is
 # identical to dolma2-tokenizer-olmo35@8b971706's), prefix labels, 65,536-token sequences, 16 rows = 1,048,576 tokens/step,
@@ -47,7 +47,7 @@ configMapGenerator:
   # remat_policy=minimal (A0' uses full): 8.85 s/step vs 10.12 with full, the same batches (H089 P5, Amendment 1).
   # The vocabulary (100,278) does not divide by 8, so the vocab axis is replicated across the tensor group (zero-padding
   # it costs +3.2 nats/token; see README Traps).
-  - EXTRA_ARGS=logical_axis_rules=[['vocab',[]],['activation_vocab',[]]] sharding_tolerance=0.05 warmup_step_offset=1 z_loss_multiplier=1e-5 enable_checkpointing=true checkpoint_period=200 max_num_checkpoints_to_keep=2 ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true num_vocab_tiling=16 remat_policy=minimal attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
+  - EXTRA_ARGS=logical_axis_rules=[['vocab',[]],['activation_vocab',[]]] sharding_tolerance=0.05 warmup_step_offset=1 z_loss_multiplier=1e-5 enable_checkpointing=true checkpoint_period=120 max_num_checkpoints_to_keep=2 ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true num_vocab_tiling=16 remat_policy=minimal attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
   - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true --xla_tpu_scoped_vmem_limit_kib=16384
   - TPU_MEGACORE=MEGACORE_DENSE
   - MAXTEXT_LOG_BATCH_HASH=1 # per-step batch hashes in the log, to check a resume against A0''s batches

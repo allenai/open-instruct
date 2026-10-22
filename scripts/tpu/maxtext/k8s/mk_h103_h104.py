@@ -75,8 +75,8 @@ MESH = {  # candidate: (topology, hosts, devices, per-device batch, mesh args, c
     "A": ("8x8x8", 128, 512, "0.125", "ici_fsdp_parallelism=16 ici_tensor_parallelism=8 ici_context_parallelism=4 allow_split_physical_axes=true", 100),
     "B": ("8x8x8", 128, 512, "0.125", "ici_fsdp_parallelism=64 ici_tensor_parallelism=8 allow_split_physical_axes=true", 100),
     "C": ("8x8x16", 256, 1024, "0.0625", "ici_fsdp_parallelism=64 ici_tensor_parallelism=8 ici_context_parallelism=2 allow_split_physical_axes=true", 180),
-    # F1 (2026-10-21, after the 8x8x8 was resliced): AOT compile on CPU fits (temp 19.2 GB vs mesh B's 35.7), ~4.5 s/step est.
-    "F1": ("8x8x16", 256, 1024, "0.0625", "ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true", 200),
+    # F1 (2026-10-21, after the 8x8x8 was resliced): AOT compile on CPU fits (temp 19.2 GB vs mesh B's 35.7), ~4.5 s/step est.; smoke 7.33 s/step wall, so checkpoint_period 120 (~15 min)
+    "F1": ("8x8x16", 256, 1024, "0.0625", "ici_fsdp_parallelism=64 ici_tensor_parallelism=16 allow_split_physical_axes=true", 120),
 }
 
 
