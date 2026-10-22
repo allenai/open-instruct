@@ -217,7 +217,8 @@ def hybrid(options):
     root.mkdir(parents=True, exist_ok=True)
     hf_config_utils._register_olmo3moe_auto_classes()
     hf = Olmo3MoeConfig.from_pretrained(options.fixture / "hf")
-    hf.layer_types = ["linear_attention", "full_attention"]
+    hf.num_hidden_layers = 3
+    hf.layer_types = ["linear_attention", "linear_attention", "full_attention"]
     hf.dense_layers_indices = [0]
     hf.dense_mlp_intermediate_size = 256
     hf.dense_mlp_uses_shared_experts = True
@@ -256,12 +257,17 @@ def hybrid(options):
 
 def run(options):
     root = options.output
+    updates = options.updates or (3 if options.resume else 2)
+    if updates < (3 if options.resume else 2):
+        raise ValueError("Use at least two updates, or three when resuming after update two")
     if options.expert_parallel_size > 1 and not options.disaggregated:
         raise ValueError("The EP fixture requires disaggregated serving")
     total_gpus = options.expert_parallel_size + 1 if options.disaggregated else 1
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
     config = RunConfig(
         CoreConfig(
+            compiler_cache=False,
+            filter_zero_std_groups=False,
             attention_backend="torch",
             diagnostic_interval=options.diagnostic_interval,
             expert_parallel_size=options.expert_parallel_size,
@@ -279,7 +285,7 @@ def run(options):
             global_batch_size=4,
             rollout_batch_size=1,
             n_samples_per_prompt=4,
-            num_rollout=3 if options.resume else 2,
+            num_rollout=updates,
             rollout_num_gpus=1,
             rollout_num_gpus_per_engine=1,
             actor_num_gpus_per_node=options.expert_parallel_size,
@@ -314,6 +320,8 @@ def run(options):
         config.miles.update(sglang_disable_radix_cache=True, sglang_max_mamba_cache_size=16)
     if options.disaggregated:
         config.miles.pop("colocate")
+    if options.greedy:
+        config.miles.update(seed=17, rollout_seed=17, rollout_temperature=0.0)
     if options.routing_replay:
         config.miles["use_rollout_routing_replay"] = True
         config.miles["use_miles_router"] = True
@@ -331,11 +339,11 @@ def run(options):
         return
     ray.init(num_gpus=total_gpus, num_cpus=6, include_dashboard=False, object_store_memory=256 * 1024 * 1024)
     try:
-        asyncio.run(train(args))
+        asyncio.run(train(args, export_hf=str(root / "export") if options.export_hf else None))
     finally:
         ray.shutdown()
     latest = json.loads((root / "save/core-latest.json").read_text())
-    expected = 2 if options.resume else 1
+    expected = updates - 1
     assert latest["rollout_id"] == expected
     complete = json.loads((root / f"save/core/rollout_{expected:07d}/complete.json").read_text())
     assert complete["clock"]["completed_steps"] == expected + 1
@@ -349,13 +357,20 @@ def audit(options):
     prompts = [json.loads(line) for line in (root / "prompts.jsonl").read_text().splitlines()]
     scores, replay_shapes = [], []
     hf = json.loads((root / "hf/config.json").read_text())
-    for rollout_id in range(3):
+    updates = options.updates or 3
+    for rollout_id in range(updates):
         data = torch.load(root / f"rollouts/{rollout_id}.pt", weights_only=False)
         assert data["rollout_id"] == rollout_id and len(data["samples"]) == 4
         for sample in data["samples"]:
             assert sample["prompt"] == prompts[rollout_id]["input"]
             assert sample["label"] == prompts[rollout_id]["label"]
-            assert set(sample["weight_versions"]) == {str(rollout_id)}
+            spans = [span for call in sample["weight_versions"] for span in call]
+            assert spans and {span["version"] for span in spans} == {str(rollout_id)}
+            cursor = len(sample["tokens"]) - sample["response_length"]
+            for span in spans:
+                assert span["abs_start"] == cursor and span["abs_end"] > cursor
+                cursor = span["abs_end"]
+            assert cursor == len(sample["tokens"])
             assert len(sample["rollout_log_probs"]) == sample["response_length"]
             assert torch.isfinite(torch.tensor(sample["rollout_log_probs"])).all()
             if options.routing_replay:
@@ -384,7 +399,7 @@ def audit(options):
     initial = native.state_dict()
     keys = [f"module.{name}.main" for name in initial]
     changed = []
-    for step in (1, 2):
+    for step in range(1, updates):
         values = core_checkpoint.load_keys(root / f"save/core/rollout_{step:07d}/model", keys)
         differences = {
             name: (value.reshape(tensor.shape).float() - tensor.float()).abs().max().item()
@@ -397,9 +412,9 @@ def audit(options):
         verified_samples=len(scores),
         rewards=scores,
         replay_shapes=replay_shapes,
-        rollout_versions=[0, 1, 2],
+        rollout_versions=list(range(updates)),
         prompt_cursor_continued=True,
-        optimizer_steps=3,
+        optimizer_steps=updates,
         max_parameter_changes_from_initial=changed,
         interpretation="All-zero task rewards imply zero policy advantages; router auxiliary losses drive updates.",
     )
@@ -419,6 +434,9 @@ def main():
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--updates", type=int)
+    parser.add_argument("--greedy", action="store_true")
+    parser.add_argument("--export-hf", action="store_true")
     parser.add_argument("--disaggregated", action="store_true")
     parser.add_argument("--expert-parallel-size", type=int, choices=[1, 2], default=1)
     parser.add_argument("--legacy-export", action="store_true")

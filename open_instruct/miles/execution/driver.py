@@ -17,7 +17,7 @@ from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
 from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
-from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
+from miles.utils.hf_utils.config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
 
@@ -56,15 +56,15 @@ async def train(args, *, export_hf=None):
         with stage(args, "serving_startup"):
             inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
         with stage(args, "trainer_startup"):
-            learner, _ = await placement_group.create_training_models(args, inference, manager)
+            learner, _ = await placement_group.create_training_models(args, manager)
 
         async def publish(rollout_id=None):
             if args.fully_async:
-                await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
+                await manager.core_publication_boundary(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
                 await inference.onload_weights()
             await infra_timeouts.wait_for(
-                placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                placement_group.update_weights(args, learner, manager, inference, rollout_id=rollout_id),
                 timeout=args.olmo_core.engine_update_timeout if refresh else None,
                 operation="Core weight publication",
             )
@@ -84,7 +84,7 @@ async def train(args, *, export_hf=None):
                         skip_list=args.check_weight_update_skip_list,
                     )
                     await infra_timeouts.wait_for(
-                        placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                        placement_group.update_weights(args, learner, manager, inference, rollout_id=rollout_id),
                         timeout=args.olmo_core.engine_update_timeout if refresh else None,
                         operation="Core weight publication",
                     )
@@ -97,7 +97,7 @@ async def train(args, *, export_hf=None):
             if args.offload_rollout:
                 await inference.onload_kv()
             if args.fully_async:
-                await manager.core_publication_boundary.remote(False, **({"refresh": True} if refresh else {}))
+                await manager.core_publication_boundary(False, **({"refresh": True} if refresh else {}))
 
         with stage(args, "initial_publication"):
             await publish()
@@ -145,7 +145,7 @@ async def train(args, *, export_hf=None):
             with stage(args, "generation_wait", rollout_id):
                 if rolling is None:
                     await inference.prepare_rollout(rollout_id)
-                batch = await manager.get.remote(rollout_id)
+                batch = await manager.get(rollout_id)
             if args.offload_rollout:
                 await inference.offload()
             try:
@@ -185,7 +185,7 @@ async def train(args, *, export_hf=None):
                 # groups regenerate on resume; live inference need not finish or
                 # pause. No new training batch is consumed until this save commits.
                 with stage(args, "checkpoint", rollout_id):
-                    await manager.save.remote(rollout_id)
+                    await manager.save(rollout_id)
                     await learner.save_model(rollout_id, force_sync=True)
                     await learner.finalize_checkpoint(rollout_id)
                 if sentinel:
@@ -218,7 +218,7 @@ async def train(args, *, export_hf=None):
         reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
         if export_hf is not None and (reached_end or stopped_for_time):
             if args.fully_async:
-                await manager.core_publication_boundary.remote(True)
+                await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
         if stopped_for_time and coordinator is not None and background is not None and background["final"]:
@@ -251,7 +251,7 @@ async def train(args, *, export_hf=None):
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
-                lambda: manager.core_publication_boundary.remote(True),
+                lambda: manager.core_publication_boundary(True),
                 (
                     args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
                     if rolling or refresh
@@ -260,10 +260,10 @@ async def train(args, *, export_hf=None):
                 "final_generation_drain",
             ),
             (learner, lambda: learner.execute_workers("close_weight_transport"), 60, "close_weight_transport"),
-            (manager, lambda: manager.dispose.remote(), 120, "rollout_dispose"),
+            (manager, lambda: manager.dispose(), 120, "rollout_dispose"),
             (learner, lambda: learner.dispose(), 60, "trainer_dispose"),
             (inference, lambda: inference.dispose(), 60, "inference_dispose"),
-            (worker_manager, lambda: worker_manager.dispose.remote(), 120, "worker_dispose"),
+            (worker_manager, lambda: wiring.shutdown_worker_manager(worker_manager), 120, "worker_dispose"),
         ):
             if component is None:
                 continue

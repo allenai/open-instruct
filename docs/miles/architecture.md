@@ -226,3 +226,57 @@ Rebuild runtime/application images from the lock and validate the intended
 training topology; an existing image retains its original source revisions.
 Record application validation with the exact image and source pins. The compact
 options snapshot must be regenerated whenever runtime source pins change.
+
+### Optional local integration group
+
+Run the isolated group explicitly inside the candidate application runtime:
+
+```bash
+python tests/miles/qualification/runner.py --case all \
+  --output /results/tiny-hybrid-v1 \
+  --miles-source /opt/core-rl/sources/miles \
+  --image-id sha256:IMAGE_ID
+```
+
+Use a new output directory each time. `--case lifecycle` runs three uninterrupted
+updates; `--case resume` or `all` also runs two updates, restarts the process for
+update three, and compares the result with the control. Each process has a
+600-second timeout. The group requires exactly one visible GPU and the complete
+runtime; missing prerequisites fail. It is a standalone command, outside ordinary
+pytest discovery and the default CPU/GPU CI selections, and submits no cluster jobs.
+
+`tests/miles/qualification/fixture.json` fixes the tiny target-family hybrid-MoE
+geometry, seed, three arithmetic prompts and comparison tolerances. Preparation
+creates a local tokenizer and random BF16 weights without network downloads.
+Each update processes one prompt with four greedy responses. Router auxiliary
+losses provide nonzero gradients despite zero task advantages. This checks
+integration and resume consistency, not task learning or sampled-generation RNG
+continuity. The existing sampled GSM8K smoke is a separate check.
+
+The audit requires correct policy versions and prompt cursor, valid routing
+replay, finite nonzero gradients and updates, complete native checkpoints,
+serving/training logprob error at most 0.05, and exact HF export round-trip.
+The resume comparison requires identical generated tokens and routes, scheduler
+and data state, and compares all native model/Adam state with `rtol=1e-5` and
+`atol=1e-6`. These are strict acceptance thresholds, not a promise of bitwise
+identity across hardware. A failure must be investigated before changing them.
+
+Retain `result.json`, provenance, fixture hashes, process logs, audit JSON and
+comparison metrics. Provenance records imported source paths and Python source
+hashes as well as available Git revisions; the container launcher supplies the
+immutable image ID. A checked-out revision alone does not identify local edits.
+Keep the trained H045 two-GPU WEKA recipe as a separate qualification gate;
+this local fixture does not replace it or qualify distributed/publication modes.
+
+Adam first/second moments use the stricter absolute tolerance `1e-12` (relative
+tolerance `1e-5`), since small moments must not compare equal to a reset optimizer.
+
+The first validated RTX 4090 run completed this group in about seven minutes:
+three control updates versus two plus a fresh-process resumed update. Generated
+tokens/routes and all 560 compared floating checkpoint tensors matched exactly;
+both exports reloaded and ran. Independent fixture preparations produced identical
+file hashes. A separate fresh-container control differed after its first update,
+however. The cause of that numerical variability is not established. Treat the
+paired resume result as scoped evidence, and keep cross-container cold-start
+repeatability separate from this gate; no stable golden numerical baseline or
+required GPU CI check is claimed. Do not widen tolerances to hide that finding.

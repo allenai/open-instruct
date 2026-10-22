@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication import transport
 from miles.backends.core_utils.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
 
 from open_instruct.miles.configuration.config import CoreConfig
@@ -18,14 +19,25 @@ from open_instruct.miles.execution import driver
 
 
 def install_components(monkeypatch, manager):
+    # The driver now receives typed handles; preserve the event-recording fakes.
+    for name, value in vars(manager).copy().items():
+        if isinstance(value, SimpleNamespace) and hasattr(value, "remote"):
+            setattr(manager, name, value.remote)
+
+    async def update_weights(args, learner, manager, inference, *, rollout_id=None):
+        await learner.update_weights(rollout_id)
+
+    monkeypatch.setattr(driver.placement_group, "update_weights", update_weights)
+    monkeypatch.setattr(driver.wiring, "shutdown_worker_manager", AsyncMock())
+
     async def create_components(args):
         inference = SimpleNamespace(
-            check_weights=manager.check_weights.remote if hasattr(manager, "check_weights") else AsyncMock(),
+            check_weights=manager.check_weights if hasattr(manager, "check_weights") else AsyncMock(),
             prepare_rollout=AsyncMock(),
             dispose=AsyncMock(),
         )
-        manager.get = getattr(manager, "generate", SimpleNamespace(remote=AsyncMock()))
-        manager.set_weight_version = SimpleNamespace(remote=AsyncMock())
+        manager.get = getattr(manager, "generate", AsyncMock())
+        manager.set_weight_version = AsyncMock()
         return inference, manager, 1
 
     monkeypatch.setattr(driver.placement_group, "create_rollout_components", create_components)
@@ -144,7 +156,10 @@ def test_driver_quiesces_then_retires_transport_before_engines(
 
 def test_transport_destruction_starts_on_both_peers_before_wait(monkeypatch):
     events = []
-    updater = SimpleNamespace(
+    updater = object.__new__(transport.DistributedUpdater)
+    updater.__dict__.update(
+        args=SimpleNamespace(),
+        group_name="miles",
         _model_update_groups="group",
         _group_name="miles",
         rollout_engines=[
