@@ -1,22 +1,27 @@
-"""Refresh opener branches: per-prompt candidate probe, uniform draw, even split into seeded samples."""
+"""Refresh opener branches: exact per-prompt opener pool, uniform draw, even split into seeded samples."""
 
 import asyncio
 import copy
 import json
 import math
+import threading
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from miles.backends.core_utils.rollout import opener_branches, refreshing_rollout, response_seed
 from miles.backends.core_utils.rollout.errors import GenerationRequestTimeout
+from miles.backends.core_utils.rollout.generation_admission import GenerationAdmission
 from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
 from miles.utils.types import Sample
 
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
-# Token 7 is half of a multi-byte character; 8 completes it. Token 9 is special.
-VOCAB = ["Q", "<think>", "\n", " Okay", "Okay", "I", "The", "\xe2", "\x80\x94", "</think>", "!"]
+# "\xe2" is half of a multi-byte character that "\x80\x94" completes; "</think>" is special.
+WORDS = [f" w{i}" for i in range(40)]
+VOCAB = ["Q", "<think>", "\n", " Okay", "Okay", "I", "The", "\xe2", "\x80\x94", "</think>", "!", *WORDS]
 SPECIAL = [VOCAB.index("</think>")]
 
 
@@ -42,24 +47,41 @@ def ids(*tokens):
 
 PROMPT = ids("Q", "<think>")
 # Next-token distributions after the prompt, keyed by the response prefix.
-DIST = {
+SMALL = {
     (): {"\n": 0.5, "Okay": 0.3, " Okay": 0.1, "\xe2": 0.05, "</think>": 0.05},
     ("\n",): {"I": 0.7, "The": 0.3},
     ("\xe2",): {"\x80\x94": 1.0},
 }
+# More than TOP likely words at the root: an exact pool of 25 must look past the root's top 20.
+WIDE = {
+    (): {"\n": 0.3, **{w: (0.7 / 30) * (1 - 0.01 * i) for i, w in enumerate(WORDS[:30])}},
+    ("\n",): {w: 0.5 * 0.5**j for j, w in enumerate(WORDS)},
+}
 
 
-def serve(monkeypatch, posts, *, stall_probe=False):
-    """Fake SGLang: opener probes, prefill-only seed scoring and a one-token continuation."""
+def serve(monkeypatch, posts, dist=SMALL, *, versions=lambda n: "5", stall=None, fail_at=None):
+    """Fake SGLang: opener probes (top-k honoured), prefill-only seed scoring, one-token continuation."""
+    probes = []
+    active = [0, 0]  # current, peak concurrent probes
 
     async def post(url, payload, **kwargs):
         posts.append(copy.deepcopy(payload))
         if "top_logprobs_num" in payload:
-            if stall_probe:
-                await asyncio.sleep(10)
-            prefix = tuple(VOCAB[t] for t in payload["input_ids"][len(PROMPT) :])
-            top = [[math.log(p), VOCAB.index(t), None] for t, p in DIST[prefix].items()]
-            return {"text": "", "meta_info": {"output_top_logprobs": [top], "weight_version": "5"}}
+            probes.append(payload)
+            active[0] += 1
+            active[1] = max(active)
+            try:
+                if stall is not None:
+                    await stall.wait()
+                if fail_at is not None and len(probes) == fail_at:
+                    raise httpx.TransportError("probe failed")
+                prefix = tuple(VOCAB[t] for t in payload["input_ids"][len(PROMPT) :])
+                ranked = sorted(dist[prefix].items(), key=lambda kv: -kv[1])[: payload["top_logprobs_num"]]
+                top = [[math.log(p), VOCAB.index(t), None] for t, p in ranked]
+                meta = {"output_top_logprobs": [top], "weight_version": versions(len(probes))}
+                return {"text": "", "meta_info": meta}
+            finally:
+                active[0] -= 1
         if payload["sampling_params"]["max_new_tokens"] == 0:
             tail = payload["input_ids"][payload["logprob_start_len"] :]
             items = [[None, tail[0], None]] + [[-0.1, t, None] for t in tail[1:]]
@@ -75,6 +97,15 @@ def serve(monkeypatch, posts, *, stall_probe=False):
         }
 
     monkeypatch.setattr(refreshing_rollout, "post", post)
+    return probes, active
+
+
+class Ledger:
+    def __init__(self):
+        self.persisted = []
+
+    def persist_group_metadata(self, group, keys):
+        self.persisted.append(([copy.deepcopy(s.metadata) for s in group], keys))
 
 
 def producer(branches=2, pool=20):
@@ -91,6 +122,8 @@ def producer(branches=2, pool=20):
         sglang_speculative_algorithm=None,
     )
     p.state = SimpleNamespace(tokenizer=Tokenizer(), processor=None)
+    p._generation_admission = GenerationAdmission(8)
+    p.data_source = Ledger()
     return p
 
 
@@ -102,25 +135,105 @@ def texts(found):
     return [Tokenizer().decode(path) for path, _ in found]
 
 
-def probe(posts, monkeypatch, pool=20):
-    serve(monkeypatch, posts)
+def search(monkeypatch, dist=SMALL, pool=20, **serve_options):
+    posts = []
+    serve(monkeypatch, posts, dist, **serve_options)
     p = producer(pool=pool)
-    score = lambda x: p._prefill(opener_branches.probe_payload(x), "opener probe")  # noqa: E731
-    return asyncio.run(opener_branches.candidates(score, Tokenizer(), PROMPT, pool))
+
+    async def probe(x, top):
+        return await p._prefill(opener_branches.probe_payload(x, top), "opener probe")
+
+    return asyncio.run(opener_branches.candidates(probe, Tokenizer(), PROMPT, pool)), posts
 
 
-def test_probe_keeps_whitespace_distinct_and_expands_unfinished_prefixes(monkeypatch):
-    found, version = probe([], monkeypatch)
-    assert version == "5"
-    # Newline paths are expanded to their first word; the split character is completed;
+def brute_force(dist, pool):
+    """Every opener path and its probability, by full enumeration."""
+    paths, stack = [], [((), 0.0)]
+    while stack:
+        prefix, lp = stack.pop()
+        for token, p in dist[prefix].items():
+            if token in ("</think>",):
+                continue
+            child = prefix + (token,)
+            text = Tokenizer().decode([VOCAB.index(t) for t in child])
+            if text.strip() and "\ufffd" not in text:
+                paths.append((text, lp + math.log(p)))
+            elif child in dist:
+                stack.append((child, lp + math.log(p)))
+    return sorted(paths, key=lambda item: -item[1])[:pool]
+
+
+def test_search_keeps_whitespace_distinct_and_expands_unfinished_prefixes(monkeypatch):
+    result, _ = search(monkeypatch)
+    assert result["version"] == "5" and result["exact"]
+    # Newline paths run to their first word; the split character is completed;
     # the special closing tag is never an opener.
-    assert texts(found) == ["\nI", "Okay", "\nThe", " Okay", "—"]
-    assert [round(math.exp(lp), 4) for _, lp in found] == [0.35, 0.3, 0.15, 0.1, 0.05]
+    assert texts(result["found"]) == ["\nI", "Okay", "\nThe", " Okay", "\u2014"]
+    assert [round(math.exp(lp), 4) for _, lp in result["found"]] == [0.35, 0.3, 0.15, 0.1, 0.05]
 
 
-def test_pool_keeps_only_the_most_likely_openers(monkeypatch):
-    found, _ = probe([], monkeypatch, pool=3)
-    assert texts(found) == ["\nI", "Okay", "\nThe"]
+def test_search_returns_the_exact_pool_beyond_the_first_probe_width(monkeypatch):
+    result, posts = search(monkeypatch, WIDE, pool=25)
+    expected = brute_force(WIDE, 25)
+    assert texts(result["found"]) == [t for t, _ in expected]
+    assert result["exact"]
+    # The root was read again, wider, to admit root words ranked past its first 20.
+    assert [p["top_logprobs_num"] for p in posts if p["input_ids"] == PROMPT] == [20, 200]
+
+
+def test_search_cut_short_by_its_budget_is_inexact(monkeypatch):
+    monkeypatch.setattr(opener_branches, "MAX_REQUESTS", 1)
+    result, _ = search(monkeypatch)
+    assert not result["exact"] and math.isclose(result["missed"], 0.5)
+
+
+def test_depth_limit_is_an_omission(monkeypatch):
+    monkeypatch.setattr(opener_branches, "MAX_DEPTH", 1)
+    result, _ = search(monkeypatch)
+    assert not result["exact"] and math.isclose(result["missed"], 0.5)
+    assert "\nI" not in texts(result["found"])
+
+
+def test_search_spanning_a_publication_is_repeated_under_one_version(monkeypatch):
+    # The first search's second probe is served by version 6: the search is repeated.
+    result, posts = search(monkeypatch, versions=lambda n: "5" if n == 1 else "6")
+    assert result["version"] == "6" and result["versions"] == {"6"}
+    assert len(posts) > 3
+
+
+def test_search_that_never_settles_on_one_version_fails(monkeypatch):
+    with pytest.raises(RuntimeError, match="spanned policy versions"):
+        search(monkeypatch, versions=lambda n: str(n))
+
+
+def test_probes_run_one_at_a_time_and_stop_at_a_failure(monkeypatch):
+    posts = []
+    probes, active = serve(monkeypatch, posts, fail_at=2)
+    p = producer()
+    with pytest.raises(httpx.TransportError):
+        asyncio.run(p._branch_openers(group(2)))
+    assert len(probes) == 2 and active == [0, 1]
+
+
+def test_probes_wait_for_admission_and_hold_a_slot_while_running(monkeypatch):
+    async def run():
+        stall = asyncio.Event()
+        probes, _ = serve(monkeypatch, [], stall=stall)
+        p = producer()
+        p._generation_admission.pause()
+        task = asyncio.create_task(p._branch_openers(group(2)))
+        await asyncio.sleep(0.05)
+        assert probes == []  # admission is paused
+        p._generation_admission.resume()
+        await asyncio.sleep(0.05)
+        assert len(probes) == 1 and p._generation_admission.active == 1
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(p._generation_admission.wait_idle(), 0.05)  # a drain waits for the probe
+        stall.set()
+        await task
+        assert p._generation_admission.active == 0
+
+    asyncio.run(run())
 
 
 def test_draw_is_uniform_without_replacement_and_reproducible():
@@ -138,6 +251,39 @@ def test_draw_is_uniform_without_replacement_and_reproducible():
         opener_branches.choose(pool[:3], 4, "k")
 
 
+def test_assignment_is_persisted_and_reused_on_retry(monkeypatch):
+    posts = []
+    serve(monkeypatch, posts)
+    p = producer(branches=2)
+    samples = group(4)
+    asyncio.run(p._branch_openers(samples))
+    [(persisted, keys)] = p.data_source.persisted
+    assert keys == (response_seed.REQUEST_KEY, opener_branches.RECORD_KEY)
+    # A requeued group arrives with the persisted metadata and is not probed again.
+    retried = [Sample(group_index=3, index=30 + i, prompt="Q<think>", metadata=m) for i, m in enumerate(persisted)]
+    posts.clear()
+    asyncio.run(p._branch_openers(retried))
+    assert posts == [] and [s.metadata for s in retried] == [s.metadata for s in samples]
+
+
+def test_data_source_writes_the_assignment_into_its_pristine_records():
+    source = DashboardDrainingRolloutDataSource.__new__(DashboardDrainingRolloutDataSource)
+    source._cursor_lock = threading.RLock()
+    source._fully_async = True
+    source._recovery_groups = None
+    source._delegate = SimpleNamespace(buffer=[])
+    pristine = group(2)
+    source._pending_groups = {3: copy.deepcopy(pristine)}
+    produced = copy.deepcopy(pristine)
+    for s in produced:
+        s.metadata = {"a": 1, "keep": "private"}
+    source.persist_group_metadata(produced, ("a",))
+    assert source.requeue_pending_groups([3]) == 1
+    assert [s.metadata for s in source._delegate.buffer[0]] == [{"a": 1}, {"a": 1}]
+    with pytest.raises(RuntimeError, match="no pristine record"):
+        source.persist_group_metadata([Sample(group_index=9, index=0)], ("a",))
+
+
 def test_group_splits_evenly_and_seeds_by_token_ids(monkeypatch):
     posts = []
     serve(monkeypatch, posts)
@@ -148,6 +294,7 @@ def test_group_splits_evenly_and_seeds_by_token_ids(monkeypatch):
     assert seeds[:4] == [seeds[0]] * 4 and seeds[4:] == [seeds[4]] * 4 and seeds[0] != seeds[4]
     record = samples[5].metadata[opener_branches.RECORD_KEY]
     assert record["branch"] == 1 and record["probe_weight_version"] == "5" and len(record["pool"]) == 5
+    assert record["pool_exact"] and record["pool_missed_probability"] == 0.0
     assert record["chosen"] == [seeds[0], seeds[4]]
 
 
@@ -169,7 +316,7 @@ def test_seeded_branch_generates_from_its_opener_tokens(monkeypatch):
 
 
 def test_stalled_probe_is_a_recoverable_generation_timeout(monkeypatch):
-    serve(monkeypatch, [], stall_probe=True)
+    serve(monkeypatch, [], stall=asyncio.Event())
     p = producer()
     p.args.olmo_core.refresh_request_timeout = 0.01
     with pytest.raises(GenerationRequestTimeout):

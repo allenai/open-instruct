@@ -117,11 +117,19 @@ opener_pool = 20
 Before each prompt group is generated, prefill-only probes read the policy's most
 likely openers for that prompt. An opener runs to the first token that completes
 visible text, so whitespace is part of it (` Okay`, `Okay` and a newline followed
-by `Okay` are distinct) and special tokens are excluded. Of the `opener_pool` most
-likely openers, `opener_branches` are drawn uniformly without replacement, and the
-group's samples are split evenly across them as token-id response seeds. The
-candidate pool, the draw and the probe's policy version are kept in sample metadata
-as `opener_branches`.
+by `Okay` are distinct) and special tokens are excluded. A best-first search with
+probability bounds finds the exact `opener_pool` most likely openers, reading more
+next tokens where unseen ones could still qualify; a search cut short by its request
+budget or depth limit is recorded as inexact, with the largest probability it could
+have missed. All probes of a search must come from one policy version, and a search
+spanning a publication is repeated. Probes take generation-admission slots, so
+admission pauses and lifecycle drains cover them.
+
+`opener_branches` of the pool are drawn uniformly without replacement, and the
+group's samples are split evenly across them as token-id response seeds. The pool,
+the draw, its exactness and the probe's policy version are kept in sample metadata as
+`opener_branches`, and the assignment is written back to the pristine prompt record,
+so a retried or resumed group reuses it instead of probing again.
 
 The draw ignores the policy's probabilities, so a rare candidate is tried as often
 as the favorite, and no correction is applied for it. `n_samples_per_prompt` must be

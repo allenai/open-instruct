@@ -107,6 +107,25 @@ class DashboardDrainingRolloutDataSource:
                 text = openers[(group[0].group_index * count + slot) % len(openers)]
                 sample.metadata = {**(sample.metadata or {}), response_seed.REQUEST_KEY: {"text": text}}
 
+    def persist_group_metadata(self, group: Any, keys: tuple[str, ...]) -> None:
+        """Copy producer-chosen metadata into this group's pristine retry and resume records.
+
+        The refresh producer decides opener branches after the group is handed out;
+        writing them back means a requeued or resumed group reuses the same draw.
+        """
+        identity = group[0].group_index
+        with self._cursor_lock:
+            records = [self._pending_groups[identity]] if identity in self._pending_groups else []
+            records += [g for g in self._recovery_groups or () if g[0].group_index == identity]
+            if not records:
+                raise RuntimeError(f"prompt group {identity} has no pristine record to update")
+            for record in records:
+                if [s.index for s in record] != [s.index for s in group]:
+                    raise RuntimeError(f"pristine record for prompt group {identity} does not match its samples")
+                for pristine, sample in zip(record, group, strict=True):
+                    chosen = {key: copy.deepcopy(sample.metadata[key]) for key in keys}
+                    pristine.metadata = {**(pristine.metadata or {}), **chosen}
+
     def add_samples(self, samples: Any) -> None:
         """Return aborted samples to the underlying MILES buffer."""
         with self._cursor_lock:
