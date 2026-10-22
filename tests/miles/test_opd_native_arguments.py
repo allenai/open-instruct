@@ -71,7 +71,11 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
 
 
 def test_opd_packed_attention_declares_separate_padding_sequence():
-    batch = {"cu_seqlens": torch.tensor([0, 319, 512], dtype=torch.int32), "max_seqlen": 319}
+    batch = {
+        "cu_seqlens": torch.tensor([0, 319, 512], dtype=torch.int32),
+        "max_seqlen": 319,
+        "cu_seqlens_host": [0, 319, 512],
+    }
     packed = parallel.get_packed_seq_params(
         batch, SimpleNamespace(qkv_format="thd", use_opd=True, context_parallel_size=1)
     )

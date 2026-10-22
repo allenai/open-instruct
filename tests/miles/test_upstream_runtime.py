@@ -14,6 +14,7 @@ from miles.backends.core_utils.publication.engine_drain import WeightSnapshot
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray.rollout.inference_controller import InferenceController
 from miles.utils.compiler_cache import startup_cache
+from miles.utils.ft_utils.health_checker import ActivenessTracker
 from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
 from miles.utils.workers.worker_spec import CommandWorkerSpec, SchedulingSpec, WorkerLaunchContext
 
@@ -120,7 +121,16 @@ def test_native_provenance_round_trips_without_collapsing_mixed_versions():
 @pytest.mark.parametrize("failed", [False, True])
 def test_independent_delivery_holds_controller_window_until_acknowledged(failed):
     async def exercise():
-        inference = InferenceController(SimpleNamespace(colocate=False))
+        inference = InferenceController(SimpleNamespace(colocate=False), engine_provider=None, router_providers=[])
+        server = SimpleNamespace(
+            health_checker_activeness=ActivenessTracker(active=True),
+            server_cells={},
+            update_weights=True,
+            api_clients=[],
+            engine_gpu_counts=[],
+            engine_gpu_offsets=[],
+        )
+        inference.servers = {"default": server}
         inference.prepare_rollout = AsyncMock()
         entered, release = asyncio.Event(), asyncio.Event()
 
@@ -135,14 +145,14 @@ def test_independent_delivery_holds_controller_window_until_acknowledged(failed)
         publisher = RollingPublication(
             None,
             SimpleNamespace(execute_workers=AsyncMock(return_value=[WeightSnapshot(1, (), 0, 0)])),
-            SimpleNamespace(core_engine_drain=SimpleNamespace(remote=control)),
+            SimpleNamespace(core_engine_drain=control),
             inference,
         )
         publisher.version = 1
         await publisher.publish()
         await entered.wait()
         assert inference.context_lock.locked
-        assert not inference._health_checker_activeness.get().active
+        assert not server.health_checker_activeness.get().active
         release.set()
         if failed:
             with pytest.raises(RuntimeError, match="receiver failed"):

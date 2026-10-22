@@ -32,6 +32,7 @@ def test_hook_through_real_reward_normalization_and_partition(tmp_path):
     args.disable_rollout_trim_samples = False
     args.balance_data = False
     args.multi_lora = False
+    args.rollout_top_logprobs_num = 0
     original = sample_groups(36, Sample)
     for group in original:
         for sample in group:
