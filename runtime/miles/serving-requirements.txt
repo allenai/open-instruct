@@ -4,3 +4,7 @@
 --extra-index-url https://flashinfer.ai/whl
 flashinfer-python[cu13]==0.6.18
 flashinfer-cubin==0.6.18
+# Miles' upstream router wheel, built from sgl-router-for-miles a0cf7da533105d8d8da13119700934fb0c6e10d7.
+# Includes 8ecf980: HTTP workers do not auto-register their checkpoint tokenizer.
+# The rolling release URL and version (0.3.2) are reused; require these exact bytes.
+sglang-router @ https://github.com/radixark/miles-wheels/releases/download/cu130-torch213-x86_64/sglang_router-0.3.2-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=28fede513319fcff4a38e5d859589498799c2e2861cc25d78ed371b3aaf3d192

@@ -299,6 +299,19 @@ qualify every optional SGLang backend. `inference.sglang_bf16_gemm_backend = "to
 remains available for the existing Torch path; automatic backend selection is
 exercised separately on Blackwell.
 
+The serving requirements also pin the exact upstream `sglang-router` wheel by
+SHA-256, built from `radixark/sgl-router-for-miles` commit `a0cf7da`. The wheel's
+version remains `0.3.2`, so a version-only pin cannot distinguish it from the old
+build. It includes upstream fix `8ecf980`: HTTP workers skip automatic tokenizer
+registration unless the router has an explicitly configured tokenizer/model path.
+This avoids parsing the checkpoint's Transformers-only `{% generation %}` tags
+in the router's MiniJinja parser. Preserve those tags in checkpoint templates;
+they describe training spans. This does not add MiniJinja support for the tags.
+`tests/miles/test_router_http_runtime.py` starts a real CPU router and an HTTP
+worker fixture, verifies token-ID forwarding and worker removal, and checks that
+automatic tokenizer registration is skipped. It belongs to the optional runtime
+test group and requires no GPUs or checkpoint download.
+
 Local Ray initializes before W&B so its workers do not inherit the driver's local
 W&B service connection. Tracking then initializes before launching the Miles worker
 manager so serialized worker arguments include the primary W&B run ID, including
@@ -318,7 +331,13 @@ passed all 94 lifecycle and tracking tests in 43.20 seconds, including real
 Ray/offline W&B processes writing to WEKA. This was a CPU-only check with CUDA
 hidden; it does not qualify A100 training or online W&B. The test file was supplied
 as an immutable dataset after the image build; application code came from the
-embedded image. Its replacement trained H045 two-GPU Blackwell exercise is pending.
+embedded image. Its replacement trained H045 two-GPU
+[Blackwell exercise](https://beaker.org/ex/01M5JE15RBBZMZTKJ5ASMM1XGS) completed two
+optimizer steps and weight publication/comparison checks with offline W&B, exiting
+successfully after about 14 minutes. All 16 responses hit the 128-token limit and
+received zero task rewards; the updates had entropy gradients, so this validates
+integration rather than learning. That image still had the older router wheel;
+its passing run does not qualify the subsequent router replacement.
 Candidate image identities and exact build revision are recorded in `runtime/miles/candidate-image.json` after publication.
 Use its `application.beaker` ID with `MILES_EXISTING_IMAGE` to select that exact
 image. This candidate is not a claim that the trained H045 or distributed gates
