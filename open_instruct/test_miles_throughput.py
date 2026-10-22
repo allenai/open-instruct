@@ -69,6 +69,49 @@ def test_self_contained_example_plans(profile, gpus):
     assert spec.compile().core.max_policy_lag == (6 if profile in ("medium", "large") else 0)
 
 
+@pytest.mark.parametrize("profile", ["medium", "large"])
+def test_learning_examples_separate_transport_capacity_and_qualification(profile):
+    config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
+    plan = config.plan()
+    capacity = plan["async_capacity"]
+    assert capacity["global_http_slots"] == 2 * capacity["requested_engine_slots"]
+    assert capacity["producer_sample_budget"] >= capacity["global_http_slots"]
+    assert capacity["completed_buffer_samples"] == capacity["samples_per_collection"]
+    assert config.miles["check_weight_update_equal"] is False
+    assert plan["scoring_pass"]["standalone"] is False
+    assert plan["scoring_pass"]["check_interval"] == 0
+    assert not config.core.replay_diagnostics and config.core.diagnostic_interval == 0
+    assert config.miles["save_interval"] == 25
+
+
+@pytest.mark.parametrize("profile", ["dev", "small"])
+def test_mechanics_examples_retain_weight_qualification(profile):
+    config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
+    assert config.miles["check_weight_update_equal"] is True
+
+
+def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
+    with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
+        RunSpec.load("configs/miles/examples/medium.toml", ["inference.global_batch_size=128"])
+    config = RunSpec.load(
+        "configs/miles/examples/medium.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+    ).compile()
+    decision = config.plan()["scoring_pass"]
+    assert decision["standalone"] is True
+    assert decision["optimizer_steps_per_collection"] == 2
+    assert decision["check_interval"] == 0
+
+
+def test_optional_qualification_costs_are_visible_in_plan():
+    options = {"check_weight_update_equal": True}
+    codes = {w["code"] for w in throughput.report(options, CoreConfig(scoring_pass_required=True))["warnings"]}
+    assert {"weight_sync_qualification", "forced_trainer_rescoring"} <= codes
+    codes = {w["code"] for w in throughput.report({}, CoreConfig(scoring_check_interval=20))["warnings"]}
+    assert "periodic_scoring_check" in codes
+    codes = {w["code"] for w in throughput.report({}, CoreConfig(scoring_check_interval=0))["warnings"]}
+    assert "periodic_scoring_check" not in codes
+
+
 def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path):
     metrics = tmp_path / "checkpoints"
     metrics.mkdir()

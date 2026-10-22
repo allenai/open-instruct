@@ -58,6 +58,15 @@ def report(options, max_policy_lag):
             f"sglang_server_concurrency={http} is below sglang_max_running_requests={running}; "
             "the global HTTP semaphore cannot supply all requested engine slots. Raise server_concurrency if intentional capacity is unused."
         )
+    if http_slots is not None and engine_slots is not None and effective is not None:
+        request_slots = min(http_slots, effective)
+        if request_slots == engine_slots:
+            warnings.append(
+                "End-to-end request capacity equals GPU running capacity; requests in transit or awaiting "
+                "response processing still hold permits and can leave engines idle. Give both "
+                "sglang_server_concurrency and async_max_concurrent_samples headroom (start with two waves) "
+                "without increasing sglang_max_running_requests, then measure engine occupancy and HTTP latency."
+            )
     if buffer_samples is not None and collection is not None and buffer_samples < collection:
         warnings.append(
             f"Completed buffer holds {buffer_samples} samples, less than one collection ({collection}); "

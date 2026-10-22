@@ -23,11 +23,13 @@ below.
 
 ## Size engine admission from memory
 
-Engine admission is the number of requests each SGLang engine decodes at once. Four
-settings express it and must move together: `sglang_server_concurrency` (HTTP
-slots per engine), `sglang_max_running_requests` (the engine's batch limit),
+Engine admission is the number of requests each SGLang engine decodes at once.
+`sglang_max_running_requests` (the engine's batch limit),
 `sglang_cuda_graph_max_bs_decode` (the largest batch replayed from a CUDA graph)
-and the two memory pools below. Decode throughput grows with batch size until the
+and the two memory pools below size GPU capacity. `sglang_server_concurrency`
+instead sizes end-to-end HTTP permits per engine: a request holds its permit
+while in transit and while its response is processed, even when the GPU has
+finished it. Decode throughput grows with batch size until the
 GPU saturates, so an admission set below what memory allows leaves throughput
 unused whenever training waits for batches.
 
@@ -47,8 +49,9 @@ logs print “GB”.
 
 To choose admission `R` for context length `C` (`inference.max_context_length`):
 
-1. Set `sglang_server_concurrency`, `sglang_max_running_requests` and
-   `sglang_cuda_graph_max_bs_decode` to `R`.
+1. Set `sglang_max_running_requests` and `sglang_cuda_graph_max_bs_decode` to `R`.
+   For async runs, start `sglang_server_concurrency` at `2 × R`. Structured
+   configs derive this when omitted. This adds transport headroom, not GPU slots.
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
    request at full context, so KV capacity never forces a retraction.
 3. Keep `sglang_max_mamba_cache_size` above `5 × R` with the KDA radix cache (the
@@ -56,8 +59,10 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
 4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
    slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
 5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to
-   `max(collection, 2 × engines × R)` samples, which keeps every engine refilled
-   without a long upstream queue.
+   `max(collection, 2 × engines × R)` samples when HTTP capacity is at least `R`.
+   Both producer and HTTP capacity need headroom: raising only one leaves the
+   other as a bottleneck. Two waves are a starting point, not a measured guarantee
+   of full occupancy; monitor response latency, host memory and stale work.
 
 For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 
@@ -93,6 +98,17 @@ admission is too low.
 * Use dynamic-row Core kernels and persistent Triton caching. Cache namespaces
   include source/configuration identity; new configurations can still start cold.
 * Publish every optimizer step using flattened 1-GiB buckets and per-expert export.
+* In qualified long runs, use `check_weight_update_equal = false`. The optional
+  startup snapshot/reset audit remains enabled in the tiny mechanics examples.
+  Turning it off does not remove required publication acknowledgments.
+* Leave `core.scoring_pass_required = false`: the recipe selects whether a
+  standalone pre-update scoring forward is needed. One optimizer step per
+  collection with no KL in advantages can reuse the training forward. Multiple
+  optimizer steps, KL requirements and runtime guards still require their scores.
+  The learning templates use `core.scoring_check_interval = 0`, which validates
+  reuse on the first update of each process, including resume, without repeating
+  the audit during steady training. Enable periodic checks during qualification.
+  This does not disable TIS or replace trainer scores with serving scores.
 * Disabling activation recomputation can help short contexts when memory allows;
   restore it for long contexts or smaller memory budgets.
 * Keep the completed FIFO to one collection. A large explicit producer budget can
@@ -108,6 +124,15 @@ The examples prepare a normal train/eval task split and retain evaluation, nativ
 saves and optional final HF export. Disable eval, saves and export when isolating
 normal training cycles, and remember that such timings do not predict total wall
 time with those stages.
+
+If HTTP permits are full but engine slots are not, inspect the time outside the
+engine before adding GPUs. The October H077 review found approximately 721 active
+HTTP requests but 360 running sequences across 12 engines, with 768 permits and
+768 GPU slots configured. In 7,285 completed timed responses, mean HTTP duration
+was 141 seconds versus 63 seconds inside engine timestamps. The original H1
+configuration also used only one wave of permits and showed this delay. This
+motivates separate transport headroom; it does not establish which CPU or network
+stage caused the delay or certify a speedup from the revised settings.
 
 ## Read the right measurements
 

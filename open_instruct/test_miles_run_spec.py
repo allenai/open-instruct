@@ -27,7 +27,7 @@ def test_async_defaults_are_real_tis_and_eight_by_eight(tmp_path):
     config = spec(tmp_path, **{"async": {"fully_async": True}}).compile()
     assert config.miles["use_tis"] is True
     assert config.miles["use_rollout_logprobs"] is False
-    assert config.miles["async_data_buffer_capacity_factor"] == 2
+    assert config.miles["async_data_buffer_capacity_factor"] == 1
     assert config.miles["colocate"] is False
     assert config.miles["rollout_batch_size"] == config.miles["n_samples_per_prompt"] == 8
     assert config.miles["global_batch_size"] == 64

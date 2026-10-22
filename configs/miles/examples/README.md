@@ -74,3 +74,24 @@ scaling. The [throughput guide](../../../docs/miles/throughput-profiles.md) expl
 how to size memory budgets and engine admission for a model. Follow the
 [completion checks](../../../docs/miles/operations.md) to verify training,
 checkpoint and export outputs.
+
+## Capacity and qualification settings
+
+The learning templates (`medium`, `large`) separate 64 GPU-running requests per
+engine from 128 end-to-end HTTP permits. The automatically sized producer supplies
+two waves; the completed buffer holds one collection. HTTP permits include
+response delivery/processing, so setting both limits to 64 can leave GPU slots
+empty. Increasing only the producer cannot bypass the HTTP limit. Confirm warm
+occupancy, latency and memory on your workload before increasing either further.
+
+These templates disable the optional startup weight snapshot/reset audit
+(`check_weight_update_equal = false`) and periodic score-reuse audits
+(`scoring_check_interval = 0`). The first score check at startup/resume, required
+scoring passes, TIS, and publication acknowledgments remain. `dev` and `small`
+retain weight qualification. Re-enable audits when changing the publication or
+scoring implementation. Learning templates save every 25 updates; choose the
+cadence from measured save cost and acceptable recovery loss.
+
+`plan` reports copied configurations with no request headroom, forced rescoring,
+weight qualification, periodic scoring audits, or other diagnostic overhead.
+Review those warnings instead of inheriting settings from an old experiment.

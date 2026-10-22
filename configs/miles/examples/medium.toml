@@ -61,7 +61,8 @@ num_rollouts = 200
 skip_eval_before_train = false
 eval_interval = 50
 save_checkpoints = true
-save_interval = 5
+# Synchronous save; revisit cadence using measured save time and preemption risk.
+save_interval = 25
 
 [trainer]
 gpus = 8
@@ -86,7 +87,8 @@ max_context_length = 34816
 # Admission sized from B300 memory; see docs/miles/throughput-profiles.md#size-engine-admission-from-memory.
 # The pool holds 64 full 34,816-token contexts (16 KiB/token, 34 GiB), so KV never forces retraction.
 # 1024 KDA state slots (~32 MiB each) exceed the 5 x 64 radix minimum; ~165 GiB stays free per engine.
-sglang_server_concurrency = 64
+# HTTP permits include transit/response processing; keep two waves for 64 GPU slots.
+sglang_server_concurrency = 128
 sglang_max_running_requests = 64
 sglang_max_total_tokens = 2228224
 sglang_max_mamba_cache_size = 1024
@@ -98,7 +100,8 @@ sglang_cuda_graph_max_bs_decode = 64
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
-check_weight_update_equal = true
+# Startup weight snapshot/reset audit: enable for publication qualification.
+check_weight_update_equal = false
 update_weight_buffer_size = 1073741824
 
 [optimizer]
@@ -146,7 +149,8 @@ router_z_loss_weight = 0.0
 stream_moe_export = true
 weight_sync_mode = "flattened"
 expert_publication = "per_expert"
-scoring_check_interval = 20
+# Validate score reuse at startup/resume only; required scoring is never skipped.
+scoring_check_interval = 0
 diagnostic_interval = 0
 
 [miles]

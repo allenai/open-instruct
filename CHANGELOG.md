@@ -44,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - Add the desktop RTX 4090 to `GPU_SPECS`, so `grpo_fast.py` no longer stops at startup with `Unknown device name: NVIDIA GeForce RTX 4090`. The entry sits after `4090 laptop` because `get_device_name` returns the first key it finds in the device name (https://github.com/allenai/open-instruct/pull/2018).
 
 ### Changed
+- Give MILES async runs separate HTTP request headroom, align learning templates with one completed collection and startup-only scoring audits, and report copied configurations that can underfill engines or add qualification overhead (https://github.com/allenai/open-instruct/pull/2043).
 - Default MILES Jupiter launches to the pinned image's CUDA compatibility library path, while preserving explicit environment overrides (https://github.com/allenai/open-instruct/pull/1924).
 - Scope the MILES recommendation to supported Olmo MoE models and retain Core/vLLM and DeepSpeed/vLLM as current dense-model GRPO workflows in documentation and agent guidance (https://github.com/allenai/open-instruct/pull/1924).
 - Automatically publish stable CUDA 12 and CUDA 13 Beaker image aliases after merge-queue integration tests pass (https://github.com/allenai/open-instruct/pull/1783).
