@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "FlashInfer/tracking fixes: embedded contracts and local 4090 lifecycle/resume passed; H045 two-GPU rerun queued",
+  "status": "FlashInfer Blackwell serving startup passed; H045 run failed on inherited offline W&B service; Ray-before-tracking fix awaiting rebuild",
   "application": {
     "beaker": "01M5J8WT92CYRJ1YV3R34SF76S",
     "docker_id": "sha256:a83f8d9e04d3d5295ff710c33dbd7577de802059d7c7e0415f0b52836b0ebfd0",
@@ -66,13 +66,17 @@
     "training_exercise": {
       "experiment": "01M5J99D67RN1ES3PB3Z0ZJQ7J",
       "url": "https://beaker.org/ex/01M5J99D67RN1ES3PB3Z0ZJQ7J",
-      "status": "queued",
+      "status": "failed",
       "cluster": "ai2/holmes",
       "workspace": "ai2/olmo-instruct",
       "gpus": 2,
       "model": "trained H045",
       "bf16_gemm_backend": "auto",
-      "requested_updates": 2
+      "requested_updates": 2,
+      "exit_code": 1,
+      "completed_optimizer_steps": 0,
+      "failure": "RolloutExecutor.init: offline W&B run ID already in use via inherited WANDB_SERVICE",
+      "serving_health_generate": "passed with automatic BF16 backend"
     },
     "targeted_cpu_contracts": {
       "source_revision": "98dff7d56dd8770c97f2ce84f695d382810c720f",

@@ -346,6 +346,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         create_training_models=AsyncMock(return_value=(learner, None)),
         update_weights=AsyncMock(),
     )
+    module("ray", is_initialized=lambda: True)
     module("miles")
     module(
         "miles.ray",

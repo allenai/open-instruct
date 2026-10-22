@@ -19,6 +19,7 @@ from open_instruct.miles.execution import driver
 
 
 def install_components(monkeypatch, manager):
+    monkeypatch.setattr(driver.ray, "is_initialized", lambda: True)
     # The driver now receives typed handles; preserve the event-recording fakes.
     for name, value in vars(manager).copy().items():
         if isinstance(value, SimpleNamespace) and hasattr(value, "remote"):

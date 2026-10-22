@@ -299,8 +299,10 @@ qualify every optional SGLang backend. `inference.sglang_bf16_gemm_backend = "to
 remains available for the existing Torch path; automatic backend selection is
 exercised separately on Blackwell.
 
-Tracking initializes before launching the Miles worker manager so the serialized
-worker arguments include the primary W&B run ID, including in offline mode.
+Local Ray initializes before W&B so its workers do not inherit the driver's local
+W&B service connection. Tracking then initializes before launching the Miles worker
+manager so serialized worker arguments include the primary W&B run ID, including
+in offline mode. An already connected Ray cluster is preserved.
 
 The rebuilt FlashInfer/tracking candidate passed the embedded lifecycle contracts
 and the local 4090 qualification with three uninterrupted updates versus two plus

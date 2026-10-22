@@ -33,7 +33,8 @@ RUN --mount=type=bind,from=flash-attention-build,source=/wheels,target=/tmp/flas
 RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_interface; import flash_attn_3; import flash_attn.cute"
 # Replace the application overlay before fetching the newly locked sources.
 RUN rm -rf /opt/core-rl
-COPY runtime/miles /opt/core-rl/build/runtime/miles
+# Image receipts change after publication; they must not invalidate binary layers.
+COPY runtime/miles/serving-requirements.txt runtime/miles/verifier-requirements.txt runtime/miles/runtime.lock.json /opt/core-rl/build/runtime/miles/
 # Preserve the qualified Torch/CUDA stack; check the upgraded packages' runtime
 # requirements explicitly below instead of resolving a different binary stack.
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/serving-requirements.txt

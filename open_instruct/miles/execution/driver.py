@@ -10,6 +10,7 @@ import time
 from functools import partial
 from pathlib import Path
 
+import ray
 import wandb
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray import placement_group, wiring
@@ -47,6 +48,11 @@ async def train(args, *, export_hf=None):
     rolling = None
     refresh = args.olmo_core.publication_mode == "refresh"
     try:
+        # Start local Ray before W&B creates WANDB_SERVICE. Otherwise raylet
+        # inherits the driver's service connection, and offline worker writers
+        # collide with the primary run. Preserve an already connected cluster.
+        if not ray.is_initialized():
+            ray.init()
         # Tracking assigns the run ID before Miles serializes args into worker
         # specs. Later mutations in the driver cannot reach those worker copies.
         init_tracking(args)
