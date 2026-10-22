@@ -307,10 +307,13 @@ in offline mode. An already connected Ray cluster is preserved.
 real CPU Ray and offline W&B processes inside the optional runtime test group;
 it does not load models or allocate GPUs.
 
-The rebuilt FlashInfer/tracking candidate passed the embedded lifecycle contracts
+The FlashInfer 0.6.18 image (`98dff7d`) passed the embedded lifecycle contracts
 and the local 4090 qualification with three uninterrupted updates versus two plus
-resume: all 560 compared checkpoint tensors matched exactly. The trained H045
-two-GPU Blackwell exercise is pending. Candidate image identities and exact build
+resume: all 560 compared checkpoint tensors matched exactly. It also passed
+Blackwell serving startup, but exposed an offline W&B service collision. The
+subsequent Ray-before-W&B image (`0646b57`) passed 93 embedded contracts and the
+real-process CPU logging regression. Its replacement trained H045 two-GPU
+Blackwell exercise is pending. Candidate image identities and exact build
 revision are recorded in `runtime/miles/candidate-image.json` after publication.
 Use its `application.beaker` ID with `MILES_EXISTING_IMAGE` to select that exact
 image. This candidate is not a claim that the trained H045 or distributed gates
