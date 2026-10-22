@@ -8,3 +8,12 @@
 
 Explicitly identify a concern as blocking only when it is a significant correctness problem.
 For other concerns, defer to the author's judgment and make the recommendation clear.
+
+## Review output
+
+For each finding, give a severity, the repository path and line at the PR head,
+the concrete trigger, the impact, and a practical fix when clear. Separate
+optional suggestions from correctness findings.
+
+Describe what you checked and any important uncertainty, missing context, or
+verification limits. If there are no consequential findings, say so briefly.

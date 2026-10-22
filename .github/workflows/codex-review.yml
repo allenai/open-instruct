@@ -136,9 +136,7 @@ jobs:
             Inspect git diff BASE...HEAD using the exact SHAs above, and read PR source
             with git show HEAD:path/to/file using the supplied head SHA.
 
-            Return JSON with verdict and review fields. Put the Markdown review in review,
-            citing repository paths and lines, triggers, impact, and practical fixes.
-            Describe what you checked and any verification limits.
+            Return JSON with verdict and review fields. Put the Markdown review in review.
             Choose APPROVE when the review is complete with no blocking findings or
             material unresolved uncertainty; optional suggestions do not prevent approval.
             Choose REQUEST_CHANGES for a significant correctness problem under the shared

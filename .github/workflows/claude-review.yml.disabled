@@ -135,10 +135,8 @@ jobs:
             submodules are not materialized; their changes remain visible in the diff.
             The top-level working tree is not necessarily the PR head.
 
-            Return Markdown in the structured output's review field. For each finding,
-            cite the original repository path and line (omit .review-input/head/),
-            explain the trigger and impact, and suggest a practical fix when clear.
-            Describe what you checked and any verification limits.
+            Return Markdown in the structured output's review field.
+            Omit .review-input/head/ from repository path references.
             The publishing job adds attribution and the reviewed commit to your output.
 
       - name: Report Claude failure details
