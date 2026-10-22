@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "status": "Pinned MILES/Core runtime; see docs/miles/feature-parity.md for qualified scope",
+  "status": "Candidate Miles v0.1.2 runtime; application image exercise pending",
   "base_image": {
-    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
-    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    "beaker": "01M5J4F4AZHR12WEQ1X54FGDN6",
+    "docker_id": "sha256:5504c7a84a6ac31272f7b5b6ba778ce688f17d7942e088f96074977cc7827e8b"
   },
   "sources": {
     "olmo-core": {
@@ -12,13 +12,17 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "4772a6767f1079eb3548d680c59fe98e481d6ff5",
+      "revision": "9ea6759fd872e78516decc45a684183f77918e14",
       "private": true
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "92b35cdf2771353a9e2c527a5b96b29cbb3d38c8",
+      "revision": "109f881dc1fa8acdb16bc2717a910f01958d79c9",
       "private": true
+    },
+    "sglang": {
+      "repository": "https://github.com/sgl-project/sglang.git",
+      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
     }
   }
 }

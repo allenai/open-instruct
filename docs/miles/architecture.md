@@ -24,7 +24,7 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 
 [`runtime/miles/runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the
 source of truth for exact dependency commits and the immutable binary base.
-Builds fetch those commits without patches or moving branch tips. MILES uses the
+Builds fetch those commits, including SGLang itself, without patches or moving branch tips. MILES uses the
 organized adapter hooks; OLMo-core provides the model, objective and checkpoint
 APIs required by this adapter; olmo-sglang supplies compatible serving models.
 The ordinary Open Instruct environment keeps its own dependency versions.
@@ -35,9 +35,10 @@ require a new, validated binary base. The Dockerfile separates a `runtime-base`
 stage (locked dependency sources and verifier packages) from `application`
 (Open Instruct, tests, scripts, configs and MILES docs). Build the former with
 `build_image.py --target runtime-base` to reuse the prepared layer. Ordinary builds
-select `application` and reuse that layer through Docker caching. The immutable
-binary base in the lock is unchanged; the prepared layer is not interchangeable
-with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
+select `application` and reuse that layer through Docker caching. The binary base is pinned separately from the prepared layer. The Miles v0.1.2
+candidate reuses the binary stack from the local 4090 qualification image, including
+`sglang-kernel==0.4.7`; its inherited application overlay is removed before the
+locked sources are fetched. The prepared layer is not interchangeable with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
 
 The main `runtime/miles/Dockerfile` adds FlashAttention 2 and 3 to the original
 binary base. Its separate `flash-attention-build` stage compiles FA3 from an
@@ -280,3 +281,18 @@ however. The cause of that numerical variability is not established. Treat the
 paired resume result as scoped evidence, and keep cross-container cold-start
 repeatability separate from this gate; no stable golden numerical baseline or
 required GPU CI check is claimed. Do not widen tolerances to hide that finding.
+
+## Miles v0.1.2 candidate
+
+The candidate pins the merged fork tag `v0.1.2` (`9ea6759`), SGLang
+`b84bec5`, and the olmo-sglang rank-logging fix `109f881` from
+[PR #8](https://github.com/allenai/olmo-sglang/pull/8). OLMo-core remains at
+`7e97bc4`. The branch contains the consumer lifecycle updates and optional
+qualification fixtures. The parser snapshot was regenerated against these sources.
+
+The earlier source-mounted 4090 qualification passed; a newly built application
+image still needs its own exercise. Candidate image identities and exact build
+revision are recorded in `runtime/miles/candidate-image.json` after publication.
+Use its `application.beaker` ID with `MILES_EXISTING_IMAGE` to select that exact
+image. This candidate is not a claim that the trained H045 or distributed gates
+have passed.

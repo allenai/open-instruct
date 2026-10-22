@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Keep the qualified binary toolchain and build kernels before copying application sources.
-ARG BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks
+ARG BASE_IMAGE=miles-v012-local:kernel047
 FROM ${BASE_IMAGE} AS flash-attention-build
 # Compile FA3 against the base's Torch/CUDA ABI. No GPU is needed; limit compiler
 # parallelism so a cold build does not exhaust the build host's memory.
@@ -31,6 +31,8 @@ RUN --mount=type=bind,from=flash-attention-build,source=/wheels,target=/tmp/flas
 # Importing the extensions catches missing libraries and Torch ABI mismatches
 # without requiring a GPU; each submitted job also checks forward/backward passes.
 RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_interface; import flash_attn_3; import flash_attn.cute"
+# Replace the application overlay before fetching the newly locked sources.
+RUN rm -rf /opt/core-rl
 COPY runtime/miles /opt/core-rl/build/runtime/miles
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt
 RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
@@ -61,7 +63,7 @@ COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
 COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles
 COPY README.md /opt/core-rl/README.md
-ENV PYTHONPATH=/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles
+ENV PYTHONPATH=/opt/core-rl/sources/sglang/python:/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles
 WORKDIR /opt/core-rl
 RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/sources/olmo-core/src/olmo_core /opt/core-rl/sources/miles/miles
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
@@ -69,3 +71,5 @@ RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
+
+RUN python -c "import sglang; from importlib.metadata import version; assert sglang.__file__.startswith('/opt/core-rl/sources/sglang/python/'); assert version('sglang-kernel') == '0.4.7'"
