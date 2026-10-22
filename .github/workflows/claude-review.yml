@@ -131,6 +131,27 @@ jobs:
             Do not assume the top-level working tree contains the PR head.
             Return the Markdown review in the structured output's review field.
 
+      - name: Report Claude failure details
+        if: failure() && steps.claude.outcome == 'failure'
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "claude-execution-output.json"
+          if path.exists():
+              messages = json.loads(path.read_text())
+              for message in reversed(messages):
+                  if message.get("type") == "result":
+                      # Report the terminal error, never the full agent transcript.
+                      details = {key: message[key] for key in ("subtype", "is_error", "errors") if key in message}
+                      if message.get("is_error"):
+                          details["result"] = message.get("result", "")[:2000]
+                      print("Claude failure details: " + json.dumps(details))
+                      break
+          PYTHON
+
   publish:
     needs: review
     if: needs.review.outputs.review != ''
