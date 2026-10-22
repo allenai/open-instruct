@@ -4,7 +4,9 @@ H103: from h078/bb4-lr1e4-s<seed> (6a38852e). Only RUN_NAME/names, checkpoint_pe
 ragged_buffer_factor F and num_vocab_tiling T change. P1 smokes: 5 steps, scratch output, no checkpoint, maxRestarts 0.
 H104: from h089/olmo3-7b-s<seed> (2a6be850, copied to h089src/). GLOBAL_BATCH 64, STEPS = LR_SCHEDULE_STEPS 2942, LR 1e-4,
 the r2 data shim 8:2:128:32:4 (hashing stays on), the big-slice image, and P1 candidate A/B/C's slice and mesh.
-  python mk_h103_h104.py h103-p1 | h103-prod <seed> <F> <T> <suffix> | h103-prod-dc <seed> <suffix> | h104-p1 | h104-smoke <cand> | h104-prod <cand> <seed>"""
+H103 Amendment 2: the dropcount runs move to the 8x8x16, olmo35-ep-as-cp fsdp 64 x expert 16 (no ici CP).
+  python mk_h103_h104.py h103-p1 | h103-prod <seed> <F> <T> <suffix> | h103-prod-dc <seed> <suffix> | h103-ep16 <seed> <F> <suffix>
+    | h103-ep16-smoke <F> <steps> | h104-p1 | h104-smoke <cand> | h104-prod <cand> <seed>"""
 import pathlib, sys
 
 K = pathlib.Path(__file__).parent
@@ -29,12 +31,20 @@ def write(src, dst, old, new, edit, head):
     print(dst)
 
 
-def h103(seed, F, T, name, smoke, dropcount=False, smoke_steps=5):
+def h103(seed, F, T, name, smoke, dropcount=False, smoke_steps=5, ep16=False):
     src = K / f"h078/bb4-lr1e4-s{seed}"
 
     def edit(f, t):
         if f == "jobset.yaml" and smoke:
             t = sub(t, "    maxRestarts: 3\n", "    maxRestarts: 0\n")
+        if f == "jobset.yaml" and ep16:
+            t = sub(t, "        parallelism: 128 # Hosts per slice.\n", "        parallelism: 256 # Hosts per slice.\n")
+            t = sub(t, "        completions: 128\n", "        completions: 256\n")
+            t = sub(t, "cloud.google.com/gke-tpu-topology: 8x8x8\n", "cloud.google.com/gke-tpu-topology: 8x8x16\n")
+        if f == "kustomization.yaml" and ep16:
+            t = sub(t, "  - TOTAL_DEVICES=512\n", "  - TOTAL_DEVICES=1024\n")
+            t = sub(t, "  - PER_DEVICE_BATCH=0.125\n", "  - PER_DEVICE_BATCH=0.0625\n")
+            t = sub(t, " ici_fsdp_parallelism=64 ici_expert_parallelism=8 ", " ici_fsdp_parallelism=64 ici_expert_parallelism=16 ")
         if f == "kustomization.yaml":
             t = sub(t, " ragged_buffer_factor=3.0 ", f" ragged_buffer_factor={F} ")
             t = sub(t, " num_vocab_tiling=16 ", f" num_vocab_tiling={T} ")
@@ -56,7 +66,8 @@ def h103(seed, F, T, name, smoke, dropcount=False, smoke_steps=5):
 
     head = (f"# H103 {name} (tpu-worker, 2026-10-21; mk_h103_h104.py): H078's bb4-lr1e4-s{seed} with ragged_buffer_factor {F},\n"
             f"# num_vocab_tiling {T}{f', a {smoke_steps}-step smoke (scratch, no checkpoint)' if smoke else ', checkpoint_period 200'}"
-            f"{'; Amendment 1: log_moe_dropped_tokens on the dropcount image' if dropcount else ''}.\n")
+            f"{'; Amendment 1: log_moe_dropped_tokens on the dropcount image' if dropcount else ''}"
+            f"{'; Amendment 2: 8x8x16, ep-as-cp fsdp 64 x expert 16' if ep16 else ''}.\n")
     write(src, K / "h103" / name, f"h078-bb4-lr1e4-s{seed}", f"h103-{name}", edit, head)
 
 
@@ -120,6 +131,12 @@ elif mode == "h103-prod-dc":  # H103 Amendment 1: factor 3.0 (s0r's), every step
 elif mode == "h103-dc-smoke":  # Amendment 1 positive control: seed 1 at factor F on the dropcount image
     F, steps = sys.argv[2], int(sys.argv[3])
     h103(1, F, 16, f"dc-f{F.replace('.', '')}-s1", True, dropcount=True, smoke_steps=steps)
+elif mode == "h103-ep16":  # H103 Amendment 2: the dropcount run on the 8x8x16 at fsdp 64 x expert 16
+    seed, F, suffix = int(sys.argv[2]), sys.argv[3], sys.argv[4]
+    h103(seed, F, 16, f"bb4-lr1e4-s{seed}{suffix}", False, dropcount=True, ep16=True)
+elif mode == "h103-ep16-smoke":  # Amendment 2 positive control: seed 1 at factor F, 8x8x16 fsdp 64 x expert 16
+    F, steps = sys.argv[2], int(sys.argv[3])
+    h103(1, F, 16, f"dc16-f{F.replace('.', '')}-s1", True, dropcount=True, smoke_steps=steps, ep16=True)
 elif mode == "h104-p1":
     for c in MESH:
         h104(c, 0, f"p1-{c.lower()}", True)
