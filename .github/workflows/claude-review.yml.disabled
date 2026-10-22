@@ -122,16 +122,10 @@ jobs:
             --max-turns 30
             --json-schema '{"type":"object","properties":{"review":{"type":"string","minLength":1}},"required":["review"],"additionalProperties":false}'
           prompt: |
-            Read and follow CODE_REVIEW.md and .github/claude/review-prompt.md.
+            You are Claude performing a GitHub Actions review. Read and follow CODE_REVIEW.md.
             Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.
             Base commit: ${{ steps.pr.outputs.base }}
             Head commit: ${{ steps.pr.outputs.head }}
-            Read .review-input/pr.diff for the exact PR diff.
-            Read .review-input/head/ for source at the PR head and .review-input/base/
-            for source at the merge base. Symlinks and submodules are not materialized;
-            use the diff to inspect their changes and state any resulting limitations.
-            Do not assume the top-level working tree contains the PR head.
-            Return the Markdown review in the structured output's review field.
 
       - name: Report Claude failure details
         if: failure() && steps.claude.outcome == 'failure'

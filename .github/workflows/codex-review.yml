@@ -90,13 +90,10 @@ jobs:
           safety-strategy: drop-sudo
           sandbox: read-only
           prompt: |
-            Read and follow CODE_REVIEW.md and .github/codex/review-prompt.md.
+            You are Codex performing a GitHub Actions review. Read and follow CODE_REVIEW.md.
             Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.
             Base commit: ${{ steps.pr.outputs.base }}
             Head commit: ${{ steps.pr.outputs.head }}
-            Inspect the diff with git diff BASE...HEAD using those exact commits.
-            The working tree contains the workflow revision; do not assume it is the PR head.
-            Read PR source with git show HEAD:path/to/file using the head SHA above.
 
   publish:
     needs: review
