@@ -19,6 +19,34 @@ CHECKPOINT = Path(
 )
 
 
+def assert_release_parity(native, hf, tokens):
+    # FP16's additional mantissa bits separate model interchange errors from
+    # accumulated BF16 rounding across eager/FlashAttention and fused kernels.
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
+        expected_fp16 = hf(tokens, use_cache=False).logits.float()
+        actual_fp16 = native(tokens).float()
+    print(f"FP16 parity max_abs={(actual_fp16 - expected_fp16).abs().max().item():.6f}", flush=True)
+    torch.testing.assert_close(actual_fp16, expected_fp16, rtol=0.005, atol=0.01)
+
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+        expected = hf(tokens, use_cache=False).logits.float()
+        actual = native(tokens).float()
+    expected_logprobs = expected.log_softmax(-1)
+    actual_logprobs = actual.log_softmax(-1)
+    kl = (expected_logprobs.exp() * (expected_logprobs - actual_logprobs)).sum(-1)
+    hf_precision_kl = (expected_logprobs.exp() * (expected_logprobs - expected_fp16.log_softmax(-1))).sum(-1)
+    native_precision_kl = (actual_logprobs.exp() * (actual_logprobs - actual_fp16.log_softmax(-1))).sum(-1)
+    print(
+        f"BF16 parity max_abs={(actual - expected).abs().max().item():.6f} "
+        f"mean_kl={kl.mean().item():.8f} max_kl={kl.max().item():.8f} "
+        f"hf_precision_kl={hf_precision_kl.max().item():.8f} "
+        f"native_precision_kl={native_precision_kl.max().item():.8f}",
+        flush=True,
+    )
+    assert torch.isfinite(kl).all()
+    assert kl.max().item() < 1e-3, "BF16 next-token distributions diverged"
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires a CUDA GPU")
 @pytest.mark.skipif(not CHECKPOINT.is_dir(), reason="Requires the release checkpoint Weka mount")
 def test_release_parity_update_and_export_reload(tmp_path):
@@ -39,10 +67,7 @@ def test_release_parity_update_and_export_reload(tmp_path):
     native.eval()
     hf = AutoModelForCausalLM.from_pretrained(str(CHECKPOINT), dtype=torch.float32, attn_implementation="eager")
     hf.to("cuda").eval()
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-        expected = hf(tokens[:, :16], use_cache=False).logits.float()
-        actual = native(tokens[:, :16]).float()
-    torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.05)
+    assert_release_parity(native, hf, tokens[:, :16])
     del hf
 
     native.train()
@@ -52,6 +77,7 @@ def test_release_parity_update_and_export_reload(tmp_path):
         logits = native(tokens)
         loss = F.cross_entropy(logits[:, :-1].float().reshape(-1, config.vocab_size), tokens[:, 1:].reshape(-1))
     assert torch.isfinite(loss)
+    print(f"Full-length BF16 loss={loss.item():.6f}", flush=True)
     loss.backward()
     assert all(torch.isfinite(p.grad).all() for p in native.parameters() if p.grad is not None)
     optimizer.step()
@@ -60,15 +86,11 @@ def test_release_parity_update_and_export_reload(tmp_path):
     del logits, loss
 
     native.eval()
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-        updated = native(tokens[:, :16]).float()
     cpu_state = {name: value.detach().cpu() for name, value in native.state_dict().items()}
     output = tmp_path / "export"
     olmo_core_utils.save_state_dict_as_hf(cpu_state, str(output), str(CHECKPOINT), tokenizer)
     restored = AutoModelForCausalLM.from_pretrained(str(output), dtype=torch.float32, attn_implementation="eager")
     restored.to("cuda").eval()
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-        reloaded = restored(tokens[:, :16], use_cache=False).logits.float()
-    torch.testing.assert_close(updated, reloaded, rtol=0.02, atol=0.05)
+    assert_release_parity(native, restored, tokens[:, :16])
     assert restored.config.model_type == "mainline_ladder"
     assert torch.cuda.max_memory_allocated() > 0

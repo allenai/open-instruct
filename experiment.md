@@ -757,3 +757,17 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
 - Previous image `01M5H054GQTHEWEXE1ZT4M81H3` passed offline container registration
   and ten CPU release tests; CUDA test skipped on CPU. Rebuild required for resume fix.
 - Launch IDs/results will be appended after submission. Gate remains a prerequisite.
+
+### GPU gate attempt 1
+
+- [Beaker](https://beaker.org/ex/01M5H14REXKB7J3FJ5EY6AM8Y6), image
+  `01M5H14C0C0C53G6XV16JXHM94`, code `426992b92`: **FAILED**, exit 1.
+- Actual CUDA test ran (not skipped). It loaded all 192 tensors but stopped before
+  the optimizer/export checks at BF16 HF-eager vs native-FlashAttention pointwise
+  parity: max absolute logit difference 0.140625, 18,288 / 1,605,632 elements (1.1%)
+  exceeded rtol 0.02 / atol 0.05. No training launch follows a failed gate.
+- Diagnostic revision adds FP16 interchange parity with stricter rtol 0.005 /
+  atol 0.01, BF16 next-token KL < 1e-3 per position, and reports each model's
+  BF16-vs-FP16 KL. Full-length optimizer update remains BF16. This separates
+  reduced-precision kernel drift from architecture/weight interchange errors;
+  the revised GPU result is still pending.

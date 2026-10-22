@@ -785,6 +785,9 @@ so collection terminates; that can still produce no learning signal.
 Resume audit finding: the old initial vLLM broadcast ran before native Trainer.fit
 restored its checkpoint. A pre-train callback now republishes restored weights and
 model step before resumed rollouts are requested. This fixes the first resumed batch
-using the original release policy. GPU/restart qualification remains pending.
+using the original release policy. GPU/restart qualification remains pending. The first CUDA gate failed BF16
+pointwise HF/native logit parity (max absolute difference 0.140625; 1.1% outside
+tolerance), before reaching update/export checks. FP16 parity and BF16 distribution
+diagnostics are required before interpreting this as rounding or launching training.
 
 See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).
