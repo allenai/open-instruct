@@ -787,7 +787,8 @@ restored its checkpoint. A pre-train callback now republishes restored weights a
 model step before resumed rollouts are requested. This fixes the first resumed batch
 using the original release policy. GPU/restart qualification remains pending. The first CUDA gate failed BF16
 pointwise HF/native logit parity (max absolute difference 0.140625; 1.1% outside
-tolerance), before reaching update/export checks. FP16 parity and BF16 distribution
-diagnostics are required before interpreting this as rounding or launching training.
+tolerance), before reaching update/export checks. FP16 reduced max absolute error to 0.019531 but missed a tighter pointwise
+threshold at 40 / 1,605,632 values. A full-FP32 math-attention structural check
+and BF16 distribution diagnostics are required before launching training.
 
 See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).

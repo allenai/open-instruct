@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from transformers import AutoModelForCausalLM
 
 from open_instruct import hybrid_models, olmo_core_utils
@@ -20,13 +21,26 @@ CHECKPOINT = Path(
 
 
 def assert_release_parity(native, hf, tokens):
+    native_math, _ = olmo_core_utils.setup_model(
+        olmo_core_utils.ModelConfig(model_name_or_path=str(CHECKPOINT), attn_implementation="torch"),
+        init_device="meta",
+    )
+    native_math.to_empty(device="cuda")
+    native_math.load_state_dict(native.state_dict(), strict=True)
+    native_math.eval()
+    with torch.no_grad(), sdpa_kernel(SDPBackend.MATH):
+        expected_fp32 = hf(tokens, use_cache=False).logits.float()
+        actual_fp32 = native_math(tokens).float()
+    print(f"FP32 math parity max_abs={(actual_fp32 - expected_fp32).abs().max().item():.8f}", flush=True)
+    torch.testing.assert_close(actual_fp32, expected_fp32, rtol=5e-4, atol=1e-3)
+    del native_math
+
     # FP16's additional mantissa bits separate model interchange errors from
     # accumulated BF16 rounding across eager/FlashAttention and fused kernels.
     with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
         expected_fp16 = hf(tokens, use_cache=False).logits.float()
         actual_fp16 = native(tokens).float()
     print(f"FP16 parity max_abs={(actual_fp16 - expected_fp16).abs().max().item():.6f}", flush=True)
-    torch.testing.assert_close(actual_fp16, expected_fp16, rtol=0.005, atol=0.01)
 
     with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
         expected = hf(tokens, use_cache=False).logits.float()
@@ -51,6 +65,7 @@ def assert_release_parity(native, hf, tokens):
 @pytest.mark.skipif(not CHECKPOINT.is_dir(), reason="Requires the release checkpoint Weka mount")
 def test_release_parity_update_and_export_reload(tmp_path):
     hybrid_models.register_models()
+    torch.set_float32_matmul_precision("highest")
     torch.manual_seed(1)
     native, config = olmo_core_utils.setup_model(
         olmo_core_utils.ModelConfig(model_name_or_path=str(CHECKPOINT), attn_implementation="flash_2"),

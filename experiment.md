@@ -749,8 +749,8 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
 - Native model/optimizer/trainer/data-preparation checkpoint every 100 updates,
   loaded automatically with `LoadStrategy.if_available`; latest checkpoints remain
   under the launch's stable `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/<run-name>/native`.
-  W&B ID is stable across Beaker restarts. At most 99 completed updates can be lost
-  between scheduled checkpoints (plus any in-progress update).
+  W&B ID is stable across Beaker restarts. Restarts roll back to the latest fully completed checkpoint; a pending
+  asynchronous save can increase rollback beyond the nominal 100-update interval.
 - Resume audit found the initial serving-weight sync preceded Trainer.fit's checkpoint
   load. Fixed VLLMWeightSyncCallback.pre_train to republish restored weights/step before
   requesting resumed training data. CPU regression covers fresh and restored startup.
@@ -771,3 +771,15 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
   BF16-vs-FP16 KL. Full-length optimizer update remains BF16. This separates
   reduced-precision kernel drift from architecture/weight interchange errors;
   the revised GPU result is still pending.
+
+### GPU gate attempt 2 and precision diagnosis
+
+- [Beaker](https://beaker.org/ex/01M5H1JP4RYQ0DVMKBD2TH9XAK), code
+  `3370c0ee3`: **FAILED** the tighter FP16 pointwise check before update/export.
+- FP16 max absolute difference 0.019531 (versus BF16 0.140625); only 40 /
+  1,605,632 values exceeded rtol 0.005 / atol 0.01, max failing absolute 0.015625.
+  This precision scaling supports rounding drift but is not by itself a pass.
+- Next gate checks structural parity with native Torch math attention and HF eager
+  in FP32 (rtol 5e-4 / atol 1e-3), reports FlashAttention FP16 differences, and
+  independently gates FlashAttention BF16 next-token KL < 1e-3 per position.
+  The full-length optimizer test and export/reload remain required; training is pending.
