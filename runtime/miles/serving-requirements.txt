@@ -1,4 +1,6 @@
 # Match the pinned SGLang source's FlashInfer requirement. Keep the Python
 # dispatch code and prebuilt CUDA kernels on the same release.
+# Cubin wheels are published on FlashInfer's own index, as in SGLang's build.
+--extra-index-url https://flashinfer.ai/whl
 flashinfer-python[cu13]==0.6.18
 flashinfer-cubin==0.6.18
