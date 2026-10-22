@@ -68,6 +68,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /uvx /bin/
 WORKDIR /stage/
 
 ENV UV_CACHE_DIR=/root/.cache/uv \
+    UV_PROJECT_ENVIRONMENT=/stage/.venv \
+    UV_PYTHON_INSTALL_DIR=/opt/python \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0 \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+docker
@@ -81,7 +83,9 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     GIT_CONFIG_KEY_0=credential.https://github.com.helper \
     GIT_CONFIG_VALUE_0='!f() { if [ "$1" = get ]; then printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; fi; }; f' \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
-        python -m nltk.downloader punkt punkt_tab words
+        python -m nltk.downloader punkt punkt_tab words \
+    && test ! -L /stage/.venv \
+    && test -x /stage/.venv/bin/python
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs

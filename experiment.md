@@ -721,6 +721,11 @@ Related: [research.md#olmo-hybrid-release-checkpoint-inputs](research.md#olmo-hy
   final HF export. Output: `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/<run-name>`.
 - Build without allocating GPUs: `./scripts/train/build_image_and_launch.sh --build-only`.
   Private plugin fetches use an ephemeral BuildKit GitHub-token secret.
+- Built-container validation caught uv's default managed environment being stored
+  under the BuildKit cache mount, leaving a dangling `/stage/.venv` after build.
+  The Dockerfile now explicitly places the environment at `/stage/.venv` and
+  Python at `/opt/python`, and asserts the environment is not a symlink.
+  GPU jobs must use the rebuilt, container-validated image rather than the first build.
 - GPU gate (separate from training):
   `GPU_TEST_CLUSTER=ai2/saturn GPU_TEST_TIMEOUT=1h GPU_TEST_BUDGET=ai2/oe-other ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh open_instruct/test_hybrid_release_gpu.py`.
   One A100 80GB, urgent/preemptible, no guaranteed minimum runtime, zero retries.
