@@ -61,8 +61,20 @@ Separate optional suggestions from correctness findings. State important
 uncertainty or missing source context and that tests were not run. If there are
 no consequential findings, say so briefly.
 
-Codex returns the review as Markdown. Claude returns that Markdown in the
-structured output's `review` field. The publishing job adds agent attribution
+Codex returns a JSON object with `verdict` and `review` fields. Choose the verdict
+using these criteria:
+
+- `APPROVE`: the review is complete, with no significant correctness problems or
+  material unresolved uncertainty. Optional suggestions do not prevent approval.
+- `REQUEST_CHANGES`: concrete findings demonstrate a significant correctness
+  problem. Explain what must be fixed and when the failure occurs.
+- `COMMENT`: the review is incomplete or a material question needs human judgment.
+  Do not approve merely because no finding could be confirmed.
+
+Put the Markdown review in `review`. Static review does not require running tests
+to approve, but must state that tests were not run; CI requirements still apply.
+Claude returns Markdown in the structured output's `review` field and remains
+advisory when re-enabled. The publishing job adds agent attribution
 and the reviewed commit, so do not add an attribution banner to the returned
 text or claim human approval.
 
@@ -94,7 +106,14 @@ Reviews have a 20-minute job timeout. Each agent reads this document from the
 workflow revision for all review instructions.
 Codex inspects Git objects in a read-only sandbox. Claude gets a diff and regular
 source-file snapshots, with only Read, Glob, and Grep tools in restricted mode
-and a 30-turn limit. Neither executes repository code. A separate job posts
-each advisory review with the agent's attribution;
-it skips publishing if the PR has closed or its head has changed. Reviews do not
-approve PRs or request changes. Rerun the workflow after new commits when needed.
+and a 30-turn limit. Neither executes repository code. A separate job publishes
+Codex's verdict as a GitHub approval, request for changes, or comment on non-draft
+same-repository PRs. Draft and fork PRs receive advisory comments only. GitHub's
+"Allow GitHub Actions to create and approve pull requests" setting must be enabled.
+The workflow withdraws its own previous approvals before starting a new review,
+and skips publishing if the PR closes or its base or head changes during review.
+Invalid or missing output fails publication rather than approving. This does not
+enable automatic merging; required checks and repository merge rules still apply.
+The disabled Claude workflow only publishes advisory comments.
+Rerun the workflow after new commits when needed. Approval withdrawal occurs when
+a run starts; repository rules control stale approvals outside those runs.

@@ -19,23 +19,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  review:
+  prepare:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.number == 1986 &&
        github.event.pull_request.head.repo.full_name == github.repository &&
        !github.event.pull_request.draft)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
-      contents: read
-      pull-requests: read
+      pull-requests: write
     outputs:
       pr_number: ${{ steps.pr.outputs.number }}
+      base_sha: ${{ steps.pr.outputs.base }}
       head_sha: ${{ steps.pr.outputs.head }}
-      review: ${{ steps.codex.outputs.final-message }}
     steps:
-      - name: Resolve the pull request
+      - name: Resolve the pull request and withdraw previous Codex approvals
         id: pr
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
@@ -54,6 +53,30 @@ jobs:
             core.setOutput('base', pr.base.sha);
             core.setOutput('head', pr.head.sha);
 
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              ...context.repo, pull_number: pr.number, per_page: 100,
+            });
+            for (const review of reviews) {
+              if (review.state === 'APPROVED' &&
+                  review.user?.login === 'github-actions[bot]' &&
+                  review.body?.includes('<!-- codex-action-review -->')) {
+                await github.rest.pulls.dismissReview({
+                  ...context.repo, pull_number: pr.number, review_id: review.id,
+                  message: '> [!NOTE]\n> Drafted by Codex.\n\nA new Codex review is starting; withdrawing the previous approval.',
+                });
+              }
+            }
+
+  review:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      review: ${{ steps.codex.outputs.final-message }}
+    steps:
       - name: Check API key configuration
         env:
           REVIEW_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -75,8 +98,8 @@ jobs:
 
       - name: Fetch the exact commits to review
         env:
-          BASE_SHA: ${{ steps.pr.outputs.base }}
-          HEAD_SHA: ${{ steps.pr.outputs.head }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
         run: |
           git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
           git merge-base "$BASE_SHA" "$HEAD_SHA"
@@ -89,36 +112,54 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           safety-strategy: drop-sudo
           sandbox: read-only
+          output-schema: |
+            {
+              "type": "object",
+              "properties": {
+                "verdict": {"type": "string", "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]},
+                "review": {"type": "string", "minLength": 1}
+              },
+              "required": ["verdict", "review"],
+              "additionalProperties": false
+            }
           prompt: |
             You are Codex performing a GitHub Actions review. Read and follow CODE_REVIEW.md.
-            Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.
-            Base commit: ${{ steps.pr.outputs.base }}
-            Head commit: ${{ steps.pr.outputs.head }}
+            Review PR #${{ needs.prepare.outputs.pr_number }} in ${{ github.repository }}.
+            Base commit: ${{ needs.prepare.outputs.base_sha }}
+            Head commit: ${{ needs.prepare.outputs.head_sha }}
 
   publish:
-    needs: review
-    if: needs.review.outputs.review != ''
+    needs: [prepare, review]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       pull-requests: write
     steps:
-      - name: Publish an advisory review
+      - name: Publish the Codex verdict
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          PR_NUMBER: ${{ needs.review.outputs.pr_number }}
-          HEAD_SHA: ${{ needs.review.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
           REVIEW: ${{ needs.review.outputs.review }}
         with:
           script: |
             const pull_number = Number(process.env.PR_NUMBER);
             const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number });
-            if (pr.state !== 'open' || pr.head.sha !== process.env.HEAD_SHA) {
+            if (pr.state !== 'open' || pr.head.sha !== process.env.HEAD_SHA ||
+                pr.base.sha !== process.env.BASE_SHA) {
               core.notice('PR closed or changed during review; skipping outdated feedback.');
               return;
             }
-            const review = process.env.REVIEW.trim();
-            if (!review) return;
+            const output = JSON.parse(process.env.REVIEW);
+            if (!output || Array.isArray(output) ||
+                !['APPROVE', 'REQUEST_CHANGES', 'COMMENT'].includes(output.verdict) ||
+                typeof output.review !== 'string' || !output.review.trim()) {
+              throw new Error('Codex returned an invalid verdict or empty review.');
+            }
+            const review = output.review.trim();
+            const sameRepository = pr.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`;
+            const event = sameRepository && !pr.draft ? output.verdict : 'COMMENT';
             const limit = 50000;
             const text = review.length > limit
               ? review.slice(0, limit) + '\n\n_Review truncated; see the workflow run for the full output._'
@@ -127,7 +168,9 @@ jobs:
               ...context.repo,
               pull_number,
               commit_id: process.env.HEAD_SHA,
-              event: 'COMMENT',
+              event,
               body: '> [!NOTE]\n> Drafted by Codex.\n\n' +
-                `Reviewed commit \`${process.env.HEAD_SHA}\`.\n\n` + text,
+                '<!-- codex-action-review -->\n' +
+                `Reviewed commit \`${process.env.HEAD_SHA}\`.\n\n` +
+                (event !== output.verdict ? '_Draft and fork PRs receive advisory comments only._\n\n' : '') + text,
             });
