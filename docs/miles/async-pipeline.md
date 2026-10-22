@@ -88,8 +88,14 @@ rotating through the list by prompt-group identity; the remaining samples are
 unchanged. The producer scores the opener under the serving policy in a
 prefill-only request, then generates from it. Opener tokens are response tokens:
 they are rewarded, trained, and carry the scored behavior log probabilities and
-the policy version that scored them, so TIS treats them as on-policy draws. The
-recorded tokens and scores are kept in sample metadata as `response_seed_scored`.
+the policy version that scored them. The recorded tokens and scores are kept in
+sample metadata as `response_seed_scored`.
+
+Assigned openers are not sampled from the policy, so seeded responses are not
+on-policy draws. Recording the policy's own score as the behavior probability
+means no correction is applied for the assignment itself: the update is biased
+toward the assigned openers by design. TIS still corrects policy drift and
+inference/trainer numerical mismatch on those tokens, as on any other.
 
 An opener must tokenize the same way alone as after the prompt; text that merges
 with the end of the prompt (for example a newline after a bare `>`) is rejected.
