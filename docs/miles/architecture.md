@@ -312,9 +312,14 @@ and the local 4090 qualification with three uninterrupted updates versus two plu
 resume: all 560 compared checkpoint tensors matched exactly. It also passed
 Blackwell serving startup, but exposed an offline W&B service collision. The
 subsequent Ray-before-W&B image (`0646b57`) passed 93 embedded contracts and the
-real-process CPU logging regression. Its replacement trained H045 two-GPU
-Blackwell exercise is pending. Candidate image identities and exact build
-revision are recorded in `runtime/miles/candidate-image.json` after publication.
+real-process CPU logging regression. A subsequent
+[Saturn check in open-instruct-dev](https://beaker.org/ex/01M5JFEF9C14SMTF7WYY4DQBVM)
+passed all 94 lifecycle and tracking tests in 43.20 seconds, including real
+Ray/offline W&B processes writing to WEKA. This was a CPU-only check with CUDA
+hidden; it does not qualify A100 training or online W&B. The test file was supplied
+as an immutable dataset after the image build; application code came from the
+embedded image. Its replacement trained H045 two-GPU Blackwell exercise is pending.
+Candidate image identities and exact build revision are recorded in `runtime/miles/candidate-image.json` after publication.
 Use its `application.beaker` ID with `MILES_EXISTING_IMAGE` to select that exact
 image. This candidate is not a claim that the trained H045 or distributed gates
 have passed.

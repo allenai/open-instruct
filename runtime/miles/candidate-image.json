@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Ray-before-W&B fix: CPU, embedded contracts and real offline Ray worker passed; replacement H045 exercise submitted",
+  "status": "Ray-before-W&B fix: local CPU and Saturn/WEKA logging checks passed; replacement H045 Blackwell exercise queued",
   "application": {
     "beaker": "01M5JDNZ4CC08QQQAB6SHCP4Y8",
     "docker_id": "sha256:20636b5a6c57e14c517603b97e8c333947c35a5abd0e5376db6d01d3052c2885",
@@ -66,7 +66,7 @@
     "training_exercise": {
       "experiment": "01M5JE15RBBZMZTKJ5ASMM1XGS",
       "url": "https://beaker.org/ex/01M5JE15RBBZMZTKJ5ASMM1XGS",
-      "status": "submitted",
+      "status": "queued as of 2026-10-22T18:56:00Z",
       "cluster": "ai2/holmes",
       "workspace": "ai2/olmo-instruct",
       "gpus": 2,
@@ -113,6 +113,29 @@
       "test": "tests/miles/test_tracking_offline_runtime.py",
       "seconds": 19.23,
       "note": "Test mounted into the rebuilt image after its build; driver, Ray and W&B came from the embedded runtime. Real CPU worker logged successfully in offline mode. Earlier W&B-before-Ray ordering reproduced the collision locally."
+    },
+    "saturn_logging": {
+      "experiment": "01M5JFEF9C14SMTF7WYY4DQBVM",
+      "url": "https://beaker.org/ex/01M5JFEF9C14SMTF7WYY4DQBVM",
+      "cluster": "ai2/saturn",
+      "workspace": "ai2/open-instruct-dev",
+      "source_revision": "0646b575b90bf7347d1096c68950a3b1721e6908",
+      "image": "01M5JDNZ4CC08QQQAB6SHCP4Y8",
+      "test_payload": "01M5JF22HKVFRSRN7C0M4E2NWR",
+      "exit_code": 0,
+      "passed": 94,
+      "seconds": 43.2,
+      "scope": "CPU lifecycle contracts and real Ray/offline W&B driver/worker startup with output on WEKA; no GPU training or online W&B validation.",
+      "gpu_request": 0,
+      "gpu_slot_assigned": 1,
+      "cuda_visible_devices": "",
+      "flashinfer_import_check": "passed",
+      "driver_observation": "Host reported CUDA driver API 12.8, too old for the CUDA 13 runtime without a compatibility-library override; GPU compatibility was not tested.",
+      "previous_attempt": {
+        "experiment": "01M5JF3FRX69MNP54KTSHAXGZ7",
+        "exit_code": 1,
+        "failure": "Test launch wrapper omitted parent directory creation for pytest --basetemp on WEKA; corrected before replacement."
+      }
     }
   },
   "receipt_note": "This receipt is committed after the image build; source_revision identifies the exact application code embedded in the image.",
