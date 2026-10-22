@@ -228,67 +228,13 @@ training topology; an existing image retains its original source revisions.
 Record application validation with the exact image and source pins. The compact
 options snapshot must be regenerated whenever runtime source pins change.
 
-### Optional local integration group
-
-Run the isolated group explicitly inside the candidate application runtime:
-
-```bash
-python tests/miles/qualification/runner.py --case all \
-  --output /results/tiny-hybrid-v1 \
-  --miles-source /opt/core-rl/sources/miles \
-  --image-id sha256:IMAGE_ID
-```
-
-Use a new output directory each time. `--case lifecycle` runs three uninterrupted
-updates; `--case resume` or `all` also runs two updates, restarts the process for
-update three, and compares the result with the control. Each process has a
-600-second timeout. The group requires exactly one visible GPU and the complete
-runtime; missing prerequisites fail. It is a standalone command, outside ordinary
-pytest discovery and the default CPU/GPU CI selections, and submits no cluster jobs.
-
-`tests/miles/qualification/fixture.json` fixes the tiny target-family hybrid-MoE
-geometry, seed, three arithmetic prompts and comparison tolerances. Preparation
-creates a local tokenizer and random BF16 weights without network downloads.
-Each update processes one prompt with four greedy responses. Router auxiliary
-losses provide nonzero gradients despite zero task advantages. This checks
-integration and resume consistency, not task learning or sampled-generation RNG
-continuity. The existing sampled GSM8K smoke is a separate check.
-
-The audit requires correct policy versions and prompt cursor, valid routing
-replay, finite nonzero gradients and updates, complete native checkpoints,
-serving/training logprob error at most 0.05, and exact HF export round-trip.
-The resume comparison requires identical generated tokens and routes, scheduler
-and data state, and compares all native model/Adam state with `rtol=1e-5` and
-`atol=1e-6`. These are strict acceptance thresholds, not a promise of bitwise
-identity across hardware. A failure must be investigated before changing them.
-
-Retain `result.json`, provenance, fixture hashes, process logs, audit JSON and
-comparison metrics. Provenance records imported source paths and Python source
-hashes as well as available Git revisions; the container launcher supplies the
-immutable image ID. A checked-out revision alone does not identify local edits.
-Keep the trained H045 two-GPU WEKA recipe as a separate qualification gate;
-this local fixture does not replace it or qualify distributed/publication modes.
-
-Adam first/second moments use the stricter absolute tolerance `1e-12` (relative
-tolerance `1e-5`), since small moments must not compare equal to a reset optimizer.
-
-The first validated RTX 4090 run completed this group in about seven minutes:
-three control updates versus two plus a fresh-process resumed update. Generated
-tokens/routes and all 560 compared floating checkpoint tensors matched exactly;
-both exports reloaded and ran. Independent fixture preparations produced identical
-file hashes. A separate fresh-container control differed after its first update,
-however. The cause of that numerical variability is not established. Treat the
-paired resume result as scoped evidence, and keep cross-container cold-start
-repeatability separate from this gate; no stable golden numerical baseline or
-required GPU CI check is claimed. Do not widen tolerances to hide that finding.
-
 ## Miles v0.1.2 candidate
 
 The candidate pins the merged fork tag `v0.1.2` (`9ea6759`), SGLang
 `b84bec5`, and the olmo-sglang rank-logging fix `109f881` from
 [PR #8](https://github.com/allenai/olmo-sglang/pull/8). OLMo-core remains at
-`7e97bc4`. The branch contains the consumer lifecycle updates and optional
-qualification fixtures. The parser snapshot was regenerated against these sources.
+`7e97bc4`. The branch contains the consumer lifecycle updates. Backend qualification
+recipes and fixtures belong in miles-olmo-core. The parser snapshot was regenerated against these sources.
 
 The runtime build installs matching FlashInfer Python and cubin packages from
 `runtime/miles/serving-requirements.txt` (0.6.18 for this SGLang revision). Its build
@@ -347,7 +293,9 @@ error was 0.01161 (limit 0.05). This fixture exercises the Core/Miles/SGLang
 lifecycle; the separate real-router test covers HTTP registration and forwarding.
 The final image adds only test updates to the GPU-tested application and passed
 596 optional CPU-compatible runtime tests (57 skipped). Open-Instruct's Miles
-CPU suite passed 956 tests (one skipped). Numerical tolerances were unchanged.
+CPU suite passed 956 tests (one skipped). Numerical tolerances were unchanged. These results describe the recorded image
+revisions; the temporary qualification runner and fixtures were subsequently
+removed from this PR. They are not a maintained Open-Instruct test interface.
 
 Candidate image identities and exact build revisions are recorded in
 `runtime/miles/candidate-image.json`. Use its `application.beaker` ID with

@@ -161,7 +161,7 @@
     },
     "application_types": "passed: ty check open_instruct/miles --config src.exclude=[]"
   },
-  "receipt_note": "This receipt is committed after the image build; source_revision identifies the exact application code embedded in the image.",
+  "receipt_note": "This receipt is committed after the image build; source_revision identifies the exact application code embedded in the image. Backend qualification configs, runner, and fixtures were subsequently removed from the PR; their paths and results here identify historical validation at the recorded revisions, not maintained files at the PR head.",
   "previous_training_attempts": [
     {
       "experiment": "01M5J5B369JAP0M9KQ3BYBZ3NY",
