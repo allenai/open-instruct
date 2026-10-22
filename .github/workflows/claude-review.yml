@@ -1,0 +1,172 @@
+name: Claude review
+
+on:
+  # Bootstrap validation before this workflow exists on the default branch.
+  # The job guard limits automatic reviews to the same-repository setup PR.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review (including fork PRs)
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.number == 1986 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+      head_sha: ${{ steps.pr.outputs.head }}
+      review: ${{ steps.claude.outputs.structured_output }}
+    steps:
+      - name: Resolve the pull request
+        id: pr
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        with:
+          script: |
+            const value = process.env.PR_NUMBER;
+            if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
+              throw new Error('Enter a positive integer PR number.');
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(value),
+            });
+            if (pr.state !== 'open') throw new Error('The pull request must be open.');
+            core.setOutput('number', pr.number);
+            core.setOutput('base', pr.base.sha);
+            core.setOutput('head', pr.head.sha);
+
+      - name: Check OAuth token configuration
+        env:
+          REVIEW_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$REVIEW_OAUTH_TOKEN" ]; then
+            echo '::error::Add CLAUDE_CODE_OAUTH_TOKEN under Settings > Secrets and variables > Actions.'
+            exit 1
+          fi
+
+      # Manual runs use the maintainer-selected workflow revision. The bootstrap
+      # run uses this same-repository setup PR so its new instructions are tested.
+      # Neither path executes repository code.
+      - name: Check out review instructions and repository history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare the diff and source snapshots
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
+          REVIEW_MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          mkdir -p .review-input/base .review-input/head
+          git diff --no-ext-diff --no-textconv "$REVIEW_MERGE_BASE" "$HEAD_SHA" > .review-input/pr.diff
+          git archive --format=tar --output="$RUNNER_TEMP/review-base.tar" "$REVIEW_MERGE_BASE"
+          git archive --format=tar --output="$RUNNER_TEMP/review-head.tar" "$HEAD_SHA"
+          python3 - <<'PYTHON'
+          import os
+          import tarfile
+          from pathlib import Path
+
+          # Only materialize regular files; skip symlinks and special entries.
+          for revision in ("base", "head"):
+              archive = Path(os.environ["RUNNER_TEMP"]) / f"review-{revision}.tar"
+              with tarfile.open(archive) as source:
+                  source.extractall(
+                      Path(".review-input") / revision,
+                      members=(member for member in source if member.isfile()),
+                      filter="data",
+                  )
+          PYTHON
+
+      - name: Review with Claude
+        id: claude
+        uses: anthropics/claude-code-action@6b6870e649b5ff408753befeaee5fc7989d4e6a9 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Avoid the app-token exchange, which requires a workflow on main.
+          github_token: ${{ github.token }}
+          classify_inline_comments: 'false'
+          claude_args: >-
+            --restricted
+            --tools Read,Glob,Grep
+            --allowedTools Read,Glob,Grep
+            --disallowedTools "mcp__*"
+            --strict-mcp-config
+            --mcp-config '{"mcpServers":{}}'
+            --permission-mode dontAsk
+            --max-turns 30
+            --json-schema '{"type":"object","properties":{"review":{"type":"string","minLength":1}},"required":["review"],"additionalProperties":false}'
+          prompt: |
+            Read and follow CODE_REVIEW.md and .github/claude/review-prompt.md.
+            Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.
+            Base commit: ${{ steps.pr.outputs.base }}
+            Head commit: ${{ steps.pr.outputs.head }}
+            Read .review-input/pr.diff for the exact PR diff.
+            Read .review-input/head/ for source at the PR head and .review-input/base/
+            for source at the merge base. Symlinks and submodules are not materialized;
+            use the diff to inspect their changes and state any resulting limitations.
+            Do not assume the top-level working tree contains the PR head.
+            Return the Markdown review in the structured output's review field.
+
+  publish:
+    needs: review
+    if: needs.review.outputs.review != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Publish an advisory review
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ needs.review.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.review.outputs.head_sha }}
+          REVIEW: ${{ needs.review.outputs.review }}
+        with:
+          script: |
+            const pull_number = Number(process.env.PR_NUMBER);
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number });
+            if (pr.state !== 'open' || pr.head.sha !== process.env.HEAD_SHA) {
+              core.notice('PR closed or changed during review; skipping outdated feedback.');
+              return;
+            }
+            const output = JSON.parse(process.env.REVIEW);
+            if (typeof output.review !== 'string' || !output.review.trim()) {
+              throw new Error('Claude returned no review text.');
+            }
+            const review = output.review.trim();
+            const limit = 50000;
+            const text = review.length > limit
+              ? review.slice(0, limit) + '\n\n_Review truncated to fit the GitHub comment limit._'
+              : review;
+            await github.rest.pulls.createReview({
+              ...context.repo,
+              pull_number,
+              commit_id: process.env.HEAD_SHA,
+              event: 'COMMENT',
+              body: '> [!NOTE]\n> Drafted by Claude.\n\n' +
+                `Reviewed commit \`${process.env.HEAD_SHA}\`.\n\n` + text,
+            });
