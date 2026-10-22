@@ -38,13 +38,7 @@ async def train(args, *, export_hf=None):
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
         startup_cache.prepare(args, application_root=Path(__file__).resolve().parents[3])
-    with stage(args, "placement"):
-        worker_manager = wiring.launch_worker_manager(
-            args, transform_specs=partial(startup_cache.configure_specs, args)
-        )
-    object_store.init_instance(args, contribute_segment=False)
-    init_tracking(args)
-    define_step_key_metric_group("errors", "errors/elapsed_seconds")
+    worker_manager = None
     manager = None
     inference = None
     learner = None
@@ -53,6 +47,15 @@ async def train(args, *, export_hf=None):
     rolling = None
     refresh = args.olmo_core.publication_mode == "refresh"
     try:
+        # Tracking assigns the run ID before Miles serializes args into worker
+        # specs. Later mutations in the driver cannot reach those worker copies.
+        init_tracking(args)
+        define_step_key_metric_group("errors", "errors/elapsed_seconds")
+        with stage(args, "placement"):
+            worker_manager = wiring.launch_worker_manager(
+                args, transform_specs=partial(startup_cache.configure_specs, args)
+            )
+        object_store.init_instance(args, contribute_segment=False)
         with stage(args, "serving_startup"):
             inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
         with stage(args, "trainer_startup"):

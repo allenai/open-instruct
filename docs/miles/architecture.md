@@ -290,6 +290,18 @@ The candidate pins the merged fork tag `v0.1.2` (`9ea6759`), SGLang
 `7e97bc4`. The branch contains the consumer lifecycle updates and optional
 qualification fixtures. The parser snapshot was regenerated against these sources.
 
+The runtime build installs matching FlashInfer Python and cubin packages from
+`runtime/miles/serving-requirements.txt` (0.6.18 for this SGLang revision). Its build
+check compares the installed version with SGLang's source requirement, validates
+FlashInfer's direct dependencies, and imports the Blackwell BF16 kernel modules.
+The inherited Torch/CUDA stack remains pinned. This targeted check does not
+qualify every optional SGLang backend. `inference.sglang_bf16_gemm_backend = "torch"`
+remains available for the existing Torch path; automatic backend selection is
+exercised separately on Blackwell.
+
+Tracking initializes before launching the Miles worker manager so the serialized
+worker arguments include the primary W&B run ID, including in offline mode.
+
 The earlier source-mounted 4090 qualification passed; a newly built application
 image still needs its own exercise. Candidate image identities and exact build
 revision are recorded in `runtime/miles/candidate-image.json` after publication.

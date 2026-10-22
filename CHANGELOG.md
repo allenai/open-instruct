@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Prepare the Miles v0.1.2 runtime candidate with updated lifecycle hooks, pinned serving sources, refreshed native options, and opt-in hybrid-MoE lifecycle/resume fixtures.
+- Prepare the Miles v0.1.2 runtime candidate with updated lifecycle hooks, pinned serving sources and matching FlashInfer packages, refreshed native options, and opt-in hybrid-MoE lifecycle/resume fixtures. Initialize tracking before worker argument serialization so rollout writers receive the W&B run ID.
 - Add a separate, digest-pinned upstream MILES image with a shared TOML subset validated against each upstream backend's parser, explicit rejection of unsupported fields, and single-node Beaker submission. GPU qualification is pending.
 - Add `you_search`, an optional search tool backed by the keyed You.com Search API (`https://ydc-index.io/v1/search`, `YDC_API_KEY`), mirroring `serper_search`'s query schema and result formatting. Requests to You.com send `User-Agent: youdotcom-integration/allenai-open-instruct` (https://github.com/allenai/open-instruct/pull/1982).
 - Add experimental MILES on-policy distillation with a Megatron learner and a managed SGLang teacher, selected by `training.algorithm = "opd"`: CPU-safe backend dispatch, sync and measured async rollout, optional entropy-gated forward-KL (EOPD) loss, selection/timing audits, checkpoint retention, tiny Qwen3.5/Qwen3 fixtures and math prompt-preparation scripts, on the shared MILES runtime pins (https://github.com/allenai/open-instruct/pull/1974).

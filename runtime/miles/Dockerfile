@@ -34,6 +34,9 @@ RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_in
 # Replace the application overlay before fetching the newly locked sources.
 RUN rm -rf /opt/core-rl
 COPY runtime/miles /opt/core-rl/build/runtime/miles
+# Preserve the qualified Torch/CUDA stack; check the upgraded packages' runtime
+# requirements explicitly below instead of resolving a different binary stack.
+RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/serving-requirements.txt
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt
 RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
 ENV OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps
@@ -48,6 +51,8 @@ RUN uv pip install --system --no-deps \
     "nvidia-cudnn-cu13==9.23.2.1"
 ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 ENV CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
+COPY scripts/miles/check_flashinfer.py /opt/core-rl/build/scripts/miles/check_flashinfer.py
+RUN python /opt/core-rl/build/scripts/miles/check_flashinfer.py /opt/core-rl/sources/sglang
 
 FROM runtime-base AS application
 # The background evaluator submitter runs in an isolated, deadline-bounded process.
