@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from miles.backends.core_utils.publication import policy_refresh
 from miles.backends.core_utils.rollout import refreshing_rollout, response_seed
+from miles.backends.core_utils.rollout.errors import GenerationRequestTimeout
 from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
 from miles.utils.types import Sample
 
@@ -120,6 +121,20 @@ def test_seed_is_scored_trained_and_versioned_ahead_of_the_continuation(monkeypa
         "weight_version": "3",
     }
     assert value.metadata[response_seed.REQUEST_KEY] == {"text": " Okay"}
+
+
+@pytest.mark.parametrize("seed", [None, " Okay"])
+def test_stalled_request_is_a_recoverable_generation_timeout(monkeypatch, seed):
+    """Seed scoring times out the same way as generation, so the group is requeued."""
+
+    async def stall(url, payload, **kwargs):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(refreshing_rollout, "post", stall)
+    p = producer()
+    p.args.olmo_core.refresh_request_timeout = 0.01
+    with pytest.raises(GenerationRequestTimeout):
+        asyncio.run(p._generate_response_impl(request(p, seed=seed)))
 
 
 def test_seed_that_merges_with_the_prompt_is_rejected_before_any_request(monkeypatch):
