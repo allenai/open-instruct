@@ -1,3 +1,5 @@
+# Disabled until a valid CLAUDE_CODE_OAUTH_TOKEN is available.
+# Restore the .yml extension to enable this workflow; see CODE_REVIEW.md.
 name: Claude review
 
 on:

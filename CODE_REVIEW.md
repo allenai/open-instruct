@@ -18,14 +18,18 @@ and enter the pull request number. This also supports PRs from forks. The action
 requires a triggering user with repository write access and uses OpenAI API
 billing.
 
-For Claude, use the existing `CLAUDE_CODE_OAUTH_TOKEN` Actions secret and select
-**Actions → Claude review → Run workflow** with the PR number. This uses the
-token owner's Claude subscription; the token must still be valid. The workflow
-passes GitHub's built-in read-only token to the Claude action, so it does not
-require the Claude GitHub App token exchange or an `ANTHROPIC_API_KEY`.
+Claude is currently disabled pending a valid `CLAUDE_CODE_OAUTH_TOKEN`. Its
+implementation is preserved in `.github/workflows/claude-review.yml.disabled`,
+which GitHub does not load as a workflow. To enable it, add or replace that
+Actions secret and rename the file to `claude-review.yml`. After merging it to
+the default branch, select **Actions → Claude review → Run workflow** with the
+PR number. This uses the token owner's Claude subscription. The workflow passes
+GitHub's built-in read-only token to the Claude action, so it does not require
+the Claude GitHub App token exchange or an `ANTHROPIC_API_KEY`.
 
-Both workflows run automatically on PR #1986 when opened, updated, reopened, or marked ready
+Codex runs automatically on PR #1986 when opened, updated, reopened, or marked ready
 for review, provided it is not a draft and its branch belongs to this repository.
+Claude will use the same triggers when re-enabled.
 This lets us validate the integration before merging; other PRs remain on demand.
 The setup PR uses its own workflow and instructions for this bootstrap run.
 
