@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "status": "Candidate Miles v0.1.2 runtime; application image exercise pending",
+  "status": "Pinned MILES/Core runtime; see docs/miles/feature-parity.md for qualified scope",
   "base_image": {
-    "beaker": "01M5J4F4AZHR12WEQ1X54FGDN6",
-    "docker_id": "sha256:5504c7a84a6ac31272f7b5b6ba778ce688f17d7942e088f96074977cc7827e8b"
+    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
   },
   "sources": {
     "olmo-core": {

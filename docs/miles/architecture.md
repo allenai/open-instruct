@@ -24,7 +24,7 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 
 [`runtime/miles/runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the
 source of truth for exact dependency commits and the immutable binary base.
-Builds fetch those commits, including SGLang itself, without patches or moving branch tips. MILES uses the
+Builds fetch those commits without patches or moving branch tips. MILES uses the
 organized adapter hooks; OLMo-core provides the model, objective and checkpoint
 APIs required by this adapter; olmo-sglang supplies compatible serving models.
 The ordinary Open Instruct environment keeps its own dependency versions.
@@ -35,10 +35,9 @@ require a new, validated binary base. The Dockerfile separates a `runtime-base`
 stage (locked dependency sources and verifier packages) from `application`
 (Open Instruct, tests, scripts, configs and MILES docs). Build the former with
 `build_image.py --target runtime-base` to reuse the prepared layer. Ordinary builds
-select `application` and reuse that layer through Docker caching. The binary base is pinned separately from the prepared layer. The Miles v0.1.2
-candidate reuses the binary stack from the local 4090 qualification image, including
-`sglang-kernel==0.4.7`; its inherited application overlay is removed before the
-locked sources are fetched. The prepared layer is not interchangeable with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
+select `application` and reuse that layer through Docker caching. The immutable
+binary base in the lock is unchanged; the prepared layer is not interchangeable
+with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
 
 The main `runtime/miles/Dockerfile` adds FlashAttention 2 and 3 to the original
 binary base. Its separate `flash-attention-build` stage compiles FA3 from an
@@ -227,78 +226,3 @@ Rebuild runtime/application images from the lock and validate the intended
 training topology; an existing image retains its original source revisions.
 Record application validation with the exact image and source pins. The compact
 options snapshot must be regenerated whenever runtime source pins change.
-
-## Miles v0.1.2 candidate
-
-The candidate pins the merged fork tag `v0.1.2` (`9ea6759`), SGLang
-`b84bec5`, and the olmo-sglang rank-logging fix `109f881` from
-[PR #8](https://github.com/allenai/olmo-sglang/pull/8). OLMo-core remains at
-`7e97bc4`. The branch contains the consumer lifecycle updates. Backend qualification
-recipes and fixtures belong in miles-olmo-core. The parser snapshot was regenerated against these sources.
-
-The runtime build installs matching FlashInfer Python and cubin packages from
-`runtime/miles/serving-requirements.txt` (0.6.18 for this SGLang revision). Its build
-check compares the installed version with SGLang's source requirement, validates
-FlashInfer's direct dependencies, and imports the Blackwell BF16 kernel modules.
-The inherited Torch/CUDA stack remains pinned. This targeted check does not
-qualify every optional SGLang backend. `inference.sglang_bf16_gemm_backend = "torch"`
-remains available for the existing Torch path; automatic backend selection is
-exercised separately on Blackwell.
-
-The serving requirements also pin the exact upstream `sglang-router` wheel by
-SHA-256, built from `radixark/sgl-router-for-miles` commit `a0cf7da`. The wheel's
-version remains `0.3.2`, so a version-only pin cannot distinguish it from the old
-build. It includes upstream fix `8ecf980`: HTTP workers skip automatic tokenizer
-registration unless the router has an explicitly configured tokenizer/model path.
-This avoids parsing the checkpoint's Transformers-only `{% generation %}` tags
-in the router's MiniJinja parser. Preserve those tags in checkpoint templates;
-they describe training spans. This does not add MiniJinja support for the tags.
-`tests/miles/test_router_http_runtime.py` starts a real CPU router and an HTTP
-worker fixture, verifies token-ID forwarding and worker removal, and checks that
-automatic tokenizer registration is skipped. It belongs to the optional runtime
-test group and requires no GPUs or checkpoint download.
-
-Local Ray initializes before W&B so its workers do not inherit the driver's local
-W&B service connection. Tracking then initializes before launching the Miles worker
-manager so serialized worker arguments include the primary W&B run ID, including
-in offline mode. An already connected Ray cluster is preserved.
-`tests/miles/test_tracking_offline_runtime.py` exercises this startup order with
-real CPU Ray and offline W&B processes inside the optional runtime test group;
-it does not load models or allocate GPUs.
-
-The FlashInfer 0.6.18 image (`98dff7d`) passed the embedded lifecycle contracts
-and the local 4090 qualification with three uninterrupted updates versus two plus
-resume: all 560 compared checkpoint tensors matched exactly. It also passed
-Blackwell serving startup, but exposed an offline W&B service collision. The
-subsequent Ray-before-W&B image (`0646b57`) passed 93 embedded contracts and the
-real-process CPU logging regression. A subsequent
-[Saturn check in open-instruct-dev](https://beaker.org/ex/01M5JFEF9C14SMTF7WYY4DQBVM)
-passed all 94 lifecycle and tracking tests in 43.20 seconds, including real
-Ray/offline W&B processes writing to WEKA. This was a CPU-only check with CUDA
-hidden; it does not qualify A100 training or online W&B. The test file was supplied
-as an immutable dataset after the image build; application code came from the
-embedded image. Its replacement trained H045 two-GPU
-[Blackwell exercise](https://beaker.org/ex/01M5JE15RBBZMZTKJ5ASMM1XGS) completed two
-optimizer steps and weight publication/comparison checks with offline W&B, exiting
-successfully after about 14 minutes. All 16 responses hit the 128-token limit and
-received zero task rewards; the updates had entropy gradients, so this validates
-integration rather than learning. That image still had the older router wheel;
-its passing run does not qualify the subsequent router replacement.
-The router replacement passed the real-router CPU regression; the old wheel
-failed the same test with the tokenizer error. The updated runtime also passed
-the local 4090 qualification in 425 seconds: all 560 model/Adam tensors matched
-exactly between three uninterrupted updates and two plus a fresh-process resumed
-third update, both exports matched, and maximum train/serving log-probability
-error was 0.01161 (limit 0.05). This fixture exercises the Core/Miles/SGLang
-lifecycle; the separate real-router test covers HTTP registration and forwarding.
-The final image adds only test updates to the GPU-tested application and passed
-596 optional CPU-compatible runtime tests (57 skipped). Open-Instruct's Miles
-CPU suite passed 956 tests (one skipped). Numerical tolerances were unchanged. These results describe the recorded image
-revisions; the temporary qualification runner and fixtures were subsequently
-removed from this PR. They are not a maintained Open-Instruct test interface.
-
-Candidate image identities and exact build revisions are recorded in
-`runtime/miles/candidate-image.json`. Use its `application.beaker` ID with
-`MILES_EXISTING_IMAGE` to select that image. The final router image has not repeated
-the trained H045 Blackwell run; multi-node qualification and learning remain
-outside these short integration checks.

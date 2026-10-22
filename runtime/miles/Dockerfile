@@ -1,21 +1,42 @@
 # syntax=docker/dockerfile:1
-# Keep the qualified binary toolchain before copying application sources.
-ARG BASE_IMAGE=miles-v012-local:kernel047
-# The digest-pinned base already contains main's FA3 build from
-# 1fc0221183e799363001394a12dd9e78e15f5dda, FA2 2.8.3.post1 and FA4 4.0.0b27.
-# Its only binary change from that built application is sglang-kernel 0.4.7.
-# Reuse those artifacts; the runtime lock and import checks guard this boundary.
+# Keep the qualified binary toolchain and build kernels before copying application sources.
+ARG BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks
+FROM ${BASE_IMAGE} AS flash-attention-build
+# Compile FA3 against the base's Torch/CUDA ABI. No GPU is needed; limit compiler
+# parallelism so a cold build does not exhaust the build host's memory.
+ARG FLASH_ATTENTION_MAX_JOBS=2
+WORKDIR /tmp/flash-attention
+RUN git init . \
+ && git remote add origin https://github.com/Dao-AILab/flash-attention.git \
+ && git fetch --depth=1 origin 1fc0221183e799363001394a12dd9e78e15f5dda \
+ && git checkout --detach FETCH_HEAD \
+ && git submodule update --init csrc/cutlass \
+ && cd hopper \
+ && FLASH_ATTENTION_FORCE_BUILD=TRUE FLASH_ATTENTION_SKIP_CUDA_BUILD=FALSE \
+    FLASH_ATTENTION_DISABLE_FP8=TRUE FLASH_ATTENTION_DISABLE_SM80=TRUE \
+    MAX_JOBS=${FLASH_ATTENTION_MAX_JOBS} NVCC_THREADS=2 \
+    python setup.py bdist_wheel --dist-dir /wheels
+# FA2 is prebuilt for Python 3.12 / Torch 2.13 / CUDA 13.0. FA4 must be
+# reinstalled after FA2, which also ships files under flash_attn/cute.
+ADD --checksum=sha256:ab12a5b17f33f0d3381044f70006fa5891ec18404b412cc3a7517e5f2315534e \
+    https://wheels.astral.sh/artifacts/ab12a5b17f33f0d3381044f70006fa5891ec18404b412cc3a7517e5f2315534e/flash_attn-2.8.3.post1+cu.13.0.torch.2.13-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl /wheels/
+ADD --checksum=sha256:c84fedab172419f87bd1daf019ecd268595f512a5967ff90b74a0a601f578e07 \
+    https://files.pythonhosted.org/packages/73/b3/85de5e9e393f5fc8a83c27258ba21c683c396c5ad79f15713283a801407b/flash_attn_4-4.0.0b27-py3-none-any.whl /wheels/
+
 FROM ${BASE_IMAGE} AS runtime-base
+RUN --mount=type=bind,from=flash-attention-build,source=/wheels,target=/tmp/flash-attention-wheels \
+    uv pip install --system --no-deps /tmp/flash-attention-wheels/flash_attn_3-*.whl \
+ && uv pip install --system --no-deps /tmp/flash-attention-wheels/flash_attn-2.8.3.post1*.whl \
+ && uv pip install --system --no-deps --reinstall /tmp/flash-attention-wheels/flash_attn_4-4.0.0b27-*.whl
 # Importing the extensions catches missing libraries and Torch ABI mismatches
 # without requiring a GPU; each submitted job also checks forward/backward passes.
 RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_interface; import flash_attn_3; import flash_attn.cute"
-# Replace the application overlay before fetching the newly locked sources.
-RUN rm -rf /opt/core-rl
-# Image receipts change after publication; they must not invalidate binary layers.
-COPY runtime/miles/serving-requirements.txt runtime/miles/verifier-requirements.txt runtime/miles/runtime.lock.json /opt/core-rl/build/runtime/miles/
-# Preserve the qualified Torch/CUDA stack; check the upgraded packages' runtime
-# requirements explicitly below instead of resolving a different binary stack.
-RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/serving-requirements.txt
+# Serving dependencies for the locked Miles/SGLang revisions.
+# The router release reuses version 0.3.2; pin its wheel bytes as well.
+RUN uv pip install --system --no-deps --extra-index-url https://flashinfer.ai/whl \
+    "sglang-kernel==0.4.7" "flashinfer-python[cu13]==0.6.18" "flashinfer-cubin==0.6.18" \
+    "sglang-router @ https://github.com/radixark/miles-wheels/releases/download/cu130-torch213-x86_64/sglang_router-0.3.2-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=28fede513319fcff4a38e5d859589498799c2e2861cc25d78ed371b3aaf3d192"
+COPY runtime/miles /opt/core-rl/build/runtime/miles
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt
 RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
 ENV OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps
@@ -30,8 +51,6 @@ RUN uv pip install --system --no-deps \
     "nvidia-cudnn-cu13==9.23.2.1"
 ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 ENV CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
-COPY scripts/miles/check_flashinfer.py /opt/core-rl/build/scripts/miles/check_flashinfer.py
-RUN python /opt/core-rl/build/scripts/miles/check_flashinfer.py /opt/core-rl/sources/sglang
 
 FROM runtime-base AS application
 # The background evaluator submitter runs in an isolated, deadline-bounded process.

@@ -229,7 +229,7 @@ def _assert_exits(pid):
         except ProcessLookupError:
             return
         # A killed child reparented to a slow reaper lingers as a zombie on Linux.
-        with contextlib.suppress(FileNotFoundError, ProcessLookupError):
+        with contextlib.suppress(FileNotFoundError):
             if stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
                 return
         assert time.monotonic() < deadline, f"process {pid} survived group cleanup"
