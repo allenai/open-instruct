@@ -32,6 +32,8 @@ logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args, *, export_hf=None):
+    if getattr(args, "cluster_backend", "ray") != "ray":
+        raise ValueError("Core currently requires the Ray cluster backend")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     stopped_for_time = False
@@ -52,7 +54,7 @@ async def train(args, *, export_hf=None):
         # inherits the driver's service connection, and offline worker writers
         # collide with the primary run. Preserve an already connected cluster.
         if not ray.is_initialized():
-            ray.init()
+            ray.init(address=os.environ.get("RAY_ADDRESS") or "local")
         # Tracking assigns the run ID before Miles serializes args into worker
         # specs. Later mutations in the driver cannot reach those worker copies.
         init_tracking(args)
@@ -286,7 +288,15 @@ async def train(args, *, export_hf=None):
             await startup_cache.finish(args, success=failure is None and cleanup_error is None)
         except Exception:
             logger.exception("Optional compiler-cache finalization failed")
-        finish_tracking()
+        try:
+            # The pinned Miles finish_tracking() has no exit-code parameter.
+            # Finish W&B's run explicitly on failure before generic backend teardown.
+            if (failure is not None or cleanup_error is not None) and wandb.run is not None:
+                wandb.run.finish(exit_code=1)
+        except Exception:
+            logger.exception("Failed to mark W&B run as failed")
+        finally:
+            finish_tracking()
         if failure is None and cleanup_error is not None:
             raise cleanup_error
     return {

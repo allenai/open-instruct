@@ -7,7 +7,7 @@ caching explicitly instead of depending on the absence of a WEKA mount.
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from miles.backends.core_utils import actor
@@ -59,6 +59,8 @@ def test_driver_quiesces_then_retires_transport_before_engines(
     monkeypatch, fully_async, diagnostic_interval, start_rollout, with_eval, with_export, early_stop, tmp_path
 ):
     events = []
+    tracking_run = Mock()
+    monkeypatch.setattr(driver.wandb, "run", tracking_run)
 
     async def event(name):
         events.append(name)
@@ -120,6 +122,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
     assert events.count(f"cache-{start_rollout}") == 1
     assert events.index("trained") < events.index(f"cache-{start_rollout}")
 
+    tracking_run.finish.assert_not_called()
     assert result["completed_rollout_ids"] == [start_rollout]
     if with_export and not early_stop:
         export_index = events.index(f"export-{start_rollout}-/final")

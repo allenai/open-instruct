@@ -32,6 +32,7 @@ RUN --mount=type=bind,from=flash-attention-build,source=/wheels,target=/tmp/flas
 # without requiring a GPU; each submitted job also checks forward/backward passes.
 RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_interface; import flash_attn_3; import flash_attn.cute"
 # Serving dependencies for the locked Miles/SGLang revisions.
+# CUDA dependencies are supplied by the digest-pinned base; preserve that stack.
 # The router release reuses version 0.3.2; pin its wheel bytes as well.
 RUN uv pip install --system --no-deps --extra-index-url https://flashinfer.ai/whl \
     "sglang-kernel==0.4.7" "flashinfer-python[cu13]==0.6.18" "flashinfer-cubin==0.6.18" \
@@ -51,6 +52,11 @@ RUN uv pip install --system --no-deps \
     "nvidia-cudnn-cu13==9.23.2.1"
 ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 ENV CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
+# Align the remaining serving requirements with the pinned SGLang source.
+RUN uv pip install --system --no-deps \
+    "apache-tvm-ffi==0.1.11" "humming-kernels[cu13]==0.1.12" "nvshmem4py-cu13==0.4.1" \
+    "sentencepiece==0.2.1" "sgl-deep-ep==0.1.2" "sgl-deep-gemm==0.2.0" \
+    "smg-grpc-servicer==0.9.0" "tilelang==0.1.12" "xgrammar==0.2.7"
 
 FROM runtime-base AS application
 # The background evaluator submitter runs in an isolated, deadline-bounded process.
@@ -75,4 +81,4 @@ RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; 
 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
 
-RUN python -c "import sglang; from importlib.metadata import version; assert sglang.__file__.startswith('/opt/core-rl/sources/sglang/python/'); assert version('sglang-kernel') == '0.4.7'"
+RUN python -c "import sglang; import sglang.srt.server_args; import sglang.srt.entrypoints.engine; from importlib.metadata import version; assert sglang.__file__.startswith('/opt/core-rl/sources/sglang/python/'); assert version('sglang-kernel') == '0.4.7'"
