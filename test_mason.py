@@ -1,6 +1,10 @@
+import argparse
+import io
 import subprocess
+import sys
 import unittest
 from argparse import Namespace
+from unittest import mock
 
 import beaker
 import parameterized
@@ -148,6 +152,8 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "hostname": None,
                     "preemptible": False,
+                    "min_runtime": None,
+                    "auto_resume": False,
                     "mount_docker_socket": False,
                     "extra_weka_buckets": [],
                 },
@@ -173,6 +179,8 @@ class TestExperimentSpec(unittest.TestCase):
                     "shared_memory": "10.24gb",
                     "task_name": "beaker_mason",
                     "preemptible": True,
+                    "min_runtime": None,
+                    "auto_resume": False,
                     "hostname": None,
                     "mount_docker_socket": False,
                     "extra_weka_buckets": [],
@@ -226,6 +234,65 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
+
+
+class TestMakeTaskContext(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("protected_default", False, None, False, {"priority": "normal", "preemptible": False}),
+            ("preemptible", True, None, False, {"priority": "normal", "preemptible": True}),
+            (
+                "allocated",
+                False,
+                "2h",
+                True,
+                {"priority": "normal", "minRuntime": 2 * 60 * 60 * 1_000_000_000, "autoResume": True},
+            ),
+            ("unallocated", False, "0", False, {"priority": "normal", "minRuntime": 0, "autoResume": False}),
+        ]
+    )
+    def test_context_json(self, name, preemptible, min_runtime, auto_resume, expected_json):
+        args = Namespace(priority="normal", preemptible=preemptible, min_runtime=min_runtime, auto_resume=auto_resume)
+        self.assertEqual(mason.make_task_context(args).to_json(), expected_json)
+
+
+class TestParseMinRuntime(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [("zero", "0"), ("lower_bound", "5m"), ("hours", "2h30m"), ("upper_bound", "8h")]
+    )
+    def test_valid(self, name, value):
+        self.assertEqual(mason.parse_min_runtime(value), value)
+
+    @parameterized.parameterized.expand(
+        [("below_lower_bound", "4m"), ("above_upper_bound", "8h1m"), ("not_a_duration", "soon")]
+    )
+    def test_invalid(self, name, value):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            mason.parse_min_runtime(value)
+
+
+class TestGetArgsMinRuntime(unittest.TestCase):
+    def _get_args(self, *mason_args):
+        argv = ["mason.py", "--cluster", "ai2/jupiter", *mason_args, "--", "echo", "hello"]
+        with mock.patch.object(sys, "argv", argv):
+            return mason.get_args()
+
+    def test_min_runtime_and_auto_resume(self):
+        args, _ = self._get_args("--min_runtime", "30m", "--auto_resume")
+        self.assertEqual(args.min_runtime, "30m")
+        self.assertTrue(args.auto_resume)
+        self.assertFalse(args.preemptible)
+
+    @parameterized.parameterized.expand(
+        [
+            ("min_runtime_with_preemptible", ["--min_runtime", "30m", "--preemptible"]),
+            ("auto_resume_without_min_runtime", ["--auto_resume"]),
+            ("min_runtime_out_of_range", ["--min_runtime", "9h"]),
+        ]
+    )
+    def test_rejects(self, name, mason_args):
+        with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
+            self._get_args(*mason_args)
 
 
 class TestGetDatasets(unittest.TestCase):

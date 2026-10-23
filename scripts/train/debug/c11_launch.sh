@@ -7,7 +7,9 @@
 # Everything the registration fixes after the data is built (parquet paths, weights, cache id, steps S and S',
 # replay dir) lives in scripts/train/debug/c11_config.sh, committed before any launch; this script refuses to run
 # with an unfilled value. Steps follow H099's rule, so warmup_ratio and the linear decay keep their shape.
-# PREEMPTIBLE=0 (mason's 8 h protected window; never --preemptible on holmes), PRIORITY=high.
+# PRIORITY=high. C11_MIN_RUNTIME (default 1h) is mason's --min_runtime: above 0 is an allocated holmes job,
+# 0 is backfill beyond the allocation (never --preemptible on holmes). A preempted run resumes only by a manual
+# relaunch with C11_RESUME_FROM=<dir>/stepNNNN (no --auto_resume: a requeued command would restart at step 0).
 set -euo pipefail
 BUILT_IMAGE="${1:?built image required}"
 BASE_TAG="${2:?14t or 4t required}"
@@ -29,7 +31,7 @@ case "$BASE_TAG" in
     14t) export MODEL=/weka/olmo-3p5-checkpoints/protected/olmo35-14t600b-mt100b-lc-sft-20261014/lc/step5961/olmo-core
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/hero-sft-14t600b/runs; HOURS=11 ;;
     4t)  export MODEL=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/emo/step5961
-         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/hero-sft-4t/runs; HOURS=9 ;;
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/hero-sft-4t/runs; HOURS=11 ;;
     *) echo "Unknown base: $BASE_TAG" >&2; exit 1 ;;
 esac
 case "$ARM_TAG" in
@@ -40,6 +42,7 @@ esac
 export ROW_ALIGNED_PARTS=1 DOCB=1
 export H038_CACHE="${C11_CACHE:-}"
 export DATA_LOADER_SEED="$SEED" MAX_RETRIES=1 PRIORITY=high PREEMPTIBLE=0 JOB_TIMEOUT="${HOURS}h"
+export MIN_RUNTIME="${C11_MIN_RUNTIME:-1h}"; unset AUTO_RESUME
 export EXPERIMENT="c11"
 export RUN_NAME="${ARM_TAG}-${BASE_TAG}-s${SEED}"
 export OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"

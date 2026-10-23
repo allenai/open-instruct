@@ -258,6 +258,13 @@ else
 fi
 PREEMPTIBLE="${PREEMPTIBLE:-1}"
 if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
+# MIN_RUNTIME (mason --min_runtime: 0, or 5m-8h) replaces the preemptible switch: above 0 is an allocated job
+# shielded for that long (shorter schedules sooner); 0 is backfill. AUTO_RESUME=1 adds --auto_resume (a resumed
+# job restarts the command, so it continues only if RESUME_FROM names a checkpoint).
+if [[ -n "${MIN_RUNTIME:-}" ]]; then
+    PREEMPTIBLE_FLAG="--min_runtime $MIN_RUNTIME"
+    if [[ "${AUTO_RESUME:-0}" == "1" ]]; then PREEMPTIBLE_FLAG+=" --auto_resume"; fi
+fi
 
 # Global batch 1,048,576 tokens = SEQ * ranks * GRAD_ACCUM.
 grad_accum_for() {
