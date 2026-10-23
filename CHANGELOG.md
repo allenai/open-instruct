@@ -46,6 +46,7 @@ All notable changes to this project will be documented in this file.
 - Add the desktop RTX 4090 to `GPU_SPECS`, so `grpo_fast.py` no longer stops at startup with `Unknown device name: NVIDIA GeForce RTX 4090`. The entry sits after `4090 laptop` because `get_device_name` returns the first key it finds in the device name (https://github.com/allenai/open-instruct/pull/2018).
 
 ### Changed
+- Update the MILES runtime to the merged OLMo-core RL interfaces from PR #888, including RoPE import corrections, alongside the v0.1.2 integration (https://github.com/allenai/open-instruct/pull/2043).
 - Give MILES async runs separate HTTP request headroom, align learning templates with one completed collection and startup-only scoring audits, and report copied configurations that can underfill engines or add qualification overhead (https://github.com/allenai/open-instruct/pull/2043).
 - Reject missing named judge bindings in training and held-out data at MILES startup, including runs with no configured judges; use a judge-free two-trainer/six-inference single-node example (https://github.com/allenai/open-instruct/pull/2043).
 - Consolidate MILES examples into single-GPU `dev`, eight-GPU `node` and H1-sized three-node `large` (4 training, 19 inference and 1 judge GPU), document the full Dolci-Think-RL-7B training input, preserve explicit launch settings and paths, and use a consistent 600-second judge request timeout for managed, external and unnamed general judges, preserving explicit overrides (https://github.com/allenai/open-instruct/pull/2043).

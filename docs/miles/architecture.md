@@ -213,8 +213,10 @@ throughput arithmetic.
 
 The `olmo-core` revision in
 [`runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the Core source used
-by the runtime. The adapter interfaces it relies on are proposed upstream in
-[OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888).
+by the runtime. The adapter interfaces it relies on were merged in
+[OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888). The runtime pins
+merge commit `6ceda6530625caa5d23e3be8a455c600f62a7338`, including the reviewed
+RoPE import fixes, alongside the MILES v0.1.2 integration.
 
 Core's routed-expert `match_eager_rounding` defaults to false. The pinned MILES
 adapter explicitly enables it for policy scoring and accepts legacy MILES
