@@ -1,4 +1,4 @@
-# Single B300 node: 4 trainer GPUs (EP4), 3 inference engines, 1 judge.
+# Single B300 node: 2 trainer GPUs (EP2), 5 inference engines, 1 judge.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
 # Setup and workload requirements: configs/miles/examples/README.md
@@ -55,14 +55,14 @@ eval_interval = 50
 save_interval = 25
 
 [trainer]
-gpus = 4
-expert_parallel_size = 4
+gpus = 2
+expert_parallel_size = 2
 sequence_packing = true
 packing_max_tokens = 34816
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 3
+gpus = 5
 rollout_batch_size = 64
 samples_per_prompt = 4
 max_response_length = 32768

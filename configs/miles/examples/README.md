@@ -3,7 +3,7 @@
 | Config | Purpose |
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
-| [node.toml](node.toml) | One eight-GPU node: 4 trainer GPUs (EP4), 3 inference engines and 1 judge |
+| [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2), 5 inference engines and 1 judge |
 | [large.toml](large.toml) | Multi-node learning: 16 trainer GPUs, 32 engines and 1 judge; 56 GPUs allocated, plus background evaluation |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
@@ -65,7 +65,7 @@ because a tiny model may produce only constant rewards; see
 before changing this for a learning run.
 
 `node` adapts the previous two-node `medium` learning recipe to one B300 node,
-using four EP4 trainer ranks, three TP1 inference engines and one judge GPU.
+using two EP2 trainer ranks, five TP1 inference engines and one judge GPU.
 Its training batch, context, data, judging and shared-engine evaluation settings
 are unchanged. This topology passes CPU planning checks; sustained throughput
 and memory fit still need GPU validation. Supply an HF policy,

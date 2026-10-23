@@ -25,7 +25,7 @@ All replicas have the same allocation size; the plan reports any unused GPUs.
 
 | Request | Allocation at 8 GPUs/replica |
 | --- | --- |
-| 4 trainer + 3 rollout + 1 judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
+| 2 trainer + 5 rollout + 1 judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
 | 8 trainer + 7 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 4 trainer + 11 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 8 trainer + 23 rollout + 1 judge | 4 nodes, 32 GPUs, no unused GPUs |
