@@ -15,3 +15,10 @@ RUN cd /opt/olmo-eval \
         --extra clients --extra hf --extra beaker --extra sandbox
 RUN /opt/evaluator-venv/bin/python -c "from olmo_eval.evals.external import get_external_eval; get_external_eval('scicode')" \
     && podman --version
+
+# olmo-eval manages auxiliary vLLM judges in their own dependency environment.
+# Keep the policy's qualified SGLang/Torch stack unchanged.
+RUN cd /opt/olmo-eval \
+    && UV_PROJECT_ENVIRONMENT=/opt/judge-venv uv sync --frozen --no-default-groups --extra vllm
+ENV VLLM_PYTHON=/opt/judge-venv/bin/python
+RUN /opt/judge-venv/bin/python -c "import vllm; assert vllm.__version__ == '0.19.1'"

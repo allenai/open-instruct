@@ -341,6 +341,22 @@ def saved_task(output, task):
     return directory, attempt
 
 
+def gpu_environments(receipt):
+    """Keep olmo-eval's managed providers off the frozen policy's GPUs."""
+    policy_count = receipt["evaluation"]["gpus"]
+    auxiliary_count = max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"])
+    total = policy_count + auxiliary_count
+    mask = os.environ.get("CUDA_VISIBLE_DEVICES")
+    devices = mask.split(",") if mask is not None else [str(index) for index in range(total)]
+    if len(devices) < total or any(not device.strip() or device == "-1" for device in devices):
+        raise ValueError(f"Evaluation needs {total} visible GPUs for policy and auxiliary providers")
+    policy = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[:policy_count])}
+    evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[policy_count:total])}
+    # The independent evaluator/judge environments must not import training's source overlays.
+    evaluator.pop("PYTHONPATH", None)
+    return policy, evaluator
+
+
 def run_tasks(receipt, output):
     completed = []
     for task in receipt["tasks"]:
@@ -353,7 +369,9 @@ def run_tasks(receipt, output):
             args = command({**receipt, "tasks": [task]}, attempt)
             write_json(attempt / "command.json", args)
             with (attempt / "olmo-eval.log").open("w") as log:
-                subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=True)
+                subprocess.run(
+                    args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
+                )
             values = completed_scores(attempt, [task])
             write_json(
                 directory / "complete.json",
@@ -404,7 +422,7 @@ def run_evaluation_locked(receipt, output):
         for name in ("config.json", "tokenizer_config.json"):
             if not (Path(checkpoint) / name).is_file():
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")
-        env = {**os.environ, "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
+        env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
         server_args = [
             sys.executable,
             "-m",

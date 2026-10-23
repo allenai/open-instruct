@@ -88,11 +88,13 @@ Generation overrides map to olmo-eval's flat per-task sampling overrides
 (for example `-o max_tokens=2048`, not a nested `sampling_params` table); scoring maps to
 olmo-eval task overrides (such as `limit`, scorer settings, or formatting).
 Tasks with the same generation overrides, harness preset, harness overrides and
-execution kind share a job. Empty generation overrides preserve each task's own
+execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
 defaults; tasks execute separately while sharing the job's inference server.
 The large panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
 five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
-judge service resources are additional. One HF snapshot serves all groups. A coincident
+each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
+isolates the policy and auxiliary GPU visibility; olmo-eval manages judge startup
+and shutdown. One HF snapshot serves all groups. A coincident
 periodic/final point is submitted only once for each task group. `plan` displays
 the milestones, task groups, resources and snapshot paths. `validate` checks the
 schema; it does not establish image/model/task compatibility.
@@ -119,13 +121,13 @@ infrastructure errors even when upstream reports success with numeric zero score
 SciCode's sandbox installs its pinned scientific dependencies from the upstream
 lock; account for startup time and registry/package access when qualifying jobs.
 
-Safety tasks use separately provisioned WildGuard and StrongREJECT endpoints.
-Replace both `YOUR_*_HOST` placeholders before launching. The WildGuard endpoint
-serves `allenai/wildguard`; the StrongREJECT endpoint serves Gemma-2B with the
-`qylu4156/strongreject-15k-v1` adapter under the served name `strongreject` and uses
-that adapter's tokenizer. These are evaluation judges, not the Qwen training
-reward judge, and are not launched or allocated by this template. Endpoint model
-versions and serving settings must be recorded with qualification results.
+Safety tasks configure olmo-eval managed WildGuard and StrongREJECT providers.
+WildGuard serves `allenai/wildguard`; StrongREJECT serves `google/gemma-2b` with
+the `qylu4156/strongreject-15k-v1` adapter and its tokenizer. The sandbox evaluator
+image includes the pinned vLLM extra in an isolated environment selected through
+`VLLM_PYTHON`, preserving the policy serving environment. Model access credentials
+(including gated Gemma access) belong in `evaluation.secrets`. Record resolved
+judge revisions and serving settings with qualification results.
 
 The image and CLI/config checks do not establish full-panel correctness, GPU
 memory fit or completion within the starter three-hour timeout. Run small samples
@@ -257,7 +259,7 @@ External benchmark sandboxes may have their own upstream setup steps. Publish
 the image to Beaker and configure its immutable ID.
 
 The large example sets `image` to the published evaluator image
-`01M5KSXYY6BENK3GH8WV8B8KK0` and `revision` to olmo-eval
+`01M5MQM50J1EEQ8YJGJWSJFPQ5` and `revision` to olmo-eval
 `710b2b5dab6ea09764c02647f3a4e72819b9ee7c`, which includes `gsm8k:platinum`
 and the [stop-sequence normalization fix](https://github.com/allenai/olmo-eval/pull/450).
 Keep `revision` matched to the olmo-eval commit installed in the selected image.
@@ -265,8 +267,8 @@ A serving-runtime refresh can change the image ID without changing that revision
 
 `runtime/miles/Dockerfile.evaluator-sandbox` extends a pinned evaluator with
 Podman and the sandbox extra while preserving its serving environment. The
-published panel image extends `01M45DMWV3FEH7TNAXKZWR2DF2`; its Docker ID is
-`sha256:4461a621ebadba8f78ecee51a4e5f130a99623ef07e51c458e53e157e5726dc6`.
+published panel image uses the merged template runtime (`fd8b57d34`), with Docker ID
+`sha256:fffe14679ed79e365547e44cfc58f896b4f36e14662d574d360e625710acacfe`.
 Build it with `--build-arg EVALUATOR_IMAGE=LOCAL_PINNED_EVALUATOR_IMAGE`.
 
 Check compatibility for the exported architecture, serving backend, task and

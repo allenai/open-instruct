@@ -103,14 +103,18 @@ def parse(value, launch):
             "harness_preset",
             "kind",
             "arguments",
+            "auxiliary_gpus",
         }:
             raise InputError(
-                "evaluation.tasks accept task, interval, generation, scoring, harness, harness_preset, kind and arguments"
+                "evaluation.tasks accept task, interval, generation, scoring, harness, harness_preset, kind, arguments and auxiliary_gpus"
             )
         name = task.get("task")
         if not isinstance(name, str) or not name or name in names:
             raise InputError("evaluation task names must be nonempty and unique")
         names.add(name)
+        auxiliary_gpus = task.get("auxiliary_gpus", 0)
+        if type(auxiliary_gpus) is not int or auxiliary_gpus < 0:
+            raise InputError("evaluation task auxiliary_gpus must be a nonnegative integer")
         kind = task.get("kind", "task")
         if kind not in ("task", "external"):
             raise InputError("evaluation task kind must be task or external")
@@ -163,6 +167,7 @@ def groups(config, update, total):
                     "kind": task.get("kind", "task"),
                     "harness_preset": task.get("harness_preset", "default"),
                     "harness": task.get("harness", {}),
+                    "auxiliary_gpus": task.get("auxiliary_gpus", 0),
                 },
                 sort_keys=True,
             )
@@ -252,7 +257,10 @@ def specification(receipt):
                 ],
                 "datasets": [{"mountPath": m["mount_path"], "source": {"weka": m["weka"]}} for m in config["mounts"]],
                 "result": {"path": "/output"},
-                "resources": {"gpuCount": config["gpus"], "sharedMemory": "32 GiB"},
+                "resources": {
+                    "gpuCount": config["gpus"] + max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"]),
+                    "sharedMemory": "32 GiB",
+                },
                 "constraints": {"cluster": [config["cluster"]]},
                 "context": {"priority": "high", "autoResume": True},
                 "timeout": config["timeout"],

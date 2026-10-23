@@ -52,6 +52,8 @@ def test_panel_groups_keep_execution_requirements_separate(large):
         ({"harness_preset": ""}, "nonempty"),
         ({"harness": {"auxiliary_providers.judge.api_key": "token"}}, "secrets"),
         ({"kind": "unknown"}, "kind"),
+        ({"auxiliary_gpus": -1}, "auxiliary_gpus"),
+        ({"auxiliary_gpus": True}, "auxiliary_gpus"),
         ({"arguments": {}}, "kind=external"),
         ({"task": "unsupported", "kind": "external"}, "Only scicode"),
         ({"task": "scicode", "kind": "external", "arguments": {"split": "test"}}, "validation"),
@@ -99,6 +101,7 @@ def test_sandbox_environment_is_only_enabled_for_code_jobs(large):
         sandbox = group[0]["task"] in ("scicode", "livecodebench:lite")
         assert env.get("BEAKER_ALLOW_SUBCONTAINERS") == ("1" if sandbox else None)
         assert job["context"] == {"priority": "high", "autoResume": True}
+        assert job["resources"]["gpuCount"] == 1 + group[0].get("auxiliary_gpus", 0)
 
 
 @pytest.fixture
@@ -162,3 +165,32 @@ def test_mixed_group_requires_predictions_for_every_task(scicode_result, tmp_pat
     evaluation_runner.write_json(group / "task-results.json", ["complete", "missing"])
     with pytest.raises(ValueError, match="No evaluation predictions"):
         evaluation_runner.validate_predictions(group)
+
+
+@pytest.mark.parametrize("mask,policy,judge", [("3,7", "3", "7"), (None, "0", "1"), ("GPU-a,GPU-b", "GPU-a", "GPU-b")])
+def test_managed_judges_are_isolated_from_policy(monkeypatch, mask, policy, judge):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setenv("PYTHONPATH", "/training/sources")
+    if mask is not None:
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    receipt = {"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]}
+    policy_env, evaluator_env = evaluation_runner.gpu_environments(receipt)
+    assert policy_env["CUDA_VISIBLE_DEVICES"] == policy
+    assert evaluator_env["CUDA_VISIBLE_DEVICES"] == judge
+    assert "PYTHONPATH" not in evaluator_env
+    assert policy_env["PYTHONPATH"] == "/training/sources"
+
+
+def test_managed_judge_rejects_insufficient_gpus(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    with pytest.raises(ValueError, match="needs 2 visible GPUs"):
+        evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+
+
+def test_panel_manages_safety_judges(large):
+    judges = [task for task in large.evaluation["tasks"] if task.get("auxiliary_gpus")]
+    assert len(judges) == 6
+    assert all(not any(key.endswith("base_url") for key in task["harness"]) for task in judges)
+    strongreject = next(task for task in judges if task["task"].startswith("strongreject"))
+    assert strongreject["harness"]["auxiliary_providers.sr_judge.model"] == "google/gemma-2b"
+    assert strongreject["harness"]["auxiliary_providers.sr_judge.kwargs.enable_lora"] is True

@@ -60,7 +60,7 @@ interval = 1000
 initial = true
 final = true
 # Sandbox-enabled evaluator; full-panel GPU qualification remains required.
-image = "01M5KSXYY6BENK3GH8WV8B8KK0"
+image = "01M5MQM50J1EEQ8YJGJWSJFPQ5"
 revision = "710b2b5dab6ea09764c02647f3a4e72819b9ee7c"
 gpus = 1
 cluster = "ai2/holmes"
@@ -124,46 +124,46 @@ task = "scicode"
 kind = "external"
 arguments = { split = "validation", h5py_host_path = "/weka/oe-adapt-default/YOUR_USERNAME/scicode/test_data.h5" }
 
-# Text safety for reasoning models. These are separately provisioned evaluation
-# judge endpoints, not the training reward judge. Replace both YOUR_*_HOST names.
+# Text safety for reasoning models. olmo-eval manages these evaluation judges
+# on the additional GPU reserved per group, separate from the policy server.
 [[evaluation.tasks]]
 task = "do_anything_now:wg_judge_thinking"
+auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
 "auxiliary_providers.wg_judge.model" = "allenai/wildguard"
-"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
 "auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
 
 [[evaluation.tasks]]
 task = "harmbench:wg_judge_thinking"
+auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
 "auxiliary_providers.wg_judge.model" = "allenai/wildguard"
-"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
 "auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
 
 [[evaluation.tasks]]
 task = "wildguardtest:wg_judge_thinking"
+auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
 "auxiliary_providers.wg_judge.model" = "allenai/wildguard"
-"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
 "auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
 
 [[evaluation.tasks]]
 task = "wildjailbreak:wg_judge_thinking"
+auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
 "auxiliary_providers.wg_judge.model" = "allenai/wildguard"
-"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
 "auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
 
 [[evaluation.tasks]]
 task = "xstest:wg_judge_thinking"
+auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
 "auxiliary_providers.wg_judge.model" = "allenai/wildguard"
-"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
 "auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
 
 [[evaluation.tasks]]
@@ -174,12 +174,14 @@ task = "bbq:mcq"
 
 [[evaluation.tasks]]
 task = "strongreject:sr_judge_thinking"
+auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.sr_judge.kind" = "vllm_server"
 # Endpoint serves Gemma-2B with the strongreject adapter enabled as model strongreject.
-"auxiliary_providers.sr_judge.model" = "strongreject"
+"auxiliary_providers.sr_judge.model" = "google/gemma-2b"
+"auxiliary_providers.sr_judge.kwargs.enable_lora" = true
+"auxiliary_providers.sr_judge.kwargs.lora_modules" = ["strongreject=qylu4156/strongreject-15k-v1"]
 "auxiliary_providers.sr_judge.tokenizer" = "qylu4156/strongreject-15k-v1"
-"auxiliary_providers.sr_judge.base_url" = "http://YOUR_STRONGREJECT_HOST:8000/v1"
 "auxiliary_providers.sr_judge.kwargs.add_bos_token" = true
 
 [trainer]

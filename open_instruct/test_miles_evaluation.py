@@ -71,6 +71,7 @@ def test_background_jobs_restart_after_preemption(run):
     receipt = {
         "evaluation": evaluation.runtime(run, run.compile().miles),
         "training": {"name": run.name},
+        "tasks": run.evaluation["tasks"],
         "update": 2,
         "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
     }

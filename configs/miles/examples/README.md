@@ -94,8 +94,8 @@ Evaluator jobs allocate GPUs beyond the training plan;
 overlapping jobs can increase that total. Its 25-entry post-training development
 and text-safety panel runs on the initial/final checkpoints for the 200-update
 template, and every 1,000 updates if extended. It preserves pinned task sampling
-and full evaluation sizes. Configure the separate WildGuard/StrongREJECT judge
-endpoints and SciCode reference-data path. Code tasks need the sandbox-enabled
+and full evaluation sizes. olmo-eval launches WildGuard/StrongREJECT judges on an extra GPU
+per safety group. Configure the SciCode reference-data path. Code tasks need the sandbox-enabled
 evaluator image. The full panel still requires GPU/sandbox qualification and
 measured resource bounds; the starter three-hour evaluator timeout is not a
 measured full-panel budget.
