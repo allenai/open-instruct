@@ -40,6 +40,11 @@ fp32 windows at the 512 x 1024 forward tiles. Attempt 3 (`-v24t`) halves those t
 (`w{i,o}_tile_fwd_{batch_seq,embed_dim,mlp_dim}=256/512/512`) in both images. This is an execution setting: it changes how
 the kernel blocks its accumulation, the same way in both images, and not the math being compared.
 
+## Memory at 64K
+In attempt 3 the old image compiled and ran at 16 x 65536. The bs image ran out of HBM at compile: HLO temporaries 32.13G
+against 31.75G, with identical settings. Both then use 16 x 32768. The details, including that the old image's temporaries
+were not logged, are in `MEMORY_64K.md`, which is appended to the receipt.
+
 ## Shape
 Tried in order (the `-v24` overlays): 16 x 65536, then 16 x 32768, then 16 x 16384 (`SEQ_LEN`, both images alike) if HBM runs out. A VMEM overflow stops the ladder instead. The one used
 is in `RECEIPT.md` and the event line.
