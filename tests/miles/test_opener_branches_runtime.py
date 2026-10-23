@@ -13,6 +13,7 @@ from miles.backends.core_utils.rollout import opener_branches, refreshing_rollou
 from miles.backends.core_utils.rollout.errors import GenerationRequestTimeout
 from miles.backends.core_utils.rollout.generation_admission import GenerationAdmission
 from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
+from miles.rollout.submission_scheduler import SampleBackfillSubmission
 from miles.utils.types import Sample
 
 from open_instruct.miles.configuration.run_spec import RunSpec
@@ -323,6 +324,21 @@ def test_stalled_probe_is_a_recoverable_generation_timeout(monkeypatch):
     p.args.olmo_core.refresh_request_timeout = 0.01
     with pytest.raises(GenerationRequestTimeout):
         asyncio.run(p._branch_openers(group(2)))
+
+
+def test_failed_probe_frees_its_group_slots_while_another_group_runs(monkeypatch):
+    # Both groups are charged at submission; the running one keeps its slots, and the
+    # one whose probe failed gives its slots back at once instead of at the next idle.
+    serve(monkeypatch, [], fail_at=1)
+    p = producer()
+    p._scheduler = SampleBackfillSubmission(4)
+    running, failing = group(4), group(4)
+    p._scheduler.on_submit([running, failing])
+    assert not p._scheduler.has_capacity(pending_groups=2, group_budget=2)
+    with pytest.raises(httpx.TransportError):
+        asyncio.run(p._generate_group(failing))
+    assert p._scheduler.samples_in_flight == len(running)
+    assert p._scheduler.has_capacity(pending_groups=1, group_budget=2)
 
 
 def test_branching_is_off_without_the_setting():

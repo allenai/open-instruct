@@ -137,6 +137,10 @@ a multiple of `opener_branches`, and branches cannot be combined with
 `opener_seeds`. Leaving `opener_branches` at zero keeps the native arguments and
 producer behavior unchanged.
 
+The zero-variance filter drops groups before they reach training or the rollout
+dumps, so an analysis of openers against reward needs [inference records](inference-records.md),
+which keep every scored group with its opener pool, draw and per-response branch.
+
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted
