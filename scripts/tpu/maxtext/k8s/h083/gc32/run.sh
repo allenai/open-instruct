@@ -35,7 +35,9 @@ grab() {
     $K logs "$p" -c maxtext 2>/dev/null > "$D/logs/$1/${p#pod/}.log.tmp" && mv "$D/logs/$1/${p#pod/}.log.tmp" "$D/logs/$1/${p#pod/}.log"
   done
 }
-oom() { grep -qlE "RESOURCE_EXHAUSTED|Ran out of memory|out of memory|exceeds the (HBM|memory)" "$D"/logs/"$1"/*.log 2>/dev/null; }
+# HBM only: a VMEM overflow is a compile limit (attempt 1 hit "Used 17.09M of 16.00M vmem" at every length) and a smaller
+# shape doesn't fix it, so it stops the ladder as a failure.
+oom() { grep -qlE "Ran out of memory in memory space hbm|exceeds the HBM|Attempting to (allocate|reserve).*hbm" "$D"/logs/"$1"/*.log 2>/dev/null; }
 
 gate() { # behind both H104 X1 leg-A drivers
   until [ -f "$D/GO" ] || { $K get workloads -o name 2>/dev/null | grep -q '/jobset-h104-x1-mt-s1-' &&
@@ -68,14 +70,15 @@ run_one() { # -> Completed | OOM | Failed
 }
 
 shape=""
-for S in s64k s32k s16k; do
+# Shapes in order (attempt 1 at 16 MiB scoped VMEM, plain s64k/s32k/s16k, stopped on VMEM); attempt 2 raises it to 24 MiB.
+for S in ${GC32_SHAPES:-s64k-v24 s32k-v24 s16k-v24}; do
   ro=$(run_one h083-gc32-old-$S); [ "$ro" = OOM ] && continue
   [ "$ro" = Completed ] || { ev "GRAD-CMP-FP32 stopped: h083-gc32-old-$S failed (not OOM); see $D/logs"; exit 1; }
   rb=$(run_one h083-gc32-bs-$S); [ "$rb" = OOM ] && { ev "GRAD-CMP-FP32 bs OOMed at $S where old fit; stepping both down"; continue; }
   [ "$rb" = Completed ] || { ev "GRAD-CMP-FP32 stopped: h083-gc32-bs-$S failed (not OOM); see $D/logs"; exit 1; }
   shape=$S; break
 done
-[ -n "$shape" ] || { ev "GRAD-CMP-FP32 stopped: out of HBM at every shape tried (65536, 32768, 16384)"; exit 1; }
+[ -n "$shape" ] || { ev "GRAD-CMP-FP32 stopped: out of HBM at every shape tried (${GC32_SHAPES:-s64k-v24 s32k-v24 s16k-v24})"; exit 1; }
 
 python3 - "$D" "$shape" > "$D/checks.txt" <<'PY'
 import glob, re, sys
@@ -104,11 +107,13 @@ python3 - "$D/result.json" "$BF16" "$shape" "$D/checks.txt" "$D/RECEIPT.md" > "$
 import json, sys
 f, b, shape, checks, out = sys.argv[1:6]
 r, q = json.load(open(f)), json.load(open(b))
-seq = {"s64k": 65536, "s32k": 32768, "s16k": 16384}[shape]
+seq = {"s64k": 65536, "s32k": 32768, "s16k": 16384}[shape.split("-")[0]]
+vmem = "24 MiB" if shape.endswith("-v24") else "16 MiB"
 qb = {w["tensor"]: w["rel"] for w in q["worst"]}
 fp = r["per_tensor_rel"]
 lines = ["# H083 fp32 identity test: receipt", "",
-         f"Shape: 16 sequences x {seq} tokens, olmo35-ep-as-cp fsdp16 x ep8 on one 4x4x8, one plain-SGD step (LR 1e8, no clip).",
+         f"Shape: 16 sequences x {seq} tokens, olmo35-ep-as-cp fsdp16 x ep8 on one 4x4x8, one plain-SGD step (LR 1e8, no clip); "
+         f"scoped VMEM {vmem} (bf16 test: 16 MiB, the same in both images either way).",
          "Images by digest: old sha256:7d7f4938..., bs3ec936c3 sha256:c858123f... (KDA sharding pins, maxtext c5f1251d).",
          f"Checks: {open(checks).read().strip().replace(chr(10), '; ')}", "",
          "| | bf16 (activations bf16, default precision, megablox) | fp32 (activations fp32, highest, ragged_dot) |",
@@ -125,7 +130,7 @@ verdict = "PASS: class B, the pins are value identities" if r["pass"] else "FAIL
 lines += ["", f"Rule (ledger-manager, fixed before the result): rel <= 1e-5 in fp32 -> class B; else math change. **{verdict}.**"]
 open(out, "w").write("\n".join(lines) + "\n")
 w = r["worst"][0]
-print(f"GRAD-CMP-FP32 h083 old vs bs3ec936c3 at seq {seq}: rel={r['rel']:.3e} (floor {r['floor']:.1e}; bf16 was {q['rel']:.3e}) "
+print(f"GRAD-CMP-FP32 h083 old vs bs3ec936c3 at seq {seq}, vmem {vmem}: rel={r['rel']:.3e} (floor {r['floor']:.1e}; bf16 was {q['rel']:.3e}) "
       f"worst={w['tensor']} {w['rel']:.3e} bit-identical {r['bit_identical_tensors']}/{r['tensors']} -> "
       f"{'PASS' if r['pass'] else 'FAIL'} (<= 1e-5); receipt gc32/RECEIPT.md")
 PY

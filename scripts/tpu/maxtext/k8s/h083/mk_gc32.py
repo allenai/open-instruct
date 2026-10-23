@@ -10,10 +10,13 @@ so the MoE runs through jax.lax.ragged_dot instead. Only SEQ_LEN differs between
 import os
 
 SEQS = {"s64k": 65536, "s32k": 32768, "s16k": 16384}
-for arm in ("old", "bs"):
+# fp32 needs more scoped VMEM than the bf16 runs' 16 MiB (attempt 1: "Used 17.09M of 16.00M vmem" at 64K and 32K alike);
+# the -v24 pairs raise it to 24 MiB, the same in both images.
+VMEM = {"": None, "-v24": 24576}
+for arm, (vtag, vmem) in [(a, v) for a in ("old", "bs") for v in VMEM.items()]:
     src = {f: open(f"gradcmp-{arm}/{f}").read() for f in ("kustomization.yaml", "jobset.yaml", "train_sft.sh")}
     for tag, seq in SEQS.items():
-        name, d = f"h083-gc32-{arm}-{tag}", f"gc32-{arm}-{tag}"
+        name, d = f"h083-gc32-{arm}-{tag}{vtag}", f"gc32-{arm}-{tag}{vtag}"
         os.makedirs(d, exist_ok=True)
         k = src["kustomization.yaml"]
         assert k.count(f"h083-gradcmp-{arm}") == 3
@@ -22,7 +25,7 @@ for arm in ("old", "bs"):
             ("  - SEQ_LEN=65536\n", f"  - SEQ_LEN={seq}\n"),
             ("  - CLIP_THRESHOLD=0\n", "  - CLIP_THRESHOLD=0\n  - DTYPE=float32\n  - JAX_DEFAULT_MATMUL_PRECISION=highest\n"),
             (" remat_policy=full\n", " remat_policy=full matmul_precision=highest megablox=false\n"),
-        ]:
+        ] + ([("--xla_tpu_scoped_vmem_limit_kib=16384", f"--xla_tpu_scoped_vmem_limit_kib={vmem}")] if vmem else []):
             assert k.count(a) == 1, (d, a)
             k = k.replace(a, b)
         head = (f"# fp32 identity test (ledger-manager ruling 2026-10-23), sequence {seq}: gradcmp-{arm} with fp32 activations,\n"

@@ -29,8 +29,13 @@ Ledger-manager's ruling (2026-10-23), fixed before the result.
 **Not verified:** whether XLA's TPU ragged-dot lowering honours HIGHEST for fp32 operands. If the result sits above 1e-5,
 check this first.
 
+## VMEM
+Attempt 1, at the bf16 runs' `--xla_tpu_scoped_vmem_limit_kib=16384`, failed to compile at sequence 65536 and 32768 alike:
+`Used 17.09M of 16.00M vmem`. The `-v24` overlays raise the limit to 24576 KiB in both images. It is a compiler budget,
+the same for both, and the read is still image vs image.
+
 ## Shape
-Tried in order: 16 x 65536, then 16 x 32768, then 16 x 16384 (`SEQ_LEN`, both images alike) if HBM runs out. The one used
+Tried in order (the `-v24` overlays): 16 x 65536, then 16 x 32768, then 16 x 16384 (`SEQ_LEN`, both images alike) if HBM runs out. A VMEM overflow stops the ladder instead. The one used
 is in `RECEIPT.md` and the event line.
 
 ## Run and receipt
