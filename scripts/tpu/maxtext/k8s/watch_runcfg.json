@@ -1,0 +1,35 @@
+{
+ "_doc": "Per-run gate and watcher settings read by g8.py and the x16prod watchers (10-23: env vars and cmdlines are lost on relaunch). g3tol: gate-3 tolerance (1 = record-only); hf: gate-1 HF step-1 CE; ref: gate-3 CE reference; hashref: gate-2 hash references.",
+ "h083-sci-s0-ep8dc2": {
+  "g3tol": 1,
+  "hf": 1.043133,
+  "ref": "logs/h083-sci-s0-ep8ref",
+  "hashref": "logs/h083-sci-s0-ep8ref,replay:sci3-s0",
+  "mode": "#591 candidate C; g3tol becomes max(1e-3, 2F) once R2 lands"
+ },
+ "h083-sci-s1-ep8dc": {
+  "g3tol": 0.001,
+  "hf": 1.078077,
+  "ref": "/weka/oe-eval-default/abhishekr/watch/tpu/h083/logs/h083-sci-s1"
+ },
+ "h102-lr3x-s0-ep8dc": {
+  "g3tol": 0.001,
+  "hf": 1.018884,
+  "ref": "h102-lr3x-s0"
+ },
+ "h102-lr3x-s1-ep8dc": {
+  "g3tol": 0.001,
+  "hf": 1.098849,
+  "ref": "h102-lr3x-s1"
+ },
+ "h102-lr4x-s0-ep8dc": {
+  "g3tol": 0.001,
+  "hf": 1.018884,
+  "ref": "h102-lr4x-s0"
+ },
+ "h102-lr4x-s1-ep8dc": {
+  "g3tol": 0.001,
+  "hf": 1.098849,
+  "ref": "h102-lr4x-s1"
+ }
+}
