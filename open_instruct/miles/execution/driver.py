@@ -203,11 +203,16 @@ async def train(args, *, export_hf=None):
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)
-            if evaluation is not None and should_run_periodic_action(
-                rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout
+            if (
+                evaluation is not None
+                and args.eval_interval is not None
+                and (
+                    stopped_for_time
+                    or should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout)
+                )
             ):
                 with evaluation_stage(args, rollout_id):
-                    await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
+                    await evaluation.dispatch(rollout_id, force=stopped_for_time or rollout_id == args.num_rollout - 1)
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
             if coordinator is not None and background is not None and not (stopped_for_time and background["final"]):

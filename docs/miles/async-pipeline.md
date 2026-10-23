@@ -126,6 +126,13 @@ have missed. All probes of a search must come from one policy version, and a sea
 spanning a publication is repeated. Probes take generation-admission slots, so
 admission pauses and lifecycle drains cover them.
 
+Set `opener_anchor_top1=true` to keep the highest-ranked eligible opener in every
+group and sample the remaining branches uniformly without replacement from the
+rest of the pool. Each branch still gets the same number of continuations, with
+one advantage baseline across the full group. The anchor is a rank-one choice,
+not a draw from the natural policy. The default remains uniform selection of all
+branches. Metadata records the choice, and retries reuse the same draw.
+
 With `opener_mode="first_token"`, candidates are exactly one token after the
 prompt, ranked by raw log probability before temperature or top-p truncation.
 Whitespace is eligible and is never expanded. Tokenizer special IDs and literal

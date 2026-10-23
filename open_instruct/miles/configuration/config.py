@@ -112,6 +112,7 @@ class CoreConfig:
     opener_pool: int = 20
     # Literal next-token ranking includes whitespace; visible mode expands it.
     opener_mode: str = "visible"
+    opener_anchor_top1: bool = False
 
     def __post_init__(self):
         if isinstance(self.opener_seeds, list):
@@ -126,6 +127,7 @@ class CoreConfig:
         validation.integer(self.opener_branches, "core.opener_branches", minimum=0)
         validation.integer(self.opener_pool, "core.opener_pool", minimum=1)
         validation.choice(self.opener_mode, "core.opener_mode", ("visible", "first_token"))
+        validation.boolean(self.opener_anchor_top1, "core.opener_anchor_top1")
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -690,6 +692,7 @@ class RunConfig:
             core.pop("opener_branches")
             core.pop("opener_pool")
             core.pop("opener_mode")
+            core.pop("opener_anchor_top1")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,

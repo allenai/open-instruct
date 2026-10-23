@@ -182,16 +182,19 @@ def test_literal_first_token_excludes_unflagged_protocol_markers(monkeypatch, ma
     assert texts(result["found"]) == ["\n"]
 
 
-def test_literal_first_token_is_wired_and_persisted_with_even_branches(monkeypatch):
+@pytest.mark.parametrize("anchor", [False, True])
+def test_literal_first_token_is_wired_and_persisted_with_even_branches(monkeypatch, anchor):
     posts = []
     serve(monkeypatch, posts, WIDE)
     p = producer(branches=4, pool=8)
     p.args.olmo_core.opener_mode = "first_token"
+    p.args.olmo_core.opener_anchor_top1 = anchor
     samples = group(16)
     asyncio.run(p._branch_openers(samples))
     assert len(p.data_source.persisted) == 1
     for sample in samples:
         assert sample.metadata["opener_branches"]["mode"] == "first_token"
+        assert sample.metadata["opener_branches"]["anchor_top1"] is anchor
         assert len(sample.metadata[response_seed.REQUEST_KEY]["token_ids"]) == 1
     branches = [s.metadata["opener_branches"]["branch"] for s in samples]
     assert branches == [b for b in range(4) for _ in range(4)]
@@ -303,6 +306,23 @@ def test_draw_is_uniform_without_replacement_and_reproducible():
     assert min(hits) > 0.8 * 800 and max(hits) < 1.2 * 800
     with pytest.raises(ValueError, match="branches are required"):
         opener_branches.choose(pool[:3], 4, "k")
+
+
+def test_anchor_keeps_top_rank_and_uniformly_explores_remaining_ranks():
+    pool = [([i], -float(i)) for i in range(8)]
+    hits = [0] * 8
+    for k in range(2800):
+        draw = opener_branches.choose(pool, 4, f"key:{k}", anchor_top1=True)
+        assert draw == opener_branches.choose(pool, 4, f"key:{k}", anchor_top1=True)
+        assert draw[0] == pool[0] and len({tuple(p) for p, _ in draw}) == 4
+        for path, _ in draw:
+            hits[path[0]] += 1
+    assert hits[0] == 2800
+    assert min(hits[1:]) > 0.9 * 1200 and max(hits[1:]) < 1.1 * 1200
+    assert opener_branches.choose(pool, 1, "k", anchor_top1=True) == pool[:1]
+    assert set(tuple(p) for p, _ in opener_branches.choose(pool, 8, "k", anchor_top1=True)) == set(
+        (i,) for i in range(8)
+    )
 
 
 def test_assignment_is_persisted_and_reused_on_retry(monkeypatch):
@@ -419,7 +439,7 @@ BRANCHES = ["core.opener_branches=4", "inference.samples_per_prompt=16", "infere
 
 
 def test_disabled_branching_keeps_the_native_core_argument_unchanged():
-    assert not {"opener_branches", "opener_pool", "opener_mode"} & set(core_argument(compiled()))
+    assert not {"opener_branches", "opener_pool", "opener_mode", "opener_anchor_top1"} & set(core_argument(compiled()))
 
 
 def test_first_token_mode_reaches_runtime_and_invalid_mode_is_rejected():
@@ -451,3 +471,9 @@ def test_pool_must_hold_every_branch():
 def test_branches_and_fixed_seeds_cannot_be_combined():
     with pytest.raises(InputError, match="cannot be combined"):
         compiled(*BRANCHES, 'core.opener_seeds=["Okay"]', "core.opener_seeds_per_group=1").arguments()
+
+
+def test_anchor_option_reaches_runtime_and_rejects_non_boolean():
+    assert core_argument(compiled(*BRANCHES, "core.opener_anchor_top1=true"))["opener_anchor_top1"] is True
+    with pytest.raises(InputError):
+        compiled(*BRANCHES, "core.opener_anchor_top1=1").arguments()

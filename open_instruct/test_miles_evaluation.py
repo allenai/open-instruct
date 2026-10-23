@@ -314,10 +314,11 @@ def test_evaluator_command_keeps_task_overrides(run):
     assert "--save-predictions" in args
 
 
+@pytest.mark.parametrize("shared_mode", [False, True])
 @pytest.mark.parametrize("stop_mode", ("complete", "deadline", "deadline_off_cadence", "debug"))
 @pytest.mark.parametrize("initial", [False, True])
 @pytest.mark.parametrize("export_hf", [None, "final-hf"])
-def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode, initial, export_hf):
+def test_driver_evaluation_at_completion_and_deadline(run, monkeypatch, stop_mode, initial, export_hf, shared_mode):
     deadline_stop = stop_mode.startswith("deadline")
     # Import the real driver with CPU stand-ins for the external actor runtime.
     imported = {}
@@ -354,7 +355,12 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         wiring=SimpleNamespace(launch_worker_manager=lambda *a, **kw: workers, shutdown_worker_manager=AsyncMock()),
     )
     module("miles.ray.rollout")
-    shared = Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
+    dispatcher = SimpleNamespace(dispatch=AsyncMock(), drain=AsyncMock())
+    shared = (
+        Mock(return_value=dispatcher)
+        if shared_mode
+        else Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
+    )
     module("miles.ray.rollout.eval_dispatch", EvalDispatcher=shared)
     module("miles.utils", object_store=SimpleNamespace(init_instance=lambda *a, **kw: None))
     module(
@@ -382,6 +388,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     spec.loader.exec_module(driver)
     monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=Mock(side_effect=[0, 2])))
     monkeypatch.setattr(driver, "stage", lambda *a, **kw: nullcontext())
+    monkeypatch.setattr(driver, "evaluation_stage", lambda *a, **kw: nullcontext())
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
     monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a, **kw: None)
     monkeypatch.setattr(driver.startup_cache, "finish", AsyncMock())
@@ -397,6 +404,8 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     monkeypatch.setattr(evaluation, "submit", blocked_submit)
 
     async def train_step(rollout_id, batch):
+        if shared_mode:
+            return
         for update in range(rollout_id * 4 + 1, (rollout_id + 1) * 4 + 1):
             target = evaluation.training_snapshot(args, update)
             if target:
@@ -408,7 +417,9 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         olmo_core=SimpleNamespace(
             publication_mode="barrier", diagnostic_interval=0, max_run_seconds=1 if deadline_stop else None
         ),
-        background_evaluation=evaluation.runtime(run, run.compile().miles),
+        background_evaluation=None if shared_mode else evaluation.runtime(run, run.compile().miles),
+        eval_interval=50,
+        skip_eval_before_train=not initial,
         fully_async=False,
         offload_rollout=False,
         check_weight_update_equal=False,
@@ -428,12 +439,21 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         update_weights_interval=1,
         debug_exit_after_rollout=1 if stop_mode == "debug" else None,
     )
-    args.background_evaluation.update(initial=initial, total_updates=8)
-    if stop_mode == "deadline_off_cadence":
+    if not shared_mode:
+        args.background_evaluation.update(initial=initial, total_updates=8)
+    if not shared_mode and stop_mode == "deadline_off_cadence":
         for task, interval in zip(args.background_evaluation["tasks"], (3, 5)):
             task["interval"] = interval
     try:
         result = asyncio.run(driver.train(args, export_hf=export_hf))
+        if shared_mode:
+            assert result["stopped_for_time"] == deadline_stop
+            assert dispatcher.dispatch.await_count == int(initial) + int(deadline_stop)
+            if deadline_stop:
+                dispatcher.dispatch.assert_any_await(0, force=True)
+                learner.save_model.assert_awaited_once_with(0, force_sync=True)
+            dispatcher.drain.assert_awaited_once()
+            return
         assert entered.wait(1)
         assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
         expected = [0, 1] if stop_mode == "complete" else [0]
