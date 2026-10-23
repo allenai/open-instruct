@@ -75,7 +75,7 @@ def main():
         "tensors": len(rows), "params": sum(r["numel"] for r in rows),
         "bit_identical_tensors": sum(r["bit_identical"] for r in rows),
         "non_param_keys_skipped": len(extra), "non_param_examples": extra[:5],
-        "worst": rows[:10], "zero_grad_tensors": [r["tensor"] for r in rows if r["g2"] == 0],
+        "worst": rows[:10], "per_tensor_rel": {r["tensor"]: r["rel"] for r in rows}, "zero_grad_tensors": [r["tensor"] for r in rows if r["g2"] == 0],
     }, indent=1))
 
 
