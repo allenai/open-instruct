@@ -47,7 +47,9 @@ def read(base, k):
 def main():
     p0, old, bs = sys.argv[1:4]
     k0, ko, kb = keys(p0), keys(old), keys(bs)
-    assert set(k0) == set(ko) == set(kb), (len(k0), len(ko), len(kb), sorted(set(k0) ^ set(ko))[:5], sorted(set(k0) ^ set(kb))[:5])
+    # The step-1 checkpoints also hold non-parameter state (rng counters and keys); compare the weights p0 has.
+    assert set(ko) == set(kb) and set(k0) <= set(ko), (len(k0), len(ko), len(kb), sorted(set(k0) - set(ko))[:5])
+    extra = sorted("/".join(k) for k in set(ko) - set(k0))
 
     def one(n):
         a0, ao, ab = (read(p, kk[n]).astype(np.float64) for p, kk in ((p0, k0), (old, ko), (bs, kb)))
@@ -72,6 +74,7 @@ def main():
         "rel": rel, "floor": 2**-24 * p2**0.5 / g2**0.5 if g2 > 0 else float("inf"), "pass": rel <= 1e-5,
         "tensors": len(rows), "params": sum(r["numel"] for r in rows),
         "bit_identical_tensors": sum(r["bit_identical"] for r in rows),
+        "non_param_keys_skipped": len(extra), "non_param_examples": extra[:5],
         "worst": rows[:10], "zero_grad_tensors": [r["tensor"] for r in rows if r["g2"] == 0],
     }, indent=1))
 
