@@ -290,24 +290,8 @@ def get_env_vars(
     collisions = sorted({var["name"] for var in additional_env_vars} & {s["name"] for s in additional_secrets})
     if collisions:
         raise ValueError(f"Set by both --env and --secret: {', '.join(collisions)}")
-    # An explicit --env or --secret replaces any default mason adds under the same name
-    # (e.g. HF_HOME off a full bucket).
-    explicit_names = {var["name"] for var in additional_env_vars} | {s["name"] for s in additional_secrets}
 
-    env_vars = [
-        beaker.BeakerEnvVar(name=name, value=value)
-        for name, value in DEFAULT_ENV_VARS.items()
-        if name not in explicit_names
-    ]
-
-    explicit_env_vars = [
-        beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars
-    ]
-    # add user-specific secrets
-    explicit_env_vars.extend(
-        beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets
-    )
-    env_vars.extend(explicit_env_vars)
+    env_vars = [beaker.BeakerEnvVar(name=name, value=value) for name, value in DEFAULT_ENV_VARS.items()]
 
     useful_secrets = [
         "HF_TOKEN",
@@ -368,8 +352,16 @@ def get_env_vars(
             ]
         )
 
-    explicit_ids = {id(env_var) for env_var in explicit_env_vars}
-    return [env_var for env_var in env_vars if env_var.name not in explicit_names or id(env_var) in explicit_ids]
+    # An explicit --env or --secret replaces any default mason adds under the same name
+    # (e.g. HF_HOME off a full bucket).
+    explicit_env_vars = [
+        beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars
+    ]
+    explicit_env_vars.extend(
+        beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets
+    )
+    explicit_names = {env_var.name for env_var in explicit_env_vars}
+    return [env_var for env_var in env_vars if env_var.name not in explicit_names] + explicit_env_vars
 
 
 def get_datasets(
