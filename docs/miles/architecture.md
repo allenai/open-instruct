@@ -29,10 +29,10 @@ organized adapter hooks; OLMo-core provides the model, objective and checkpoint
 APIs required by this adapter; olmo-sglang supplies compatible serving models.
 The ordinary Open Instruct environment keeps its own dependency versions.
 
-The MILES pin includes the v0.1.2 refresh-consumer compatibility fix from
+The MILES pin includes the v0.1.2 async-consumer compatibility fix from
 [miles-olmo-core PR #10](https://github.com/allenai/miles-olmo-core/pull/10).
-Its refresh dequeue accepts the native consumer's optional trainer identity and
-preserves Core's explicit rejection of multi-policy training.
+Its refresh and engine-drain dequeues accept the native consumer's optional trainer
+identity and preserve Core's explicit rejection of multi-policy training.
 
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
