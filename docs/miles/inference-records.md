@@ -96,6 +96,7 @@ Each line is either a `group` row or a `disposition` row.
 | `filter_decision`, `filter_reason` | `passed`, `filtered` (with the reason, for example `zero_std_0.0`) or `aborted`. Passing is not reaching training; see disposition rows. |
 | `responses_included` | Whether response text is present for this group. |
 | `responses[]` | Per-response fields, below. |
+| `opener_branches` | Present only for groups generated with [opener branches](async-pipeline.md#opener-branches): the opener pool, the drawn openers, the probe's policy version, whether the pool is exact, the largest probability it could have missed, and the probe request count. |
 
 Per-response fields:
 
@@ -103,6 +104,8 @@ Per-response fields:
 - `validity`, described below.
 - `response_tokens`, `status` and `truncated`.
 - `policy_versions` and `policy_scope`, described below.
+- `response_seed` (seeded responses only): the forced opening token IDs, their serving-policy log probabilities and scoring version.
+- `opener_branch` (branched groups only): the index into the group's drawn openers.
 - `response`, the text, when included.
 
 ### Disposition rows
