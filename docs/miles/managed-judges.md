@@ -6,7 +6,7 @@ See the [scheduling contract](launching.md#distributed-scheduling-contract)
 before submitting a multi-node run. Short execution checks do not establish
 mixture learning quality.
 
-Start from [node.toml](../../configs/miles/examples/node.toml), copying it to
+Start from [large.toml](../../configs/miles/examples/large.toml), copying it to
 `runs/` before changing policy, dataset, verifier and judge inputs. Run `plan` and
 `validate` on that personal file, inspect the rendered replica group, then submit
 through the [committed-image launcher](launching.md). The example paths are
@@ -25,7 +25,7 @@ All replicas have the same allocation size; the plan reports any unused GPUs.
 
 | Request | Allocation at 8 GPUs/replica |
 | --- | --- |
-| 2 trainer + 5 rollout + 1 judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
+| 2 trainer + 6 rollout, no judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
 | 8 trainer + 7 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 4 trainer + 11 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 8 trainer + 23 rollout + 1 judge | 4 nodes, 32 GPUs, no unused GPUs |
@@ -56,7 +56,15 @@ policy weights or a trainer rank from landing on a judge device.
 The schema follows the Megatron implementation: `[judges.NAME]` declares serving, `[rubrics.NAME]`
 declares grading, and `[judging.bindings.VERIFIER]` maps prepared verifier names to
 both. Two rubrics can use one fixed service. Only bound services consume GPUs.
-The node and large examples bind `general-quality` and `general-quality_ref`.
+The large example binds `general-quality` and `general-quality_ref`.
+The node example uses only math, instruction-following and code verifiers and
+allocates no judge GPU.
+
+At startup, data preparation checks training and held-out verifier requirements,
+even when no judges are configured. Missing bindings fail before training with the
+verifier name and the required `[judging.bindings."VERIFIER"]` entry. The same check
+runs when reusing prepared data on resume. `plan` and `validate` remain independent
+of dataset access; their success does not certify dataset-to-judge compatibility.
 
 Managed services use the pinned training image's SGLang and a cached,
 revision-pinned Qwen model with the `qwen3-no-thinking` template. Model

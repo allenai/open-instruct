@@ -1,4 +1,4 @@
-# Single B300 node: 2 trainer GPUs (EP2), 5 inference engines, 1 judge.
+# Single B300 node: 2 trainer GPUs (EP2), 6 inference engines; no judge.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
 # Setup and workload requirements: configs/miles/examples/README.md
@@ -27,27 +27,22 @@ gpus_per_replica = 8
 weka = "oe-training-default"
 mount_path = "/weka/oe-training-default"
 
-[[launch.weka_mounts]]
-weka = "oe-adapt-default"
-mount_path = "/weka/oe-adapt-default"
-
 [launch.env]
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 OI_MILES_CODE_FAILURE_POLICY = "zero"
-OI_MILES_JUDGE_FAILURE_POLICY = "zero"
 SGLANG_TIMEOUT_KEEP_ALIVE = "60"
 NCCL_SOCKET_IFNAME = "ib"
 NCCL_IB_HCA = "^=mlx5_bond_0"
 
+# Prepared math, instruction-following and code data; no judge-dependent verifiers.
 [data]
-prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/train.jsonl"
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/train.jsonl"
 eval_prompt_data = [
-  "math", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-math.jsonl",
-  "ifeval", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-ifeval.jsonl",
-  "code", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-code.jsonl",
-  "general", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/eval-general.jsonl",
+  "math", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-math.jsonl",
+  "ifeval", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-ifeval.jsonl",
+  "code", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-code.jsonl",
 ]
-reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/verifiers.json"
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
 
 [training]
 num_rollouts = 200
@@ -62,7 +57,7 @@ packing_max_tokens = 34816
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 5
+gpus = 6
 rollout_batch_size = 64
 samples_per_prompt = 4
 max_response_length = 32768
@@ -97,25 +92,3 @@ fully_async = true
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
-
-[judges.general]
-mode = "managed"
-model = "Qwen/Qwen3-32B"
-revision = "9216db5781bf21249d130ec9da846c4624c16137"
-max_context_length = 131072
-context_extension = "qwen3-yarn-128k"
-prepared_dir = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/checkpoints/qwen3-32b-judge"
-
-[rubrics.quality]
-profile = "open-instruct/general-quality"
-
-[rubrics.reference_quality]
-profile = "open-instruct/general-quality_ref"
-
-[judging.bindings."general-quality"]
-judge = "general"
-rubric = "quality"
-
-[judging.bindings."general-quality_ref"]
-judge = "general"
-rubric = "reference_quality"

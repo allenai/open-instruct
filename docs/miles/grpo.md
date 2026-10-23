@@ -17,7 +17,8 @@ and [development defaults](development-defaults.md) for starting settings.
    checkpoint for a single-GPU colocated mechanics check. Keep barrier publication
    and offline W&B for this first exercise unless requested otherwise.
    Use [node.toml](../../configs/miles/examples/node.toml)
-   for single-node mixed-workload training, after preparing its policy, data and judge assets.
+   for single-node math, instruction-following and code training, after preparing
+   its policy, data and code-verifier service. It allocates no judge GPU.
 3. Check Beaker resource access and supply credentials for the selected inputs
    and tracking mode. Run `plan` and `validate`, then inspect the rendered Beaker
    spec against the [distributed scheduling contract](launching.md#distributed-scheduling-contract);

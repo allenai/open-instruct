@@ -44,8 +44,8 @@ component in `prepared_sample_id` identifies the source split, including when th
 row is assigned to this run's held-out partition; it is not a training assignment.
 
 The [single-node example](../../configs/miles/examples/node.toml) takes prepared
-mixed math, instruction-following, code and general-task JSONL with a verifier
-registry; its placeholder paths do not identify the complete published Olmo 3 mixture.
+math, instruction-following and code JSONL with a verifier registry, without
+judge-dependent tasks; its placeholder paths do not identify the complete published Olmo 3 mixture.
 Use manifest adoption when starting from dataset manifests. Unsupported task/verifier contracts fail
 rather than silently substituting a different judge or reward.
 
@@ -183,9 +183,9 @@ Judge transport failures and invalid or incomplete replies default to zero
 reward after retries, with a warning and per-sample `judge_error` diagnostics.
 Set `OI_MILES_JUDGE_FAILURE_POLICY="raise"` in `[launch.env]` to stop on those
 failures. Detected context overflow and configuration errors raise regardless
-of that fallback policy. The node and large examples explicitly select
-`"zero"` for both judge and code-service failures; change those settings to opt
-into strict handling. Managed judge health-check failures separately stop
+of that fallback policy. The large example explicitly selects `"zero"` for judge
+failures; both node and large select it for code-service failures. Change those
+settings to opt into strict handling. Managed judge health-check failures separately stop
 training; the fallback applies to grading requests.
 
 ### Symbolic math timeouts

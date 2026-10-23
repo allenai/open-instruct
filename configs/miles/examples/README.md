@@ -3,7 +3,7 @@
 | Config | Purpose |
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
-| [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2), 5 inference engines and 1 judge |
+| [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
 | [large.toml](large.toml) | Multi-node learning: 16 trainer GPUs, 32 engines and 1 judge; 56 GPUs allocated, plus background evaluation |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
@@ -65,13 +65,15 @@ because a tiny model may produce only constant rewards; see
 before changing this for a learning run.
 
 `node` adapts the previous two-node `medium` learning recipe to one B300 node,
-using two EP2 trainer ranks, five TP1 inference engines and one judge GPU.
-Its training batch, context, data, judging and shared-engine evaluation settings
-are unchanged. This topology passes CPU planning checks; sustained throughput
-and memory fit still need GPU validation. Supply an HF policy,
-immutable prepared training and held-out JSONL files, a verifier registry and a
-prepared Qwen3-32B judge. The registry needs a code-execution endpoint and the named
-general-quality verifiers; the template does not provision a code service.
+using two EP2 trainer ranks and six TP1 inference engines, with no judge.
+Its prepared workload contains math, instruction-following and code tasks only;
+exclude general-quality and other judge-dependent verifiers from both training
+and held-out files. The paths use a separate `math-ifeval-code` preparation.
+Its training batch, context and shared-engine evaluation cadence are unchanged.
+This topology passes CPU planning checks; sustained throughput and memory fit
+still need GPU validation. Supply an HF policy, immutable prepared training and
+held-out JSONL files, and a verifier registry with a code-execution endpoint;
+the template does not provision a code service.
 See [datasets and verifiers](../../../docs/miles/data-and-evaluation.md) and
 [managed judges](../../../docs/miles/managed-judges.md).
 
@@ -80,8 +82,10 @@ and `node` for disaggregated learning. A single-GPU run with the full policy nee
 its combined trainer/inference memory footprint checked before replacing the
 `dev` checkpoint; single-GPU inference alone does not establish that fit.
 
-`large` additionally requires an accessible `launch.secrets.BEAKER_TOKEN` for
-background evaluation. Evaluator jobs allocate GPUs beyond the training plan;
+`large` retains the mixed workload including general-quality tasks and requires
+a prepared Qwen3-32B judge with named verifier bindings. It also requires an
+accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
+Evaluator jobs allocate GPUs beyond the training plan;
 overlapping jobs can increase that total. Configure the intended evaluation tasks
 and credentials: the starter benchmarks do not cover code or general-task quality.
 With offline W&B, sync training and manually publish the retained evaluation results.

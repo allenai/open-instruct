@@ -20,6 +20,18 @@ PROFILES = {
 }
 
 
+def require_binding(name, bindings, verifier_spec=None):
+    """Reject judge-dependent data even when the run has no judge configuration."""
+    named_factory = "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"
+    factory = verifier_spec.get("factory") if isinstance(verifier_spec, dict) else None
+    if name not in bindings and (name.startswith("general-") or factory == named_factory):
+        raise InputError(
+            f"Missing named judge binding for verifier {name!r}. "
+            f'Configure [judging.bindings."{name}"] with a configured judge and rubric, '
+            "or remove the dataset requiring this verifier."
+        )
+
+
 def parse(document):
     judges = copy.deepcopy(document.get("judges", {}))
     rubrics = copy.deepcopy(document.get("rubrics", {}))

@@ -307,6 +307,37 @@ def test_missing_reference_and_unused_bindings_are_rejected(document, tmp_path):
         judge_registry.validate_data({"prompt_data": str(path)}, value)
 
 
+@pytest.mark.parametrize("split", ["train", "eval"])
+@pytest.mark.parametrize("verifier", ["general-quality", "custom-quality"])
+def test_missing_binding_checked_with_no_judges_in_train_and_eval(document, tmp_path, split, verifier):
+    paths = {name: tmp_path / f"{name}.jsonl" for name in ("train", "eval")}
+    for name, path in paths.items():
+        path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "judge_query": "Question",
+                        "verifiers": [{"name": verifier if name == split else "gsm8k", "target": "42"}],
+                    }
+                }
+            )
+            + "\n"
+        )
+    reward = tmp_path / "verifiers.json"
+    reward.write_text(
+        json.dumps({verifier: {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"}})
+    )
+    prepared = {
+        "prompt_data": str(paths["train"]),
+        "eval_prompt_data": ["heldout", str(paths["eval"])],
+        "reward_config": str(reward),
+    }
+    with pytest.raises(InputError, match=f"Missing named judge binding.*{verifier}"):
+        judge_registry.validate_data(prepared, judging.registry(judging.parse({})))
+    document["judging"]["bindings"] = {verifier: {"judge": "general", "rubric": "quality"}}
+    judge_registry.validate_data(prepared, judging.registry(judging.parse(document)))
+
+
 def test_health_probe_tolerates_transient_failures_but_bounds_outage(document, tmp_path, monkeypatch):
     owner = cluster.Supervisor(RunSpec.from_dict(document), tmp_path, 0, 1)
     owner.health["general"] = "http://127.0.0.1/health"

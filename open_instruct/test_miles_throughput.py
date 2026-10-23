@@ -62,7 +62,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
 
 @pytest.mark.parametrize(
     "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
-    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 5, 1), ("large", 56, 7, 16, 32, 1)],
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("large", 56, 7, 16, 32, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")

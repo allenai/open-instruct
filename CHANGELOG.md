@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Give MILES async runs separate HTTP request headroom, align learning templates with one completed collection and startup-only scoring audits, and report copied configurations that can underfill engines or add qualification overhead (https://github.com/allenai/open-instruct/pull/2043).
+- Reject missing named judge bindings in training and held-out data at MILES startup, including runs with no configured judges; use a judge-free two-trainer/six-inference single-node example (https://github.com/allenai/open-instruct/pull/2043).
 - Consolidate MILES examples into single-GPU `dev`, eight-GPU `node` and multi-node `large`, preserve explicit launch settings and paths, and use a consistent 600-second judge request timeout for managed, external and unnamed general judges, preserving explicit overrides (https://github.com/allenai/open-instruct/pull/2043).
 - Default MILES Jupiter launches to the pinned image's CUDA compatibility library path, while preserving explicit environment overrides (https://github.com/allenai/open-instruct/pull/1924).
 - Scope the MILES recommendation to supported Olmo MoE models and retain Core/vLLM and DeepSpeed/vLLM as current dense-model GRPO workflows in documentation and agent guidance (https://github.com/allenai/open-instruct/pull/1924).
