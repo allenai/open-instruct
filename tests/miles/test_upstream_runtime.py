@@ -3,6 +3,9 @@
 import asyncio
 import json
 import shlex
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -19,6 +22,7 @@ from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
 from miles.utils.workers.worker_spec import CommandWorkerSpec, SchedulingSpec, WorkerLaunchContext
 
 from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.execution import serving
 
 
 def test_serving_child_receives_model_package_and_its_own_cache_slot():
@@ -30,7 +34,7 @@ def test_serving_child_receives_model_package_and_its_own_cache_slot():
         launch_command=lambda ctx: "/usr/bin/python -m sglang.launch_server --model-path '/model with spaces'",
     )
     args = SimpleNamespace(olmo_core_startup_cache={"shared": "/shared", "restore": True})
-    _, configured = startup_cache.configure_specs(args, [spec.model_copy(update={"name": "trainer-actor"}), spec])
+    _, configured = serving.configure_specs(args, [spec.model_copy(update={"name": "trainer-actor"}), spec])
     context = WorkerLaunchContext(cell_index=2, worker_in_cell_index=1, gpu_ids=[3])
     env = configured.env_var(context)
     assert env["SGLANG_EXTERNAL_MODEL_PACKAGE"] == "olmo_sglang.models"
@@ -39,12 +43,63 @@ def test_serving_child_receives_model_package_and_its_own_cache_slot():
     assert shlex.split(configured.launch_command(context)) == [
         "/usr/bin/python",
         "-m",
-        "miles.utils.compiler_cache.serving",
+        "open_instruct.miles.execution.serving",
         "--model-path",
         "/model with spaces",
     ]
     assert "worker_process_setup_hook" not in env
     assert spec.env_var(context) == {"EXISTING": "kept"}
+
+
+def test_serving_registers_hybrid_cache_capabilities_before_argument_resolution():
+    # A fresh serving process must not inherit registration from a trainer or
+    # another test. Exercise the real pinned capability resolver without a GPU.
+    script = textwrap.dedent("""
+        import os
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        # SGLang's optional dumper probes Megatron, whose Transformer Engine
+        # installation requires a CUDA driver even for this CPU-only check.
+        sys.modules["megatron.core"] = None
+
+        from miles.utils.compiler_cache import hf_module_cache
+        from sglang.srt.arg_groups import overrides
+        from sglang.srt.configs import linear_attn_model_registry
+
+        from open_instruct.miles.execution import serving
+
+        os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
+        hf_config = SimpleNamespace(architectures=["Olmo3MoeForCausalLM"])
+        assert linear_attn_model_registry.get_linear_attn_spec(hf_config) is None
+        events = []
+
+        def launch(module, *, run_name):
+            assert module == "sglang.launch_server" and run_name == "__main__"
+            assert events == ["cache", "hf"]
+            view = SimpleNamespace(
+                disable_radix_cache=False,
+                mamba_radix_cache_strategy="extra_buffer",
+                linear_attn_backend="triton",
+            )
+            spec = linear_attn_model_registry.get_linear_attn_spec(hf_config)
+            assert spec is not None and spec.uses_mamba_radix_cache
+            with patch.object(overrides, "model_config_of", return_value=SimpleNamespace(hf_config=hf_config)):
+                assert overrides._mamba_radix_cache_resolution(view)["uses_mamba_radix_cache"]
+            assert overrides.supports_mamba_cache_extra_buffer(view, hf_config)
+            events.append("launch")
+
+        with (
+            patch.object(serving.startup_cache, "setup_worker", side_effect=lambda: events.append("cache")),
+            patch.object(hf_module_cache, "prime_serving_modules", side_effect=lambda argv: events.append("hf")),
+            patch.object(serving.runpy, "run_module", side_effect=launch),
+        ):
+            serving.main()
+        assert events == ["cache", "hf", "launch"]
+    """)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
