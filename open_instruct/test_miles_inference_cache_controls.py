@@ -37,9 +37,11 @@ def _miles(overrides):
     )
 
 
-def test_example_default_is_cache_off_with_a_slot_per_request():
-    miles = _miles([])
+@pytest.mark.parametrize("profile", ["dev", "node", "large"])
+def test_example_default_is_cache_off_with_a_slot_per_request(profile):
+    miles = RunSpec.load(EXAMPLE.with_name(f"{profile}.toml")).compile().miles
     assert miles["sglang_disable_radix_cache"] is True
+    assert "sglang_mamba_radix_cache_strategy" not in miles
     assert miles["sglang_max_mamba_cache_size"] >= miles["sglang_max_running_requests"]
 
 

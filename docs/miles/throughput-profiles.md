@@ -54,8 +54,11 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    configs derive this when omitted. This adds transport headroom, not GPU slots.
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
    request at full context, so KV capacity never forces a retraction.
-3. Keep `sglang_max_mamba_cache_size` above `5 × R` with the KDA radix cache (the
-   validator enforces this), or at least `R` with radix caching off.
+3. Keep `sglang_max_mamba_cache_size` at least `R` with radix caching off. The
+   pinned Olmo hybrid backend requires this mode; see [model limits](moe-model-support.md#current-limits).
+   For compatible KDA backends with radix caching enabled, the capacity validator
+   requires more than `5 × R` slots. Passing capacity validation does not establish
+   that a model's kernel supports prefix-cache snapshots.
 4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
    slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
 5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to

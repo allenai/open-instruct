@@ -64,8 +64,6 @@ max_response_length = 32768
 max_context_length = 34816
 sglang_max_mamba_cache_size = 1024
 sglang_mem_fraction_static = 0.7
-radix_cache = true
-mamba_radix_cache_strategy = "extra_buffer"
 
 [tracking]
 wandb_mode = "offline"

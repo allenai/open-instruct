@@ -106,6 +106,14 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
+The examples inherit disabled prefix caching (`inference.radix_cache = false`).
+The pinned Olmo hybrid KDA kernel cannot produce the FP32 tracked-state snapshots
+required by SGLang's `extra_buffer` prefix-cache path. Enabling that path fails
+during rollout; selecting `linear_attn_prefill_backend = "triton"` does not change
+the Olmo adapter's kernel override. Keep prefix caching disabled for this runtime;
+the recurrent-state pool is still required for active requests. See
+[hybrid model limits](../../../docs/miles/moe-model-support.md#current-limits).
+
 The learning templates (`node`, `large`) separate 64 GPU-running requests per
 engine from 128 end-to-end HTTP permits. The automatically sized producer supplies
 two waves; the completed buffer holds one collection. HTTP permits include

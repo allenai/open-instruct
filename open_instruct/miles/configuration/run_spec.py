@@ -551,6 +551,9 @@ class RunSpec:
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
         validation.runtime_values(miles)
+        # Capacity checks must see the structured cache-mode default, even when
+        # a recipe overrides only the recurrent-state pool size.
+        miles.setdefault("sglang_disable_radix_cache", True)
         validation.inference_capacity(miles)
         CoreConfig(**core)
         if "placement_mode" in controls:
@@ -657,7 +660,6 @@ class RunSpec:
             "update_weights_interval": 1,
             "sglang_max_running_requests": 64,
             "sglang_mem_fraction_static": 0.4 if miles["colocate"] else 0.6,
-            "sglang_disable_radix_cache": True,
             "sglang_max_mamba_cache_size": 128,
             "sglang_cuda_graph_backend_decode": "full",
             "sglang_cuda_graph_max_bs_decode": 64,
