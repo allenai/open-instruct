@@ -29,6 +29,7 @@ from typing import Any
 
 import ray
 import torch
+from miles.backends.core_utils.rollout import response_seed
 from miles.dashboard import backend, hooks
 from miles.utils.types import Sample
 
@@ -63,6 +64,8 @@ class DashboardDrainingRolloutDataSource:
         self._collect_dashboard = bool(getattr(args, "use_miles_dashboard", False))
         core = getattr(args, "olmo_core", None)
         self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
+        self._opener_seeds = tuple(getattr(core, "opener_seeds", ()) or ())
+        self._opener_seeds_per_group = getattr(core, "opener_seeds_per_group", 0)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attributes not implemented by this lifecycle adapter."""
@@ -79,6 +82,7 @@ class DashboardDrainingRolloutDataSource:
                 dataset = getattr(self._delegate, "dataset", None)
                 limit = len(dataset) if dataset is not None else 1_000_000
                 groups = record_selection.take(self._delegate.get_samples, num_samples, self._selection.keep, limit)
+            self._seed_openers(groups)
             if self._recovery_groups is not None:
                 self._recovery_groups.extend(copy.deepcopy(groups))
             for group in groups:
@@ -86,6 +90,41 @@ class DashboardDrainingRolloutDataSource:
                 if identity not in self._pending_groups:
                     self._pending_groups[identity] = copy.deepcopy(group)
             return groups
+
+    def _seed_openers(self, groups: Any) -> None:
+        """Request opening text for the first samples of each new group.
+
+        Openers rotate across groups by prompt identity, so every opener is tried
+        on a fixed share of each collection and retries reproduce the assignment.
+        The request lives in sample metadata and survives the pristine-prompt
+        ledger, resets and resume; the refresh producer scores and applies it.
+        """
+        if not self._opener_seeds:
+            return
+        count, openers = self._opener_seeds_per_group, self._opener_seeds
+        for group in groups:
+            for slot, sample in enumerate(group[:count]):
+                text = openers[(group[0].group_index * count + slot) % len(openers)]
+                sample.metadata = {**(sample.metadata or {}), response_seed.REQUEST_KEY: {"text": text}}
+
+    def persist_group_metadata(self, group: Any, keys: tuple[str, ...]) -> None:
+        """Copy producer-chosen metadata into this group's pristine retry and resume records.
+
+        The refresh producer decides opener branches after the group is handed out;
+        writing them back means a requeued or resumed group reuses the same draw.
+        """
+        identity = group[0].group_index
+        with self._cursor_lock:
+            records = [self._pending_groups[identity]] if identity in self._pending_groups else []
+            records += [g for g in self._recovery_groups or () if g[0].group_index == identity]
+            if not records:
+                raise RuntimeError(f"prompt group {identity} has no pristine record to update")
+            for record in records:
+                if [s.index for s in record] != [s.index for s in group]:
+                    raise RuntimeError(f"pristine record for prompt group {identity} does not match its samples")
+                for pristine, sample in zip(record, group, strict=True):
+                    chosen = {key: copy.deepcopy(sample.metadata[key]) for key in keys}
+                    pristine.metadata = {**(pristine.metadata or {}), **chosen}
 
     def add_samples(self, samples: Any) -> None:
         """Return aborted samples to the underlying MILES buffer."""

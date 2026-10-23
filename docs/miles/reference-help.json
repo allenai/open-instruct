@@ -61,7 +61,12 @@
     "max_run_seconds": "Optional positive driver wall-clock budget, including startup. Stop after a completed collection, save when checkpointing is enabled, export final HF weights when requested, and request final background evaluation. It is a soft limit; leave shutdown headroom before the Beaker timeout.",
     "fp32_lm_head": "Opt-in trainable FP32-output vocabulary projection on Core and SGLang. Keeps BF16 operands and ordinary low-precision gradient GEMMs; Default false. Default LM head/loss and trainer TP1 only; increases logit memory, and its learning effect is unknown.",
     "reward_zero_truncated": "Opt-in: assign reward zero to every length-truncated response before filtering or group centering; retain its policy loss mask. Applies to training and held-out evaluation.",
-    "reward_final_answer_only": "Opt-in for text verifiers: grade only text after the last closing think delimiter; missing or empty final sections score zero. Managed judges are unsupported."
+    "reward_final_answer_only": "Opt-in for text verifiers: grade only text after the last closing think delimiter; missing or empty final sections score zero. Managed judges are unsupported.",
+    "opener_seeds": "Opening response texts assigned as response seeds, rotating across prompt groups; refresh publication only. Seeded tokens are scored by the serving policy and trained; the assignment is not on-policy. Default empty (off).",
+    "opener_seeds_per_group": "Samples per prompt group that receive the group's opener seed; default 0 (off). Must not exceed samples per prompt.",
+    "opener_branches": "Openers drawn per prompt group for opener branching; default 0 (off). Refresh publication only; samples per prompt must divide evenly across branches; cannot be combined with opener_seeds.",
+    "opener_pool": "Number of highest-probability eligible openers searched per prompt before a uniform branch draw; default 20. Candidate definition is controlled by opener_mode.",
+    "opener_mode": "Candidate definition: visible (default) expands whitespace to the first visible token; first_token ranks literal next tokens, allowing whitespace and excluding special IDs and think delimiters."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",

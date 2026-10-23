@@ -79,6 +79,10 @@ def test_enabled_hook_and_disabled_native_arguments():
         "expert_balance_layer_stride",
         "expert_balance_search_proposals",
         "expert_balance_search_seconds",
+        "opener_seeds",
+        "opener_seeds_per_group",
+        "opener_branches",
+        "opener_pool",
     ):
         del expected[name]
     assert encoded == expected

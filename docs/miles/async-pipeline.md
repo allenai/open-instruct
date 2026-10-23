@@ -71,6 +71,87 @@ temperature/top-p 1 and top-k -1. See [configuration](configuration.md) and
 A configured refresh mode does not prove a particular short run actually crossed
 a policy boundary; inspect retained token spans and `refresh_scores` observations.
 
+### Opener seeds
+
+Refresh can start some responses from chosen opening text, so that alternative
+openers are explored on every prompt instead of only those the policy already
+prefers:
+
+```toml
+[core]
+opener_seeds = ["\n", " Okay", "Okay"]
+opener_seeds_per_group = 2
+```
+
+The first `opener_seeds_per_group` samples of each prompt group receive an opener,
+rotating through the list by prompt-group identity; the remaining samples are
+unchanged. The producer scores the opener under the serving policy in a
+prefill-only request, then generates from it. Opener tokens are response tokens:
+they are rewarded, trained, and carry the scored behavior log probabilities and
+the policy version that scored them. The recorded tokens and scores are kept in
+sample metadata as `response_seed_scored`.
+
+Assigned openers are not sampled from the policy, so seeded responses are not
+on-policy draws. Recording the policy's own score as the behavior probability
+means no correction is applied for the assignment itself: the update is biased
+toward the assigned openers by design. TIS still corrects policy drift and
+inference/trainer numerical mismatch on those tokens, as on any other.
+
+An opener must tokenize the same way alone as after the prompt; text that merges
+with the end of the prompt (for example a newline after a bare `>`) is rejected.
+Openers count against `max_response_length`, at least one sample per group must
+stay unseeded, and seeding requires `publication_mode="refresh"`. Leaving both
+fields unset keeps the native arguments and producer behavior unchanged.
+
+### Opener branches
+
+Instead of fixed text, refresh can choose openers per prompt from the serving policy
+(first-token exploration):
+
+```toml
+[core]
+opener_branches = 4
+opener_pool = 20
+opener_mode = "visible" # default; use "first_token" for literal next-token ranking
+```
+
+Before each prompt group is generated, prefill-only probes read the policy's most
+likely openers for that prompt. An opener runs to the first token that completes
+visible text, so whitespace is part of it (` Okay`, `Okay` and a newline followed
+by `Okay` are distinct) and special tokens are excluded. A best-first search with
+probability bounds finds the exact `opener_pool` most likely openers, reading more
+next tokens where unseen ones could still qualify; a search cut short by its request
+budget or depth limit is recorded as inexact, with the largest probability it could
+have missed. All probes of a search must come from one policy version, and a search
+spanning a publication is repeated. Probes take generation-admission slots, so
+admission pauses and lifecycle drains cover them.
+
+With `opener_mode="first_token"`, candidates are exactly one token after the
+prompt, ranked by raw log probability before temperature or top-p truncation.
+Whitespace is eligible and is never expanded. Tokenizer special IDs and literal
+`<think>` / `</think>` tokens are excluded, including atomic added tokens not marked
+special. Probes widen at the same prompt until the full eligible pool is available;
+an insufficient pool fails rather than silently changing the experiment. For example,
+`opener_pool=8`, `opener_branches=4` and 16 samples give four uniformly selected
+tokens with four naturally sampled continuations each. The mode is recorded with
+the pool. Evaluation remains unseeded.
+
+`opener_branches` of the pool are drawn uniformly without replacement, and the
+group's samples are split evenly across them as token-id response seeds. The pool,
+the draw, its exactness and the probe's policy version are kept in sample metadata as
+`opener_branches`, and the assignment is written back to the pristine prompt record,
+so a retried or resumed group reuses it instead of probing again.
+
+The draw ignores the policy's probabilities, so a rare candidate is tried as often
+as the favorite, and no correction is applied for it. `n_samples_per_prompt` must be
+a multiple of `opener_branches`, and branches cannot be combined with
+`opener_seeds`. Leaving `opener_branches` at zero keeps the native arguments and
+producer behavior unchanged.
+
+The zero-variance filter drops groups before they reach training or the rollout
+dumps, so an analysis of openers against reward needs [inference records](inference-records.md),
+which keep every scored group with its opener pool, draw and per-response branch.
+
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted
