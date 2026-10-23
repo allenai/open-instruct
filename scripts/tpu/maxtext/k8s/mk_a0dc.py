@@ -6,8 +6,11 @@ Writes, per data-order seed s in {0, 1}:
                         logging flags (MAXTEXT_LOG_BATCH_HASH=1, log_moe_dropped_tokens=true) and retention
                         (max_num_checkpoints_to_keep=10) changed. TRAIN_FILES are A0''s own shards; mesh (fsdp16 x ep8),
                         factor 2.5, LR 5e-5, schedule, NUM_EPOCH, DATA_SEED, checkpoint_period and maxRestarts 3 are A0''s.
-  h123/pf-a0dc-ep8-s<s>/ disposable steps 1-6 preflight on the production mesh: a0dc-s<s> with STEPS=6, scratch output,
-                        no checkpoints, maxRestarts 0 and load_balance_loss_weight=0 (#620: the reference differs in EP).
+  h123/pf-a0dc-ep8-s<s>/ disposable preflight on the production mesh: a0dc-s<s> with STEPS=20, scratch output, no
+                        checkpoints, maxRestarts 0 and load_balance_loss_weight=0 (#620: the reference differs in EP).
+                        One restore gives all three P4 reads on this side: step-1 CE against HF (forward only, so the
+                        loss weight does not enter), BATCH-HASH n=1..20 against the CPU replay (data only), and CE on
+                        steps 1-6 for the cross-placement comparison.
   h123/pf-a0dc-x16-s<s>/ the same preflight on the registered x16 placement (8x8x16, fsdp16 x ep64, factor 5.0, r2 data
                         emulation 8:2:128:32 so every batch is the 4x4x8 run's), as mk_h123.py builds it."""
 import pathlib
@@ -66,7 +69,7 @@ for s in (0, 1):
         if f == "kustomization.yaml":
             t = sub(t, (
                 ("  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs\n", "  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch\n"),
-                ("  - STEPS=11768\n", "  - STEPS=6\n"),
+                ("  - STEPS=11768\n", "  - STEPS=20\n"),
                 (" checkpoint_period=300 ", " checkpoint_period=100000 "),
                 (" emo_enabled=false ", " emo_enabled=false load_balance_loss_weight=0 ")), f"pf-a0dc-ep8-s{s}")
             assert "  - LR_SCHEDULE_STEPS=11768\n" in t
@@ -83,6 +86,7 @@ for s in (0, 1):
         if f == "kustomization.yaml":
             t = sub(t, (
                 ("  - MAXTEXT_LOG_BATCH_HASH=1\n", "  - MAXTEXT_LOG_BATCH_HASH=1\n  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32\n"),
+                ("  - STEPS=20\n", "  - STEPS=6\n"),
                 ("  - TOTAL_DEVICES=128\n", "  - TOTAL_DEVICES=1024\n"),
                 ("  - PER_DEVICE_BATCH=0.125\n", "  - PER_DEVICE_BATCH=0.015625\n"),
                 (" ici_expert_parallelism=8 ", " ici_expert_parallelism=64 "),

@@ -39,7 +39,7 @@ configMapGenerator:
   - LR=5e-5
   - WARMUP_FRAC=0.03
   - LR_SCHEDULE_STEPS=11768
-  - STEPS=6
+  - STEPS=20
   - NUM_EPOCH=2
   - DATA_SEED=0
   # FSDP 16 x expert 8 = 128 chips, no tensor or context axes (olmo35-ep-as-cp): batch shards over fsdp (16 sequences),
