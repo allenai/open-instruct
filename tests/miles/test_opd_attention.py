@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import torch
 from miles.backends.megatron_utils import parallel
-from miles.backends.training_utils import cp_utils, data
+from miles.backends.training_utils.data import context_parallel as cp_utils
+from miles.backends.training_utils.data import rollout as data
 from transformer_engine import pytorch as te
 
 

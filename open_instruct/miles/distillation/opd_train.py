@@ -7,10 +7,23 @@ from pathlib import Path
 
 import ray
 from miles.utils.arguments import parse_args
+from miles.utils.async_utils import Disposer
 from miles.utils.tracking_utils.tracking import finish_tracking
 
 import miles
 from open_instruct.miles.distillation import opd_config, opd_timing
+
+
+class TimedDisposer(Disposer):
+    async def __aexit__(self, exc_type, exc, traceback):
+        with opd_timing.stage("shutdown"):
+            return await super().__aexit__(exc_type, exc, traceback)
+
+
+async def run_training(train, args):
+    # Match native with_disposer ownership; time the actual cleanup boundary.
+    async with TimedDisposer() as disposer:
+        return await train(args, disposer=disposer)
 
 
 def main():
@@ -41,7 +54,7 @@ def main():
             if not args.fully_async:
                 raise ValueError("OPD pipeline timing currently requires the pinned async driver")
             train = opd_timing.instrument_driver(train)
-        asyncio.run(train(args))
+        asyncio.run(run_training(train, args))
     finally:
         finish_tracking()
         ray.shutdown()
