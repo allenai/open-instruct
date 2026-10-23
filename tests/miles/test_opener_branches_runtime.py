@@ -23,6 +23,7 @@ from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutData
 # "\xe2" is half of a multi-byte character that "\x80\x94" completes; "</think>" is special.
 WORDS = [f" w{i}" for i in range(40)]
 VOCAB = ["Q", "<think>", "\n", " Okay", "Okay", "I", "The", "\xe2", "\x80\x94", "</think>", "!", *WORDS]
+VOCAB += ["<functions>", "</functions>", "<function_calls>", "</function_calls>", "<|extra_id_2|>"]
 SPECIAL = [VOCAB.index("</think>")]
 
 
@@ -173,6 +174,12 @@ def test_literal_first_token_widens_at_same_prompt_and_retries_version_change(mo
 def test_literal_first_token_refuses_short_pool(monkeypatch):
     with pytest.raises(ValueError, match="pool of 8 required"):
         search(monkeypatch, pool=8, mode="first_token")
+
+
+@pytest.mark.parametrize("marker", VOCAB[-5:])
+def test_literal_first_token_excludes_unflagged_protocol_markers(monkeypatch, marker):
+    result, _ = search(monkeypatch, {(): {marker: 0.9, "\n": 0.1}}, pool=1, mode="first_token")
+    assert texts(result["found"]) == ["\n"]
 
 
 def test_literal_first_token_is_wired_and_persisted_with_even_branches(monkeypatch):

@@ -83,6 +83,7 @@ def test_enabled_hook_and_disabled_native_arguments():
         "opener_seeds_per_group",
         "opener_branches",
         "opener_pool",
+        "opener_mode",
     ):
         del expected[name]
     assert encoded == expected

@@ -129,8 +129,8 @@ admission pauses and lifecycle drains cover them.
 With `opener_mode="first_token"`, candidates are exactly one token after the
 prompt, ranked by raw log probability before temperature or top-p truncation.
 Whitespace is eligible and is never expanded. Tokenizer special IDs and literal
-`<think>` / `</think>` tokens are excluded, including atomic added tokens not marked
-special. Probes widen at the same prompt until the full eligible pool is available;
+think/function control tokens and `<|...|>` reserved markers are excluded,
+including added tokens not marked special. Probes widen at the same prompt until the full eligible pool is available;
 an insufficient pool fails rather than silently changing the experiment. For example,
 `opener_pool=8`, `opener_branches=4` and 16 samples give four uniformly selected
 tokens with four naturally sampled continuations each. The mode is recorded with
