@@ -31,5 +31,12 @@
   "g3tol": 0.001,
   "hf": 1.098849,
   "ref": "h102-lr4x-s1"
+ },
+ "h083-sci-s0-ep8dc3": {
+  "g3tol": 1,
+  "hf": 1.043133,
+  "ref": "logs/h083-sci-s0-dcnolog",
+  "hashref": "logs/h083-sci-s0-ep8ref,replay:sci3-s0",
+  "mode": "#591 candidate C on the dc image (H083 note 2026-10-23 12:10 PT): R1 dcnolog, R2 dcnolog2; set g3tol = max(1e-3, 2F), F capped 2.5e-3, after R2 lands and before C is applied"
  }
 }
