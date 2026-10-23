@@ -119,6 +119,8 @@ def producer(branches=2, pool=20):
         rollout_max_context_len=None,
         use_rollout_routing_replay=False,
         use_rollout_indexer_replay=False,
+        use_sampling_support_replay=False,
+        rollout_top_logprobs_num=0,
         sglang_speculative_algorithm=None,
     )
     p.state = SimpleNamespace(tokenizer=Tokenizer(), processor=None)
