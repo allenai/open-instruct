@@ -23,6 +23,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import artifacts
+from open_instruct.miles.rewards import judging
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -311,26 +312,21 @@ def execute(spec):
             root / "prepared" / "data",
             max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
             seed=planned.miles.get("seed", 17),
-            **(
-                {
-                    "registry_overrides": {
-                        name: {
-                            "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
-                            "config": {"name": name},
-                        }
-                        for name in spec.judges["judging"]["bindings"]
-                    }
+            registry_overrides={
+                name: {
+                    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+                    "config": {"name": name},
                 }
-                if spec.judges["judging"]["bindings"]
-                else {}
-            ),
+                for name in spec.judges["judging"]["bindings"]
+            },
         )
+        registry_module = importlib.import_module("open_instruct.miles.rewards.judge_registry")
+        resolved = judging.registry(spec.judges)
         if spec.judges["judging"]["bindings"]:
-            registry_module = importlib.import_module("open_instruct.miles.rewards.judge_registry")
             resolved = registry_module.registry()
             if resolved is None:
                 raise InputError("Named judges require the managed launcher (or a resolved registry)")
-            registry_module.validate_data(prepared, resolved)
+        registry_module.validate_data(prepared, resolved)
         config = spec.compile({**prepared, "hf_checkpoint": hf})
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():

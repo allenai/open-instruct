@@ -18,11 +18,16 @@ maintained example TOMLs encode a choice, the example is authoritative.
 
 - **Publication mode** (`refresh` for full-model async runs, `barrier` for small synchronous checks): refresh keeps generating across weight updates, so long responses span several policy versions; barrier is simpler to reason about but stalls generation at each update.
 - **Engine admission** (64 requests per engine): size it from GPU memory, with `sglang_max_total_tokens = admission × context`; higher values add throughput only while memory and the router keep up.
+- **HTTP admission** (128 permits per engine for async runs with 64 GPU slots): permits cover transit and response processing as well as generation. Keep headroom in both HTTP and producer limits; this does not double GPU cache or graph sizes.
 - **Producer budget** (`async_max_concurrent_samples` unset): the automatic value scales with the engine fleet; a larger budget fills engines more reliably but leaves more work to age out.
+- **Completed buffer** (one collection): separate from unfinished-request headroom; enlarging it retains more completed work without fixing response transport.
 - **Submission granularity** (`"sample"`): engines refill as individual responses finish rather than waiting for whole groups.
 - **Activation recomputation** (on for long contexts): trades extra compute for memory; turning it off is reasonable for short contexts once memory fit is checked.
 - **Radix caching** (as in the examples): pays off when long prompt prefixes repeat; with short prompts and long responses it matters little.
 - **Compiler cache** (on): shortens repeat startup and does not change training.
+- **Weight equality audit** (off in learning templates, on in mechanics templates): startup snapshot/reset qualification is separate from the required publication protocol.
+- **Trainer scoring** (`scoring_pass_required = false`): reuse the training forward only when the recipe permits it. Learning templates set `scoring_check_interval = 0` to retain startup/resume validation without periodic extra scoring forwards; TIS and required scoring remain active.
+- **Native checkpoints** (every 25 updates in learning templates): synchronous saves interrupt training. Adjust using measured save time and acceptable lost work after preemption; keep recovery enabled.
 
 ## Opt-in features
 

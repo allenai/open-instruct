@@ -6,7 +6,7 @@ See the [scheduling contract](launching.md#distributed-scheduling-contract)
 before submitting a multi-node run. Short execution checks do not establish
 mixture learning quality.
 
-Start from [medium.toml](../../configs/miles/examples/medium.toml), copying it to
+Start from [large.toml](../../configs/miles/examples/large.toml), copying it to
 `runs/` before changing policy, dataset, verifier and judge inputs. Run `plan` and
 `validate` on that personal file, inspect the rendered replica group, then submit
 through the [committed-image launcher](launching.md). The example paths are
@@ -25,8 +25,10 @@ All replicas have the same allocation size; the plan reports any unused GPUs.
 
 | Request | Allocation at 8 GPUs/replica |
 | --- | --- |
+| 2 trainer + 6 rollout, no judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
 | 8 trainer + 7 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 4 trainer + 11 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
+| 4 trainer + 19 rollout + 1 judge (`large`) | 3 nodes, 24 GPUs, no unused GPUs |
 | 8 trainer + 23 rollout + 1 judge | 4 nodes, 32 GPUs, no unused GPUs |
 | 8 trainer + 8 rollout + 1 judge | 3 nodes, 24 GPUs, 7 unused GPUs |
 
@@ -55,7 +57,15 @@ policy weights or a trainer rank from landing on a judge device.
 The schema follows the Megatron implementation: `[judges.NAME]` declares serving, `[rubrics.NAME]`
 declares grading, and `[judging.bindings.VERIFIER]` maps prepared verifier names to
 both. Two rubrics can use one fixed service. Only bound services consume GPUs.
-The medium and large examples bind `general-quality` and `general-quality_ref`.
+The large example binds `general-quality` and `general-quality_ref`.
+The node example uses only math, instruction-following and code verifiers and
+allocates no judge GPU.
+
+At startup, data preparation checks training and held-out verifier requirements,
+even when no judges are configured. Missing bindings fail before training with the
+verifier name and the required `[judging.bindings."VERIFIER"]` entry. The same check
+runs when reusing prepared data on resume. `plan` and `validate` remain independent
+of dataset access; their success does not certify dataset-to-judge compatibility.
 
 Managed services use the pinned training image's SGLang and a cached,
 revision-pinned Qwen model with the `qwen3-no-thinking` template. Model
@@ -66,6 +76,17 @@ can use `mode="external"`, `endpoint`, `model`, and the same context/concurrency
 settings; their lifecycle and context enforcement remain externally owned.
 Independent vLLM allocations, credentialed external judges and custom rubric files
 available in the Megatron implementation are not supported yet; unsupported keys fail.
+
+`judges.NAME.timeout` defaults to **600 seconds** for both managed and external
+services, matching the general-judge client's default. This allows time for long
+prefills; it is a per-HTTP-request timeout, including the context-tokenization
+request when enabled, not a total budget across requests and retries. It is
+independent of service startup, heartbeat and Beaker job timeouts. Omit it for
+normal runs; override it with a positive integer in `[judges.NAME]` or, for example,
+`--set judges.general.timeout=300`. The unnamed general-judge client accepts
+`llm_judge_timeout` or `OI_MILES_JUDGE_TIMEOUT`; named services use their own
+`judges.NAME.timeout` value. See the [configuration reference](configuration.md#workflow-fields)
+for all judge fields and their defaults.
 
 For long policy responses, budget the complete grading request in **judge**
 tokens: question, candidate answer, optional reference, rubric, chat framing and
@@ -107,7 +128,7 @@ Core optimizer/publication/replay contracts and retained rollout metadata.
 `driver-RANK.log` and `judge-NAME-RANK.log` stay on WEKA. A successful tiny run must
 include finite optimizer steps, policy refresh and actual judge replies; process
 exit alone is insufficient. Startup controls do not establish judge calibration
-or throughput for a production mixture. The full EP8 judged combination, 32K
+or throughput for a production mixture. The full judged `large` combination, 32K
 judged responses and sustained multi-node performance are untested.
 
 ## Policy-engine health
