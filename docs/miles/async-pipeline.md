@@ -112,6 +112,7 @@ Instead of fixed text, refresh can choose openers per prompt from the serving po
 [core]
 opener_branches = 4
 opener_pool = 20
+opener_mode = "visible" # default; use "first_token" for literal next-token ranking
 ```
 
 Before each prompt group is generated, prefill-only probes read the policy's most
@@ -124,6 +125,16 @@ budget or depth limit is recorded as inexact, with the largest probability it co
 have missed. All probes of a search must come from one policy version, and a search
 spanning a publication is repeated. Probes take generation-admission slots, so
 admission pauses and lifecycle drains cover them.
+
+With `opener_mode="first_token"`, candidates are exactly one token after the
+prompt, ranked by raw log probability before temperature or top-p truncation.
+Whitespace is eligible and is never expanded. Tokenizer special IDs and literal
+`<think>` / `</think>` tokens are excluded, including atomic added tokens not marked
+special. Probes widen at the same prompt until the full eligible pool is available;
+an insufficient pool fails rather than silently changing the experiment. For example,
+`opener_pool=8`, `opener_branches=4` and 16 samples give four uniformly selected
+tokens with four naturally sampled continuations each. The mode is recorded with
+the pool. Evaluation remains unseeded.
 
 `opener_branches` of the pool are drawn uniformly without replacement, and the
 group's samples are split evenly across them as token-id response seeds. The pool,

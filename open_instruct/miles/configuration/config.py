@@ -110,6 +110,8 @@ class CoreConfig:
     # them as response seeds. Refresh only; 0 disables.
     opener_branches: int = 0
     opener_pool: int = 20
+    # Literal next-token ranking includes whitespace; visible mode expands it.
+    opener_mode: str = "visible"
 
     def __post_init__(self):
         if isinstance(self.opener_seeds, list):
@@ -123,6 +125,7 @@ class CoreConfig:
         validation.integer(self.opener_seeds_per_group, "core.opener_seeds_per_group", minimum=0)
         validation.integer(self.opener_branches, "core.opener_branches", minimum=0)
         validation.integer(self.opener_pool, "core.opener_pool", minimum=1)
+        validation.choice(self.opener_mode, "core.opener_mode", ("visible", "first_token"))
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -686,6 +689,7 @@ class RunConfig:
         if not self.core.opener_branches:
             core.pop("opener_branches")
             core.pop("opener_pool")
+            core.pop("opener_mode")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,

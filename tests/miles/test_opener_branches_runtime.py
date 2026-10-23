@@ -138,7 +138,7 @@ def texts(found):
     return [Tokenizer().decode(path) for path, _ in found]
 
 
-def search(monkeypatch, dist=SMALL, pool=20, **serve_options):
+def search(monkeypatch, dist=SMALL, pool=20, mode="visible", **serve_options):
     posts = []
     serve(monkeypatch, posts, dist, **serve_options)
     p = producer(pool=pool)
@@ -146,7 +146,51 @@ def search(monkeypatch, dist=SMALL, pool=20, **serve_options):
     async def probe(x, top):
         return await p._prefill(opener_branches.probe_payload(x, top), "opener probe")
 
-    return asyncio.run(opener_branches.candidates(probe, Tokenizer(), PROMPT, pool)), posts
+    return asyncio.run(opener_branches.candidates(probe, Tokenizer(), PROMPT, pool, mode=mode)), posts
+
+
+def test_literal_first_token_keeps_whitespace_and_low_probability_candidates(monkeypatch):
+    distribution = {(): {"\n": 0.8, "<think>": 0.1, "</think>": 0.05, "Okay": 0.049, " Okay": 0.001}}
+    result, posts = search(monkeypatch, distribution, pool=3, mode="first_token")
+    assert texts(result["found"]) == ["\n", "Okay", " Okay"]
+    assert all(len(path) == 1 for path, _ in result["found"])
+    assert result["found"][-1][1] == pytest.approx(math.log(0.001))
+    assert len(posts) == 1 and posts[0]["input_ids"] == PROMPT
+    assert posts[0]["sampling_params"]["temperature"] == 1.0
+    assert result["exact"] and result["mode"] == "first_token"
+
+
+def test_literal_first_token_widens_at_same_prompt_and_retries_version_change(monkeypatch):
+    distribution = {(): {**WIDE[()], "<think>": 0.5, "</think>": 0.4}}
+    result, posts = search(
+        monkeypatch, distribution, pool=25, mode="first_token", versions=lambda n: "4" if n == 1 else "5"
+    )
+    assert result["version"] == "5" and result["exact"]
+    assert len(posts) == 4 and all(p["input_ids"] == PROMPT for p in posts)
+    assert all(len(path) == 1 for path, _ in result["found"])
+
+
+def test_literal_first_token_refuses_short_pool(monkeypatch):
+    with pytest.raises(ValueError, match="pool of 8 required"):
+        search(monkeypatch, pool=8, mode="first_token")
+
+
+def test_literal_first_token_is_wired_and_persisted_with_even_branches(monkeypatch):
+    posts = []
+    serve(monkeypatch, posts, WIDE)
+    p = producer(branches=4, pool=8)
+    p.args.olmo_core.opener_mode = "first_token"
+    samples = group(16)
+    asyncio.run(p._branch_openers(samples))
+    assert len(p.data_source.persisted) == 1
+    for sample in samples:
+        assert sample.metadata["opener_branches"]["mode"] == "first_token"
+        assert len(sample.metadata[response_seed.REQUEST_KEY]["token_ids"]) == 1
+    branches = [s.metadata["opener_branches"]["branch"] for s in samples]
+    assert branches == [b for b in range(4) for _ in range(4)]
+    before = copy.deepcopy([s.metadata for s in samples])
+    asyncio.run(p._branch_openers(samples))
+    assert [s.metadata for s in samples] == before and len(posts) == 1
 
 
 def brute_force(dist, pool):
@@ -356,7 +400,7 @@ def test_malformed_token_seed_fails_closed(bad):
 
 
 def compiled(*overrides):
-    return RunSpec.load("configs/miles/examples/medium.toml", list(overrides)).compile()
+    return RunSpec.load("configs/miles/examples/node.toml", list(overrides)).compile()
 
 
 def core_argument(config):
@@ -368,7 +412,13 @@ BRANCHES = ["core.opener_branches=4", "inference.samples_per_prompt=16", "infere
 
 
 def test_disabled_branching_keeps_the_native_core_argument_unchanged():
-    assert not {"opener_branches", "opener_pool"} & set(core_argument(compiled()))
+    assert not {"opener_branches", "opener_pool", "opener_mode"} & set(core_argument(compiled()))
+
+
+def test_first_token_mode_reaches_runtime_and_invalid_mode_is_rejected():
+    assert core_argument(compiled(*BRANCHES, 'core.opener_mode="first_token"'))["opener_mode"] == "first_token"
+    with pytest.raises(InputError, match="opener_mode"):
+        compiled(*BRANCHES, 'core.opener_mode="typo"')
 
 
 def test_refresh_run_carries_opener_branches_to_the_runtime():

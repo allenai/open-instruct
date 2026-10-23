@@ -220,7 +220,7 @@ def test_opener_fields_must_be_set_together():
 
 
 def compiled(*overrides):
-    return RunSpec.load("configs/miles/examples/medium.toml", list(overrides)).compile()
+    return RunSpec.load("configs/miles/examples/node.toml", list(overrides)).compile()
 
 
 def core_argument(config):
