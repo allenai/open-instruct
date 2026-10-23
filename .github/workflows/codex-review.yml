@@ -100,6 +100,52 @@ jobs:
           git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
           git merge-base "$BASE_SHA" "$HEAD_SHA"
 
+      - name: Fetch pinned dependency sources for review
+        timeout-minutes: 5
+        env:
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+          SOURCES_DIR: ${{ runner.temp }}/codex-dependencies
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          root = Path(os.environ["SOURCES_DIR"])
+          root.mkdir(parents=True, exist_ok=True)
+          lock_path = "runtime/miles/runtime.lock.json"
+          head = os.environ["HEAD_SHA"]
+          files = subprocess.check_output(["git", "ls-tree", "--name-only", head, "--", lock_path], text=True)
+          sources = {}
+          if files.strip():
+              lock = json.loads(subprocess.check_output(["git", "show", f"{head}:{lock_path}"], text=True))
+              sources = lock["sources"]
+
+          manifest = {}
+          for name, source in sources.items():
+              repository, revision = source["repository"], source["revision"]
+              if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", name):
+                  raise ValueError("Invalid dependency directory name")
+              if not re.fullmatch(r"https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+\.git", repository):
+                  raise ValueError(f"Expected a public GitHub HTTPS repository for {name}")
+              if not re.fullmatch(r"[0-9a-f]{40}", revision):
+                  raise ValueError(f"Expected an exact commit SHA for {name}")
+              target = root / name
+              subprocess.run(["git", "init", "--quiet", str(target)], check=True)
+              subprocess.run(["git", "-c", "credential.helper=", "fetch", "--quiet", "--no-tags", "--depth=1",
+                              repository, revision], cwd=target, check=True, timeout=90)
+              subprocess.run(["git", "checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=target, check=True)
+              actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target, text=True).strip()
+              if actual != revision:
+                  raise ValueError(f"Dependency revision mismatch for {name}")
+              manifest[name] = {"repository": repository, "revision": revision, "path": str(target)}
+              print(f"Prepared {name} at {revision}")
+          (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
       - name: Load previous Codex change requests
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
@@ -152,6 +198,13 @@ jobs:
             The working tree contains the workflow revision, not necessarily the PR head.
             Inspect git diff BASE...HEAD using the exact SHAs above, and read PR source
             with git show HEAD:path/to/file using the supplied head SHA.
+
+            Dependency source checkouts are listed in
+            ${{ runner.temp }}/codex-dependencies/manifest.json.
+            These are the exact revisions from the PR head's runtime lock, fetched
+            before the review sandbox starts. Use their local paths to verify upstream
+            APIs and callers; source availability does not imply packages are installed.
+            An empty manifest means this PR head has no runtime source lock.
 
             Read previous Codex change requests from
             ${{ runner.temp }}/codex-prior-reviews.json (an empty array means none).
