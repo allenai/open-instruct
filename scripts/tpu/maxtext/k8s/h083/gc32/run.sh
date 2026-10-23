@@ -37,7 +37,7 @@ grab() {
 }
 # HBM only: a VMEM overflow is a compile limit (attempt 1 hit "Used 17.09M of 16.00M vmem" at every length) and a smaller
 # shape doesn't fix it, so it stops the ladder as a failure.
-oom() { grep -qlE "Ran out of memory in memory space hbm|exceeds the HBM|Attempting to (allocate|reserve).*hbm" "$D"/logs/"$1"/*.log 2>/dev/null; }
+oom() { grep -qlE "Ran out of memory in memory space hbm|Ran out of memory on HBM|exceeds (the|available) HBM|Attempting to (allocate|reserve).*hbm" "$D"/logs/"$1"/*.log 2>/dev/null; }
 
 gate() { # behind both H104 X1 leg-A drivers
   until [ -f "$D/GO" ] || { $K get workloads -o name 2>/dev/null | grep -q '/jobset-h104-x1-mt-s1-' &&
