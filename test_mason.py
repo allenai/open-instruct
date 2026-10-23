@@ -280,6 +280,60 @@ class TestExperimentSpec(unittest.TestCase):
         self.assertEqual(actual_spec, expected_spec)
 
 
+class TestGetEnvVars(unittest.TestCase):
+    def _env(self, additional_env_vars, beaker_secrets=(), pure_docker_mode=False, resumable=True, num_nodes=2):
+        env_vars = mason.get_env_vars(
+            pure_docker_mode,
+            ["ai2/jupiter"],
+            list(beaker_secrets),
+            "me",
+            resumable,
+            num_nodes,
+            additional_env_vars,
+            [],
+        )
+        return [(env_var.name, env_var.value or env_var.secret) for env_var in env_vars]
+
+    def test_mason_defaults_are_set_without_overrides(self):
+        names = [name for name, _ in self._env([], beaker_secrets=["me_HF_TOKEN"])]
+        for name in [
+            *mason.DEFAULT_ENV_VARS,
+            "HF_TOKEN",
+            "PATH",
+            "HF_HOME",
+            "HF_DATASETS_CACHE",
+            "HF_HUB_CACHE",
+            "CHECKPOINT_OUTPUT_DIR",
+            "NCCL_SOCKET_IFNAME",
+            "NCCL_IB_HCA",
+            "WANDB_RUN_ID",
+            "WANDB_RESUME",
+        ]:
+            self.assertEqual(names.count(name), 1, name)
+
+    @parameterized.parameterized.expand(
+        [
+            (name,)
+            for name in [
+                *mason.DEFAULT_ENV_VARS,
+                "HF_TOKEN",
+                "PATH",
+                "HF_HOME",
+                "HF_DATASETS_CACHE",
+                "HF_HUB_CACHE",
+                "CHECKPOINT_OUTPUT_DIR",
+                "NCCL_SOCKET_IFNAME",
+                "NCCL_IB_HCA",
+                "WANDB_RUN_ID",
+                "WANDB_RESUME",
+            ]
+        ]
+    )
+    def test_explicit_env_replaces_default(self, name):
+        env = self._env([{"name": name, "value": "/explicit"}], beaker_secrets=["me_HF_TOKEN"])
+        self.assertEqual([value for env_name, value in env if env_name == name], ["/explicit"])
+
+
 class TestGetDatasets(unittest.TestCase):
     def _buckets(self, mounts):
         return [(mount.mount_path, mount.source.weka) for mount in mounts]

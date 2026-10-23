@@ -295,9 +295,10 @@ def get_env_vars(
         if name not in additional_env_var_names
     ]
 
-    env_vars.extend(
-        [beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars]
-    )
+    explicit_env_vars = [
+        beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars
+    ]
+    env_vars.extend(explicit_env_vars)
 
     # add user-specific secrets
     env_vars.extend(
@@ -363,7 +364,11 @@ def get_env_vars(
             ]
         )
 
-    return env_vars
+    # An explicit --env replaces any default mason adds under the same name (e.g. HF_HOME off a full bucket).
+    explicit_ids = {id(env_var) for env_var in explicit_env_vars}
+    return [
+        env_var for env_var in env_vars if env_var.name not in additional_env_var_names or id(env_var) in explicit_ids
+    ]
 
 
 def get_datasets(
