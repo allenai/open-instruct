@@ -118,6 +118,8 @@ task = "ifeval_ood"
 [[evaluation.tasks]]
 task = "livecodebench:lite"
 harness_preset = "codex_python"
+# Preinstall the sandbox server; the pinned runtime's on-demand fallback fails.
+harness = { "sandboxes.0.inject_swerex" = true }
 
 [[evaluation.tasks]]
 task = "scicode"

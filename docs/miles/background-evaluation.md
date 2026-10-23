@@ -107,7 +107,10 @@ so auxiliary providers and sandboxes are not mistaken for scoring overrides.
 The frozen checkpoint's `provider` settings cannot be overridden here. Harness
 settings are recorded in receipts and checked when reusing completed tasks.
 
-The large template selects `codex_python` for LiveCodeBench. Code jobs receive
+The large template selects `codex_python` for LiveCodeBench and enables
+`sandboxes.0.inject_swerex` to preinstall the sandbox server. The pinned runtime's
+on-demand installation fallback otherwise invokes an unavailable executable.
+Code jobs receive
 Beaker's subcontainer environment flags and need an evaluator image containing
 Podman and the olmo-eval sandbox dependencies. Container startup and reference-data
 access still require qualification on the target cluster.
