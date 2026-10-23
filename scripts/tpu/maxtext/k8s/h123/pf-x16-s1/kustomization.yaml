@@ -20,8 +20,14 @@ configMapGenerator:
 - name: h123-pf-x16-s1-launcher
   files:
   - train_sft.sh # a copy of ../olmo3-sft/train_sft.sh (kustomize loads no files from outside this directory); keep them identical
+  - sitecustomize.py # restore-only gcsfs retry patch (gcsfs_patch.py)
 - name: h123-pf-x16-s1-env
   literals:
+  # Restore-only gcsfs retry patch (gcsfs_patch.py; ledger #643): /launcher first so sitecustomize.py loads.
+  - PYTHONPATH=/launcher:/deps/src
+  - GCSFS_RETRIES=20
+  - GCSFS_JITTER_S=4
+  - GCSFS_PIN=2026.2.0
   - RUN_NAME=olmo35-sft-h123-pf-x16-s1
   - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch
   # OLMo-core step5961 converted with o35/convert_olmocore_to_maxtext.py (fp32 masters, padded 100352 vocab).
