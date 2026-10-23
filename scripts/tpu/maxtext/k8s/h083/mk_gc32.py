@@ -12,8 +12,12 @@ import os
 SEQS = {"s64k": 65536, "s32k": 32768, "s16k": 16384}
 # fp32 needs more scoped VMEM than the bf16 runs' 16 MiB (attempt 1: "Used 17.09M of 16.00M vmem" at 64K and 32K alike);
 # the -v24 pairs raise it to 24 MiB, the same in both images.
-VMEM = {"": None, "-v24": 24576}
-for arm, (vtag, vmem) in [(a, v) for a in ("old", "bs") for v in VMEM.items()]:
+# Attempt 2 (-v24) still failed: the overflow is the TPU ragged-dot kernel's backward at the 512 x 1024 forward tiles in fp32,
+# 17.09M against the v4 core's 16 MiB physical VMEM, which the scoped limit cannot raise. The -v24t pairs also halve the
+# ragged-dot forward tiles (the backward inherits them), the same in both images: an execution setting, not the math.
+TILES = " ".join(f"{w}_tile_fwd_{d}={v}" for w in ("wi", "wo") for d, v in (("batch_seq", 256), ("embed_dim", 512), ("mlp_dim", 512)))
+VMEM = {"": (None, ""), "-v24": (24576, ""), "-v24t": (24576, " " + TILES)}
+for arm, (vtag, (vmem, tiles)) in [(a, v) for a in ("old", "bs") for v in VMEM.items()]:
     src = {f: open(f"gradcmp-{arm}/{f}").read() for f in ("kustomization.yaml", "jobset.yaml", "train_sft.sh")}
     for tag, seq in SEQS.items():
         name, d = f"h083-gc32-{arm}-{tag}{vtag}", f"gc32-{arm}-{tag}{vtag}"
@@ -24,7 +28,7 @@ for arm, (vtag, vmem) in [(a, v) for a in ("old", "bs") for v in VMEM.items()]:
         for a, b in [
             ("  - SEQ_LEN=65536\n", f"  - SEQ_LEN={seq}\n"),
             ("  - CLIP_THRESHOLD=0\n", "  - CLIP_THRESHOLD=0\n  - DTYPE=float32\n  - JAX_DEFAULT_MATMUL_PRECISION=highest\n"),
-            (" remat_policy=full\n", " remat_policy=full matmul_precision=highest megablox=false\n"),
+            (" remat_policy=full\n", f" remat_policy=full matmul_precision=highest megablox=false{tiles}\n"),
         ] + ([("--xla_tpu_scoped_vmem_limit_kib=16384", f"--xla_tpu_scoped_vmem_limit_kib={vmem}")] if vmem else []):
             assert k.count(a) == 1, (d, a)
             k = k.replace(a, b)

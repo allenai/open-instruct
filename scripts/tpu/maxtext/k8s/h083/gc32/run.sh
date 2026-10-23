@@ -70,15 +70,16 @@ run_one() { # -> Completed | OOM | Failed
 }
 
 shape=""
-# Shapes in order (attempt 1 at 16 MiB scoped VMEM, plain s64k/s32k/s16k, stopped on VMEM); attempt 2 raises it to 24 MiB.
-for S in ${GC32_SHAPES:-s64k-v24 s32k-v24 s16k-v24}; do
+# Shapes in order. Attempt 1 (plain, 16 MiB scoped VMEM) and attempt 2 (-v24) stopped on VMEM; attempt 3 (-v24t) also halves
+# the ragged-dot tiles.
+for S in ${GC32_SHAPES:-s64k-v24t s32k-v24t s16k-v24t}; do
   ro=$(run_one h083-gc32-old-$S); [ "$ro" = OOM ] && continue
   [ "$ro" = Completed ] || { ev "GRAD-CMP-FP32 stopped: h083-gc32-old-$S failed (not OOM); see $D/logs"; exit 1; }
   rb=$(run_one h083-gc32-bs-$S); [ "$rb" = OOM ] && { ev "GRAD-CMP-FP32 bs OOMed at $S where old fit; stepping both down"; continue; }
   [ "$rb" = Completed ] || { ev "GRAD-CMP-FP32 stopped: h083-gc32-bs-$S failed (not OOM); see $D/logs"; exit 1; }
   shape=$S; break
 done
-[ -n "$shape" ] || { ev "GRAD-CMP-FP32 stopped: out of HBM at every shape tried (${GC32_SHAPES:-s64k-v24 s32k-v24 s16k-v24})"; exit 1; }
+[ -n "$shape" ] || { ev "GRAD-CMP-FP32 stopped: out of HBM at every shape tried (${GC32_SHAPES:-s64k-v24t s32k-v24t s16k-v24t})"; exit 1; }
 
 python3 - "$D" "$shape" > "$D/checks.txt" <<'PY'
 import glob, re, sys
@@ -108,7 +109,7 @@ import json, sys
 f, b, shape, checks, out = sys.argv[1:6]
 r, q = json.load(open(f)), json.load(open(b))
 seq = {"s64k": 65536, "s32k": 32768, "s16k": 16384}[shape.split("-")[0]]
-vmem = "24 MiB" if shape.endswith("-v24") else "16 MiB"
+vmem = {"v24": "24 MiB", "v24t": "24 MiB, ragged-dot fwd tiles 256/512/512"}.get(shape.split("-")[-1], "16 MiB")
 qb = {w["tensor"]: w["rel"] for w in q["worst"]}
 fp = r["per_tensor_rel"]
 lines = ["# H083 fp32 identity test: receipt", "",

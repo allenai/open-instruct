@@ -32,7 +32,13 @@ check this first.
 ## VMEM
 Attempt 1, at the bf16 runs' `--xla_tpu_scoped_vmem_limit_kib=16384`, failed to compile at sequence 65536 and 32768 alike:
 `Used 17.09M of 16.00M vmem`. The `-v24` overlays raise the limit to 24576 KiB in both images. It is a compiler budget,
-the same for both, and the read is still image vs image.
+the same for both, and the read is still image vs image. Approved by ledger-manager.
+
+Attempt 2 (`-v24`) failed the same way, still against 16.00M. That is the v4 core's physical VMEM, which the flag cannot
+raise. The overflowing op is the TPU ragged-dot kernel's backward pass (`transpose(jvp(...))/ragged_dot_general`) with
+fp32 windows at the 512 x 1024 forward tiles. Attempt 3 (`-v24t`) halves those tiles
+(`w{i,o}_tile_fwd_{batch_seq,embed_dim,mlp_dim}=256/512/512`) in both images. This is an execution setting: it changes how
+the kernel blocks its accumulation, the same way in both images, and not the math being compared.
 
 ## Shape
 Tried in order (the `-v24` overlays): 16 x 65536, then 16 x 32768, then 16 x 16384 (`SEQ_LEN`, both images alike) if HBM runs out. A VMEM overflow stops the ladder instead. The one used
