@@ -47,6 +47,15 @@ so captured graphs retain valid pointers.
 
 ## Current limits
 
+Keep prefix caching disabled (`inference.radix_cache = false`, the structured
+default) with the pinned runtime. SGLang's `extra_buffer` path requires FP32
+tracked-state snapshots, which `OlmoPackedKDAKernel` does not implement. The
+backend rejects tracked prefill batches rather than restoring unwritten states.
+The Olmo adapter overrides the prefill kernel, so selecting the generic Triton
+prefill option does not fix this incompatibility. The learning examples inherit
+disabled prefix caching while retaining recurrent-state storage for active
+requests.
+
 Synchronous barrier publication with EP4 training and TP1 fused-rounding serving
 is supported for this profile. Mixed-policy refresh, long context and save/resume
 are untested for it.

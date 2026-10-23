@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("command", ["plan", "validate"])
-@pytest.mark.parametrize("tier", ["dev", "small", "medium", "large"])
+@pytest.mark.parametrize("tier", ["dev", "node", "large"])
 def test_cli_without_runtime_dependencies(command, tier):
     result = subprocess.run(
         [sys.executable, "-S", "-m", "open_instruct.miles", command, f"configs/miles/examples/{tier}.toml"],

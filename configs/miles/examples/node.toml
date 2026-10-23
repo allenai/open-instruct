@@ -1,0 +1,92 @@
+# Single B300 node: 2 trainer GPUs (EP2), 6 inference engines; no judge.
+# Before setting up a run, review configuration options and defaults:
+# https://allenai.github.io/open-instruct/miles/configuration/
+# Setup and workload requirements: configs/miles/examples/README.md
+# Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
+schema_version = 1
+name = "node"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/checkpoints/policy-hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/node"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "4h"
+timeout = "48h"
+auto_resume = true
+gpus_per_replica = 8
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[launch.env]
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+OI_MILES_CODE_FAILURE_POLICY = "zero"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+# Prepared math, instruction-following and code data; no judge-dependent verifiers.
+[data]
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/train.jsonl"
+eval_prompt_data = [
+  "math", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-math.jsonl",
+  "ifeval", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-ifeval.jsonl",
+  "code", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-code.jsonl",
+]
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
+
+[training]
+num_rollouts = 200
+eval_interval = 50
+save_interval = 25
+
+[trainer]
+gpus = 2
+expert_parallel_size = 2
+sequence_packing = true
+packing_max_tokens = 34816
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 6
+rollout_batch_size = 64
+samples_per_prompt = 4
+max_response_length = 32768
+max_context_length = 34816
+sglang_max_mamba_cache_size = 1024
+sglang_mem_fraction_static = 0.7
+
+[tracking]
+wandb_mode = "offline"
+wandb_team = "ai2-llm"
+wandb_project = "open-instruct-miles"
+wandb_group = "node"
+
+[core]
+checkpoint_keep_last = 2
+publication_mode = "refresh"
+engine_drain_timeout = 900.0
+pipeline_observation_interval = 2.0
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+scoring_check_interval = 0
+
+[miles]
+sglang_enable_metrics = true
+use_rollout_routing_replay = true
+sglang_chunked_prefill_size = 8192
+
+[async]
+fully_async = true
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

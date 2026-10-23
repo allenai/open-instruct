@@ -25,6 +25,7 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
+from open_instruct.miles.execution import serving
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -60,9 +61,7 @@ async def train(args, *, export_hf=None):
         init_tracking(args)
         define_step_key_metric_group("errors", "errors/elapsed_seconds")
         with stage(args, "placement"):
-            worker_manager = wiring.launch_worker_manager(
-                args, transform_specs=partial(startup_cache.configure_specs, args)
-            )
+            worker_manager = wiring.launch_worker_manager(args, transform_specs=partial(serving.configure_specs, args))
         object_store.init_instance(args, contribute_segment=False)
         with stage(args, "serving_startup"):
             inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)

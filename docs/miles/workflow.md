@@ -26,8 +26,8 @@ weights, so retain the original checkpoint for the life of the run.
 ## One configuration, inspection through launch
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/medium.toml
-python -m open_instruct.miles validate configs/miles/examples/medium.toml
+python -m open_instruct.miles plan configs/miles/examples/node.toml
+python -m open_instruct.miles validate configs/miles/examples/node.toml
 ```
 
 `plan` resolves the structured sections into the existing Core configuration and
@@ -85,7 +85,7 @@ for GPU placement, protected runtime and the separate CPU-job rules.
 All commands accept repeatable TOML overrides, for example:
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/small.toml \
+python -m open_instruct.miles plan configs/miles/examples/dev.toml \
   --set training.num_rollouts=20 \
   --set 'tracking.wandb_group="gsm8k-parity-check"'
 ```

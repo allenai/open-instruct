@@ -8,11 +8,11 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
-      "revision": "7e97bc43ff25d080ae4fd0eab1050a79caf80e55"
+      "revision": "6ceda6530625caa5d23e3be8a455c600f62a7338"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "9ea6759fd872e78516decc45a684183f77918e14"
+      "revision": "e17b5c5dd4e4d78322f8f497dc590b4a93d59a0a"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
