@@ -1,0 +1,54 @@
+# H124 (ledger, atomic-think-7b): H122's C11 recipe with one change, <think>/</think> promoted to single tokens
+# (open-instruct #1911: ids 100256/100266 renamed in place, olmo35 template unchanged) and the base's two promoted rows
+# seeded with #1911's mean-of-pieces init (ledger experiments/h124, P1-P3 receipts). Differs from
+# ../../h122/olmo3-7b-c11-s0 only in names, LOAD_PARAMETERS_PATH (the seeded base) and TOKENIZER_PATH (the promoted
+# tokenizer). Data (H122's P1 shards), steps, LR, mesh, labels and image are H122's.
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+
+resources:
+- jobset.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: h124-olmo3-7b-atomic-s0-launcher
+  files:
+  - train_sft.sh # a copy of ../../olmo3-sft/train_sft.sh (kustomize loads no files from outside this directory); keep them identical
+- name: h124-olmo3-7b-atomic-s0-env
+  literals:
+  # Set a unique name before launching; do not resume or overwrite the reference run.
+  - RUN_NAME=olmo3-7b-sft-h124-atomic-s0
+  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
+  # H089's base (gs://.../olmo3-1025-7b/0/items) with rows 100256/100266 of the embedding and output head seeded by #1911's
+  # init, converted with MaxText c469d980's to_maxtext at H089's settings; equal to H089's base in every other value (P3).
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-1025-7b-h124-atomic/0/items
+  - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo35-8b971706-h124-atomic
+  - TRAIN_FILES=/mnt/post-training/data/h122/c11-s0/*.parquet
+  - MODEL_NAME=olmo3-7b
+  - MAXTEXT_SFT_LABELS=prefix
+  - TOTAL_DEVICES=128
+  - GLOBAL_BATCH=16
+  - PER_DEVICE_BATCH=0.125
+  - SEQ_LEN=65536
+  - LR=5e-5
+  - WARMUP_FRAC=0.03
+  - LR_SCHEDULE_STEPS=16304
+  - STEPS=16304
+  - NUM_EPOCH=2
+  - DATA_SEED=0
+  # FSDP 16 x tensor 8: batch shards over fsdp (16 sequences, A0''s data layout), one 64K sequence over 8 chips.
+  # remat_policy=minimal (A0' uses full): 8.85 s/step vs 10.12 with full, the same batches (H089 P5, Amendment 1).
+  # The vocabulary (100,278) does not divide by 8, so the vocab axis is replicated across the tensor group (zero-padding
+  # it costs +3.2 nats/token; see README Traps).
+  - EXTRA_ARGS=logical_axis_rules=[['vocab',[]],['activation_vocab',[]]] sharding_tolerance=0.05 warmup_step_offset=1 z_loss_multiplier=1e-5 enable_checkpointing=true checkpoint_period=300 max_num_checkpoints_to_keep=2 ici_fsdp_parallelism=16 ici_tensor_parallelism=8 num_vocab_tiling=16 remat_policy=minimal attention=flash sa_block_q=512 sa_block_kv=512 sa_block_kv_compute=512 sa_block_q_dkv=512 sa_block_kv_dkv=512 sa_block_kv_dkv_compute=512
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true --xla_tpu_scoped_vmem_limit_kib=16384
+  - TPU_MEGACORE=MEGACORE_DENSE
+  - MAXTEXT_LOG_BATCH_HASH=1 # per-step batch hashes in the log, to check a resume against A0''s batches
+
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+  newTag: 51f8cc4b-p907d86f3-rfb46e215e
