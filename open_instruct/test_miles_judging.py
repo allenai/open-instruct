@@ -42,6 +42,30 @@ def document(tmp_path):
     }
 
 
+@pytest.mark.parametrize("mode", ["managed", "external"])
+@pytest.mark.parametrize("timeout", [None, 37])
+def test_judge_timeout_defaults_and_overrides_reach_request_config(document, monkeypatch, mode, timeout):
+    if mode == "external":
+        document["judges"]["general"] = {
+            "mode": "external",
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "http://judge.example/v1",
+        }
+    if timeout is not None:
+        document["judges"]["general"]["timeout"] = timeout
+    run = RunSpec.from_dict(document)
+    value = judging.registry(run.judges)
+    value["judges"]["general"]["endpoint"] = "http://judge.example/v1"
+    monkeypatch.setenv(judging.REGISTRY_ENV, json.dumps(value))
+    monkeypatch.delenv("OI_MILES_JUDGE_TIMEOUT", raising=False)
+    args = SimpleNamespace(llm_judge_api_base="http://judge.example/v1", llm_judge_timeout=timeout)
+    config, *_ = judge_registry.resolve_request(args, "general-quality", "Question", "Answer", None)
+    expected = 600 if timeout is None else timeout
+    assert config.timeout == general_judge.general_judge_config(args).timeout == expected
+    overridden = RunSpec.from_dict(document, overrides=["judges.general.timeout=45"])
+    assert overridden.judges["judges"]["general"]["timeout"] == 45
+
+
 def test_production_topology_and_growth_are_additive(document):
     run = RunSpec.from_dict(document)
     assert RunSpec.from_dict(run.to_dict()).to_dict() == run.to_dict()

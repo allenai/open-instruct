@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from miles.backends.core_utils import models, standard_models
 
+from miles.backends.core_utils import models, standard_models
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
@@ -95,7 +95,7 @@ def test_profile_defaults_and_explicit_rollback_reach_save_and_load(tmp_path, le
         if legacy
         else []
     )
-    config = RunSpec.load("configs/miles/examples/medium.toml", overrides).compile().core
+    config = RunSpec.load("configs/miles/examples/node.toml", overrides).compile().core
     module = SimpleNamespace(
         _miles_model_backend="moe",
         _miles_checkpoint_options=config.checkpoint_save_options(),

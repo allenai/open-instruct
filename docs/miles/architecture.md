@@ -101,7 +101,7 @@ therefore does not check GPU kernels, distributed gradients or publication.
 The ordinary Open Instruct GPU CI image does not include the private MILES
 runtime; dedicated runtime checks are a separate maintainer validation step.
 
-For a training lifecycle check, copy [small.toml](../../configs/miles/examples/small.toml)
+For a training lifecycle check, copy [dev.toml](../../configs/miles/examples/dev.toml)
 to `runs/`, select a compatible tiny checkpoint, and follow the
 [committed-image launcher](launching.md). Verify the rendered replica group and
 retain image, config and completion artifacts. Test refresh separately when

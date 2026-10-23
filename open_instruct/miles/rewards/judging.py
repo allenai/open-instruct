@@ -13,6 +13,7 @@ from open_instruct.miles.configuration import constraints, validation
 from open_instruct.miles.errors import InputError
 
 REGISTRY_ENV = "OI_MILES_JUDGE_REGISTRY"
+DEFAULT_REQUEST_TIMEOUT = 600
 PROFILES = {
     "open-instruct/" + name: name
     for name in ("general-quality", "general-quality_ref", "general-web_instruct_general_verifier")
@@ -37,7 +38,11 @@ def parse(document):
         mode = service.get("mode")
         if mode not in ("managed", "external"):
             raise InputError("judge mode must be managed or external")
-        for key, default in (("max_context_length", 40960), ("max_concurrent_calls", 16), ("timeout", 120)):
+        for key, default in (
+            ("max_context_length", 40960),
+            ("max_concurrent_calls", 16),
+            ("timeout", DEFAULT_REQUEST_TIMEOUT),
+        ):
             service.setdefault(key, default)
             validation.integer(service[key], f"judges.{name}.{key}")
         if mode == "managed":

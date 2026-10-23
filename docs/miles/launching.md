@@ -35,7 +35,7 @@ replace checkpoint/output paths, usernames and image placeholders.
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/small.toml runs/my-grpo.toml
+cp configs/miles/examples/dev.toml runs/my-grpo.toml
 # Edit name/output.root to use your username and a fresh run path.
 # Select a tiny checkpoint that fits on one trainer GPU; this starter uses two GPUs.
 python -m open_instruct.miles plan runs/my-grpo.toml
@@ -50,7 +50,7 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
-Choose a starter from the four maintained examples and an image built from the
+Choose a starter from the three maintained examples and an image built from the
 intended application revision and runtime lock. Building requires access to the
 private sources described in [architecture](architecture.md#runtime-sources-and-images).
 Supply model/data paths and any secrets needed by your run. Beaker resource
@@ -274,7 +274,7 @@ collective health; local `validate` cannot inspect the future container's networ
 ## Placement, secrets and results
 
 At AI2, GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and
-minimum runtimes of one hour (dev/small), four hours (medium) or eight hours
+minimum runtimes of one hour (dev), four hours (node) or eight hours
 (large). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
 timeout and mounts) and run on Saturn, falling back to Jupiter after canceling
 an unschedulable attempt; not on Holmes.

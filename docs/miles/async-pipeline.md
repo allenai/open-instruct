@@ -74,7 +74,7 @@ a policy boundary; inspect retained token spans and `refresh_scores` observation
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted
-policy lag. Medium and large explicitly select six; synchronous dev/small retain
+policy lag. Node and large inherit six; synchronous dev retains
 zero. Set `async.max_weight_staleness` in structured runs. Configuration files
 also accept `core.max_policy_lag` and `miles.max_weight_staleness` as aliases:
 any explicit value overrides the default, and conflicting explicit values are

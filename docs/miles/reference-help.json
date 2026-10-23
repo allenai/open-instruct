@@ -215,7 +215,7 @@
     "judges.NAME.prepared_dir": "Managed only: required absolute pre-cached judge directory; prepare before GPU allocation.",
     "judges.NAME.revision": "Managed only: required immutable 40-character hexadecimal model revision.",
     "judges.NAME.tensor_parallel_size": "Managed only: positive TP count, default 1.",
-    "judges.NAME.timeout": "Positive seconds per judge request, default 120.",
+    "judges.NAME.timeout": "Positive integer seconds per judge HTTP request, default 600 for managed and external services. Also applies to context-tokenization requests; separate from startup/heartbeat and Beaker job timeouts. Explicit values override the default; see the managed-judges guide.",
     "judging.bindings": "Table mapping verifier names to an explicit judge and rubric pair.",
     "judging.bindings.VERIFIER.judge": "Required name of a declared judge.",
     "judging.bindings.VERIFIER.rubric": "Required name of a declared rubric.",

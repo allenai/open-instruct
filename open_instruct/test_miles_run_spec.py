@@ -367,7 +367,7 @@ def test_explicit_prepared_input_and_tracking_disable(tmp_path):
 def test_all_researcher_examples_compile_to_native_arguments():
     root = Path(__file__).parents[1] / "configs" / "miles"
     paths = sorted((root / "examples").glob("*.toml"))
-    assert {path.stem for path in paths} == {"dev", "small", "medium", "large"}
+    assert {path.stem for path in paths} == {"dev", "node", "large"}
     for path in paths:
         run = RunSpec.load(path)
         config = run.compile()

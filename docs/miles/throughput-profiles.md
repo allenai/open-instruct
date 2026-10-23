@@ -13,12 +13,12 @@ starting values.
 
 ## Choose a profile
 
-Choose among the four [maintained starters](../../configs/miles/examples/README.md).
+Choose among the three [maintained starters](../../configs/miles/examples/README.md).
 Their [generated recipe tables](configuration.md#example-recipes) show GPU
 allocations and batch geometry from the current TOMLs. For the runtime image, see
 the [MILES GRPO guide](grpo.md). Do not transfer a short-context
 no-recomputation setting to long packs without checking memory; the maintained
-medium and large use recomputation and engine admission 64, sized as described
+node and large use recomputation and engine admission 64, sized as described
 below.
 
 ## Size engine admission from memory
@@ -99,7 +99,7 @@ admission is too low.
   include source/configuration identity; new configurations can still start cold.
 * Publish every optimizer step using flattened 1-GiB buckets and per-expert export.
 * In qualified long runs, use `check_weight_update_equal = false`. The optional
-  startup snapshot/reset audit remains enabled in the tiny mechanics examples.
+  startup snapshot/reset audit remains enabled in the dev mechanics example.
   Turning it off does not remove required publication acknowledgments.
 * Leave `core.scoring_pass_required = false`: the recipe selects whether a
   standalone pre-update scoring forward is needed. One optimizer step per

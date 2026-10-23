@@ -10,7 +10,9 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 
 def test_validate_multinode_does_not_assume_a_storage_provider(tmp_path, monkeypatch, capsys):
     root = Path(__file__).resolve().parents[1]
-    payload = RunSpec.load(root / "configs/miles/examples/medium.toml").to_dict()
+    payload = RunSpec.load(root / "configs/miles/examples/node.toml").to_dict()
+    payload["trainer"]["trainer_num_nodes"] = 2
+    assert RunSpec.from_dict(payload).plan()["allocation"]["replicas"] > 1
     payload["output"]["root"] = "/shared/training/run"
     payload["launch"]["weka_mounts"] = []
     config = tmp_path / "run.json"

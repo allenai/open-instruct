@@ -60,16 +60,24 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
     } <= codes
 
 
-@pytest.mark.parametrize("profile,gpus", [("dev", 1), ("small", 2), ("medium", 16), ("large", 56)])
-def test_self_contained_example_plans(profile, gpus):
+@pytest.mark.parametrize(
+    "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 4, 3, 1), ("large", 56, 7, 16, 32, 1)],
+)
+def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
     assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k-less-noise"
-    assert spec.plan()["allocation"]["allocated_gpus"] == gpus
+    layout = spec.plan()["allocation"]
+    assert layout["allocated_gpus"] == gpus
+    assert layout["replicas"] == replicas
+    assert sum(node["trainer_gpus"] for node in layout["nodes"]) == trainer_gpus
+    assert sum(node["rollout_gpus"] for node in layout["nodes"]) == rollout_gpus
+    assert layout["judge_gpus"] == judge_gpus
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
-    assert spec.compile().core.max_policy_lag == (6 if profile in ("medium", "large") else 0)
+    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "large") else 0)
 
 
-@pytest.mark.parametrize("profile", ["medium", "large"])
+@pytest.mark.parametrize("profile", ["node", "large"])
 def test_learning_examples_separate_transport_capacity_and_qualification(profile):
     config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
     plan = config.plan()
@@ -77,24 +85,23 @@ def test_learning_examples_separate_transport_capacity_and_qualification(profile
     assert capacity["global_http_slots"] == 2 * capacity["requested_engine_slots"]
     assert capacity["producer_sample_budget"] >= capacity["global_http_slots"]
     assert capacity["completed_buffer_samples"] == capacity["samples_per_collection"]
-    assert config.miles["check_weight_update_equal"] is False
+    assert "--check-weight-update-equal" not in config.arguments()
     assert plan["scoring_pass"]["standalone"] is False
     assert plan["scoring_pass"]["check_interval"] == 0
     assert not config.core.replay_diagnostics and config.core.diagnostic_interval == 0
     assert config.miles["save_interval"] == 25
 
 
-@pytest.mark.parametrize("profile", ["dev", "small"])
-def test_mechanics_examples_retain_weight_qualification(profile):
-    config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
+def test_dev_retains_weight_qualification():
+    config = RunSpec.load("configs/miles/examples/dev.toml").compile()
     assert config.miles["check_weight_update_equal"] is True
 
 
 def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
     with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
-        RunSpec.load("configs/miles/examples/medium.toml", ["inference.global_batch_size=128"])
+        RunSpec.load("configs/miles/examples/node.toml", ["inference.global_batch_size=128"])
     config = RunSpec.load(
-        "configs/miles/examples/medium.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+        "configs/miles/examples/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
     ).compile()
     decision = config.plan()["scoring_pass"]
     assert decision["standalone"] is True

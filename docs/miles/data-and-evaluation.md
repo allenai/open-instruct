@@ -22,7 +22,7 @@ generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/d
 `gsm8k_original` remains a compatibility alias for the same pinned dataset,
 retaining its historical sampling seed convention.
 
-The maintained dev and small examples use `gsm8k-less-noise`, which selects
+The maintained dev example uses `gsm8k-less-noise`, which selects
 [`techarb/gsm8k-cleaner`](https://huggingface.co/datasets/techarb/gsm8k-cleaner), an
 **informally cleaned variant that has not been rigorously validated**. It has 39
 corrected targets and omits 93 problems judged ambiguous or unreliable, leaving
@@ -43,9 +43,10 @@ runs reuse their recorded data unchanged. For named source datasets, the `train`
 component in `prepared_sample_id` identifies the source split, including when the
 row is assigned to this run's held-out partition; it is not a training assignment.
 
-The [multitask example](../../configs/miles/examples/medium.toml) mixes
-GSM8K and math; it is not the complete published Olmo 3 mixture.
-Use manifest adoption for broader data. Unsupported task/verifier contracts fail
+The [single-node example](../../configs/miles/examples/node.toml) takes prepared
+mixed math, instruction-following, code and general-task JSONL with a verifier
+registry; its placeholder paths do not identify the complete published Olmo 3 mixture.
+Use manifest adoption when starting from dataset manifests. Unsupported task/verifier contracts fail
 rather than silently substituting a different judge or reward.
 
 The trusted verifier registry names factories and configurations; individual
@@ -95,7 +96,7 @@ ledger. Their prompts remain eligible on later dataset passes.
 Filtering saves trainer work but still pays generation and verification costs.
 A low acceptance rate increases collection time; if every group is rejected,
 collection waits for useful data and cannot advance the policy. The tiny `dev`
-and `small` mechanics examples therefore explicitly set this switch to false.
+mechanics example therefore explicitly sets this switch to false.
 Monitor `rollout/dynamic_filter/drop_zero_std_0.0`,
 `rollout/dynamic_filter/drop_zero_std_1.0` and the corresponding counters for other
 constant rewards, together with trainer wait time and accepted task proportions.
@@ -182,7 +183,7 @@ Judge transport failures and invalid or incomplete replies default to zero
 reward after retries, with a warning and per-sample `judge_error` diagnostics.
 Set `OI_MILES_JUDGE_FAILURE_POLICY="raise"` in `[launch.env]` to stop on those
 failures. Detected context overflow and configuration errors raise regardless
-of that fallback policy. The medium and large examples explicitly select
+of that fallback policy. The node and large examples explicitly select
 `"zero"` for both judge and code-service failures; change those settings to opt
 into strict handling. Managed judge health-check failures separately stop
 training; the fallback applies to grading requests.
