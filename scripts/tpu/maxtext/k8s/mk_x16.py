@@ -21,6 +21,8 @@ def make(h, run, smoke):
         subs = []
         if f == "kustomization.yaml":
             period = "100000" if smoke else "150"
+            keep10 = (h, run) == ("h076", "lr2x-s0") and not smoke  # 10-23 ruling: new production overlays keep >=10 at period 200
+            if keep10: period = "200"
             subs = [("  - TOKENIZER_PATH=", "  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32\n  - TOKENIZER_PATH="),
                     ("  - TOTAL_DEVICES=128\n", "  - TOTAL_DEVICES=1024\n"),
                     ("  - PER_DEVICE_BATCH=0.125\n", "  - PER_DEVICE_BATCH=0.015625\n"),
@@ -31,6 +33,9 @@ def make(h, run, smoke):
             t = t.replace(" checkpoint_period=300 ", f" checkpoint_period={period} ").replace(
                 " checkpoint_period=200 ", f" checkpoint_period={period} ")
             assert f" checkpoint_period={period} " in t
+            if keep10:
+                t = t.replace(" max_num_checkpoints_to_keep=2 ", " max_num_checkpoints_to_keep=10 ")
+                assert " max_num_checkpoints_to_keep=10 " in t
             if "MAXTEXT_LOG_BATCH_HASH=1" not in t:
                 subs.append(("  - TOKENIZER_PATH=", "  - MAXTEXT_LOG_BATCH_HASH=1\n  - TOKENIZER_PATH="))
             if smoke:
