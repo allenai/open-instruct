@@ -31,7 +31,10 @@ def check(name, tokenizer):
 def main(argv):
     if argv[:1] == ["config"]:
         tc = TokenizerConfig(
-            tokenizer_name_or_path=TOKENIZER, tokenizer_revision=REVISION, reserved_slot_tokens=["<think>", "</think>"]
+            tokenizer_name_or_path=TOKENIZER,
+            tokenizer_revision=REVISION,
+            chat_template_name="olmo35",
+            reserved_slot_tokens=["<think>", "</think>"],
         )
         return check(f"{TOKENIZER}@{REVISION}+reserved_slots", tc.tokenizer)
     if argv[:1] == ["dir"] and len(argv) > 1:
