@@ -438,6 +438,7 @@ case "$MODE" in
         $EXTRA_BUCKET_FLAGS \
         --env OLMO_SHARED_FS=1 \
         ${EXPECTED_NUMPY_CACHE:+--env EXPECTED_NUMPY_CACHE=$EXPECTED_NUMPY_CACHE} \
+        ${MASON_EXTRA_ENV:-} \
         -- torchrun \
         --nnodes=$NNODES \
         $RDZV_FLAGS \

@@ -40,6 +40,9 @@ case "$ARM_TAG" in
     *) echo "Unknown arm: $ARM_TAG" >&2; exit 1 ;;
 esac
 export ROW_ALIGNED_PARTS=1 DOCB=1
+# oe-adapt-default is full (10-23): mason's HF_* caches there fail with ENOSPC while datasets reads the parquets.
+HF_ROOT=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache
+export MASON_EXTRA_ENV="--env HF_HOME=$HF_ROOT/huggingface --env HF_DATASETS_CACHE=$HF_ROOT/huggingface --env HF_HUB_CACHE=$HF_ROOT/hub"
 export H038_CACHE="${C11_CACHE:-}"
 export DATA_LOADER_SEED="$SEED" MAX_RETRIES=1 PRIORITY=high PREEMPTIBLE=0 JOB_TIMEOUT="${HOURS}h"
 export MIN_RUNTIME="${C11_MIN_RUNTIME:-1h}"; unset AUTO_RESUME

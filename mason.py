@@ -364,19 +364,17 @@ def get_env_vars(
 
     # if all cluster is in weka, we mount the weka
     if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
-        env_vars.extend(
-            [
-                beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
-                beaker.BeakerEnvVar(
-                    name="HF_DATASETS_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"
-                ),
-                beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
-                beaker.BeakerEnvVar(
-                    name="CHECKPOINT_OUTPUT_DIR",
-                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
-                ),
-            ]
-        )
+        # An explicit --env of the same name (e.g. HF_HOME off a full bucket) replaces these defaults.
+        weka_env_vars = [
+            beaker.BeakerEnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
+            beaker.BeakerEnvVar(name="HF_DATASETS_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
+            beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
+            beaker.BeakerEnvVar(
+                name="CHECKPOINT_OUTPUT_DIR",
+                value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+            ),
+        ]
+        env_vars.extend(v for v in weka_env_vars if v.name not in additional_env_var_names)
         if num_nodes > 1:
             env_vars.extend(
                 [
