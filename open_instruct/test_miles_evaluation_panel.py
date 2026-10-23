@@ -1,0 +1,164 @@
+"""Post-training panel configuration, execution boundaries and completion checks."""
+
+import copy
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.errors import InputError
+from open_instruct.miles.evaluation import evaluation, evaluation_runner
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def large():
+    return RunSpec.load(ROOT / "configs/miles/examples/large.toml")
+
+
+def test_large_panel_preserves_protocols_and_before_after_cadence(large):
+    tasks = large.evaluation["tasks"]
+    assert len(tasks) == len({task["task"] for task in tasks}) == 25
+    assert all(not task["generation"] and not task["scoring"] for task in tasks)
+    milestones = large.plan()["evaluation"]["milestones"]
+    assert [point["update"] for point in milestones] == [0, 200]
+    assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
+    assert len(milestones[0]["groups"]) == 5
+    # Extending the run keeps the existing positive-interval semantics.
+    assert evaluation.groups(large.evaluation, 999, 2500) == []
+    assert sum(map(len, evaluation.groups(large.evaluation, 1000, 2500))) == 25
+    assert sum(map(len, evaluation.groups(large.evaluation, 2500, 2500))) == 25
+
+
+def test_panel_groups_keep_execution_requirements_separate(large):
+    groups = evaluation.groups(large.evaluation, 0, 200)
+    assert sorted(map(len, groups)) == [1, 1, 1, 5, 17]
+    for group in groups:
+        for task in group:
+            assert task.get("harness", {}) == group[0].get("harness", {})
+            assert task.get("harness_preset", "default") == group[0].get("harness_preset", "default")
+            assert task.get("kind", "task") == group[0].get("kind", "task")
+
+
+@pytest.mark.parametrize(
+    "patch, message",
+    [
+        ({"harness": {"provider.model": "other"}}, "frozen checkpoint"),
+        ({"harness": {"provider": {"model": "other"}}}, "frozen checkpoint"),
+        ({"harness": []}, "override"),
+        ({"harness_preset": ""}, "nonempty"),
+        ({"harness": {"auxiliary_providers.judge.api_key": "token"}}, "secrets"),
+        ({"kind": "unknown"}, "kind"),
+        ({"arguments": {}}, "kind=external"),
+        ({"task": "unsupported", "kind": "external"}, "Only scicode"),
+        ({"task": "scicode", "kind": "external", "arguments": {"split": "test"}}, "validation"),
+        ({"task": "scicode", "kind": "external", "arguments": {"split": "validation"}}, "reference data"),
+    ],
+)
+def test_invalid_panel_settings_fail_before_launch(large, patch, message):
+    config = copy.deepcopy(large.evaluation)
+    config["tasks"] = [{"task": "ifeval", **patch}]
+    with pytest.raises(InputError, match=message):
+        evaluation.parse(config, large.launch)
+
+
+def test_harness_options_precede_task_overrides(large):
+    task = next(task for task in large.evaluation["tasks"] if task["task"] == "harmbench:wg_judge_thinking")
+    task = {**task, "scoring": {"limit": 2}}
+    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
+    index = args.index("--task")
+    assert "auxiliary_providers.wg_judge.model=allenai/wildguard" in args[:index]
+    assert "provider.base_url=http://127.0.0.1:30000/v1" in args[:index]
+    assert "limit=2" in args[index:]
+
+
+def test_scicode_uses_external_cli_with_frozen_server(large):
+    task = next(task for task in large.evaluation["tasks"] if task["task"] == "scicode")
+    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
+    assert args[:2] == ["olmo-eval", "run-external"]
+    assert args[args.index("--model") + 1] == "/frozen/hf"
+    assert args[args.index("--base-url") + 1] == "http://127.0.0.1:30000/v1"
+    assert 'split="validation"' in args
+    assert "--task" not in args
+
+
+def test_sandbox_environment_is_only_enabled_for_code_jobs(large):
+    for group in evaluation.groups(large.evaluation, 0, 200):
+        receipt = {
+            "evaluation": evaluation.runtime(large, large.compile().miles),
+            "training": {"name": large.name},
+            "update": 0,
+            "tasks": group,
+            "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+        }
+        job = evaluation.specification(receipt)["tasks"][0]
+        env = {item["name"]: item.get("value") for item in job["envVars"]}
+        sandbox = group[0]["task"] in ("scicode", "livecodebench:lite")
+        assert env.get("BEAKER_ALLOW_SUBCONTAINERS") == ("1" if sandbox else None)
+        assert job["context"] == {"priority": "high", "autoResume": True}
+
+
+@pytest.fixture
+def scicode_result(tmp_path):
+    result = {
+        "name": "scicode",
+        "success": True,
+        "metrics": {"sub_step_accuracy": 0.0, "num_problems": 1, "num_sub_steps": 1},
+        "predictions": [
+            {
+                "problem_id": "1",
+                "total": 1,
+                "step_results": [False],
+                "step_codes": {"0": "bad code"},
+                "step_texts": {"0": "response"},
+            }
+        ],
+    }
+    path = tmp_path / "scicode_results.json"
+    path.write_text(json.dumps(result))
+    evaluation_runner.write_json(
+        tmp_path / "metrics.json",
+        {"tasks": [{"task": "scicode", "metrics": {"sub_step_accuracy": {"external": 0.0}}}]},
+    )
+    return path, result
+
+
+def test_scicode_accepts_scored_wrong_answers_without_model_output(scicode_result):
+    path, _ = scicode_result
+    assert evaluation_runner.completed_scores(path.parent, [{"task": "scicode"}]) == {
+        "eval/scicode/sub_step_accuracy/external": 0.0
+    }
+
+
+@pytest.mark.parametrize("failure", ("problem_error", "missing_step", "empty", "count_mismatch", "failed"))
+def test_scicode_rejects_infrastructure_errors_even_with_numeric_scores(scicode_result, failure):
+    path, result = scicode_result
+    if failure == "problem_error":
+        result["predictions"][0]["error"] = "Sandbox startup failed"
+    elif failure == "missing_step":
+        result["predictions"][0]["step_texts"] = {}
+    elif failure == "empty":
+        result["predictions"] = []
+    elif failure == "count_mismatch":
+        result["metrics"]["num_problems"] = 2
+    else:
+        result["success"] = False
+    path.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match="SciCode"):
+        evaluation_runner.completed_scores(path.parent, [{"task": "scicode"}])
+
+
+def test_mixed_group_requires_predictions_for_every_task(scicode_result, tmp_path):
+    path, _ = scicode_result
+    group = tmp_path / "group"
+    complete = group / "complete"
+    complete.mkdir(parents=True)
+    (complete / path.name).write_bytes(path.read_bytes())
+    missing = group / "missing"
+    missing.mkdir()
+    evaluation_runner.write_json(group / "task-results.json", ["complete", "missing"])
+    with pytest.raises(ValueError, match="No evaluation predictions"):
+        evaluation_runner.validate_predictions(group)

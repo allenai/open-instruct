@@ -94,12 +94,48 @@ def parse(value, launch):
         raise InputError("evaluation.tasks must be a nonempty list of olmo-eval tasks")
     names = set()
     for task in tasks:
-        if not isinstance(task, dict) or set(task) - {"task", "interval", "generation", "scoring"}:
-            raise InputError("evaluation.tasks accept task, interval, generation and scoring")
+        if not isinstance(task, dict) or set(task) - {
+            "task",
+            "interval",
+            "generation",
+            "scoring",
+            "harness",
+            "harness_preset",
+            "kind",
+            "arguments",
+        }:
+            raise InputError(
+                "evaluation.tasks accept task, interval, generation, scoring, harness, harness_preset, kind and arguments"
+            )
         name = task.get("task")
         if not isinstance(name, str) or not name or name in names:
             raise InputError("evaluation task names must be nonempty and unique")
         names.add(name)
+        kind = task.get("kind", "task")
+        if kind not in ("task", "external"):
+            raise InputError("evaluation task kind must be task or external")
+        if kind == "external":
+            if name != "scicode":
+                raise InputError("Only scicode external evaluation has a supported artifact validation contract")
+            if any(task.get(key) for key in ("generation", "scoring", "harness", "harness_preset")):
+                raise InputError(
+                    "External evaluation uses arguments instead of generation, scoring or harness settings"
+                )
+            arguments = task.get("arguments", {})
+            if not isinstance(arguments, dict) or arguments.get("split") != "validation":
+                raise InputError("SciCode development evaluation requires arguments.split=validation")
+            if not isinstance(arguments.get("h5py_host_path"), str) or not arguments["h5py_host_path"]:
+                raise InputError("SciCode requires arguments.h5py_host_path for its reference data")
+        elif "arguments" in task:
+            raise InputError("evaluation task arguments require kind=external")
+        preset = task.get("harness_preset", "default")
+        if not isinstance(preset, str) or not preset:
+            raise InputError("evaluation task harness_preset must be a nonempty string")
+        harness = task.get("harness", {})
+        if not isinstance(harness, dict) or any(not isinstance(key, str) or not key for key in harness):
+            raise InputError("evaluation task harness must be a table of flat olmo-eval harness overrides")
+        if any(key == "provider" or key.startswith("provider.") for key in harness):
+            raise InputError("evaluation task harness cannot override the frozen checkpoint provider")
         task.setdefault("interval", value["interval"])
         if type(task["interval"]) is not int or task["interval"] < 1:
             raise InputError("evaluation task interval must be a positive integer")
@@ -121,7 +157,15 @@ def groups(config, update, total):
         due = config["initial"] if update == 0 else update % task["interval"] == 0
         due = due or (update == total and config["final"])
         if due:
-            key = json.dumps(task["generation"], sort_keys=True)
+            key = json.dumps(
+                {
+                    "generation": task["generation"],
+                    "kind": task.get("kind", "task"),
+                    "harness_preset": task.get("harness_preset", "default"),
+                    "harness": task.get("harness", {}),
+                },
+                sort_keys=True,
+            )
             selected.setdefault(key, []).append(task)
     return list(selected.values())
 
@@ -185,6 +229,15 @@ def specification(receipt):
     payload = base64.b64encode(json.dumps(receipt).encode()).decode()
     source = base64.b64encode(runner).decode()
     setup = f"import base64,pathlib; pathlib.Path('/tmp/evaluate.py').write_bytes(base64.b64decode({source!r})); pathlib.Path('/tmp/evaluation.json').write_bytes(base64.b64decode({payload!r}))"
+    sandbox = any(
+        task.get("kind") == "external" or task.get("harness_preset") == "codex_python"
+        for task in receipt.get("tasks", [])
+    )
+    sandbox_env = (
+        [{"name": name, "value": "1"} for name in ("BEAKER_ALLOW_SUBCONTAINERS", "BEAKER_SKIP_DOCKER_SOCKET")]
+        if sandbox
+        else []
+    )
     return {
         "version": "v2",
         "budget": config["budget"],
@@ -203,7 +256,8 @@ def specification(receipt):
                 "constraints": {"cluster": [config["cluster"]]},
                 "context": {"priority": "high", "autoResume": True},
                 "timeout": config["timeout"],
-                "envVars": [{"name": name, "secret": secret} for name, secret in config["secrets"].items()],
+                "envVars": sandbox_env
+                + [{"name": name, "secret": secret} for name, secret in config["secrets"].items()],
             }
         ],
     }

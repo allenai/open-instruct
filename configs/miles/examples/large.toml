@@ -55,10 +55,12 @@ save_interval = 25
 
 [evaluation]
 mode = "background"
-interval = 50
+# Initial/final for this 200-update run; every 1,000 updates if extended.
+interval = 1000
 initial = true
 final = true
-image = "01M45DMWV3FEH7TNAXKZWR2DF2"
+# Sandbox-enabled evaluator; full-panel GPU qualification remains required.
+image = "01M5KSXYY6BENK3GH8WV8B8KK0"
 revision = "710b2b5dab6ea09764c02647f3a4e72819b9ee7c"
 gpus = 1
 cluster = "ai2/holmes"
@@ -67,19 +69,118 @@ timeout = "3h"
 server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--context-length", "34816"]
 
 [[evaluation.tasks]]
-task = "gsm8k"
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
-scoring = { limit = 128, num_fewshot = 0 }
+# Post-training development panel. Keep upstream sampling and full dataset sizes.
+# Seven AIME/HMMT variants preserve pass@32 with a 16K response budget.
+task = "aime_2022:pass_at_32:16k"
 
 [[evaluation.tasks]]
-task = "gsm8k:platinum"
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
-scoring = { limit = 128, num_fewshot = 0 }
+task = "aime_2023:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2024:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2025:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2026:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "hmmt_nov_2025:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "hmmt_feb_2026:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "gpqa_diamond"
+
+[[evaluation.tasks]]
+task = "gpqa_main:cot"
+
+[[evaluation.tasks]]
+task = "omega_500:hillclimb"
+
+[[evaluation.tasks]]
+task = "omega_500_out"
+
+[[evaluation.tasks]]
+task = "ifeval"
+
+[[evaluation.tasks]]
+task = "ifeval_mt_wildchat_unused_withRewrite"
+
+[[evaluation.tasks]]
+task = "ifeval_mt_ood_wildchat_unused_withRewrite"
 
 [[evaluation.tasks]]
 task = "ifeval_ood"
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
-scoring = { limit = 128 }
+
+[[evaluation.tasks]]
+task = "livecodebench:lite"
+harness_preset = "codex_python"
+
+[[evaluation.tasks]]
+task = "scicode"
+kind = "external"
+arguments = { split = "validation", h5py_host_path = "/weka/oe-adapt-default/YOUR_USERNAME/scicode/test_data.h5" }
+
+# Text safety for reasoning models. These are separately provisioned evaluation
+# judge endpoints, not the training reward judge. Replace both YOUR_*_HOST names.
+[[evaluation.tasks]]
+task = "do_anything_now:wg_judge_thinking"
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "harmbench:wg_judge_thinking"
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "wildguardtest:wg_judge_thinking"
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "wildjailbreak:wg_judge_thinking"
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "xstest:wg_judge_thinking"
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.base_url" = "http://YOUR_WILDGUARD_HOST:8000/v1"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "wmdp:mcq"
+
+[[evaluation.tasks]]
+task = "bbq:mcq"
+
+[[evaluation.tasks]]
+task = "strongreject:sr_judge_thinking"
+[evaluation.tasks.harness]
+"auxiliary_providers.sr_judge.kind" = "vllm_server"
+# Endpoint serves Gemma-2B with the strongreject adapter enabled as model strongreject.
+"auxiliary_providers.sr_judge.model" = "strongreject"
+"auxiliary_providers.sr_judge.tokenizer" = "qylu4156/strongreject-15k-v1"
+"auxiliary_providers.sr_judge.base_url" = "http://YOUR_STRONGREJECT_HOST:8000/v1"
+"auxiliary_providers.sr_judge.kwargs.add_bos_token" = true
 
 [trainer]
 gpus = 4

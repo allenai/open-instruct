@@ -91,8 +91,14 @@ including general-quality tasks, prepared according to the
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;
-overlapping jobs can increase that total. Configure the intended evaluation tasks
-and credentials: the starter benchmarks do not cover code or general-task quality.
+overlapping jobs can increase that total. Its 25-entry post-training development
+and text-safety panel runs on the initial/final checkpoints for the 200-update
+template, and every 1,000 updates if extended. It preserves pinned task sampling
+and full evaluation sizes. Configure the separate WildGuard/StrongREJECT judge
+endpoints and SciCode reference-data path. Code tasks need the sandbox-enabled
+evaluator image. The full panel still requires GPU/sandbox qualification and
+measured resource bounds; the starter three-hour evaluator timeout is not a
+measured full-panel budget.
 With offline W&B, sync training and manually publish the retained evaluation results.
 Snapshot cleanup is manual after all referencing jobs stop. See
 [background evaluation](../../../docs/miles/background-evaluation.md) for the
