@@ -14,6 +14,8 @@ Writes, per data-order seed s in {0, 1}:
   h123/pf-a0dc-x16-s<s>/ the same preflight on the registered x16 placement (8x8x16, fsdp16 x ep64, factor 5.0, r2 data
                         emulation 8:2:128:32 so every batch is the 4x4x8 run's), as mk_h123.py builds it."""
 import pathlib
+
+import gcsfs_patch  # default restore-only gcsfs retry patch on every 8x8x16 overlay
 import sys
 
 K = pathlib.Path(sys.argv[1])
@@ -97,4 +99,5 @@ for s in (0, 1):
                         ("completions: 32", "completions: 256"),
                         ("cloud.google.com/gke-tpu-topology: 4x4x8", "cloud.google.com/gke-tpu-topology: 8x8x16")), f"pf-a0dc-x16-s{s}")
         (x16 / f).write_text(t)
+    gcsfs_patch.apply(x16)
     print(x16)
