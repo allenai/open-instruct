@@ -19,7 +19,7 @@ from pathlib import Path
 
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import task_verifiers
+from open_instruct.miles.rewards import judging, task_verifiers
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -503,6 +503,13 @@ def prepare_data(
     for split, rows in partitions.items():
         for index, row in enumerate(rows, 1):
             try:
+                if registry_overrides is not None:
+                    metadata = row.get("metadata", {})
+                    verifiers = metadata.get("verifiers", []) if isinstance(metadata, dict) else []
+                    if isinstance(verifiers, list):
+                        for verifier in verifiers:
+                            if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
+                                judging.require_binding(name, registry_overrides, known.get(name))
                 _verify_row(row, tokenizer, max_prompt_length, known)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error

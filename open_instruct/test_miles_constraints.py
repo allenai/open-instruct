@@ -18,7 +18,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 
 ROOT = Path(__file__).resolve().parents[1]
-SMALL = ROOT / "configs/miles/examples/small.toml"
+DEV = ROOT / "configs/miles/examples/dev.toml"
 
 
 @pytest.mark.parametrize(
@@ -80,9 +80,9 @@ def test_native_collection_preserves_explicit_only_options_and_false_values():
 )
 def test_structured_cli_constraints_still_stop_before_training(override, category):
     with pytest.raises(InputError, match=category.value):
-        RunSpec.load(SMALL, [override])
+        RunSpec.load(DEV, [override])
     result = subprocess.run(
-        [sys.executable, "-m", "open_instruct.miles", "plan", str(SMALL), "--set", override],
+        [sys.executable, "-m", "open_instruct.miles", "plan", str(DEV), "--set", override],
         capture_output=True,
         text=True,
         timeout=20,

@@ -17,7 +17,7 @@ queue additional collections or wait at shutdown.
 
 The [large example](../../configs/miles/examples/large.toml) opts into background
 evaluation with the published image, separate one-GPU jobs and starter GSM8K,
-GSM8K-Platinum and IFBench tasks. Dev, small and medium retain shared-engine
+GSM8K-Platinum and IFBench tasks. Dev and node retain shared-engine
 evaluation, which also remains the low-level default. The large template is
 provisional; check evaluator compatibility for the full model. Remove explicit
 shared settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
@@ -74,6 +74,10 @@ ID; never configure a separate evaluation run.
 `gsm8k:platinum` uses olmo-eval's pinned GSM8K-Platinum dataset variant. The
 large example evaluates it alongside `gsm8k` with the same zero-shot, greedy
 settings and per-task limit. Both retain separate scores and predictions.
+The example uses an 8,192-token evaluation response budget, independently of its
+32,768-token training response budget. Empty `stop_sequences` overrides GSM8K's
+default blank-line stop so it does not truncate reasoning there. `ifeval_ood` is
+IFBench; the pinned evaluator has no task named `ifeval`.
 
 Generation overrides map to olmo-eval's flat per-task sampling overrides
 (for example `-o max_tokens=2048`, not a nested `sampling_params` table); scoring maps to
