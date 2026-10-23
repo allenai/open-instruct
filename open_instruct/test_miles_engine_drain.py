@@ -62,3 +62,26 @@ def test_timeline_audit_does_not_confuse_phase_sums_with_overlap():
     assert len(result["fast_reopened_while_older_peer_drained"]) == 1
     assert [r["rollout_id"] for r in result["optimizer_completions_during_publication"]] == [1]
     assert result["generated_tokens_observed"] == 10
+
+
+@pytest.mark.parametrize(
+    "external",
+    [
+        {"rollout_external_engine_addrs": ["localhost:30000"]},
+        {"custom_inference_engine_provider_path": "custom.provider"},
+    ],
+)
+def test_engine_drain_rejects_external_pool_inputs(external):
+    config = RunConfig(
+        CoreConfig(publication_mode="engine_drain", max_policy_lag=2),
+        dict(
+            hf_checkpoint="/fixture/hf",
+            global_batch_size=4,
+            rollout_batch_size=2,
+            n_samples_per_prompt=2,
+            fully_async=True,
+        )
+        | external,
+    )
+    with pytest.raises(ValueError, match="external rollout"):
+        config.validate()

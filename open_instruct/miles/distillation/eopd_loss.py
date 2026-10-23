@@ -10,7 +10,7 @@ runtime patch adds ``metadata`` to the Megatron train-step batch keys. Settings 
 """
 
 import torch
-from miles.backends.training_utils.loss_hub import logit_processors, losses
+from miles.backends.training_utils.loss.hub import logit_processors, losses
 from miles.backends.training_utils.parallel import get_parallel_state
 from torch import distributed
 

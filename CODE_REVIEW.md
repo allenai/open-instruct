@@ -12,6 +12,19 @@ Approve a completed review when there are no blocking concerns, even if non-bloc
 comments remain. For those comments, defer to the author's judgment and make the
 recommendation clear. Minor issues and stylistic preferences must not hold up approval.
 
+Missing local test tools, unavailable dependencies, or inability to reproduce a
+training run do not by themselves make a code review incomplete or prevent approval.
+Report these verification limits separately; CI and runtime validation complement
+the review. If missing evidence prevents a decision, identify the specific
+correctness question and the evidence needed to resolve it.
+
+On a follow-up review, reassess each previous blocking finding against the current
+code and state whether it is resolved, still present, or cannot yet be assessed,
+with supporting evidence. Also check the current diff for new issues. When the
+previous blockers are resolved and no new blockers remain, approve explicitly
+rather than only commenting that the code looks good. If a decision still cannot
+be made, explain the specific unresolved concern.
+
 ## Review output
 
 For each finding, give a severity, the repository path and line at the PR head,
