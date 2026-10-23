@@ -6,7 +6,7 @@ Writes, per data-order seed s in {0, 1}:
                        drop-count image changed. Mesh (fsdp16 x ep8), factor 2.5, LR 5e-5, schedule, NUM_EPOCH,
                        DATA_SEED and checkpoint_period are A0''s. The image is the one H083's gc32 qualifies; if gc32
                        fails, H123 stays blocked (#629) and this tag is not used against A0'.
-  h123/pf-ep8-s<s>/    disposable steps 1-6 preflight on the candidate mesh: if4c-s<s> with STEPS=6, scratch output,
+  h123/pf-ep8-s<s>/    disposable 20-step preflight (step-1 CE, BATCH-HASH 1-20, CE 1-6) on the candidate mesh: if4c-s<s> with STEPS=6, scratch output,
                        no checkpoints, maxRestarts 0 and load_balance_loss_weight=0 (#620: the reference differs in EP).
   h123/pf-x16-s<s>/    the same preflight on the registered x16 placement (8x8x16, fsdp16 x ep64, factor 5.0, r2 data
                        emulation 8:2:128:32 so every batch is the 4x4x8 run's), as mk_x16.py builds it."""
@@ -57,7 +57,7 @@ for s in (0, 1):
         if f == "kustomization.yaml":
             t = sub(t, (
                 ("  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs\n", "  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch\n"),
-                ("  - STEPS=11768\n", "  - STEPS=6\n"),
+                ("  - STEPS=11768\n", "  - STEPS=20\n"),   # BATCH-HASH n=1..20 against the CPU replay; CE compared on 1-6
                 (" checkpoint_period=300 ", " checkpoint_period=100000 "),
                 (" emo_enabled=false ", " emo_enabled=false load_balance_loss_weight=0 ")), f"pf-ep8-s{s}")
             assert "  - LR_SCHEDULE_STEPS=11768\n" in t
@@ -70,7 +70,7 @@ for s in (0, 1):
     x16 = K / "h123" / f"pf-x16-s{s}"
     x16.mkdir(exist_ok=True)
     for f in FILES:
-        t = (ep8 / f).read_text().replace(f"h123-pf-ep8-s{s}", f"h123-pf-x16-s{s}")
+        t = (ep8 / f).read_text().replace(f"h123-pf-ep8-s{s}", f"h123-pf-x16-s{s}").replace("  - STEPS=20\n", "  - STEPS=6\n")
         if f == "kustomization.yaml":
             t = sub(t, (
                 ("  - MAXTEXT_LOG_BATCH_HASH=1\n", "  - MAXTEXT_LOG_BATCH_HASH=1\n  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32\n"),
