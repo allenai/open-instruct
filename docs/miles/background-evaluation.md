@@ -17,10 +17,15 @@ queue additional collections or wait at shutdown.
 
 The [large example](../../configs/miles/examples/large.toml) opts into background
 evaluation with a pinned sandbox-enabled image and the 25-entry post-training
-development/text-safety panel. Its interval of 1,000 optimizer updates gives
-initial and final evaluation for the template's 200-update run. Extending the run
-also enables evaluation every 1,000 updates. Intervals remain positive integers;
-omitting the field retains the default cadence rather than disabling it.
+development/text-safety panel. It sets `interval=0`, `initial=true` and `final=true`
+to evaluate the full panel before and after training only, including when the run
+is extended. Zero disables periodic evaluation; it does not disable either endpoint.
+Positive intervals count completed optimizer updates, not rollout collections.
+Omitting `interval` retains the default of 20 updates. Task-level intervals override
+the global value: a task can opt into periodic evaluation under a global zero, or
+set zero to opt out under a positive global interval. The global `initial` and
+`final` flags still apply to every task. With both flags false and all intervals
+zero, no background evaluations or evaluation snapshots are scheduled.
 Dev and node retain shared-engine
 evaluation, which also remains the low-level default. The large template is
 provisional; check evaluator compatibility for the full model. Remove explicit
@@ -32,7 +37,7 @@ when selecting background mode. Evaluation tasks are independent of training
 ```toml
 [evaluation]
 mode = "background"
-interval = 20                 # Completed optimizer updates, not collections
+interval = 0                  # Initial/final only; positive values enable periodic evaluation
 initial = true
 final = true
 image = "IMMUTABLE_BEAKER_IMAGE_ID" # Replace with a compatible evaluator image
@@ -83,6 +88,18 @@ create synthetic cross-benchmark aggregate scores. It retains full task sizes
 and sampling defaults from the pinned olmo-eval revision, including AIME/HMMT
 pass@32 with 16K responses. The pinned IFBench defaults differ from newer upstream
 revisions; changing the image/revision can change the benchmark protocol.
+
+Use the full panel at the initial and final checkpoints for official comparisons.
+The example above shows how one task can additionally run every 100 updates; its
+`scoring.limit` applies at every scheduled point, including initial and final.
+The large template has no such limits or periodic overrides. Progress subsets are
+not enabled by default: fewer prompts still incur separate-job and judge startup
+costs. If adding a periodic development panel, choose fixed example IDs with a
+documented seed and relevant category coverage, and distinguish its metrics from
+the full-panel scores. A simple `limit` is not a seeded or stratified sample, and
+this configuration does not switch sampling/scoring settings between endpoints
+and periodic points. Keep release held-out evaluation separate from development
+metrics used to select recipes or checkpoints.
 
 Generation overrides map to olmo-eval's flat per-task sampling overrides
 (for example `-o max_tokens=2048`, not a nested `sampling_params` table); scoring maps to

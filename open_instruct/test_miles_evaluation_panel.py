@@ -3,7 +3,9 @@
 import copy
 import hashlib
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,10 +29,84 @@ def test_large_panel_preserves_protocols_and_before_after_cadence(large):
     assert [point["update"] for point in milestones] == [0, 200]
     assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
     assert len(milestones[0]["groups"]) == 5
-    # Extending the run keeps the existing positive-interval semantics.
-    assert evaluation.groups(large.evaluation, 999, 2500) == []
-    assert sum(map(len, evaluation.groups(large.evaluation, 1000, 2500))) == 25
-    assert sum(map(len, evaluation.groups(large.evaluation, 2500, 2500))) == 25
+    # Extending the run never introduces periodic full-panel evaluations.
+    document = large.to_dict()
+    document["training"]["num_rollouts"] = 2500
+    extended = RunSpec.from_dict(document)
+    assert [point["update"] for point in extended.plan()["evaluation"]["milestones"]] == [0, 2500]
+    for update in (1, 999, 1000, 2000, 2499):
+        assert evaluation.groups(extended.evaluation, update, 2500) == []
+    assert sum(map(len, evaluation.groups(extended.evaluation, 2500, 2500))) == 25
+
+
+def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large, tmp_path, monkeypatch):
+    document = large.to_dict()
+    document["output"]["root"] = str(tmp_path / "run")
+    document["training"]["num_rollouts"] = 2500
+    run = RunSpec.from_dict(document)
+    config = evaluation.runtime(run, run.compile().miles)
+    args = SimpleNamespace(background_evaluation=config)
+    training = {"name": run.name, "wandb": {"mode": "offline", "id": "panel", "entity": "team", "project": "test"}}
+    calls = []
+
+    def transport(argv, **kwargs):
+        assert argv[1:3] == ["-m", "open_instruct.miles.evaluation.evaluation_submit"]
+        assert argv[4] == config["workspace"]
+        assert kwargs["check"] and kwargs["timeout"] > 0
+        calls.append(json.loads(Path(argv[3]).read_text()))
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"id": f"experiment-{len(calls)}"}), "")
+
+    # Exercise real coordination, receipt writing, spec rendering and submission;
+    # replace only the subprocess boundary that contacts Beaker.
+    monkeypatch.setattr(evaluation.subprocess, "run", transport)
+    manager = evaluation.Coordinator(config, training)
+    initial = tmp_path / "initial-hf"
+    manager.dispatch(0, initial)
+    manager.worker.join(5)
+    assert not manager.worker.is_alive()
+    assert len(calls) == 5
+    for update in (1, 999, 1000, 2000, 2499):
+        assert evaluation.training_snapshot(args, update) is None
+        manager.dispatch(update, "unused-checkpoint")
+    assert len(calls) == 5
+    final = Path(evaluation.training_snapshot(args, 2500))
+    final.mkdir(parents=True)
+    (final / ".complete").touch()
+    manager.dispatch(2500, final)
+    manager.worker.join(5)
+    assert not manager.worker.is_alive()
+    assert len(calls) == 10
+
+    receipts = [
+        json.loads(path.read_text())
+        for path in (Path(run.output["root"]) / "evaluation").glob("update-*.json")
+        if not path.name.endswith(".beaker.json")
+    ]
+    assert len(receipts) == 10
+    assert {r["status"] for r in receipts} == {"submitted"}
+    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 11)}
+    assert {r["update"] for r in receipts} == {0, 2500}
+    for update, checkpoint in ((0, initial), (2500, final)):
+        endpoint = [r for r in receipts if r["update"] == update]
+        assert {r["checkpoint"] for r in endpoint} == {str(checkpoint)}
+        tasks = [task for r in endpoint for task in r["tasks"]]
+        assert sorted(tasks, key=lambda task: task["task"]) == sorted(
+            run.evaluation["tasks"], key=lambda task: task["task"]
+        )
+        assert all(r["training"] == training and r["evaluation"]["revision"] == config["revision"] for r in endpoint)
+    for specs in (calls[:5], calls[5:]):
+        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 2, 2]
+        for spec in specs:
+            job = spec["tasks"][0]
+            assert job["image"] == {"beaker": config["image"]}
+            assert job["context"] == {"priority": "high", "autoResume": True}
+            assert job["constraints"]["cluster"] == [config["cluster"]]
+
+    resumed = evaluation.Coordinator(config, training)
+    resumed.dispatch(0, initial)
+    resumed.dispatch(2500, final)
+    assert resumed.worker is None
+    assert len(calls) == 10
 
 
 def test_panel_groups_keep_execution_requirements_separate(large):

@@ -67,6 +67,60 @@ def test_plan_and_independent_eval_tasks(run):
     assert RunSpec.from_dict(run.to_dict()).evaluation == run.evaluation
 
 
+@pytest.mark.parametrize("initial", [False, True])
+@pytest.mark.parametrize("final", [False, True])
+def test_zero_interval_preserves_independent_endpoints(run, initial, final):
+    document = run.to_dict()
+    document["evaluation"].update(interval=0, initial=initial, final=final)
+    for task in document["evaluation"]["tasks"]:
+        task.pop("interval")
+    run = RunSpec.from_dict(document)
+    expected = ([0] if initial else []) + ([6] if final else [])
+    assert [point["update"] for point in run.plan()["evaluation"]["milestones"]] == expected
+    args = SimpleNamespace(background_evaluation=evaluation.runtime(run, run.compile().miles))
+    for update in range(7):
+        groups = evaluation.groups(run.evaluation, update, 6)
+        assert sum(map(len, groups)) == (2 if update in expected else 0)
+        assert evaluation.training_snapshot(args, update) == (
+            str(evaluation.snapshot(run.output["root"], update)) if update in expected else None
+        )
+
+
+@pytest.mark.parametrize("global_interval, task_interval", [(0, 3), (3, 0)])
+def test_task_interval_can_enable_or_disable_periodic_evaluation(run, global_interval, task_interval):
+    document = run.to_dict()
+    document["evaluation"]["interval"] = global_interval
+    document["evaluation"]["tasks"][0].pop("interval")
+    document["evaluation"]["tasks"][1]["interval"] = task_interval
+    run = RunSpec.from_dict(document)
+    milestones = run.plan()["evaluation"]["milestones"]
+    assert [point["update"] for point in milestones] == [0, 3, 6]
+    assert [task["task"] for group in milestones[1]["groups"] for task in group] == [
+        "arc_easy" if task_interval else "gsm8k"
+    ]
+    assert all(sum(map(len, point["groups"])) == 2 for point in (milestones[0], milestones[-1]))
+
+
+def test_omitted_interval_retains_default(run):
+    document = run.to_dict()
+    document["training"]["num_rollouts"] = 45
+    document["evaluation"].pop("interval")
+    for task in document["evaluation"]["tasks"]:
+        task.pop("interval")
+    run = RunSpec.from_dict(document)
+    assert [point["update"] for point in run.plan()["evaluation"]["milestones"]] == [0, 20, 40, 45]
+
+
+@pytest.mark.parametrize("value", [-1, True, None, 1.5, "0"])
+@pytest.mark.parametrize("per_task", [False, True])
+def test_invalid_intervals_fail_before_launch(run, value, per_task):
+    document = run.to_dict()
+    target = document["evaluation"]["tasks"][0] if per_task else document["evaluation"]
+    target["interval"] = value
+    with pytest.raises(InputError, match="interval must be a nonnegative integer"):
+        RunSpec.from_dict(document)
+
+
 def test_background_jobs_restart_after_preemption(run):
     receipt = {
         "evaluation": evaluation.runtime(run, run.compile().miles),
@@ -96,7 +150,7 @@ def test_reject_conflicts(run, patch):
 
 
 @pytest.mark.parametrize(
-    "field,value", [("interval", 0), ("gpus", True), ("submit_timeout", -1), ("revision", "main")]
+    "field,value", [("interval", -1), ("gpus", True), ("submit_timeout", -1), ("revision", "main")]
 )
 def test_reject_invalid_config(run, field, value):
     document = run.to_dict()
@@ -315,11 +369,25 @@ def test_evaluator_command_keeps_task_overrides(run):
     assert "--save-predictions" in args
 
 
-@pytest.mark.parametrize("stop_mode", ("complete", "deadline", "deadline_off_cadence", "debug"))
+@pytest.mark.parametrize(
+    "stop_mode",
+    (
+        "complete",
+        "deadline",
+        "deadline_off_cadence",
+        "debug",
+        "complete_endpoints",
+        "deadline_endpoints",
+        "debug_endpoints",
+    ),
+)
 @pytest.mark.parametrize("initial", [False, True])
 @pytest.mark.parametrize("export_hf", [None, "final-hf"])
 def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, stop_mode, initial, export_hf):
     deadline_stop = stop_mode.startswith("deadline")
+    complete = stop_mode.startswith("complete")
+    debug = stop_mode.startswith("debug")
+    endpoints = stop_mode.endswith("endpoints")
     # Import the real driver with CPU stand-ins for the external actor runtime.
     imported = {}
 
@@ -427,17 +495,24 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         save="native-checkpoints",
         save_interval=None,
         update_weights_interval=1,
-        debug_exit_after_rollout=1 if stop_mode == "debug" else None,
+        debug_exit_after_rollout=1 if debug else None,
     )
     args.background_evaluation.update(initial=initial, total_updates=8)
+    if endpoints:
+        args.background_evaluation["interval"] = 0
+        for task in args.background_evaluation["tasks"]:
+            task["interval"] = 0
     if stop_mode == "deadline_off_cadence":
         for task, interval in zip(args.background_evaluation["tasks"], (3, 5)):
             task["interval"] = interval
     try:
         result = asyncio.run(driver.train(args, export_hf=export_hf))
-        assert entered.wait(1)
-        assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
-        expected = [0, 1] if stop_mode == "complete" else [0]
+        if endpoints and debug and not initial:
+            assert not worker_threads
+        else:
+            assert entered.wait(1)
+            assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
+        expected = [0, 1] if complete else [0]
         assert result["completed_rollout_ids"] == expected
         assert learner.train.await_count == len(expected)
         assert result["stopped_for_time"] == deadline_stop
@@ -445,18 +520,28 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
             manager.save.assert_awaited_once_with(0)
             learner.save_model.assert_awaited_once_with(0, force_sync=True)
             learner.finalize_checkpoint.assert_awaited_once_with(0)
-        if stop_mode == "deadline_off_cadence" and export_hf is None:
+        if stop_mode in ("deadline_off_cadence", "deadline_endpoints") and export_hf is None:
             learner.export_hf.assert_awaited_once_with(0, str(evaluation.snapshot(run.output["root"], 4)))
-        elif stop_mode == "debug" or export_hf is None:
+        elif debug or export_hf is None:
             learner.export_hf.assert_not_awaited()
         else:
             learner.export_hf.assert_awaited_once_with(expected[-1], "final-hf")
         receipts = [json.loads(p.read_text()) for p in (Path(run.output["root"]) / "evaluation").glob("*.json")]
-        for update in (3, 4) if stop_mode == "deadline_off_cadence" else (2, 3, 4):
+        if endpoints:
+            expected_updates = ({0} if initial else set()) | ({8} if complete else {4} if deadline_stop else set())
+            assert {r["update"] for r in receipts} == expected_updates
+            for receipt in receipts:
+                assert receipt["status"] == ("skipped_busy" if initial and receipt["update"] else "pending")
+                assert {task["task"] for task in receipt["tasks"]} == {"gsm8k", "arc_easy"}
+            # No intermediate backend exports; the deadline export is requested from the actor above.
+            markers = list((Path(run.output["root"]) / "eval-snapshots").glob("*/hf/.complete"))
+            assert markers == ([evaluation.snapshot(run.output["root"], 8) / ".complete"] if complete else [])
+        periodic = () if endpoints else (3, 4) if stop_mode == "deadline_off_cadence" else (2, 3, 4)
+        for update in periodic:
             milestone = [r for r in receipts if r["update"] == update]
             assert len(milestone) == 1
             assert milestone[0]["status"] == ("skipped_busy" if initial else "pending")
-        if stop_mode == "complete":
+        if complete and not endpoints:
             assert all(r["status"] == "skipped_busy" for r in receipts if r["update"] > 4)
             assert any(r["update"] == 8 for r in receipts)
         if deadline_stop:

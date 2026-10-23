@@ -55,11 +55,12 @@ save_interval = 25
 
 [evaluation]
 mode = "background"
-# Initial/final for this 200-update run; every 1,000 updates if extended.
-interval = 1000
+# Full official development/text-safety panel before and after training only.
+# Zero disables periodic evaluation, even when the run is extended.
+interval = 0
 initial = true
 final = true
-# Sandbox-enabled evaluator; full-panel GPU qualification remains required.
+# Limited-example execution is validated; measure full-model memory and runtime.
 image = "01M5MQM50J1EEQ8YJGJWSJFPQ5"
 revision = "710b2b5dab6ea09764c02647f3a4e72819b9ee7c"
 gpus = 1
@@ -69,7 +70,8 @@ timeout = "3h"
 server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--context-length", "34816"]
 
 [[evaluation.tasks]]
-# Post-training development panel. Keep upstream sampling and full dataset sizes.
+# Official measurement uses full datasets and pinned upstream sampling settings.
+# Periodic subsets are not enabled; see docs/miles/background-evaluation.md.
 # Seven AIME/HMMT variants preserve pass@32 with a 16K response budget.
 task = "aime_2022:pass_at_32:16k"
 

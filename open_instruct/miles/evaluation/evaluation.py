@@ -62,7 +62,9 @@ def parse(value, launch):
         value.setdefault(key, default)
     for key in ("cluster", "workspace", "budget"):
         value.setdefault(key, launch[key])
-    for key in ("interval", "gpus", "submit_timeout"):
+    if type(value["interval"]) is not int or value["interval"] < 0:
+        raise InputError("evaluation.interval must be a nonnegative integer (0 disables periodic evaluation)")
+    for key in ("gpus", "submit_timeout"):
         if type(value[key]) is not int or value[key] < 1:
             raise InputError(f"evaluation.{key} must be a positive integer")
     for key in ("initial", "final"):
@@ -141,8 +143,8 @@ def parse(value, launch):
         if any(key == "provider" or key.startswith("provider.") for key in harness):
             raise InputError("evaluation task harness cannot override the frozen checkpoint provider")
         task.setdefault("interval", value["interval"])
-        if type(task["interval"]) is not int or task["interval"] < 1:
-            raise InputError("evaluation task interval must be a positive integer")
+        if type(task["interval"]) is not int or task["interval"] < 0:
+            raise InputError("evaluation task interval must be a nonnegative integer (0 disables periodic evaluation)")
         for key in ("generation", "scoring"):
             task.setdefault(key, {})
             if not isinstance(task[key], dict):
@@ -158,7 +160,7 @@ def groups(config, update, total):
     """Merge coincident initial/periodic/final milestones, grouped by harness settings."""
     selected = {}
     for task in config["tasks"]:
-        due = config["initial"] if update == 0 else update % task["interval"] == 0
+        due = config["initial"] if update == 0 else task["interval"] > 0 and update % task["interval"] == 0
         due = due or (update == total and config["final"])
         if due:
             key = json.dumps(
@@ -197,7 +199,8 @@ def plan(spec, options):
     if config["final"]:
         updates.add(total)
     for task in config["tasks"]:
-        updates.update(range(task["interval"], total + 1, task["interval"]))
+        if task["interval"] > 0:
+            updates.update(range(task["interval"], total + 1, task["interval"]))
     return {
         **config,
         "mounts": spec.launch["weka_mounts"],
