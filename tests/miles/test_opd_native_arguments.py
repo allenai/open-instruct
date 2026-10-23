@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import torch
 from megatron.training import arguments as megatron_arguments
 from miles.backends.megatron_utils import parallel
@@ -16,7 +17,8 @@ from open_instruct.miles.configuration import specs
 from open_instruct.miles.distillation import opd_runtime
 
 
-def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
+@pytest.mark.parametrize("trainer_gpus,tensor_parallel_size", [(1, 1), (4, 2)])
+def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path, trainer_gpus, tensor_parallel_size):
     root = Path(__file__).resolve().parents[2]
     config = Qwen3_5Config(
         text_config={
@@ -40,7 +42,8 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
             'model.source="Qwen/Qwen3.5-2B"',
             'model.revision=""',
             'model.architecture="qwen3.5-2B"',
-            "trainer.gpus=4",
+            f"trainer.gpus={trainer_gpus}",
+            f"trainer.tensor_parallel_size={tensor_parallel_size}",
             "inference.gpus=3",
         ],
     )
@@ -64,8 +67,8 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
         monkeypatch.setattr(megatron_arguments, "get_device_arch_version", lambda: 10)
     parsed = arguments.parse_args()
     assert parsed.train_backend == "megatron"
-    assert parsed.tensor_model_parallel_size == 2
-    assert parsed.world_size == 4
+    assert parsed.tensor_model_parallel_size == tensor_parallel_size
+    assert parsed.world_size == trainer_gpus
     assert parsed.lr == 1e-6
     assert parsed.use_opd and parsed.opd_kl_coef == 1.0
 
