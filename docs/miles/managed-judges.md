@@ -28,6 +28,7 @@ All replicas have the same allocation size; the plan reports any unused GPUs.
 | 2 trainer + 6 rollout, no judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
 | 8 trainer + 7 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 4 trainer + 11 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
+| 4 trainer + 19 rollout + 1 judge (`large`) | 3 nodes, 24 GPUs, no unused GPUs |
 | 8 trainer + 23 rollout + 1 judge | 4 nodes, 32 GPUs, no unused GPUs |
 | 8 trainer + 8 rollout + 1 judge | 3 nodes, 24 GPUs, 7 unused GPUs |
 
@@ -127,7 +128,7 @@ Core optimizer/publication/replay contracts and retained rollout metadata.
 `driver-RANK.log` and `judge-NAME-RANK.log` stay on WEKA. A successful tiny run must
 include finite optimizer steps, policy refresh and actual judge replies; process
 exit alone is insufficient. Startup controls do not establish judge calibration
-or throughput for a production mixture. The full EP8 judged combination, 32K
+or throughput for a production mixture. The full judged `large` combination, 32K
 judged responses and sustained multi-node performance are untested.
 
 ## Policy-engine health

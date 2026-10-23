@@ -62,7 +62,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
 
 @pytest.mark.parametrize(
     "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
-    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("large", 56, 7, 16, 32, 1)],
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("large", 24, 3, 4, 19, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
@@ -73,6 +73,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert sum(node["trainer_gpus"] for node in layout["nodes"]) == trainer_gpus
     assert sum(node["rollout_gpus"] for node in layout["nodes"]) == rollout_gpus
     assert layout["judge_gpus"] == judge_gpus
+    assert layout["unused_gpus"] == 0
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
     assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "large") else 0)
 

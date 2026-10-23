@@ -4,7 +4,7 @@
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
-| [large.toml](large.toml) | Multi-node learning: 16 trainer GPUs, 32 engines and 1 judge; 56 GPUs allocated, plus background evaluation |
+| [large.toml](large.toml) | Three-node learning: 4 trainer GPUs (EP4), 19 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -82,7 +82,12 @@ and `node` for disaggregated learning. A single-GPU run with the full policy nee
 its combined trainer/inference memory footprint checked before replacing the
 `dev` checkpoint; single-GPU inference alone does not establish that fit.
 
-`large` retains the mixed workload including general-quality tasks and requires
+`large` matches H1's three-node, 24-GPU footprint, replacing one of H1's 20 inference
+GPUs with a judge. The nodes contain 4 training + 4 inference GPUs, 8 inference
+GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs are unused.
+Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
+including general-quality tasks, prepared according to the
+[source and preparation contract](../../../docs/miles/data-and-evaluation.md#large-training-mixture). It requires
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;

@@ -1,4 +1,4 @@
-# Provisional B300 layout: 16 trainer GPUs, 32 engines, 1 judge; 56 allocated GPUs.
+# H1-sized B300 layout: 4 trainer GPUs (EP4), 19 engines, 1 judge; 3 nodes / 24 GPUs.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
 # Setup and workload requirements: configs/miles/examples/README.md
@@ -43,8 +43,11 @@ NCCL_IB_HCA = "^=mlx5_bond_0"
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 
 [data]
-prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/train.jsonl"
-reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/mixed-workload/verifiers.json"
+# Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.
+# Source revision: 0fb6466d31ef3a9dd16985ef635e6429e05a6491.
+# Preparation contract: docs/miles/data-and-evaluation.md#large-training-mixture
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/train.jsonl"
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/verifiers.json"
 
 [training]
 num_rollouts = 200
@@ -79,15 +82,14 @@ generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_seque
 scoring = { limit = 128 }
 
 [trainer]
-gpus = 8
-trainer_num_nodes = 2
-expert_parallel_size = 8
+gpus = 4
+expert_parallel_size = 4
 sequence_packing = true
 packing_max_tokens = 34816
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 32
+gpus = 19
 rollout_batch_size = 64
 samples_per_prompt = 4
 max_response_length = 32768

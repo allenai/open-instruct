@@ -60,6 +60,41 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
+## Large training mixture
+
+`large.toml` targets the full `train` split of
+[`allenai/Dolci-Think-RL-7B`](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B),
+pinned to revision `0fb6466d31ef3a9dd16985ef635e6429e05a6491`.
+This is the dataset selected by the checked-in
+[Olmo 3 7B Think RL recipe](../../scripts/train/olmo3/7b_think_rl.sh).
+The [dataset card](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B/blob/0fb6466d31ef3a9dd16985ef635e6429e05a6491/README.md)
+reports these source-group counts:
+
+| Source group | Rows |
+| --- | ---: |
+| Math | 30,180 |
+| Instruction following | 29,813 |
+| Code | 21,385 |
+| General | 20,636 |
+| Total | 102,014 |
+
+Prepare every source row once, preserving the published proportions, source
+identities, verifier names and targets. Do not substitute a balanced four-domain
+basket, an RLZero mixture or a smoke-test subset. Render and tokenize prompts with
+the selected policy checkpoint; the source's saved token IDs belong to its original
+tokenizer. Preserve the full question for judged examples in `metadata.judge_query`.
+The trusted verifier registry must support math, code/code_stdio and instruction
+following; general-quality and general-quality_ref use the template's named bindings.
+Code verification requires an externally provisioned service.
+
+The `dolci-think-rl-7b` paths in the template are **prepared-artifact placeholders**,
+not an automatic Hugging Face download or proof of provenance. Before launch,
+record the source ID/revision and verify row counts, source-group counts and retained
+identities against the pinned source. Record any deliberate exclusions as a changed
+mixture; do not silently filter rows to satisfy the policy's prompt-length limit.
+Use the existing prepared-JSONL or immutable-manifest input contract. Background
+benchmark evaluation is configured separately and does not change this training mix.
+
 ## Online group filtering
 
 MILES/Core training defaults to online reward-group filtering:
