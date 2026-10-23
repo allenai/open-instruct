@@ -46,6 +46,8 @@ def producer():
         rollout_max_context_len=None,
         use_rollout_routing_replay=False,
         use_rollout_indexer_replay=False,
+        use_sampling_support_replay=False,
+        rollout_top_logprobs_num=0,
         sglang_speculative_algorithm=None,
     )
     return p
