@@ -94,3 +94,20 @@ step 2048. Other steps, categories and suffixes remain diagnostics. The tests
 reject missing/duplicate questions, mismatched prompts and different checkpoints,
 and check the comparison sign and invariance to record order. No training-seed
 floor or confirmatory claim is supplied by these question-bootstrap intervals.
+
+Secondary MATH quality uses `generate_math.py` at step 2048: the original
+1,000 prompts, one sampled trajectory each, T=0.6/top-p=0.95/top-k disabled,
+32,768 generated tokens maximum, and end-of-text/im-end stop IDs. Both tags
+remain atomic; no first-word forcing, newline mask, or suffix change. Use the
+pinned Olmo SGLang image/runtime in the evaluation protocol; first qualify a
+small pilot on the trained export. Shards are disjoint slices of the frozen
+panel, and caches are bound to weights, metadata, runtime, code and sampling.
+Per-question seeds are requested, without claiming identical random draws.
+
+`score_math.py` uses the pinned historical MATH harness
+`allenai/olmo-eval@6f4cbee81ffbd79b210b92d6adb7e37744613020`. It requires a complete
+1,000-question union, the exact frozen prompt IDs, matching checkpoint/arm and
+sampling, and checks all generation-file hashes. It reports historical accuracy
+and explicit-final accuracy alongside cap hits, closing, extraction failures and
+lengths. Six archived historical cases passed in the pinned CPU scorer image.
+No generated quality results exist yet; serving qualification remains pending.
