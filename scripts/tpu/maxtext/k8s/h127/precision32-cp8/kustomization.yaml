@@ -41,7 +41,8 @@ configMapGenerator:
     log_moe_dropped_tokens=true sharding_tolerance=0.3 olmoe3_per_layer_remat=true
     sparse_matmul=true megablox=true use_tokamax_kda=false kda_chunked_impl=subblock
     matmul_precision=highest kda_matmul_precision=highest
-    wi_tile_fwd_mlp_dim=512 wo_tile_fwd_embed_dim=512 wi_tile_dlhs_embed_dim=512 wo_tile_dlhs_mlp_dim=512 wi_tile_drhs_mlp_dim=512 wo_tile_drhs_embed_dim=512 num_vocab_tiling=16 remat_policy=full load_balance_loss_weight=0
+    wi_tile_fwd_mlp_dim=512 wo_tile_fwd_embed_dim=512 wi_tile_dlhs_embed_dim=512 wo_tile_dlhs_mlp_dim=512 wi_tile_drhs_mlp_dim=512 wo_tile_drhs_embed_dim=512
+    wi_tile_drhs_embed_dim=512 wo_tile_drhs_mlp_dim=512 num_vocab_tiling=16 remat_policy=full load_balance_loss_weight=0
     ici_context_parallelism=8
   - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true --xla_tpu_enable_async_ragged_all_to_all=true
     --xla_tpu_scoped_vmem_limit_kib=16384

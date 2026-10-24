@@ -22,7 +22,9 @@ def main():
         wi_tile_dlhs_embed_dim="512",
         wo_tile_dlhs_mlp_dim="512",
         wi_tile_drhs_mlp_dim="512",
+        wi_tile_drhs_embed_dim="512",
         wo_tile_drhs_embed_dim="512",
+        wo_tile_drhs_mlp_dim="512",
     )
     if name == "reference-cp8":
         extra.update(custom_mesh_and_rule="olmo35-cp-ep", ici_context_parallelism="8", ici_expert_parallelism="1")
@@ -64,7 +66,7 @@ def main():
             compiled = original(*args, **kwargs)
         except Exception as error:
             report = {"type": type(error).__name__, "message": str(error)}
-            Path(f"/work/fp32-n512-{name}-compile-error.json").write_text(json.dumps(report, indent=2))
+            Path(f"/work/fp32-output512-{name}-compile-error.json").write_text(json.dumps(report, indent=2))
             print("AOT-COMPILE-ERROR", json.dumps(report), flush=True)
             raise
         memory = compiled.memory_analysis()
@@ -79,12 +81,12 @@ def main():
         report["scope"] = (
             "Offline pretraining-step compiler estimate, not Tunix SFT runtime or numerical qualification"
         )
-        Path(f"/work/fp32-n512-{name}-aot-memory.json").write_text(json.dumps(report, indent=2))
+        Path(f"/work/fp32-output512-{name}-aot-memory.json").write_text(json.dumps(report, indent=2))
         print("AOT-MEMORY", json.dumps(report), flush=True)
         return compiled
 
     train_compile.jit_and_compile = compile_and_report
-    Path(f"/work/fp32-n512-{name}-aot-args.json").write_text(json.dumps(args, indent=2))
+    Path(f"/work/fp32-output512-{name}-aot-args.json").write_text(json.dumps(args, indent=2))
     oom = train_compile.is_oom(args)
     print("AOT-FINISHED", name, "oom", oom, flush=True)
     if oom:
