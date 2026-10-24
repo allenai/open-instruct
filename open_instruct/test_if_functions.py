@@ -39,5 +39,26 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestVerifySentenceConstraint(unittest.TestCase):
+    @parameterized.expand(
+        [
+            # Trailing whitespace / newline must not add a phantom sentence: each
+            # of these has the correct number of sentences for "at most".
+            ("trailing_space_at_most", "One sentence here. ", 1, "at most", True),
+            ("trailing_newline_at_most", "First. Second.\n", 2, "at most", True),
+            ("trailing_blank_lines_at_most", "Only one.\n\n", 1, "at most", True),
+            # Normal cases (no trailing terminator+space) are unaffected.
+            ("no_trailing_at_most", "First. Second.", 2, "at most", True),
+            ("three_sentences_at_least", "One. Two. Three.", 3, "at least", True),
+            ("around_exact", "One. Two. Three.", 3, "around", True),
+            # The count is still real: genuinely too many sentences is rejected.
+            ("too_many_at_most", "One. Two. Three. ", 2, "at most", False),
+            ("too_few_at_least", "Only one.", 2, "at least", False),
+        ]
+    )
+    def test_verify_sentence_constraint(self, _name, text, n, quantifier, expected):
+        self.assertEqual(if_functions.verify_sentence_constraint(text, n, quantifier), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
