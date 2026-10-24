@@ -16,6 +16,12 @@ text = (
     "MOE-DROPPED step=1 dropped=0 routed=10000\n"
     "MOE-DROPPED step=2 dropped=0 routed=10000\n" + "BATCH-HASH n=1 host=0 sha256=" + "a" * 64 + "\n"
 )
+for step in (1, 2):
+    text = text.replace(
+        f"MOE-DROPPED step={step} dropped=0 routed=10000",
+        f"MOE-DROPPED step={step} dropped=0 routed=10000 per_layer=[" + ",".join(["0"] * 15) + "]",
+    )
+    text += f"REQUIRED_RBF step={step} max=1.0 per_layer=[" + ",".join(["1.0"] * 15) + "]\n"
 assert assess(config, text, True)["passed"]
 assert assess(config, text + text, True)["passed"]
 assert not assess(config, text)["passed"]
@@ -23,7 +29,13 @@ assert not assess(config, text.replace("step=2", "step=3"), True)["passed"]
 assert not assess(config, text.replace("1.000001", "1.01"), True)["passed"]
 assert not assess(config, text.replace("tokens=100", "tokens=99"), True)["passed"]
 assert not assess(config, text.replace("a" * 64, "b" * 64), True)["passed"]
-assert not assess(config, text.replace("dropped=0", "dropped=200"), True)["passed"]
+try:
+    assess(config, text.replace("dropped=0", "dropped=200"), True)
+except AssertionError:
+    pass
+else:
+    raise AssertionError("Inconsistent per-layer drop counts accepted")
+assert not assess(config, text.replace("REQUIRED_RBF", "MISSING-CAPACITY"), True)["passed"]
 assert not assess(config, text.replace("MOE-DROPPED", "MISSING-DROPS"), True)["passed"]
 assert not assess(config, text.replace("1.000001", "nan"), True)["passed"]
 try:

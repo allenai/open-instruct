@@ -23,7 +23,7 @@ def unique_insert(table, key, value):
 
 
 def parse_logs(text):
-    parts, batches, drops, restores, skips = {}, {}, {}, {}, set()
+    parts, batches, drops, restores, skips, capacity = {}, {}, {}, {}, set(), {}
     for step, ce, lb, z, tokens in re.findall(
         r"LOSS-PARTS step=(\d+) ce=(\S+) moe_lb=(\S+) z=(\S+) tokens=(\d+)", text
     ):
@@ -32,16 +32,24 @@ def parse_logs(text):
         unique_insert(batches, (int(host), int(step)), sha)
     for step, dropped, routed in re.findall(r"MOE-DROPPED step=(\d+) dropped=(\d+) routed=(\d+)", text):
         unique_insert(drops, int(step), {"dropped": int(dropped), "routed": int(routed)})
+    for step, maximum, values in re.findall(r"REQUIRED_RBF step=(\d+) max=(\S+) per_layer=\[([^\]]+)\]", text):
+        unique_insert(
+            capacity, int(step), {"maximum": float(maximum), "per_layer": [float(v) for v in values.split(",")]}
+        )
+    for step, values in re.findall(r"MOE-DROPPED step=(\d+)[^\n]*per_layer=\[([^\]]+)\]", text):
+        per_layer = [int(v) for v in values.split(",")]
+        assert sum(per_layer) == drops[int(step)]["dropped"], "Layer/global drop counts differ"
+        drops[int(step)]["per_layer"] = per_layer
     for line in text.splitlines():
         if "H127-RESUME-RESTORE " in line:
             value = json.loads(line.split("H127-RESUME-RESTORE ", 1)[1])
             unique_insert(restores, value["process"], value)
     skips.update(map(int, re.findall(r"Resume: skipped (\d+) already-trained batches", text)))
-    return parts, batches, drops, restores, skips
+    return parts, batches, drops, restores, skips, capacity
 
 
 def assess(config, text, terminal=False):
-    parts, batches, drops, restores, skips = parse_logs(text)
+    parts, batches, drops, restores, skips, capacity = parse_logs(text)
     expected = {(row["host"], row["step"]): row["sha256"] for row in config["expected_batches"]}
     mismatches = [list(key) for key, sha in expected.items() if key in batches and batches[key] != sha]
     failures, missing = [], []
@@ -69,7 +77,16 @@ def assess(config, text, terminal=False):
             failures.append("Wrong restored step")
         if skips - {resume_step}:
             failures.append("Wrong data-resume cursor")
+    if any(
+        len(v["per_layer"]) != 15 or any(not math.isfinite(x) or x < 0 for x in v["per_layer"])
+        for v in capacity.values()
+    ):
+        failures.append("Invalid per-layer capacity evidence")
     if terminal:
+        if set(capacity) != expected_steps:
+            missing.append("Incomplete per-layer routing-capacity steps")
+        if any(len(v.get("per_layer", [])) != 15 for v in drops.values()):
+            missing.append("Incomplete per-layer routing-drop counts")
         if set(parts) != expected_steps:
             missing.append("Incomplete loss steps")
         if set(drops) != expected_steps:
@@ -90,6 +107,7 @@ def assess(config, text, terminal=False):
         "batch_hash_mismatches": mismatches,
         "loss_parts": parts,
         "drops": drops,
+        "required_capacity": capacity,
         "drop_fraction": drop_fraction,
         "max_step_drop_fraction": max_drop,
         "restore_audits": restores,
