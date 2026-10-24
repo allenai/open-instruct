@@ -10,6 +10,7 @@ from tunix.sft import checkpoint_manager
 
 root = tempfile.mkdtemp(prefix="h127-resume-")
 model = nnx.Linear(2, 3, rngs=nnx.Rngs(0))
+model.rngs = nnx.Rngs(42)
 optimizer = nnx.Optimizer(model, optax.adamw(1e-3), wrt=nnx.Param)
 for _ in range(5):
     grads = jax.tree.map(lambda x: x * 0 + 0.1, nnx.state(model, nnx.Param))
@@ -18,6 +19,7 @@ manager = checkpoint_manager.CheckpointManager(root_directory=root)
 assert manager.save(5, model, optimizer, force=True)
 manager.close()
 model2 = nnx.Linear(2, 3, rngs=nnx.Rngs(123))
+model2.rngs = nnx.Rngs(456)
 optimizer2 = nnx.Optimizer(model2, optax.adamw(1e-3), wrt=nnx.Param)
 manager2 = checkpoint_manager.CheckpointManager(root_directory=root)
 install(5)

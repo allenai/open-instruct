@@ -30,7 +30,12 @@ def verify_installed(expected, actual):
         assert len(shards_a) == len(shards_b), str(path_a)
         for sa, sb in zip(shards_a, shards_b, strict=True):
             assert str(sa.index) == str(sb.index), str(path_a)
-            av, bv = np.asarray(sa.data), np.asarray(sb.data)
+            # NNX modules can retain typed PRNG keys alongside parameters.
+            # Compare their underlying key data; NumPy rejects typed-key arrays.
+            if jax.dtypes.issubdtype(sa.data.dtype, jax.dtypes.prng_key):
+                av, bv = np.asarray(jax.random.key_data(sa.data)), np.asarray(jax.random.key_data(sb.data))
+            else:
+                av, bv = np.asarray(sa.data), np.asarray(sb.data)
             assert av.tobytes() == bv.tobytes(), f"Restored value changed: {path_a}"
             digest.update(str(path_a).encode())
             digest.update(str(sa.index).encode())
