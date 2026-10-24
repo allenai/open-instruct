@@ -96,14 +96,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--panel", type=Path, required=True)
-    parser.add_argument("--arm", choices=("atomic-original", "atomic-presentation-balanced"), required=True)
-    parser.add_argument("--step", type=int, choices=(2048,), required=True)
+    parser.add_argument(
+        "--arm", choices=("atomic-original", "atomic-presentation-balanced", "infra-smoke"), required=True
+    )
+    parser.add_argument("--step", type=int, choices=(50, 2048), required=True)
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--shards", type=int, default=1)
     parser.add_argument("--pilot-items", type=int)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     started = time.monotonic()
+    assert (args.step == 50) == (args.arm == "infra-smoke")
+    assert args.step != 50 or args.pilot_items is not None
     assert hashlib.sha256(args.panel.read_bytes()).hexdigest() == PANEL_SHA
     with gzip.open(args.panel, "rt") as stream:
         panel = [json.loads(line) for line in stream]
@@ -178,6 +182,7 @@ def main():
                 "shard": args.shard,
                 "shards": args.shards,
                 "pilot_items": args.pilot_items,
+                "qualification_only": args.step == 50,
                 "fingerprint": fingerprint,
                 "rows": rows,
                 "startup_seconds": startup,

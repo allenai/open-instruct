@@ -26,21 +26,29 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--panel", type=Path, required=True)
     parser.add_argument("--family", type=Path, required=True)
-    parser.add_argument("--step", type=int, choices=(0, 512, 2048), required=True)
+    parser.add_argument("--step", type=int, choices=(0, 50, 512, 2048), required=True)
     parser.add_argument(
-        "--arm", choices=("atomic-original", "atomic-presentation-balanced", "shared-base"), required=True
+        "--arm",
+        choices=("atomic-original", "atomic-presentation-balanced", "shared-base", "infra-smoke"),
+        required=True,
     )
+    parser.add_argument("--pilot-items", type=int)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     panel_sha = hashlib.sha256(args.panel.read_bytes()).hexdigest()
     assert panel_sha in PANELS
     assert hashlib.sha256(args.family.read_bytes()).hexdigest() == FAMILY_SHA
     assert (args.step == 0) == (args.arm == "shared-base")
+    assert (args.step == 50) == (args.arm == "infra-smoke")
+    assert (args.pilot_items is not None) == (args.step == 50)
     with gzip.open(args.panel, "rt") as stream:
         panel = [json.loads(line) for line in stream]
     assert len(panel) == PANELS[panel_sha]
     assert len({(r.get("variant", "original"), r["qualified_id"]) for r in panel}) == len(panel)
     assert len({r["qualified_id"] for r in panel}) == 1000
+    if args.pilot_items is not None:
+        assert 16 <= args.pilot_items <= 32
+        panel = panel[: args.pilot_items]
     family = [r["id"] for r in json.loads(args.family.read_text())]
     assert len(set(family)) == 48 and not set(family) & {33413, 36539}
     export = json.loads((args.model / "export-receipt.json").read_text())
@@ -116,6 +124,7 @@ def main():
         "panel_sha256": panel_sha,
         "family_sha256": FAMILY_SHA,
         "rows": len(panel),
+        "qualification_only": args.step == 50,
         "repeated_identical_forwards": repeats,
         "scope": "Raw FP32 softmax on BF16 HF forward; before temperature, top-p or sampling",
     }
