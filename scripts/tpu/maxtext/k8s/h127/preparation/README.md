@@ -41,6 +41,8 @@ the scripts at `/work` and mounts the prepared corpus read-only at `/corpus`.
   tensor hash to equal the independent seeded-HF reference. Generation defaults
   use T=0.6/top-p=0.95 with top-k disabled and end-of-text/im-end stop IDs; the
   thinking-close token does not stop answer generation.
+  Every serialized BF16 value is checked for finiteness. Copied base-only
+  conversion/tokenizer audit files are removed; the export carries its own receipt.
   `test_export_bounded.py` compares byte-identical safetensors exports with the
   unchanged exporter on base and wrapped Tunix fixtures, including scanned
   layers and unused RNG state. This fixture check is not the full-base check.

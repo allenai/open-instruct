@@ -12,6 +12,8 @@ import struct
 import sys
 from pathlib import Path
 
+import numpy as np
+
 PINNED_SHA256 = "e1b5f0ac7c9326d3d822cb6963c9c35498ee94bb3ddfc760f4928040bde88944"
 
 
@@ -32,6 +34,8 @@ def tensor_hashes(path):
             while remaining:
                 chunk = stream.read(min(remaining, 16 * 1024 * 1024))
                 assert chunk, "Truncated safetensors file"
+                values = np.frombuffer(chunk, dtype="<u2")
+                assert not np.any((values & 0x7F80) == 0x7F80), f"Nonfinite BF16 tensor: {key}"
                 digest.update(chunk)
                 remaining -= len(chunk)
             result[key] = digest.hexdigest()
@@ -75,7 +79,13 @@ def main():
         shutil.copy2(tokenizer / name, output / name)
     # Remove only validation metadata just copied into this new export; keep the
     # original reference files intact and put this export's receipt below.
-    for name in ("reference-shapes.json", "expected-seeded-bf16-sha256.json", "metadata-receipt.json"):
+    for name in (
+        "reference-shapes.json",
+        "expected-seeded-bf16-sha256.json",
+        "metadata-receipt.json",
+        "tokenizer-export-audit.json",
+        "_HERO_CONVERSION_SUCCESS.json",
+    ):
         (output / name).unlink(missing_ok=True)
     generation_path = output / "generation_config.json"
     generation = json.loads(generation_path.read_text()) if generation_path.exists() else {}
@@ -89,6 +99,8 @@ def main():
         "exporter_source_commit": "allenai/open-instruct@268c124abd07c1f1addc83a47729b79ab53aed5c",
         "exporter_sha256": PINNED_SHA256,
         "tensor_count": len(hashes),
+        "all_bf16_values_finite": True,
+        "reference_only_audit_files_removed": True,
         "model_safetensors_sha256": model_hash,
         "independent_base_hashes_match": check_base,
         "changes": "Bound restore concurrency; use layout views until BF16 materialization; retain the registered atomic tokenizer",
