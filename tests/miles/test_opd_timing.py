@@ -83,6 +83,11 @@ def test_driver_changes_only_await_instrumentation():
         pytest.skip("Pinned native driver required; run in experiment image")
     source = (Path(package.origin).parents[1] / "train_async.py").read_text()
     transformed = opd_timing_driver.transform(source)
+    assert any(isinstance(node, ast.Constant) and node.value == "rollout_state_save" for node in ast.walk(transformed))
+    with pytest.raises(ValueError, match="rollout_state_save"):
+        opd_timing_driver.transform(
+            source.replace("await rollout_executor.save(", "await rollout_executor.renamed_save(")
+        )
 
     class RemoveObservation(ast.NodeTransformer):
         def visit_Await(self, node):

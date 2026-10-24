@@ -280,6 +280,71 @@ class TestExperimentSpec(unittest.TestCase):
         self.assertEqual(actual_spec, expected_spec)
 
 
+MASON_DEFAULT_NAMES = [
+    *mason.DEFAULT_ENV_VARS,
+    "HF_TOKEN",
+    "PATH",
+    "HF_HOME",
+    "HF_DATASETS_CACHE",
+    "HF_HUB_CACHE",
+    "CHECKPOINT_OUTPUT_DIR",
+    "NCCL_SOCKET_IFNAME",
+    "NCCL_IB_HCA",
+    "WANDB_RUN_ID",
+    "WANDB_RESUME",
+]
+
+
+class TestGetEnvVars(unittest.TestCase):
+    def _env(self, env=(), secrets=()):
+        env_vars = mason.get_env_vars(False, ["ai2/jupiter"], ["me_HF_TOKEN"], "me", True, 2, list(env), list(secrets))
+        return [(env_var.name, env_var.value, env_var.secret) for env_var in env_vars]
+
+    def _named(self, env_vars, name):
+        return [env_var for env_var in env_vars if env_var[0] == name]
+
+    def test_mason_defaults_are_set_once_without_overrides(self):
+        env_vars = self._env()
+        for name in MASON_DEFAULT_NAMES:
+            self.assertEqual(len(self._named(env_vars, name)), 1, name)
+
+    @parameterized.parameterized.expand([(name,) for name in MASON_DEFAULT_NAMES])
+    def test_explicit_env_replaces_default(self, name):
+        env_vars = self._env(env=[{"name": name, "value": "/explicit"}])
+        self.assertEqual(self._named(env_vars, name), [(name, "/explicit", None)])
+
+    @parameterized.parameterized.expand([(name,) for name in MASON_DEFAULT_NAMES])
+    def test_explicit_secret_replaces_default(self, name):
+        env_vars = self._env(secrets=[{"name": name, "value": "my_secret"}])
+        self.assertEqual(self._named(env_vars, name), [(name, None, "my_secret")])
+
+    def test_explicit_secret_is_kept_beside_unrelated_env(self):
+        env_vars = self._env(env=[{"name": "FOO", "value": "1"}], secrets=[{"name": "BAR", "value": "bar_secret"}])
+        self.assertEqual(self._named(env_vars, "FOO"), [("FOO", "1", None)])
+        self.assertEqual(self._named(env_vars, "BAR"), [("BAR", None, "bar_secret")])
+
+    @parameterized.parameterized.expand(
+        [
+            ("env_first", ["--env", "HF_TOKEN=plain", "--secret", "HF_TOKEN=x"]),
+            ("secret_first", ["--secret", "HF_TOKEN=x", "--env", "HF_TOKEN=plain"]),
+        ]
+    )
+    def test_same_name_as_env_and_secret_raises(self, _, flags):
+        argv = ["mason.py", "--cluster", "ai2/jupiter", "--image", "img", *flags, "--", "echo", "hi"]
+        with mock.patch("sys.argv", argv):
+            args, _ = mason.get_args()
+        with self.assertRaisesRegex(ValueError, "HF_TOKEN"):
+            self._env(env=args.env, secrets=args.secret)
+
+    def test_repeated_env_name_keeps_both_in_order(self):
+        env_vars = self._env(env=[{"name": "HF_HOME", "value": "/a"}, {"name": "HF_HOME", "value": "/b"}])
+        self.assertEqual(self._named(env_vars, "HF_HOME"), [("HF_HOME", "/a", None), ("HF_HOME", "/b", None)])
+
+    def test_empty_env_value_replaces_default(self):
+        env_vars = self._env(env=[mason.parse_env_var("HF_HOME=")])
+        self.assertEqual(self._named(env_vars, "HF_HOME"), [("HF_HOME", "", None)])
+
+
 class TestGetDatasets(unittest.TestCase):
     def _buckets(self, mounts):
         return [(mount.mount_path, mount.source.weka) for mount in mounts]

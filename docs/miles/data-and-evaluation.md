@@ -22,7 +22,7 @@ generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/d
 `gsm8k_original` remains a compatibility alias for the same pinned dataset,
 retaining its historical sampling seed convention.
 
-The maintained dev and small examples use `gsm8k-less-noise`, which selects
+The maintained dev example uses `gsm8k-less-noise`, which selects
 [`techarb/gsm8k-cleaner`](https://huggingface.co/datasets/techarb/gsm8k-cleaner), an
 **informally cleaned variant that has not been rigorously validated**. It has 39
 corrected targets and omits 93 problems judged ambiguous or unreliable, leaving
@@ -43,9 +43,10 @@ runs reuse their recorded data unchanged. For named source datasets, the `train`
 component in `prepared_sample_id` identifies the source split, including when the
 row is assigned to this run's held-out partition; it is not a training assignment.
 
-The [multitask example](../../configs/miles/examples/medium.toml) mixes
-GSM8K and math; it is not the complete published Olmo 3 mixture.
-Use manifest adoption for broader data. Unsupported task/verifier contracts fail
+The [single-node example](../../configs/miles/examples/node.toml) takes prepared
+math, instruction-following and code JSONL with a verifier registry, without
+judge-dependent tasks; its placeholder paths do not identify the complete published Olmo 3 mixture.
+Use manifest adoption when starting from dataset manifests. Unsupported task/verifier contracts fail
 rather than silently substituting a different judge or reward.
 
 The trusted verifier registry names factories and configurations; individual
@@ -58,6 +59,41 @@ automatically supply every Olmo 3 external service.
 `prompt_wrapper` supports the task-specific contracts in the preparation code.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
+
+## Large training mixture
+
+`large.toml` targets the full `train` split of
+[`allenai/Dolci-Think-RL-7B`](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B),
+pinned to revision `0fb6466d31ef3a9dd16985ef635e6429e05a6491`.
+This is the dataset selected by the checked-in
+[Olmo 3 7B Think RL recipe](../../scripts/train/olmo3/7b_think_rl.sh).
+The [dataset card](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B/blob/0fb6466d31ef3a9dd16985ef635e6429e05a6491/README.md)
+reports these source-group counts:
+
+| Source group | Rows |
+| --- | ---: |
+| Math | 30,180 |
+| Instruction following | 29,813 |
+| Code | 21,385 |
+| General | 20,636 |
+| Total | 102,014 |
+
+Prepare every source row once, preserving the published proportions, source
+identities, verifier names and targets. Do not substitute a balanced four-domain
+basket, an RLZero mixture or a smoke-test subset. Render and tokenize prompts with
+the selected policy checkpoint; the source's saved token IDs belong to its original
+tokenizer. Preserve the full question for judged examples in `metadata.judge_query`.
+The trusted verifier registry must support math, code/code_stdio and instruction
+following; general-quality and general-quality_ref use the template's named bindings.
+Code verification requires an externally provisioned service.
+
+The `dolci-think-rl-7b` paths in the template are **prepared-artifact placeholders**,
+not an automatic Hugging Face download or proof of provenance. Before launch,
+record the source ID/revision and verify row counts, source-group counts and retained
+identities against the pinned source. Record any deliberate exclusions as a changed
+mixture; do not silently filter rows to satisfy the policy's prompt-length limit.
+Use the existing prepared-JSONL or immutable-manifest input contract. Background
+benchmark evaluation is configured separately and does not change this training mix.
 
 ## Online group filtering
 
@@ -95,7 +131,7 @@ ledger. Their prompts remain eligible on later dataset passes.
 Filtering saves trainer work but still pays generation and verification costs.
 A low acceptance rate increases collection time; if every group is rejected,
 collection waits for useful data and cannot advance the policy. The tiny `dev`
-and `small` mechanics examples therefore explicitly set this switch to false.
+mechanics example therefore explicitly sets this switch to false.
 Monitor `rollout/dynamic_filter/drop_zero_std_0.0`,
 `rollout/dynamic_filter/drop_zero_std_1.0` and the corresponding counters for other
 constant rewards, together with trainer wait time and accepted task proportions.
@@ -182,9 +218,9 @@ Judge transport failures and invalid or incomplete replies default to zero
 reward after retries, with a warning and per-sample `judge_error` diagnostics.
 Set `OI_MILES_JUDGE_FAILURE_POLICY="raise"` in `[launch.env]` to stop on those
 failures. Detected context overflow and configuration errors raise regardless
-of that fallback policy. The medium and large examples explicitly select
-`"zero"` for both judge and code-service failures; change those settings to opt
-into strict handling. Managed judge health-check failures separately stop
+of that fallback policy. The large example explicitly selects `"zero"` for judge
+failures; both node and large select it for code-service failures. Change those
+settings to opt into strict handling. Managed judge health-check failures separately stop
 training; the fallback applies to grading requests.
 
 ### Symbolic math timeouts

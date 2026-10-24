@@ -551,6 +551,9 @@ class RunSpec:
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
         validation.runtime_values(miles)
+        # Capacity checks must see the structured cache-mode default, even when
+        # a recipe overrides only the recurrent-state pool size.
+        miles.setdefault("sglang_disable_radix_cache", True)
         validation.inference_capacity(miles)
         CoreConfig(**core)
         if "placement_mode" in controls:
@@ -655,10 +658,8 @@ class RunSpec:
             "clip_grad": 1.0,
             "update_weight_buffer_size": 1073741824,
             "update_weights_interval": 1,
-            "sglang_server_concurrency": 64,
             "sglang_max_running_requests": 64,
             "sglang_mem_fraction_static": 0.4 if miles["colocate"] else 0.6,
-            "sglang_disable_radix_cache": True,
             "sglang_max_mamba_cache_size": 128,
             "sglang_cuda_graph_backend_decode": "full",
             "sglang_cuda_graph_max_bs_decode": 64,
@@ -675,6 +676,12 @@ class RunSpec:
         }
         for key, value in defaults.items():
             miles.setdefault(key, value)
+        # HTTP permits cover the entire request, including response delivery and
+        # decoding. Leave transport headroom without increasing GPU batch/cache
+        # limits. Preserve explicit limits, including deliberately small checks.
+        miles.setdefault(
+            "sglang_server_concurrency", miles["sglang_max_running_requests"] * (2 if asynchronous else 1)
+        )
         miles.setdefault("global_batch_size", miles["rollout_batch_size"] * miles["n_samples_per_prompt"])
         miles.setdefault("sglang_max_total_tokens", max(524288, miles["sglang_max_running_requests"] * length))
         if miles.get("use_rollout_routing_replay"):
@@ -699,7 +706,7 @@ class RunSpec:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
-            miles.setdefault("async_data_buffer_capacity_factor", 2.0)
+            miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             miles.setdefault("async_unused_samples_handler", "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
             # a finished sibling frees its slot instead of idling until its slowest

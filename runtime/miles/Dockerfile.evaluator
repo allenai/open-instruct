@@ -5,6 +5,7 @@ FROM ${SERVING_IMAGE}
 ARG OLMO_EVAL_REVISION=710b2b5dab6ea09764c02647f3a4e72819b9ee7c
 LABEL ai2.olmo.eval.revision=${OLMO_EVAL_REVISION}
 RUN git clone https://github.com/allenai/olmo-eval.git /opt/olmo-eval \
+    && git -C /opt/olmo-eval fetch origin ${OLMO_EVAL_REVISION} \
     && git -C /opt/olmo-eval checkout --detach ${OLMO_EVAL_REVISION} \
     && test "$(git -C /opt/olmo-eval rev-parse HEAD)" = "${OLMO_EVAL_REVISION}"
 RUN cd /opt/olmo-eval \
