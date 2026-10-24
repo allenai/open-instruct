@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -248,11 +249,23 @@ def _assert_exits(pid):
         except ProcessLookupError:
             return
         # A killed child reparented to a slow reaper lingers as a zombie on Linux.
-        with contextlib.suppress(FileNotFoundError):
+        # The process can disappear before opening stat (ENOENT) or while reading it (ESRCH).
+        with contextlib.suppress(FileNotFoundError, ProcessLookupError):
             if stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
                 return
         assert time.monotonic() < deadline, f"process {pid} survived group cleanup"
         time.sleep(0.05)
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, ProcessLookupError])
+def test_assert_exits_handles_process_disappearing_during_stat_read(error):
+    with (
+        mock.patch.object(os, "kill", side_effect=[None, ProcessLookupError]) as probe,
+        mock.patch.object(Path, "read_text", side_effect=error) as read_stat,
+    ):
+        _assert_exits(12345)
+    read_stat.assert_called_once()
+    assert probe.call_count == 2
 
 
 @pytest.mark.skipif(
