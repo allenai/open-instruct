@@ -75,3 +75,22 @@ checks every loss/drop step, rejects conflicting duplicate records, and requires
 untouched for inspection. `test_monitor_tpu.py` verifies rejection of incomplete
 or incorrect evidence. Resume loss differences from the uninterrupted smoke
 remain diagnostics, not an arbitrary statistical pass/fail gate.
+
+Scientific measurement uses `measure_openers.py` on the verified HF export at
+step 512 or 2048. It accepts only the frozen primary panel or its historical
+four-paraphrase diagnostic expansion, verifies the export weight hash, and uses
+the same single-prompt BF16 forward / FP32 softmax calculation as the completed
+step-zero reference. It makes no token-row changes. Each panel repeats 16
+original prompts and records raw category probabilities, prompt hashes, model
+metadata hashes and checkpoint identity. The four diagnostic paraphrases never
+replace the primary original suffix. This code is prepared; runtime validation
+on a trained export remains pending.
+
+`compare_openers.py CONTROL.jsonl TREATMENT.jsonl OUTPUT.json` joins by qualified
+question ID and variant, requires all 1,000 matched prompts at the same step,
+and reports treatment-minus-control paired bootstrap intervals (10,000 samples,
+seed 61023). The primary read is the original-suffix newline-family delta at
+step 2048. Other steps, categories and suffixes remain diagnostics. The tests
+reject missing/duplicate questions, mismatched prompts and different checkpoints,
+and check the comparison sign and invariance to record order. No training-seed
+floor or confirmatory claim is supplied by these question-bootstrap intervals.
