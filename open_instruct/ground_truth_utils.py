@@ -967,10 +967,18 @@ class CodeVerifier(VerifierFunction):
             score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
             if self.apply_perf_penalty and score > 0.0:
                 runtimes = result["runtimes"]
-                # for each runtime, multiply the percent of the timeout that was used
+                # For each runtime, multiply by the fraction of the timeout left unused.
+                # Clamp at 0: a test can be reported as passing with runtime slightly
+                # above max_execution_time (wall-clock/scheduling jitter, or the executor
+                # reporting a pass at the timeout boundary), which without the floor makes
+                # the multiplier negative and can drive the aggregate reward below 0 --
+                # flipping the sign of the RL signal for an otherwise-correct solution.
                 multipliers = [
-                    (self.verifier_config.code_max_execution_time - runtime)
-                    / self.verifier_config.code_max_execution_time
+                    max(
+                        0.0,
+                        (self.verifier_config.code_max_execution_time - runtime)
+                        / self.verifier_config.code_max_execution_time,
+                    )
                     for runtime in runtimes
                 ]
                 penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
