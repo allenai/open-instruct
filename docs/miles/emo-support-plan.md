@@ -82,9 +82,9 @@ The implementation coordinates Open Instruct with these dependency changes:
 
 | Dependency | Pinned revision | Contribution |
 |---|---|---|
-| OLMo-core | `5ebc07e396a51856be9ddb429c0cc7419e799315` | HF factory/export metadata, full-pool EMO router and replay support |
-| miles-olmo-core | `ff575e2ad5640991502c5fe62d35bf27c34f972c` | Training constraints and router diagnostics |
-| olmo-sglang | `3f32dc5f5dcb5684bcc2416263f51e0dfd6f4a6d` | EMO serving metadata guard |
+| OLMo-core | `9ea9a37a576276b076e2d6d9b78ad36410ce5bfe` | HF factory/export metadata, full-pool EMO router and replay support |
+| miles-olmo-core | `ac801956bcbeb4d829db9dc89b553754c87e3cc6` | Training constraints and router diagnostics |
+| olmo-sglang | `7d44e6c5594266cdb559ab389bdc3fd67785a90b` | EMO serving metadata guard |
 
 Each revision is published on its repository's
 `robertb/emo-full-pool-main-20261014` branch. The serving input-aliasing fix found
@@ -96,7 +96,18 @@ metadata, replay weights/gradients, packing and activation recomputation. The
 native preparation test writes and reads a real Core distributed checkpoint;
 it is not a mock of the converter. This does not qualify distributed RL recovery.
 
-The October 15 ingestion branch, based on main `95a84bb57`, passed 880 application
+The October 23 rebase onto Open Instruct main `dff453f54` preserves the MILES
+v0.1.2 runtime and rebases all three companion branches onto their current mains.
+Validation passed 1,085 application CPU tests (one skipped), 23 focused EMO
+runtime tests, 216 Core tests (13 GPU/optional-dependency skips), and 45 serving
+configuration tests. Core coverage includes EMO replay, HF factory/import/export,
+RoPE import, custom objectives, and a regression combining EMO with scaled RoPE
+import; scaled-RoPE HF config export remains unsupported. The actual runtime
+parser matches all 1,528 checked-in option definitions. Runtime tests used the
+existing `open-instruct-miles-core-fd8b57d34` image with rebased sources mounted
+read-only and no GPU devices. No image rebuild or new GPU run is claimed.
+
+Historical validation on October 15, based on main `95a84bb57`, passed 880 application
 tests, 538 runtime tests (59 skipped), 87 focused Core tests and 48 portable
 serving tests. Repository lint, formatting, type checks, generated references and
 the documentation build passed. Tests used mounted source revisions in the

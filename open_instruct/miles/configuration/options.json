@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sources": {"miles":{"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"ac801956bcbeb4d829db9dc89b553754c87e3cc6"},"olmo-core":{"repository":"https://github.com/allenai/Olmo-core.git","revision":"08e9564e732908e04f743c224c2d2cf98dbf5a77"},"olmo-sglang":{"repository":"https://github.com/allenai/olmo-sglang.git","revision":"7d44e6c5594266cdb559ab389bdc3fd67785a90b"},"sglang":{"repository":"https://github.com/sgl-project/sglang.git","revision":"b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"}},
+  "sources": {"miles":{"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"ac801956bcbeb4d829db9dc89b553754c87e3cc6"},"olmo-core":{"repository":"https://github.com/allenai/Olmo-core.git","revision":"9ea9a37a576276b076e2d6d9b78ad36410ce5bfe"},"olmo-sglang":{"repository":"https://github.com/allenai/olmo-sglang.git","revision":"7d44e6c5594266cdb559ab389bdc3fd67785a90b"},"sglang":{"repository":"https://github.com/sgl-project/sglang.git","revision":"b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"}},
   "options": [
   {"dest":"config","type":"str"},
   {"dest":"optimizer","type":"str"},
