@@ -11,6 +11,7 @@ configMapGenerator:
   files:
   - train_sft.sh
   - routing_log_fix.py
+  - embedding_fp32_gather_patch.py
 - name: robertb-pres14t-v1-control-screen-env
   literals:
   - RUN_NAME=robertb-pres14t-v1-control-screen
