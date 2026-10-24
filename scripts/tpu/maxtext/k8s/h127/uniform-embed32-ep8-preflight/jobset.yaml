@@ -1,0 +1,88 @@
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: robertb-pres14t-v1-u-emb32-ep8
+  namespace: olmo
+  labels:
+    kueue.x-k8s.io/queue-name: post-training
+  annotations:
+    alpha.jobset.sigs.k8s.io/exclusive-topology: cloud.google.com/gke-nodepool
+spec:
+  failurePolicy:
+    maxRestarts: 0
+  replicatedJobs:
+  - name: slice
+    replicas: 1
+    template:
+      spec:
+        parallelism: 32
+        completions: 32
+        backoffLimit: 0
+        template:
+          metadata:
+            annotations:
+              gke-gcsfuse/volumes: 'true'
+              gke-gcsfuse/cpu-limit: '0'
+              gke-gcsfuse/memory-limit: '0'
+              gke-gcsfuse/ephemeral-storage-limit: '0'
+          spec:
+            serviceAccountName: olmo
+            hostNetwork: true
+            dnsPolicy: ClusterFirstWithHostNet
+            restartPolicy: Never
+            nodeSelector:
+              cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
+              cloud.google.com/gke-tpu-topology: 4x4x8
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: cloud.google.com/gke-nodepool
+                      operator: NotIn
+                      values:
+                      - tpu-v4-4x4x8-6
+            containers:
+            - name: maxtext
+              image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+              command:
+              - bash
+              - /launcher/train_sft.sh
+              envFrom:
+              - configMapRef:
+                  name: robertb-pres14t-v1-u-emb32-ep8-env
+              env:
+              - name: HF_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: hf-token
+                    key: token
+                    optional: true
+              ports:
+              - containerPort: 8471
+              - containerPort: 8080
+              - containerPort: 8431
+              volumeMounts:
+              - name: launcher
+                mountPath: /launcher
+                readOnly: true
+              - name: post-training
+                mountPath: /mnt/post-training
+                readOnly: true
+              resources:
+                limits:
+                  google.com/tpu: 4
+            volumes:
+            - name: launcher
+              configMap:
+                name: robertb-pres14t-v1-u-emb32-ep8-launcher
+            - name: post-training
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                readOnly: true
+                volumeAttributes:
+                  bucketName: ai2-olmo-dev
+                  mountOptions: only-dir=post-training,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
+                  gcsfuseMetadataPrefetchOnMount: 'true'
+                  hostNetworkPodKSA: 'true'
+        activeDeadlineSeconds: 7200
