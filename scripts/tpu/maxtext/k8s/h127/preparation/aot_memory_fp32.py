@@ -15,6 +15,15 @@ def main():
     env = dict(item.split("=", 1) for item in spec["configMapGenerator"][1]["literals"])
     extra = dict(item.split("=", 1) for item in env["EXTRA_ARGS"].split())
     extra.update(enable_checkpointing="false", load_balance_loss_weight="0", matmul_precision="highest")
+    # Halve non-contracting output tiles to fit FP32 kernel windows in v4 VMEM.
+    extra.update(
+        wi_tile_fwd_mlp_dim="512",
+        wo_tile_fwd_embed_dim="512",
+        wi_tile_dlhs_embed_dim="512",
+        wo_tile_dlhs_mlp_dim="512",
+        wi_tile_drhs_mlp_dim="512",
+        wo_tile_drhs_embed_dim="512",
+    )
     if name == "reference-cp8":
         extra.update(custom_mesh_and_rule="olmo35-cp-ep", ici_context_parallelism="8", ici_expert_parallelism="1")
     args = [
@@ -51,7 +60,13 @@ def main():
     original = train_compile.jit_and_compile
 
     def compile_and_report(*args, **kwargs):
-        compiled = original(*args, **kwargs)
+        try:
+            compiled = original(*args, **kwargs)
+        except Exception as error:
+            report = {"type": type(error).__name__, "message": str(error)}
+            Path(f"/work/fp32-n512-{name}-compile-error.json").write_text(json.dumps(report, indent=2))
+            print("AOT-COMPILE-ERROR", json.dumps(report), flush=True)
+            raise
         memory = compiled.memory_analysis()
         fields = ["argument_size_in_bytes", "output_size_in_bytes", "alias_size_in_bytes", "temp_size_in_bytes"]
         report = {field: int(getattr(memory, field)) for field in fields}
@@ -64,12 +79,12 @@ def main():
         report["scope"] = (
             "Offline pretraining-step compiler estimate, not Tunix SFT runtime or numerical qualification"
         )
-        Path(f"/work/fp32-{name}-aot-memory.json").write_text(json.dumps(report, indent=2))
+        Path(f"/work/fp32-n512-{name}-aot-memory.json").write_text(json.dumps(report, indent=2))
         print("AOT-MEMORY", json.dumps(report), flush=True)
         return compiled
 
     train_compile.jit_and_compile = compile_and_report
-    Path(f"/work/fp32-{name}-aot-args.json").write_text(json.dumps(args, indent=2))
+    Path(f"/work/fp32-n512-{name}-aot-args.json").write_text(json.dumps(args, indent=2))
     oom = train_compile.is_oom(args)
     print("AOT-FINISHED", name, "oom", oom, flush=True)
     if oom:
