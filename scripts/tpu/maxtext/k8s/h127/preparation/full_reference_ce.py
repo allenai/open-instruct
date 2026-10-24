@@ -1,8 +1,10 @@
 """Source HF model reference CE on the exact packed TPU first batch, split by document."""
 
+import argparse
 import gzip
 import hashlib
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -17,7 +19,43 @@ OUT = Path("/output")
 ROWS = [(100256, [14023, 771, 29]), (100270, [524, 27963, 29])]
 
 
-def load_model():
+def capture_base_metadata(model):
+    destination = OUT / "hf-reference"
+    destination.mkdir(exist_ok=False)
+    for path in Path(HF).iterdir():
+        if path.is_file() and path.suffix in (".json", ".py", ".jinja") and not path.name.endswith(".index.json"):
+            shutil.copy2(path, destination / path.name)
+        elif path.is_dir() and path.name == "chat_templates":
+            shutil.copytree(path, destination / path.name)
+    config = json.loads((destination / "config.json").read_text())
+    source_vocab = config["vocab_size"]
+    config["vocab_size"] = 100352
+    (destination / "config.json").write_text(json.dumps(config, indent=2))
+    shapes, hashes = {}, {}
+    for name, value in model.state_dict().items():
+        assert value.device.type == "cpu" and value.is_floating_point(), (name, value.dtype)
+        array = value.detach().to(torch.bfloat16).contiguous().view(torch.uint16).numpy()
+        shapes[name] = list(array.shape)
+        hashes[name] = hashlib.sha256(memoryview(array).cast("B")).hexdigest()
+    (destination / "reference-shapes.json").write_text(json.dumps(shapes, sort_keys=True))
+    (destination / "expected-seeded-bf16-sha256.json").write_text(json.dumps(hashes, sort_keys=True))
+    (destination / "metadata-receipt.json").write_text(
+        json.dumps(
+            {
+                "source": HF,
+                "source_vocab": source_vocab,
+                "export_vocab": 100352,
+                "tensors": len(shapes),
+                "values": sum(value.numel() for value in model.state_dict().values()),
+                "scope": "Source HF model after the registered two-row atomic initialization; all other HF weights unchanged",
+            },
+            indent=2,
+        )
+    )
+    print("HF-METADATA-AND-HASHES", len(shapes), flush=True)
+
+
+def load_model(capture_metadata=False):
     reader = dcp.FileSystemReader(str(SOURCE / "model_and_optim"))
     original_read = reader.read_metadata
 
@@ -53,6 +91,8 @@ def load_model():
             target.copy_(bf16)
             initial_rows[key] = hashlib.sha256(bf16[[row for row, _ in ROWS]].float().numpy().tobytes()).hexdigest()
     del state, matrices, matrix_refs
+    if capture_metadata:
+        capture_base_metadata(model)
     model = model.cuda().eval()
     return model, initial_rows
 
@@ -151,16 +191,22 @@ def score_openers(model):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("all", "reference", "step0"), default="all")
+    args = parser.parse_args()
     OUT.mkdir(exist_ok=True)
-    model, initial_rows = load_model()
+    model, initial_rows = load_model(capture_metadata=args.mode in ("all", "step0"))
     receipt = {"source": HF, "initial_rows": initial_rows, "arms": {}}
-    for arm in ("control", "uniform"):
-        receipt["arms"][arm] = score_batch(model, arm)
-        (OUT / "full-reference-ce.json").write_text(json.dumps(receipt, indent=2))
-    receipt["step0_panel"] = score_openers(model)
+    if args.mode in ("all", "reference"):
+        for arm in ("control", "uniform"):
+            receipt["arms"][arm] = score_batch(model, arm)
+            (OUT / "full-reference-ce.json").write_text(json.dumps(receipt, indent=2))
+    if args.mode in ("all", "step0"):
+        receipt["step0_panel"] = score_openers(model)
     receipt["provenance_sha256"] = {
         name: hashlib.sha256((Path("/probe") / name).read_bytes()).hexdigest()
         for name in ("math-opener-panel.jsonl.gz", "newline-token-family.json", "full-replay/qualification.json")
+        if (Path("/probe") / name).exists()
     }
     (OUT / "full-reference-ce.json").write_text(json.dumps(receipt, indent=2))
     print("FULL-REFERENCE-COMPLETE", flush=True)
