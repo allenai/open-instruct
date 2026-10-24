@@ -1,7 +1,8 @@
 # H127 preparation and reference checks
 
 These scripts qualify the C11–14T original-versus-uniform-presentation SFT pair.
-They do not submit training jobs. The scientific overlays remain blocked until
+They do not submit training jobs. The monitor can deactivate only its named
+JobSet on a verified numerical or pod failure. The scientific overlays remain blocked until
 their numerical, data, checkpoint, and export checks have receipts.
 
 Use the image digest pinned by the adjacent overlays. Host orchestration stages
@@ -52,3 +53,25 @@ reference values must be measured afresh, rather than copied from that smoke.
 Training uses the full 2,253,684-record corpus per arm. The 32,768-record smoke
 subset is for infrastructure only. Changed prompt lengths can change packed
 boundaries even though paired document order and assistant messages match.
+
+Resume qualification uses `control-resume50/` only after the initial 100-step
+smoke succeeds. Copy its **complete step-50 training checkpoint**, including
+optimizer state, to the new resume run's `checkpoints/50/` prefix. Verify source
+and destination object sets, sizes and CRC32C checksums before submitting; never
+point the resume test at the original smoke's output prefix. The same recipe,
+image and data continue from update 50 through 70. `resume_audit.py` wraps only
+checkpoint restoration: each host checks all installed local model and optimizer
+leaves bitwise against the restored values, and requires optimizer step 50.
+`test_resume_audit.py` exercises a real small Flax/Optax/Tunix checkpoint and
+rejects a weights-only checkpoint. This test is not a TPU resume receipt.
+
+`monitor_tpu.py CONFIG.json OUTPUT` never submits or restarts a job. Supply `job`,
+`steps`, `expected_batches` (host, step, sha256), and for fresh runs `reference_ce`
+and `reference_tokens`. Resume configuration additionally uses `first_step=51`
+and `resume_step=50`; expected hashes are the uninterrupted smoke's batches
+51–70 on all eight data hosts. It preserves retrieved log lines across rotations,
+checks every loss/drop step, rejects conflicting duplicate records, and requires
+32 restoration audits for a resumed run. A watcher timeout leaves the workload
+untouched for inspection. `test_monitor_tpu.py` verifies rejection of incomplete
+or incorrect evidence. Resume loss differences from the uninterrupted smoke
+remain diagnostics, not an arbitrary statistical pass/fail gate.
