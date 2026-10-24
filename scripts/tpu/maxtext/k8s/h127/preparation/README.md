@@ -111,3 +111,23 @@ sampling, and checks all generation-file hashes. It reports historical accuracy
 and explicit-final accuracy alongside cap hits, closing, extraction failures and
 lengths. Six archived historical cases passed in the pinned CPU scorer image.
 No generated quality results exist yet; serving qualification remains pending.
+
+Local validation utilities (no training submission):
+
+- `verify_full_upload.py` rechecks all local Parquet SHA256 values, then waits
+  for the existing upload to finish and compares all 1,029 remote object names,
+  sizes and CRC32C checksums. It does not start or restart the upload.
+- `prepare_resume_copy.py` requires the qualified smoke, copies its finalized
+  full step-50 state into the distinct resume prefix, and verifies every object
+  and unchanged source generation. It never overwrites the source checkpoint.
+- `verify_smoke50_download.py` compares the downloaded model-only objects with
+  that source manifest before trained checkpoint export.
+- `compare_preflight.py` requires complete individual preflight passes and
+  identical supervised-token counts, then enforces the registered 1e-3 CE
+  bound at every one of the first six candidate/reference updates. Router
+  balancing must be disabled in both disposable preflights as registered.
+
+The three fixed-path local transfer checks are orchestrator scripts for this
+experiment: stage them in `runs/presentation-tpu-h127-20261023/`, where their
+receipts and monitor results live. Use the gcloud bundled Python for the CRC32C
+checks. They must not be mistaken for container entrypoints.
