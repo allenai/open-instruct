@@ -80,11 +80,13 @@ def main():
     parser.add_argument("candidate_logs", type=Path)
     parser.add_argument("reference_logs", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--steps", type=int, choices=(3, 6), default=3)
     args = parser.parse_args()
     arms = [load_records(p) for p in [args.candidate_logs, args.reference_logs]]
-    assert all(set(a) == {1, 2, 3} for a in arms), "Require all three steps from each mesh"
+    expected_steps = set(range(1, args.steps + 1))
+    assert all(set(a) == expected_steps for a in arms), f"Require all {args.steps} steps from each mesh"
     result = {"scope": "Diagnostic attribution only; does not override the failed numerical gate", "steps": []}
-    for step in range(1, 4):
+    for step in range(1, args.steps + 1):
         c, r = (a[step] for a in arms)
         assert c["token_ids"] == r["token_ids"] and c["arrays"].keys() == r["arrays"].keys()
         comparison = {}
