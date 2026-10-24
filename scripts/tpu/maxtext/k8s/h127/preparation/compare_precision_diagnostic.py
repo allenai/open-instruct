@@ -21,7 +21,7 @@ def compare(candidate, reference):
         rows.append({"step": step, "candidate_ce": a["ce"], "reference_ce": b["ce"], "gap": abs(a["ce"] - b["ce"])})
     gap = max(r["gap"] for r in rows)
     return {
-        "scope": "Six-step FP32/highest precision, smaller output tiles and 2.4 expert buffers; original-data diagnostic only",
+        "scope": "Six-step FP32/highest precision with the registered memory configuration; original-data diagnostic only",
         "candidate": candidate["job"],
         "reference": reference["job"],
         "rows": rows,

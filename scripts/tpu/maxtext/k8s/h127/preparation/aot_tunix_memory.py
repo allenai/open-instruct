@@ -22,6 +22,7 @@ def main():
     parser.add_argument("mesh", choices=("candidate", "reference-cp8"))
     parser.add_argument("--buffer-factor", type=float, default=2.5)
     parser.add_argument("--runtime-flags", action="store_true")
+    parser.add_argument("--synchronous-collectives", action="store_true")
     options = parser.parse_args()
     args = json.loads(Path(f"/work/fp32-output512-{options.mesh}-aot-args.json").read_text())
     args = [a for a in args if not a.startswith("ragged_buffer_factor=")]
@@ -67,9 +68,13 @@ def main():
         batch_sharding = sharding.get_input_data_sharding(config, mesh)
         batch = maxtext_utils.get_shaped_batch(config, batch_sharding=batch_sharding)
         flag_label = "-runtime-flags" if options.runtime_flags else ""
+        if options.synchronous_collectives:
+            assert options.runtime_flags, "Synchronous override requires runtime flags"
+            flag_label += "-sync"
         prefix = f"/work/tunix-{options.mesh}-rbf{options.buffer_factor:g}{flag_label}"
         compiler_options = max_utils.parse_libtpu_flags_to_dict(
-            "--xla_enable_async_all_gather=true --xla_tpu_enable_async_ragged_all_to_all=true "
+            f"--xla_enable_async_all_gather={str(not options.synchronous_collectives).lower()} "
+            f"--xla_tpu_enable_async_ragged_all_to_all={str(not options.synchronous_collectives).lower()} "
             "--xla_tpu_scoped_vmem_limit_kib=16384"
             if options.runtime_flags
             else ""
