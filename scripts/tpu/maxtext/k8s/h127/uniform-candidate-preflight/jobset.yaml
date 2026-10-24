@@ -34,6 +34,16 @@ spec:
             nodeSelector:
               cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
               cloud.google.com/gke-tpu-topology: 4x4x8
+            # Exclude the slice with two unreachable nodes observed during H127 preflight.
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: cloud.google.com/gke-nodepool
+                      operator: NotIn
+                      values:
+                      - tpu-v4-4x4x8-6
             containers:
             - name: maxtext
               image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
