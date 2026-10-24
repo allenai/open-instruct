@@ -47,6 +47,8 @@ INFO
 export PYTHONUNBUFFERED=1
 log=/tmp/train.log
 cd /deps
+# The image logger reads a Tunix config that lacks the MaxText routing-log flag.
+python3 /launcher/routing_log_fix.py
 # shellcheck disable=SC2086 # EXTRA_ARGS is meant to split.
 python3 -m maxtext.trainers.post_train.sft.train_sft src/maxtext/configs/post_train/sft.yml \
   run_name="$RUN_NAME" base_output_directory="$OUTPUT_DIR" model_name="$MODEL_NAME" \

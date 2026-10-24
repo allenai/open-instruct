@@ -10,6 +10,7 @@ configMapGenerator:
 - name: robertb-pres14t-v1-control-resume50-launcher
   files:
   - train_sft.sh
+  - routing_log_fix.py
   - resume_audit.py
 - name: robertb-pres14t-v1-control-resume50-env
   literals:

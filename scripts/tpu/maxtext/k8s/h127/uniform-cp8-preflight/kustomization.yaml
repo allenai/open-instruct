@@ -10,6 +10,7 @@ configMapGenerator:
 - name: robertb-pres14t-v1-uniform-cp8-preflight-launcher
   files:
   - train_sft.sh
+  - routing_log_fix.py
 - name: robertb-pres14t-v1-uniform-cp8-preflight-env
   literals:
   - RUN_NAME=robertb-pres14t-v1-uniform-cp8-preflight
