@@ -47,7 +47,12 @@ spec:
             containers:
             - name: maxtext
               image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+              # Bound actual container execution separately from queue waiting.
               command:
+              - timeout
+              - --signal=TERM
+              - --kill-after=60s
+              - 21600s
               - bash
               - /launcher/train_sft.sh
               envFrom:
@@ -87,4 +92,4 @@ spec:
                   mountOptions: only-dir=post-training,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
                   gcsfuseMetadataPrefetchOnMount: 'true'
                   hostNetworkPodKSA: 'true'
-        activeDeadlineSeconds: 21600
+        activeDeadlineSeconds: 43200
