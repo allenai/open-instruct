@@ -1,0 +1,7008 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/miles/native-serving-options/">
+      
+      
+        <link rel="prev" href="../native-training-options/">
+      
+      
+        <link rel="next" href="../../algorithms/synthetic_preference_dataset/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>SGLang options - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sglang-native-option-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              SGLang options
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tpu_sft_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../background-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="sglang-native-option-reference">SGLang native option reference</h1>
+<!-- Generated by python -m scripts.miles.generate_docs; edit reference-help.json or source definitions. -->
+
+<p>Use these names under [miles]. Defaults below come from the pinned parser <strong>before</strong> structured, backend and model-dependent resolution. Some inherited options are inapplicable to Core; see the restrictions column and <a href="../run-controls/">run controls</a>. Parser acceptance does not mean the Core trainer implements an option. Source help describes the upstream runtime, which may mention other backends.</p>
+<p><a href="../native-options/">Reference index and provenance</a>.</p>
+<p>This build uses the compact parser schema and reviewed integration descriptions. Full upstream help and value defaults were not captured; boolean defaults remain available from the schema.</p>
+<table>
+<thead>
+<tr>
+<th>TOML key</th>
+<th>Native flags</th>
+<th>Type/action</th>
+<th>Choices</th>
+<th>Parser default</th>
+<th>Core restriction</th>
+<th>Help (source or reviewed supplement)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>sglang_router_ip</td>
+<td>--sglang-router-ip</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_router_port</td>
+<td>--sglang-router-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_router_policy</td>
+<td>--sglang-router-policy</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_router_request_timeout_secs</td>
+<td>--sglang-router-request-timeout-secs</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_server_concurrency</td>
+<td>--sglang-server-concurrency</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>End-to-end HTTP permits per engine, including response transport/processing. Structured async configs default to twice max running requests; GPU batch, graph and cache limits remain separate.</td>
+</tr>
+<tr>
+<td>sglang_tokenizer_path</td>
+<td>--sglang-tokenizer-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tokenizer_mode</td>
+<td>--sglang-tokenizer-mode</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;slow&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tokenizer_backend</td>
+<td>--sglang-tokenizer-backend</td>
+<td>str</td>
+<td>[&quot;fastokens&quot;, &quot;huggingface&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tokenizer_worker_num</td>
+<td>--sglang-tokenizer-worker-num</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_detokenizer_worker_num</td>
+<td>--sglang-detokenizer-worker-num</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_skip_tokenizer_init</td>
+<td>--sglang-skip-tokenizer-init</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_load_format</td>
+<td>--sglang-load-format</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bitsandbytes&quot;, &quot;dummy&quot;, &quot;expert_pack&quot;, &quot;fastsafetensors&quot;, &quot;flash_rl&quot;, &quot;gguf&quot;, &quot;layered&quot;, &quot;mistral&quot;, &quot;npcache&quot;, &quot;presharded&quot;, &quot;private&quot;, &quot;pt&quot;, &quot;remote&quot;, &quot;remote_instance&quot;, &quot;runai_streamer&quot;, &quot;safetensors&quot;, &quot;sharded_state&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_model_loader_extra_config</td>
+<td>--sglang-model-loader-extra-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_context_length</td>
+<td>--sglang-context-length</td>
+<td>human_readable_int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_is_embedding</td>
+<td>--sglang-is-embedding</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_multimodal</td>
+<td>--sglang-enable-multimodal</td>
+<td>switch</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_revision</td>
+<td>--sglang-revision</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_model_impl</td>
+<td>--sglang-model-impl</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_model_config_parser</td>
+<td>--sglang-model-config-parser</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_json_model_override_args</td>
+<td>--sglang-json-model-override-args</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dtype</td>
+<td>--sglang-dtype</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bfloat16&quot;, &quot;float&quot;, &quot;float16&quot;, &quot;float32&quot;, &quot;half&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_quantization</td>
+<td>--sglang-quantization</td>
+<td>str</td>
+<td>[&quot;auto-round&quot;, &quot;auto-round-int8&quot;, &quot;awq&quot;, &quot;awq_marlin&quot;, &quot;bitsandbytes&quot;, &quot;compressed-tensors&quot;, &quot;fp8&quot;, &quot;gguf&quot;, &quot;gptq&quot;, &quot;gptq_marlin&quot;, &quot;humming&quot;, &quot;mlx_q4&quot;, &quot;mlx_q8&quot;, &quot;modelopt&quot;, &quot;modelopt_fp4&quot;, &quot;modelopt_fp8&quot;, &quot;modelopt_mixed&quot;, &quot;modelslim&quot;, &quot;moe_wna16&quot;, &quot;mxfp4&quot;, &quot;mxfp8&quot;, &quot;mxfp_w4a8&quot;, &quot;nvfp4_online&quot;, &quot;petit_nvfp4&quot;, &quot;quark&quot;, &quot;quark_int4fp8_moe&quot;, &quot;quark_mxfp4&quot;, &quot;unquant&quot;, &quot;w4afp8&quot;, &quot;w8a8_fp8&quot;, &quot;w8a8_int8&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_quantization_param_path</td>
+<td>--sglang-quantization-param-path</td>
+<td>nullable_str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kv_cache_dtype</td>
+<td>--sglang-kv-cache-dtype</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bf16&quot;, &quot;bfloat16&quot;, &quot;fp4_mx_block16&quot;, &quot;fp8_e4m3&quot;, &quot;fp8_e5m2&quot;, &quot;mxfp8&quot;, &quot;nvfp4&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_fp32_lm_head</td>
+<td>--sglang-enable-fp32-lm-head</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_modelopt_quant</td>
+<td>--sglang-modelopt-quant</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_modelopt_checkpoint_restore_path</td>
+<td>--sglang-modelopt-checkpoint-restore-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_modelopt_checkpoint_save_path</td>
+<td>--sglang-modelopt-checkpoint-save-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_modelopt_export_path</td>
+<td>--sglang-modelopt-export-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_quantize_and_serve</td>
+<td>--sglang-quantize-and-serve</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_rl_quant_profile</td>
+<td>--sglang-rl-quant-profile</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_tf32_matmul</td>
+<td>--sglang-enable-tf32-matmul</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mem_fraction_static</td>
+<td>--sglang-mem-fraction-static</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_running_requests</td>
+<td>--sglang-max-running-requests</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_queued_requests</td>
+<td>--sglang-max-queued-requests</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_total_tokens</td>
+<td>--sglang-max-total-tokens</td>
+<td>human_readable_int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_chunked_prefill_size</td>
+<td>--sglang-chunked-prefill-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_decode_interval</td>
+<td>--sglang-prefill-decode-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dynamic_chunking</td>
+<td>--sglang-enable-dynamic-chunking</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_prefill_tokens</td>
+<td>--sglang-max-prefill-tokens</td>
+<td>human_readable_int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_max_requests</td>
+<td>--sglang-prefill-max-requests</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_schedule_policy</td>
+<td>--sglang-schedule-policy</td>
+<td>str</td>
+<td>[&quot;dfs-weight&quot;, &quot;fcfs&quot;, &quot;hrrn&quot;, &quot;lof&quot;, &quot;lpm&quot;, &quot;priority&quot;, &quot;random&quot;, &quot;routing-key&quot;, &quot;shortest-prefill-first&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_priority_scheduling</td>
+<td>--sglang-enable-priority-scheduling</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_priority_preemption</td>
+<td>--sglang-disable-priority-preemption</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_default_priority_value</td>
+<td>--sglang-default-priority-value</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_abort_on_priority_when_disabled</td>
+<td>--sglang-abort-on-priority-when-disabled</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_schedule_low_priority_values_first</td>
+<td>--sglang-schedule-low-priority-values-first</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_priority_scheduling_preemption_threshold</td>
+<td>--sglang-priority-scheduling-preemption-threshold</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_retraction_policy</td>
+<td>--sglang-retraction-policy</td>
+<td>str</td>
+<td>[&quot;length&quot;, &quot;priority&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_schedule_conservativeness</td>
+<td>--sglang-schedule-conservativeness</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_page_size</td>
+<td>--sglang-page-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_c128_page_size</td>
+<td>--sglang-c128-page-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_swa_full_tokens_ratio</td>
+<td>--sglang-swa-full-tokens-ratio</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_hybrid_swa_memory</td>
+<td>--sglang-disable-hybrid-swa-memory</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_radix_eviction_policy</td>
+<td>--sglang-radix-eviction-policy</td>
+<td>str</td>
+<td>[&quot;lfu&quot;, &quot;lru&quot;, &quot;priority&quot;, &quot;slru&quot;, &quot;tlru&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_radix_eviction_policy_config</td>
+<td>--sglang-radix-eviction-policy-config</td>
+<td>loads</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_only_disable_kv_cache</td>
+<td>--sglang-prefill-only-disable-kv-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_radix_cache</td>
+<td>--sglang-disable-radix-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_page_major_kv_layout</td>
+<td>--sglang-enable-page-major-kv-layout</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_unified_memory</td>
+<td>--sglang-enable-unified-memory</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_chunked_prefix_cache</td>
+<td>--sglang-disable-chunked-prefix-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_overlap_schedule</td>
+<td>--sglang-disable-overlap-schedule</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_num_continuous_decode_steps</td>
+<td>--sglang-num-continuous-decode-steps</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_scheduler_recv_interval</td>
+<td>--sglang-scheduler-recv-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_mixed_chunk</td>
+<td>--sglang-enable-mixed-chunk</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dist_timeout</td>
+<td>--sglang-dist-timeout</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tp_size</td>
+<td>--sglang-tp-size, --sglang-tensor-parallel-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dcp_size</td>
+<td>--sglang-dcp-size, --sglang-decode-context-parallel-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_pp_size</td>
+<td>--sglang-pp-size, --sglang-pipeline-parallel-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_pp_max_micro_batch_size</td>
+<td>--sglang-pp-max-micro-batch-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_pp_async_batch_depth</td>
+<td>--sglang-pp-async-batch-depth</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dp_size</td>
+<td>--sglang-dp-size, --sglang-data-parallel-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_load_balance_method</td>
+<td>--sglang-load-balance-method</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;follow_bootstrap_room&quot;, &quot;round_robin&quot;, &quot;total_requests&quot;, &quot;total_tokens&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_attn_cp_size</td>
+<td>--sglang-attn-cp-size, --sglang-attention-context-parallel-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_moe_dp_size</td>
+<td>--sglang-moe-dp-size, --sglang-moe-data-parallel-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dwdp_size</td>
+<td>--sglang-dwdp-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dcp_comm_backend</td>
+<td>--sglang-dcp-comm-backend</td>
+<td>str</td>
+<td>[&quot;a2a&quot;, &quot;ag_rs&quot;, &quot;fi_a2a&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dcp_replicate_q_proj</td>
+<td>--sglang-dcp-replicate-q-proj, --no-sglang-dcp-replicate-q-proj</td>
+<td>boolean</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_prefill_cp</td>
+<td>--sglang-enable-prefill-cp</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cp_strategy</td>
+<td>--sglang-cp-strategy</td>
+<td>str</td>
+<td>[&quot;interleave&quot;, &quot;zigzag&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dsa_cache_layer_split</td>
+<td>--sglang-enable-dsa-cache-layer-split</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_cp_decode_attn_tp</td>
+<td>--sglang-enable-cp-decode-attn-tp</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dp_attention</td>
+<td>--sglang-enable-dp-attention</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dp_attention_local_control_broadcast</td>
+<td>--sglang-enable-dp-attention-local-control-broadcast</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dp_lm_head</td>
+<td>--sglang-enable-dp-lm-head</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_tp_lm_head_all_to_all</td>
+<td>--sglang-enable-tp-lm-head-all-to-all, --no-sglang-enable-tp-lm-head-all-to-all</td>
+<td>boolean</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_attn_tp_input_scattered</td>
+<td>--sglang-enable-attn-tp-input-scattered</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_shared_experts_attn_tp</td>
+<td>--sglang-enable-shared-experts-attn-tp</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_shared_experts_tp_size</td>
+<td>--sglang-shared-experts-tp-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dense_mlp_attn_tp</td>
+<td>--sglang-enable-dense-mlp-attn-tp</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_layernorm_sp</td>
+<td>--sglang-enable-layernorm-sp</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_attn_tp_gather</td>
+<td>--sglang-disable-attn-tp-gather</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_p2p_check</td>
+<td>--sglang-enable-p2p-check</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_device</td>
+<td>--sglang-device</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mlx_enable_sampling</td>
+<td>--sglang-mlx-enable-sampling</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_watchdog_timeout</td>
+<td>--sglang-watchdog-timeout</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_soft_watchdog_timeout</td>
+<td>--sglang-soft-watchdog-timeout</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sleep_on_idle</td>
+<td>--sglang-sleep-on-idle</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_use_ray</td>
+<td>--sglang-use-ray</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_numa_node</td>
+<td>--sglang-numa-node</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_gc_threshold</td>
+<td>--sglang-gc-threshold</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_host</td>
+<td>--sglang-host</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_fastapi_root_path</td>
+<td>--sglang-fastapi-root-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_smg_grpc_mode</td>
+<td>--sglang-smg-grpc-mode</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_grpc_mode</td>
+<td>--sglang-grpc-mode</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_grpc_port</td>
+<td>--sglang-grpc-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sidecar</td>
+<td>--sglang-sidecar</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sidecar_args</td>
+<td>--sglang-sidecar-args</td>
+<td>json_list_type</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_warmups</td>
+<td>--sglang-warmups</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_http2</td>
+<td>--sglang-enable-http2</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_http2_max_concurrent_streams</td>
+<td>--sglang-http2-max-concurrent-streams</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_http2_initial_connection_window_size</td>
+<td>--sglang-http2-initial-connection-window-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ssl_keyfile</td>
+<td>--sglang-ssl-keyfile</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ssl_certfile</td>
+<td>--sglang-ssl-certfile</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ssl_ca_certs</td>
+<td>--sglang-ssl-ca-certs</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ssl_keyfile_password</td>
+<td>--sglang-ssl-keyfile-password</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_ssl_refresh</td>
+<td>--sglang-enable-ssl-refresh</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_api_key</td>
+<td>--sglang-api-key</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_admin_api_key</td>
+<td>--sglang-admin-api-key</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_served_model_name</td>
+<td>--sglang-served-model-name</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_version</td>
+<td>--sglang-weight-version</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_chat_template</td>
+<td>--sglang-chat-template</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_trust_request_chat_template</td>
+<td>--sglang-trust-request-chat-template</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hf_chat_template_name</td>
+<td>--sglang-hf-chat-template-name</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_completion_template</td>
+<td>--sglang-completion-template</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_file_storage_path</td>
+<td>--sglang-file-storage-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_cache_report</td>
+<td>--sglang-enable-cache-report</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_return_input_ids</td>
+<td>--sglang-return-input-ids</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_return_output_ids</td>
+<td>--sglang-return-output-ids</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_default_chat_template_kwargs</td>
+<td>--sglang-default-chat-template-kwargs</td>
+<td>loads</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_strip_thinking_cache</td>
+<td>--sglang-strip-thinking-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_strict_thinking</td>
+<td>--sglang-enable-strict-thinking</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tool_server</td>
+<td>--sglang-tool-server</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sampling_defaults</td>
+<td>--sglang-sampling-defaults</td>
+<td>str</td>
+<td>[&quot;model&quot;, &quot;openai&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_asr_max_buffer_seconds</td>
+<td>--sglang-asr-max-buffer-seconds</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_asr_max_concurrent_sessions</td>
+<td>--sglang-asr-max-concurrent-sessions</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_preferred_sampling_params</td>
+<td>--sglang-preferred-sampling-params</td>
+<td>loads</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_allow_auto_truncate</td>
+<td>--sglang-allow-auto-truncate</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_stream_interval</td>
+<td>--sglang-stream-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_batch_notify_size</td>
+<td>--sglang-batch-notify-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_stream_response_default_include_usage</td>
+<td>--sglang-stream-response-default-include-usage</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_incremental_streaming_output</td>
+<td>--sglang-incremental-streaming-output</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_streaming_session</td>
+<td>--sglang-enable-streaming-session</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_session_radix_cache</td>
+<td>--sglang-enable-session-radix-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_log_level</td>
+<td>--sglang-log-level</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_log_level_http</td>
+<td>--sglang-log-level-http</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_log_requests</td>
+<td>--sglang-log-requests</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_log_requests_level</td>
+<td>--sglang-log-requests-level</td>
+<td>int</td>
+<td>[0, 1, 2, 3]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_log_requests_format</td>
+<td>--sglang-log-requests-format</td>
+<td>str</td>
+<td>[&quot;json&quot;, &quot;text&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_log_requests_target</td>
+<td>--sglang-log-requests-target</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_uvicorn_access_log_exclude_prefixes</td>
+<td>--sglang-uvicorn-access-log-exclude-prefixes</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_crash_dump_folder</td>
+<td>--sglang-crash-dump-folder</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_show_time_cost</td>
+<td>--sglang-show-time-cost</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_metrics</td>
+<td>--sglang-enable-metrics</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_smg_http_sidecar_port</td>
+<td>--sglang-smg-http-sidecar-port, --sglang-grpc-http-sidecar-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_mfu_metrics</td>
+<td>--sglang-enable-mfu-metrics</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_metrics_for_all_schedulers</td>
+<td>--sglang-enable-metrics-for-all-schedulers</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_load_snapshot_publish_interval</td>
+<td>--sglang-load-snapshot-publish-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tokenizer_metrics_custom_labels_header</td>
+<td>--sglang-tokenizer-metrics-custom-labels-header</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tokenizer_metrics_allowed_custom_labels</td>
+<td>--sglang-tokenizer-metrics-allowed-custom-labels</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_extra_metric_labels</td>
+<td>--sglang-extra-metric-labels</td>
+<td>loads</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_bucket_time_to_first_token</td>
+<td>--sglang-bucket-time-to-first-token</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_bucket_inter_token_latency</td>
+<td>--sglang-bucket-inter-token-latency</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_bucket_e2e_request_latency</td>
+<td>--sglang-bucket-e2e-request-latency</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prompt_tokens_buckets</td>
+<td>--sglang-prompt-tokens-buckets</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_generation_tokens_buckets</td>
+<td>--sglang-generation-tokens-buckets</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_gc_warning_threshold_secs</td>
+<td>--sglang-gc-warning-threshold-secs</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decode_log_interval</td>
+<td>--sglang-decode-log-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_request_time_stats_logging</td>
+<td>--sglang-enable-request-time-stats-logging</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kv_events_config</td>
+<td>--sglang-kv-events-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_load_publish_endpoint</td>
+<td>--sglang-load-publish-endpoint</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_forward_pass_metrics</td>
+<td>--sglang-enable-forward-pass-metrics</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_forward_pass_metrics_worker_id</td>
+<td>--sglang-forward-pass-metrics-worker-id</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>Worker identity used by SGLang forward-pass metrics.</td>
+</tr>
+<tr>
+<td>sglang_forward_pass_metrics_ipc_name</td>
+<td>--sglang-forward-pass-metrics-ipc-name</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>IPC channel name used by SGLang forward-pass metrics.</td>
+</tr>
+<tr>
+<td>sglang_enable_trace</td>
+<td>--sglang-enable-trace</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_trace_modules</td>
+<td>--sglang-trace-modules</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_otlp_traces_endpoint</td>
+<td>--sglang-otlp-traces-endpoint</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_export_metrics_to_file</td>
+<td>--sglang-export-metrics-to-file</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_export_metrics_to_file_dir</td>
+<td>--sglang-export-metrics-to-file-dir</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_constrained_json_whitespace_pattern</td>
+<td>--sglang-constrained-json-whitespace-pattern</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_constrained_json_disable_any_whitespace</td>
+<td>--sglang-constrained-json-disable-any-whitespace</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_constrained_json_max_whitespace_cnt</td>
+<td>--sglang-constrained-json-max-whitespace-cnt</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_attention_backend</td>
+<td>--sglang-attention-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;ascend&quot;, &quot;compressed&quot;, &quot;cutedsl_mla&quot;, &quot;dsa&quot;, &quot;dsv4&quot;, &quot;fa3&quot;, &quot;fa4&quot;, &quot;flashinfer&quot;, &quot;flashmla&quot;, &quot;flex_attention&quot;, &quot;hpc_ops&quot;, &quot;intel_amx&quot;, &quot;intel_xpu&quot;, &quot;minicpm_flashattn&quot;, &quot;minicpm_flashinfer&quot;, &quot;nsa&quot;, &quot;qsa&quot;, &quot;tokenspeed_mla&quot;, &quot;torch_native&quot;, &quot;triton&quot;, &quot;trtllm_mha&quot;, &quot;trtllm_mla&quot;, &quot;wave&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decode_attention_backend</td>
+<td>--sglang-decode-attention-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;ascend&quot;, &quot;compressed&quot;, &quot;cutedsl_mla&quot;, &quot;dsa&quot;, &quot;dsv4&quot;, &quot;fa3&quot;, &quot;fa4&quot;, &quot;flashinfer&quot;, &quot;flashmla&quot;, &quot;flex_attention&quot;, &quot;hpc_ops&quot;, &quot;intel_amx&quot;, &quot;intel_xpu&quot;, &quot;minicpm_flashattn&quot;, &quot;minicpm_flashinfer&quot;, &quot;nsa&quot;, &quot;qsa&quot;, &quot;tokenspeed_mla&quot;, &quot;torch_native&quot;, &quot;triton&quot;, &quot;trtllm_mha&quot;, &quot;trtllm_mla&quot;, &quot;wave&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_lean_attention</td>
+<td>--sglang-enable-lean-attention</td>
+<td>switch</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_attention_backend</td>
+<td>--sglang-prefill-attention-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;ascend&quot;, &quot;compressed&quot;, &quot;cutedsl_mla&quot;, &quot;dsa&quot;, &quot;dsv4&quot;, &quot;fa3&quot;, &quot;fa4&quot;, &quot;flashinfer&quot;, &quot;flashmla&quot;, &quot;flex_attention&quot;, &quot;hpc_ops&quot;, &quot;intel_amx&quot;, &quot;intel_xpu&quot;, &quot;minicpm_flashattn&quot;, &quot;minicpm_flashinfer&quot;, &quot;nsa&quot;, &quot;qsa&quot;, &quot;tokenspeed_mla&quot;, &quot;torch_native&quot;, &quot;triton&quot;, &quot;trtllm_mha&quot;, &quot;trtllm_mla&quot;, &quot;wave&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_grammar_backend</td>
+<td>--sglang-grammar-backend</td>
+<td>str</td>
+<td>[&quot;llguidance&quot;, &quot;none&quot;, &quot;outlines&quot;, &quot;xgrammar&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_radix_cache_backend</td>
+<td>--sglang-radix-cache-backend</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_attention_backend</td>
+<td>--sglang-mm-attention-backend</td>
+<td>str</td>
+<td>[&quot;aiter_attn&quot;, &quot;amx_attn&quot;, &quot;ascend_attn&quot;, &quot;fa3&quot;, &quot;fa4&quot;, &quot;flashinfer_cudnn&quot;, &quot;sdpa&quot;, &quot;triton_attn&quot;, &quot;xpu_attn&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_fp8_gemm_runner_backend</td>
+<td>--sglang-fp8-gemm-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;auto&quot;, &quot;cutlass&quot;, &quot;deep_gemm&quot;, &quot;flashinfer_cutedsl&quot;, &quot;flashinfer_cutlass&quot;, &quot;flashinfer_deepgemm&quot;, &quot;flashinfer_trtllm&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_fp4_gemm_runner_backend</td>
+<td>--sglang-fp4-gemm-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;flashinfer_cudnn&quot;, &quot;flashinfer_cutedsl&quot;, &quot;flashinfer_cutlass&quot;, &quot;flashinfer_trtllm&quot;, &quot;marlin&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_bf16_gemm_backend</td>
+<td>--sglang-bf16-gemm-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;cutedsl&quot;, &quot;gemv&quot;, &quot;torch&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dsa_prefill_backend</td>
+<td>--sglang-dsa-prefill-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;fa3&quot;, &quot;flashinfer_sparse_mla&quot;, &quot;flashmla_auto&quot;, &quot;flashmla_kv&quot;, &quot;flashmla_sparse&quot;, &quot;flashmla_sparse_q8&quot;, &quot;tilelang&quot;, &quot;triton&quot;, &quot;trtllm&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dsv4_prefill_backend</td>
+<td>--sglang-dsv4-prefill-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;flashmla_sparse&quot;, &quot;flashmla_sparse_q8&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dsa_decode_backend</td>
+<td>--sglang-dsa-decode-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;fa3&quot;, &quot;flashinfer_sparse_mla&quot;, &quot;flashmla_auto&quot;, &quot;flashmla_kv&quot;, &quot;flashmla_sparse&quot;, &quot;flashmla_sparse_q8&quot;, &quot;tilelang&quot;, &quot;triton&quot;, &quot;trtllm&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dsa_paged_mqa_logits_backend</td>
+<td>--sglang-dsa-paged-mqa-logits-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;auto&quot;, &quot;cutedsl&quot;, &quot;deepgemm&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dsa_topk_backend</td>
+<td>--sglang-dsa-topk-backend</td>
+<td>str</td>
+<td>[&quot;flashinfer&quot;, &quot;sgl-kernel&quot;, &quot;torch&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_flashinfer_autotune</td>
+<td>--sglang-disable-flashinfer-autotune</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_flashinfer_autotune_skip_ops</td>
+<td>--sglang-flashinfer-autotune-skip-ops</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_backend</td>
+<td>--sglang-mamba-backend</td>
+<td>str</td>
+<td>[&quot;flashinfer&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_config</td>
+<td>--sglang-cuda-graph-config</td>
+<td>parse_cuda_graph_config_arg</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_backend_decode</td>
+<td>--sglang-cuda-graph-backend-decode</td>
+<td>str</td>
+<td>[&quot;breakable&quot;, &quot;disabled&quot;, &quot;full&quot;, &quot;tc_piecewise&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_backend_prefill</td>
+<td>--sglang-cuda-graph-backend-prefill</td>
+<td>str</td>
+<td>[&quot;breakable&quot;, &quot;disabled&quot;, &quot;full&quot;, &quot;tc_piecewise&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_max_bs_decode</td>
+<td>--sglang-cuda-graph-max-bs-decode</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_max_bs_prefill</td>
+<td>--sglang-cuda-graph-max-bs-prefill</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_bs_decode</td>
+<td>--sglang-cuda-graph-bs-decode</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_bs_prefill</td>
+<td>--sglang-cuda-graph-bs-prefill</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_prefill_max_context</td>
+<td>--sglang-cuda-graph-prefill-max-context, --sglang-context-bucket</td>
+<td>human_readable_int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_tc_compiler</td>
+<td>--sglang-cuda-graph-tc-compiler</td>
+<td>str</td>
+<td>[&quot;eager&quot;, &quot;inductor&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_prefill_cuda_graph</td>
+<td>--sglang-disable-prefill-cuda-graph</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_decode_cuda_graph</td>
+<td>--sglang-disable-decode-cuda-graph</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_cuda_graph_padding</td>
+<td>--sglang-disable-cuda-graph-padding</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_profile_cuda_graph</td>
+<td>--sglang-enable-profile-cuda-graph</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_cudagraph_gc</td>
+<td>--sglang-enable-cudagraph-gc</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_debug_cuda_graph</td>
+<td>--sglang-debug-cuda-graph</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_layerwise_nvtx_marker</td>
+<td>--sglang-enable-layerwise-nvtx-marker</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_nccl_nvls</td>
+<td>--sglang-enable-nccl-nvls</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_symm_mem</td>
+<td>--sglang-enable-symm-mem</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_triton_attention_reduce_in_fp32</td>
+<td>--sglang-triton-attention-reduce-in-fp32</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_triton_attention_num_kv_splits</td>
+<td>--sglang-triton-attention-num-kv-splits</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_triton_attention_split_tile_size</td>
+<td>--sglang-triton-attention-split-tile-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_flashinfer_mla_disable_ragged</td>
+<td>--sglang-flashinfer-mla-disable-ragged</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_fused_qk_norm_rope</td>
+<td>--sglang-enable-fused-qk-norm-rope</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_precise_embedding_interpolation</td>
+<td>--sglang-enable-precise-embedding-interpolation</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_fused_moe_sum_all_reduce</td>
+<td>--sglang-enable-fused-moe-sum-all-reduce</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_deepseek_v4_fp4_indexer</td>
+<td>--sglang-enable-deepseek-v4-fp4-indexer</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_custom_all_reduce</td>
+<td>--sglang-disable-custom-all-reduce</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_mscclpp</td>
+<td>--sglang-enable-mscclpp</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_torch_symm_mem</td>
+<td>--sglang-enable-torch-symm-mem</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_scattered_sconv</td>
+<td>--sglang-enable-scattered-sconv</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_pre_warm_nccl</td>
+<td>--sglang-pre-warm-nccl</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_boundary_reduction</td>
+<td>--sglang-boundary-reduction</td>
+<td>str</td>
+<td>[&quot;ar&quot;, &quot;auto&quot;, &quot;rs&quot;, &quot;rs+rsv&quot;, &quot;rsv&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_quant_communications</td>
+<td>--sglang-enable-quant-communications</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enforce_disable_flashinfer_allreduce_fusion</td>
+<td>--sglang-enforce-disable-flashinfer-allreduce-fusion</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_flashinfer_allreduce_fusion_backend</td>
+<td>--sglang-flashinfer-allreduce-fusion-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;cutedsl&quot;, &quot;mnnvl&quot;, &quot;trtllm&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_aiter_allreduce_fusion</td>
+<td>--sglang-enable-aiter-allreduce-fusion</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_torch_compile</td>
+<td>--sglang-enable-torch-compile</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_torch_compile_debug_mode</td>
+<td>--sglang-enable-torch-compile-debug-mode</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_torch_compile_max_bs</td>
+<td>--sglang-torch-compile-max-bs</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_algorithm</td>
+<td>--sglang-speculative-algorithm</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_uno_lora_path</td>
+<td>--sglang-uno-lora-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_model_path</td>
+<td>--sglang-speculative-draft-model-path, --sglang-speculative-draft-model</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_model_revision</td>
+<td>--sglang-speculative-draft-model-revision</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_load_format</td>
+<td>--sglang-speculative-draft-load-format</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bitsandbytes&quot;, &quot;dummy&quot;, &quot;expert_pack&quot;, &quot;fastsafetensors&quot;, &quot;flash_rl&quot;, &quot;gguf&quot;, &quot;layered&quot;, &quot;mistral&quot;, &quot;npcache&quot;, &quot;presharded&quot;, &quot;private&quot;, &quot;pt&quot;, &quot;remote&quot;, &quot;remote_instance&quot;, &quot;runai_streamer&quot;, &quot;safetensors&quot;, &quot;sharded_state&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_num_steps</td>
+<td>--sglang-speculative-num-steps</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_eagle_topk</td>
+<td>--sglang-speculative-eagle-topk</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_num_draft_tokens</td>
+<td>--sglang-speculative-num-draft-tokens</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_dflash_block_size</td>
+<td>--sglang-speculative-dflash-block-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_dspark_block_size</td>
+<td>--sglang-speculative-dspark-block-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_dspark_sps_table_path</td>
+<td>--sglang-speculative-dspark-sps-table-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_dspark_confidence_sts_path</td>
+<td>--sglang-speculative-dspark-confidence-sts-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_dspark_align_verify_tokens_to_graph_tier</td>
+<td>--sglang-speculative-dspark-align-verify-tokens-to-graph-tier</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_accept_threshold_single</td>
+<td>--sglang-speculative-accept-threshold-single</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_accept_threshold_acc</td>
+<td>--sglang-speculative-accept-threshold-acc</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_use_rejection_sampling</td>
+<td>--sglang-speculative-use-rejection-sampling</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_token_map</td>
+<td>--sglang-speculative-token-map</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_attention_mode</td>
+<td>--sglang-speculative-attention-mode</td>
+<td>str</td>
+<td>[&quot;decode&quot;, &quot;prefill&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_attention_backend</td>
+<td>--sglang-speculative-draft-attention-backend</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_dsa_topk_backend</td>
+<td>--sglang-speculative-dsa-topk-backend</td>
+<td>str</td>
+<td>[&quot;flashinfer&quot;, &quot;sgl-kernel&quot;, &quot;torch&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_kv_cache_dtype</td>
+<td>--sglang-speculative-draft-kv-cache-dtype</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bf16&quot;, &quot;bfloat16&quot;, &quot;fp8_e4m3&quot;, &quot;fp8_e5m2&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_window_size</td>
+<td>--sglang-speculative-draft-window-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>Speculative-decoding draft-window size; requires a compatible serving mode/model.</td>
+</tr>
+<tr>
+<td>sglang_speculative_moe_runner_backend</td>
+<td>--sglang-speculative-moe-runner-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;auto&quot;, &quot;cutlass&quot;, &quot;deep_gemm&quot;, &quot;experimental_sgl_marlin&quot;, &quot;experimental_sgl_trtllm&quot;, &quot;flashinfer_cutedsl&quot;, &quot;flashinfer_cutlass&quot;, &quot;flashinfer_megamoe&quot;, &quot;flashinfer_mxfp4&quot;, &quot;flashinfer_trtllm&quot;, &quot;flashinfer_trtllm_routed&quot;, &quot;hpc_ops&quot;, &quot;humming&quot;, &quot;intel_xpu&quot;, &quot;marlin&quot;, &quot;megamoe&quot;, &quot;triton&quot;, &quot;triton_kernel&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_moe_a2a_backend</td>
+<td>--sglang-speculative-moe-a2a-backend</td>
+<td>str</td>
+<td>[&quot;ascend_fuseep&quot;, &quot;ascend_tp&quot;, &quot;deepep&quot;, &quot;deepep_v2&quot;, &quot;flashinfer&quot;, &quot;megamoe&quot;, &quot;mooncake&quot;, &quot;mori&quot;, &quot;nixl&quot;, &quot;none&quot;, &quot;pplx&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_model_quantization</td>
+<td>--sglang-speculative-draft-model-quantization</td>
+<td>str</td>
+<td>[&quot;auto-round&quot;, &quot;auto-round-int8&quot;, &quot;awq&quot;, &quot;awq_marlin&quot;, &quot;bitsandbytes&quot;, &quot;compressed-tensors&quot;, &quot;fp8&quot;, &quot;gguf&quot;, &quot;gptq&quot;, &quot;gptq_marlin&quot;, &quot;humming&quot;, &quot;mlx_q4&quot;, &quot;mlx_q8&quot;, &quot;modelopt&quot;, &quot;modelopt_fp4&quot;, &quot;modelopt_fp8&quot;, &quot;modelopt_mixed&quot;, &quot;modelslim&quot;, &quot;moe_wna16&quot;, &quot;mxfp4&quot;, &quot;mxfp8&quot;, &quot;mxfp_w4a8&quot;, &quot;nvfp4_online&quot;, &quot;petit_nvfp4&quot;, &quot;quark&quot;, &quot;quark_int4fp8_moe&quot;, &quot;quark_mxfp4&quot;, &quot;unquant&quot;, &quot;w4afp8&quot;, &quot;w8a8_fp8&quot;, &quot;w8a8_int8&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_skip_dp_mlp_sync</td>
+<td>--sglang-speculative-skip-dp-mlp-sync</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_multi_layer_eagle</td>
+<td>--sglang-enable-multi-layer-eagle</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_adaptive</td>
+<td>--sglang-speculative-adaptive</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_adaptive_config</td>
+<td>--sglang-speculative-adaptive-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decoupled_spec_bind_endpoint</td>
+<td>--sglang-decoupled-spec-bind-endpoint</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decoupled_spec_connect_endpoints</td>
+<td>--sglang-decoupled-spec-connect-endpoints</td>
+<td>json_list_type</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decoupled_spec_rank</td>
+<td>--sglang-decoupled-spec-rank</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decoupled_spec_role</td>
+<td>--sglang-decoupled-spec-role</td>
+<td>str</td>
+<td>[&quot;drafter&quot;, &quot;null&quot;, &quot;verifier&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_spec_trace_dir</td>
+<td>--sglang-spec-trace-dir</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_min_bfs_breadth</td>
+<td>--sglang-speculative-ngram-min-bfs-breadth</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_max_bfs_breadth</td>
+<td>--sglang-speculative-ngram-max-bfs-breadth</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_match_type</td>
+<td>--sglang-speculative-ngram-match-type</td>
+<td>str</td>
+<td>[&quot;BFS&quot;, &quot;PROB&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_max_trie_depth</td>
+<td>--sglang-speculative-ngram-max-trie-depth</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_capacity</td>
+<td>--sglang-speculative-ngram-capacity</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_external_corpus_path</td>
+<td>--sglang-speculative-ngram-external-corpus-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_external_sam_budget</td>
+<td>--sglang-speculative-ngram-external-sam-budget</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_ngram_external_corpus_max_tokens</td>
+<td>--sglang-speculative-ngram-external-corpus-max-tokens</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ep_size</td>
+<td>--sglang-ep-size, --sglang-expert-parallel-size, --sglang-ep</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_moe_a2a_backend</td>
+<td>--sglang-moe-a2a-backend</td>
+<td>str</td>
+<td>[&quot;ascend_fuseep&quot;, &quot;ascend_tp&quot;, &quot;deepep&quot;, &quot;deepep_v2&quot;, &quot;flashinfer&quot;, &quot;flashinfer_megamoe&quot;, &quot;megamoe&quot;, &quot;mooncake&quot;, &quot;mori&quot;, &quot;nixl&quot;, &quot;none&quot;, &quot;pplx&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_w4a4_mxfp4_megamoe</td>
+<td>--sglang-enable-w4a4-mxfp4-megamoe</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_deepep_v2_mode</td>
+<td>--sglang-deepep-v2-mode</td>
+<td>str</td>
+<td>[&quot;direct&quot;, &quot;hybrid&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_moe_runner_backend</td>
+<td>--sglang-moe-runner-backend</td>
+<td>str</td>
+<td>[&quot;aiter&quot;, &quot;auto&quot;, &quot;cutlass&quot;, &quot;deep_gemm&quot;, &quot;experimental_sgl_marlin&quot;, &quot;experimental_sgl_trtllm&quot;, &quot;flashinfer_cutedsl&quot;, &quot;flashinfer_cutlass&quot;, &quot;flashinfer_megamoe&quot;, &quot;flashinfer_mxfp4&quot;, &quot;flashinfer_trtllm&quot;, &quot;flashinfer_trtllm_routed&quot;, &quot;hpc_ops&quot;, &quot;humming&quot;, &quot;intel_xpu&quot;, &quot;marlin&quot;, &quot;megamoe&quot;, &quot;triton&quot;, &quot;triton_kernel&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_flashinfer_mxfp4_moe_precision</td>
+<td>--sglang-flashinfer-mxfp4-moe-precision</td>
+<td>str</td>
+<td>[&quot;bf16&quot;, &quot;default&quot;, &quot;fp8&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_deepep_mode</td>
+<td>--sglang-deepep-mode</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;low_latency&quot;, &quot;normal&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_fuseep_mode</td>
+<td>--sglang-fuseep-mode</td>
+<td>int</td>
+<td>[1, 2]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_deepep_dispatcher_output_dtype</td>
+<td>--sglang-deepep-dispatcher-output-dtype</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bf16&quot;, &quot;fp8&quot;, &quot;int8&quot;, &quot;nvfp4&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ep_num_redundant_experts</td>
+<td>--sglang-ep-num-redundant-experts</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ep_dispatch_algorithm</td>
+<td>--sglang-ep-dispatch-algorithm</td>
+<td>str</td>
+<td>[&quot;dynamic&quot;, &quot;fake&quot;, &quot;lp&quot;, &quot;static&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_init_expert_location</td>
+<td>--sglang-init-expert-location</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_eplb</td>
+<td>--sglang-enable-eplb</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_eplb_algorithm</td>
+<td>--sglang-eplb-algorithm</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_eplb_rebalance_num_iterations</td>
+<td>--sglang-eplb-rebalance-num-iterations</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_eplb_rebalance_layers_per_chunk</td>
+<td>--sglang-eplb-rebalance-layers-per-chunk</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_eplb_min_rebalancing_utilization_threshold</td>
+<td>--sglang-eplb-min-rebalancing-utilization-threshold</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_expert_distribution_recorder_mode</td>
+<td>--sglang-expert-distribution-recorder-mode</td>
+<td>str</td>
+<td>[&quot;per_pass&quot;, &quot;per_token&quot;, &quot;stat&quot;, &quot;stat_approx&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_expert_distribution_recorder_buffer_size</td>
+<td>--sglang-expert-distribution-recorder-buffer-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_expert_balancedness_report_mode</td>
+<td>--sglang-expert-balancedness-report-mode</td>
+<td>str</td>
+<td>[&quot;both&quot;, &quot;off&quot;, &quot;prometheus&quot;, &quot;server_log&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_deepep_config</td>
+<td>--sglang-deepep-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_moe_dense_tp_size</td>
+<td>--sglang-moe-dense-tp-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_elastic_ep_backend</td>
+<td>--sglang-elastic-ep-backend</td>
+<td>str</td>
+<td>[&quot;mooncake&quot;, &quot;nixl&quot;, &quot;none&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_elastic_expert_backup</td>
+<td>--sglang-enable-elastic-expert-backup</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mooncake_ib_device</td>
+<td>--sglang-mooncake-ib-device</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_waterfill</td>
+<td>--sglang-enable-waterfill</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ep_join_mode</td>
+<td>--sglang-elastic-ep-join-mode</td>
+<td>str</td>
+<td>[&quot;recover&quot;, &quot;scale&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ep_join_rank_offset</td>
+<td>--sglang-elastic-ep-join-rank-offset</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_elastic_ep_initial_size</td>
+<td>--sglang-elastic-ep-initial-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_ep_size</td>
+<td>--sglang-max-ep-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_elastic_ep_scale_timeout</td>
+<td>--sglang-elastic-ep-scale-timeout</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_flashinfer_cutlass_moe_fp4_allgather</td>
+<td>--sglang-disable-flashinfer-cutlass-moe-fp4-allgather</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_shared_experts_fusion</td>
+<td>--sglang-disable-shared-experts-fusion</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enforce_shared_experts_fusion</td>
+<td>--sglang-enforce-shared-experts-fusion</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_mamba_cache_size</td>
+<td>--sglang-max-mamba-cache-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_ssm_dtype</td>
+<td>--sglang-mamba-ssm-dtype</td>
+<td>str</td>
+<td>[&quot;bfloat16&quot;, &quot;float16&quot;, &quot;float32&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_max_states_per_path</td>
+<td>--sglang-mamba-max-states-per-path</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_mamba_cache_stochastic_rounding</td>
+<td>--sglang-enable-mamba-cache-stochastic-rounding</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_cache_philox_rounds</td>
+<td>--sglang-mamba-cache-philox-rounds</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_full_memory_ratio</td>
+<td>--sglang-mamba-full-memory-ratio</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_radix_cache_strategy</td>
+<td>--sglang-mamba-radix-cache-strategy</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;extra_buffer&quot;, &quot;extra_buffer_lazy&quot;, &quot;no_buffer&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mamba_track_interval</td>
+<td>--sglang-mamba-track-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_int8_mamba_checkpoint</td>
+<td>--sglang-enable-int8-mamba-checkpoint</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_int8_mamba_ckpt_size</td>
+<td>--sglang-int8-mamba-ckpt-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_linear_attn_backend</td>
+<td>--sglang-linear-attn-backend</td>
+<td>str</td>
+<td>[&quot;cutedsl&quot;, &quot;flashinfer&quot;, &quot;flashkda&quot;, &quot;helion&quot;, &quot;intel_xpu&quot;, &quot;nvidia_kda&quot;, &quot;ptx_kda&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_linear_attn_decode_backend</td>
+<td>--sglang-linear-attn-decode-backend</td>
+<td>str</td>
+<td>[&quot;cutedsl&quot;, &quot;flashinfer&quot;, &quot;flashkda&quot;, &quot;helion&quot;, &quot;intel_xpu&quot;, &quot;nvidia_kda&quot;, &quot;ptx_kda&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_linear_attn_prefill_backend</td>
+<td>--sglang-linear-attn-prefill-backend</td>
+<td>str</td>
+<td>[&quot;cutedsl&quot;, &quot;flashinfer&quot;, &quot;flashkda&quot;, &quot;helion&quot;, &quot;intel_xpu&quot;, &quot;nvidia_kda&quot;, &quot;ptx_kda&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_linear_attn_verify_backend</td>
+<td>--sglang-linear-attn-verify-backend</td>
+<td>str</td>
+<td>[&quot;cutedsl&quot;, &quot;flashinfer&quot;, &quot;flashkda&quot;, &quot;helion&quot;, &quot;intel_xpu&quot;, &quot;nv_cutedsl&quot;, &quot;nvidia_kda&quot;, &quot;ptx_kda&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_linear_replayssm</td>
+<td>--sglang-enable-linear-replayssm</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_linear_replayssm_cache_len</td>
+<td>--sglang-linear-replayssm-cache-len</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_linear_replayssm_spec</td>
+<td>--sglang-enable-linear-replayssm-spec</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_hierarchical_cache</td>
+<td>--sglang-enable-hierarchical-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_host_memory_mode</td>
+<td>--sglang-hicache-host-memory-mode</td>
+<td>str</td>
+<td>[&quot;buffer_only&quot;, &quot;cache&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_ratio</td>
+<td>--sglang-hicache-ratio</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_size</td>
+<td>--sglang-hicache-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_write_policy</td>
+<td>--sglang-hicache-write-policy</td>
+<td>str</td>
+<td>[&quot;write_back&quot;, &quot;write_through&quot;, &quot;write_through_selective&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_io_backend</td>
+<td>--sglang-hicache-io-backend</td>
+<td>str</td>
+<td>[&quot;direct&quot;, &quot;kernel&quot;, &quot;kernel_ascend&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_mem_layout</td>
+<td>--sglang-hicache-mem-layout</td>
+<td>str</td>
+<td>[&quot;layer_first&quot;, &quot;page_first&quot;, &quot;page_first_direct&quot;, &quot;page_first_kv_split&quot;, &quot;page_head&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_storage_backend</td>
+<td>--sglang-hicache-storage-backend</td>
+<td>str</td>
+<td>[&quot;aibrix&quot;, &quot;dynamic&quot;, &quot;eic&quot;, &quot;file&quot;, &quot;hf3fs&quot;, &quot;mooncake&quot;, &quot;mori&quot;, &quot;nixl&quot;, &quot;npu_memcache&quot;, &quot;shm&quot;, &quot;sim&quot;, &quot;simm&quot;, &quot;tensorcast&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_storage_prefetch_policy</td>
+<td>--sglang-hicache-storage-prefetch-policy</td>
+<td>str</td>
+<td>[&quot;best_effort&quot;, &quot;timeout&quot;, &quot;wait_complete&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_storage_backend_extra_config</td>
+<td>--sglang-hicache-storage-backend-extra-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_storage_prefetch_retry_poll_interval</td>
+<td>--sglang-hicache-storage-prefetch-retry-poll-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_storage_prefetch_retry_max_attempts</td>
+<td>--sglang-hicache-storage-prefetch-retry-max-attempts</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_unified_cache_external_linker</td>
+<td>--sglang-enable-unified-cache-external-linker</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_unified_cache_external_linker_backend</td>
+<td>--sglang-unified-cache-external-linker-backend</td>
+<td>str</td>
+<td>[&quot;mooncake&quot;, &quot;mori&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_hisparse</td>
+<td>--sglang-enable-hisparse</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hisparse_config</td>
+<td>--sglang-hisparse-config, --sglang-hierarchical-sparse-attention-extra-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_broadcast_mm_inputs_process</td>
+<td>--sglang-enable-broadcast-mm-inputs-process</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_prefix_mm_cache</td>
+<td>--sglang-enable-prefix-mm-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_enable_dp_encoder</td>
+<td>--sglang-mm-enable-dp-encoder</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_process_config</td>
+<td>--sglang-mm-process-config</td>
+<td>loads</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_processor_worker_num</td>
+<td>--sglang-mm-processor-worker-num</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_io_worker_num</td>
+<td>--sglang-mm-io-worker-num</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_allowed_media_domains</td>
+<td>--sglang-allowed-media-domains</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_media_url_max_file_size_mb</td>
+<td>--sglang-media-url-max-file-size-mb</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_preprocess_cache_size_mb</td>
+<td>--sglang-mm-preprocess-cache-size-mb</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_trust_mm_content_hashes</td>
+<td>--sglang-trust-mm-content-hashes</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_limit_mm_data_per_request</td>
+<td>--sglang-limit-mm-data-per-request</td>
+<td>loads</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_mm_global_cache</td>
+<td>--sglang-enable-mm-global-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_image_processor_backend</td>
+<td>--sglang-image-processor-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;pil&quot;, &quot;torchvision&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_global_cache_backend</td>
+<td>--sglang-mm-global-cache-backend</td>
+<td>str</td>
+<td>[&quot;mooncake&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_fast_image_processor</td>
+<td>--sglang-disable-fast-image-processor</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_mm_feature_transport</td>
+<td>--sglang-mm-feature-transport</td>
+<td>str</td>
+<td>[&quot;cpu&quot;, &quot;cuda_ipc&quot;, &quot;cuda_vmm&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_lora</td>
+<td>--sglang-enable-lora</td>
+<td>switch</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_lora_overlap_loading</td>
+<td>--sglang-enable-lora-overlap-loading</td>
+<td>switch</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_lora_rank</td>
+<td>--sglang-max-lora-rank</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_target_modules</td>
+<td>--sglang-lora-target-modules</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_paths</td>
+<td>--sglang-lora-paths</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_loaded_loras</td>
+<td>--sglang-max-loaded-loras</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_loras_per_batch</td>
+<td>--sglang-max-loras-per-batch</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_eviction_policy</td>
+<td>--sglang-lora-eviction-policy</td>
+<td>str</td>
+<td>[&quot;fifo&quot;, &quot;lru&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_backend</td>
+<td>--sglang-lora-backend</td>
+<td>str</td>
+<td>[&quot;ascend&quot;, &quot;csgmv&quot;, &quot;torch_native&quot;, &quot;triton&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_max_lora_chunk_size</td>
+<td>--sglang-max-lora-chunk-size</td>
+<td>int</td>
+<td>[128, 16, 32, 64]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_experts_shared_outer_loras</td>
+<td>--sglang-experts-shared-outer-loras, --no-sglang-experts-shared-outer-loras</td>
+<td>boolean</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_use_virtual_experts</td>
+<td>--sglang-lora-use-virtual-experts</td>
+<td>switch</td>
+<td>—</td>
+<td>true</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_strict_loading</td>
+<td>--sglang-lora-strict-loading, --no-sglang-lora-strict-loading</td>
+<td>boolean</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_no_cpu_backup</td>
+<td>--sglang-lora-no-cpu-backup</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_drain_wait_threshold</td>
+<td>--sglang-lora-drain-wait-threshold</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_two_batch_overlap</td>
+<td>--sglang-enable-two-batch-overlap</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_single_batch_overlap</td>
+<td>--sglang-enable-single-batch-overlap</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tbo_token_distribution_threshold</td>
+<td>--sglang-tbo-token-distribution-threshold</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cpu_offload_gb</td>
+<td>--sglang-cpu-offload-gb</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_offload_group_size</td>
+<td>--sglang-offload-group-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_offload_num_in_group</td>
+<td>--sglang-offload-num-in-group</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_offload_prefetch_step</td>
+<td>--sglang-offload-prefetch-step</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_offload_mode</td>
+<td>--sglang-offload-mode</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_lmcache</td>
+<td>--sglang-enable-lmcache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lmcache_config_file</td>
+<td>--sglang-lmcache-config-file</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_flexkv</td>
+<td>--sglang-enable-flexkv</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_flexkv_config_file</td>
+<td>--sglang-flexkv-config-file</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kt_weight_path</td>
+<td>--sglang-kt-weight-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kt_method</td>
+<td>--sglang-kt-method</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kt_cpuinfer</td>
+<td>--sglang-kt-cpuinfer</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kt_threadpool_count</td>
+<td>--sglang-kt-threadpool-count</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kt_num_gpu_experts</td>
+<td>--sglang-kt-num-gpu-experts</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kt_max_deferred_experts_per_token</td>
+<td>--sglang-kt-max-deferred-experts-per-token</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dllm_algorithm</td>
+<td>--sglang-dllm-algorithm</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dllm_algorithm_config</td>
+<td>--sglang-dllm-algorithm-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dllm_fdfo</td>
+<td>--sglang-dllm-fdfo, --no-sglang-dllm-fdfo</td>
+<td>boolean</td>
+<td>—</td>
+<td>true</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_mode</td>
+<td>--sglang-disaggregation-mode</td>
+<td>str</td>
+<td>[&quot;decode&quot;, &quot;null&quot;, &quot;prefill&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_transfer_backend</td>
+<td>--sglang-disaggregation-transfer-backend</td>
+<td>str</td>
+<td>[&quot;ascend&quot;, &quot;fake&quot;, &quot;mooncake&quot;, &quot;mooncake_tcp&quot;, &quot;mori&quot;, &quot;nixl&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_bootstrap_port</td>
+<td>--sglang-disaggregation-bootstrap-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_ib_device</td>
+<td>--sglang-disaggregation-ib-device</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_decode_enable_radix_cache</td>
+<td>--sglang-disaggregation-decode-enable-radix-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_decode_enable_offload_kvcache</td>
+<td>--sglang-disaggregation-decode-enable-offload-kvcache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_decode_retraction_backup</td>
+<td>--sglang-disaggregation-decode-retraction-backup</td>
+<td>str</td>
+<td>[&quot;cpu_tensor&quot;, &quot;host_pool&quot;, &quot;none&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_num_reserved_decode_tokens</td>
+<td>--sglang-num-reserved-decode-tokens</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_decode_extra_slots</td>
+<td>--sglang-disaggregation-decode-extra-slots</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_decode_polling_interval</td>
+<td>--sglang-disaggregation-decode-polling-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_optimistic_prefill_attempts</td>
+<td>--sglang-optimistic-prefill-attempts</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_encoder_only</td>
+<td>--sglang-encoder-only</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_language_only</td>
+<td>--sglang-language-only</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_language_model_only</td>
+<td>--sglang-language-model-only</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_encoder_transfer_backend</td>
+<td>--sglang-encoder-transfer-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;mooncake&quot;, &quot;zmq_to_scheduler&quot;, &quot;zmq_to_tokenizer&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_encoder_urls</td>
+<td>--sglang-encoder-urls</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_encoder_bootstrap_port</td>
+<td>--sglang-encoder-bootstrap-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_encoder_register_urls</td>
+<td>--sglang-encoder-register-urls</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_adaptive_dispatch_to_encoder</td>
+<td>--sglang-enable-adaptive-dispatch-to-encoder</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_pdmux</td>
+<td>--sglang-enable-pdmux</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_pdmux_config_path</td>
+<td>--sglang-pdmux-config-path</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sm_group_num</td>
+<td>--sglang-sm-group-num</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_startup_weight_load_mode</td>
+<td>--sglang-startup-weight-load-mode</td>
+<td>str</td>
+<td>[&quot;overlap&quot;, &quot;serial&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_custom_weight_loader</td>
+<td>--sglang-custom-weight-loader</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_loader_disable_mmap</td>
+<td>--sglang-weight-loader-disable-mmap</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_loader_prefetch_checkpoints</td>
+<td>--sglang-weight-loader-prefetch-checkpoints</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_loader_prefetch_num_threads</td>
+<td>--sglang-weight-loader-prefetch-num-threads</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_loader_drop_cache_after_load</td>
+<td>--sglang-weight-loader-drop-cache-after-load</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_remote_instance_weight_loader_seed_instance_ip</td>
+<td>--sglang-remote-instance-weight-loader-seed-instance-ip</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_remote_instance_weight_loader_seed_instance_service_port</td>
+<td>--sglang-remote-instance-weight-loader-seed-instance-service-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_remote_instance_weight_loader_send_weights_group_ports</td>
+<td>--sglang-remote-instance-weight-loader-send-weights-group-ports</td>
+<td>json_list_type</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_remote_instance_weight_loader_backend</td>
+<td>--sglang-remote-instance-weight-loader-backend</td>
+<td>str</td>
+<td>[&quot;modelexpress&quot;, &quot;nccl&quot;, &quot;transfer_engine&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_remote_instance_weight_loader_start_seed_via_transfer_engine</td>
+<td>--sglang-remote-instance-weight-loader-start-seed-via-transfer-engine</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_engine_info_bootstrap_port</td>
+<td>--sglang-engine-info-bootstrap-port</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_modelexpress_config</td>
+<td>--sglang-modelexpress-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_download_dir</td>
+<td>--sglang-download-dir</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_model_checksum</td>
+<td>--sglang-model-checksum</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_delete_ckpt_after_loading</td>
+<td>--sglang-delete-ckpt-after-loading</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decrypted_config_file</td>
+<td>--sglang-decrypted-config-file</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_decrypted_draft_config_file</td>
+<td>--sglang-decrypted-draft-config-file</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_checkpoint_engine_wait_weights_before_ready</td>
+<td>--sglang-checkpoint-engine-wait-weights-before-ready</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_prefill_delayer</td>
+<td>--sglang-enable-prefill-delayer</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_delayer_max_delay_passes</td>
+<td>--sglang-prefill-delayer-max-delay-passes</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_delayer_token_usage_low_watermark</td>
+<td>--sglang-prefill-delayer-token-usage-low-watermark</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_delayer_forward_passes_buckets</td>
+<td>--sglang-prefill-delayer-forward-passes-buckets</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_delayer_wait_seconds_buckets</td>
+<td>--sglang-prefill-delayer-wait-seconds-buckets</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_delayer_queue_min_ratio</td>
+<td>--sglang-prefill-delayer-queue-min-ratio</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_delayer_max_delay_ms</td>
+<td>--sglang-prefill-delayer-max-delay-ms</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_min_free_slots_delay</td>
+<td>--sglang-min-free-slots-delay</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_deterministic_inference</td>
+<td>--sglang-enable-deterministic-inference</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_rl_on_policy_target</td>
+<td>--sglang-rl-on-policy-target</td>
+<td>str</td>
+<td>[&quot;fsdp&quot;, &quot;fsdp_tp&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kv_canary</td>
+<td>--sglang-kv-canary</td>
+<td>str</td>
+<td>[&quot;log&quot;, &quot;none&quot;, &quot;raise&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kv_canary_sweep_interval</td>
+<td>--sglang-kv-canary-sweep-interval</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_dynamic_batch_tokenizer</td>
+<td>--sglang-enable-dynamic-batch-tokenizer</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dynamic_batch_tokenizer_batch_size</td>
+<td>--sglang-dynamic-batch-tokenizer-batch-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dynamic_batch_tokenizer_batch_timeout</td>
+<td>--sglang-dynamic-batch-tokenizer-batch-timeout</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_tokenizer_batch_encode</td>
+<td>--sglang-enable-tokenizer-batch-encode</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_tokenizer_batch_decode</td>
+<td>--sglang-disable-tokenizer-batch-decode</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_debug_tensor_dump_output_folder</td>
+<td>--sglang-debug-tensor-dump-output-folder</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_debug_tensor_dump_layers</td>
+<td>--sglang-debug-tensor-dump-layers</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_debug_tensor_dump_input_file</td>
+<td>--sglang-debug-tensor-dump-input-file</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_weights_cpu_backup</td>
+<td>--sglang-enable-weights-cpu-backup</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_draft_weights_cpu_backup</td>
+<td>--sglang-enable-draft-weights-cpu-backup</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_custom_logit_processor</td>
+<td>--sglang-enable-custom-logit-processor</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_return_hidden_states</td>
+<td>--sglang-enable-return-hidden-states</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_return_hidden_states_mode</td>
+<td>--sglang-return-hidden-states-mode</td>
+<td>str</td>
+<td>[&quot;full&quot;, &quot;last&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sampling_mask_max_tokens</td>
+<td>--sglang-sampling-mask-max-tokens</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_outlines_disk_cache</td>
+<td>--sglang-disable-outlines-disk-cache</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_mis</td>
+<td>--sglang-enable-mis</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_cache_mode</td>
+<td>--sglang-weight-cache-mode</td>
+<td>str</td>
+<td>[&quot;client&quot;, &quot;daemon&quot;, &quot;off&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_cache_socket</td>
+<td>--sglang-weight-cache-socket</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_weight_cache_timeout</td>
+<td>--sglang-weight-cache-timeout</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_forward_hooks</td>
+<td>--sglang-forward-hooks</td>
+<td>json_list_type</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_msprobe_dump_config</td>
+<td>--sglang-msprobe-dump-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ple_offload_embedding</td>
+<td>--sglang-ple-offload-embedding, --no-sglang-ple-offload-embedding</td>
+<td>boolean</td>
+<td>—</td>
+<td>null</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ple_offload_backend</td>
+<td>--sglang-ple-offload-backend</td>
+<td>str</td>
+<td>[&quot;file&quot;, &quot;pinned&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_ple_offload_dir</td>
+<td>--sglang-ple-offload-dir</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_enable_kv_checksum</td>
+<td>--sglang-disaggregation-enable-kv-checksum</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_pd_role_switch</td>
+<td>--sglang-enable-pd-role-switch</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_domino_candidate_pool_size</td>
+<td>--sglang-speculative-domino-candidate-pool-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_flashinfer_a2a_dispatch_type</td>
+<td>--sglang-flashinfer-a2a-dispatch-type</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;bf16&quot;, &quot;mxfp8&quot;, &quot;nvfp4&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_cuda_graph_max_seq_len_prefill</td>
+<td>--sglang-cuda-graph-max-seq-len-prefill</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_prefill_kv_cache_dequant_dtype</td>
+<td>--sglang-prefill-kv-cache-dequant-dtype</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;fp8_e4m3&quot;, &quot;nvfp4&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_dsv4_attn_backend</td>
+<td>--sglang-dsv4-attn-backend</td>
+<td>str</td>
+<td>[&quot;auto&quot;, &quot;flashmla&quot;, &quot;trtllm&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_otlp_service_name</td>
+<td>--sglang-otlp-service-name</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_hicache_host_memory_fraction</td>
+<td>--sglang-hicache-host-memory-fraction</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_linker_mla_dedup</td>
+<td>--sglang-enable-linker-mla-dedup</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_swa_prefix_tails</td>
+<td>--sglang-swa-prefix-tails</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_encoder_swa_bounded_replay</td>
+<td>--sglang-enable-encoder-swa-bounded-replay</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_decoder_swa_bounded_replay</td>
+<td>--sglang-enable-decoder-swa-bounded-replay</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_response_store</td>
+<td>--sglang-enable-response-store</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disaggregation_decode_host_receive_threshold</td>
+<td>--sglang-disaggregation-decode-host-receive-threshold</td>
+<td>float</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_custom_pull_weights_pre_read_hook</td>
+<td>--sglang-custom-pull-weights-pre-read-hook</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_engine_info_bootstrap</td>
+<td>--sglang-enable-engine-info-bootstrap</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_rdt_weight_sync</td>
+<td>--sglang-enable-rdt-weight-sync</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_prefill_only_deterministic_inference</td>
+<td>--sglang-enable-prefill-only-deterministic-inference</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_true_on_policy_contract</td>
+<td>--sglang-true-on-policy-contract</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_speculative_draft_sink_size</td>
+<td>--sglang-speculative-draft-sink-size</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_aiter_allreduce_fusion_in_prefill</td>
+<td>--sglang-disable-aiter-allreduce-fusion-in-prefill</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_aiter_allreduce_fusion_in_decode</td>
+<td>--sglang-disable-aiter-allreduce-fusion-in-decode</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_draft_cuda_graph</td>
+<td>--sglang-disable-draft-cuda-graph</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_grpc_response_timeout_secs</td>
+<td>--sglang-grpc-response-timeout-secs</td>
+<td>int</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_sampling_backend</td>
+<td>--sglang-sampling-backend</td>
+<td>str</td>
+<td>[&quot;ascend&quot;, &quot;flashinfer&quot;, &quot;intel_xpu&quot;, &quot;pytorch&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_reasoning_parser</td>
+<td>--sglang-reasoning-parser</td>
+<td>str</td>
+<td>[&quot;apertus2509&quot;, &quot;auto&quot;, &quot;cohere_command4&quot;, &quot;deepseek-r1&quot;, &quot;deepseek-v3&quot;, &quot;deepseek-v4&quot;, &quot;deepseek-v41&quot;, &quot;dots&quot;, &quot;gemma4&quot;, &quot;gigachat35&quot;, &quot;glm45&quot;, &quot;gpt-oss&quot;, &quot;granite_thinking_parser&quot;, &quot;hunyuan&quot;, &quot;inkling&quot;, &quot;interns1&quot;, &quot;iquest_q1&quot;, &quot;k2_horizon&quot;, &quot;kimi&quot;, &quot;kimi_k2&quot;, &quot;kimi_k3&quot;, &quot;ling3&quot;, &quot;mimo&quot;, &quot;minimax&quot;, &quot;minimax-append-think&quot;, &quot;minimax-m3&quot;, &quot;mistral&quot;, &quot;muse&quot;, &quot;nanbeige&quot;, &quot;nemotron_3&quot;, &quot;poolside_v1&quot;, &quot;qwen3&quot;, &quot;qwen3-thinking&quot;, &quot;step3&quot;, &quot;step3p5&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_tool_call_parser</td>
+<td>--sglang-tool-call-parser</td>
+<td>str</td>
+<td>[&quot;apertus2509&quot;, &quot;auto&quot;, &quot;cohere_command4&quot;, &quot;deepseekv3&quot;, &quot;deepseekv31&quot;, &quot;deepseekv32&quot;, &quot;deepseekv4&quot;, &quot;deepseekv41&quot;, &quot;dots&quot;, &quot;gemma4&quot;, &quot;gigachat3&quot;, &quot;gigachat35&quot;, &quot;glm&quot;, &quot;glm45&quot;, &quot;glm47&quot;, &quot;gpt-oss&quot;, &quot;hermes&quot;, &quot;hunyuan&quot;, &quot;inkling&quot;, &quot;interns1&quot;, &quot;iquest_q1&quot;, &quot;k2_horizon&quot;, &quot;kimi_k2&quot;, &quot;kimi_k3&quot;, &quot;lfm2&quot;, &quot;ling3&quot;, &quot;llama3&quot;, &quot;mimo&quot;, &quot;minicpm5&quot;, &quot;minimax-m2&quot;, &quot;minimax-m3&quot;, &quot;mistral&quot;, &quot;muse&quot;, &quot;nanbeige&quot;, &quot;poolside_v1&quot;, &quot;pythonic&quot;, &quot;qwen&quot;, &quot;qwen25&quot;, &quot;qwen3_coder&quot;, &quot;spark25&quot;, &quot;step3&quot;, &quot;step3p5&quot;, &quot;trinity&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_kv_canary_real_data</td>
+<td>--sglang-kv-canary-real-data</td>
+<td>str</td>
+<td>[&quot;all&quot;, &quot;none&quot;, &quot;partial&quot;]</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_disable_cuda_graph</td>
+<td>--sglang-disable-cuda-graph</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_enable_flashinfer_allreduce_fusion</td>
+<td>--sglang-enable-flashinfer-allreduce-fusion</td>
+<td>switch</td>
+<td>—</td>
+<td>false</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_config</td>
+<td>--sglang-config</td>
+<td>str</td>
+<td>—</td>
+<td>Not captured</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+<tr>
+<td>sglang_lora_use_virtual_experts</td>
+<td>--no-sglang-lora-use-virtual-experts</td>
+<td>switch</td>
+<td>—</td>
+<td>true</td>
+<td>Parser option; subject to Core/model/runtime validation</td>
+<td>See pinned runtime help.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

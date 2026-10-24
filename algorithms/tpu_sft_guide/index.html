@@ -1,0 +1,3125 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/algorithms/tpu_sft_guide/">
+      
+      
+        <link rel="prev" href="../sft_running_guide/">
+      
+      
+        <link rel="next" href="../dpo/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Running SFT on TPU: a known-good starting point - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#running-sft-on-tpu-a-known-good-starting-point" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Running SFT on TPU: a known-good starting point
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#example-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before you start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-cluster-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the cluster is
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-per-slice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost per slice
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Image
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-base-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Base checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-and-tokenizer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Data and tokenizer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Launch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-read-the-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Read the loss
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-checkpoints-preemption-and-resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Checkpoints, preemption and resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-export-to-hf-and-evaluate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Export to HF and evaluate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#traps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changing-the-recipe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing the recipe
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/background-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../miles/native-serving-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#example-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before you start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-cluster-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the cluster is
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-per-slice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost per slice
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Image
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-base-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Base checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-and-tokenizer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Data and tokenizer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Launch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-read-the-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Read the loss
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-checkpoints-preemption-and-resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Checkpoints, preemption and resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-export-to-hf-and-evaluate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Export to HF and evaluate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#traps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changing-the-recipe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing the recipe
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="running-sft-on-tpu-a-known-good-starting-point">Running SFT on TPU: a known-good starting point</h1>
+<p>Olmo 3.5 small (the 4T EMO base) on Dolci-Think with H045's recipe, on <strong>one TPU v4 <code>4x4x8</code> slice (128 chips)</strong> of
+the <code>gke-tpu-v4</code> cluster, through MaxText + Tunix.</p>
+<p>Measured cost and outcome: 11,768 steps of 16 × 65,536 tokens at a median 3.94 s/step, 13.5 h wall clock from submit
+to the last step. The loss matches H045's GPU runs (parity windows in <a href="https://github.com/allenai/open-instruct/issues/1933">open-instruct#1933</a>). The GPU recipe takes 5 h 54 m on
+2×8 H100, so the TPU path is slower per run. Its advantage is capacity: four of these runs fit at once without
+touching Beaker.</p>
+<p>The recipe is <code>scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8/</code>.
+Its <code>kustomization.yaml</code> header records why each setting is what it is; read it before editing. Olmo 3 7B has its
+own overlay, <code>k8s/instruct-sft-4x4x8/</code>; its base <code>k8s/olmo3-sft/</code> targets a <code>2x2x4</code> slice, which no longer exists. <code>scripts/tpu/maxtext/README.md</code> lists the MaxText patches.</p>
+<h2 id="example-runs">Example runs</h2>
+<table>
+<thead>
+<tr>
+<th>Run</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>olmo35-sft-h045-tpu-full-r2</code></td>
+<td>This recipe, verbatim: the TPU replica of the ledger's H045 anchor (arm <code>anchor-emo-olmo35-tpu</code>). 0 restarts, final CE 0.9245. HF export: <code>/weka/oe-adapt-default/abhishekr/tpu-posttrain/hf/olmo35-sft-h045-tpu-full-r2-step11768</code>.</td>
+</tr>
+<tr>
+<td>H067, H072 (olmo-post-training-ledger)</td>
+<td>The same recipe with other data: arms, seeds, resumes and their checks are recorded in those hypothesis files and in <a href="https://github.com/allenai/open-instruct/issues/1976">open-instruct#1976</a> and <a href="https://github.com/allenai/open-instruct/issues/1977">#1977</a>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="before-you-start">Before you start</h2>
+<ul>
+<li><strong>IAM on the <code>ai2-olmo</code> GCP project</strong>, e.g. <code>roles/container.developer</code>.</li>
+<li><strong>A network the cluster accepts.</strong> <a href="https://github.com/allenai/olmo-gcp-infra#connecting-to-gke-tpu-v4">allenai/olmo-gcp-infra's README</a>
+  lists them: the office IPs, its Tailscale exit nodes, and Beaker sessions on <code>ai2/hammond</code>. From anywhere else, use the
+  DNS endpoint (<code>--dns-endpoint</code>). Then:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>container<span class="w"> </span>clusters<span class="w"> </span>get-credentials<span class="w"> </span>gke-tpu-v4<span class="w"> </span>--zone<span class="w"> </span>us-central2-b<span class="w"> </span>--project<span class="w"> </span>ai2-olmo
+kubectl<span class="w"> </span>-n<span class="w"> </span>olmo<span class="w"> </span>get<span class="w"> </span>workloads
+</code></pre></div>
+<p><code>kubectl</code> needs <code>gke-gcloud-auth-plugin</code> (<code>gcloud components install gke-gcloud-auth-plugin</code>, or a binary in <code>~/.local/bin</code>).
+- <strong>gcloud logins expire about daily, and kubectl then fails quietly.</strong> Watchers go blind without an error. Agents
+  use the service account <code>tpu-posttrain-agent@ai2-olmo.iam.gserviceaccount.com</code>: export
+  <code>CLOUDSDK_CORE_ACCOUNT</code> to it in every process, background watchers included. Move
+  <code>~/.kube/gke_gcloud_auth_plugin_cache</code> aside when switching identity, or kubectl keeps the cached one. People log in
+  with their own account.
+- <strong>Agents.</strong> Claude Code and Codex in this repo load a summary of this guide's rules from the
+  <a href="https://github.com/allenai/open-instruct/blob/main/.claude/skills/tpu/SKILL.md"><code>tpu</code> skill</a>. Update it when you change
+  a rule here.
+- <strong>Where things live.</strong> Everything is in <code>us-central2</code>. Data, tokenizers and checkpoints are in <code>gs://ai2-olmo-dev/post-training/</code>,
+  and the nodes mount it at <code>/mnt/post-training</code> through gcsfuse. Images are in
+  <code>us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain</code>.</p>
+<h2 id="what-the-cluster-is">What the cluster is</h2>
+<p><code>gke-tpu-v4</code> holds 4,096 reserved v4 chips at 4 per host. Since 2026-10-21 they are cut into seven <code>4x4x8</code> slices
+(128 chips) and three <code>8x8x16</code> (1,024), with 128 chips held back so GKE can auto-repair failed nodes; the <code>8x8x8</code> is
+gone. The layout changes as the cluster's admins reslice it, so check it before planning:
+<code>kubectl get nodes -L cloud.google.com/gke-nodepool --no-headers | awk '{print $NF}' | sort | uniq -c</code> (32 hosts per
+<code>4x4x8</code>, 256 per <code>8x8x16</code>). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:</p>
+<table>
+<thead>
+<tr>
+<th>Queue</th>
+<th>Who</th>
+<th>Preempted by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hero</code></td>
+<td>the main pretraining run; owns all the quota</td>
+<td>nothing</td>
+</tr>
+<tr>
+<td><code>dev</code></td>
+<td>tests</td>
+<td>hero</td>
+</tr>
+<tr>
+<td><code>post-training</code>, <code>data-adaptation</code></td>
+<td>us; share what is left</td>
+<td>hero, dev</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use <code>post-training</code>.</strong> Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
+checkpoint often enough to lose little. Never hold a slice in a way that delays hero.</p>
+<p>The recipe needs exactly a <code>4x4x8</code>: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The
+measurements below on the former <code>8x8x8</code> ran the same mesh at 64 rows per step, which is a different recipe (H078's 4x
+batch). On the former <code>8x8x8</code>, the
+measured 16-row configuration used <code>olmo35-cp-ep</code>, splitting each row 32 ways and changing the MoE load-balance term.
+No validated 16-row configuration for the <code>8x8x16</code> is documented here. Measured meshes are
+in <a href="#changing-the-recipe">Changing the recipe</a>.</p>
+<h2 id="cost-per-slice">Cost per slice</h2>
+<p>From TensorBoard <code>perf/*</code>. Throughput is tokens per chip-second: tokens per device per step divided by the mean
+step time over steps 31-100, so a stalled step counts at its full cost.</p>
+<table>
+<thead>
+<tr>
+<th>slice</th>
+<th>config</th>
+<th>rows/step</th>
+<th>median s/step</th>
+<th>tokens/s/chip</th>
+<th>steps over 3x median</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>4x4x8</code></td>
+<td>the recipe (A0')</td>
+<td>16</td>
+<td>3.88</td>
+<td>2,055</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>8x8x8</code></td>
+<td>H078's config, with the data-order shim (H088 opt-a)</td>
+<td>64</td>
+<td>4.28</td>
+<td>1,386</td>
+<td>4.3% (13% over H078's whole runs)</td>
+</tr>
+<tr>
+<td><code>8x8x8</code></td>
+<td>same, no shim and no batch hashes (H088 opt-b)</td>
+<td>64</td>
+<td>4.23</td>
+<td>1,887</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>8x8x8</code></td>
+<td>opt-b + <code>remat_policy=save_dot_except_mlp</code> (H088 opt-c)</td>
+<td>64</td>
+<td>4.18</td>
+<td>1,900</td>
+<td>0; a tie, keep <code>full</code></td>
+</tr>
+</tbody>
+</table>
+<p>Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
+resume.</p>
+<ul>
+<li><strong>Use a <code>4x4x8</code> for this recipe.</strong> Among the measured configurations it used the fewest chip-hours per token; no
+  throughput is measured here for the <code>8x8x16</code>, which is hero's and borrowed only. The <code>8x8x8</code> was split into
+  <code>4x4x8</code>s on 2026-10-21, so the <code>8x8x8</code> results below are historical. The <code>8x8x8</code> overlay is <code>k8s/olmo35-sft-8x8x8/</code>: the same token budget at 64 rows and 2,942 steps. Its data order
+  differs from the <code>4x4x8</code> recipe's, so an arm on it needed a control on the same slice and config. Without the shim
+  the <code>8x8x8</code> is projected at ~1.09x the chip-hours of the <code>4x4x8</code>, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
+  not a measured cost. Both rates come from stall-free 70-step windows on different days (<code>4x4x8</code> 10-14, <code>8x8x8</code>
+  10-18). The <code>8x8x8</code>'s stall rate over a whole run without the shim is not measured. The <code>8x8x8</code> could not run the 16-row recipe at that rate (see
+  <a href="#changing-the-recipe">Changing the recipe</a>).</li>
+<li><strong>Historical <code>8x8x8</code> input stalls.</strong> H088 removed the data-order shim (<code>MAXTEXT_R2_DATA_EMULATION</code>) and
+  <code>MAXTEXT_LOG_BATCH_HASH=1</code> together, so their separate contributions are not isolated. With both, one step in eight stalled for 20-35 s, at the same steps in
+  every run, and H078's runs cost 1.8-1.9x the chip-hours of a <code>4x4x8</code>. In xprof the stall is one host's input
+  pipeline (grain <code>process_prefetch</code> waiting 29 s) while every TPU waits for its batch in <code>jit__device_put_reshard</code>.
+  The HF input pipeline allows at most one grain worker, so more workers are not a fix.</li>
+<li><strong>Keep <code>remat_policy=full</code>.</strong> Saving dot outputs except the MLP's gained 0.7%, with the same loss.</li>
+<li>Outside stalls a step is ~4.0 s of device compute and ~0.2-0.5 s idle. FSDP all-gather waits are ~16% of the
+  compute, and <code>num_vocab_tiling=16</code> costs ~4% (the 205 MB embedding is all-gathered and its gradient all-reduced
+  96 times a step).</li>
+<li>Both slices run at ~4% of v4's 275 TFLOP/s bf16 peak by MaxText's own FLOP count.</li>
+<li><code>jax</code> <code>memory_stats()</code> peaks (0.9-2.3 GiB) leave out XLA temporaries: the same <code>8x8x8</code> config needed 32.17 GB at
+  compile with <code>ragged_buffer_factor=4.0</code>. Read HBM headroom from the compile error or xprof, not from those lines.</li>
+</ul>
+<h2 id="1-image">1. Image</h2>
+<div class="highlight"><pre><span></span><code>us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e
+</code></pre></div>
+<p>This tag is r2's image (<code>51f8cc4b-p907d86f3</code>, built from <code>image-olmo35/</code>) plus <code>image-olmo35-rf/</code>. That patch adds a
+fix for resuming from a checkpoint (without it, restore runs out of HBM) and batch-hash logging. Training numerics are
+unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. Use it for every new run. The
+Olmo 3 image is built by <code>image/build.sh &lt;maxtext commit&gt;</code>.</p>
+<p>To build a new image, run <code>build.sh</code> from any host with <code>gcloud</code> (a Beaker session works). Cloud Build carries the context base64-encoded inside the build
+config. Builds use Cloud Build's default service account. Set <code>BUILD_SERVICE_ACCOUNT</code> to a full
+<code>projects/&lt;project&gt;/serviceAccounts/&lt;email&gt;</code> resource only when the caller is authorized to use that account.</p>
+<h2 id="2-base-checkpoint">2. Base checkpoint</h2>
+<p>The loader reads an Orbax parameter tree (<code>…/0/items</code>) from GCS.</p>
+<ul>
+<li><strong>Olmo 3.5 (OLMo-core distcp).</strong> This runs in two stages, on CPU:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/tpu/maxtext/olmo35/dump_olmocore_masters.py<span class="w"> </span>&lt;step<span class="w"> </span>dir&gt;<span class="w"> </span>&lt;masters<span class="w"> </span>dir&gt;<span class="w">              </span><span class="c1"># needs olmo_core</span>
+python<span class="w"> </span>scripts/tpu/maxtext/olmo35/convert_olmocore_to_maxtext.py<span class="w"> </span>&lt;step<span class="w"> </span>dir&gt;<span class="w"> </span>&lt;masters<span class="w"> </span>dir&gt;<span class="w"> </span>&lt;out&gt;<span class="w">   </span><span class="c1"># needs maxtext</span>
+gcloud<span class="w"> </span>storage<span class="w"> </span>cp<span class="w"> </span>-r<span class="w"> </span>&lt;out&gt;/0<span class="w"> </span>gs://ai2-olmo-dev/post-training/checkpoints/&lt;name&gt;/
+</code></pre></div>
+<p>It keeps OLMo-core's padded 100,352 vocabulary, whose padded rows were trained. The 4T EMO base is already at
+  <code>gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items</code>.
+- <strong>Olmo 3 (HF).</strong> Use MaxText's converter with <code>model_name=olmo3-7b</code>. <code>olmo3-7b-pt</code> has no YaRN, so it is wrong for
+  the 1025 base.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">JAX_PLATFORMS</span><span class="o">=</span>cpu<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>maxtext.checkpoint_conversion.to_maxtext<span class="w"> </span><span class="nv">model_name</span><span class="o">=</span>olmo3-7b<span class="w"> </span><span class="nv">base_output_directory</span><span class="o">=</span>&lt;out&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">scan_layers</span><span class="o">=</span>True<span class="w"> </span><span class="nv">use_multimodal</span><span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="nv">hardware</span><span class="o">=</span>cpu<span class="w"> </span><span class="nv">skip_jax_distributed_system</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">checkpoint_storage_use_zarr3</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">checkpoint_storage_use_ocdbt</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>--hf_model_path<span class="o">=</span>allenai/Olmo-3-1025-7B<span class="w"> </span>--save_dtype<span class="o">=</span>bfloat16
+</code></pre></div>
+<p><strong>Check any new conversion numerically</strong> against the source model before training on it. Key and shape checks pass on
+broken conversions.</p>
+<h2 id="3-data-and-tokenizer">3. Data and tokenizer</h2>
+<p>MaxText streams parquet files. Its shuffle only permutes files and mixes a small buffer, and hub shards are grouped by
+source, so shuffle globally first. <code>olmo35/build_full_dolci_think.py</code> (Olmo 3.5) and <code>data/build_full_dolci.py</code>
+(Olmo 3) write N shuffled shards from one dataset revision and use the standard HF cache settings. Pin the input with
+<code>--revision &lt;dataset commit&gt;</code>, or use <code>--data-files '&lt;local parquet glob&gt;'</code> for local files; the output directory must be
+new or empty. Upload the shards to <code>gs://ai2-olmo-dev/post-training/data/&lt;name&gt;/</code>. Ledger experiments shard each
+arm and seed into 512 files with <code>experiments/h067/shard.py</code> in olmo-post-training-ledger.</p>
+<p>The tokenizer is a directory on the bucket. For Olmo 3.5, <code>olmo35/tok_oi35.py</code> saves H045's tokenizer and template
+(<code>allenai/dolma2-tokenizer-olmo35</code> @8b971706, <code>olmo35</code>). For Olmo 3, save
+<code>PreTrainedTokenizerFast.from_pretrained("allenai/olmo-3-tokenizer-instruct-dev")</code> (see Traps).</p>
+<h2 id="4-launch">4. Launch</h2>
+<p>Copy <code>k8s/olmo35-sft-4x4x8/</code> to a new directory. Then rename the JobSet and both ConfigMaps (in <code>jobset.yaml</code> and
+<code>kustomization.yaml</code>) to a new unique name, and edit the env block:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RUN_NAME</code>, <code>OUTPUT_DIR</code></td>
+<td>Checkpoints go to <code>$OUTPUT_DIR/$RUN_NAME/checkpoints/&lt;step&gt;/</code>.</td>
+</tr>
+<tr>
+<td><code>LOAD_PARAMETERS_PATH</code>, <code>TOKENIZER_PATH</code>, <code>TRAIN_FILES</code></td>
+<td>Step 2 and step 3 outputs (<code>/mnt/post-training/...</code> = <code>gs://ai2-olmo-dev/post-training/...</code>).</td>
+</tr>
+<tr>
+<td><code>TOTAL_DEVICES</code>, <code>GLOBAL_BATCH</code>, <code>PER_DEVICE_BATCH</code></td>
+<td>128 chips × 0.125 = 16 sequences per step, with no gradient accumulation. The launcher derives accumulation and fails if the numbers don't divide.</td>
+</tr>
+<tr>
+<td><code>SEQ_LEN</code></td>
+<td>65,536. Tokens per step = <code>GLOBAL_BATCH × SEQ_LEN</code>.</td>
+</tr>
+<tr>
+<td><code>STEPS</code>, <code>LR_SCHEDULE_STEPS</code></td>
+<td>Steps trained, and the horizon the LR decays over (warmup <code>WARMUP_FRAC</code> of it). Set <code>STEPS</code> below the horizon to run the start of a longer recipe, e.g. for a loss-parity check.</td>
+</tr>
+<tr>
+<td><code>NUM_EPOCH</code></td>
+<td>Passes the stream holds. <code>STEPS</code> decides what is trained; a pass shorter than <code>STEPS</code> repeats data.</td>
+</tr>
+<tr>
+<td><code>EXTRA_ARGS</code></td>
+<td>MaxText flags. The mesh is <code>custom_mesh_and_rule=olmo35-ep-as-cp ici_fsdp_parallelism=16 ici_expert_parallelism=8</code>: batch over FSDP, and the expert axis doubles as context parallelism outside the MoE. <code>checkpoint_period</code> and <code>max_num_checkpoints_to_keep</code> set what is saved.</td>
+</tr>
+<tr>
+<td><code>images: newTag</code></td>
+<td>The image tag from step 1.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>--context<span class="w"> </span>gke_ai2-olmo_us-central2-b_gke-tpu-v4<span class="w"> </span>apply<span class="w"> </span>-k<span class="w"> </span>&lt;your<span class="w"> </span>overlay<span class="w"> </span>dir&gt;
+kubectl<span class="w"> </span>-n<span class="w"> </span>olmo<span class="w"> </span>get<span class="w"> </span>workloads<span class="w">              </span><span class="c1"># ADMITTED True = it has a slice</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>olmo<span class="w"> </span>get<span class="w"> </span>jobset<span class="w"> </span>&lt;name&gt;<span class="w">          </span><span class="c1"># TERMINALSTATE, RESTARTS, SUSPENDED (a hero preemption suspends it)</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>olmo<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-l<span class="w"> </span>jobset.sigs.k8s.io/jobset-name<span class="o">=</span>&lt;name&gt;
+</code></pre></div>
+<p>To stop a run, deactivate its Kueue workload:
+<code>kubectl -n olmo patch $(kubectl -n olmo get workloads -o name | grep "/jobset-&lt;name&gt;-") --type merge -p '{"spec":{"active":false}}'</code>.
+Setting the JobSet's <code>spec.suspend</code> does nothing while Kueue has it admitted: Kueue resets it, and a watcher that
+relied on it left a run training on the <code>8x8x8</code> for 4.5 h after its stop rule fired.</p>
+<p>Startup takes ~35 min: the 32 pods start a few minutes after admission, then the model compiles and the first step runs. <code>k8s/watch_jobset.sh &lt;jobset&gt; &lt;run&gt; [max minutes]</code>
+saves every pod's log when the JobSet ends. Pod logs vanish once the JobSet is deleted
+or restarted, so save them before either.</p>
+<h2 id="5-read-the-loss">5. Read the loss</h2>
+<p>Read the step loss only from the <code>LOSS-PARTS step=N ce=… moe_lb=… z=… tokens=…</code> line, which one pod logs. Each pod's
+<code>completed step: N, … loss:</code> line is that pod's own value: on one step the 32 pods ranged 1.28–1.68. Compare <code>ce=</code>
+with H045's <code>train/CE loss</code>, never Tunix's <code>loss</code>, which adds the MoE load-balancing and z-losses.</p>
+<p>A healthy Olmo 3.5 run: <code>REQUIRED_RBF</code> (the MoE buffer factor that would have dropped no token) stays below the
+configured <code>ragged_buffer_factor=2.5</code>. r2's maximum was 2.24.</p>
+<p><code>REQUIRED_RBF</code> is logged every step by JAX process 0 only, and that is often not pod <code>slice-0-0</code>: find the pod whose log
+has it. Kubelet keeps about 700 steps of each pod's log, and the agent service account cannot read Cloud Logging. So
+if a rule needs every step's value, stream that pod with <code>kubectl logs -f</code> from step 1. A watcher polling
+<code>kubectl logs</code> every 5 minutes lost 14 steps at one rotation (H078 bb4-lr1e4-s0), and the run had to be relaunched.</p>
+<h2 id="6-checkpoints-preemption-and-resume">6. Checkpoints, preemption and resume</h2>
+<ul>
+<li><code>enable_checkpointing=true</code> is required even if you want no checkpoints. Without it, <code>jax.distributed</code> is never
+  initialised on multi-host TPU and Tunix crashes.</li>
+<li>Tunix always saves the final step. An Olmo 3.5 checkpoint with optimizer state is ~137 GB. Agents delete nothing on
+  GCS; ask the run's owner.</li>
+<li>After a preemption, JobSet restarts the run from the last checkpoint, on the same overlay. A resume replays the data
+  pipeline to the restored step at ~1.4 s per skipped batch, which is hours late in a run. Resume only on the
+  restore-fix image (step 1).</li>
+</ul>
+<h2 id="7-export-to-hf-and-evaluate">7. Export to HF and evaluate</h2>
+<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>storage<span class="w"> </span>cp<span class="w"> </span>-r<span class="w"> </span>gs://ai2-olmo-dev/post-training/runs/&lt;run&gt;/checkpoints/&lt;step&gt;/model_params<span class="w"> </span>&lt;<span class="nb">local</span><span class="w"> </span>dir&gt;
+python<span class="w"> </span>scripts/tpu/maxtext/olmo35/export_maxtext_to_hf.py<span class="w"> </span>&lt;<span class="nb">local</span><span class="w"> </span>dir&gt;/model_params<span class="w"> </span>&lt;reference<span class="w"> </span>HF<span class="w"> </span>dir&gt;<span class="w"> </span>&lt;out&gt;
+</code></pre></div>
+<p>The reference directory supplies tensor names, <code>config.json</code>, modeling code, tokenizer and chat template. Use an HF
+export of the same model with the matching tokenizer and chat template, and choose <code>&lt;out&gt;</code> under your own output
+location. One existing reference export is H045's:
+<code>/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/runs/h045-anchor-emo-olmo35-s34521/hf_step11768</code>.
+Its <code>config.json</code> is the HF model config, unlike the run directory's OLMo-core training config. The exporter is
+bit-exact on all 23,441 tensors. For Olmo 3, use <code>export_hf.sh</code>, which also takes the base model's <code>config.json</code>,
+because MaxText's own is wrong.</p>
+<p>Evaluate the HF export with olmo-eval on Beaker GPUs, as for a GPU run (see <a href="../sft_running_guide/">the GPU guide</a>).
+HF Olmo 3.5 needs <code>fla</code>, so every pass runs on GPU. Where exports and checkpoints go, and what to keep, is the ledger's
+<code>storage</code> skill (olmo-post-training-ledger <code>skills/storage/SKILL.md</code>).</p>
+<h2 id="traps">Traps</h2>
+<p>Each of these trained silently on wrong data or a wrong model before it was found.</p>
+<ul>
+<li><strong>Dropped EOS targets.</strong> Olmo tokenizers have <code>bos == eos</code>, and MaxText's target shift ignored BOS targets, so SFT
+  never learned to stop while the loss looked fine. Fixed in the image. Check P(EOS) after an answer on any new pipeline.</li>
+<li><strong>YaRN.</strong> Olmo 3 applies YaRN to full-attention layers only. Unpatched MaxText also applies it to sliding-window
+  layers, which costs +0.1 nats/token at the start. Fixed in the image.</li>
+<li><strong>Vocab padding.</strong> 100,278 isn't divisible by tensor parallelism. Zero-padding to 100,352 is wrong (+3.2 nats/token).
+  Replicate the vocab axis instead: <code>logical_axis_rules=[['vocab',[]],['activation_vocab',[]]]</code>.</li>
+<li><strong>Olmo 3 tokenizer.</strong> <code>allenai/olmo-3-tokenizer-instruct-dev</code> loads as <code>GPT2Tokenizer</code> under transformers 5 and drops
+  the pre-tokenizer. Train with a <code>PreTrainedTokenizerFast</code> save.</li>
+<li><strong>KDA miscompile on v4.</strong> Slicing a reshape inside the sub-block inverse dropped a column offset on TPU only (CPU was
+  correct). Fixed in maxtext 9f55e7b6 (in the image). Kernel rewrites need a TPU-vs-exact-scan check, not only a CPU one.</li>
+<li><strong>MoE buffer.</strong> Fully dropless runs out of HBM at 64K. <code>ragged_buffer_factor=2.5</code> drops nothing as long as
+  <code>REQUIRED_RBF</code> stays below it.</li>
+<li><strong>Restore OOM.</strong> r2's image replicates the expert Adam moments on restore and runs out of HBM. Use the
+  restore-fix image.</li>
+<li><strong>Data order depends on slice shape.</strong> Batches are packed per data host, so a different host count gives a
+  different, still valid, data order. Keep every arm of a comparison, and its control, on the same slice shape.</li>
+<li><strong>Context parallelism with load balancing gives a wrong forward.</strong> With <code>ici_context_parallelism</code> &gt; 1 and MaxText's
+  default <code>context_parallel_load_balance=True</code>, dense Olmo 3 7B's step-1 CE on a fixed packed batch was off by +0.39
+  (cp4) and +1.98 (cp8) against an HF forward; cp4 with <code>context_parallel_load_balance=False</code> matches it (0.919794 vs
+  0.919799). The suspected cause, from the code, is that the SFT input path never applies the load-balancing reorder
+  that attention then assumes; upstream confirmation is pending. Turn load balancing off, and check step-1
+  <code>LOSS-PARTS</code> CE against an HF forward of the same batch before trusting any new mesh. The recipe's
+  <code>olmo35-ep-as-cp</code> uses the expert axis rather than <code>ici_context_parallelism</code>; on Olmo 3.5 small its step-1 CE
+  matched an HF forward of the same 64 rows (1.077855 vs 1.077850).</li>
+<li><strong>Zero steps, exit 0.</strong> <code>train_sft</code> exits 0 with no steps when the data iterator fails. The launcher's step guard
+  catches it; keep that guard.</li>
+<li><strong>KDA all-gathers on a new mesh.</strong> Under <code>olmo35-cp-ep</code> on the <code>8x8x8</code>, the KDA chunk scan's inputs and states were
+  sharded on the chunk axis, so XLA all-gathered them inside every scan iteration: 97.6% of a 475 s step. Logical
+  constraints in <code>_delta_rule_chunked_subblock</code> (abhishekraok/maxtext c5f1251d) bring the step to 3.33 s. CPU runs never
+  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh.</li>
+<li><strong>Compile-time HBM.</strong> At 64 rows on the <code>8x8x8</code>, <code>ragged_buffer_factor=4.0</code> failed to compile (HLO temporaries
+  32.17 GB vs 31.75 GB of HBM); 3.0 compiles, and the runs peaked at 2.39-2.84.</li>
+<li><strong>GCS egress quota.</strong> Two big slices loading the base checkpoint at once hit <code>google_egress_bandwidth</code> (us-central2)
+  and failed at startup. Stagger big-slice launches.</li>
+<li><strong>The control host is a single point of failure.</strong> Watchers and log tailers die with the host they run on (a Beaker
+  session lost its node on 2026-10-16). Keep any record a rule depends on in a source that survives it.</li>
+<li><strong>hostNetwork.</strong> The image's libtpu forms a multi-host slice only on the host network. Keep <code>hostNetwork: true</code> and
+  <code>dnsPolicy: ClusterFirstWithHostNet</code>.</li>
+<li><strong><code>pgrep -f</code> / <code>pkill -f</code> inside <code>bash -c</code></strong> match their own command line: loops never end and kills hit the caller.
+  Use PIDs.</li>
+</ul>
+<h2 id="changing-the-recipe">Changing the recipe</h2>
+<ul>
+<li><strong>Other slice sizes and meshes.</strong> <code>olmo35-ep-as-cp</code> puts one 64K row on 8 chips (KDA's 8 heads). Measured on Olmo 3.5
+  small with 65,536-token rows:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>slice</th>
+<th>mesh</th>
+<th>rows/step</th>
+<th>s/step</th>
+<th>tokens/s/chip</th>
+<th>status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>4x4x8</code></td>
+<td><code>olmo35-ep-as-cp</code>, fsdp 16 x expert 8</td>
+<td>16</td>
+<td>3.94</td>
+<td>2,080</td>
+<td>r2 and A0'; the recipe</td>
+</tr>
+<tr>
+<td><code>8x8x8</code></td>
+<td><code>olmo35-ep-as-cp</code>, fsdp 64 x expert 8</td>
+<td>64</td>
+<td>4.28</td>
+<td>1,910</td>
+<td>H078's 4x batch; <code>ragged_buffer_factor=3.0</code>; 1,887 tokens/s/chip without the shim, see <a href="#cost-per-slice">Cost</a></td>
+</tr>
+<tr>
+<td><code>8x8x8</code></td>
+<td><code>olmo35-cp-ep</code> + c5f1251d</td>
+<td>16</td>
+<td>3.33</td>
+<td>620</td>
+<td>runs, but numerics differ from the <code>4x4x8</code> (#1933)</td>
+</tr>
+<tr>
+<td><code>8x8x16</code></td>
+<td><code>olmo35-cp-ep</code>, fsdp 64 x context 2 x expert 8</td>
+<td>64</td>
+<td>-</td>
+<td>-</td>
+<td>never reached step 1 (egress quota, then a TPU core halt)</td>
+</tr>
+</tbody>
+</table>
+<p>Each mesh was picked to keep r2's per-device layout, not tuned. No sweep of the parallelism split, remat policy or
+  per-device batch has been run, so these are known-good points, not optima. Any other slice or mesh needs its own
+  same-slice control.
+- <strong>Comparing against a GPU result.</strong> TPU and GPU runs of the same recipe differ in data order and numerics. Compare
+  TPU arms with a TPU control on the same slice shape.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
