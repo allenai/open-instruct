@@ -159,6 +159,12 @@ refresh or engine-drain publication; those modes allow only the built-in filter.
 
 ## Held-out evaluation and comparison
 
+Built-in evaluation requests omit expert-routing and indexer replay arrays, even
+when replay is enabled for training on the same engines. These arrays are training
+inputs, not evaluation metrics; ordinary response tokens, text and log-probabilities
+remain available. This behavior is automatic in the pinned runtime and requires
+no evaluation-specific configuration.
+
 Specify eval_count per task, or explicit held-out files. The structured defaults
 use greedy evaluation, one response per question, initial evaluation and periodic
 evaluation every 20 collections when held-out data exists. Examples can override
