@@ -12,6 +12,7 @@ def compare(candidate, reference):
         assert not r["batch_hash_mismatches"] and not r["missing"]
         assert set(r["loss_parts"]) == {str(i) for i in range(1, 7)}
         assert set(r["drops"]) == {str(i) for i in range(1, 7)}
+        assert all(d["dropped"] == 0 for d in r["drops"].values()), "Precision attribution requires zero drops"
     rows = []
     for step in range(1, 7):
         a, b = (r["loss_parts"][str(step)] for r in (candidate, reference))
@@ -20,7 +21,7 @@ def compare(candidate, reference):
         rows.append({"step": step, "candidate_ce": a["ce"], "reference_ce": b["ce"], "gap": abs(a["ce"] - b["ce"])})
     gap = max(r["gap"] for r in rows)
     return {
-        "scope": "Six-step FP32/highest precision plus smaller output tiles; original-data diagnostic only",
+        "scope": "Six-step FP32/highest precision, smaller output tiles and 2.4 expert buffers; original-data diagnostic only",
         "candidate": candidate["job"],
         "reference": reference["job"],
         "rows": rows,
