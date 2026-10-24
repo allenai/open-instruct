@@ -3,7 +3,7 @@
 This integration brings the Qwen OPD investigation onto the primary MILES
 application layout. It uses **Megatron for training and SGLang for student and
 teacher inference**, through `python -m open_instruct.miles`. GRPO continues to use
-Core. Core OPD from the historical branch is not included in this integration.
+Core by default; [Megatron verifier GRPO](megatron-grpo.md) shares this runtime. Core OPD from the historical branch is not included in this integration.
 A run file selects OPD with `training.algorithm = "opd"`; the default
 `trainer.backend = "megatron"` routes it to `OPDRunSpec` instead of the GRPO
 `RunSpec`.
