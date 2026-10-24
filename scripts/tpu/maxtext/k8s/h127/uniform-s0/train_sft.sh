@@ -49,7 +49,6 @@ log=/tmp/train.log
 cd /deps
 # The image logger reads a Tunix config that lacks the MaxText routing-log flag.
 python3 /launcher/routing_log_fix.py
-python3 /launcher/embedding_fp32_gather_patch.py
 # shellcheck disable=SC2086 # EXTRA_ARGS is meant to split.
 python3 -m maxtext.trainers.post_train.sft.train_sft src/maxtext/configs/post_train/sft.yml \
   run_name="$RUN_NAME" base_output_directory="$OUTPUT_DIR" model_name="$MODEL_NAME" \
@@ -62,7 +61,7 @@ python3 -m maxtext.trainers.post_train.sft.train_sft src/maxtext/configs/post_tr
   learning_rate="$LR" lr_schedule_type=wsd warmup_steps_fraction="$WARMUP_FRAC" \
   wsd_decay_steps_fraction="$(python3 -c "print(1 - $WARMUP_FRAC)")" wsd_decay_style=linear learning_rate_final_fraction=0.0 \
   opt_type=adamw adam_b1=0.9 adam_b2=0.95 adam_eps=1e-8 adam_weight_decay=0.0 gradient_clipping_threshold=1.0 \
-  dtype=bfloat16 weight_dtype=float32 enable_dropout=false z_loss_multiplier=0.0 \
+  dtype=float32 weight_dtype=float32 enable_dropout=false z_loss_multiplier=0.0 \
   $EXTRA_ARGS 2>&1 | tee "$log"
 # train_sft exits 0 with zero steps when the data iterator fails (AI-Hypercomputer/maxtext#5523).
 if ! grep -q "completed step: $STEPS," "$log"; then

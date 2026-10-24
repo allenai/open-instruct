@@ -11,7 +11,6 @@ configMapGenerator:
   files:
   - train_sft.sh
   - routing_log_fix.py
-  - embedding_fp32_gather_patch.py
 - name: robertb-pres14t-v1-control-screen-env
   literals:
   - RUN_NAME=robertb-pres14t-v1-control-screen
@@ -39,9 +38,12 @@ configMapGenerator:
     shard_exp_on_fsdp=False ragged_buffer_factor=2.5 log_required_ragged_buffer_factor=true
     log_moe_dropped_tokens=true sharding_tolerance=0.3 olmoe3_per_layer_remat=true
     sparse_matmul=true megablox=true use_tokamax_kda=false kda_chunked_impl=subblock
-    kda_matmul_precision=highest num_vocab_tiling=16 remat_policy=full
-  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true --xla_tpu_enable_async_ragged_all_to_all=true
+    matmul_precision=highest kda_matmul_precision=highest wi_tile_fwd_mlp_dim=512 wo_tile_fwd_embed_dim=512 wi_tile_dlhs_embed_dim=512 wo_tile_dlhs_mlp_dim=512
+    wi_tile_drhs_mlp_dim=512 wo_tile_drhs_embed_dim=512 wi_tile_drhs_embed_dim=512 wo_tile_drhs_mlp_dim=512
+    num_vocab_tiling=16 remat_policy=full
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=false --xla_tpu_enable_async_ragged_all_to_all=false
     --xla_tpu_scoped_vmem_limit_kib=16384
+  - JAX_DEFAULT_MATMUL_PRECISION=highest
   - TPU_MEGACORE=MEGACORE_DENSE
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
