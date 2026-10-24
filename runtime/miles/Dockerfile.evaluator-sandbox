@@ -1,0 +1,24 @@
+# Extend a pinned evaluator without changing the qualified serving environment.
+ARG EVALUATOR_IMAGE
+FROM ${EVALUATOR_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    podman crun conmon uidmap netavark passt \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /etc/containers/registries.conf.d \
+    && cp /opt/olmo-eval/src/olmo_eval/launch/beaker/podman/containers.conf /etc/containers/containers.conf \
+    && cp /opt/olmo-eval/src/olmo_eval/launch/beaker/podman/policy.json /etc/containers/policy.json \
+    && cp /opt/olmo-eval/src/olmo_eval/launch/beaker/podman/10-unqualified-search-registries.conf /etc/containers/registries.conf.d/ \
+    && echo 'root:10000:11165536' >> /etc/subuid \
+    && echo 'root:10000:11165536' >> /etc/subgid
+RUN cd /opt/olmo-eval \
+    && UV_PROJECT_ENVIRONMENT=/opt/evaluator-venv uv sync --frozen --no-default-groups \
+        --extra clients --extra hf --extra beaker --extra sandbox
+RUN /opt/evaluator-venv/bin/python -c "from olmo_eval.evals.external import get_external_eval; get_external_eval('scicode')" \
+    && podman --version
+
+# olmo-eval manages auxiliary vLLM judges in their own dependency environment.
+# Keep the policy's qualified SGLang/Torch stack unchanged.
+RUN cd /opt/olmo-eval \
+    && UV_PROJECT_ENVIRONMENT=/opt/judge-venv uv sync --frozen --no-default-groups --extra vllm
+ENV VLLM_PYTHON=/opt/judge-venv/bin/python
+RUN /opt/judge-venv/bin/python -c "import vllm; assert vllm.__version__ == '0.19.1'"

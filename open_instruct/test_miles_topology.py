@@ -25,7 +25,7 @@ def test_packing_preserves_trainer_order_and_whole_engines(
     spec = SimpleNamespace(
         launch={"gpus_per_replica": 8},
         output={"root": "/weka/run"},
-        judges={},
+        judges={"judges": {}, "rubrics": {}, "judging": {"bindings": {}}},
         compile=lambda: SimpleNamespace(
             miles={
                 "actor_num_nodes": trainer_nodes,
@@ -54,3 +54,31 @@ def test_packing_preserves_trainer_order_and_whole_engines(
     world = trainer_nodes * trainer_gpus
     assert roles == ["trainer"] * world + ["inference"] * rollout
     assert assigned[addresses[-1]]["judges"] == {"general": 1}
+
+
+@pytest.mark.parametrize(
+    "external",
+    [
+        {"rollout_external_engine_addrs": ["localhost:30000"]},
+        {"rollout_external_engine_addrs": []},
+        {"custom_inference_engine_provider_path": "custom.provider"},
+    ],
+)
+def test_launcher_rejects_external_pool_inputs(external):
+    spec = SimpleNamespace(
+        launch={"gpus_per_replica": 2},
+        judges={"judges": {}, "rubrics": {}, "judging": {"bindings": {}}},
+        compile=lambda: SimpleNamespace(
+            miles=dict(
+                actor_num_nodes=1,
+                actor_num_gpus_per_node=1,
+                rollout_num_gpus=1,
+                rollout_num_gpus_per_engine=1,
+                num_gpus_per_node=2,
+                colocate=False,
+            )
+            | external
+        ),
+    )
+    with pytest.raises(ValueError, match="external rollout pools"):
+        topology.plan(spec)

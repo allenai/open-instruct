@@ -377,6 +377,10 @@ class OPDRunSpec:
         document["launch"] = run_spec.RunSpec._launch(
             {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent
         )
+        if document["launch"]["env"].get("OI_OPD_TIMING") and not native.get("fully_async", False):
+            raise InputError(
+                "launch.env.OI_OPD_TIMING requires miles.fully_async=true; remove OI_OPD_TIMING for synchronous OPD"
+            )
         if document["launch"]["auto_resume"] and not document["training"]["resume"]:
             raise InputError(
                 "launch.auto_resume requires training.resume so a re-queued job continues its checkpoints"

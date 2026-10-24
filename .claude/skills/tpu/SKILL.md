@@ -17,12 +17,12 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Start on a `4x4x8`; use the `8x8x8` only when no `4x4x8` is free** (guide: Cost per slice). The `4x4x8` is the
-  cheapest per chip-hour. The `8x8x8` overlay (`k8s/olmo35-sft-8x8x8/`, 64 rows) is projected at ~1.09x the chip-hours,
-  ~3.6x sooner (steady state, not yet a measured whole run). Its data order differs from the `4x4x8`'s, so compare it
-  only with a control on the same slice. The 1.09x holds only without the data-order shim
-  (`MAXTEXT_R2_DATA_EMULATION`) and `MAXTEXT_LOG_BATCH_HASH=1`. With them a step in eight stalls 20-35 s
-  (1.8-1.9x the chip-hours).
+- **Use a `4x4x8`** (guide: What the cluster is). Since 2026-10-21 the cluster is seven `4x4x8`s and three `8x8x16`s;
+  the `8x8x8` is gone. The `8x8x16`s are hero's, borrowed only. Check the live layout before planning (command in the
+  guide); it changes when the cluster is resliced.
+- **For `ici_context_parallelism` > 1, set `context_parallel_load_balance=False`** and require step-1 `LOSS-PARTS` CE
+  to match an HF forward of the same batch within 1e-3 before training. With load balancing on, dense Olmo 3 7B's CE
+  was off by +0.39 (cp4) and +1.98 (cp8); with it off, cp4 matched (guide: Traps).
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
   does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). None of them has been tuned. A new slice or

@@ -8,6 +8,7 @@ Ray starts; it does not choose the workload's GPU counts for the user.
 import ipaddress
 from typing import Any
 
+from open_instruct.miles.configuration import constraints
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging
 
@@ -32,7 +33,7 @@ def plan(spec):
         raise InputError("inference.rollout_gpus_per_node must match launch.gpus_per_replica")
     if any(count > capacity for count in managed.values()):
         raise InputError("Each managed judge must fit within one replica")
-    if miles.get("eval_num_gpus", 0) or miles.get("rollout_external", False):
+    if miles.get("eval_num_gpus", 0) or constraints.external_rollout(miles):
         raise InputError("The config launcher does not yet allocate dedicated eval or external rollout pools")
     policy = trainer if miles["colocate"] else trainer + rollout
     total = policy + sum(managed.values())

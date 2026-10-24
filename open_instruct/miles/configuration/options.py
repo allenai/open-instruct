@@ -97,6 +97,15 @@ def resolve_option(name, value):
     if not isinstance(name, str):
         raise InputError("MILES option names must be strings; use underscores, for example global_batch_size.")
     if name not in index:
+        prefix = "eval_sglang_" if name.startswith("eval_sglang_") else "sglang_"
+        replacements = {
+            prefix + "mamba_scheduler_strategy": prefix + "mamba_radix_cache_strategy",
+            prefix + "disable_piecewise_cuda_graph": prefix + 'cuda_graph_backend_prefill="disabled"',
+            prefix + "enable_breakable_cuda_graph": prefix + 'cuda_graph_backend_prefill="breakable"',
+            prefix + "enforce_piecewise_cuda_graph": prefix + 'cuda_graph_backend_prefill="tc_piecewise"',
+        }
+        if name in replacements:
+            raise InputError(f"Miles v0.1.2 removed miles.{name}; use miles.{replacements[name]} instead")
         close = difflib.get_close_matches(name, index, n=1)
         hint = f"; did you mean {close[0]}?" if close else ""
         raise InputError(f"Unknown MILES option: {name}{hint}")

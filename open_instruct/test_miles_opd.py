@@ -72,6 +72,25 @@ def test_async_opd_selects_safe_eval_and_measured_restartable_queue():
     assert specs.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
 
 
+@pytest.mark.parametrize("fully_async", [None, False, True])
+@pytest.mark.parametrize("timing", [None, "", "/tmp/opd-timing", "0"])
+def test_opd_timing_requires_async_driver(fully_async, timing):
+    overrides = []
+    if fully_async is not None:
+        overrides.append(f"miles.fully_async={str(fully_async).lower()}")
+    if fully_async:
+        overrides += ["miles.max_weight_staleness=3", "distillation.use_rollout_logprobs=true"]
+    if timing is not None:
+        overrides.append(f"launch.env.OI_OPD_TIMING={json.dumps(timing)}")
+    # Like the runtime, any nonempty value enables timing, including "0".
+    if timing and not fully_async:
+        with pytest.raises(InputError, match=r"launch.env.OI_OPD_TIMING requires miles.fully_async=true"):
+            specs.load(CONFIG, overrides)
+    else:
+        spec = specs.load(CONFIG, overrides)
+        assert spec.launch["env"].get("OI_OPD_TIMING") == timing
+
+
 @pytest.mark.parametrize(
     "override, message",
     [

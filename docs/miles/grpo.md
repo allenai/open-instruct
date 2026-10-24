@@ -12,12 +12,13 @@ and [development defaults](development-defaults.md) for starting settings.
 1. Check [model and topology support](models-and-checkpoints.md), check out the
    intended Open Instruct revision, then follow the
    [laptop/session setup](launching.md). Sibling development worktrees are unnecessary.
-2. Copy [small.toml](../../configs/miles/examples/small.toml) to ignored
+2. Copy [dev.toml](../../configs/miles/examples/dev.toml) to ignored
    `runs/my-grpo.toml`. Set a run name, fresh output path and compatible tiny
-   checkpoint for a two-GPU disaggregated mechanics check. Keep barrier publication
+   checkpoint for a single-GPU colocated mechanics check. Keep barrier publication
    and offline W&B for this first exercise unless requested otherwise.
-   Use [medium.toml](../../configs/miles/examples/medium.toml)
-   for mixed-workload training, after preparing its policy, data and judge assets.
+   Use [node.toml](../../configs/miles/examples/node.toml)
+   for single-node math, instruction-following and code training, after preparing
+   its policy, data and code-verifier service. It allocates no judge GPU.
 3. Check Beaker resource access and supply credentials for the selected inputs
    and tracking mode. Run `plan` and `validate`, then inspect the rendered Beaker
    spec against the [distributed scheduling contract](launching.md#distributed-scheduling-contract);
@@ -40,7 +41,7 @@ and data paths are placeholders that must be replaced for the selected run.
 
 ## Configuration conventions
 
-The maintained examples are `dev.toml`, `small.toml`, `medium.toml` and `large.toml`
+The maintained examples are `dev.toml`, `node.toml` and `large.toml`
 under `configs/miles/examples/`. Keep these templates unchanged for individual
 runs. Copy one to Git-ignored `runs/` for experiments, sweeps and debugging.
 Add a maintained example only for an agreed, distinct user-facing purpose;
@@ -62,7 +63,7 @@ and [development defaults](development-defaults.md).
 
 ## Router auxiliary losses in the examples
 
-The four maintained examples set both router balancing and z-loss coefficients
+The three maintained examples set both router balancing and z-loss coefficients
 to zero; low-level API defaults remain nonzero. Re-enable either coefficient
 explicitly to train with auxiliary losses. See
 [router auxiliary objectives](core.md#router-auxiliary-objectives) for the controls.
@@ -79,8 +80,8 @@ controls](sequence-packing.md#replay-informed-expert-aware-packing-experimental)
 
 Learning runs enable `training.filter_zero_std_groups=true`: constant-reward prompt
 groups are dropped and generation replenishes the accepted training batch. Offline
-correctness preprocessing can still be applied. The tiny `dev`/`small` mechanics
-examples explicitly disable filtering to permit all-zero-reward checks. See
+correctness preprocessing can still be applied. The tiny `dev` mechanics
+example explicitly disables filtering to permit all-zero-reward checks. See
 [data and evaluation](data-and-evaluation.md#online-group-filtering) for metrics,
 batch semantics and the opt-out.
 
@@ -114,8 +115,8 @@ changes, then try the selected model and topology on a small run.
 
 | Mode | Behavior and use |
 |---|---|
-| `core.publication_mode="refresh"` | Medium and large templates. Preserve generated tokens and their original behavior log probabilities across publication; rebuild serving state under the new weights and continue decoding. A response can span multiple policy versions. |
-| `barrier` | Low-level default, used by dev and small mechanics examples. Does not continue mixed-policy responses across publication. |
+| `core.publication_mode="refresh"` | Node and large templates. Preserve generated tokens and their original behavior log probabilities across publication; rebuild serving state under the new weights and continue decoding. A response can span multiple policy versions. |
+| `barrier` | Low-level default, used by dev mechanics example. Does not continue mixed-policy responses across publication. |
 | `engine_drain` | Independent engine drain: finish requests on their admitted version before swapping weights. This mode is distinct from mixed-policy refresh; see [engine drain](engine-drain.md). |
 
 The [generated recipe tables](configuration.md#example-recipes) show each
