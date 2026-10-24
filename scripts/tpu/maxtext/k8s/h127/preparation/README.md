@@ -31,6 +31,18 @@ the scripts at `/work` and mounts the prepared corpus read-only at `/corpus`.
   `/work/control-config.yaml`. This estimates accelerator memory using the
   pinned image's **pretraining** compiler. It does not establish Tunix SFT
   memory use or parity; live preflight is still required.
+- `export_bounded.py`: use the established exporter pinned at open-instruct
+  `268c124abd07c1f1addc83a47729b79ab53aed5c`, with layout views instead of duplicate
+  FP32 copies and bounded Orbax restore concurrency. `Dockerfile.export` adds
+  CPU PyTorch 2.11.0 to the pinned checkpoint environment. The wrapper accepts
+  captured HF shape metadata, keeps the padded 100352-row vocabulary, and copies
+  the registered atomic tokenizer. `--check-base` requires every exported BF16
+  tensor hash to equal the independent seeded-HF reference. Generation defaults
+  use T=0.6/top-p=0.95 with top-k disabled and end-of-text/im-end stop IDs; the
+  thinking-close token does not stop answer generation.
+  `test_export_bounded.py` compares byte-identical safetensors exports with the
+  unchanged exporter on base and wrapped Tunix fixtures, including scanned
+  layers and unused RNG state. This fixture check is not the full-base check.
 
 The replay extension reproduced all 20 previously validated smoke-batch hashes
 and loss-token counts for host 0. The full-reference model loading and atomic-row
