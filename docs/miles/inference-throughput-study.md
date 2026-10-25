@@ -164,6 +164,10 @@ keep-alive value. It uses source `6201ba12a400` and image
 `01M5TEFD3AF7VY06EE0TJ1ZZPQ`, including incremental score retention and a separate
 fix that joins all foreground tasks after a diagnostic failure. Diagnostic timings
 are excluded from throughput measurements.
+The replacement's first abort/drain transition occurred at 21:33 UTC on October 25;
+subsequent generation continued without a transport exception or HTTP 503. This
+supports the correction, but the complete multi-case regression and retained
+wave artifacts are still pending.
 Its [first attempt](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW) was canceled
 when the node was cordoned for an unrecoverable Xid 31 error, before completing a
 wave. The application log contains no preceding CUDA exception; that does not
@@ -183,13 +187,23 @@ These establish the starting discrepancy, not the correctness of higher admissio
 or equivalence to packed expert-parallel training. Candidate comparisons will
 report paired changes against this same reference and repeated serving controls.
 
+A same-token tail audit of the original draws and the completed replay wave found
+59 and 57 tokens, respectively, with absolute Core logprob error above one; 18
+token positions occur in both sets. The largest discrepancy recurs at sample
+171, response offset 974 (a space token): original/replayed serving logprobs are
+-0.49356/-0.51578 versus Core -5.69095. This is a persistent admission-64 baseline
+discrepancy, not evidence that higher admission caused it. Its cause and practical
+effect remain unresolved. The full token identities, surrounding text, scores and
+threshold counts are retained in `analysis/baseline-tail-repeatability.json`; keep
+this issue visible when assessing candidates rather than relying on mean error.
+
 All finalized attempts, including failed startup attempts, are downloaded under
 `runs/inference-throughput-20261025/archives/` with full job logs, Beaker metadata,
 result files and SHA-256 inventories. The ledger and launch receipts are retained
 alongside them. The initial panel predates the unlimited benchmark report
 collector; its [WEKA inventory/recovery](https://beaker.org/ex/01M5TA4FSVAK5VR84GPQABPMD4)
 verified all 1,194 source files (excluding the checkpoint symlink trees), totaling
-249,077,758 bytes. `analysis/fit-observations.jsonl` preserves the four initial
+249,077,758 bytes. `analysis/fit-observations.jsonl` preserves six audited
 measurements with full model geometry, settings, hardware observations and hashed
 analysis/source references. Its records explicitly retain pending numerical
 qualification rather than presenting every completed case as a recommendation.
