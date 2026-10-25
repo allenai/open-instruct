@@ -118,10 +118,11 @@ and final drain 409.45 s, outside measurement.
 
 The same case carried 511.10 queued engine requests on average. Mean initial
 engine queue time was 168.48 s and mean engine execution 170.94 s; these overlapping
-request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TF82W6EH1P2HG48E9V24X2)
+request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TGBVHH5J8BHN726WPHS55W)
 holds admission/graphs/pools at 512 and compares HTTP/producer capacities
 1,024/2,048 → 512/2,048 → 512/1,024 → 1,024/2,048. Each case uses 600 s warmup and
-600 s measurement, with the production 60-second engine keep-alive. This isolates
+600 s measurement, with the production 60-second engine keep-alive. The first attempt was preempted during image pull before application startup;
+the replacement retains the same settings and timeout. This isolates
 whether the large queue and producer budget improve throughput.
 
 ## Correctness and retained evidence
