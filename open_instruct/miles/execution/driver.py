@@ -24,6 +24,7 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
+from open_instruct.miles.execution import publication_checks
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -77,11 +78,15 @@ async def train(args, *, export_hf=None):
                     # cannot validate trained/restored weights. Instead measure
                     # an exact current-state publication round trip, including
                     # reset so an omitted tensor cannot pass as unchanged.
-                    await inference.check_weights(action="snapshot", selector=args.check_weight_update_selector)
-                    await inference.check_weights(
-                        action="reset_tensors",
-                        selector=args.check_weight_update_selector,
-                        skip_list=args.check_weight_update_skip_list,
+                    await infra_timeouts.wait_for(
+                        publication_checks.prepare_round_trip(
+                            inference,
+                            refresh=refresh,
+                            selector=args.check_weight_update_selector,
+                            skip_list=args.check_weight_update_skip_list,
+                        ),
+                        timeout=args.olmo_core.engine_update_timeout if refresh else None,
+                        operation="Core publication round-trip preparation",
                     )
                     await infra_timeouts.wait_for(
                         placement_group.update_weights(learner, manager, rollout_id=rollout_id),

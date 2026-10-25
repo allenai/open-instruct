@@ -248,6 +248,16 @@ and prefill scoring of the identical target token. This diagnostic isolates
 sequence-length and execution-path effects; it does not qualify a production
 configuration or replace the async refresh test.
 
+The runtime-check audit also found an opt-in publication diagnostic race. With
+refresh publication and a positive `core.diagnostic_interval`, the round-trip
+check could reset weights after the publisher had resumed live decoding. The
+driver now pauses every engine before the diagnostic snapshot/reset; the normal
+publisher restores weights and resumes the preserved requests. Failure paths
+leave decoding paused. CPU regression tests exercise the driver and the mutation
+ordering; GPU validation remains pending. The current production draft uses
+interval zero, so this path adds no recurring work to that configuration. The
+issue is tracked as `ITP-009` in the retained issue log.
+
 All finalized attempts, including failed startup attempts, are downloaded under
 `runs/inference-throughput-20261025/archives/` with full job logs, Beaker metadata,
 result files and SHA-256 inventories. The ledger and launch receipts are retained
