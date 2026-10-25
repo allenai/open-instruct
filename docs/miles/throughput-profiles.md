@@ -18,18 +18,20 @@ Their [generated recipe tables](configuration.md#example-recipes) show GPU
 allocations and batch geometry from the current TOMLs. For the runtime image, see
 the [MILES GRPO guide](grpo.md). Do not transfer a short-context
 no-recomputation setting to long packs without checking memory; the maintained
-medium and large use recomputation and engine admission 64, sized as described
-below.
+medium and large use recomputation and conservative engine admission 64. This is
+not a measured optimum for every model. The [Olmo 3.5 inference study](inference-throughput-study.md)
+and [fixed-policy benchmark](inference-benchmark.md) isolate serving capacity
+without allocating a trainer.
 
 ## Size engine admission from memory
 
-Engine admission is the number of requests each SGLang engine decodes at once. Four
-settings express it and must move together: `sglang_server_concurrency` (HTTP
-slots per engine), `sglang_max_running_requests` (the engine's batch limit),
-`sglang_cuda_graph_max_bs_decode` (the largest batch replayed from a CUDA graph)
-and the two memory pools below. Decode throughput grows with batch size until the
-GPU saturates, so an admission set below what memory allows leaves throughput
-unused whenever training waits for batches.
+Engine admission is the number of requests each SGLang engine decodes at once.
+`sglang_max_running_requests` sets the requested limit; decode graph coverage and
+the two memory pools below must support it. `sglang_server_concurrency` separately
+limits HTTP requests, including requests waiting at the engine. Increasing HTTP
+permits beyond admission supplies refill headroom but does not increase the decode
+batch limit. Throughput can stop improving because of GPU work, CPU scheduling,
+prefill interruptions or transport before memory fills. Find that point by measurement.
 
 As a worked example, consider a hybrid MoE served on one GPU per engine whose
 weights occupy 34.5 GiB, with 4 full-attention layers × 8 KV heads × 128 dims and
@@ -47,17 +49,22 @@ logs print “GB”.
 
 To choose admission `R` for context length `C` (`inference.max_context_length`):
 
-1. Set `sglang_server_concurrency`, `sglang_max_running_requests` and
-   `sglang_cuda_graph_max_bs_decode` to `R`.
-2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
-   request at full context, so KV capacity never forces a retraction.
+1. Set `sglang_max_running_requests` and `sglang_cuda_graph_max_bs_decode` to `R`.
+   Start HTTP concurrency at least at `R`, then compare refill headroom separately
+   (for example `R`, `1.5 × R`, `2 × R`) against running occupancy and throughput.
+2. `sglang_max_total_tokens = R × C` is a conservative full-context KV budget.
+   Verify the resolved pool, block rounding and observed retractions rather than
+   treating this arithmetic alone as a runtime guarantee.
 3. Keep `sglang_max_mamba_cache_size` above `5 × R` with the KDA radix cache (the
    validator enforces this), or at least `R` with radix caching off.
 4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
-   slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
-5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to
-   `max(collection, 2 × engines × R)` samples, which keeps every engine refilled
-   without a long upstream queue.
+   slot) fits within `sglang_mem_fraction_static` × visible GPU memory, allowing
+   additional room for graphs, workspaces and allocator/runtime overhead. Include
+   recurrent convolution state as well as the main SSM state.
+5. Use the planner's automatic producer budget as a starting point, or record an
+   explicit `async.async_max_concurrent_samples` while sweeping supply. Measure
+   both HTTP waiters and running occupancy; a larger producer can simply add
+   upstream waiting. In training, also check policy age and discarded tokens.
 
 For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 
@@ -78,11 +85,17 @@ the example weights, so reduce `R` or the state-slot count to fit that.
 After launch, confirm the setting from the engine metrics:
 
 - `#running-req` should sit near `R` while the trainer waits for batches.
-- `token usage` should stay below 1, with few retractions.
+- Inspect full-attention token usage and recurrent-state usage separately; the
+  combined `token_usage` metric can reflect the more occupied pool.
 - Per-engine generation throughput should rise over a lower-admission baseline.
+- `internal_states[].effective_max_running_requests_per_dp` should match the
+  requested admission; insufficient recurrent slots can reduce it silently apart
+  from a startup warning.
 
-If requests run at the cap with KV usage far below one half while training waits,
-admission is too low.
+If requests run at the cap with spare memory, test higher admission. Spare memory
+alone does not establish a throughput gain or numerical correctness. Raising the
+static memory fraction with explicit unchanged pool caps may change neither
+allocated memory nor serving capacity.
 
 ## Other serving and training settings
 

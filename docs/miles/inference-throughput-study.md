@@ -39,21 +39,40 @@ are 8,192 tokens with native maximum prefill 16,384. Each case warms for at leas
 180 seconds and measures for at least 600 seconds, ending at complete collection
 boundaries. Startup and drain are outside the reported rates.
 
-These preliminary rows come from completed measurement windows in the live log;
-the full-panel artifact audit and closing control remain outstanding.
+The panel completed successfully. These rows were recomputed from downloaded
+collection and response records; all requested captures are present. A separate
+source-side WEKA recovery found no missing result content or hash differences;
+only five empty workflow-lock files were absent from the original collection.
 
 | Case | Delivered tokens | Actual seconds | Tokens/s | Mean delivered response length |
 |---|---:|---:|---:|---:|
 | Admission 64, opening control | 6,160,116 | 672.958 | 9,153.8 | 8,021.0 |
 | Admission 128 | 10,166,610 | 730.100 | 13,925.0 | 7,942.7 |
 | Admission 256 | 11,816,780 | 616.823 | 19,157.5 | 7,693.2 |
+| Admission 64, closing control | 6,128,678 | 706.526 | 8,674.4 | 7,980.0 |
 
 Admission 128 delivers about 52% more tokens per second than the opening control;
 256 adds about 38% over 128. This compares coupled admission/graph/pool/request-supply settings,
 not an isolated admission change. Completion ordering, unfinished responses and
 work crossing boundaries require the retained inventory and timing audit before
 selecting a setting. Higher admission can improve aggregate throughput while
-increasing individual response latency.
+increasing individual response latency. The closing control is 5.2% below the
+opening control; these four serial cases do not establish a run-to-run confidence
+interval.
+
+| Case | Mean running requests | GPU memory high-water (GiB) | Mean engine execution per delivered response (s) | Mean initial engine queue (s) |
+|---|---:|---:|---:|---:|
+| 64, opening | 63.84 | 48.78 | 58.17 | 57.15 |
+| 128 | 127.71 | 57.54 | 77.02 | 73.24 |
+| 256 | 255.60 | 82.30 | 104.17 | 102.44 |
+| 64, closing | 63.90 | 48.90 | 57.32 | 56.99 |
+
+Occupancy and GPU observations cover the full measurement windows. All measured
+responses have matched request timing records and report zero retractions.
+These per-request intervals overlap and exclude unfinished responses; they are
+not an engine wall-time partition. The native forward-time metric was unavailable,
+not zero. The twice-admission HTTP limit kept an approximately admission-sized
+engine queue, making reduced HTTP headroom a worthwhile independent comparison.
 
 ## Memory evidence and the higher-admission range
 
@@ -71,8 +90,9 @@ are capacity calculations, not proof that the corresponding serving settings
 are safe or fast. Explicit pool caps also mean raising `mem_fraction_static`
 alone need not allocate or use more memory.
 
-The next prepared panel brackets admission 512 with admission-256 controls,
-using longer warmup and measurement windows. Admission 768/1,024 remain candidates
+The [running higher-admission panel](https://beaker.org/ex/01M5T88CTXEP3GQG2AVRYGRCYK)
+brackets admission 512 with admission-256 controls, using at least 600 seconds of
+warmup and 900 seconds of measurement. Admission 768/1,024 remain candidates
 if measured gains and memory headroom justify them. HTTP and producer headroom
 will then be varied separately, followed by prefill controls and fleet scaling.
 
@@ -89,15 +109,34 @@ across repeated controls and examine cache/batching effects.
 
 Later diagnostics retain compressed routing matrices and compare response-
 conditioning expert slots and tokens with prompt-clustered intervals. Repeated
-trajectory copies can fill higher admission without pretending to supply more
-independent prompts. Numerical claims remain relative to the serving control;
-they do not establish Core agreement or learning quality.
+trajectory copies or continuous background traffic can fill higher admission
+without pretending to supply more independent prompts. Loaded replay is undergoing
+a separate mechanics check before the long comparisons.
+
+The [forward-only Core reference](https://beaker.org/ex/01M5T83FJNW3Q87VYF468YMH1H)
+completed all 256 opening-control captures, spanning 64 prompt clusters and
+1,976,865 response tokens, including a 32,768-token response. It uses the pinned
+Core revision `7e97bc43ff25d080ae4fd0eab1050a79caf80e55`, MILES model preparation,
+BF16/FlashAttention 4, natural routing and one causal document per request at EP1.
+For the original admission-64 sampled behavior scores, absolute logprob error
+against this reference averages 0.03396 (prompt-clustered 95% interval
+0.03317–0.03479); 1.807% of selected-token Core/serving probability ratios lie
+outside 0.8–1.2 (interval 1.726–1.876%). The 99th-percentile absolute error is
+0.2394 and the maximum is 5.1974. The mean does not make those tails harmless.
+These establish the starting discrepancy, not the correctness of higher admission
+or equivalence to packed expert-parallel training. Candidate comparisons will
+report paired changes against this same reference and repeated serving controls.
 
 All finalized attempts, including failed startup attempts, are downloaded under
 `runs/inference-throughput-20261025/archives/` with full job logs, Beaker metadata,
 result files and SHA-256 inventories. The ledger and launch receipts are retained
 alongside them. The initial panel predates the unlimited benchmark report
-collector; a WEKA inventory/recovery is still required to establish completeness.
+collector; its [WEKA inventory/recovery](https://beaker.org/ex/01M5TA4FSVAK5VR84GPQABPMD4)
+verified all 1,194 source files (excluding the checkpoint symlink trees), totaling
+249,077,758 bytes. `analysis/fit-observations.jsonl` preserves the four initial
+measurements with full model geometry, settings, hardware observations and hashed
+analysis/source references. Its records explicitly retain pending numerical
+qualification rather than presenting every completed case as a recommendation.
 Future fitting should retain model architecture, GPU/runtime identity, pool sizes,
 admission/graph/prefill settings, queue controls, fleet size, observed lengths,
 memory/utilization and measurement coverage for every row.
