@@ -116,12 +116,26 @@ memory was 139.03 GiB. All 2,816 measured responses have timing records and repo
 zero retractions. Mean response length was 7,828.7 tokens; startup took 386.53 s
 and final drain 409.45 s, outside measurement.
 
-The same case carried 511.10 queued engine requests on average. Mean initial
+The completed 768 case was also [snapshotted and audited](https://beaker.org/ex/01M5THB5QNVAB1H78N19RM82P3):
+all 298 files / 70,341,529 bytes match the source-job inventory. It delivered
+**24,967,280 tokens in 966.461 seconds (25,833.7 tokens/s)**, 7.84% above 512.
+Native decode counters give 24,850.4 tokens/s, a smaller 5.38% gain; the two measures
+have different boundary inventory. Mean occupancy was 767.22/768 with complete
+observation coverage, peak memory 188.35 GiB, and all 3,072 measured responses
+reported zero retractions. Mean response length was 8,127.4 tokens. Mean initial
+engine queue/execution times rose to 227.36/247.82 seconds; startup was 237.44 s
+and final drain 542.50 s. The marginal throughput gain is shrinking, but the 1,024
+case, closing controls and numerical comparisons remain necessary before selecting
+a setting. More memory or a longer queue is not itself evidence of more useful
+RL throughput.
+
+The 512 case carried 511.10 queued engine requests on average. Mean initial
 engine queue time was 168.48 s and mean engine execution 170.94 s; these overlapping
 request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TGBVHH5J8BHN726WPHS55W)
 holds admission/graphs/pools at 512 and compares HTTP/producer capacities
 1,024/2,048 → 512/2,048 → 512/1,024 → 1,024/2,048. Each case uses 600 s warmup and
-600 s measurement, with the production 60-second engine keep-alive. The first attempt was preempted during image pull before application startup;
+600 s measurement, with the production 60-second engine keep-alive. The first
+attempt was preempted during image pull before application startup;
 the replacement retains the same settings and timeout. This isolates
 whether the large queue and producer budget improve throughput.
 
@@ -219,7 +233,7 @@ result files and SHA-256 inventories. The ledger and launch receipts are retaine
 alongside them. The initial panel predates the unlimited benchmark report
 collector; its [WEKA inventory/recovery](https://beaker.org/ex/01M5TA4FSVAK5VR84GPQABPMD4)
 verified all 1,194 source files (excluding the checkpoint symlink trees), totaling
-249,077,758 bytes. `analysis/fit-observations.jsonl` preserves six audited
+249,077,758 bytes. `analysis/fit-observations.jsonl` preserves seven audited
 measurements with full model geometry, settings, hardware observations and hashed
 analysis/source references. Its records explicitly retain pending numerical
 qualification rather than presenting every completed case as a recommendation.
