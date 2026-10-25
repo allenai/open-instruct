@@ -327,6 +327,15 @@ def execute(spec):
                 raise InputError("Named judges require the managed launcher (or a resolved registry)")
             registry_module.validate_data(prepared, resolved)
         config = spec.compile({**prepared, "hf_checkpoint": hf})
+        if getattr(spec, "benchmark", None):
+            write_json(root / "resolved-plan.json", spec.plan()["runtime"])
+            state.update(status="benchmarking", benchmark_started_unix=time.time())
+            write_json(root / "workflow.json", state)
+            benchmark = importlib.import_module("open_instruct.miles.execution.benchmark")
+            result = asyncio.run(benchmark.run(parse_runtime(config), spec.benchmark, root))
+            state.update(status="complete", finished_unix=time.time(), benchmark=result)
+            write_json(root / "workflow.json", state)
+            return result
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
             config.miles["load"] = str(checkpoint_root)

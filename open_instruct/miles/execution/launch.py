@@ -75,7 +75,7 @@ def specification(image, spec, *, hostnames=None):
     )
     collect = f"from open_instruct.miles.execution.launch import collect_results; collect_results({spec.output['root']!r}, '/output')"
     preflight = ""
-    if config.core.attention_backend in ("torch", "flash_4"):
+    if not spec.benchmark and config.core.attention_backend in ("torch", "flash_4"):
         preflight = (
             f"python -m open_instruct.miles.execution.preflight_attention --backend {config.core.attention_backend}\n"
         )

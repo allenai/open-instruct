@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, constraints, options, topology, validation
+from open_instruct.miles.configuration import async_capacity, benchmark, constraints, options, topology, validation
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
@@ -140,6 +140,7 @@ class RunSpec:
     evaluation: dict[str, Any]
     records: dict[str, Any] = dataclasses.field(default_factory=dict)
     selection: dict[str, Any] = dataclasses.field(default_factory=dict)
+    benchmark: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -168,6 +169,7 @@ class RunSpec:
             "rubrics",
             "judging",
             "evaluation",
+            "benchmark",
         }
         if set(document) & {"validation", "conversion_validation"}:
             raise InputError(
@@ -246,6 +248,7 @@ class RunSpec:
             evaluation.parse(_table(document, "evaluation"), launch),
             records,
             selection,
+            benchmark.parse(_table(document, "benchmark")),
         )
         result.compile()
         return result
@@ -263,6 +266,7 @@ class RunSpec:
             "compiler_cache": self.compiler_cache,
             **({"records": self.records} if self.records else {}),
             **({"selection": self.selection} if self.selection else {}),
+            **({"benchmark": self.benchmark} if self.benchmark else {}),
             **({"evaluation": self.evaluation} if self.evaluation["mode"] == "background" else {}),
             **self.sections,
             "core": self.core,
@@ -574,10 +578,16 @@ class RunSpec:
             raise InputError(
                 f"Colocated inference.gpus must equal the total trainer GPUs ({world}); got {miles['rollout_num_gpus']}."
             )
-        allocated = world if miles["colocate"] else world + miles["rollout_num_gpus"]
+        allocated = (
+            miles["rollout_num_gpus"]
+            if self.benchmark
+            else world
+            if miles["colocate"]
+            else world + miles["rollout_num_gpus"]
+        )
         per_node = self.launch.get("gpus_per_replica", min(8, allocated))
         miles.setdefault("num_gpus_per_node", per_node)
-        if miles["actor_num_gpus_per_node"] > miles["num_gpus_per_node"]:
+        if not self.benchmark and miles["actor_num_gpus_per_node"] > miles["num_gpus_per_node"]:
             raise InputError("trainer.gpus exceeds the declared physical num_gpus_per_node")
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
         core.setdefault("attention_backend", "flash_4")
@@ -766,8 +776,11 @@ class RunSpec:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
+        if self.benchmark:
+            miles.setdefault("sglang_weight_version", "0")
         result = RunConfig(CoreConfig(**core), miles)
         result.validate()
+        benchmark.validate(self, result)
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
             raise InputError(
                 "core.reward_final_answer_only is incompatible with judging.bindings "
@@ -777,6 +790,8 @@ class RunSpec:
         return result
 
     def launch_warnings(self, miles) -> list[str]:
+        if self.benchmark:
+            return ["Fixed-policy inference benchmark: no trainer, weight publication, evaluation or training resume."]
         warnings = []
         min_runtime = validation.duration(self.launch["min_runtime"], "launch.min_runtime")
         timeout = validation.duration(self.launch["timeout"], "launch.timeout")
@@ -803,6 +818,10 @@ class RunSpec:
     def plan(self) -> dict[str, Any]:
         compiled = self.compile()
         runtime = compiled.plan()
+        if self.benchmark:
+            runtime["shape"]["trainer_gpus"] = 0
+            runtime["shape"]["optimizer_steps_per_collection"] = None
+            runtime["benchmark"] = self.benchmark
         return {
             "schema_version": 1,
             "name": self.name,

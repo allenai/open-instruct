@@ -17,6 +17,8 @@ def plan(spec):
     capacity = spec.launch.get("gpus_per_replica", miles["num_gpus_per_node"])
     trainer_nodes, trainer_per_node = miles["actor_num_nodes"], miles["actor_num_gpus_per_node"]
     trainer = trainer_nodes * trainer_per_node
+    if getattr(spec, "benchmark", None):
+        trainer_nodes, trainer_per_node, trainer = 1, 0, 0
     rollout = miles["rollout_num_gpus"]
     tp = miles["rollout_num_gpus_per_engine"]
     managed = {
