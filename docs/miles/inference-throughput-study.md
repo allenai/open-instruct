@@ -301,8 +301,24 @@ case, but sequence-dependent numerical behavior matters for another selected
 case. This does not by itself demonstrate noncausal attention; kernels and MoE
 routing can change with shape. Full selected-token evidence is retained in
 `analysis/tail-core-localization.json`. The [serving counterpart](https://beaker.org/ex/01M5TN03YDESZRFSNXQ6PJ5A6X)
-has been submitted. These selected diagnostic cases do not estimate a population
-error rate, qualify production or replace the async refresh test.
+completed both twelve-record waves at admission 16 with radix caching disabled;
+all 52 archive files are saved. The space token scores -0.58334 in both full
+generation waves and -0.81241 in both prefilled-prefix waves. Its truncated
+generation scores instead change from -0.58334 to -7.43811 across waves, while
+Core remains -5.69095. At the target's conditioning position, expert membership
+changes in layers 4–15. All other selected target scores repeat exactly between
+waves. This shows that high admission and prefix caching are not required to
+observe the discrepancy; it does not establish a root cause.
+
+Both waves passed offline route hash, shape, expert-range and unique-top-k checks.
+No invalid expert IDs were observed. `analysis/tail-core-serving-localization.json`,
+`analysis/tail-serving-route-differences.json` and
+`analysis/tail-serving-route-audit.json` retain the scores and route evidence.
+The [native Core routing-replay diagnostic](https://beaker.org/ex/01M5TQJ0WEX7KSS941KEK7RTM4)
+will score the same twelve records using the first serving wave's expert IDs and
+Core's recomputed expert weights. The second wave's flipped target is retained
+for a possible follow-up. These selected diagnostic cases do not estimate a
+population error rate, qualify production or replace the async refresh test.
 
 An offline CPU microbenchmark of the existing checks used 256 retained captures
 (1,960,609 response tokens) on the development host. Native `record_response`
