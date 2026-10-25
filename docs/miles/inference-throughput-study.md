@@ -278,11 +278,21 @@ control waves, eight token positions exceed absolute Core logprob error one in
 all four observations. The same space token remains the largest discrepancy;
 both corrected waves score it at approximately -0.75204 versus Core -5.69095.
 `analysis/baseline-tail-controls.json` retains these matched observations. A
-bounded localization probe has been prepared for four short-prefix examples:
-compare full-document and truncated-prefix Core scoring, then recurrent decode
-and prefill scoring of the identical target token. This diagnostic isolates
-sequence-length and execution-path effects; it does not qualify a production
-configuration or replace the async refresh test.
+bounded localization probe uses four short-prefix examples: compare full-document
+and truncated-prefix Core scoring, then recurrent decode and prefill scoring of
+the identical target token. The [Core probe](https://beaker.org/ex/01M5TMBHEDG5AZS0QAGT7HSXV9)
+completed all twelve records and is fully archived. The worst recurring token
+(sample 171 / offset 974) has exactly the same Core score in all three arms and
+the original reference. Two other selected targets also remain identical. At
+sample 42 / offset 588, however, Core changes from -5.21493 for the full sequence
+to -3.24734 for the truncated prefix. Both identical-prefix arms agree exactly.
+Thus Core sequence length does not explain the worst recurring space-token
+case, but sequence-dependent numerical behavior matters for another selected
+case. This does not by itself demonstrate noncausal attention; kernels and MoE
+routing can change with shape. Full selected-token evidence is retained in
+`analysis/tail-core-localization.json`. The [serving counterpart](https://beaker.org/ex/01M5TN03YDESZRFSNXQ6PJ5A6X)
+has been submitted. These selected diagnostic cases do not estimate a population
+error rate, qualify production or replace the async refresh test.
 
 An offline CPU microbenchmark of the existing checks used 256 retained captures
 (1,960,609 response tokens) on the development host. Native `record_response`
