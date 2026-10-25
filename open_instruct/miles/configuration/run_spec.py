@@ -251,7 +251,20 @@ class RunSpec:
             benchmark.parse(_table(document, "benchmark")) if "benchmark" in document else {},
         )
         result.compile()
+        result.benchmark_variants()  # Validate every panel arm before reserving GPUs.
         return result
+
+    def benchmark_variants(self):
+        variants = []
+        for variant in self.benchmark.get("variants", []):
+            document = self.to_dict()
+            document["benchmark"].pop("variants")
+            document["name"] = f"{self.name}-{variant['name']}"
+            document["output"]["root"] = str(Path(self.output["root"]) / "variants" / variant["name"])
+            document["output"].pop("hf_dir", None)
+            document["conversion"].pop("hf_output", None)
+            variants.append(RunSpec.from_dict(document, self.config_path, variant.get("overrides", [])))
+        return variants
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the run contract, with filesystem paths independent of submitter cwd."""

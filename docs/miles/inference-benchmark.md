@@ -42,6 +42,28 @@ filtering for a second, separate rollout-delivery measurement. The initial
 implementation does not allocate managed judges or background evaluators.
 Both modes retain ordinary behavior logprobs and requested expert-routing payloads.
 
+To compare several settings serially on the same allocation, add named variants:
+
+```toml
+[[benchmark.variants]]
+name = "control-before"
+overrides = []
+
+[[benchmark.variants]]
+name = "prefill-4096"
+overrides = ["miles.sglang_chunked_prefill_size=4096"]
+
+[[benchmark.variants]]
+name = "control-after"
+overrides = []
+```
+
+Override an option in the section where it is already declared to avoid conflicting
+aliases. Each variant starts a fresh Python/Ray/server process and gets a separate
+output directory. The entire panel keeps the same allocation, checkpoint and data;
+variants may change serving and queue controls only. A failed case stops the panel.
+The Beaker timeout must cover all cases, startup and drain included.
+
 Use the normal `plan`, `validate`, and committed-image `run` commands. Planning
 reports only inference GPU allocation and identifies the benchmark explicitly.
 Inside the pinned image, `train` dispatches to the benchmark workflow when this
@@ -96,6 +118,13 @@ Compare prefill chunks and mixed-chunk scheduling on realistic prompt/response
 lengths. Keep sampling, response/context limits and arithmetic unchanged.
 Only advance finalists to two and eight engines; report per-engine imbalance and
 fleet throughput divided by engine count times the single-engine baseline.
+
+With `use_miles_router=true` (required for the qualified refresh/replay path), the
+pinned router selects the healthy engine with the fewest active requests. Native
+SGLang `sglang_router_policy` and cache/balance thresholds do not change this
+router. Its `miles_router_max_connections` defaults to fleet HTTP capacity; an
+explicit smaller value can introduce another queue. Planning warns about both
+ineffective native policy overrides and this extra connection limit.
 
 A short-response lifecycle smoke test is useful before this procedure, but it
 cannot establish a long-context serving default. Treat H100 as a separate memory

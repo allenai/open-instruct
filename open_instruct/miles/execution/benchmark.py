@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 
 import httpx
+import ray
 from miles.backends.core_utils.rollout import pipeline_observer
 from miles.ray import wiring
 from miles.ray.rollout.inference_controller import InferenceController
@@ -172,8 +173,8 @@ async def run(args, settings, root):
         workers = wiring.launch_worker_manager(args, transform_specs=partial(inference_specs, args))
         inference = InferenceController(args)
         await inference.init()
-        workflow.write_json(root / "benchmark-server-start.json", await server_info(args))
         init_http_client(args)
+        workflow.write_json(root / "benchmark-server-start.json", await server_info(args))
         source = load_function(args.data_source_path)(args)
         producer = load_rollout_function(
             RolloutFnConstructorInput(args=args, data_source=source), args.rollout_function_path
@@ -210,6 +211,7 @@ async def run(args, settings, root):
         if producer is not None:
             workflow.write_json(root / "benchmark-shutdown.json", pipeline_observer.snapshot(producer))
         await startup_cache.finish(args, success=failure is None and cleanup_error is None)
+        ray.shutdown()
         if failure is None and cleanup_error is not None:
             raise cleanup_error
         if result is not None:

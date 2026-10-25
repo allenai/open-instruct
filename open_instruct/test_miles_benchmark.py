@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from open_instruct.miles.configuration import throughput
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import launch
 from open_instruct.miles.rollout import benchmark_metrics
@@ -97,3 +98,54 @@ def test_response_checks_reject_missing_payload_and_wrong_policy():
         setattr(broken, field, value)
         with pytest.raises(ValueError):
             benchmark_metrics.sample_record(broken, require_routes=True)
+
+
+def test_panel_resolves_overrides_and_isolates_case_outputs(tmp_path):
+    payload = document(tmp_path)
+    payload["benchmark"]["variants"] = [
+        {"name": "control", "overrides": []},
+        {"name": "larger", "overrides": ["inference.sglang_max_running_requests=96"]},
+    ]
+    spec = RunSpec.from_dict(payload)
+    control, larger = spec.benchmark_variants()
+    assert control.output["root"] == str(tmp_path / "variants/control")
+    assert larger.conversion["hf_output"].startswith(str(tmp_path / "variants/larger"))
+    assert control.compile().miles["sglang_max_running_requests"] == 64
+    assert larger.compile().miles["sglang_max_running_requests"] == 96
+    assert control.benchmark["variants"] == larger.benchmark["variants"] == []
+    assert control.plan()["allocation"] == larger.plan()["allocation"] == spec.plan()["allocation"]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        'model.source="other"',
+        "inference.gpus=8",
+        "trainer.gpus=1",
+        'miles.sglang_dtype="float16"',
+        "miles.sglang_tp_size=2",
+        "miles.sglang_enable_return_routed_experts=false",
+    ],
+)
+def test_panel_cannot_change_model_workload_or_gpu_allocation(tmp_path, override):
+    payload = document(tmp_path)
+    payload["benchmark"]["variants"] = [{"name": "bad", "overrides": [override]}]
+    with pytest.raises(ValueError, match="serving/queue controls only"):
+        RunSpec.from_dict(payload)
+
+
+def test_miles_router_warns_about_ineffective_policy_and_connection_gate():
+    report = throughput.report(
+        {
+            "use_miles_router": True,
+            "sglang_router_policy": "round_robin",
+            "rollout_num_gpus": 2,
+            "sglang_server_concurrency": 128,
+            "miles_router_max_connections": 64,
+        },
+        SimpleNamespace(),
+    )
+    assert {warning["code"] for warning in report["warnings"]} == {
+        "miles_router_ignores_native_policy",
+        "miles_router_connection_limit",
+    }

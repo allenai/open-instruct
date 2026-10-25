@@ -13,6 +13,7 @@ import importlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -297,6 +298,22 @@ def run_directory(spec):
 
 def execute(spec):
     with run_directory(spec) as (root, state):
+        if getattr(spec, "benchmark", {}).get("variants"):
+            results = []
+            state.update(status="benchmarking", benchmark_started_unix=time.time())
+            write_json(root / "workflow.json", state)
+            for variant in spec.benchmark_variants():
+                # Each case gets a fresh Python/Ray/server process and shares only
+                # the fixed allocation. Its resolved config and output are retained.
+                config_path = root / f"{variant.name}.json"
+                write_json(config_path, variant.to_dict())
+                subprocess.run([sys.executable, "-m", "open_instruct.miles", "train", str(config_path)], check=True)
+                summary = json.loads((Path(variant.output["root"]) / "benchmark-summary.json").read_text())
+                results.append({"name": variant.name, "output": variant.output["root"], "summary": summary})
+                write_json(root / "benchmark-panel.json", results)
+            state.update(status="complete", finished_unix=time.time(), benchmark=results)
+            write_json(root / "workflow.json", state)
+            return results
         hf = prepare_model(spec)
         data = importlib.import_module("open_instruct.miles.datasets.run_data")
         planned = spec.compile()

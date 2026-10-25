@@ -24,6 +24,28 @@ def report(options, core):
     collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
     http = options.get("sglang_server_concurrency")
     asynchronous = options.get("fully_async", False)
+    if options.get("use_miles_router"):
+        ignored = [
+            key
+            for key in (
+                "sglang_router_policy",
+                "router_cache_threshold",
+                "router_balance_abs_threshold",
+                "router_balance_rel_threshold",
+            )
+            if key in options
+        ]
+        if ignored:
+            warn(
+                "miles_router_ignores_native_policy",
+                f"The pinned MILES router uses least-active-request routing; {', '.join(ignored)} configure the native SGLang router and have no effect here. Measure miles_router_max_connections and HTTP/producer headroom instead.",
+            )
+        connections = options.get("miles_router_max_connections")
+        if engines and http and connections and connections < engines * http:
+            warn(
+                "miles_router_connection_limit",
+                f"MILES router connection limit {connections} is below the fleet HTTP budget {engines * http}; requests may wait in the proxy connection pool.",
+            )
     if pool and context and pool < context:
         warn(
             "token_pool_below_context",

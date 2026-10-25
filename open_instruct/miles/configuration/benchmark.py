@@ -1,7 +1,47 @@
 """Explicit, bounded fixed-policy inference measurements without trainer GPUs."""
 
+import re
+
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
+
+# Keep a panel's model, precision, sampling and output contract fixed. Native
+# SGLang options include much more than scheduling (including dtype and TP).
+SERVING_CONTROLS = {
+    "sglang_server_concurrency",
+    "sglang_mem_fraction_static",
+    "sglang_max_running_requests",
+    "sglang_max_queued_requests",
+    "sglang_max_total_tokens",
+    "sglang_chunked_prefill_size",
+    "sglang_max_prefill_tokens",
+    "sglang_schedule_policy",
+    "sglang_schedule_conservativeness",
+    "sglang_disable_radix_cache",
+    "sglang_disable_overlap_schedule",
+    "sglang_scheduler_recv_interval",
+    "sglang_enable_mixed_chunk",
+    "sglang_cuda_graph_backend_decode",
+    "sglang_cuda_graph_backend_prefill",
+    "sglang_cuda_graph_max_bs_decode",
+    "sglang_cuda_graph_max_bs_prefill",
+    "sglang_cuda_graph_bs_decode",
+    "sglang_cuda_graph_bs_prefill",
+    "sglang_cuda_graph_tc_compiler",
+    "sglang_max_mamba_cache_size",
+    "sglang_mamba_max_states_per_path",
+    "sglang_mamba_radix_cache_strategy",
+    "sglang_mamba_track_interval",
+}
+QUEUE_CONTROLS = {
+    "inference.radix_cache",
+    "inference.mamba_radix_cache_strategy",
+    "inference.enable_mixed_chunk",
+    "miles.miles_router_max_connections",
+    "async.async_max_concurrent_samples",
+    "async.async_data_buffer_capacity_factor",
+    "async.rollout_submission_granularity",
+}
 
 
 def parse(value):
@@ -12,6 +52,7 @@ def parse(value):
         "drain_timeout": 120.0,
         "capture_samples": 8,
         "reward_mode": "none",
+        "variants": [],
     }
     validation.fields(value, "benchmark", set(defaults))
     result = defaults | value
@@ -20,6 +61,27 @@ def parse(value):
     validation.integer(result["capture_samples"], "benchmark.capture_samples", minimum=0)
     if result["reward_mode"] not in ("none", "configured"):
         raise InputError("benchmark.reward_mode must be none or configured")
+    variants = result["variants"]
+    if not isinstance(variants, list):
+        raise InputError("benchmark.variants must be an array of name/overrides tables")
+    names = set()
+    for variant in variants:
+        validation.mapping(variant, "benchmark variant")
+        validation.fields(variant, "benchmark variant", {"name", "overrides"})
+        name = variant.get("name", "")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name) or name in names:
+            raise InputError("Benchmark variant names must be unique letters/digits/hyphens/underscores")
+        names.add(name)
+        overrides = variant.get("overrides", [])
+        if not isinstance(overrides, list):
+            raise InputError("Benchmark variant overrides must be a list of SECTION.KEY=VALUE strings")
+        for override in overrides:
+            if not isinstance(override, str) or "=" not in override:
+                raise InputError("Benchmark variant overrides must be SECTION.KEY=VALUE strings")
+            key = override.partition("=")[0]
+            section, _, option = key.partition(".")
+            if key not in QUEUE_CONTROLS and not (section in {"inference", "miles"} and option in SERVING_CONTROLS):
+                raise InputError(f"Benchmark variants may change serving/queue controls only, not {key}")
     return result
 
 
