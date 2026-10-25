@@ -411,6 +411,39 @@ def test_route_comparison_counts_response_conditioning_positions(tmp_path):
         compare_inference_replay.route_agreement(left, right, *records)
 
 
+def test_route_comparison_excludes_dense_padding_and_separates_expert_membership(tmp_path):
+    paths = [tmp_path / name for name in ("left", "right")]
+    x = np.zeros((3, 2, 2), dtype=np.int32)
+    x[:, 1] = [1, 2]
+    y = x.copy()
+    y[:, 1] = [2, 1]  # Same experts, opposite top-k order.
+    y[-1, 1] = [2, 3]  # One genuinely replaced expert in one response position.
+    records = []
+    for path, matrix in zip(paths, (x, y), strict=True):
+        path.mkdir()
+        (path / "benchmark-model-config.json").write_text(
+            json.dumps({"model_type": "olmo3moe", "num_hidden_layers": 2, "dense_layers_indices": [0]})
+        )
+        np.savez_compressed(path / "routes.npz", routes=matrix)
+        records.append(
+            [
+                {
+                    "group_index": 0,
+                    "prompt_tokens": 1,
+                    "response_tokens": 3,
+                    "route_path": "routes.npz",
+                    "route_sha256": hashlib.sha256(matrix.tobytes()).hexdigest(),
+                }
+            ]
+        )
+    report = compare_inference_replay.route_agreement(*paths, *records)
+    assert report["routed_layer_indices"] == [1]
+    assert report["per_layer_expert_slot_changed_fraction"] == [None, 1]
+    assert report["expert_slot_changed_fraction"]["value"] == 1
+    assert report["expert_membership_changed_fraction"]["value"] == pytest.approx(1 / 6)
+    assert report["conditioning_token_expert_set_changed_fraction"]["value"] == pytest.approx(1 / 3)
+
+
 def test_workload_preparation_filters_without_truncating_and_keeps_sources(tmp_path, monkeypatch):
     model = tmp_path / "model"
     model.mkdir()

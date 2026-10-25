@@ -16,6 +16,19 @@ from scripts.miles import throughput_occupancy
 def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=17):
     clusters = {}
     layer_changed = layer_total = None
+    layouts = []
+    for root in (left_root, right_root):
+        path = Path(root) / "benchmark-model-config.json"
+        config = json.loads(path.read_text()) if path.is_file() else {}
+        layouts.append(
+            (config["num_hidden_layers"], config.get("dense_layers_indices") or [])
+            if config.get("model_type") == "olmo3moe"
+            else None
+        )
+    if layouts[0] != layouts[1]:
+        raise ValueError("Routing comparisons require matching layer layouts")
+    routed_layers = None
+    recorded_layers = None
     matched = 0
     for a, b in zip(left, right, strict=True):
         if not a.get("route_path") or not b.get("route_path"):
@@ -31,10 +44,31 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
         expected_length = a["prompt_tokens"] + a["response_tokens"] - 1
         if x.ndim != 3 or x.shape != y.shape or x.shape[0] != expected_length:
             raise ValueError("Replay routing matrices have inconsistent shapes")
+        if layouts[0] is not None and x.shape[1] != layouts[0][0]:
+            raise ValueError("Routing matrix layer dimension differs from the model configuration")
+        recorded_layers = x.shape[1]
+        dense = layouts[0][1] if layouts[0] is not None else []
+        if any(not isinstance(layer, int) or not 0 <= layer < recorded_layers for layer in dense):
+            raise ValueError("Model configuration contains an invalid dense-layer index")
+        routed_layers = [layer for layer in range(recorded_layers) if layer not in dense]
+        if not routed_layers:
+            raise ValueError("Routing matrices contain no routed layers")
         # The route for the last prompt token conditions the first response logit.
-        changed = x[a["prompt_tokens"] - 1 :] != y[b["prompt_tokens"] - 1 :]
-        row = np.array([changed.size, changed.sum(), len(changed), changed.any(axis=(1, 2)).sum()], dtype=np.float64)
-        clusters[a["group_index"]] = clusters.get(a["group_index"], np.zeros(4)) + row
+        x = x[a["prompt_tokens"] - 1 :, routed_layers]
+        y = y[b["prompt_tokens"] - 1 :, routed_layers]
+        changed = x != y
+        absent_slots = changed_sets = 0
+        # Chunk the top-k cross-comparison to bound memory for long trajectories.
+        # Permuting the same selected experts changes ordered slots but not membership.
+        for offset in range(0, len(x), 1024):
+            absent = ~(x[offset : offset + 1024, ..., None] == y[offset : offset + 1024, ..., None, :]).any(axis=-1)
+            absent_slots += absent.sum()
+            changed_sets += absent.any(axis=(1, 2)).sum()
+        row = np.array(
+            [changed.size, changed.sum(), len(changed), changed.any(axis=(1, 2)).sum(), absent_slots, changed_sets],
+            dtype=np.float64,
+        )
+        clusters[a["group_index"]] = clusters.get(a["group_index"], np.zeros(6)) + row
         per_layer = changed.sum(axis=(0, 2))
         total_per_layer = changed.shape[0] * changed.shape[2]
         layer_changed = per_layer if layer_changed is None else layer_changed + per_layer
@@ -50,6 +84,8 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
     for name, numerator, denominator in (
         ("expert_slot_changed_fraction", 1, 0),
         ("conditioning_token_changed_fraction", 3, 2),
+        ("expert_membership_changed_fraction", 4, 0),
+        ("conditioning_token_expert_set_changed_fraction", 5, 2),
     ):
         result[name] = {
             "value": float(total[numerator] / total[denominator]),
@@ -57,10 +93,18 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
                 draws[:, numerator] / draws[:, denominator], [0.025, 0.975]
             ).tolist(),
         }
-    assert layer_changed is not None and layer_total is not None
-    result["per_layer_expert_slot_changed_fraction"] = (layer_changed / layer_total).tolist()
+    assert layer_changed is not None and layer_total is not None and routed_layers is not None
+    assert recorded_layers is not None
+    per_layer: list[float | None] = [None] * recorded_layers
+    for layer, rate in zip(routed_layers, layer_changed / layer_total, strict=True):
+        per_layer[layer] = float(rate)
+    result["per_layer_expert_slot_changed_fraction"] = per_layer
+    result["routed_layer_indices"] = routed_layers
+    result["layer_layout_known"] = layouts[0] is not None
     result["scope"] = (
-        "Ordered expert slots for inputs conditioning response logits; prompt clusters retain copies and repeated waves. Expert-set overlap is a different metric."
+        "Response-conditioning routes; known dense layers are excluded, otherwise all recorded layers are used. "
+        "Membership counts selected experts absent from the other arm, independently of top-k order. "
+        "Prompt clusters retain copies and repeated waves."
     )
     return result
 

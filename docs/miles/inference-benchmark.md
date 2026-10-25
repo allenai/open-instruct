@@ -164,8 +164,11 @@ trajectories reaching them, so inspect their prompt counts; they are conditional
 diagnostics and their intervals are not adjusted for multiple comparisons.
 When routing matrices are present, comparison reports ordered expert-slot and
 response-conditioning token disagreement, including per-layer rates, rather than
-only whether any route changed in an entire trajectory. It verifies their stored
-hashes before comparison.
+only whether any route changed in an entire trajectory. It separately measures
+expert membership changes, so permuting the same top-k experts is distinguishable
+from selecting different experts. Known Olmo dense layers are excluded from the
+denominator; missing layout metadata is reported explicitly. Stored matrix hashes
+are verified before comparison.
 Its ratios and logprob differences are relative to the serving control, not Core;
 the intervals do not cover machine/day variability or establish learning quality.
 If the capture set is smaller than the admission being tested, set
