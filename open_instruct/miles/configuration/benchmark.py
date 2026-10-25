@@ -56,6 +56,7 @@ def parse(value):
         "replay_reference": None,
         "replay_repeats": 2,
         "replay_copies": 1,
+        "score_reference": False,
     }
     validation.fields(value, "benchmark", set(defaults))
     result = defaults | value
@@ -64,6 +65,7 @@ def parse(value):
     validation.integer(result["capture_samples"], "benchmark.capture_samples", minimum=0)
     validation.integer(result["replay_repeats"], "benchmark.replay_repeats", minimum=1)
     validation.integer(result["replay_copies"], "benchmark.replay_copies", minimum=1)
+    validation.boolean(result["score_reference"], "benchmark.score_reference")
     if result["replay_reference"] is not None:
         validation.text(result["replay_reference"], "benchmark.replay_reference")
         if not result["replay_reference"].startswith("/"):
@@ -122,5 +124,13 @@ def validate(spec, config):
         )
     if miles.get("sglang_weight_version", "0") != "0":
         raise InputError('Inference benchmarks use the fixed checkpoint version sglang_weight_version="0"')
-    if spec.benchmark["replay_reference"] and not miles.get("sglang_enable_custom_logit_processor"):
+    if spec.benchmark["score_reference"] and (
+        not spec.benchmark["replay_reference"] or miles["rollout_num_gpus"] != 1 or spec.benchmark["variants"]
+    ):
+        raise InputError("Core reference scoring requires replay_reference, one GPU and no variants")
+    if (
+        spec.benchmark["replay_reference"]
+        and not spec.benchmark["score_reference"]
+        and not miles.get("sglang_enable_custom_logit_processor")
+    ):
         raise InputError("Diagnostic replay requires miles.sglang_enable_custom_logit_processor=true")

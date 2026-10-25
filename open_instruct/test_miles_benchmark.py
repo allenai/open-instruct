@@ -239,6 +239,50 @@ def test_replay_requires_explicit_diagnostic_server_setting(tmp_path):
         RunSpec.from_dict(payload)
 
 
+def test_core_reference_requires_a_single_gpu_and_reference(tmp_path):
+    payload = document(tmp_path)
+    payload["benchmark"]["score_reference"] = True
+    with pytest.raises(ValueError, match="Core reference"):
+        RunSpec.from_dict(payload)
+    payload["benchmark"]["replay_reference"] = str(tmp_path / "reference")
+    assert RunSpec.from_dict(payload).benchmark["score_reference"]
+    payload["benchmark"]["variants"] = [{"name": "unused", "overrides": []}]
+    with pytest.raises(ValueError, match="no variants"):
+        RunSpec.from_dict(payload)
+
+
+def test_frozen_reference_validates_model_completion_and_lengths(tmp_path):
+    (tmp_path / "run-spec.json").write_text('{"model": {"source": "fixed"}}')
+    (tmp_path / "workflow.json").write_text('{"status": "complete"}')
+    record = {"index": 0, "prompt_tokens": 1, "response_tokens": 2, "tokens": [1, 2, 3]}
+    (tmp_path / "benchmark-captures.jsonl").write_text(json.dumps(record) + "\n")
+    _, rows = benchmark_metrics.reference_records(tmp_path, {"source": "fixed"}, 3)
+    assert rows == [record]
+    with pytest.raises(ValueError, match="same checkpoint"):
+        benchmark_metrics.reference_records(tmp_path, {"source": "changed"}, 3)
+    with pytest.raises(ValueError, match="exceeds"):
+        benchmark_metrics.reference_records(tmp_path, {"source": "fixed"}, 2)
+    (tmp_path / "workflow.json").write_text('{"status": "running"}')
+    with pytest.raises(ValueError, match="completed"):
+        benchmark_metrics.reference_records(tmp_path, {"source": "fixed"}, 3)
+
+
+def test_core_comparison_measures_paired_error_changes(tmp_path):
+    (tmp_path / "workflow.json").write_text('{"status": "complete"}')
+    (tmp_path / "benchmark-summary.json").write_text(
+        json.dumps({"reference_backend": "core", "reference_sha256": "fixed", "trajectories": 1})
+    )
+    row = {"index": 0, "group_index": 0, "prompt_tokens": 1, "response_tokens": 2, "logprobs": [-1.0, -1.0]}
+    (tmp_path / "benchmark-core-reference.jsonl").write_text(json.dumps(row) + "\n")
+    left = [{**row, "logprobs": [-1.1, -1.1]}]
+    right = [{**row, "logprobs": [-1.3, -1.3]}]
+    report = compare_inference_replay.core_comparison(tmp_path, "fixed", left, right)
+    assert report["paired_change"]["mean_absolute_error_change"]["value"] == pytest.approx(0.2)
+    assert report["paired_change"]["ratio_outlier_fraction_change"]["value"] == 1
+    with pytest.raises(ValueError, match="same captured reference"):
+        compare_inference_replay.core_comparison(tmp_path, "changed", left, right)
+
+
 def test_replay_copies_keep_distinct_ids_and_shared_prompt_clusters():
     original = [{"index": 0, "group_index": 0}, {"index": 3, "group_index": 0}, {"index": 5, "group_index": 1}]
     expanded = benchmark_metrics.replicate_trajectories(original, 4)

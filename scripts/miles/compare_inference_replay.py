@@ -123,7 +123,56 @@ def paired_metrics(left, right, *, bootstrap=2000, seed=17):
     }
 
 
-def compare(left, right):
+def core_comparison(root, reference_sha256, left, right, *, bootstrap=2000, seed=17):
+    root = Path(root)
+    summary = json.loads((root / "benchmark-summary.json").read_text())
+    if (
+        json.loads((root / "workflow.json").read_text())["status"] != "complete"
+        or summary.get("reference_backend") != "core"
+        or summary["reference_sha256"] != reference_sha256
+    ):
+        raise ValueError("Core scores must be complete and use the same captured reference")
+    rows = [json.loads(line) for line in (root / "benchmark-core-reference.jsonl").read_text().splitlines()]
+    scores = {row["index"]: row for row in rows}
+    if len(scores) != len(rows) or len(rows) != summary["trajectories"]:
+        raise ValueError("Core reference has missing or duplicate trajectories")
+    reference, clusters = [], {}
+    for a, b in zip(left, right, strict=True):
+        row = scores[a.get("source_index", a["index"])]
+        if any(row[key] != a[key] for key in ("group_index", "prompt_tokens", "response_tokens")):
+            raise ValueError("Core reference trajectory identity differs")
+        reference.append({**row, **{key: a[key] for key in ("index", "source_index", "copy_index") if key in a}})
+        core = np.asarray(row["logprobs"], dtype=np.float64)
+        before, after = np.asarray(a["logprobs"]) - core, np.asarray(b["logprobs"]) - core
+        if len(core) != row["response_tokens"] or not np.isfinite(core).all():
+            raise ValueError("Core reference has invalid logprobs")
+        before_outside = (before < -np.log(1.2)) | (before > -np.log(0.8))
+        after_outside = (after < -np.log(1.2)) | (after > -np.log(0.8))
+        values = np.array(
+            [len(core), (np.abs(after) - np.abs(before)).sum(), after_outside.sum() - before_outside.sum()]
+        )
+        clusters[a["group_index"]] = clusters.get(a["group_index"], np.zeros(3)) + values
+    grouped = np.stack(list(clusters.values()))
+    total = grouped.sum(axis=0)
+    rng = np.random.default_rng(seed)
+    draws = grouped[rng.integers(0, len(grouped), size=(bootstrap, len(grouped)))].sum(axis=1)
+    change = {
+        name: {
+            "value": float(total[i] / total[0]),
+            "prompt_cluster_95pct_interval": np.quantile(draws[:, i] / draws[:, 0], [0.025, 0.975]).tolist(),
+        }
+        for i, name in enumerate(("mean_absolute_error_change", "ratio_outlier_fraction_change"), 1)
+    }
+    return {
+        "reference": str(root),
+        "contract": summary,
+        "left_error": paired_metrics(reference, left),
+        "right_error": paired_metrics(reference, right),
+        "paired_change": change,
+    }
+
+
+def compare(left, right, core=None):
     summaries, records = [], []
     for root in (Path(left), Path(right)):
         if json.loads((root / "workflow.json").read_text())["status"] != "complete":
@@ -144,13 +193,16 @@ def compare(left, right):
             raise ValueError(f"Replay reference mismatch: {key}")
     if summaries[0].get("copies", 1) != summaries[1].get("copies", 1):
         raise ValueError("Replay reference mismatch: copies")
-    return {
+    result = {
         "left": str(left),
         "right": str(right),
         "reference_sha256": summaries[0]["reference_sha256"],
         **paired_metrics(*records),
         "route_agreement": route_agreement(left, right, *records),
     }
+    if core is not None:
+        result["core_comparison"] = core_comparison(core, summaries[0]["reference_sha256"], *records)
+    return result
 
 
 def main():
@@ -158,8 +210,9 @@ def main():
     parser.add_argument("left", type=Path)
     parser.add_argument("right", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--core", type=Path, help="Completed forward-only Core reference run")
     args = parser.parse_args()
-    report = json.dumps(compare(args.left, args.right), indent=2) + "\n"
+    report = json.dumps(compare(args.left, args.right, args.core), indent=2) + "\n"
     if args.output:
         args.output.write_text(report)
     print(report)

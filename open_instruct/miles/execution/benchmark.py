@@ -184,6 +184,19 @@ async def consume(producer, args, settings, root):
 
 
 async def run(args, settings, root):
+    if settings["score_reference"]:
+        observer = asyncio.create_task(observe_resources(root))
+        try:
+            score = load_function("open_instruct.miles.execution.benchmark_core_reference.run")
+            result = await asyncio.to_thread(score, args, settings, root)
+            workflow.write_json(root / "benchmark-summary.json", result)
+            return result
+        except BaseException as error:
+            workflow.write_json(root / "benchmark-failure.json", {"type": type(error).__name__, "error": str(error)})
+            raise
+        finally:
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
     # Native parsing still checks the production serving contract. Only this
     # explicit execution path enables inference-only placement and omits trainers.
     args.debug_rollout_only = True

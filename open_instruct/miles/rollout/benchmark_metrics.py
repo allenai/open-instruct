@@ -1,6 +1,33 @@
 """CPU-side accounting for complete fixed-policy rollout collections."""
 
+import json
 import math
+from pathlib import Path
+
+
+def reference_records(reference, model, context_length):
+    reference = Path(reference)
+    if json.loads((reference / "run-spec.json").read_text())["model"] != model:
+        raise ValueError("Replay reference must use the same checkpoint and tokenizer contract")
+    if json.loads((reference / "workflow.json").read_text())["status"] != "complete":
+        raise ValueError("Replay reference must be a completed benchmark")
+    capture_root = reference / "benchmark-captures"
+    raw = (
+        b"".join(path.read_bytes() for path in sorted(capture_root.glob("*.json")))
+        if capture_root.is_dir()
+        else (reference / "benchmark-captures.jsonl").read_bytes()
+    )
+    records = sorted((json.loads(line) for line in raw.splitlines()), key=lambda row: row["index"])
+    if not records or len({r["index"] for r in records}) != len(records) or any(r["index"] < 0 for r in records):
+        raise ValueError("Replay reference must contain distinct nonnegative captured indices")
+    for record in records:
+        if min(record["prompt_tokens"], record["response_tokens"]) <= 0 or record["prompt_tokens"] + record[
+            "response_tokens"
+        ] != len(record["tokens"]):
+            raise ValueError("Replay reference token lengths are inconsistent")
+        if len(record["tokens"]) > context_length:
+            raise ValueError("Replay trajectory exceeds configured context")
+    return raw, records
 
 
 def replicate_trajectories(records, copies):

@@ -168,6 +168,20 @@ original prompt cluster and do not increase the independent sample count. This
 deliberately changes prefix sharing for the diagnostic; inspect occupancy because
 short trajectories finish first and batch size falls during each wave.
 
+For an additional fixed Core reference, copy the same run to another output,
+retain `benchmark.replay_reference`, set `benchmark.score_reference=true`, and
+use one GPU with no variants. This performs forward-only BF16 scoring with the
+pinned MILES/Core model preparation and configured attention backend. It creates
+no trainer, optimizer or serving engine. Each original capture is scored once,
+with natural routing and one causal document per request at EP1; copies and
+repeated replay waves share that reference. The scorer chunks the vocabulary head
+to bound memory and retains `benchmark-core-reference.jsonl` and source/backend
+provenance. Use `compare_inference_replay ... --core CORE_RUN_DIRECTORY` to report
+both serving arms' errors and prompt-clustered paired changes against it. This
+is a numerical reference, not a measurement of packed, expert-parallel training
+or a guarantee of learning quality. Serving-to-serving agreement alone cannot
+determine whether a difference moved toward or away from this reference.
+
 ## Selecting configurations
 
 Start with one engine and memory-feasible pools. Couple admission with decode
