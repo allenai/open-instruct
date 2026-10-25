@@ -103,8 +103,26 @@ runs 512/768/1,024/512/256 on one B300, with at least 600 seconds of warmup and
 900 seconds of measurement per case. This combines the remaining admission work
 without repeating the completed opening 256 case. The 1,024 case reserves 5,376
 recurrent slots, exceeding the five-slot reservation with prefix headroom. HTTP
-and producer headroom will then be varied separately, followed by prefill controls
+and producer headroom are being varied separately, followed by prefill controls
 and fleet scaling.
+
+Its completed opening 512 case was [snapshotted independently](https://beaker.org/ex/01M5TEXAQKZJAA8HCH21T5H7Q8)
+while later cases continued. All 298 copied files match the source-job hash
+inventory. It delivered **22,045,514 tokens in 920.238 seconds (23,956.3 tokens/s)**;
+native decode counters give 23,582.8 tokens/s. This is about 26% above the longer
+256 control, before the new bracket's closing controls and numerical qualification.
+Mean running occupancy was 511.30/512, with 99.24% observation coverage, and peak
+memory was 139.03 GiB. All 2,816 measured responses have timing records and report
+zero retractions. Mean response length was 7,828.7 tokens; startup took 386.53 s
+and final drain 409.45 s, outside measurement.
+
+The same case carried 511.10 queued engine requests on average. Mean initial
+engine queue time was 168.48 s and mean engine execution 170.94 s; these overlapping
+request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TF82W6EH1P2HG48E9V24X2)
+holds admission/graphs/pools at 512 and compares HTTP/producer capacities
+1,024/2,048 → 512/2,048 → 512/1,024 → 1,024/2,048. Each case uses 600 s warmup and
+600 s measurement, with the production 60-second engine keep-alive. This isolates
+whether the large queue and producer budget improve throughput.
 
 ## Correctness and retained evidence
 
