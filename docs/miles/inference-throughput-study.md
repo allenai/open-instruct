@@ -339,10 +339,11 @@ native weight refreshes, checking behavior-logprob preservation, policy-version
 spans, final replay routes, publication pauses and recovery. Keep trainer settings
 unchanged; a synchronous or barrier-drained substitute does not meet this gate.
 
-Finish the admission sweep and closing controls; audit full results; test higher
-admission while gains continue; independently tune request supply and prefill;
-compare frozen-prefix numerical behavior; and validate the selected setting on
-multiple engines. Then exercise shorter response budgets on the same prompts and
+For this pass, use admission 512 as the ballpark tuning point. The completed
+768 and 1,024 measurements are sufficient upper-end exploration; no 1,536/2,048
+runs or fine search for the knee are planned. Finish the remaining controls and
+numerical qualification, independently tune request supply and prefill, and
+validate the selected setting on multiple engines. Then exercise shorter response budgets on the same prompts and
 a separately identified longer-prefill workload, retaining actual length and
 truncation distributions. Check whether admission recommendations transfer across
 those workloads rather than assuming the 32K-cap result is universal.
