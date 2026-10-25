@@ -18,6 +18,7 @@ from miles.rollout.inference_rollout.inference_rollout_train import get_worker_u
 from miles.utils.compiler_cache import startup_cache
 from miles.utils.function_registry import load_function
 from miles.utils.http_utils import init_http_client
+from scripts.miles import snapshot_options
 
 from open_instruct import logger_utils
 from open_instruct.miles.execution import workflow
@@ -66,8 +67,8 @@ async def observe_resources(root):
 
 
 def inference_specs(args, specs):
-    specs = [spec for spec in specs if not spec.name.startswith("trainer-")]
-    return startup_cache.configure_specs(args, specs)
+    configured = startup_cache.configure_specs(args, specs)
+    return [spec for spec in configured if not spec.name.startswith("trainer-")]
 
 
 async def server_info(args):
@@ -166,6 +167,7 @@ async def run(args, settings, root):
     failure = None
     result = None
     try:
+        workflow.write_json(root / "benchmark-native-options.json", snapshot_options.snapshot())
         startup_cache.prepare(args, application_root=Path(__file__).resolve().parents[3])
         workers = wiring.launch_worker_manager(args, transform_specs=partial(inference_specs, args))
         inference = InferenceController(args)
