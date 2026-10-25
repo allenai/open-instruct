@@ -3,6 +3,8 @@
 import argparse
 import csv
 import json
+import math
+from collections import defaultdict
 from pathlib import Path
 
 from scripts.miles import throughput_occupancy
@@ -25,6 +27,48 @@ def quantiles(values):
             name: values[round(fraction * (len(values) - 1))]
             for name, fraction in (("p50", 0.5), ("p90", 0.9), ("p99", 0.99), ("maximum", 1.0))
         },
+    }
+
+
+def request_timings(root, responses):
+    """Join only unambiguous completed attempts; report missing coverage explicitly."""
+    observations = defaultdict(list)
+    for path in (root / "checkpoints").glob("sibling_timing_*.jsonl"):
+        for group in throughput_occupancy.records(path):
+            if group["outcome"] == "completed":
+                for sample in group["samples"]:
+                    if sample.get("outcome") == "completed":
+                        observations[(sample["sample_index"], sample["group_index"])].append(sample)
+    joined = []
+    for sample in responses:
+        matches = observations[(sample.get("index"), sample.get("group_index"))]
+        if len(matches) == 1:
+            joined.append(matches[0])
+    metrics = {}
+    for name, first, last in (
+        ("producer_admission_wait", "group_created_monotonic", "admitted_monotonic"),
+        ("http", "admitted_monotonic", "response_received_monotonic"),
+        ("engine_initial_queue", "engine_received_unix", "engine_first_forward_unix"),
+        ("engine_execution", "engine_first_forward_unix", "engine_finished_unix"),
+        ("producer_to_response", "group_created_monotonic", "response_received_monotonic"),
+    ):
+        durations = [r[last] - r[first] for r in joined if first in r and last in r]
+        valid = [value for value in durations if math.isfinite(value) and value >= 0]
+        metrics[name] = {
+            "seconds": quantiles(valid),
+            "coverage_fraction": len(valid) / len(responses),
+            "invalid_order_count": len(durations) - len(valid),
+        }
+    retractions = [r["engine_reported_num_retractions"] for r in joined if "engine_reported_num_retractions" in r]
+    return {
+        "matched_samples": len(joined),
+        "measured_samples": len(responses),
+        "durations": metrics,
+        "engine_reported_retractions": {
+            "count": sum(retractions),
+            "coverage_fraction": len(retractions) / len(responses),
+        },
+        "scope": "Measured delivered samples only. Durations overlap across requests and must not be summed into engine wall time. Unfinished responses are censored.",
     }
 
 
@@ -124,6 +168,7 @@ def analyze(root):
         "prompt_lengths": quantiles([r["prompt_tokens"] for r in responses]),
         "response_lengths": quantiles([r["response_tokens"] for r in responses]),
         "truncated_fraction": sum(r["status"] == "truncated" for r in responses) / len(responses),
+        "request_timings": request_timings(root, responses),
         "occupancy": occupancy,
         "hardware": devices,
         "boundary_inventory": read_json(root / "benchmark-boundaries.json"),
