@@ -5,6 +5,11 @@ weights with **full-pool token routing**. It does not continue EMO's stochastic
 restriction of experts to a document-level pool. Prompt-selected pools are the
 next implementation stage, described below; they are not enabled by this change.
 
+This work is deferred. The retained implementation is consolidated on
+`robertb/emo` in Open Instruct, OLMo-core, miles-olmo-core and olmo-sglang.
+Consolidation preserves the pinned implementation and design notes; it does not
+reopen the ingestion PR or qualify additional execution modes.
+
 ## Supported inputs and configuration
 
 | Checkpoint | Selection | Result |
@@ -87,7 +92,7 @@ The implementation coordinates Open Instruct with these dependency changes:
 | olmo-sglang | `7d44e6c5594266cdb559ab389bdc3fd67785a90b` | EMO serving metadata guard |
 
 Each revision is published on its repository's
-`robertb/emo-full-pool-main-20261014` branch. The serving input-aliasing fix found
+`robertb/emo` branch. The serving input-aliasing fix found
 during earlier EMO validation is already in the upstream serving base.
 
 CPU coverage includes actual tiny HF/native checkpoint preparation, weight and
@@ -184,3 +189,46 @@ samples, recomputation and recovery tests, then a bounded nonzero-gradient RL
 smoke and real-checkpoint qualification. Existing full-pool results cannot
 substitute for prompt-selected evidence. All expert weights remain resident;
 restricted eligibility alone does not imply model-memory savings.
+
+### Retained implementation details for the follow-up
+
+These constraints preserve the more detailed prompt-pool design from the earlier
+full-pool checkout. They describe future implementation and qualification, not
+additional behavior supported by the retained full-pool code.
+
+- Use one explicit integer pool size across routed layers, with separately
+  selected IDs per layer. Do not infer a random size from pretraining metadata.
+  Reject a pool-size setting in full-pool mode, empty prompts, non-finite selector
+  scores and invalid IDs. Multi-turn/tool-driven pool reselection stays deferred.
+- Compute FP32 softmax scores over all experts, mask eligibility for token top-k
+  selection, then gather the original selected scores and preserve checkpoint
+  normalization/scaling. Keep existing token-routing tie behavior separate from
+  the deterministic aggregate-score tie rule used by the pool selector.
+- Preserve the shared replay implementation's gating-specific formulas:
+  `softmax(z).gather(I)` for softmax gating and `softmax(z.gather(I))` for
+  top-k-softmax gating. Test raw selected weights and gradients before optional
+  normalization so it cannot hide an arithmetic change. The EMO serving profile
+  remains limited to its supported softmax configuration.
+- Condition reference scoring on the rollout's recorded pool, using reference
+  model scores rather than selecting a new pool or falling back to all experts.
+  Measure that distinction explicitly in KL comparisons.
+- Capture the actual logical expert IDs used for execution, before physical
+  dispatch remapping, with correct token and routed-layer alignment. Do not run
+  a second top-k solely for diagnostics or keep one global pool on a layer.
+- Verify the pinned serving runtime's `cache_salt`/`RadixKey.extra_key` hooks,
+  including KDA state. Compose pool identity with existing salt/LoRA identity.
+  Reject or explicitly disable a cache path if it cannot isolate different pools;
+  test cancellation, retraction, retries, mixed-pool batches and slot reuse.
+- During refresh, distinguish original behavior probabilities/version spans from
+  the final rebuilt replay table/version. Rebuild under the original fixed pools
+  and retain behavior probabilities; do not relabel rebuilt routes as the routes
+  originally sampled for every historical token. Model export must not install
+  one request's selected pool globally. Preserve in-flight pools in recovery.
+- Qualify serving TP1/EP1 first and trainer EP1 followed by EP2, preserving current
+  trainer TP/CP/PP limits. Check every rank, packed/unpacked gradients and optimizer
+  state, and malformed-input failures before unsafe collectives. Other serving
+  geometries, quantization, speculation and prefill graphs need separate evidence.
+- Report near-tie margins, route mismatches, logprob percentiles/maxima, greedy
+  choices, importance-ratio tails and clipping fractions; a mean-only logprob
+  guard is insufficient. Use independent references and several pool sizes, with
+  probe/restricted-prefill overhead separated from warmed decode and update time.
