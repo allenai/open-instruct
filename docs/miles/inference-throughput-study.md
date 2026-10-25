@@ -140,10 +140,14 @@ closing controls and numerical qualification remain necessary.
 
 The parent was preempted by allocated work during the closing 512 warmup.
 The [replacement controls](https://beaker.org/ex/01M5TMC3NPE6WVRYV1WM164CBE)
-run only 512 and 256 with the same runtime and settings. A different node/attempt
-cannot restore the original same-node bracket; these controls assess reproducibility
-across attempts. More memory or a longer queue is not itself evidence of more
-useful RL throughput.
+were also preempted before their 512 measurement completed. All 302 archive files
+are retained, but this incomplete case is excluded from the qualified results.
+For this ballpark pass, use the supply panel's opening and closing 512 cases for
+replication rather than retrying another dedicated 512/256 panel. Its 600-second
+measurement and 60-second keep-alive differ from the earlier admission panel;
+retain those distinctions in comparisons. A different node/attempt cannot restore
+the original same-node bracket. More memory or a longer queue is not itself
+evidence of more useful RL throughput.
 
 Retained process CPU counters give an average of 0.277–0.279 CPU cores at
 admission 512 and 0.335–0.337 at 768 for the producer/consumer process. These
@@ -270,8 +274,14 @@ at its conditioning position in layers 6–15. This association does not establi
 causality. Admission 256 is closer to Core for this token, but neither average
 agreement nor this one improvement qualifies it. The full matched report is
 `analysis/replay-v4-64-vs256.json`. The parent was preempted during 512;
-[replacement replay cases](https://beaker.org/ex/01M5TMC66743TX59RVBJGKZ8N9)
-retain 512 and closing 64 with two waves each, explicitly across attempts.
+the [first replacement](https://beaker.org/ex/01M5TMC66743TX59RVBJGKZ8N9)
+was also preempted during its first 512 wave. Its full 278-file archive retains
+251 aligned score vectors and matching route hashes; these partial observations
+do not qualify the setting. The [next replacement](https://beaker.org/ex/01M5TQ4T1HCFAGBD7RNZK03CDN)
+retains 512 and closing 64 with two waves each, explicitly across attempts.
+It uses application image `01M5TNPB5BXFE2675SD2XNJAWB` (source `5241f527a`):
+the added optional Core route scorer and publication diagnostic changes are
+inactive in this serving-only replay, and the serving replay path is unchanged.
 
 Across the original draws, the retained earlier replay wave and both corrected
 control waves, eight token positions exceed absolute Core logprob error one in
