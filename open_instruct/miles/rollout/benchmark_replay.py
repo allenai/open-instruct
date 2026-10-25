@@ -13,9 +13,12 @@ import math
 from pathlib import Path
 
 import httpx
+import numpy as np
 import torch
 from sglang.srt.layers import sampler
 from sglang.srt.sampling.custom_logit_processor import CustomLogitProcessor
+
+from open_instruct.miles.rollout import benchmark_metrics
 
 
 class ReplayIdentityProcessor(CustomLogitProcessor):
@@ -66,6 +69,8 @@ async def run(args, settings, root):
             raise ValueError("Replay reference token lengths are inconsistent")
         if len(record["tokens"]) > args.rollout_max_context_len:
             raise ValueError("Replay trajectory exceeds configured context")
+    reference_trajectories = len(records)
+    records = benchmark_metrics.replicate_trajectories(records, settings["replay_copies"])
     processor = ReplayIdentityProcessor.to_str()
     capacity = args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
@@ -73,8 +78,10 @@ async def run(args, settings, root):
         timeout=settings["collection_timeout"], limits=httpx.Limits(max_connections=capacity)
     ) as client:
         for repeat in range(settings["replay_repeats"]):
+            route_root = root / "benchmark-replay-routes" / str(repeat)
+            route_root.mkdir(parents=True)
 
-            async def generate(record):
+            async def generate(record, route_root=route_root):
                 prompt_length = record["prompt_tokens"]
                 output_ids = record["tokens"][prompt_length:]
                 payload = {
@@ -109,13 +116,21 @@ async def run(args, settings, root):
                 )
                 if routes is not None and len(routes) != record["route_bytes"]:
                     raise ValueError("Diagnostic replay returned misaligned routing payload")
+                route_path = None
+                if routes is not None:
+                    route_path = route_root / f"{record['index']:08d}.npz"
+                    matrix = np.frombuffer(routes, dtype=np.int32).reshape(record["route_shape"])
+                    await asyncio.to_thread(np.savez_compressed, route_path, routes=matrix)
                 return {
                     "index": record["index"],
+                    "source_index": record["source_index"],
+                    "copy_index": record["copy_index"],
                     "group_index": record["group_index"],
                     "prompt_tokens": prompt_length,
                     "response_tokens": len(output_ids),
                     "logprobs": [row[0] for row in probabilities],
                     "route_sha256": hashlib.sha256(routes).hexdigest() if routes is not None else None,
+                    "route_path": str(route_path.relative_to(root)) if route_path is not None else None,
                 }
 
             output = await asyncio.gather(*(generate(record) for record in records))
@@ -125,6 +140,8 @@ async def run(args, settings, root):
         "reference": str(reference),
         "reference_sha256": hashlib.sha256(raw).hexdigest(),
         "trajectories": len(records),
+        "reference_trajectories": reference_trajectories,
+        "copies": settings["replay_copies"],
         "repeats": settings["replay_repeats"],
         "response_tokens_per_repeat": sum(r["response_tokens"] for r in records),
         "scope": "Forced-token cached decode with raw model logprobs; timings are not throughput.",

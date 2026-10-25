@@ -496,11 +496,13 @@ def test_benchmark_result_collection_keeps_large_reports(tmp_path):
     root, destination = tmp_path / "run", tmp_path / "result"
     root.mkdir()
     (root / "run-spec.json").write_text('{"benchmark": {}}')
+    (root / "routes.npz").write_bytes(b"routing artifact")
     report = root / "benchmark-resources.jsonl"
     with report.open("wb") as stream:
         stream.truncate(33 * 1024 * 1024)
     copied = launch.collect_results(root, destination)
     assert "benchmark-resources.jsonl" in copied
+    assert (destination / "run/routes.npz").read_bytes() == b"routing artifact"
     assert (destination / "run" / report.name).stat().st_size == report.stat().st_size
     assert json.loads((destination / "result-collection.json").read_text())["skipped"] == []
 

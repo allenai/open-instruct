@@ -5,10 +5,62 @@ of learning quality. Compare repeated controls to measure the diagnostic's floor
 """
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
+
+
+def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=17):
+    clusters = {}
+    layer_changed = layer_total = None
+    matched = 0
+    for a, b in zip(left, right, strict=True):
+        if not a.get("route_path") or not b.get("route_path"):
+            continue
+        matrices = []
+        for root, record in ((left_root, a), (right_root, b)):
+            with np.load(Path(root) / record["route_path"], allow_pickle=False) as archive:
+                matrix = archive["routes"]
+            if matrix.dtype != np.int32 or hashlib.sha256(matrix.tobytes()).hexdigest() != record["route_sha256"]:
+                raise ValueError("Replay routing artifact disagrees with its recorded hash or dtype")
+            matrices.append(matrix)
+        x, y = matrices
+        expected_length = a["prompt_tokens"] + a["response_tokens"] - 1
+        if x.ndim != 3 or x.shape != y.shape or x.shape[0] != expected_length:
+            raise ValueError("Replay routing matrices have inconsistent shapes")
+        # The route for the last prompt token conditions the first response logit.
+        changed = x[a["prompt_tokens"] - 1 :] != y[b["prompt_tokens"] - 1 :]
+        row = np.array([changed.size, changed.sum(), len(changed), changed.any(axis=(1, 2)).sum()], dtype=np.float64)
+        clusters[a["group_index"]] = clusters.get(a["group_index"], np.zeros(4)) + row
+        per_layer = changed.sum(axis=(0, 2))
+        total_per_layer = changed.shape[0] * changed.shape[2]
+        layer_changed = per_layer if layer_changed is None else layer_changed + per_layer
+        layer_total = total_per_layer if layer_total is None else layer_total + total_per_layer
+        matched += 1
+    result = {"matched_trajectories": matched, "coverage_fraction": matched / len(left)}
+    if not clusters:
+        return result
+    grouped = np.stack(list(clusters.values()))
+    total = grouped.sum(axis=0)
+    rng = np.random.default_rng(seed)
+    draws = grouped[rng.integers(0, len(grouped), size=(bootstrap, len(grouped)))].sum(axis=1)
+    for name, numerator, denominator in (
+        ("expert_slot_changed_fraction", 1, 0),
+        ("conditioning_token_changed_fraction", 3, 2),
+    ):
+        result[name] = {
+            "value": float(total[numerator] / total[denominator]),
+            "prompt_cluster_95pct_interval": np.quantile(
+                draws[:, numerator] / draws[:, denominator], [0.025, 0.975]
+            ).tolist(),
+        }
+    result["per_layer_expert_slot_changed_fraction"] = (layer_changed / layer_total).tolist()
+    result["scope"] = (
+        "Ordered expert slots for inputs conditioning response logits; prompt clusters retain copies and repeated waves. Expert-set overlap is a different metric."
+    )
+    return result
 
 
 def paired_metrics(left, right, *, bootstrap=2000, seed=17):
@@ -20,6 +72,10 @@ def paired_metrics(left, right, *, bootstrap=2000, seed=17):
     for a, b in zip(left, right, strict=True):
         if any(a[key] != b[key] for key in ("index", "group_index", "prompt_tokens", "response_tokens")):
             raise ValueError("Replay trajectory identities or lengths differ")
+        if a.get("source_index", a["index"]) != b.get("source_index", b["index"]) or a.get("copy_index", 0) != b.get(
+            "copy_index", 0
+        ):
+            raise ValueError("Replay trajectory copy identities differ")
         x, y = np.asarray(a["logprobs"], dtype=np.float64), np.asarray(b["logprobs"], dtype=np.float64)
         if (
             x.shape != y.shape
@@ -86,11 +142,14 @@ def compare(left, right):
     for key in ("reference_sha256", "trajectories", "repeats", "response_tokens_per_repeat"):
         if summaries[0][key] != summaries[1][key]:
             raise ValueError(f"Replay reference mismatch: {key}")
+    if summaries[0].get("copies", 1) != summaries[1].get("copies", 1):
+        raise ValueError("Replay reference mismatch: copies")
     return {
         "left": str(left),
         "right": str(right),
         "reference_sha256": summaries[0]["reference_sha256"],
         **paired_metrics(*records),
+        "route_agreement": route_agreement(left, right, *records),
     }
 
 

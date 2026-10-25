@@ -1,10 +1,12 @@
 """Inference benchmarks must allocate no trainer and account only measured work."""
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from scripts.miles import (
     analyze_inference_benchmark,
@@ -231,6 +233,50 @@ def test_replay_requires_explicit_diagnostic_server_setting(tmp_path):
         RunSpec.from_dict(payload)
     payload.setdefault("miles", {})["sglang_enable_custom_logit_processor"] = True
     assert RunSpec.from_dict(payload).benchmark["replay_repeats"] == 2
+    assert RunSpec.from_dict(payload).benchmark["replay_copies"] == 1
+    payload["benchmark"]["replay_copies"] = 0
+    with pytest.raises(ValueError, match="replay_copies"):
+        RunSpec.from_dict(payload)
+
+
+def test_replay_copies_keep_distinct_ids_and_shared_prompt_clusters():
+    original = [{"index": 0, "group_index": 0}, {"index": 3, "group_index": 0}, {"index": 5, "group_index": 1}]
+    expanded = benchmark_metrics.replicate_trajectories(original, 4)
+    assert len({row["index"] for row in expanded}) == 12
+    assert {row["group_index"] for row in expanded} == {0, 1}
+    assert [row["source_index"] for row in expanded] == [0, 3, 5] * 4
+    assert original == [{"index": 0, "group_index": 0}, {"index": 3, "group_index": 0}, {"index": 5, "group_index": 1}]
+
+
+def test_route_comparison_counts_response_conditioning_positions(tmp_path):
+    left, right = tmp_path / "left", tmp_path / "right"
+    a = np.zeros((4, 2, 2), dtype=np.int32)
+    b = a.copy()
+    b[0, 0, 0] = 3  # Earlier prompt route is outside response-conditioning positions.
+    b[1, 1, 0] = 4
+    records = []
+    for root, matrix in ((left, a), (right, b)):
+        root.mkdir()
+        np.savez_compressed(root / "routes.npz", routes=matrix)
+        records.append(
+            [
+                {
+                    "group_index": 0,
+                    "prompt_tokens": 2,
+                    "response_tokens": 3,
+                    "route_path": "routes.npz",
+                    "route_sha256": hashlib.sha256(matrix.tobytes()).hexdigest(),
+                }
+            ]
+        )
+    report = compare_inference_replay.route_agreement(left, right, *records)
+    assert report["coverage_fraction"] == 1
+    assert report["expert_slot_changed_fraction"]["value"] == pytest.approx(1 / 12)
+    assert report["conditioning_token_changed_fraction"]["value"] == pytest.approx(1 / 3)
+    assert report["per_layer_expert_slot_changed_fraction"] == [0, pytest.approx(1 / 6)]
+    records[1][0]["route_sha256"] = "invalid"
+    with pytest.raises(ValueError, match="hash"):
+        compare_inference_replay.route_agreement(left, right, *records)
 
 
 def test_workload_preparation_filters_without_truncating_and_keeps_sources(tmp_path, monkeypatch):

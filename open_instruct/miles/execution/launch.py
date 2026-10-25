@@ -173,7 +173,8 @@ def collect_results(root, destination):
         )
         for name in sorted(files):
             path = Path(directory) / name
-            if path.is_symlink() or path.suffix not in (".json", ".jsonl", ".log"):
+            suffixes = (".json", ".jsonl", ".log", ".npz") if benchmark else (".json", ".jsonl", ".log")
+            if path.is_symlink() or path.suffix not in suffixes:
                 continue
             relative = path.relative_to(root)
             if not benchmark and path.stat().st_size > 32 * 1024 * 1024:

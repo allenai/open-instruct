@@ -55,6 +55,7 @@ def parse(value):
         "variants": [],
         "replay_reference": None,
         "replay_repeats": 2,
+        "replay_copies": 1,
     }
     validation.fields(value, "benchmark", set(defaults))
     result = defaults | value
@@ -62,6 +63,7 @@ def parse(value):
         validation.number(result[key], f"benchmark.{key}", exclusive_min=key != "warmup_seconds")
     validation.integer(result["capture_samples"], "benchmark.capture_samples", minimum=0)
     validation.integer(result["replay_repeats"], "benchmark.replay_repeats", minimum=1)
+    validation.integer(result["replay_copies"], "benchmark.replay_copies", minimum=1)
     if result["replay_reference"] is not None:
         validation.text(result["replay_reference"], "benchmark.replay_reference")
         if not result["replay_reference"].startswith("/"):

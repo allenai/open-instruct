@@ -3,6 +3,16 @@
 import math
 
 
+def replicate_trajectories(records, copies):
+    """Fill a diagnostic batch while retaining the original prompt clusters."""
+    stride = max(row["index"] for row in records) + 1
+    return [
+        {**row, "index": row["index"] + copy * stride, "source_index": row["index"], "copy_index": copy}
+        for copy in range(copies)
+        for row in records
+    ]
+
+
 def sample_record(sample, *, require_routes=False):
     length = sample.response_length
     if length <= 0 or length > len(sample.tokens):

@@ -124,6 +124,10 @@ tokens selected during prefill; they are not identical to response token counts.
 Scrape windows differ slightly from collection boundaries and retain their timing
 bounds. Missing/reset counters remain unknown. Forward counters do not account for
 every part of engine wall time, so their residual is not automatically a CPU stall.
+The pinned runtime only fills forward-time counters with
+`SGLANG_ENABLE_METRICS_DEVICE_TIMER=true`; it defaults to false. Keep that setting
+fixed within a comparison and measure its overhead before using timed profiles
+as throughput evidence.
 
 Preserve full results rather than only summary tables. Run `python -m
 scripts.miles.archive_inference_benchmark EXPERIMENT_ID LOCAL_DIRECTORY` after
@@ -132,8 +136,9 @@ with a SHA-256 file inventory. Failed and preempted attempts remain separate.
 The benchmark collector retains JSON/JSONL/log reports without the ordinary
 32 MiB per-file ceiling; `result-collection.json` records copied and size-skipped
 reports. Older images still use that ceiling and need a separate WEKA recovery
-for omitted files. Weight trees and full per-token routing tensors are not result
-artifacts. Token/logprob captures are the configured subset, while response
+for omitted files. Weight trees are not result artifacts. Ordinary throughput runs
+retain routing hashes; diagnostic replays additionally retain compressed routing
+matrices under `benchmark-replay-routes/`. Token/logprob captures are the configured subset, while response
 accounting and timing cover the recorded workload. Keep workload provenance and
 launch receipts alongside the archives. Future fits should condition on model
 architecture, GPU, runtime revision, pools, scheduling, fleet size and observed
@@ -150,8 +155,18 @@ produce a throughput number: forced token selection synchronizes CPU and GPU.
 `python -m scripts.miles.compare_inference_replay CONTROL CANDIDATE --output
 comparison.json` checks reference identities and computes paired prompt-group
 bootstrap intervals, retaining siblings and repeated waves in each cluster.
+When routing matrices are present, comparison reports ordered expert-slot and
+response-conditioning token disagreement, including per-layer rates, rather than
+only whether any route changed in an entire trajectory. It verifies their stored
+hashes before comparison.
 Its ratios and logprob differences are relative to the serving control, not Core;
 the intervals do not cover machine/day variability or establish learning quality.
+If the capture set is smaller than the admission being tested, set
+`benchmark.replay_copies` to repeat those trajectories within each wave (default
+one). Use the same copy count for control and candidate. Copies retain their
+original prompt cluster and do not increase the independent sample count. This
+deliberately changes prefix sharing for the diagnostic; inspect occupancy because
+short trajectories finish first and batch size falls during each wave.
 
 ## Selecting configurations
 
