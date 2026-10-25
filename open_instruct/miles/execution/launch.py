@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -154,11 +155,14 @@ def specification(image, spec, *, hostnames=None):
 
 
 def collect_results(root, destination):
-    """Keep small provenance/metric artifacts in Beaker; checkpoints stay on WEKA."""
+    """Keep reports in Beaker; benchmark reports have no per-file size ceiling."""
     root, destination = Path(root), Path(destination)
     if destination.resolve().is_relative_to(root.resolve()):
         raise InputError("Result destination must be outside the run directory")
+    run_spec = root / "run-spec.json"
+    benchmark = run_spec.is_file() and json.loads(run_spec.read_text()).get("benchmark") is not None
     copied = []
+    skipped = []
     for directory, dirs, files in os.walk(root, followlinks=False):
         # Checkpoint tensor trees and HF descriptors can contain tens of
         # thousands of files. Retain their parent completion manifests only.
@@ -169,17 +173,20 @@ def collect_results(root, destination):
         )
         for name in sorted(files):
             path = Path(directory) / name
-            if (
-                path.is_symlink()
-                or path.suffix not in (".json", ".jsonl", ".log")
-                or path.stat().st_size > 32 * 1024 * 1024
-            ):
+            if path.is_symlink() or path.suffix not in (".json", ".jsonl", ".log"):
                 continue
             relative = path.relative_to(root)
+            if not benchmark and path.stat().st_size > 32 * 1024 * 1024:
+                skipped.append({"path": str(relative), "bytes": path.stat().st_size, "reason": "size_limit"})
+                continue
             target = destination / "run" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(path.read_bytes())
+            shutil.copyfile(path, target)
             copied.append(str(relative))
+    destination.mkdir(parents=True, exist_ok=True)
+    workflow.write_json(
+        destination / "result-collection.json", {"benchmark": benchmark, "copied": copied, "skipped": skipped}
+    )
     return copied
 
 

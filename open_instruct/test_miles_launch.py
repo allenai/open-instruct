@@ -492,6 +492,19 @@ def test_result_collection_reads_only_small_reports_and_prunes_weight_trees(tmp_
         launch.collect_results(root, root / "recursive")
 
 
+def test_benchmark_result_collection_keeps_large_reports(tmp_path):
+    root, destination = tmp_path / "run", tmp_path / "result"
+    root.mkdir()
+    (root / "run-spec.json").write_text('{"benchmark": {}}')
+    report = root / "benchmark-resources.jsonl"
+    with report.open("wb") as stream:
+        stream.truncate(33 * 1024 * 1024)
+    copied = launch.collect_results(root, destination)
+    assert "benchmark-resources.jsonl" in copied
+    assert (destination / "run" / report.name).stat().st_size == report.stat().st_size
+    assert json.loads((destination / "result-collection.json").read_text())["skipped"] == []
+
+
 def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
     run = spec(tmp_path)
     path = tmp_path / "frozen.json"

@@ -169,6 +169,9 @@ async def run(args, settings, root):
     failure = None
     result = None
     try:
+        workflow.write_json(
+            root / "benchmark-model-config.json", json.loads((Path(args.hf_checkpoint) / "config.json").read_text())
+        )
         workflow.write_json(root / "benchmark-native-options.json", snapshot_options.snapshot())
         startup_cache.prepare(args, application_root=Path(__file__).resolve().parents[3])
         workers = wiring.launch_worker_manager(args, transform_specs=partial(inference_specs, args))

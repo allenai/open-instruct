@@ -100,6 +100,7 @@ Artifacts under `output.root`, also collected into the Beaker result:
 | `benchmark-captures/*.json` | Token IDs, logprobs and route hashes for the first configured sample indices; separate files keep long-response captures within the result collector's per-file limit |
 | `benchmark-boundaries.json` / `benchmark-shutdown.json` | Retained queue/work counts at measurement boundaries and shutdown |
 | `benchmark-server-start.json` / `benchmark-server-end.json` | Engine identities and resolved server information |
+| `benchmark-model-config.json` | Checkpoint architecture/dtype configuration for comparing model shapes |
 | `benchmark-resources.jsonl` | GPU identity/activity/memory and consumer CPU/RSS samples |
 | `checkpoints/*occupancy.jsonl` | Existing MILES pipeline and per-engine observations; this directory contains no trainer checkpoint |
 
@@ -115,6 +116,20 @@ RUN_DIRECTORY --output analysis.json`. The analyzer recomputes collection totals
 checks response accounting, and aligns length distributions, GPU measurements and
 queue/engine observations to the measured window. Missing observation coverage
 remains unknown rather than becoming zero utilization.
+
+Preserve full results rather than only summary tables. Run `python -m
+scripts.miles.archive_inference_benchmark EXPERIMENT_ID LOCAL_DIRECTORY` after
+finalization to download every attempt's Beaker result, full job log and metadata,
+with a SHA-256 file inventory. Failed and preempted attempts remain separate.
+The benchmark collector retains JSON/JSONL/log reports without the ordinary
+32 MiB per-file ceiling; `result-collection.json` records copied and size-skipped
+reports. Older images still use that ceiling and need a separate WEKA recovery
+for omitted files. Weight trees and full per-token routing tensors are not result
+artifacts. Token/logprob captures are the configured subset, while response
+accounting and timing cover the recorded workload. Keep workload provenance and
+launch receipts alongside the archives. Future fits should condition on model
+architecture, GPU, runtime revision, pools, scheduling, fleet size and observed
+length distributions; do not pool different shapes into a universal admission rule.
 
 For a separate same-prefix diagnostic, copy the benchmark run to a new output
 directory, set `benchmark.replay_reference` to the absolute path of a completed
