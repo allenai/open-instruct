@@ -110,8 +110,15 @@ across repeated controls and examine cache/batching effects.
 Later diagnostics retain compressed routing matrices and compare response-
 conditioning expert slots and tokens with prompt-clustered intervals. Repeated
 trajectory copies or continuous background traffic can fill higher admission
-without pretending to supply more independent prompts. Loaded replay is undergoing
-a separate mechanics check before the long comparisons.
+without pretending to supply more independent prompts. The
+[loaded replay smoke](https://beaker.org/ex/01M5T9ZMY62AQSWDSE8G69XY1D) passed two
+waves, retaining all 16 routing matrices and joining all 32 outstanding background
+responses after each wave's abort. Its short waves and five-second observations
+do not establish sustained admission; inspect coverage during the long comparisons.
+The [long qualification panel](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW)
+now compares 64/256/512/64 with two loaded waves each on the same 256 captures,
+explicit Core-compatible rounding and fresh engines between cases. These
+diagnostic timings are excluded from throughput measurements.
 
 The [forward-only Core reference](https://beaker.org/ex/01M5T83FJNW3Q87VYF468YMH1H)
 completed all 256 opening-control captures, spanning 64 prompt clusters and
