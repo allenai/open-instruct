@@ -7,6 +7,7 @@ import resource
 import time
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import ray
@@ -204,7 +205,7 @@ async def run(args, settings, root):
     if settings["reward_mode"] == "none":
         args.custom_rm_path = "open_instruct.miles.execution.benchmark.no_reward"
     started = time.monotonic()
-    workers = inference = producer = source = None
+    workers = inference = producer = source = engine_observer = None
     observer = asyncio.create_task(observe_resources(root))
     failure = None
     result = None
@@ -221,6 +222,9 @@ async def run(args, settings, root):
         workflow.write_json(root / "benchmark-server-start.json", await server_info(args))
         startup_seconds = time.monotonic() - started
         if settings["replay_reference"]:
+            engine_observer = asyncio.create_task(
+                pipeline_observer.observe_engines(SimpleNamespace(args=args), get_worker_urls)
+            )
             result = await benchmark_replay.run(args, settings, root)
         else:
             source = load_function(args.data_source_path)(args)
@@ -238,6 +242,9 @@ async def run(args, settings, root):
         raise
     finally:
         drain_started = time.monotonic()
+        if engine_observer is not None:
+            engine_observer.cancel()
+            await asyncio.gather(engine_observer, return_exceptions=True)
         cleanup_error = None
         for component, operation, timeout in (
             (producer, lambda: producer.shutdown(), settings["drain_timeout"]),

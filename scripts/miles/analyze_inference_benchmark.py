@@ -161,6 +161,20 @@ def analyze(root):
                     )
                 },
                 "memory": [state.get("memory_usage") for state in server["info"].get("internal_states", [])],
+                "runtime_limits": [
+                    {
+                        key: state.get(key)
+                        for key in (
+                            "effective_max_running_requests_per_dp",
+                            "max_running_requests",
+                            "max_total_tokens",
+                            "max_mamba_cache_size",
+                            "mamba_radix_cache_strategy",
+                            "disable_radix_cache",
+                        )
+                    }
+                    for state in server["info"].get("internal_states", [])
+                ],
                 "startup": [state.get("startup_time") for state in server["info"].get("internal_states", [])],
             }
             for server in read_json(root / "benchmark-server-start.json")

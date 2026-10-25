@@ -188,6 +188,17 @@ Start with one engine and memory-feasible pools. Couple admission with decode
 graph coverage, then independently tune HTTP permits and producer headroom.
 Compare prefill chunks and mixed-chunk scheduling on realistic prompt/response
 lengths. Keep sampling, response/context limits and arithmetic unchanged.
+Check the resolved arithmetic mode: prefill graphs make this hybrid model
+ineligible for automatic Core-compatible rounding, so enabling them is not a pure
+scheduling comparison under `auto`. An experimental graph comparison must select
+the same explicit arithmetic mode in all arms and qualify runtime compatibility
+and numerics; the initial admission study keeps prefill graphs disabled.
+Also check `internal_states[].effective_max_running_requests_per_dp` in the engine
+snapshot. With the pinned standard overlapping `extra_buffer` cache, the recurrent
+pool reserves five state slots per running request; insufficient slots reduce
+effective admission with a server warning. Other cache/overlap modes can have
+different ratios. Changing recurrent-state precision needs a separate numerical
+qualification.
 Only advance finalists to two and eight engines; report per-engine imbalance and
 fleet throughput divided by engine count times the single-engine baseline.
 

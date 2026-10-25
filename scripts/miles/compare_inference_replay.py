@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from scripts.miles import throughput_occupancy
 
 
 def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=17):
@@ -199,6 +200,18 @@ def compare(left, right, core=None):
         "reference_sha256": summaries[0]["reference_sha256"],
         **paired_metrics(*records),
         "route_agreement": route_agreement(left, right, *records),
+        "diagnostic_occupancy": {
+            str(root): [
+                {
+                    "repeat": wave["repeat"],
+                    "engines": throughput_occupancy.analyze(
+                        Path(root), window=(wave["started_unix"], wave["finished_unix"])
+                    )["engines"],
+                }
+                for wave in summary.get("waves", [])
+            ]
+            for root, summary in zip((left, right), summaries, strict=True)
+        },
     }
     if core is not None:
         result["core_comparison"] = core_comparison(core, summaries[0]["reference_sha256"], *records)

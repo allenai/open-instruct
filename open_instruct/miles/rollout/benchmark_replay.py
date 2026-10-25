@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import math
+import time
 from pathlib import Path
 
 import httpx
@@ -56,12 +57,14 @@ async def run(args, settings, root):
     processor = ReplayIdentityProcessor.to_str()
     capacity = args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
+    waves = []
     async with httpx.AsyncClient(
         timeout=settings["collection_timeout"], limits=httpx.Limits(max_connections=capacity)
     ) as client:
         for repeat in range(settings["replay_repeats"]):
             route_root = root / "benchmark-replay-routes" / str(repeat)
             route_root.mkdir(parents=True)
+            started_unix = time.time()
 
             async def generate(record, route_root=route_root):
                 prompt_length = record["prompt_tokens"]
@@ -117,6 +120,8 @@ async def run(args, settings, root):
 
             output = await asyncio.gather(*(generate(record) for record in records))
             (root / f"benchmark-replay-{repeat}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in output))
+            waves.append({"repeat": repeat, "started_unix": started_unix, "finished_unix": time.time()})
+            (root / "benchmark-replay-waves.json").write_text(json.dumps(waves, indent=2) + "\n")
     return {
         "diagnostic_only": True,
         "reference": str(reference),
@@ -125,6 +130,7 @@ async def run(args, settings, root):
         "reference_trajectories": reference_trajectories,
         "copies": settings["replay_copies"],
         "repeats": settings["replay_repeats"],
+        "waves": waves,
         "response_tokens_per_repeat": sum(r["response_tokens"] for r in records),
         "scope": "Forced-token cached decode with raw model logprobs; timings are not throughput.",
     }

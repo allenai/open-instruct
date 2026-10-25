@@ -46,9 +46,10 @@ the full-panel artifact audit and closing control remain outstanding.
 |---|---:|---:|---:|---:|
 | Admission 64, opening control | 6,160,116 | 672.958 | 9,153.8 | 8,021.0 |
 | Admission 128 | 10,166,610 | 730.100 | 13,925.0 | 7,942.7 |
+| Admission 256 | 11,816,780 | 616.823 | 19,157.5 | 7,693.2 |
 
-The second configuration delivers about 52% more tokens per second in these
-windows. This compares coupled admission/graph/pool/request-supply settings,
+Admission 128 delivers about 52% more tokens per second than the opening control;
+256 adds about 38% over 128. This compares coupled admission/graph/pool/request-supply settings,
 not an isolated admission change. Completion ordering, unfinished responses and
 work crossing boundaries require the retained inventory and timing audit before
 selecting a setting. Higher admission can improve aggregate throughput while
