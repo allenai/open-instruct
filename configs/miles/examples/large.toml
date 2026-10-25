@@ -111,9 +111,10 @@ samples_per_prompt = 4
 global_batch_size = 256
 max_response_length = 32768
 max_context_length = 34816
-# Admission sized from B300 memory; see docs/miles/throughput-profiles.md#size-engine-admission-from-memory.
-# The pool holds 64 full 34,816-token contexts (16 KiB/token, 34 GiB), so KV never forces retraction.
-# 1024 KDA state slots (~32 MiB each) exceed the 5 x 64 radix minimum; ~165 GiB stays free per engine.
+# Conservative starter; see docs/miles/throughput-profiles.md#size-engine-admission-from-memory.
+# The KV token budget equals 64 x 34,816; bytes per token depend on the checkpoint.
+# 1024 state slots exceed the pinned extra-buffer radix minimum of 5 x 64.
+# Check actual weights, state bytes, graph/workspace memory and retractions; no universal GiB estimate.
 sglang_server_concurrency = 64
 sglang_max_running_requests = 64
 sglang_max_total_tokens = 2228224

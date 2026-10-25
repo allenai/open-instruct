@@ -43,6 +43,15 @@ weights occupy 34.5 GiB, with 4 full-attention layers × 8 KV heads × 128 dims 
 | Full-attention KV cache | 16 KiB per token | 2 (K, V) × 4 layers × 8 KV heads × 128 dims × 2 bytes |
 | KDA recurrent state | About 32 MiB per slot | 16 layers × 16 heads × 128 × 256, FP32 |
 
+This worked geometry is not the checkpoint in the current
+[Olmo 3.5 inference study](inference-throughput-study.md). That checkpoint has
+about 23.31 GiB of weights, 4 KiB of full-attention KV per token, and 14.34 MiB per
+recurrent slot including convolution state. Applying the larger example's byte
+sizes to it would substantially understate feasible admission. Starter TOMLs
+therefore specify token/slot budgets without promising a model-independent free
+memory amount; admission 64 remains a conservative initial setting, not a
+throughput recommendation for every model.
+
 Read the actual sizes for your model from the engine startup logs (`Load weight
 end`, `KV Cache is allocated`). SGLang reports these values in GiB although its
 logs print “GB”.
