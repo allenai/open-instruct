@@ -140,7 +140,7 @@ the production examples. The pinned engine's five-second default equals HTTPX's
 reuse window; the [documented connection-close race](operations.md#http-keep-alive-margin)
 is consistent with the observed timing. This attribution awaits the rerun.
 A [single-wave workaround](https://beaker.org/ex/01M5TE1ZDE09W1SRYR0VCQWSBP) was
-stopped during startup. The [corrected replacement](https://beaker.org/ex/01M5TEFKHVQE06R7QGZKW2N912)
+stopped before its first wave completed. The [corrected replacement](https://beaker.org/ex/01M5TEFKHVQE06R7QGZKW2N912)
 restores the original two-wave 64/256/512/64 protocol with the production engine
 keep-alive value. It uses source `6201ba12a400` and image
 `01M5TEFD3AF7VY06EE0TJ1ZZPQ`, including incremental score retention and a separate
