@@ -5,8 +5,6 @@ from open_instruct.miles.errors import InputError
 
 
 def parse(value):
-    if not value:
-        return {}
     defaults = {
         "warmup_seconds": 120.0,
         "measure_seconds": 300.0,

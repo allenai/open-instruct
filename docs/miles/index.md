@@ -36,6 +36,7 @@ choosing a backend. Introducing MILES does not deprecate the existing GRPO train
 | [Models and checkpoints](models-and-checkpoints.md) | Selecting a supported checkpoint, converting, saving, resuming or exporting |
 | [Core-compatible serving](core-compatible-serving.md) | Choosing the scoped fused-rounding default, opt-out and numerical reference modes |
 | [Throughput](throughput-profiles.md) | Sizing trainer/inference allocation and engine admission, and reading queue, waste and warmup measurements |
+| [Inference benchmarks](inference-benchmark.md) | Measuring fixed-policy serving throughput without trainer GPUs |
 | [Async queues and discard metrics](async-pipeline.md) | Sizing producer and completed buffers, tracing waits, and measuring discarded work |
 | [Topology and capacity](topology.md) | Choosing GPU placement, async scheduling, batch geometry and serving capacity |
 | [Data and evaluation](data-and-evaluation.md) | Selecting tasks, importing mixtures and retaining held-out generations |

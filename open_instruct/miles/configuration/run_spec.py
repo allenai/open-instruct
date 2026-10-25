@@ -248,7 +248,7 @@ class RunSpec:
             evaluation.parse(_table(document, "evaluation"), launch),
             records,
             selection,
-            benchmark.parse(_table(document, "benchmark")),
+            benchmark.parse(_table(document, "benchmark")) if "benchmark" in document else {},
         )
         result.compile()
         return result

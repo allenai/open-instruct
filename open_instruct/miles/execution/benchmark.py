@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import resource
 import time
 from functools import partial
 from pathlib import Path
@@ -27,7 +28,41 @@ logger = logger_utils.setup_logger(__name__)
 
 async def no_reward(args, sample, **kwargs):
     """Keep the generation contract; benchmark validation disables reward filters."""
-    return 0.0
+    return [0.0] * len(sample) if isinstance(sample, list) else 0.0
+
+
+async def observe_resources(root):
+    """Keep hardware identity, GPU activity/memory and consumer CPU outside timings."""
+    with (root / "benchmark-resources.jsonl").open("w", buffering=1) as stream:
+        while True:
+            process = await asyncio.create_subprocess_exec(
+                "nvidia-smi",
+                "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu,power.draw,clocks.sm",
+                "--format=csv,noheader,nounits",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            stream.write(
+                json.dumps(
+                    {
+                        "time_unix": time.time(),
+                        "gpu_csv": stdout.decode(),
+                        "stderr": stderr.decode(),
+                        "returncode": process.returncode,
+                        "consumer_cpu_seconds": usage.ru_utime + usage.ru_stime,
+                        "consumer_max_rss_kib": usage.ru_maxrss,
+                    }
+                )
+                + "\n"
+            )
+            await asyncio.sleep(2)
 
 
 def inference_specs(args, specs):
@@ -47,7 +82,7 @@ async def server_info(args):
 
 async def consume(producer, args, settings, root):
     batches = []
-    capture_remaining = settings["capture_samples"]
+    captured_indices = set()
     started = time.monotonic()
     phase = "warmup" if settings["warmup_seconds"] else "measure"
     measure_started = started
@@ -71,7 +106,11 @@ async def consume(producer, args, settings, root):
                     row = benchmark_metrics.sample_record(sample, require_routes=args.use_rollout_routing_replay)
                     rows.append(row)
                     response_file.write(json.dumps({"phase": phase, "batch": len(batches), **row}) + "\n")
-                    if capture_remaining:
+                    if (
+                        sample.index is not None
+                        and 0 <= sample.index < settings["capture_samples"]
+                        and sample.index not in captured_indices
+                    ):
                         routes = sample.rollout_routed_experts
                         captures.write(
                             json.dumps(
@@ -87,7 +126,7 @@ async def consume(producer, args, settings, root):
                             )
                             + "\n"
                         )
-                        capture_remaining -= 1
+                        captured_indices.add(sample.index)
             finished = time.monotonic()
             batch = {
                 "phase": phase,
@@ -123,6 +162,7 @@ async def run(args, settings, root):
         args.custom_rm_path = "open_instruct.miles.execution.benchmark.no_reward"
     started = time.monotonic()
     workers = inference = producer = source = None
+    observer = asyncio.create_task(observe_resources(root))
     failure = None
     result = None
     try:
@@ -159,6 +199,10 @@ async def run(args, settings, root):
                 except BaseException as error:
                     cleanup_error = cleanup_error or error
                     logger.exception("Benchmark cleanup failed")
+        observer.cancel()
+        observed = await asyncio.gather(observer, return_exceptions=True)
+        if observed and isinstance(observed[0], Exception):
+            logger.warning("Resource observations unavailable: %s", observed[0])
         if source is not None:
             source.close()
         if producer is not None:

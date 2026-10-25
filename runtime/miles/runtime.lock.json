@@ -17,7 +17,7 @@
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "92b35cdf2771353a9e2c527a5b96b29cbb3d38c8",
+      "revision": "3d701d8bdad348d7ae4b5ef7166290ec595cc5a5",
       "private": true
     }
   }
