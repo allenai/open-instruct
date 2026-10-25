@@ -7,7 +7,7 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
-from scripts.miles import throughput_occupancy
+from scripts.miles import inference_counter_metrics, throughput_occupancy
 
 from open_instruct.miles.rollout import benchmark_metrics
 
@@ -169,6 +169,11 @@ def analyze(root):
         "response_lengths": quantiles([r["response_tokens"] for r in responses]),
         "truncated_fraction": sum(r["status"] == "truncated" for r in responses) / len(responses),
         "request_timings": request_timings(root, responses),
+        "engine_execution_counters": inference_counter_metrics.analyze(
+            read_json(root / "benchmark-engine-counters.json")
+        )
+        if (root / "benchmark-engine-counters.json").exists()
+        else {"missing": "This run did not retain engine counter snapshots"},
         "occupancy": occupancy,
         "hardware": devices,
         "boundary_inventory": read_json(root / "benchmark-boundaries.json"),

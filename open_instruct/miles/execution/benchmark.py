@@ -82,6 +82,25 @@ async def server_info(args):
         return result
 
 
+async def engine_metrics(args):
+    """Retain raw counters and scrape bounds; failures remain missing observations."""
+    async with httpx.AsyncClient(timeout=10) as client:
+
+        async def scrape(url):
+            row = {"url": url, "started_unix": time.time(), "started": time.monotonic()}
+            try:
+                response = await client.get(url + "/metrics")
+                response.raise_for_status()
+                row["text"] = response.text
+            except Exception as error:
+                row["error"] = str(error)
+                logger.warning("Benchmark engine metric scrape failed: %s", error)
+            row.update(finished_unix=time.time(), finished=time.monotonic())
+            return row
+
+        return await asyncio.gather(*(scrape(url) for url in await get_worker_urls(args)))
+
+
 async def consume(producer, args, settings, root):
     batches = []
     captured_indices = set()
@@ -89,6 +108,10 @@ async def consume(producer, args, settings, root):
     phase = "warmup" if settings["warmup_seconds"] else "measure"
     measure_started = started
     boundaries = {"start": pipeline_observer.snapshot(producer)}
+    counters = {}
+    if phase == "measure":
+        counters["measure_start"] = await engine_metrics(args)
+        workflow.write_json(root / "benchmark-engine-counters.json", counters)
     capture_root = root / "benchmark-captures"
     capture_root.mkdir()
     with (
@@ -149,9 +172,13 @@ async def consume(producer, args, settings, root):
             if phase == "warmup" and finished - started >= settings["warmup_seconds"]:
                 phase, measure_started = "measure", finished
                 boundaries["measure_start"] = pipeline_observer.snapshot(producer)
+                counters["measure_start"] = await engine_metrics(args)
+                workflow.write_json(root / "benchmark-engine-counters.json", counters)
             elif phase == "measure" and finished - measure_started >= settings["measure_seconds"]:
                 break
     boundaries["measure_end"] = pipeline_observer.snapshot(producer)
+    counters["measure_end"] = await engine_metrics(args)
+    workflow.write_json(root / "benchmark-engine-counters.json", counters)
     workflow.write_json(root / "benchmark-boundaries.json", boundaries)
     return benchmark_metrics.summarize(batches, args.rollout_num_gpus)
 

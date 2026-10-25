@@ -6,7 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from scripts.miles import analyze_inference_benchmark, compare_inference_replay, prepare_inference_workload
+from scripts.miles import (
+    analyze_inference_benchmark,
+    compare_inference_replay,
+    inference_counter_metrics,
+    prepare_inference_workload,
+)
 
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.configuration.run_spec import RunSpec
@@ -196,6 +201,27 @@ def test_inference_analysis_validates_accounting_and_keeps_missing_occupancy_unk
     (tmp_path / "benchmark-summary.json").write_text(json.dumps(files["benchmark-summary.json"]))
     with pytest.raises(ValueError, match="summary disagrees"):
         analyze_inference_benchmark.analyze(tmp_path)
+
+
+def test_engine_counters_preserve_missing_reset_and_scrape_uncertainty():
+    key = 'sglang:realtime_tokens_total{mode="decode",model="a b"}'
+    document = {
+        "measure_start": [{"url": "engine", "started": 1, "finished": 2, "text": f"{key} 100\n"}],
+        "measure_end": [{"url": "engine", "started": 11, "finished": 12, "text": f"{key} 300\n"}],
+    }
+    report = inference_counter_metrics.analyze(document)["engines"][0]
+    assert report["scrape_window_seconds_bounds"] == [9, 11]
+    assert report["series"][0]["per_second"] == 20
+    document["measure_end"][0]["text"] = f"{key} 20\n"
+    assert "decreased" in inference_counter_metrics.analyze(document)["engines"][0]["series"][0]["missing"]
+    document["measure_start"][0]["text"] = ""
+    assert "absent" in inference_counter_metrics.analyze(document)["engines"][0]["series"][0]["missing"]
+    document["measure_end"][0]["error"] = "timeout"
+    assert "failed" in inference_counter_metrics.analyze(document)["engines"][0]["missing"]
+    with pytest.raises(ValueError, match="nonfinite"):
+        inference_counter_metrics.parse(f"{key} NaN")
+    with pytest.raises(ValueError, match="duplicated"):
+        inference_counter_metrics.parse(f"{key} 1\n{key} 2")
 
 
 def test_replay_requires_explicit_diagnostic_server_setting(tmp_path):

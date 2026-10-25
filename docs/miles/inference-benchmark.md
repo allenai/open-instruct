@@ -101,6 +101,7 @@ Artifacts under `output.root`, also collected into the Beaker result:
 | `benchmark-boundaries.json` / `benchmark-shutdown.json` | Retained queue/work counts at measurement boundaries and shutdown |
 | `benchmark-server-start.json` / `benchmark-server-end.json` | Engine identities and resolved server information |
 | `benchmark-model-config.json` | Checkpoint architecture/dtype configuration for comparing model shapes |
+| `benchmark-engine-counters.json` | Raw engine metrics at measurement boundaries, with scrape timestamp bounds |
 | `benchmark-resources.jsonl` | GPU identity/activity/memory and consumer CPU/RSS samples |
 | `checkpoints/*occupancy.jsonl` | Existing MILES pipeline and per-engine observations; this directory contains no trainer checkpoint |
 
@@ -116,6 +117,13 @@ RUN_DIRECTORY --output analysis.json`. The analyzer recomputes collection totals
 checks response accounting, and aligns length distributions, GPU measurements and
 queue/engine observations to the measured window. Missing observation coverage
 remains unknown rather than becoming zero utilization.
+When counter snapshots are available, the report also computes native execution
+token rates, prefill work and forward-time deltas. These include work on unfinished
+responses and complement delivered throughput. Decode counters exclude the first
+tokens selected during prefill; they are not identical to response token counts.
+Scrape windows differ slightly from collection boundaries and retain their timing
+bounds. Missing/reset counters remain unknown. Forward counters do not account for
+every part of engine wall time, so their residual is not automatically a CPU stall.
 
 Preserve full results rather than only summary tables. Run `python -m
 scripts.miles.archive_inference_benchmark EXPERIMENT_ID LOCAL_DIRECTORY` after
