@@ -124,6 +124,11 @@ raw model logprobs and route hashes in `benchmark-replay-*.jsonl`. Repeat contro
 and candidates on the same reference. This path checks frozen-token reproduction
 and payload lengths; statistical comparison is still required. It does not
 produce a throughput number: forced token selection synchronizes CPU and GPU.
+`python -m scripts.miles.compare_inference_replay CONTROL CANDIDATE --output
+comparison.json` checks reference identities and computes paired prompt-group
+bootstrap intervals, retaining siblings and repeated waves in each cluster.
+Its ratios and logprob differences are relative to the serving control, not Core;
+the intervals do not cover machine/day variability or establish learning quality.
 
 ## Selecting configurations
 

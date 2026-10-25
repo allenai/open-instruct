@@ -72,6 +72,35 @@ def analyze(root):
     return {
         "root": str(root),
         "summary": summary,
+        "resolved_engines": [
+            {
+                "url": server["url"],
+                "settings": {
+                    key: server["info"].get(key)
+                    for key in (
+                        "context_length",
+                        "max_running_requests",
+                        "max_total_tokens",
+                        "max_mamba_cache_size",
+                        "mem_fraction_static",
+                        "chunked_prefill_size",
+                        "max_prefill_tokens",
+                        "enable_mixed_chunk",
+                        "cuda_graph_config",
+                        "schedule_policy",
+                        "schedule_conservativeness",
+                        "disable_radix_cache",
+                        "mamba_radix_cache_strategy",
+                        "dtype",
+                        "attention_backend",
+                        "sampling_backend",
+                    )
+                },
+                "memory": [state.get("memory_usage") for state in server["info"].get("internal_states", [])],
+                "startup": [state.get("startup_time") for state in server["info"].get("internal_states", [])],
+            }
+            for server in read_json(root / "benchmark-server-start.json")
+        ],
         "prompt_lengths": quantiles([r["prompt_tokens"] for r in responses]),
         "response_lengths": quantiles([r["response_tokens"] for r in responses]),
         "truncated_fraction": sum(r["status"] == "truncated" for r in responses) / len(responses),

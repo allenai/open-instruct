@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from scripts.miles import analyze_inference_benchmark, prepare_inference_workload
+from scripts.miles import analyze_inference_benchmark, compare_inference_replay, prepare_inference_workload
 
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.configuration.run_spec import RunSpec
@@ -175,6 +175,7 @@ def test_inference_analysis_validates_accounting_and_keeps_missing_occupancy_unk
         "resolved-plan.json": {"miles": {"rollout_num_gpus": 2}},
         "benchmark-boundaries.json": {},
         "benchmark-shutdown.json": {},
+        "benchmark-server-start.json": [],
     }
     for name, value in files.items():
         (tmp_path / name).write_text(json.dumps(value))
@@ -225,3 +226,29 @@ def test_workload_preparation_filters_without_truncating_and_keeps_sources(tmp_p
     assert {r["input"] for r in rows} == {"one", "two"}
     manifest = json.loads(Path(result["manifest"]).read_text())
     assert all(Path(path).is_file() for path in manifest["inputs"])
+
+
+def test_replay_comparison_pairs_prompt_clusters_and_rejects_different_trajectories():
+    left = [
+        {
+            "index": i,
+            "group_index": i // 2,
+            "prompt_tokens": 1,
+            "response_tokens": 2,
+            "logprobs": [-1.0, -2.0],
+            "route_sha256": "same",
+        }
+        for i in range(8)
+    ]
+    exact = compare_inference_replay.paired_metrics(left, left)
+    assert exact["prompt_clusters"] == 4
+    assert exact["metrics"]["mean_absolute_logprob_delta"]["value"] == 0
+    right = copy.deepcopy(left)
+    for row in right:
+        row["logprobs"] = [-0.5, -1.5]
+    shifted = compare_inference_replay.paired_metrics(left, right)
+    assert shifted["metrics"]["mean_signed_logprob_delta"]["prompt_cluster_95pct_interval"] == [0.5, 0.5]
+    assert shifted["metrics"]["ratio_outside_0_8_to_1_2_fraction"]["value"] == 1
+    right[0]["index"] = 9
+    with pytest.raises(ValueError, match="identities"):
+        compare_inference_replay.paired_metrics(left, right)
