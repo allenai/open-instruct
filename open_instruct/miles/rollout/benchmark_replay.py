@@ -89,10 +89,12 @@ async def run(args, settings, root):
         for repeat in range(settings["replay_repeats"]):
             route_root = root / "benchmark-replay-routes" / str(repeat)
             route_root.mkdir(parents=True)
+            output_path = root / f"benchmark-replay-{repeat}.jsonl"
+            output_path.touch(exist_ok=False)
             started_unix = time.time()
             window = {"repeat": repeat, "started_unix": started_unix}
 
-            async def generate(record, route_root=route_root):
+            async def generate(record, route_root=route_root, output_path=output_path):
                 prompt_length = record["prompt_tokens"]
                 output_ids = record["tokens"][prompt_length:]
                 response = await client.post(url, json=payload(record, details=True))
@@ -115,7 +117,7 @@ async def run(args, settings, root):
                     route_path = route_root / f"{record['index']:08d}.npz"
                     matrix = np.frombuffer(routes, dtype=np.int32).reshape(record["route_shape"])
                     await asyncio.to_thread(np.savez_compressed, route_path, routes=matrix)
-                return {
+                result = {
                     "index": record["index"],
                     "source_index": record["source_index"],
                     "copy_index": record["copy_index"],
@@ -126,6 +128,12 @@ async def run(args, settings, root):
                     "route_sha256": hashlib.sha256(routes).hexdigest() if routes is not None else None,
                     "route_path": str(route_path.relative_to(root)) if route_path is not None else None,
                 }
+                # Preserve completed foreground scores if the allocation is lost
+                # before the longest trajectory finishes. Comparisons still require
+                # a completed workflow and check every expected trajectory.
+                with output_path.open("a") as stream:
+                    stream.write(json.dumps(result) + "\n")
+                return result
 
             with (root / f"benchmark-replay-background-{repeat}.jsonl").open("w", buffering=1) as background_file:
 
@@ -167,10 +175,9 @@ async def run(args, settings, root):
                                 response.raise_for_status()
                             await asyncio.wait(workers, timeout=0.5, return_when=asyncio.ALL_COMPLETED)
 
-                output = await benchmark_load.run_wave(
+                await benchmark_load.run_wave(
                     [generate(record) for record in records], background, background_streams, shutdown
                 )
-            (root / f"benchmark-replay-{repeat}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in output))
             window.setdefault("finished_unix", time.time())
             window["drain_finished_unix"] = time.time()
             waves.append(window)

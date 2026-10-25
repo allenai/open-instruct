@@ -90,11 +90,21 @@ are capacity calculations, not proof that the corresponding serving settings
 are safe or fast. Explicit pool caps also mean raising `mem_fraction_static`
 alone need not allocate or use more memory.
 
-The [running higher-admission panel](https://beaker.org/ex/01M5T88CTXEP3GQG2AVRYGRCYK)
-brackets admission 512 with admission-256 controls, using at least 600 seconds of
-warmup and 900 seconds of measurement. Admission 768/1,024 remain candidates
-if measured gains and memory headroom justify them. HTTP and producer headroom
-will then be varied separately, followed by prefill controls and fleet scaling.
+The [first higher-admission attempt](https://beaker.org/ex/01M5T88CTXEP3GQG2AVRYGRCYK)
+completed its opening 256 control, then was preempted during 512 warmup. Its
+completed control delivered 18,157,581 tokens in 953.303 seconds (19,047.0 tokens/s).
+Native decode execution counters give 18,767.1 tokens/s over a 953.687-second
+scrape window, including unfinished responses and excluding prefill-selected
+first tokens. The difference illustrates boundary inventory rather than a second
+independent throughput observation. The interrupted 512 warmup is not a result.
+
+The [replacement admission panel](https://beaker.org/ex/01M5TC1Q6KB701FQJH5TCRYSVT)
+runs 512/768/1,024/512/256 on one B300, with at least 600 seconds of warmup and
+900 seconds of measurement per case. This combines the remaining admission work
+without repeating the completed opening 256 case. The 1,024 case reserves 5,376
+recurrent slots, exceeding the five-slot reservation with prefix headroom. HTTP
+and producer headroom will then be varied separately, followed by prefill controls
+and fleet scaling.
 
 ## Correctness and retained evidence
 
@@ -115,10 +125,14 @@ without pretending to supply more independent prompts. The
 waves, retaining all 16 routing matrices and joining all 32 outstanding background
 responses after each wave's abort. Its short waves and five-second observations
 do not establish sustained admission; inspect coverage during the long comparisons.
-The [long qualification panel](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW)
+The [long qualification replacement](https://beaker.org/ex/01M5TC1T09R3M7NFESE49VJKA1)
 now compares 64/256/512/64 with two loaded waves each on the same 256 captures,
 explicit Core-compatible rounding and fresh engines between cases. These
 diagnostic timings are excluded from throughput measurements.
+Its [first attempt](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW) was canceled
+when the node was cordoned for an unrecoverable Xid 31 error, before completing a
+wave. The application log contains no preceding CUDA exception; that does not
+identify the cause of the node event. Both interrupted attempts are archived.
 
 The [forward-only Core reference](https://beaker.org/ex/01M5T83FJNW3Q87VYF468YMH1H)
 completed all 256 opening-control captures, spanning 64 prompt clusters and
@@ -153,7 +167,11 @@ memory/utilization and measurement coverage for every row.
 Finish the admission sweep and closing controls; audit full results; test higher
 admission while gains continue; independently tune request supply and prefill;
 compare frozen-prefix numerical behavior; and validate the selected setting on
-multiple engines. An H100 check needs its own memory-feasible pools. Only then
+multiple engines. Then exercise shorter response budgets on the same prompts and
+a separately identified longer-prefill workload, retaining actual length and
+truncation distributions. Check whether admission recommendations transfer across
+those workloads rather than assuming the 32K-cap result is universal.
+An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
 new evidence for trainer batch size, policy-lag limits, publication intervals or
 evaluation placement.
