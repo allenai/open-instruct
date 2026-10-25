@@ -129,6 +129,16 @@ case, closing controls and numerical comparisons remain necessary before selecti
 a setting. More memory or a longer queue is not itself evidence of more useful
 RL throughput.
 
+Retained process CPU counters give an average of 0.277–0.279 CPU cores at
+admission 512 and 0.335–0.337 at 768 for the producer/consumer process. These
+are bounds from observations bracketing the measurement, not confidence
+intervals. Routing payloads alone account for 23.83 and 25.70 MiB/s respectively.
+The counters include this process's validation and serialization, but exclude
+the separate router and engine processes; they do not isolate individual checks
+or rule out brief event-loop stalls. `analysis/consumer-cpu.json` and the fitting
+records retain the evidence. Fleet scaling must measure the shared producer and
+router as well as per-engine throughput.
+
 The 512 case carried 511.10 queued engine requests on average. Mean initial
 engine queue time was 168.48 s and mean engine execution 170.94 s; these overlapping
 request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TGBVHH5J8BHN726WPHS55W)
