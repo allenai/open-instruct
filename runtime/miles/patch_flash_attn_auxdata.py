@@ -52,7 +52,9 @@ def patch(path: Path, version: str) -> None:
 
 def main() -> None:
     distribution = metadata.distribution("flash-attn-4")
-    path = Path(distribution.locate_file("flash_attn/cute/utils.py"))
+    path = distribution.locate_file("flash_attn/cute/utils.py")
+    if not isinstance(path, Path):
+        raise TypeError("The FA4 image patch requires a filesystem installation")
     patch(path, distribution.version)
     print(f"Patched flash-attn-4 {distribution.version} AuxData with CuTe argument protocols")
 
