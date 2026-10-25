@@ -162,13 +162,18 @@ router as well as per-engine throughput.
 
 The 512 case carried 511.10 queued engine requests on average. Mean initial
 engine queue time was 168.48 s and mean engine execution 170.94 s; these overlapping
-request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TMC9B2VHDHWPRKHGMT0MJZ)
+request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TQTNPNT6GVW8YR28HZK7VT)
 holds admission/graphs/pools at 512 and compares HTTP/producer capacities
 1,024/2,048 → 512/2,048 → 512/1,024 → 1,024/2,048. Each case uses 600 s warmup and
 600 s measurement, with the production 60-second engine keep-alive. The first two
-attempts were preempted during image pull before application startup;
-the replacement retains the same settings and timeout. This isolates
-whether the large queue and producer budget improve throughput.
+attempts were preempted during image pull before application startup; the third
+was preempted during warmup and its full 149-file archive is retained. The fourth
+retains the same settings and 150-minute timeout but requests 150-minute protection
+on its one B300, at high priority with no automatic restart. A bounded scheduler
+simulation did not resolve completion times and had incomplete external-demand
+history; the change follows the actual preemption losses, not a predicted success
+probability. This panel isolates whether the large queue and producer budget
+improve throughput.
 
 ## Correctness and retained evidence
 
@@ -315,10 +320,23 @@ No invalid expert IDs were observed. `analysis/tail-core-serving-localization.js
 `analysis/tail-serving-route-differences.json` and
 `analysis/tail-serving-route-audit.json` retain the scores and route evidence.
 The [native Core routing-replay diagnostic](https://beaker.org/ex/01M5TQJ0WEX7KSS941KEK7RTM4)
-will score the same twelve records using the first serving wave's expert IDs and
-Core's recomputed expert weights. The second wave's flipped target is retained
-for a possible follow-up. These selected diagnostic cases do not estimate a
-population error rate, qualify production or replace the async refresh test.
+completed the same twelve records using the first serving wave's expert IDs and
+Core's recomputed expert weights. Its 19-file archive and source hashes are
+verified. At the full-generation space target, Core moves from -5.69095 to
+-0.63627, versus serving -0.58334. Across the 30,387 scored tokens in these
+related selected trajectories, mean absolute error falls from 0.031038 to
+0.013084 and maximum absolute error from 5.10761 to 0.24637. Routing therefore
+accounts for much of this selected discrepancy, while a residual arithmetic
+gap remains. `analysis/tail-r3-wave0.json` retains every target and full-vector
+comparison. The [second-wave diagnostic](https://beaker.org/ex/01M5TQY1HE1RJNKHN8WP9EESP1)
+checks the routes from the wave containing the flipped target.
+
+Observed native route-context setup took 5.467 seconds on the first call and
+3.82–5.00 milliseconds on the remaining calls. This includes native padding,
+conversion and existing GPU checks, with no added synchronization; it is not
+isolated per-check cost or a packed EP8 trainer estimate. The first call includes
+cold setup. These selected EP1 diagnostics do not estimate a population error
+rate, qualify production or replace the async refresh test.
 
 An offline CPU microbenchmark of the existing checks used 256 retained captures
 (1,960,609 response tokens) on the development host. Native `record_response`
