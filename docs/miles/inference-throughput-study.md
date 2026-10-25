@@ -227,6 +227,17 @@ identical probabilities or routing. The second wave has a warmer cache; these
 observations do not establish an irreducible numerical floor. Compare candidates
 against matching waves and the closing control.
 
+Across the original draws, the retained earlier replay wave and both corrected
+control waves, eight token positions exceed absolute Core logprob error one in
+all four observations. The same space token remains the largest discrepancy;
+both corrected waves score it at approximately -0.75204 versus Core -5.69095.
+`analysis/baseline-tail-controls.json` retains these matched observations. A
+bounded localization probe has been prepared for four short-prefix examples:
+compare full-document and truncated-prefix Core scoring, then recurrent decode
+and prefill scoring of the identical target token. This diagnostic isolates
+sequence-length and execution-path effects; it does not qualify a production
+configuration or replace the async refresh test.
+
 All finalized attempts, including failed startup attempts, are downloaded under
 `runs/inference-throughput-20261025/archives/` with full job logs, Beaker metadata,
 result files and SHA-256 inventories. The ledger and launch receipts are retained
