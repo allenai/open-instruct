@@ -99,7 +99,7 @@ first tokens. The difference illustrates boundary inventory rather than a second
 independent throughput observation. The interrupted 512 warmup is not a result.
 
 The [replacement admission panel](https://beaker.org/ex/01M5TC1Q6KB701FQJH5TCRYSVT)
-runs 512/768/1,024/512/256 on one B300, with at least 600 seconds of warmup and
+scheduled 512/768/1,024/512/256 on one B300, with at least 600 seconds of warmup and
 900 seconds of measurement per case. This combines the remaining admission work
 without repeating the completed opening 256 case. The 1,024 case reserves 5,376
 recurrent slots, exceeding the five-slot reservation with prefix headroom. HTTP
@@ -124,15 +124,32 @@ have different boundary inventory. Mean occupancy was 767.22/768 with complete
 observation coverage, peak memory 188.35 GiB, and all 3,072 measured responses
 reported zero retractions. Mean response length was 8,127.4 tokens. Mean initial
 engine queue/execution times rose to 227.36/247.82 seconds; startup was 237.44 s
-and final drain 542.50 s. The marginal throughput gain is shrinking, but the 1,024
-case, closing controls and numerical comparisons remain necessary before selecting
-a setting. More memory or a longer queue is not itself evidence of more useful
-RL throughput.
+and final drain 542.50 s.
+
+The [1,024 snapshot](https://beaker.org/ex/01M5TM05XJZG4KQRGV0SWZKVWJ)
+also passed full source-hash reconciliation: 298 files / 72,389,601 bytes. It
+delivered **22,585,224 tokens in 901.851 seconds (25,043.2 tokens/s)**, 3.06%
+below 768. Native decode counters instead rose 1.39% to 25,195.4 tokens/s;
+work on unfinished responses explains why these measures need not rank adjacent
+cases alike. Mean occupancy was 1,023.12/1,024 with 96.89% observation coverage,
+and peak memory was 241.42 GiB. All 2,816 measured responses have valid timing
+records and report zero retractions. Mean engine queue/execution times were
+271.11/306.76 s; startup and drain took 236.44/705.52 s outside measurement.
+The marginal gains are small relative to the added memory and response latency;
+closing controls and numerical qualification remain necessary.
+
+The parent was preempted by allocated work during the closing 512 warmup.
+The [replacement controls](https://beaker.org/ex/01M5TMC3NPE6WVRYV1WM164CBE)
+run only 512 and 256 with the same runtime and settings. A different node/attempt
+cannot restore the original same-node bracket; these controls assess reproducibility
+across attempts. More memory or a longer queue is not itself evidence of more
+useful RL throughput.
 
 Retained process CPU counters give an average of 0.277–0.279 CPU cores at
 admission 512 and 0.335–0.337 at 768 for the producer/consumer process. These
 are bounds from observations bracketing the measurement, not confidence
-intervals. Routing payloads alone account for 23.83 and 25.70 MiB/s respectively.
+intervals. At 1,024, the bound is 0.372–0.376 cores. Routing payloads alone
+account for 23.83, 25.70 and 24.91 MiB/s respectively.
 The counters include this process's validation and serialization, but exclude
 the separate router and engine processes; they do not isolate individual checks
 or rule out brief event-loop stalls. `analysis/consumer-cpu.json` and the fitting
@@ -141,11 +158,11 @@ router as well as per-engine throughput.
 
 The 512 case carried 511.10 queued engine requests on average. Mean initial
 engine queue time was 168.48 s and mean engine execution 170.94 s; these overlapping
-request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TGBVHH5J8BHN726WPHS55W)
+request durations are not a wall-time partition. The [supply panel](https://beaker.org/ex/01M5TMC9B2VHDHWPRKHGMT0MJZ)
 holds admission/graphs/pools at 512 and compares HTTP/producer capacities
 1,024/2,048 → 512/2,048 → 512/1,024 → 1,024/2,048. Each case uses 600 s warmup and
-600 s measurement, with the production 60-second engine keep-alive. The first
-attempt was preempted during image pull before application startup;
+600 s measurement, with the production 60-second engine keep-alive. The first two
+attempts were preempted during image pull before application startup;
 the replacement retains the same settings and timeout. This isolates
 whether the large queue and producer budget improve throughput.
 
@@ -237,6 +254,25 @@ identical probabilities or routing. The second wave has a warmer cache; these
 observations do not establish an irreducible numerical floor. Compare candidates
 against matching waves and the closing control.
 
+The completed admission-256 case retains two full loaded waves, with all 535
+[source snapshot files](https://beaker.org/ex/01M5TK0MRHFJQH40PM3H2JR9D1)
+verified. Relative to matching admission-64 waves, the paired Core MAE change is
++0.0000041 [-0.0000534, +0.0000621], while the ratio-outlier fraction increases
+by 0.0220 percentage points [0.0037, 0.0402]. These prompt-clustered intervals
+include both waves without treating copies as independent prompts. Expert
+membership differs at 3.126% of compared token/layer positions; ordered slots
+differ at 27.210%. No invalid expert IDs were observed.
+
+Stable average error conceals a large change at the persistent tail token:
+sample 171 / response offset 974 has serving scores -0.75204 in both 64 waves,
+but -6.81363/-6.75120 at 256, versus Core -5.69095. Expert memberships differ
+at its conditioning position in layers 6–15. This association does not establish
+causality. Admission 256 is closer to Core for this token, but neither average
+agreement nor this one improvement qualifies it. The full matched report is
+`analysis/replay-v4-64-vs256.json`. The parent was preempted during 512;
+[replacement replay cases](https://beaker.org/ex/01M5TMC66743TX59RVBJGKZ8N9)
+retain 512 and closing 64 with two waves each, explicitly across attempts.
+
 Across the original draws, the retained earlier replay wave and both corrected
 control waves, eight token positions exceed absolute Core logprob error one in
 all four observations. The same space token remains the largest discrepancy;
@@ -264,7 +300,7 @@ result files and SHA-256 inventories. The ledger and launch receipts are retaine
 alongside them. The initial panel predates the unlimited benchmark report
 collector; its [WEKA inventory/recovery](https://beaker.org/ex/01M5TA4FSVAK5VR84GPQABPMD4)
 verified all 1,194 source files (excluding the checkpoint symlink trees), totaling
-249,077,758 bytes. `analysis/fit-observations.jsonl` preserves seven audited
+249,077,758 bytes. `analysis/fit-observations.jsonl` preserves eight audited
 measurements with full model geometry, settings, hardware observations and hashed
 analysis/source references. Its records explicitly retain pending numerical
 qualification rather than presenting every completed case as a recommendation.
