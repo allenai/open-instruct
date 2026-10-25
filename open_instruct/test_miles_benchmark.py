@@ -473,6 +473,53 @@ def test_route_comparison_excludes_dense_padding_and_separates_expert_membership
     assert report["expert_slot_changed_fraction"]["value"] == 1
     assert report["expert_membership_changed_fraction"]["value"] == pytest.approx(1 / 6)
     assert report["conditioning_token_expert_set_changed_fraction"]["value"] == pytest.approx(1 / 3)
+    assert not report["expert_id_contract_checked"]
+
+
+@pytest.mark.parametrize("fault", [None, "negative", "out_of_range", "duplicate", "width"])
+def test_route_comparison_rejects_identically_corrupt_payloads(tmp_path, fault):
+    matrix = np.zeros((3, 2, 2), dtype=np.int32)
+    matrix[:, 1] = [1, 2]
+    # Corrupt an earlier prompt position, outside response-conditioning metrics.
+    if fault in {"negative", "out_of_range", "duplicate"}:
+        matrix[0, 1, 0] = {"negative": -1, "out_of_range": 4, "duplicate": 2}[fault]
+    if fault == "width":
+        matrix = np.pad(matrix, ((0, 0), (0, 0), (0, 1)))
+    paths, records = [], []
+    for name in ("left", "right"):
+        path = tmp_path / name
+        path.mkdir()
+        paths.append(path)
+        (path / "benchmark-model-config.json").write_text(
+            json.dumps(
+                dict(
+                    model_type="olmo3moe",
+                    num_hidden_layers=2,
+                    dense_layers_indices=[0],
+                    n_routed_experts=4,
+                    num_experts_per_tok=2,
+                )
+            )
+        )
+        np.savez_compressed(path / "routes.npz", routes=matrix)
+        records.append(
+            [
+                dict(
+                    group_index=0,
+                    prompt_tokens=2,
+                    response_tokens=2,
+                    route_path="routes.npz",
+                    route_sha256=hashlib.sha256(matrix.tobytes()).hexdigest(),
+                )
+            ]
+        )
+    if fault:
+        with pytest.raises(ValueError, match="out-of-range|duplicate expert|top-k dimension"):
+            compare_inference_replay.route_agreement(*paths, *records)
+    else:
+        report = compare_inference_replay.route_agreement(*paths, *records)
+        assert report["expert_id_contract_checked"]
+        assert report["expert_slot_changed_fraction"]["value"] == 0
 
 
 def test_workload_preparation_filters_without_truncating_and_keeps_sources(tmp_path, monkeypatch):

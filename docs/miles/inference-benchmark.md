@@ -168,7 +168,12 @@ only whether any route changed in an entire trajectory. It separately measures
 expert membership changes, so permuting the same top-k experts is distinguishable
 from selecting different experts. Known Olmo dense layers are excluded from the
 denominator; missing layout metadata is reported explicitly. Stored matrix hashes
-are verified before comparison.
+are verified before comparison. For Olmo MoE payloads with model metadata, the
+comparison also rejects negative/out-of-range expert IDs, duplicate selected
+experts and a top-k dimension that disagrees with the model. These integrity
+checks include earlier prompt positions while excluding dense-layer padding.
+`expert_id_contract_checked` is false when the model lacks the expert counts
+needed for the complete check; matching hashes alone do not validate expert IDs.
 Its ratios and logprob differences are relative to the serving control, not Core;
 the intervals do not cover machine/day variability or establish learning quality.
 If the capture set is smaller than the admission being tested, set

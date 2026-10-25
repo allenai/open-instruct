@@ -21,7 +21,12 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
         path = Path(root) / "benchmark-model-config.json"
         config = json.loads(path.read_text()) if path.is_file() else {}
         layouts.append(
-            (config["num_hidden_layers"], config.get("dense_layers_indices") or [])
+            (
+                config["num_hidden_layers"],
+                config.get("dense_layers_indices") or [],
+                config.get("n_routed_experts"),
+                config.get("num_experts_per_tok"),
+            )
             if config.get("model_type") == "olmo3moe"
             else None
         )
@@ -53,6 +58,22 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
         routed_layers = [layer for layer in range(recorded_layers) if layer not in dense]
         if not routed_layers:
             raise ValueError("Routing matrices contain no routed layers")
+        if layouts[0] is not None:
+            experts, top_k = layouts[0][2:]
+            if any(value is not None and (type(value) is not int or value < 1) for value in (experts, top_k)):
+                raise ValueError("Model configuration contains invalid expert counts")
+            if top_k is not None and x.shape[2] != top_k:
+                raise ValueError("Routing matrix top-k dimension differs from the model configuration")
+            # Agreement alone can accept two identically corrupt payloads. Check
+            # the complete prompt/response payload before slicing metric positions.
+            # Dense-layer padding is deliberately excluded from these checks.
+            for matrix in (x, y):
+                values = matrix[:, routed_layers]
+                if (values < 0).any() or (experts is not None and (values >= experts).any()):
+                    raise ValueError("Routing payload contains an out-of-range expert ID")
+                ordered = np.sort(values, axis=-1)
+                if (ordered[..., 1:] == ordered[..., :-1]).any():
+                    raise ValueError("Routing payload selects a duplicate expert for one token/layer")
         # The route for the last prompt token conditions the first response logit.
         x = x[a["prompt_tokens"] - 1 :, routed_layers]
         y = y[b["prompt_tokens"] - 1 :, routed_layers]
@@ -101,6 +122,9 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
     result["per_layer_expert_slot_changed_fraction"] = per_layer
     result["routed_layer_indices"] = routed_layers
     result["layer_layout_known"] = layouts[0] is not None
+    result["expert_id_contract_checked"] = layouts[0] is not None and all(
+        value is not None for value in layouts[0][2:]
+    )
     result["scope"] = (
         "Response-conditioning routes; known dense layers are excluded, otherwise all recorded layers are used. "
         "Membership counts selected experts absent from the other arm, independently of top-k order. "
