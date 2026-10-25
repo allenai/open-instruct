@@ -322,6 +322,55 @@ def test_core_comparison_measures_paired_error_changes(tmp_path):
         compare_inference_replay.core_comparison(tmp_path, "changed", left, right)
 
 
+def test_core_position_bands_expose_late_error_without_adding_short_prompt_clusters(tmp_path):
+    (tmp_path / "workflow.json").write_text('{"status": "complete"}')
+    (tmp_path / "benchmark-summary.json").write_text(
+        json.dumps({"reference_backend": "core", "reference_sha256": "fixed", "trajectories": 2})
+    )
+    rows = [
+        {"index": i, "group_index": i, "prompt_tokens": 1, "response_tokens": n, "logprobs": [-1.0] * n}
+        for i, n in enumerate((1025, 2))
+    ]
+    (tmp_path / "benchmark-core-reference.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    changed = copy.deepcopy(rows)
+    changed[0]["logprobs"][-1] = -1.5
+    report = compare_inference_replay.core_comparison(tmp_path, "fixed", rows, changed)
+    assert report["paired_change"]["mean_absolute_error_change"]["value"] < 0.001
+    early, late = report["by_response_position"]
+    assert early["paired_change"]["mean_absolute_error_change"]["value"] == 0
+    assert late["start"] == 1024
+    assert late["right_error"]["prompt_clusters"] == 1
+    assert late["right_error"]["tokens_including_repeats"] == 1
+    assert late["paired_change"]["mean_absolute_error_change"]["value"] == 0.5
+
+
+def test_replay_wave_reports_do_not_hide_opposite_signed_changes(tmp_path):
+    paths = [tmp_path / side for side in ("left", "right")]
+    row = {"index": 0, "group_index": 0, "prompt_tokens": 1, "response_tokens": 2, "logprobs": [-1.0, -1.0]}
+    for side, path in enumerate(paths):
+        path.mkdir()
+        (path / "workflow.json").write_text('{"status": "complete"}')
+        (path / "benchmark-summary.json").write_text(
+            json.dumps(
+                {
+                    "diagnostic_only": True,
+                    "reference_sha256": "fixed",
+                    "trajectories": 1,
+                    "repeats": 2,
+                    "response_tokens_per_repeat": 2,
+                }
+            )
+        )
+        for repeat in range(2):
+            changed = {**row, "logprobs": [-1.0 + side * (0.1 if repeat == 0 else -0.1)] * 2}
+            (path / f"benchmark-replay-{repeat}.jsonl").write_text(json.dumps(changed) + "\n")
+    report = compare_inference_replay.compare(*paths)
+    assert report["metrics"]["mean_signed_logprob_delta"]["value"] == pytest.approx(0)
+    assert [x["metrics"]["mean_signed_logprob_delta"]["value"] for x in report["per_wave"]] == pytest.approx(
+        [0.1, -0.1]
+    )
+
+
 def test_replay_copies_keep_distinct_ids_and_shared_prompt_clusters():
     original = [{"index": 0, "group_index": 0}, {"index": 3, "group_index": 0}, {"index": 5, "group_index": 1}]
     expanded = benchmark_metrics.replicate_trajectories(original, 4)

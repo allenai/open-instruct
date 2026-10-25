@@ -1,7 +1,7 @@
 """Compare frozen-token serving diagnostics with prompt-clustered intervals.
 
-These are serving-relative differences, not errors against a trainer or evidence
-of learning quality. Compare repeated controls to measure the diagnostic's floor.
+Serving-relative differences and optional fixed Core errors are not evidence of
+learning quality. Compare repeated controls to observe repeat variability.
 """
 
 import argparse
@@ -57,6 +57,7 @@ def route_agreement(left_root, right_root, left, right, *, bootstrap=2000, seed=
                 draws[:, numerator] / draws[:, denominator], [0.025, 0.975]
             ).tolist(),
         }
+    assert layer_changed is not None and layer_total is not None
     result["per_layer_expert_slot_changed_fraction"] = (layer_changed / layer_total).tolist()
     result["scope"] = (
         "Ordered expert slots for inputs conditioning response logits; prompt clusters retain copies and repeated waves. Expert-set overlap is a different metric."
@@ -124,6 +125,52 @@ def paired_metrics(left, right, *, bootstrap=2000, seed=17):
     }
 
 
+def response_position_slices(*arms):
+    """Half-open response offsets; long-position rows include only reaching prompts."""
+    for start, stop in ((0, 1024), (1024, 8192), (8192, 16384), (16384, 32768), (32768, None)):
+        sliced = []
+        for records in arms:
+            sliced.append(
+                [
+                    {
+                        **row,
+                        "logprobs": row["logprobs"][start:stop],
+                        "response_tokens": len(row["logprobs"][start:stop]),
+                        "route_sha256": None,
+                        "route_path": None,
+                    }
+                    for row in records
+                    if row["response_tokens"] > start
+                ]
+            )
+        if sliced[0]:
+            yield start, stop, sliced
+
+
+def core_error_change(reference, left, right, *, bootstrap=2000, seed=17):
+    clusters = {}
+    for row, a, b in zip(reference, left, right, strict=True):
+        core = np.asarray(row["logprobs"], dtype=np.float64)
+        before, after = np.asarray(a["logprobs"]) - core, np.asarray(b["logprobs"]) - core
+        before_outside = (before < -np.log(1.2)) | (before > -np.log(0.8))
+        after_outside = (after < -np.log(1.2)) | (after > -np.log(0.8))
+        values = np.array(
+            [len(core), (np.abs(after) - np.abs(before)).sum(), after_outside.sum() - before_outside.sum()]
+        )
+        clusters[a["group_index"]] = clusters.get(a["group_index"], np.zeros(3)) + values
+    grouped = np.stack(list(clusters.values()))
+    total = grouped.sum(axis=0)
+    rng = np.random.default_rng(seed)
+    draws = grouped[rng.integers(0, len(grouped), size=(bootstrap, len(grouped)))].sum(axis=1)
+    return {
+        name: {
+            "value": float(total[i] / total[0]),
+            "prompt_cluster_95pct_interval": np.quantile(draws[:, i] / draws[:, 0], [0.025, 0.975]).tolist(),
+        }
+        for i, name in enumerate(("mean_absolute_error_change", "ratio_outlier_fraction_change"), 1)
+    }
+
+
 def core_comparison(root, reference_sha256, left, right, *, bootstrap=2000, seed=17):
     root = Path(root)
     summary = json.loads((root / "benchmark-summary.json").read_text())
@@ -137,39 +184,28 @@ def core_comparison(root, reference_sha256, left, right, *, bootstrap=2000, seed
     scores = {row["index"]: row for row in rows}
     if len(scores) != len(rows) or len(rows) != summary["trajectories"]:
         raise ValueError("Core reference has missing or duplicate trajectories")
-    reference, clusters = [], {}
-    for a, b in zip(left, right, strict=True):
+    reference = []
+    for a in left:
         row = scores[a.get("source_index", a["index"])]
         if any(row[key] != a[key] for key in ("group_index", "prompt_tokens", "response_tokens")):
             raise ValueError("Core reference trajectory identity differs")
         reference.append({**row, **{key: a[key] for key in ("index", "source_index", "copy_index") if key in a}})
-        core = np.asarray(row["logprobs"], dtype=np.float64)
-        before, after = np.asarray(a["logprobs"]) - core, np.asarray(b["logprobs"]) - core
-        if len(core) != row["response_tokens"] or not np.isfinite(core).all():
-            raise ValueError("Core reference has invalid logprobs")
-        before_outside = (before < -np.log(1.2)) | (before > -np.log(0.8))
-        after_outside = (after < -np.log(1.2)) | (after > -np.log(0.8))
-        values = np.array(
-            [len(core), (np.abs(after) - np.abs(before)).sum(), after_outside.sum() - before_outside.sum()]
-        )
-        clusters[a["group_index"]] = clusters.get(a["group_index"], np.zeros(3)) + values
-    grouped = np.stack(list(clusters.values()))
-    total = grouped.sum(axis=0)
-    rng = np.random.default_rng(seed)
-    draws = grouped[rng.integers(0, len(grouped), size=(bootstrap, len(grouped)))].sum(axis=1)
-    change = {
-        name: {
-            "value": float(total[i] / total[0]),
-            "prompt_cluster_95pct_interval": np.quantile(draws[:, i] / draws[:, 0], [0.025, 0.975]).tolist(),
-        }
-        for i, name in enumerate(("mean_absolute_error_change", "ratio_outlier_fraction_change"), 1)
-    }
     return {
         "reference": str(root),
         "contract": summary,
-        "left_error": paired_metrics(reference, left),
-        "right_error": paired_metrics(reference, right),
-        "paired_change": change,
+        "left_error": paired_metrics(reference, left, bootstrap=bootstrap, seed=seed),
+        "right_error": paired_metrics(reference, right, bootstrap=bootstrap, seed=seed),
+        "paired_change": core_error_change(reference, left, right, bootstrap=bootstrap, seed=seed),
+        "by_response_position": [
+            {
+                "start": start,
+                "stop": stop,
+                "left_error": paired_metrics(ref, a, bootstrap=bootstrap, seed=seed),
+                "right_error": paired_metrics(ref, b, bootstrap=bootstrap, seed=seed),
+                "paired_change": core_error_change(ref, a, b, bootstrap=bootstrap, seed=seed),
+            }
+            for start, stop, (ref, a, b) in response_position_slices(reference, left, right)
+        ],
     }
 
 
@@ -201,6 +237,10 @@ def compare(left, right, core=None):
         "right": str(right),
         "reference_sha256": summaries[0]["reference_sha256"],
         **paired_metrics(*records),
+        "by_response_position": [
+            {"start": start, "stop": stop, **paired_metrics(*arms)}
+            for start, stop, arms in response_position_slices(*records)
+        ],
         "route_agreement": route_agreement(left, right, *records),
         "diagnostic_occupancy": {
             str(root): [
@@ -217,6 +257,18 @@ def compare(left, right, core=None):
     }
     if core is not None:
         result["core_comparison"] = core_comparison(core, summaries[0]["reference_sha256"], *records)
+    result["per_wave"] = []
+    count = summaries[0]["trajectories"]
+    for repeat in range(summaries[0]["repeats"]):
+        arms = [rows[repeat * count : (repeat + 1) * count] for rows in records]
+        wave = {"repeat": repeat, **paired_metrics(*arms)}
+        if core is not None:
+            wave["core_comparison"] = core_comparison(core, summaries[0]["reference_sha256"], *arms)
+        result["per_wave"].append(wave)
+    result["strata_scope"] = (
+        "Response positions are zero-based, half-open intervals conditional on reaching that position. "
+        "Waves are matched by repeat index; intervals retain prompt clusters and are not adjusted for multiple comparisons."
+    )
     return result
 
 

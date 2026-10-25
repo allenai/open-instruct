@@ -155,6 +155,10 @@ produce a throughput number: forced token selection synchronizes CPU and GPU.
 `python -m scripts.miles.compare_inference_replay CONTROL CANDIDATE --output
 comparison.json` checks reference identities and computes paired prompt-group
 bootstrap intervals, retaining siblings and repeated waves in each cluster.
+Reports also separate matching replay waves and response-position bands (0–1K,
+1K–8K, 8K–16K, 16K–32K and beyond when present). Position bands include only
+trajectories reaching them, so inspect their prompt counts; they are conditional
+diagnostics and their intervals are not adjusted for multiple comparisons.
 When routing matrices are present, comparison reports ordered expert-slot and
 response-conditioning token disagreement, including per-layer rates, rather than
 only whether any route changed in an entire trajectory. It verifies their stored
