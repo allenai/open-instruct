@@ -135,12 +135,17 @@ interval 0.03307–0.03474), with 1.831% of ratios outside 0.8–1.2 and maximum
 5.1752. This is supplemental control evidence from a failed workflow, not a
 qualified candidate. The transport failure's cause remains unresolved.
 
-The [fresh-engine replacement](https://beaker.org/ex/01M5TE1ZDE09W1SRYR0VCQWSBP)
-compares 64/256/512/64 with one loaded wave per fresh engine, retaining the opening
-and closing controls while avoiding that inter-wave transition. It uses the same
-256 captures and explicit Core-compatible rounding, with source `dca5dee05f3e`
-and image `01M5TE1RPH65R1BRZ5ZQBH20TK`. Completed foreground scores are now saved
-incrementally. Diagnostic timings are excluded from throughput measurements.
+The failed benchmark omitted `SGLANG_TIMEOUT_KEEP_ALIVE=60`, already present in
+the production examples. The pinned engine's five-second default equals HTTPX's
+reuse window; the [documented connection-close race](operations.md#http-keep-alive-margin)
+is consistent with the observed timing. This attribution awaits the rerun.
+A [single-wave workaround](https://beaker.org/ex/01M5TE1ZDE09W1SRYR0VCQWSBP) was
+stopped during startup. The [corrected replacement](https://beaker.org/ex/01M5TEFKHVQE06R7QGZKW2N912)
+restores the original two-wave 64/256/512/64 protocol with the production engine
+keep-alive value. It uses source `6201ba12a400` and image
+`01M5TEFD3AF7VY06EE0TJ1ZZPQ`, including incremental score retention and a separate
+fix that joins all foreground tasks after a diagnostic failure. Diagnostic timings
+are excluded from throughput measurements.
 Its [first attempt](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW) was canceled
 when the node was cordoned for an unrecoverable Xid 31 error, before completing a
 wave. The application log contains no preceding CUDA exception; that does not
@@ -175,6 +180,14 @@ admission/graph/prefill settings, queue controls, fleet size, observed lengths,
 memory/utilization and measurement coverage for every row.
 
 ## Remaining qualification
+
+Correctness and robustness are production gates. Track encountered failures in
+`runs/inference-throughput-20261025/issues.json`, with evidence, fixes and open
+regression checks. A fixed-policy sweep cannot qualify weight publication:
+exercise the ordinary fully async production path with live generations crossing
+native weight refreshes, checking behavior-logprob preservation, policy-version
+spans, final replay routes, publication pauses and recovery. Keep trainer settings
+unchanged; a synchronous or barrier-drained substitute does not meet this gate.
 
 Finish the admission sweep and closing controls; audit full results; test higher
 admission while gains continue; independently tune request supply and prefill;
