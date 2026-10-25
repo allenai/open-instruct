@@ -69,9 +69,29 @@ def analyze(root):
                 ("memory_used_mib", "memory_total_mib", "utilization_percent", "power_watts", "clock_mhz")
             )
         }
+    capture_paths = sorted((root / "benchmark-captures").glob("*.json"))
+    legacy_capture = root / "benchmark-captures.jsonl"
+    captures = (
+        [read_json(path) for path in capture_paths]
+        if capture_paths
+        else throughput_occupancy.records(legacy_capture)
+        if legacy_capture.exists()
+        else []
+    )
+    config = read_json(root / "run-spec.json") if (root / "run-spec.json").exists() else {}
+    requested_captures = config.get("benchmark", {}).get("capture_samples")
     return {
         "root": str(root),
         "summary": summary,
+        "capture_coverage": {
+            "requested": requested_captures,
+            "captured": len(captures),
+            "missing_indices": sorted(set(range(requested_captures)) - {r["index"] for r in captures})
+            if requested_captures is not None
+            else None,
+            "response_lengths": quantiles([r["response_tokens"] for r in captures]),
+            "scope": "Only complete groups consumed before measurement ends are captured; slow unfinished trajectories may be absent.",
+        },
         "resolved_engines": [
             {
                 "url": server["url"],
