@@ -30,25 +30,30 @@ def run(args, settings, root):
     moe_models.prepare_model_config(config, hf, args.olmo_core)
     config.recompute_each_block = False
     model = config.build(init_device="meta")
+    logger.info("Core reference initializing model parameters")
     model.init_weights(
         max_seq_len=args.rollout_max_context_len,
         max_local_microbatch_size=args.rollout_max_context_len,
         device=torch.device("cuda"),
     )
     state = {}
-    for shard in sorted(checkpoint.glob("*.safetensors")):
+    shards = sorted(checkpoint.glob("*.safetensors"))
+    logger.info("Core reference loading checkpoint shards=%s", len(shards))
+    for shard in shards:
         part = safetensors_torch.load_file(shard)
         if state.keys() & part.keys():
             raise ValueError("Duplicate checkpoint tensor in Core reference")
         state.update(part)
     if not state:
         raise ValueError("Core reference checkpoint has no weights")
+    logger.info("Core reference installing checkpoint tensors=%s", len(state))
     olmo3.load_olmo3_moe_hf_state(model, hf, state)
     del state, part
     model.eval()
     head = model.lm_head
     model.lm_head = None
     startup_seconds = time.monotonic() - started
+    logger.info("Core reference ready; startup_seconds=%.3f trajectories=%s", startup_seconds, len(records))
     builder = Path(olmo3.__file__)
     report = {
         "diagnostic_only": True,
