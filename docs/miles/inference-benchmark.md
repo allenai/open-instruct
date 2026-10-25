@@ -243,3 +243,23 @@ above 2048 tokens, retains source identities and exclusion records, and never
 truncates prompts. Point `data.prompt_data` and `data.reward_config` at its prepared
 outputs. This subset is a benchmark workload, not a production data recommendation;
 qualify the chosen settings again on the intended production length distribution.
+
+For a separately labeled long-prefill workload, use
+`python -m scripts.miles.prepare_inference_continuations --model CHECKPOINT
+--output NEW_DIRECTORY --reference COMPLETED_CASE` (repeat `--reference` for
+additional cases). This takes natural prefixes from saved trajectories, targeting
+8,192 prompt tokens with at least 2,048 original continuation tokens remaining.
+It searches backward by at most 32 tokens for an exact decode/encode boundary,
+never pads, deduplicates identical prefixes, and retains source hashes, exclusions,
+actual lengths and original-prompt clusters. These continuations are useful for
+prefill mechanics; siblings and repeated source prompts are not independent data.
+The generated verifier deliberately rejects reward computation: use only
+`benchmark.reward_mode=none`.
+
+Measure response-length sensitivity separately on the same immutable short
+prompts, for example 2K/8K/32K response caps with sufficient context. Start with
+the same admission and queue settings, then check a neighboring admission to see
+whether the knee moves. Retain truncation rates and actual distributions; cap
+changes also change which trajectories finish naturally. Long-prefill comparisons
+need their own frozen-prefix numerical checks because moving tokens into prefill
+changes the execution path.

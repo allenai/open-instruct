@@ -13,6 +13,7 @@ from scripts.miles import (
     analyze_inference_benchmark,
     compare_inference_replay,
     inference_counter_metrics,
+    prepare_inference_continuations,
     prepare_inference_workload,
 )
 
@@ -463,6 +464,57 @@ def test_workload_preparation_filters_without_truncating_and_keeps_sources(tmp_p
     assert {r["input"] for r in rows} == {"one", "two"}
     manifest = json.loads(Path(result["manifest"]).read_text())
     assert all(Path(path).is_file() for path in manifest["inputs"])
+
+
+def test_continuation_preparation_preserves_exact_prefixes_and_prompt_clusters(tmp_path, monkeypatch):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "tokenizer_config.json").write_text("{}")
+
+    def decode(ids, **kwargs):
+        # Simulate a token boundary that does not survive text roundtripping.
+        return "".join(map(chr, ids[:-1] if len(ids) == 5 else ids))
+
+    tokenizer = SimpleNamespace(
+        chat_template="template", encode=lambda text, **kwargs: list(map(ord, text)), decode=decode
+    )
+    monkeypatch.setattr(prepare_inference_workload.run_data, "_tokenizer", lambda path: tokenizer)
+    reference = tmp_path / "reference"
+    reference.mkdir()
+    (reference / "run-spec.json").write_text(
+        json.dumps({"model": {"source": str(model)}, "inference": {"max_context_length": 16}})
+    )
+    (reference / "workflow.json").write_text(json.dumps({"status": "complete"}))
+    records = [
+        {
+            "index": index,
+            "group_index": 0,
+            "tokens": list(map(ord, text)),
+            "prompt_tokens": 1,
+            "response_tokens": len(text) - 1,
+        }
+        for index, text in enumerate(["abcdefgh", "abcdefgx", "abc"])
+    ]
+    (reference / "benchmark-captures.jsonl").write_text("".join(json.dumps(row) + "\n" for row in records))
+    result = prepare_inference_continuations.prepare(
+        model, tmp_path / "corpus", [reference], prompt_tokens=5, boundary_slack=1, remaining_tokens=2
+    )
+    rows = [json.loads(line) for line in Path(result["prompt_data"]).read_text().split("\n") if line]
+    assert len(rows) == 1
+    assert rows[0]["input"] == "abcd"
+    assert rows[0]["metadata"]["prompt_token_ids"] == list(map(ord, "abcd"))
+    assert len(rows[0]["metadata"]["continuation_origins"]) == 2
+    selection = json.loads((tmp_path / "corpus/selection.json").read_text())
+    assert selection["original_prompt_clusters"] == 1
+    assert selection["excluded"][0]["sample_index"] == 2
+    assert selection["actual_prompt_lengths"] == [4]
+    with pytest.raises(ValueError, match="no reward targets"):
+        prepare_inference_continuations.BenchmarkOnlyVerifier()
+    with pytest.raises(ValueError, match="No captured continuations"):
+        prepare_inference_continuations.prepare(
+            model, tmp_path / "no-boundary", [reference], prompt_tokens=5, boundary_slack=0, remaining_tokens=2
+        )
+    assert not (tmp_path / "no-boundary").exists()
 
 
 def test_replay_comparison_pairs_prompt_clusters_and_rejects_different_trajectories():
