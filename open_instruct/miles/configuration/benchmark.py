@@ -56,6 +56,7 @@ def parse(value):
         "replay_reference": None,
         "replay_repeats": 2,
         "replay_copies": 1,
+        "replay_background": False,
         "score_reference": False,
     }
     validation.fields(value, "benchmark", set(defaults))
@@ -66,6 +67,7 @@ def parse(value):
     validation.integer(result["replay_repeats"], "benchmark.replay_repeats", minimum=1)
     validation.integer(result["replay_copies"], "benchmark.replay_copies", minimum=1)
     validation.boolean(result["score_reference"], "benchmark.score_reference")
+    validation.boolean(result["replay_background"], "benchmark.replay_background")
     if result["replay_reference"] is not None:
         validation.text(result["replay_reference"], "benchmark.replay_reference")
         if not result["replay_reference"].startswith("/"):

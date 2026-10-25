@@ -1,5 +1,6 @@
 """Inference benchmarks must allocate no trainer and account only measured work."""
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -18,7 +19,45 @@ from scripts.miles import (
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import launch
-from open_instruct.miles.rollout import benchmark_metrics
+from open_instruct.miles.rollout import benchmark_load, benchmark_metrics
+
+
+@pytest.mark.parametrize("failure", [None, "foreground", "background"])
+def test_replay_load_propagates_failure_and_joins_every_task(failure):
+    async def exercise():
+        started = asyncio.Event()
+        stopped = []
+
+        async def background(index, stop):
+            try:
+                started.set()
+                if failure == "background":
+                    raise ValueError("background failed")
+                await stop.wait()
+            finally:
+                stopped.append(index)
+
+        async def foreground():
+            await started.wait()
+            if failure == "foreground":
+                raise ValueError("foreground failed")
+            if failure == "background":
+                await asyncio.Event().wait()
+            return 7
+
+        async def shutdown(workers):
+            # The producer stop event must be set before waiting on outstanding
+            # HTTP responses; no next wave may inherit old background work.
+            await asyncio.wait_for(asyncio.gather(*workers, return_exceptions=True), 1)
+
+        if failure:
+            with pytest.raises(ValueError, match=f"{failure} failed"):
+                await benchmark_load.run_wave([foreground()], background, 2, shutdown)
+        else:
+            assert await benchmark_load.run_wave([foreground()], background, 2, shutdown) == [7]
+        assert sorted(stopped) == [0, 1]
+
+    asyncio.run(exercise())
 
 
 def document(tmp_path):

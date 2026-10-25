@@ -168,6 +168,18 @@ original prompt cluster and do not increase the independent sample count. This
 deliberately changes prefix sharing for the diagnostic; inspect occupancy because
 short trajectories finish first and batch size falls during each wave.
 
+For sustained admission through long foreground trajectories, use
+`benchmark.replay_background=true` instead. It maintains background streams equal
+to the configured fleet HTTP capacity, cycling through the same saved trajectories
+through the MILES router. They use the same forced-token hook but omit logprob and
+route output. Only foreground trajectories enter agreement statistics; background
+completions and interruptions are saved separately. After each wave, replenishment
+stops and the private fleet is repeatedly aborted until every background HTTP
+response has returned, bounded by `benchmark.drain_timeout`. This prevents queued
+router requests from spilling into the next wave. Compare identical background
+protocols and inspect measured occupancy; this diagnostic load is not a throughput
+workload or additional independent statistical evidence.
+
 For an additional fixed Core reference, copy the same run to another output,
 retain `benchmark.replay_reference`, set `benchmark.score_reference=true`, and
 use one GPU with no variants. This performs forward-only BF16 scoring with the

@@ -16,10 +16,11 @@ from pathlib import Path
 import httpx
 import numpy as np
 import torch
+from miles.rollout.inference_rollout.inference_rollout_train import get_worker_urls
 from sglang.srt.layers import sampler
 from sglang.srt.sampling.custom_logit_processor import CustomLogitProcessor
 
-from open_instruct.miles.rollout import benchmark_metrics
+from open_instruct.miles.rollout import benchmark_load, benchmark_metrics
 
 
 class ReplayIdentityProcessor(CustomLogitProcessor):
@@ -58,35 +59,43 @@ async def run(args, settings, root):
     capacity = args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
     waves = []
+    background_streams = capacity if settings["replay_background"] else 0
+    worker_urls = await get_worker_urls(args) if background_streams else []
+
+    def payload(record, *, details):
+        prompt_length = record["prompt_tokens"]
+        return {
+            "input_ids": record["tokens"][:prompt_length],
+            "sampling_params": {
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "top_k": -1,
+                "max_new_tokens": record["response_tokens"],
+                "ignore_eos": True,
+                "custom_params": {
+                    "benchmark_prompt_length": prompt_length,
+                    "benchmark_output_ids": record["tokens"][prompt_length:],
+                },
+            },
+            "custom_logit_processor": processor,
+            "return_logprob": details,
+            "return_routed_experts": details and args.use_rollout_routing_replay,
+        }
+
     async with httpx.AsyncClient(
-        timeout=settings["collection_timeout"], limits=httpx.Limits(max_connections=capacity)
+        timeout=settings["collection_timeout"],
+        limits=httpx.Limits(max_connections=capacity + (len(records) if background_streams else 0)),
     ) as client:
         for repeat in range(settings["replay_repeats"]):
             route_root = root / "benchmark-replay-routes" / str(repeat)
             route_root.mkdir(parents=True)
             started_unix = time.time()
+            window = {"repeat": repeat, "started_unix": started_unix}
 
             async def generate(record, route_root=route_root):
                 prompt_length = record["prompt_tokens"]
                 output_ids = record["tokens"][prompt_length:]
-                payload = {
-                    "input_ids": record["tokens"][:prompt_length],
-                    "sampling_params": {
-                        "temperature": 1.0,
-                        "top_p": 1.0,
-                        "top_k": -1,
-                        "max_new_tokens": len(output_ids),
-                        "ignore_eos": True,
-                        "custom_params": {
-                            "benchmark_prompt_length": prompt_length,
-                            "benchmark_output_ids": output_ids,
-                        },
-                    },
-                    "custom_logit_processor": processor,
-                    "return_logprob": True,
-                    "return_routed_experts": args.use_rollout_routing_replay,
-                }
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload(record, details=True))
                 response.raise_for_status()
                 meta = response.json()["meta_info"]
                 probabilities = meta["output_token_logprobs"]
@@ -118,9 +127,53 @@ async def run(args, settings, root):
                     "route_path": str(route_path.relative_to(root)) if route_path is not None else None,
                 }
 
-            output = await asyncio.gather(*(generate(record) for record in records))
+            with (root / f"benchmark-replay-background-{repeat}.jsonl").open("w", buffering=1) as background_file:
+
+                async def background(index, stop, background_file=background_file):
+                    cycle = 0
+                    while not stop.is_set():
+                        record = records[(index + cycle * background_streams) % len(records)]
+                        row = {
+                            "stream": index,
+                            "cycle": cycle,
+                            "source_index": record["source_index"],
+                            "started_unix": time.time(),
+                            "outcome": "interrupted",
+                        }
+                        try:
+                            response = await client.post(url, json=payload(record, details=False))
+                            response.raise_for_status()
+                            tokens = response.json()["meta_info"]["completion_tokens"]
+                            if tokens != record["response_tokens"] and not stop.is_set():
+                                raise ValueError("Diagnostic background returned an incomplete trajectory")
+                            row.update(
+                                outcome="completed" if tokens == record["response_tokens"] else "aborted",
+                                response_tokens=tokens,
+                            )
+                        finally:
+                            row["finished_unix"] = time.time()
+                            background_file.write(json.dumps(row) + "\n")
+                        cycle += 1
+
+                async def shutdown(workers, window=window):
+                    # Client cancellation alone leaves router/server work alive. Stop
+                    # replenishment, repeatedly abort this private fleet, and join every
+                    # HTTP response, including requests queued in the router's pool.
+                    window["finished_unix"] = time.time()
+                    async with asyncio.timeout(settings["drain_timeout"]):
+                        while any(not worker.done() for worker in workers):
+                            for worker_url in worker_urls:
+                                response = await client.post(f"{worker_url}/abort_request", json={"abort_all": True})
+                                response.raise_for_status()
+                            await asyncio.wait(workers, timeout=0.5, return_when=asyncio.ALL_COMPLETED)
+
+                output = await benchmark_load.run_wave(
+                    [generate(record) for record in records], background, background_streams, shutdown
+                )
             (root / f"benchmark-replay-{repeat}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in output))
-            waves.append({"repeat": repeat, "started_unix": started_unix, "finished_unix": time.time()})
+            window.setdefault("finished_unix", time.time())
+            window["drain_finished_unix"] = time.time()
+            waves.append(window)
             (root / "benchmark-replay-waves.json").write_text(json.dumps(waves, indent=2) + "\n")
     return {
         "diagnostic_only": True,
@@ -129,6 +182,8 @@ async def run(args, settings, root):
         "trajectories": len(records),
         "reference_trajectories": reference_trajectories,
         "copies": settings["replay_copies"],
+        "background": settings["replay_background"],
+        "background_streams": background_streams,
         "repeats": settings["replay_repeats"],
         "waves": waves,
         "response_tokens_per_repeat": sum(r["response_tokens"] for r in records),

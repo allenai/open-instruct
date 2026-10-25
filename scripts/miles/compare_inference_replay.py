@@ -194,6 +194,8 @@ def compare(left, right, core=None):
             raise ValueError(f"Replay reference mismatch: {key}")
     if summaries[0].get("copies", 1) != summaries[1].get("copies", 1):
         raise ValueError("Replay reference mismatch: copies")
+    if summaries[0].get("background", False) != summaries[1].get("background", False):
+        raise ValueError("Replay reference mismatch: background load protocol")
     result = {
         "left": str(left),
         "right": str(right),
