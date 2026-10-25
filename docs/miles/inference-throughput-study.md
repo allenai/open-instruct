@@ -165,10 +165,15 @@ keep-alive value. It uses source `6201ba12a400` and image
 `01M5TEFD3AF7VY06EE0TJ1ZZPQ`, including incremental score retention and a separate
 fix that joins all foreground tasks after a diagnostic failure. Diagnostic timings
 are excluded from throughput measurements.
-The replacement's first abort/drain transition occurred at 21:33 UTC on October 25;
-subsequent generation continued without a transport exception or HTTP 503. This
-supports the correction, but the complete multi-case regression and retained
-wave artifacts are still pending.
+The replacement completed both opening-control waves and advanced to admission
+256 without a transport exception or HTTP 503. Its
+[control snapshot](https://beaker.org/ex/01M5TGQ7XC1R8A9T7EBD8FGJPF) retains all
+535 source files (1,687,245,055 bytes), verified against the source-job hashes.
+Each wave retained 256 score vectors and routing matrices; all expert-ID range,
+top-k and uniqueness checks pass, excluding dense-layer padding. Both waves joined
+their 128 outstanding background requests in under 0.48 seconds. This supports
+the transport correction; the remaining numerical cases and closing control
+are still pending.
 Its [first attempt](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW) was canceled
 when the node was cordoned for an unrecoverable Xid 31 error, before completing a
 wave. The application log contains no preceding CUDA exception; that does not
@@ -197,6 +202,16 @@ discrepancy, not evidence that higher admission caused it. Its cause and practic
 effect remain unresolved. The full token identities, surrounding text, scores and
 threshold counts are retained in `analysis/baseline-tail-repeatability.json`; keep
 this issue visible when assessing candidates rather than relying on mean error.
+
+The corrected control's two waves have Core mean absolute errors 0.033925 and
+0.033954. Their paired change is +0.000029, with a 95% prompt-clustered interval
+of [-0.000038, +0.000093]. Core ratio-outlier rates are 1.8326% and 1.8446%; the
+paired change is +0.0120 percentage points [-0.0069, +0.0320]. The serving waves
+themselves differ by 0.02690 mean absolute logprob, and 2.092% of expert memberships
+change (18.575% of ordered slots). Thus similar aggregate Core errors do not mean
+identical probabilities or routing. The second wave has a warmer cache; these
+observations do not establish an irreducible numerical floor. Compare candidates
+against matching waves and the closing control.
 
 All finalized attempts, including failed startup attempts, are downloaded under
 `runs/inference-throughput-20261025/archives/` with full job logs, Beaker metadata,
