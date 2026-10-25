@@ -28,6 +28,10 @@ RUN --mount=type=bind,from=flash-attention-build,source=/wheels,target=/tmp/flas
     uv pip install --system --no-deps /tmp/flash-attention-wheels/flash_attn_3-*.whl \
  && uv pip install --system --no-deps /tmp/flash-attention-wheels/flash_attn-2.8.3.post1*.whl \
  && uv pip install --system --no-deps --reinstall /tmp/flash-attention-wheels/flash_attn_4-4.0.0b27-*.whl
+# Implement CuTe's argument protocols on FA4's AuxData NamedTuple, including
+# non-empty auxiliary tensors/scalars. Preserve its TVM-FFI tuple representation.
+COPY runtime/miles/patch_flash_attn_auxdata.py /opt/core-rl/runtime/miles/patch_flash_attn_auxdata.py
+RUN python /opt/core-rl/runtime/miles/patch_flash_attn_auxdata.py
 # Importing the extensions catches missing libraries and Torch ABI mismatches
 # without requiring a GPU; each submitted job also checks forward/backward passes.
 RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_interface; import flash_attn_3; import flash_attn.cute"
