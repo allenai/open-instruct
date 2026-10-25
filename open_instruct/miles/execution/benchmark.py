@@ -184,6 +184,7 @@ async def run(args, settings, root):
             producer = load_rollout_function(
                 RolloutFnConstructorInput(args=args, data_source=source), args.rollout_function_path
             )
+            startup_seconds = time.monotonic() - started
             result = await consume(producer, args, settings, root)
         result["startup_seconds"] = startup_seconds
         result["reward_mode"] = settings["reward_mode"]
