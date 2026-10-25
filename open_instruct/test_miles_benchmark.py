@@ -61,6 +61,36 @@ def test_replay_load_propagates_failure_and_joins_every_task(failure):
     asyncio.run(exercise())
 
 
+def test_replay_failure_joins_other_probes_before_abort_and_preserves_primary_error():
+    async def exercise():
+        started = asyncio.Event()
+        joined = asyncio.Event()
+
+        async def failing():
+            await started.wait()
+            raise ValueError("primary probe failure")
+
+        async def pending():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                joined.set()
+
+        async def background(index, stop):
+            await stop.wait()
+
+        async def shutdown(workers):
+            assert joined.is_set()
+            raise RuntimeError("secondary abort failure")
+
+        with pytest.raises(ValueError, match="primary probe failure") as captured:
+            await benchmark_load.run_wave([failing(), pending()], background, 1, shutdown)
+        assert "secondary abort failure" in captured.value.__notes__[0]
+
+    asyncio.run(exercise())
+
+
 def document(tmp_path):
     return {
         "schema_version": 1,

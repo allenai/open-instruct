@@ -125,14 +125,26 @@ without pretending to supply more independent prompts. The
 waves, retaining all 16 routing matrices and joining all 32 outstanding background
 responses after each wave's abort. Its short waves and five-second observations
 do not establish sustained admission; inspect coverage during the long comparisons.
-The [long qualification replacement](https://beaker.org/ex/01M5TC1T09R3M7NFESE49VJKA1)
-now compares 64/256/512/64 with two loaded waves each on the same 256 captures,
-explicit Core-compatible rounding and fresh engines between cases. These
-diagnostic timings are excluded from throughput measurements.
+The [second long qualification attempt](https://beaker.org/ex/01M5TC1T09R3M7NFESE49VJKA1)
+completed and drained its first 256-trajectory wave at admission 64, then failed
+on a router-to-engine `ReadError`/HTTP 503 while starting the next wave. All first-
+wave scores and 256 routing matrices survived and passed the local integrity
+audit. Mean running occupancy was 63.07/64 over 887 seconds with 99.93% observation
+coverage. Its Core mean absolute logprob error was 0.03389 (95% prompt-clustered
+interval 0.03307–0.03474), with 1.831% of ratios outside 0.8–1.2 and maximum error
+5.1752. This is supplemental control evidence from a failed workflow, not a
+qualified candidate. The transport failure's cause remains unresolved.
+
+The [fresh-engine replacement](https://beaker.org/ex/01M5TE1ZDE09W1SRYR0VCQWSBP)
+compares 64/256/512/64 with one loaded wave per fresh engine, retaining the opening
+and closing controls while avoiding that inter-wave transition. It uses the same
+256 captures and explicit Core-compatible rounding, with source `dca5dee05f3e`
+and image `01M5TE1RPH65R1BRZ5ZQBH20TK`. Completed foreground scores are now saved
+incrementally. Diagnostic timings are excluded from throughput measurements.
 Its [first attempt](https://beaker.org/ex/01M5TB865YZRZG4BR87B70TWNW) was canceled
 when the node was cordoned for an unrecoverable Xid 31 error, before completing a
 wave. The application log contains no preceding CUDA exception; that does not
-identify the cause of the node event. Both interrupted attempts are archived.
+identify the cause of the node event. Both failed attempts are fully archived.
 
 The [forward-only Core reference](https://beaker.org/ex/01M5T83FJNW3Q87VYF468YMH1H)
 completed all 256 opening-control captures, spanning 64 prompt clusters and
@@ -171,6 +183,12 @@ multiple engines. Then exercise shorter response budgets on the same prompts and
 a separately identified longer-prefill workload, retaining actual length and
 truncation distributions. Check whether admission recommendations transfer across
 those workloads rather than assuming the 32K-cap result is universal.
+The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
+retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
+prefixes were verified locally using the downloaded tokenizer. Ninety-five other
+length-eligible captures lacked an exact text/token boundary and were excluded.
+This small corpus can make repeated cache-on runs prefix-hit dominated; include a
+separately qualified cache-off comparison for uncached prefill mechanics.
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
 new evidence for trainer batch size, policy-lag limits, publication intervals or
