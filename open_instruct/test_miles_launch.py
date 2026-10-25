@@ -208,6 +208,18 @@ def test_jupiter_cuda_default_and_explicit_overrides_reach_workers(tmp_path, clu
     assert payload(task["arguments"][0])["launch"]["env"] == run.launch["env"]
 
 
+@pytest.mark.parametrize("override", [None, "5", "90"])
+def test_engine_keepalive_margin_is_frozen_and_reaches_workers(tmp_path, override):
+    env = {} if override is None else {"SGLANG_TIMEOUT_KEEP_ALIVE": override}
+    run = spec(tmp_path, launch={"env": env})
+    expected = "60" if override is None else override
+    assert run.plan()["launch"]["env"]["SGLANG_TIMEOUT_KEEP_ALIVE"] == expected
+    restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "frozen.json")
+    task = launch.specification(IMAGE_ID, restored)["tasks"][0]
+    assert {"name": "SGLANG_TIMEOUT_KEEP_ALIVE", "value": expected} in task["envVars"]
+    assert payload(task["arguments"][0])["launch"]["env"]["SGLANG_TIMEOUT_KEEP_ALIVE"] == expected
+
+
 def test_jupiter_cuda_path_cli_override_and_secret_precedence(tmp_path):
     run = spec(tmp_path, launch={"cluster": "ai2/jupiter"})
     overridden = RunSpec.from_dict(

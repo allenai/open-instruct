@@ -130,6 +130,9 @@ its image's behavior.
 The pinned MILES router uses a **60-second server idle keep-alive timeout**.
 HTTPX clients retain their default **five-second idle connection reuse window**.
 This gives the client time to retire a connection before the router closes it.
+The run specification also defaults `launch.env.SGLANG_TIMEOUT_KEEP_ALIVE="60"`
+for the router-to-engine leg, matching the production examples. This value is
+visible in the plan and launch receipt; explicit environment overrides are retained.
 The server timeout applies between requests; it is not a generation deadline,
 does not change admission limits, and does not hold an inference slot open.
 Idle sockets can remain open longer. Transport errors alone do not establish

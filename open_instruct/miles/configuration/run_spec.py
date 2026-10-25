@@ -403,6 +403,10 @@ class RunSpec:
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
+        if "SGLANG_TIMEOUT_KEEP_ALIVE" not in launch["secrets"]:
+            # Match the production examples on the router-to-engine leg too.
+            # Equal five-second server/client idle windows race during pool reuse.
+            launch["env"].setdefault("SGLANG_TIMEOUT_KEEP_ALIVE", "60")
         if launch["cluster"] == "ai2/jupiter" and "LD_LIBRARY_PATH" not in launch["secrets"]:
             # The pinned CUDA runtime needs forward-compatibility libraries on
             # Jupiter's older host driver. Explicit environment values win.
