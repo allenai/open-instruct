@@ -284,6 +284,17 @@ and prefill scoring of the identical target token. This diagnostic isolates
 sequence-length and execution-path effects; it does not qualify a production
 configuration or replace the async refresh test.
 
+An offline CPU microbenchmark of the existing checks used 256 retained captures
+(1,960,609 response tokens) on the development host. Native `record_response`
+took 235–236 microseconds per response; benchmark `sample_record` took 37.6–38.0.
+These are five hot-cache trial ranges, not confidence intervals or production
+speedup estimates. They exclude JSON/base64 parsing, route deserialization, GPU
+work, contention and mixed-version span counts. The actual native sample class
+and captured token/logprob arrays were used; routing placeholders supplied only
+shape metadata. `analysis/check-cost-microbenchmark.json` retains provenance and
+all timings. These measurements do not justify removing transport integrity
+checks; no runtime checks were removed or profiling hooks added.
+
 The runtime-check audit also found an opt-in publication diagnostic race. With
 refresh publication and a positive `core.diagnostic_interval`, the round-trip
 check could reset weights after the publisher had resumed live decoding. The
