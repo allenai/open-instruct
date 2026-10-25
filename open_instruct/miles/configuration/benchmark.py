@@ -58,6 +58,8 @@ def parse(value):
         "replay_copies": 1,
         "replay_background": False,
         "score_reference": False,
+        "score_route_reference": None,
+        "score_route_repeat": 0,
     }
     validation.fields(value, "benchmark", set(defaults))
     result = defaults | value
@@ -67,11 +69,20 @@ def parse(value):
     validation.integer(result["replay_repeats"], "benchmark.replay_repeats", minimum=1)
     validation.integer(result["replay_copies"], "benchmark.replay_copies", minimum=1)
     validation.boolean(result["score_reference"], "benchmark.score_reference")
+    validation.integer(result["score_route_repeat"], "benchmark.score_route_repeat", minimum=0)
     validation.boolean(result["replay_background"], "benchmark.replay_background")
     if result["replay_reference"] is not None:
         validation.text(result["replay_reference"], "benchmark.replay_reference")
         if not result["replay_reference"].startswith("/"):
             raise InputError("benchmark.replay_reference must be an absolute completed benchmark directory")
+    if result["score_route_reference"] is not None:
+        validation.text(result["score_route_reference"], "benchmark.score_route_reference")
+        if not result["score_route_reference"].startswith("/"):
+            raise InputError("benchmark.score_route_reference must be an absolute completed replay directory")
+        if not result["score_reference"]:
+            raise InputError("benchmark.score_route_reference requires score_reference=true")
+    elif result["score_route_repeat"]:
+        raise InputError("benchmark.score_route_repeat requires score_route_reference")
     if result["reward_mode"] not in ("none", "configured"):
         raise InputError("benchmark.reward_mode must be none or configured")
     variants = result["variants"]

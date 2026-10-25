@@ -248,6 +248,10 @@ def core_comparison(root, reference_sha256, left, right, *, bootstrap=2000, seed
         or summary["reference_sha256"] != reference_sha256
     ):
         raise ValueError("Core scores must be complete and use the same captured reference")
+    if summary.get("routing", "natural") != "natural":
+        raise ValueError(
+            "Comparing serving arms requires a natural-routing Core reference, not one arm's replay routes"
+        )
     rows = [json.loads(line) for line in (root / "benchmark-core-reference.jsonl").read_text().splitlines()]
     scores = {row["index"]: row for row in rows}
     if len(scores) != len(rows) or len(rows) != summary["trajectories"]:

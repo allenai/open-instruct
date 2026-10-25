@@ -209,6 +209,27 @@ is a numerical reference, not a measurement of packed, expert-parallel training
 or a guarantee of learning quality. Serving-to-serving agreement alone cannot
 determine whether a difference moved toward or away from this reference.
 
+To isolate agreement under the trainer's routing-replay contract, optionally set
+`benchmark.score_route_reference` to a completed serving replay directory and
+`benchmark.score_route_repeat` to its zero-based wave (default zero). This requires
+`score_reference=true`, the same checkpoint and capture hash, and exactly one
+route record per original capture (`replay_copies=1`). The diagnostic validates
+the saved matrix hashes, shape and expert-ID range before passing each matrix to
+the pinned MILES/Core replay context. It retains the full input sequence; native
+trainer code supplies each document's unscored final-token route padding.
+No serving hot-path checks are added. The summary records `routing=serving_replay`,
+and each score vector records its source route hash. Compare these scores with
+that exact source wave; they are not an independent natural-routing reference
+for comparing two serving arms, so the comparison command rejects them as `--core`.
+This remains an EP1 diagnostic, without packing, training or mid-sequence refresh;
+it cannot replace the production qualification run.
+Each replayed score vector also records `route_context_setup_host_seconds`:
+elapsed host time for native route padding/conversion and context entry, including
+its existing GPU range/uniqueness predicates and synchronization. This excludes
+file loading, the initial route upload and model forward; it does not isolate
+individual check costs or predict packed expert-parallel trainer overhead. The
+diagnostic adds no CUDA synchronization for this timer.
+
 ## Selecting configurations
 
 Start with one engine and memory-feasible pools. Couple admission with decode
