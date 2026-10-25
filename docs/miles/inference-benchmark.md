@@ -255,6 +255,10 @@ actual lengths and original-prompt clusters. These continuations are useful for
 prefill mechanics; siblings and repeated source prompts are not independent data.
 The generated verifier deliberately rejects reward computation: use only
 `benchmark.reward_mode=none`.
+Check corpus size against outstanding work: a small repeated corpus can make
+cache-on measurements almost entirely prefix hits. Include a separately qualified
+cache-off comparison to measure uncached prefill, and retain the observed cached
+and uncached input counters.
 
 Measure response-length sensitivity separately on the same immutable short
 prompts, for example 2K/8K/32K response caps with sufficient context. Start with
