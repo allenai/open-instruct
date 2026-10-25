@@ -72,14 +72,21 @@ def node_roles(root):
 
 def analyze(root, *, warmup=6, window=None):
     root = Path(root)
-    stages = records(root / "checkpoints/driver_timing.jsonl")
-    chosen = [
-        r for r in stages if r["stage"] in ("generation_wait", "training", "publication") and r["rollout_id"] >= warmup
-    ]
-    if not chosen or not all(r["passed"] for r in chosen):
-        raise ValueError("No complete warm-window driver stages")
-    start = min(r["started_unix"] for r in chosen) if window is None else window[0]
-    end = max(r["started_unix"] + r["seconds"] for r in chosen) if window is None else window[1]
+    if window is None:
+        stages = records(root / "checkpoints/driver_timing.jsonl")
+        chosen = [
+            r
+            for r in stages
+            if r["stage"] in ("generation_wait", "training", "publication") and r["rollout_id"] >= warmup
+        ]
+        if not chosen or not all(r["passed"] for r in chosen):
+            raise ValueError("No complete warm-window driver stages")
+        start = min(r["started_unix"] for r in chosen)
+        end = max(r["started_unix"] + r["seconds"] for r in chosen)
+    else:
+        start, end = window
+        if end <= start:
+            raise ValueError("Observation window must be positive")
     pipeline_path = root / "checkpoints/pipeline_occupancy.jsonl"
     pipeline = records(pipeline_path) if pipeline_path.exists() else []
     for row in pipeline:

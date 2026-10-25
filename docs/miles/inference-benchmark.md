@@ -97,7 +97,7 @@ Artifacts under `output.root`, also collected into the Beaker result:
 | `benchmark-summary.json` | Measured delivered throughput, GPU denominator, startup and drain time |
 | `benchmark-batches.jsonl` | Complete-collection timing, counts and producer metrics |
 | `benchmark-responses.jsonl` | Prompt/response lengths, finish status and replay payload size |
-| `benchmark-captures.jsonl` | Token IDs, logprobs and route hashes for the first configured sample indices |
+| `benchmark-captures/*.json` | Token IDs, logprobs and route hashes for the first configured sample indices; separate files keep long-response captures within the result collector's per-file limit |
 | `benchmark-boundaries.json` / `benchmark-shutdown.json` | Retained queue/work counts at measurement boundaries and shutdown |
 | `benchmark-server-start.json` / `benchmark-server-end.json` | Engine identities and resolved server information |
 | `benchmark-resources.jsonl` | GPU identity/activity/memory and consumer CPU/RSS samples |
@@ -109,6 +109,21 @@ numerical equivalence to a baseline or Core. Qualification additionally needs
 same-prefix probability comparisons, cache/chunk boundary cases, and control
 repeats. Preserve image, runtime lock, prompt manifest and resolved serving mode
 with those comparisons.
+
+Analyze a completed case with `python -m scripts.miles.analyze_inference_benchmark
+RUN_DIRECTORY --output analysis.json`. The analyzer recomputes collection totals,
+checks response accounting, and aligns length distributions, GPU measurements and
+queue/engine observations to the measured window. Missing observation coverage
+remains unknown rather than becoming zero utilization.
+
+For a separate same-prefix diagnostic, copy the benchmark run to a new output
+directory, set `benchmark.replay_reference` to the absolute path of a completed
+case, and set `miles.sglang_enable_custom_logit_processor=true`. It replays the
+captured token sequences twice by default (`benchmark.replay_repeats`), retaining
+raw model logprobs and route hashes in `benchmark-replay-*.jsonl`. Repeat controls
+and candidates on the same reference. This path checks frozen-token reproduction
+and payload lengths; statistical comparison is still required. It does not
+produce a throughput number: forced token selection synchronizes CPU and GPU.
 
 ## Selecting configurations
 
@@ -129,3 +144,12 @@ ineffective native policy overrides and this extra connection limit.
 A short-response lifecycle smoke test is useful before this procedure, but it
 cannot establish a long-context serving default. Treat H100 as a separate memory
 and throughput qualification rather than extrapolating B300 capacities.
+
+For an illustrative mixed corpus when a production manifest is unavailable,
+`python -m scripts.miles.prepare_inference_workload --model CHECKPOINT --output
+NEW_DIRECTORY --task math=1024 --task gsm8k=512 --task ifeval=512` prepares pinned
+tasks using the checkpoint's tokenizer/template. It explicitly excludes prompts
+above 2048 tokens, retains source identities and exclusion records, and never
+truncates prompts. Point `data.prompt_data` and `data.reward_config` at its prepared
+outputs. This subset is a benchmark workload, not a production data recommendation;
+qualify the chosen settings again on the intended production length distribution.

@@ -53,12 +53,19 @@ def parse(value):
         "capture_samples": 8,
         "reward_mode": "none",
         "variants": [],
+        "replay_reference": None,
+        "replay_repeats": 2,
     }
     validation.fields(value, "benchmark", set(defaults))
     result = defaults | value
     for key in ("warmup_seconds", "measure_seconds", "collection_timeout", "drain_timeout"):
         validation.number(result[key], f"benchmark.{key}", exclusive_min=key != "warmup_seconds")
     validation.integer(result["capture_samples"], "benchmark.capture_samples", minimum=0)
+    validation.integer(result["replay_repeats"], "benchmark.replay_repeats", minimum=1)
+    if result["replay_reference"] is not None:
+        validation.text(result["replay_reference"], "benchmark.replay_reference")
+        if not result["replay_reference"].startswith("/"):
+            raise InputError("benchmark.replay_reference must be an absolute completed benchmark directory")
     if result["reward_mode"] not in ("none", "configured"):
         raise InputError("benchmark.reward_mode must be none or configured")
     variants = result["variants"]
@@ -113,3 +120,5 @@ def validate(spec, config):
         )
     if miles.get("sglang_weight_version", "0") != "0":
         raise InputError('Inference benchmarks use the fixed checkpoint version sglang_weight_version="0"')
+    if spec.benchmark["replay_reference"] and not miles.get("sglang_enable_custom_logit_processor"):
+        raise InputError("Diagnostic replay requires miles.sglang_enable_custom_logit_processor=true")

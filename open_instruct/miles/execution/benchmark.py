@@ -23,7 +23,7 @@ from scripts.miles import snapshot_options
 
 from open_instruct import logger_utils
 from open_instruct.miles.execution import workflow
-from open_instruct.miles.rollout import benchmark_metrics
+from open_instruct.miles.rollout import benchmark_metrics, benchmark_replay
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -89,10 +89,11 @@ async def consume(producer, args, settings, root):
     phase = "warmup" if settings["warmup_seconds"] else "measure"
     measure_started = started
     boundaries = {"start": pipeline_observer.snapshot(producer)}
+    capture_root = root / "benchmark-captures"
+    capture_root.mkdir()
     with (
         (root / "benchmark-batches.jsonl").open("w", buffering=1) as batch_file,
         (root / "benchmark-responses.jsonl").open("w", buffering=1) as response_file,
-        (root / "benchmark-captures.jsonl").open("w", buffering=1) as captures,
     ):
         while True:
             batch_started = time.monotonic()
@@ -114,7 +115,7 @@ async def consume(producer, args, settings, root):
                         and sample.index not in captured_indices
                     ):
                         routes = sample.rollout_routed_experts
-                        captures.write(
+                        (capture_root / f"{sample.index:08d}.json").write_text(
                             json.dumps(
                                 {
                                     **row,
@@ -175,12 +176,15 @@ async def run(args, settings, root):
         await inference.init()
         init_http_client(args)
         workflow.write_json(root / "benchmark-server-start.json", await server_info(args))
-        source = load_function(args.data_source_path)(args)
-        producer = load_rollout_function(
-            RolloutFnConstructorInput(args=args, data_source=source), args.rollout_function_path
-        )
         startup_seconds = time.monotonic() - started
-        result = await consume(producer, args, settings, root)
+        if settings["replay_reference"]:
+            result = await benchmark_replay.run(args, settings, root)
+        else:
+            source = load_function(args.data_source_path)(args)
+            producer = load_rollout_function(
+                RolloutFnConstructorInput(args=args, data_source=source), args.rollout_function_path
+            )
+            result = await consume(producer, args, settings, root)
         result["startup_seconds"] = startup_seconds
         result["reward_mode"] = settings["reward_mode"]
         workflow.write_json(root / "benchmark-server-end.json", await server_info(args))

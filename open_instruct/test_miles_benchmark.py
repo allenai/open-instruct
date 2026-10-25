@@ -1,9 +1,12 @@
 """Inference benchmarks must allocate no trainer and account only measured work."""
 
 import copy
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from scripts.miles import analyze_inference_benchmark, prepare_inference_workload
 
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.configuration.run_spec import RunSpec
@@ -82,7 +85,7 @@ def test_response_checks_reject_missing_payload_and_wrong_policy():
         response_length=2,
         rollout_log_probs=[-0.1, -1.0],
         status=SimpleNamespace(value="completed"),
-        all_weight_version_spans=[SimpleNamespace(version="0")],
+        all_weight_version_spans=[SimpleNamespace(version="0", abs_start=1, abs_end=3)],
         rollout_routed_experts=SimpleNamespace(shape=(2, 16, 16), nbytes=2048),
         index=0,
         group_index=0,
@@ -92,6 +95,8 @@ def test_response_checks_reject_missing_payload_and_wrong_policy():
         ("rollout_log_probs", [-0.1]),
         ("rollout_log_probs", [float("nan"), -1]),
         ("all_weight_version_spans", [SimpleNamespace(version="1")]),
+        ("all_weight_version_spans", [SimpleNamespace(version="0", abs_start=2, abs_end=3)]),
+        ("all_weight_version_spans", [SimpleNamespace(version="0", abs_start=1, abs_end=2)]),
         ("rollout_routed_experts", None),
     ]:
         broken = copy.copy(sample)
@@ -149,3 +154,74 @@ def test_miles_router_warns_about_ineffective_policy_and_connection_gate():
         "miles_router_ignores_native_policy",
         "miles_router_connection_limit",
     }
+
+
+def test_inference_analysis_validates_accounting_and_keeps_missing_occupancy_unknown(tmp_path):
+    batches = [
+        {
+            "phase": "measure",
+            "started": 1,
+            "finished": 11,
+            "finished_unix": 100,
+            "groups": 1,
+            "samples": 1,
+            "response_tokens": 50,
+            "route_bytes": 200,
+        }
+    ]
+    files = {
+        "workflow.json": {"status": "complete"},
+        "benchmark-summary.json": benchmark_metrics.summarize(batches, 2),
+        "resolved-plan.json": {"miles": {"rollout_num_gpus": 2}},
+        "benchmark-boundaries.json": {},
+        "benchmark-shutdown.json": {},
+    }
+    for name, value in files.items():
+        (tmp_path / name).write_text(json.dumps(value))
+    streams = {
+        "benchmark-batches.jsonl": batches,
+        "benchmark-responses.jsonl": [
+            {"phase": "measure", "prompt_tokens": 5, "response_tokens": 50, "route_bytes": 200, "status": "truncated"}
+        ],
+        "benchmark-resources.jsonl": [],
+    }
+    for name, values in streams.items():
+        (tmp_path / name).write_text("".join(json.dumps(value) + "\n" for value in values))
+    report = analyze_inference_benchmark.analyze(tmp_path)
+    assert report["summary"]["response_tokens_per_gpu_second"] == 2.5
+    assert report["truncated_fraction"] == 1
+    assert report["occupancy"]["pipeline"]["http_active_requests"]["mean"] is None
+    files["benchmark-summary.json"]["response_tokens"] = 100
+    (tmp_path / "benchmark-summary.json").write_text(json.dumps(files["benchmark-summary.json"]))
+    with pytest.raises(ValueError, match="summary disagrees"):
+        analyze_inference_benchmark.analyze(tmp_path)
+
+
+def test_replay_requires_explicit_diagnostic_server_setting(tmp_path):
+    payload = document(tmp_path)
+    payload["benchmark"]["replay_reference"] = str(tmp_path / "reference")
+    with pytest.raises(ValueError, match="custom_logit_processor"):
+        RunSpec.from_dict(payload)
+    payload.setdefault("miles", {})["sglang_enable_custom_logit_processor"] = True
+    assert RunSpec.from_dict(payload).benchmark["replay_repeats"] == 2
+
+
+def test_workload_preparation_filters_without_truncating_and_keeps_sources(tmp_path, monkeypatch):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "tokenizer_config.json").write_text("{}")
+    tokenizer = SimpleNamespace(chat_template="template", encode=lambda text, **kwargs: list(text))
+    monkeypatch.setattr(prepare_inference_workload.run_data, "_tokenizer", lambda path: tokenizer)
+    candidates = [
+        {
+            "input": text,
+            "metadata": {"prepared_sample_id": str(index), "verifiers": [{"name": "gsm8k", "target": "1"}]},
+        }
+        for index, text in enumerate(["too long", "one", "two", "last"])
+    ]
+    monkeypatch.setattr(prepare_inference_workload.run_data, "_tasks", lambda *args: ({"train": candidates}, {}, None))
+    result = prepare_inference_workload.prepare(model, tmp_path / "corpus", counts={"gsm8k": 2}, max_prompt_length=3)
+    rows = [json.loads(line) for line in Path(result["prompt_data"]).read_text().splitlines()]
+    assert {r["input"] for r in rows} == {"one", "two"}
+    manifest = json.loads(Path(result["manifest"]).read_text())
+    assert all(Path(path).is_file() for path in manifest["inputs"])
