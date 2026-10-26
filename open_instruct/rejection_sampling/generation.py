@@ -33,6 +33,7 @@ from tqdm.asyncio import tqdm
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
+from open_instruct import vllm_utils
 from open_instruct.dataset_processor import INPUT_IDS_PROMPT_KEY, DatasetConfig, SFTDatasetProcessor
 from open_instruct.rejection_sampling import prompt_templates
 from open_instruct.utils import ArgumentParserPlus, combine_dataset, parse_dataset_mixer_list
@@ -163,6 +164,7 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
         max_model_len=gen_args.response_length,
+        hf_overrides=vllm_utils.flatten_olmo3_rope_parameters,
     )
 
     # filter out prompts which are beyond the model's max token length
