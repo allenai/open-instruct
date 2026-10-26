@@ -1543,8 +1543,7 @@ class TestOlmo35GenerationLabels(unittest.TestCase):
     def setUp(self):
         self.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
         self.tokenizer.add_tokens(["<|im_start|>", "<|im_end|>"], special_tokens=True)
-        with open(os.path.join(TEST_DATA_DIR, "olmo35_chat_template.jinja")) as template_file:
-            self.tokenizer.chat_template = template_file.read()
+        self.tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo35"]
 
     @parameterized.expand([("inline",), ("separate",), ("empty",), ("tool_call",)])
     def test_complete_assistant_output_is_trained(self, shape):
