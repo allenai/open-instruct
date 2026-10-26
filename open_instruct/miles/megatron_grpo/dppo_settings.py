@@ -5,6 +5,10 @@ import math
 import os
 
 ENV_PREFIX = "OI_DPPO_"
+# ``ppo``: MILES' clipped policy loss. ``dppo``: Open Instruct's DPPO trust-region mask
+# (megatron_grpo.dppo_loss), which needs the rollout engine's behavior log-probs.
+POLICY_LOSSES = ("ppo", "dppo")
+LOSS_FUNCTION = "open_instruct.miles.megatron_grpo.dppo_loss.policy_loss"
 DIVERGENCE_TYPES = ("tv", "kl")
 
 

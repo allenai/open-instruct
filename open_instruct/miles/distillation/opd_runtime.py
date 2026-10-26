@@ -17,6 +17,7 @@ from open_instruct.miles.configuration import options
 from open_instruct.miles.distillation import eopd_math, opd_prepare, opd_retention, opd_selection_audit, opd_timing
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import cluster, workflow
+from open_instruct.miles.megatron_grpo import dppo_settings
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -233,6 +234,9 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
             "--custom-loss-function-path",
             "open_instruct.miles.distillation.eopd_loss.policy_loss",
         ]
+    if doc["distillation"]["policy_loss"] == "dppo":
+        # DPPO's trust-region mask replaces the clipped surrogate on the reverse-KL advantages.
+        args += ["--loss-type", "custom_loss", "--custom-loss-function-path", dppo_settings.LOSS_FUNCTION]
     if tracking["wandb_mode"] != "disabled":
         args += ["--use-wandb", "--wandb-mode", tracking["wandb_mode"]]
         if tracking["wandb_entity"]:
@@ -307,6 +311,7 @@ def execute(spec):
                 opd_retention.KEEP_ENV: str(spec.document["training"]["keep_checkpoints"]),
                 "CONVERT_KEEP_PP1": "1",
                 **eopd_settings(spec).environment(),
+                **(spec.dppo_settings().environment() if spec.dppo_settings() else {}),
                 **(
                     {
                         opd_prepare.EOS_REMAP_ENV: opd_prepare.eos_remap_environment(

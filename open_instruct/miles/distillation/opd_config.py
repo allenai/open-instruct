@@ -8,6 +8,7 @@ from pathlib import Path
 from open_instruct.miles.configuration import options, run_spec, validation
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.megatron_grpo import dppo_settings
 
 REVISIONS = {
     "Qwen/Qwen3.5-2B": "15852e8c16360a2fea060d615a32b45270f8a8fc",
@@ -87,8 +88,8 @@ OWNED_NATIVE_OPTIONS = {
     "opd_log_prob_top_k": "distillation.log_prob_top_k",
     "opd_kl_coef": "distillation.kl_coef",
     "use_rollout_logprobs": "distillation.use_rollout_logprobs",
-    "loss_type": "distillation.eopd",
-    "custom_loss_function_path": "distillation.eopd",
+    "loss_type": "distillation.eopd and distillation.policy_loss",
+    "custom_loss_function_path": "distillation.eopd and distillation.policy_loss",
     "rm_url": "the OPD teacher hooks",
     "custom_rm_path": "the OPD teacher hooks",
     "custom_reward_post_process_path": "the OPD teacher hooks",
@@ -166,6 +167,11 @@ DEFAULTS = {
         "eopd_alpha": 1.0,
         "eopd_tau": 0.8,
         "eopd_top_k": 16,
+        # ``ppo``: MILES' clipped surrogate. ``dppo``: the verifier-RL arm's DPPO trust-region
+        # mask (megatron_grpo.dppo_loss) on the OPD advantages; needs use_rollout_logprobs.
+        "policy_loss": "ppo",
+        "dppo_divergence_type": "tv",
+        "dppo_threshold": 0.1,
     },
     "optimizer": {
         "learning_rate": 1e-6,
@@ -347,6 +353,22 @@ class OPDRunSpec:
         validation.integer(distillation["eopd_top_k"], "distillation.eopd_top_k")
         validation.number(distillation["eopd_alpha"], "distillation.eopd_alpha", exclusive_min=True)
         validation.number(distillation["eopd_tau"], "distillation.eopd_tau")
+        validation.choice(distillation["policy_loss"], "distillation.policy_loss", dppo_settings.POLICY_LOSSES)
+        validation.number(distillation["dppo_threshold"], "distillation.dppo_threshold", exclusive_min=True)
+        try:
+            dppo_settings.Settings(distillation["dppo_divergence_type"], distillation["dppo_threshold"])
+        except (TypeError, ValueError) as error:
+            raise InputError(f"distillation.dppo_*: {error}") from None
+        if distillation["policy_loss"] == "dppo":
+            if not distillation["use_rollout_logprobs"]:
+                raise InputError("distillation.policy_loss=dppo requires distillation.use_rollout_logprobs=true")
+            if distillation["eopd"]:
+                raise InputError("distillation.policy_loss=dppo does not combine with distillation.eopd")
+            for key in ("use_tis", "use_opsm", "use_kl_loss"):
+                if native.get(key, False):
+                    raise InputError(f"distillation.policy_loss=dppo does not combine with miles.{key}")
+            if native.get("entropy_coef", 0.0) != 0.0:
+                raise InputError("distillation.policy_loss=dppo does not combine with miles.entropy_coef")
         for section, key in (
             ("distillation", "kl_coef"),
             ("optimizer", "learning_rate"),
@@ -395,6 +417,13 @@ class OPDRunSpec:
         if tracking["wandb_mode"] == "online" and "WANDB_API_KEY" not in document["launch"]["secrets"]:
             raise InputError('tracking.wandb_mode="online" requires launch.secrets.WANDB_API_KEY')
         return cls(document, base)
+
+    def dppo_settings(self):
+        """DPPO settings for the custom loss, forwarded to the trainer as ``OI_DPPO_*`` environment."""
+        distillation = self.document["distillation"]
+        if distillation["policy_loss"] != "dppo":
+            return None
+        return dppo_settings.Settings(distillation["dppo_divergence_type"], distillation["dppo_threshold"])
 
     @property
     def name(self):

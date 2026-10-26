@@ -655,6 +655,46 @@ def test_eopd_knobs_are_validated(override, message):
         specs.load(CONFIG, override)
 
 
+def test_dppo_selects_the_verifier_rl_loss_and_forwards_its_settings():
+    spec = specs.load(CONFIG)
+    assert spec.dppo_settings() is None
+    spec = specs.load(
+        CONFIG,
+        [
+            "distillation.use_rollout_logprobs=true",
+            'distillation.policy_loss="dppo"',
+            "distillation.dppo_threshold=0.2",
+        ],
+    )
+    values, flags = native(spec)
+    assert values["--loss-type"] == "custom_loss"
+    assert values["--custom-loss-function-path"] == "open_instruct.miles.megatron_grpo.dppo_loss.policy_loss"
+    assert "--use-opd" in flags and "--use-rollout-logprobs" in flags
+    assert spec.dppo_settings().environment() == {"OI_DPPO_DIVERGENCE_TYPE": "tv", "OI_DPPO_THRESHOLD": "0.2"}
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        (['distillation.policy_loss="dppo"'], "requires distillation.use_rollout_logprobs"),
+        (
+            ["distillation.use_rollout_logprobs=true", 'distillation.policy_loss="dppo"', "distillation.eopd=true"],
+            "does not combine with distillation.eopd",
+        ),
+        (
+            ["distillation.use_rollout_logprobs=true", 'distillation.policy_loss="dppo"', "miles.use_tis=true"],
+            "does not combine with miles.use_tis",
+        ),
+        (['distillation.policy_loss="grpo"'], "distillation.policy_loss"),
+        (["distillation.dppo_threshold=0"], "> 0"),
+        (['distillation.dppo_divergence_type="js"'], "divergence type"),
+    ],
+)
+def test_dppo_knobs_are_validated(override, message):
+    with pytest.raises(InputError, match=message):
+        specs.load(CONFIG, override)
+
+
 def test_eopd_tiny_smoke_config_mirrors_the_opd_tiny_run():
     folder = CONFIG.parent
     opd = specs.load(folder / "eopd-opd-qwen3-tiny.toml").to_dict()

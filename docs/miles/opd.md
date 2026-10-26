@@ -49,6 +49,16 @@ of copying the old Core adapter back into Open Instruct.
 - OPD evaluation calls the shared verifier with the historical whole-answer,
   nonzero-truncation protocol explicitly, independently of GRPO reward defaults.
 
+## Policy loss
+
+`distillation.policy_loss` picks the surrogate applied to the reverse-KL advantages.
+The default `"ppo"` is MILES' clipped policy loss. `"dppo"` uses the
+[Megatron verifier GRPO](megatron-grpo.md) DPPO trust-region mask
+(`distillation.dppo_divergence_type`, default `"tv"`; `distillation.dppo_threshold`,
+default 0.1), so an OPD arm and a verifier-RL arm can share one objective. DPPO
+requires `distillation.use_rollout_logprobs = true` and rejects EOPD, TIS, OPSM,
+a KL loss and an entropy bonus.
+
 ## Local and runtime checks
 
 Use `open_instruct/test_miles_opd.py` and `open_instruct/test_miles_eopd.py` for
