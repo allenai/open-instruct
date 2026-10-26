@@ -112,17 +112,17 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-The examples inherit disabled prefix caching (`inference.radix_cache = false`).
-The pinned Olmo hybrid KDA kernel cannot produce the FP32 tracked-state snapshots
-required by SGLang's `extra_buffer` prefix-cache path. Enabling that path fails
-during rollout; selecting `linear_attn_prefill_backend = "triton"` does not change
-the Olmo adapter's kernel override. Keep prefix caching disabled for this runtime;
-the recurrent-state pool is still required for active requests. See
+For the matched Olmo 3.5 geometry, automatic profiles enable prefix caching on
+B300 and disable it on H100. Set `inference.radix_cache` explicitly to override
+that choice. Generic configurations and the colocated `dev` example keep caching
+disabled. Cached hybrid serving requires the FP32 tracked-state implementation
+in the updated [runtime lock](../../../runtime/miles/runtime.lock.json); rebuild
+the image when changing pins. See
 [hybrid model limits](../../../docs/miles/moe-model-support.md#current-limits).
 
 The learning templates (`node`, `large`) propose **512 running requests, 512 HTTP
-permits and decode graphs through batch 512 per B300 engine**. They reserve
-17,825,792 KV tokens (512 × 34,816), retain memory fraction 0.7, and keep prefill
+permits and decode graphs through batch 512 per B300 engine**. They use
+17,825,792 KV tokens (512 × 34,816), 3,072 recurrent slots, memory fraction 0.7, and prefill
 chunks at 8,192 when the model and topology match. `inference.profile = "auto"`
 selects the starting point from checkpoint geometry, cluster hardware, dedicated
 TP1 placement and context caps; explicit serving settings override it. `dev` retains eight requests and its small pools
@@ -136,12 +136,13 @@ tokens/s; two engines achieved 47.9K, about 98% of ideal doubling. At 512 admiss
 almost no engine queue. The larger 1,024-permit setting mainly added queueing.
 See the [measurements and saved artifacts](https://github.com/allenai/oe-planning/issues/31#issuecomment-6410668511).
 
-The measurements used a newer experimental serving runtime with prefix caching;
-these examples do not change the pinned runtime or enable its unsupported prefix-cache
-path. The B300 profile supplies 1,024 recurrent slots for 512 active requests
-with caching off. The measured cache-on runtime used 3,072 slots. Throughput and
-fully async mid-sequence refresh still need qualification on the exact example
-runtime. Check memory again for a different model; these are not H100 settings.
+The throughput measurements used a separate experimental runtime. The updated
+runtime was checked independently with the default EP2 trainer and one B300
+engine: both optimizer updates completed, including training on 29 responses
+that crossed a weight refresh. Engine observations showed 511 running requests
+before each refresh. This is a correctness fixture, not a new sustained
+throughput measurement. Disabling caching explicitly selects 1,024 recurrent
+slots on B300. Check memory again for a different model; these are not H100 pools.
 
 The global unfinished-sample budgets remain at their previous resolved values:
 768 for `node` and 2,432 for `large`, now explicit. Raising per-engine ceilings
@@ -160,8 +161,9 @@ tokens/s versus 14.5K for cached 320. The H100 profile uses 6,684,672 KV tokens,
 Explicitly enabled caching selects 320 with 4,456,448 KV tokens and 1,920 slots.
 The complete two-wave numerical comparison found no aggregate Core-error increase
 for the selected H100 configuration; paired intervals and coupling limits are in
-the guide. These measurements used the experimental runtime. Exact-runtime
-async-refresh qualification remains pending. Profiles preserve the user's cache mode.
+the guide. These measurements used the experimental runtime; the updated image
+also passed a short H100 deployment check. The fully async trainer-consumption
+check used B300. Profiles preserve explicit cache-mode overrides.
 
 Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
 provenance. When the checkpoint is on remote WEKA and its `config.json` is not

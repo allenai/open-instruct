@@ -18,9 +18,9 @@ Their [generated recipe tables](configuration.md#example-recipes) show GPU
 allocations and batch geometry from the current TOMLs. For the runtime image, see
 the [MILES GRPO guide](grpo.md). Do not transfer a short-context
 no-recomputation setting to long packs without checking memory; the maintained
-node and large use recomputation and a provisional B300 engine admission of 512.
+node and large use recomputation and a measured B300 engine starting admission of 512.
 Their [capacity notes](../../configs/miles/examples/README.md#capacity-and-qualification-settings)
-record the measured model, runtime differences and pending qualification. The
+record the measured model, runtime differences and qualification limits. The
 generic loader still defaults to 64; size other models and GPUs as described below.
 
 ## Size engine admission from memory
@@ -150,15 +150,19 @@ The selected capacities are per engine:
 
 | GPU and cache mode | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Static memory fraction |
 |---|---:|---:|---:|---:|
-| B300, caching disabled | 512 | 17,825,792 | 1,024 | 0.7 |
-| B300, caching explicitly enabled | 512 | 17,825,792 | 3,072 | 0.7 |
-| H100, caching disabled | 512 | 6,684,672 | 512 | 0.9 |
+| B300, automatic cache-on | 512 | 17,825,792 | 3,072 | 0.7 |
+| B300, caching explicitly disabled | 512 | 17,825,792 | 1,024 | 0.7 |
+| H100, automatic cache-off | 512 | 6,684,672 | 512 | 0.9 |
 | H100, caching explicitly enabled | 320 | 4,456,448 | 1,920 | 0.9 |
 
 All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
-Profiles do not enable caching or change runtime pins. These are candidates
-pending deployment qualification on the examples' exact runtime; the measured
-runtime's async-refresh coverage is described below.
+Profiles choose cache mode with hardware unless `inference.radix_cache` is
+explicit. Generic configurations keep caching disabled. Cache-on profiles select
+the `extra_buffer` strategy. This branch's runtime lock includes the required
+FP32 snapshot implementation; profile resolution itself never changes an image
+or its dependencies. Rebuild with the lock and inspect the recorded runtime.
+The throughput measurements and updated-runtime deployment checks have distinct
+scopes, described below.
 
 The global producer budget is independent: profiles preserve its generic sizing
 basis, and examples retain explicit 768/2,432 budgets. An explicit running-request
@@ -185,14 +189,13 @@ All 902 collected files (871.6 MB) were downloaded and hash-verified, with no
 collector omissions. The closing window was audited from its retained boundaries,
 counter snapshots, batches and response records without marking its workflow complete.
 
-The measured adapter also needs a compatibility change before enabling caching
-on the examples' newer SGLang pin: that runtime requires selected recurrent-state
-snapshots written from FP32 accumulators. The pinned adapter lacks that contract,
-and the runtime rejects the unsupported path. An isolated implementation passed
+The examples' SGLang pin requires selected recurrent-state snapshots written
+from FP32 accumulators. The updated adapter implements that contract. It passed
 [eight GPU precision/layout cases and two dispatch cases](https://beaker.org/ex/01M5VGGMDMTV1KFFH7N94WR7S4).
-Full-model deployment qualification remains separate. Casting BF16 intermediate
-states to FP32 would not restore the missing precision. Profiles do not enable
-caching or silently change runtime pins.
+Full-model deployment was checked separately below. Casting BF16 intermediate
+states to FP32 would not restore the missing precision. Older images lacking
+this implementation reject the cached path; changing a configuration does not
+update their runtime.
 
 ## Fully async refresh coverage and retained evidence
 
@@ -210,14 +213,36 @@ the remaining real-reward prompts. It exercises overlap and trainer consumption;
 it does not measure representative learning throughput or establish learning
 equivalence. All 69 regular source files, including both rollout tensors
 (2.65 GB total), were recovered and hash-verified. The experimental runtime differs
-from the example pins. The [shipping-runtime validation](https://beaker.org/ex/01M5VJEFM27YYWX57JYY2VQDSD)
-also exercises automatic profile resolution; it must complete before transferring
-the production qualification.
+from the updated example pins.
+
+The [updated-runtime validation](https://beaker.org/ex/01M5VP6DPS9XJCTPWY2XK5EN07)
+completed two optimizer steps per trainer rank and exited successfully. It used
+the same default EP2 trainer, batch 256, lag 6 and producer budget 768. The second
+batch contained **29 mixed-version responses**, confirmed by both trainer ranks'
+scoring records. Engine observations showed 511 running requests before each
+publication; the updates took **2.70 and 2.99 seconds**. All four workers restored
+their compiler caches. The first cold attempt also completed both updates but
+consumed zero mixed-version responses, so it was insufficient to qualify that
+path. Neither run changes the trainer settings to force overlap.
+
+The 56-file result/log archive passed hash verification, profile-resolution,
+version-ledger, engine-occupancy and per-rank optimizer checks. All 76 regular
+source files (2.64 GB), including both rollout tensors, were recovered and
+hash-verified. All 512 consumed samples passed finite-score, token/version
+alignment and full expert-route checks, including all 29 mixed-version responses;
+no invalid expert IDs were found. Automatic B300 cache selection
+resolves to exactly the native and Core options exercised by this explicit-cache
+fixture. These short checks establish mechanics, not representative training
+throughput or learning equivalence. The optional startup GC-freeze race and a
+five-second child shutdown timeout are retained in the issue log; a separate
+startup-readiness fix is available but is not part of this validated image.
 
 The study retains raw results and a machine-readable fitting table under
 `runs/inference-throughput-20261025`. `analysis/fit-observations.jsonl` contains
 31 completed cases with full model geometry, workload lengths, native options,
 immutable image IDs, exact producing-job allocation and artifact hashes.
+`analysis/fit-observations.csv` provides a verified 59-column projection, with
+metric definitions and fitting limits in `analysis/fit-observations.README.md`.
 `analysis/artifact-catalog.json` indexes the attempts and archives. Failed and
 interrupted attempts remain available; a completed measurement followed by an
 interrupted drain is labeled separately. This is evidence for one model shape,
@@ -230,7 +255,8 @@ The first H100 panel used the same approximately 23.31-GiB checkpoint as the
 B300 measurements, one active TP1 engine, a 34,816-token context and a 32,768-token
 response cap. It used the experimental cache-capable runtime, with `extra_buffer`
 recurrent caching, full decode graphs, prefill chunks of 8,192 and static memory
-fraction 0.9. These results do not qualify the examples' different pinned runtime.
+fraction 0.9. These are measured-runtime throughput results; the updated-runtime
+deployment check below has a separate scope.
 
 | Admission / HTTP permits | Producer samples | KV tokens | Recurrent slots | Native decode tokens/s | Peak GPU memory |
 |---|---:|---:|---:|---:|---:|
@@ -294,9 +320,9 @@ Both arms use the measured experimental runtime. The first 45-minute attempt
 timed out and remains separately archived; the identical replacement completed
 in 52.5 minutes with a 75-minute budget.
 
-Production async refresh qualification on the examples' exact runtime remains
-pending. Do not copy B300 pools to H100 or enable prefix caching on a runtime that
-lacks the required snapshot support.
+The updated-runtime fully async trainer-consumption check used B300. Do not copy
+B300 pools to H100 or enable prefix caching on a runtime that lacks the required
+snapshot support.
 
 The [candidate-runtime H100 deployment check](https://beaker.org/ex/01M5VMR1YJ24M6HN74QR578CGS)
 completed two batches of 512 requests, each generating 512 tokens, with the
@@ -308,7 +334,8 @@ were configured and captured through 512; these logs do not directly establish
 per-step graph replay. Shutdown completed, and all 1,037 files (307.3 MB) were
 downloaded and hash-verified. This checks short-generation deployment on the
 candidate image, not long-context throughput, Core numerical agreement or
-mid-sequence refresh. The examples' runtime pins remain unchanged.
+mid-sequence refresh. This is the same dependency set selected in the updated
+runtime lock.
 
 ## Other serving and training settings
 

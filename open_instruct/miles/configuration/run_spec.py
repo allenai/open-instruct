@@ -561,10 +561,10 @@ class RunSpec:
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
         validation.runtime_values(miles)
-        # Capacity checks must see the structured cache-mode default, even when
-        # a recipe overrides only the recurrent-state pool size.
-        miles.setdefault("sglang_disable_radix_cache", True)
-        validation.inference_capacity(miles)
+        # Check explicit capacity without making the generic cache default an
+        # override of a later matched profile. Final validation checks resolved
+        # cache mode and pools together.
+        validation.inference_capacity({"sglang_disable_radix_cache": True, **miles})
         CoreConfig(**core)
         if "placement_mode" in controls:
             placement, origin = controls["placement_mode"]
@@ -640,6 +640,7 @@ class RunSpec:
         profile["model_metadata_path"] = metadata_path
         for key, value in profile["defaults"].items():
             miles.setdefault(key, value)
+        miles.setdefault("sglang_disable_radix_cache", True)
         defaults = {
             "fully_async": asynchronous,
             "offload_train": False,

@@ -99,7 +99,9 @@ def test_compile_profiles_preserve_global_budget_and_explicit_overrides(tmp_path
     run = run_spec(tmp_path)
     config = run.compile()
     assert config.miles["sglang_max_running_requests"] == 512
-    assert config.miles["sglang_max_mamba_cache_size"] == 1024  # Explicitly cache off.
+    assert config.miles["sglang_max_mamba_cache_size"] == 3072
+    assert config.miles["sglang_disable_radix_cache"] is False
+    assert config.miles["sglang_mamba_radix_cache_strategy"] == "extra_buffer"
     assert config.miles["async_max_concurrent_samples"] == 768
     assert config.core.max_policy_lag == 6
     assert config.plan()["inference_profile"]["values"]["sglang_server_concurrency"]["source"] == "olmo35-b300-v1"
@@ -113,7 +115,7 @@ def test_compile_profiles_preserve_global_budget_and_explicit_overrides(tmp_path
     ).compile()
     assert overridden.miles["sglang_max_running_requests"] == 256
     assert overridden.miles["sglang_cuda_graph_max_bs_decode"] == 256
-    assert overridden.miles["sglang_max_mamba_cache_size"] == 512
+    assert overridden.miles["sglang_max_mamba_cache_size"] == 1536
     assert overridden.miles["sglang_max_total_tokens"] == 1000000
     assert overridden.miles["async_max_concurrent_samples"] == 512
     assert (
@@ -122,6 +124,32 @@ def test_compile_profiles_preserve_global_budget_and_explicit_overrides(tmp_path
     )
     restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "copy.json")
     assert restored.compile().miles == config.miles
+
+
+@pytest.mark.parametrize("cluster,cache_off,slots", [("ai2/holmes", False, 3072), ("ai2/jupiter", True, 512)])
+def test_cache_mode_is_selected_with_hardware_and_explicit_values_win(tmp_path, cluster, cache_off, slots):
+    config = run_spec(tmp_path, [f'launch.cluster="{cluster}"']).compile()
+    assert config.miles["sglang_disable_radix_cache"] is cache_off
+    assert config.miles["sglang_max_mamba_cache_size"] == slots
+    assert config.inference_profile["values"]["sglang_disable_radix_cache"]["source"].startswith("olmo35-")
+    overridden = run_spec(
+        tmp_path, [f'launch.cluster="{cluster}"', f"inference.radix_cache={str(cache_off).lower()}"]
+    ).compile()
+    assert overridden.miles["sglang_disable_radix_cache"] is not cache_off
+    assert overridden.miles["sglang_max_mamba_cache_size"] == (1024 if cluster == "ai2/holmes" else 1920)
+    assert overridden.inference_profile["values"]["sglang_disable_radix_cache"]["source"] == "inference.radix_cache"
+
+
+def test_generic_profile_keeps_cache_disabled_and_explicit_native_override_wins(tmp_path):
+    config = run_spec(tmp_path, ['inference.profile="generic"']).compile()
+    assert config.miles["sglang_disable_radix_cache"] is True
+    config = run_spec(tmp_path, ["miles.sglang_disable_radix_cache=true"]).compile()
+    assert config.miles["sglang_disable_radix_cache"] is True
+    assert config.miles["sglang_max_mamba_cache_size"] == 1024
+    assert (
+        config.inference_profile["values"]["sglang_disable_radix_cache"]["source"]
+        == "miles.sglang_disable_radix_cache"
+    )
 
 
 def test_generic_selector_and_prepared_metadata(tmp_path):
