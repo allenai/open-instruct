@@ -787,7 +787,54 @@ in the Beaker spec; the immutable image predates the new `launch.memory` field.
 The whole immutable prompt artifact is mounted directly, with no WEKA copy.
 No realistic-cache GPU result is available yet.
 
-An H100 check needs its own memory-feasible pools. Only then
-should examples carry a measured serving recommendation. This study supplies no
-new evidence for trainer batch size, policy-lag limits, publication intervals or
-evaluation placement.
+### Completed H100 admission measurements
+
+The [H100 transfer panel](https://beaker.org/ex/01M5V23DSCQE90HWD86944WHE9)
+completed 128/192/128/256 admission, followed by the separately submitted
+[224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK). Both exited
+successfully. All 1,506 files (353,895,162 bytes) were downloaded and hash-verified,
+with no collector omissions. Five complete case records extend the fitting table
+to 26 observations. Full reports are in `analysis/h100-throughput-summary.json`,
+`analysis/h100-transfer-v1/` and `analysis/h100-admit224-v1/` in the study archive.
+
+| Admission | Delivered tokens/s | Native decode tokens/s | Peak GPU MiB | KV tokens | Recurrent slots |
+|---|---:|---:|---:|---:|---:|
+| 128, before | 9,341.1 | 8,788.3 | 55,136 | 4,456,448 | 768 |
+| 192 | 11,648.1 | 11,416.9 | 69,676 | 6,684,672 | 1,152 |
+| 128, after | 9,016.2 | 8,528.9 | 55,256 | 4,456,448 | 768 |
+| 224, separate job | 13,100.7 | 12,468.9 | 66,312 | 4,456,448 | 1,536 |
+| 256 | 14,322.6 | 13,321.0 | 66,356 | 4,456,448 | 1,536 |
+
+All cases use one active H100 80GB engine, HTTP permits equal to admission,
+producer capacity twice admission, context 34,816, response cap 32,768,
+static fraction 0.9, cache on with `extra_buffer`, and prefill chunk 8,192.
+Decode graphs cover admission; 224 retains the 256 graph ceiling. The runtime
+image is `01M5TYRW60SC2JVCHJX1DHZFK9`, source `bf831286198807db97cea379fb049139348aa6dd`.
+Each case warms for at least 300 seconds and measures at least 600 seconds,
+ending at a complete collection boundary. Native counters include work on
+unfinished responses and have their own scrape boundaries. No paired or
+independent-replicate throughput confidence interval is claimed.
+
+Mean running requests are 99.7% or more of admission. Timing records cover all
+measured delivered responses, with zero reported retractions. The repeated 128
+native control drifts -2.95%. At 256, native throughput exceeds 224 by 6.83%, and
+delivered throughput by 9.33%. The comparison crosses hosts and CPU/RAM allocations:
+the original panel reserved two GPU slots because of host RAM but used only one;
+224 reserved one GPU with a 128-GiB host-memory request. Both actual allocated and
+active-engine denominators are retained. Pool sizes also vary across the panel;
+this is a configuration search, not an isolated causal effect of admission.
+
+The 256 case's 17-GiB KV pool holds only 128 full-length contexts. It is a bounded
+pool candidate for the measured length distribution, not 256 guaranteed 34K
+contexts. Its maximum observed full-token usage was 47.5%, leaving room for a
+bounded higher-admission probe. The [320 follow-up](https://beaker.org/ex/01M5VA8KDF63EJKHV8MNMHWH4J)
+retains that KV pool, raises the state pool to 1,920 and decode graphs to 320,
+and uses HTTP 320 / producer 640. It requests one Jupiter H100, urgent allocated
+45 minutes with a 45-minute execution cap and no automatic restart. Estimated
+memory from the 256 observation plus extra states is about 70.2 GiB before the
+additional graph/workspace delta; actual fit and throughput remain unverified.
+
+256 is currently the best measured H100 candidate, not an established peak.
+Numerical and fully async production-refresh qualification remain pending.
+This study supplies no new evidence for changing trainer batch size, policy-lag
+limits, publication intervals or evaluation placement.
