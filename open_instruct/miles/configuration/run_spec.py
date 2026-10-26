@@ -641,7 +641,9 @@ class RunSpec:
                 raise
             # Generic is an escape hatch; advisory metadata must not make it fail.
             metadata, metadata_path = None, None
-        profile = inference_profiles.resolve(selector, self.launch["cluster"], metadata, miles)
+        profile = inference_profiles.resolve(
+            selector, self.launch["cluster"], metadata, miles, require_model_metadata="hf_checkpoint" in prepared
+        )
         profile["model_metadata_path"] = metadata_path
         for key, value in profile["defaults"].items():
             miles.setdefault(key, value)
@@ -810,7 +812,13 @@ class RunSpec:
             for key in inference_profiles.PROFILE_KEYS
             if key in miles
         }
-        profile["warnings"] = inference_profiles.advisories(profile, miles)
+        profile["warnings"], profile["tips"] = inference_profiles.advise(
+            profile,
+            self.launch["cluster"],
+            metadata,
+            miles,
+            {key.removeprefix("miles.") for key in origins if key.startswith("miles.")},
+        )
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:

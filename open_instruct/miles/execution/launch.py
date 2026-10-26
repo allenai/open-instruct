@@ -214,7 +214,8 @@ def submit(image, spec):
     images = json.loads(subprocess.check_output(["beaker", "image", "get", image, "--format", "json"], text=True))
     metadata = images[0] if isinstance(images, list) else images
     resolved_image = metadata["id"]
-    document = specification(resolved_image, spec)
+    compiled = None if isinstance(spec, opd_config.OPDRunSpec) else spec.compile()
+    document = specification(resolved_image, spec, compiled=compiled)
     # Preserve the exact submitted source, parameters, and image in the receipt.
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     with tempfile.TemporaryDirectory(prefix="miles-workflow-") as directory:
@@ -233,7 +234,7 @@ def submit(image, spec):
         revision=revision,
         spec_sha256=workflow.fingerprint(spec.to_dict()),
         spec=spec.to_dict(),
-        allocation=spec.allocation() if isinstance(spec, opd_config.OPDRunSpec) else topology.plan(spec),
+        allocation=spec.allocation() if isinstance(spec, opd_config.OPDRunSpec) else topology.plan(spec, compiled),
         placements=[
             {
                 "task": task["name"],

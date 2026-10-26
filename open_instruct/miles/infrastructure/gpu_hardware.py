@@ -15,17 +15,17 @@ CLUSTERS = {
 }
 
 
-def inventory(device_ids=None):
+def inventory():
     """Return physical GPU identities and capacity for the selected visible devices.
 
     MILES' pinned serving adapter requires numeric CUDA device IDs, not MIG
     instances. Unknown/N/A memory is retained as None and cannot qualify a profile.
     """
-    raw_mask = device_ids if device_ids is not None else os.environ.get("CUDA_VISIBLE_DEVICES")
+    raw_mask = os.environ.get("CUDA_VISIBLE_DEVICES")
     if raw_mask is None:
         mask = []  # Unset means all physical devices; explicitly empty means none.
     else:
-        mask = [item.strip() for item in (raw_mask.split(",") if isinstance(raw_mask, str) else raw_mask)]
+        mask = [item.strip() for item in raw_mask.split(",")]
         if not mask or mask in ([""], ["-1"]):
             return []
         if len(set(mask)) != len(mask):

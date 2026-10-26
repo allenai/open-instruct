@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles.configuration import inference_profiles, topology
+from open_instruct.miles.configuration import advisories, inference_profiles, topology
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import artifacts
@@ -312,7 +312,7 @@ def execute(spec):
     with run_directory(spec) as (root, state):
         hf = prepare_model(spec)
         data = importlib.import_module("open_instruct.miles.datasets.run_data")
-        planned = spec.compile()
+        planned = spec.compile({"hf_checkpoint": hf})
         prepared = data.prepare_data(
             spec.data,
             Path(hf),
@@ -337,7 +337,7 @@ def execute(spec):
         config = spec.compile({**prepared, "hf_checkpoint": hf})
         profile = getattr(config, "inference_profile", None)
         inventory_root = os.environ.get("OI_MILES_INFERENCE_REPORT_DIR")
-        if profile and profile["status"] == "candidate":
+        if profile and profile.get("selected") in inference_profiles.PROFILES:
             layout = topology.plan(spec, config)
             if inventory_root:
                 hardware = inference_profiles.check_cluster_hardware(profile, inventory_root, layout)
@@ -354,7 +354,9 @@ def execute(spec):
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
             config.miles["load"] = str(checkpoint_root)
-        write_json(root / "resolved-plan.json", config.plan())
+        resolved_plan = config.plan()
+        write_json(root / "resolved-plan.json", resolved_plan)
+        advisories.emit(resolved_plan)
         state.update(status="training", training_started_unix=time.time())
         write_json(root / "workflow.json", state)
         result = train_config(
