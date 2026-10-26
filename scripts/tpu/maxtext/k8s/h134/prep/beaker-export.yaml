@@ -1,0 +1,32 @@
+version: v2
+description: 'H134 P2 prep: HF export of the converted 14T base (b0) + tensor compare (CPU work)'
+budget: ai2/oe-other
+tasks:
+  - name: export
+    image:
+      beaker: 01M5APNCNKVNSR8WQBWMKTERHE
+    command: [bash, /weka/oe-eval-default/abhishekr/watch/tpu/h134/convert/export_job.sh]
+    datasets:
+      - mountPath: /weka/oe-eval-default
+        source:
+          weka: oe-eval-default
+      - mountPath: /weka/olmo-3p5-post-checkpoints
+        source:
+          weka: olmo-3p5-post-checkpoints
+      - mountPath: /weka/olmo-3p5-checkpoints
+        source:
+          weka: olmo-3p5-checkpoints
+    result:
+      path: /output
+    resources:
+      gpuCount: 1
+      cpuCount: 16
+      memory: 400GiB
+    context:
+      priority: high
+      minRuntime: 5m0s
+      autoResume: true
+    constraints:
+      cluster:
+        - ai2/jupiter
+    timeout: 3h0m0s
