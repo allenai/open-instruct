@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Propose measured B300 inference limits in the MILES learning examples while preserving global producer budgets and documenting runtime/model qualification limits (PR link pending).
+- Propose measured B300 inference limits in the MILES learning examples while preserving global producer budgets and documenting runtime/model qualification limits (https://github.com/allenai/open-instruct/pull/2076).
 - Reject async-only timing on synchronous Miles OPD configurations before launch (https://github.com/allenai/open-instruct/pull/2051).
 - Update the Miles runtime to v0.1.2, adapt Core/OPD lifecycle interfaces and tracking, migrate the EOPD loss import, refresh native options, and align serving dependencies (https://github.com/allenai/open-instruct/pull/2047). Breaking option changes: `sglang_mamba_scheduler_strategy` becomes `sglang_mamba_radix_cache_strategy`; `sglang_disable_piecewise_cuda_graph`, `sglang_enable_breakable_cuda_graph`, and `sglang_enforce_piecewise_cuda_graph` become `sglang_cuda_graph_backend_prefill="disabled"`, `"breakable"`, and `"tc_piecewise"`. The same changes apply to `eval_` variants; removed names report migration guidance.
 - Add the MILES post-training development/text-safety evaluation panel, harness overrides for code and managed judges with separate GPU allocation, and SciCode external evaluation with completion validation. Support `evaluation.interval=0` (including per-task overrides) to disable periodic evaluation independently of initial/final evaluation; the large example runs the full panel before and after training only (https://github.com/allenai/open-instruct/pull/2052).
