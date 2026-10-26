@@ -60,7 +60,7 @@ def report(options, max_policy_lag, inference_profile=None):
         )
     if http_slots is not None and engine_slots is not None and effective is not None:
         request_slots = min(http_slots, effective)
-        reference = (inference_profile or {}).get("matched_reference_defaults", {})
+        reference = (inference_profile or {}).get("defaults", {})
         measured_equality = (
             (inference_profile or {}).get("status") == "candidate"
             and bool(reference)

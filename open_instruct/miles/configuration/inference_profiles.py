@@ -14,12 +14,6 @@ from open_instruct.miles.infrastructure import gpu_hardware
 MEASURED_CONTEXT = 34816
 MEASURED_RESPONSE = 32768
 MINIMUM_MEMORY_MIB = {"b300": 270000, "h100": 80000}
-# Conservative lower bounds for MODEL_SHAPE only: weights rounded down, plus
-# attention KV and FP32 recurrent matrices; convolution/workspace/graphs add more.
-WEIGHTS_LOWER_BOUND_MIB = 23 * 1024
-KV_BYTES_PER_TOKEN = 4096
-RECURRENT_MATRIX_MIB_PER_SLOT = 14
-
 PROFILES = {"olmo35-b300-v1": "b300", "olmo35-h100-v1": "h100"}
 PROFILE_KEYS = (
     "sglang_disable_radix_cache",
@@ -81,181 +75,155 @@ def model_metadata(model, prepared):
     return value, str(path)
 
 
+_COMMON = {
+    "sglang_max_running_requests": 512,
+    "sglang_server_concurrency": 512,
+    "sglang_cuda_graph_backend_decode": "full",
+    "sglang_cuda_graph_max_bs_decode": 512,
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_chunked_prefill_size": 8192,
+}
+PRESETS = {
+    "olmo35-b300-v1": _COMMON
+    | {
+        "sglang_disable_radix_cache": False,
+        "sglang_mamba_radix_cache_strategy": "extra_buffer",
+        "sglang_max_total_tokens": 512 * MEASURED_CONTEXT,
+        "sglang_max_mamba_cache_size": 3072,
+        "sglang_mem_fraction_static": 0.7,
+    },
+    "olmo35-h100-v1": _COMMON
+    | {
+        "sglang_disable_radix_cache": True,
+        "sglang_max_total_tokens": 192 * MEASURED_CONTEXT,
+        "sglang_max_mamba_cache_size": 512,
+        "sglang_mem_fraction_static": 0.9,
+    },
+}
+
+
+def editable_toml(name):
+    """Render the complete preset as an editable generic configuration."""
+    lines = ["[inference]", 'profile = "generic"']
+    lines.extend(f"{key} = {json.dumps(value)}" for key, value in PRESETS[name].items())
+    return "\n".join(lines)
+
+
 def resolve(selector, cluster, model, options):
+    """Apply a whole preset, or retain generic settings with an optional hint."""
     if not isinstance(selector, str) or selector not in ("auto", "generic", *PROFILES):
         raise InputError(f"inference.profile must be auto, generic or one of {sorted(PROFILES)}")
     report = {
         "requested": selector,
         "selected": "generic",
-        "status": "fallback",
+        "status": "generic" if selector == "generic" else "fallback",
         "expected_gpu": gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu"),
         "defaults": {},
         "qualification": "Starting point only; runtime, workload and async-refresh qualification remain required.",
     }
 
-    def fallback(reason):
-        if selector in PROFILES and report["status"] != "pending_model_metadata":
+    def no_match(reason):
+        if selector in PROFILES:
             raise InputError(f"inference.profile={selector}: {reason}")
         report["reason"] = reason
         return report
 
-    if selector == "generic":
-        return fallback("Generic defaults explicitly selected")
     if options.get("colocate") or options.get("rollout_num_gpus_per_engine", 1) != 1:
-        return fallback("Measured profiles require dedicated TP1 inference engines")
+        return no_match("Measured presets require dedicated TP1 inference engines")
     if any(options.get(name) for name in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")):
-        return fallback("External engine settings are owned by their provider")
+        return no_match("External engine settings are owned by their provider")
     if any(options.get(name, 1) != 1 for name in ("sglang_dp_size", "sglang_ep_size", "sglang_pp_size")):
-        return fallback("Measured profiles require ordinary single-rank engines")
+        return no_match("Measured presets require ordinary single-rank engines")
     gpu = PROFILES.get(selector, gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu"))
     if gpu not in PROFILES.values():
-        return fallback("No measured hardware mapping for this cluster")
+        return no_match("No measured hardware mapping for this cluster")
     if selector in PROFILES and gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu") not in (None, gpu):
-        return fallback("Named profile conflicts with the cluster GPU type")
+        return no_match("Named preset conflicts with the cluster GPU type")
     if options.get("sglang_quantization"):
-        return fallback("Quantized inference was not measured")
+        return no_match("Quantized inference was not measured")
     if options.get("sglang_dtype", "auto") not in ("auto", "bfloat16"):
-        return fallback("Serving dtype differs from the measured BF16 configuration")
+        return no_match("Serving dtype differs from the measured BF16 configuration")
     if (
         options.get("rollout_max_context_len") != MEASURED_CONTEXT
         or options.get("rollout_max_response_len") != MEASURED_RESPONSE
     ):
-        return fallback(
-            f"Automatic profiles currently cover the measured {MEASURED_CONTEXT:,} context / {MEASURED_RESPONSE:,} response caps"
+        return no_match(f"Measured presets cover {MEASURED_CONTEXT:,} context / {MEASURED_RESPONSE:,} response caps")
+    if model is not None:
+        shape = {key: model.get(key) for key in MODEL_SHAPE}
+        report["model_shape_sha256"] = hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()
+        if shape != MODEL_SHAPE or model.get("dtype", model.get("torch_dtype")) != "bfloat16":
+            return no_match("Model geometry or weight dtype differs from the measured checkpoint")
+        if model.get("quantization_config"):
+            return no_match("Quantized inference was not measured")
+    name = f"olmo35-{gpu}-v1"
+    if selector == "generic":
+        report["reason"] = "Generic settings retained"
+        if model is not None:
+            report["available_profile"] = name
+        return report
+    conflicts = sorted(set(PROFILE_KEYS).intersection(options))
+    if conflicts:
+        values = ", ".join(f"{key}={options[key]!r}" for key in conflicts)
+        raise InputError(
+            f"inference.profile={selector} applies {name} as a whole preset. "
+            f"Explicit preset-owned settings conflict: {values}. Equal values also conflict.\n"
+            "Either remove these settings (including native aliases) and keep the preset, "
+            "or select generic and manage the settings explicitly. "
+            "Merge this complete editable preset block into your inference section, then change it as needed:\n\n"
+            + editable_toml(name)
         )
     if model is None:
-        report["status"] = "pending_model_metadata"
-        return fallback("Model config.json is unavailable here; resolve again after model preparation")
-    shape = {key: model.get(key) for key in MODEL_SHAPE}
-    report["model_shape_sha256"] = hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()
-    if shape != MODEL_SHAPE or model.get("dtype", model.get("torch_dtype")) != "bfloat16":
-        return fallback("Model geometry or weight dtype differs from the measured checkpoint")
-    if model.get("quantization_config"):
-        return fallback("Quantized inference was not measured")
-    cache_off = options.get("sglang_disable_radix_cache", gpu != "b300")
-    measured_running = 512 if gpu == "b300" or cache_off else 320
-    running = options.get("sglang_max_running_requests", measured_running)
-    if running > measured_running and any(
-        key not in options for key in ("sglang_max_total_tokens", "sglang_max_mamba_cache_size")
-    ):
-        raise InputError(
-            f"Admission {running} exceeds the {measured_running}-request {gpu.upper()} "
-            f"cache-{'off' if cache_off else 'on'} profile. Automatic pool extrapolation is not qualified; "
-            "lower admission or explicitly size both sglang_max_total_tokens and sglang_max_mamba_cache_size "
-            "and validate graph/workspace memory on the target GPU."
+        report.update(
+            status="pending_model_metadata",
+            reason="Model config.json is unavailable here; resolve again after model preparation",
         )
-    kv_contexts = running if gpu == "b300" else min(running, 192 if cache_off else 128)
-    state_multiplier = (2 if gpu == "b300" else 1) if cache_off else 6
+        return report
     report.update(
-        selected=f"olmo35-{gpu}-v1",
+        selected=name,
         status="candidate",
         expected_gpu=gpu,
         reason="Matched model geometry, dedicated TP1 placement, context caps and GPU family",
-        defaults={
-            "sglang_disable_radix_cache": cache_off,
-            **({"sglang_mamba_radix_cache_strategy": "extra_buffer"} if not cache_off else {}),
-            "sglang_max_running_requests": running,
-            "sglang_server_concurrency": running,
-            "sglang_cuda_graph_backend_decode": "full",
-            "sglang_cuda_graph_max_bs_decode": running,
-            "sglang_cuda_graph_backend_prefill": "disabled",
-            "sglang_max_total_tokens": kv_contexts * MEASURED_CONTEXT,
-            "sglang_max_mamba_cache_size": running * state_multiplier,
-            "sglang_mem_fraction_static": 0.7 if gpu == "b300" else 0.9,
-            "sglang_chunked_prefill_size": 8192,
-        },
+        defaults=dict(PRESETS[name]),
     )
-    validate_pool_budget(report, {**report["defaults"], **options})
     return report
 
 
-def validate_pool_budget(report, options):
-    """Reject impossible matched pools; passing is not a full memory-fit proof."""
-    lower_bound = (
-        WEIGHTS_LOWER_BOUND_MIB
-        + options["sglang_max_total_tokens"] * KV_BYTES_PER_TOKEN / (1024 * 1024)
-        + options["sglang_max_mamba_cache_size"] * RECURRENT_MATRIX_MIB_PER_SLOT
-    )
-    budget = MINIMUM_MEMORY_MIB[report["expected_gpu"]] * options["sglang_mem_fraction_static"]
-    report["memory_lower_bound_mib"] = lower_bound
-    report["profile_memory_budget_mib"] = budget
-    if lower_bound > budget:
-        raise InputError(
-            f"Requested profile pools need at least {lower_bound / 1024:.2f} GiB for weights/KV/recurrent matrices, "
-            f"above this profile's {budget / 1024:.2f} GiB static-memory budget before graphs/workspaces. "
-            "Reduce explicit pools/admission or choose generic and qualify the different hardware/memory budget."
-        )
-
-
-def advisories(report, reference, options):
-    """Explain departures from measured defaults without changing user choices.
-
-    The reference preserves the selected cache variant and model/workload/topology
-    eligibility, while ignoring other serving overrides. Fleet coverage is deliberately separate from per-engine fit.
-    """
-    warnings = []
-
-    def warn(code, message, **details):
-        warnings.append({"code": code, "message": message, **details})
-
-    if report.get("explicit_selection") and report["requested"] != "generic" and report["status"] != "candidate":
-        warn(
-            "inference_profile_pending"
-            if report["status"] == "pending_model_metadata"
-            else "inference_profile_fallback",
-            f"Inference profile {report['requested']}: {report['reason']}. "
-            "Generic settings are provisional starting points, not a memory-fit or throughput guarantee. "
-            "Inspect resolved-plan.json after preparation and qualify the intended workload before scaling.",
-        )
-    if report["requested"] == "generic" and reference["status"] == "pending_model_metadata":
-        warn(
-            "inference_profile_pending",
-            "Generic inference settings were explicitly selected, but checkpoint metadata is unavailable; "
-            "a matching measured profile cannot yet be checked. Inspect resolved-plan.json after preparation.",
-        )
-    if reference["status"] != "candidate":
-        return warnings
-    differences = {
-        key: {"configured": options.get(key), "profile_default": value}
-        for key, value in reference["defaults"].items()
-        if options.get(key) != value
-    }
+def advisories(report, options):
+    """Expose preset availability, missing matches and fleet evidence boundaries."""
     if report["requested"] == "generic":
-        warn(
-            "inference_profile_bypassed",
-            f"Measured profile {reference['selected']} matches this model, hardware and engine topology, "
-            "but inference.profile=generic bypasses it. Compare the recorded setting differences; "
-            "use inference.profile=auto or the named profile to adopt its defaults, or retain generic deliberately.",
-            differences=differences,
+        available = report.get("available_profile")
+        return (
+            [
+                {
+                    "code": "inference_profile_available",
+                    "message": f"Measured preset {available} matches; generic settings are unchanged. Select auto or that name to use it whole.",
+                }
+            ]
+            if available
+            else []
         )
-    elif differences:
-        description = "; ".join(
-            f"{key}={values['configured']!r} (profile default {values['profile_default']!r})"
-            for key, values in differences.items()
-        )
-        warn(
-            "inference_profile_modified",
-            f"Resolved settings differ from cache-variant defaults for {reference['selected']}: {description}. "
-            "Overrides remain in effect. The selected cache variant is the comparison baseline; "
-            "other derived capacities are arithmetic, not measured optima. See docs/miles/throughput-profiles.md "
-            "and validate throughput, memory and async refresh for the resulting configuration.",
-            differences=differences,
-        )
-    gpus = options.get("rollout_num_gpus", 1)
-    engines = gpus // options.get("rollout_num_gpus_per_engine", 1)
-    if engines > 1:
-        warn(
-            "inference_fleet_extrapolation",
-            f"This plan requests {engines} inference engines. Profile {reference['selected']} selects "
-            "per-engine settings; it does not certify this fleet's routing, producer capacity or weight-publication "
-            "latency. The B300 study includes a separate two-engine throughput check, but no multi-engine "
-            "fully-async refresh qualification; the updated-runtime async trainer-consumption check used one B300 "
-            "engine. H100 deployment/replay checks have a separate scope. Inspect async_capacity warnings and "
-            "measure occupancy, policy age/discards and publication acknowledgments on the intended placement "
-            "before scaling. See docs/miles/throughput-profiles.md.",
-            requested_engines=engines,
-        )
-    return warnings
+    if report["status"] != "candidate":
+        return [
+            {
+                "code": "inference_profile_pending"
+                if report["status"] == "pending_model_metadata"
+                else "inference_profile_fallback",
+                "message": f"Inference profile {report['requested']}: {report['reason']}. Generic settings are provisional; inspect resolved-plan.json after preparation.",
+            }
+        ]
+    engines = options.get("rollout_num_gpus", 1) // options.get("rollout_num_gpus_per_engine", 1)
+    if engines <= 1:
+        return []
+    return [
+        {
+            "code": "inference_fleet_extrapolation",
+            "message": f"This plan requests {engines} inference engines. Preset {report['selected']} covers per-engine settings, "
+            "not this fleet's routing, producer capacity or publication latency. The B300 two-engine throughput check "
+            "does not qualify multi-engine fully async refresh. Inspect async_capacity and validate occupancy, policy age/discards "
+            "and publication acknowledgments on the intended placement. See docs/miles/throughput-profiles.md.",
+            "requested_engines": engines,
+        }
+    ]
 
 
 def validate_hardware(report, devices):

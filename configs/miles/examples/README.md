@@ -113,8 +113,8 @@ checkpoint and export outputs.
 ## Capacity and qualification settings
 
 For the matched Olmo 3.5 geometry, automatic profiles enable prefix caching on
-B300 and disable it on H100. Set `inference.radix_cache` explicitly to override
-that choice. Generic configurations and the colocated `dev` example keep caching
+B300 and disable it on H100. To change cache mode, select `inference.profile = "generic"` and provide
+the serving settings explicitly. Presets are applied whole. Generic configurations and the colocated `dev` example keep caching
 disabled. Cached hybrid serving requires the FP32 tracked-state implementation
 in the updated [runtime lock](../../../runtime/miles/runtime.lock.json); rebuild
 the image when changing pins. See
@@ -125,7 +125,7 @@ permits and decode graphs through batch 512 per B300 engine**. They use
 17,825,792 KV tokens (512 × 34,816), 3,072 recurrent slots, memory fraction 0.7, and prefill
 chunks at 8,192 when the model and topology match. `inference.profile = "auto"`
 selects the starting point from checkpoint geometry, cluster hardware, dedicated
-TP1 placement and context caps; explicit serving settings override it. `dev` retains eight requests and its small pools
+TP1 placement and context caps. Explicit preset-owned settings conflict with it. `dev` retains eight requests and its small pools
 because its tiny trainer and engine share one GPU.
 
 This starting point comes from an Olmo 3.5 checkpoint with approximately 23.31 GiB
@@ -141,8 +141,8 @@ runtime was checked independently with the default EP2 trainer and one B300
 engine: both optimizer updates completed, including training on 29 responses
 that crossed a weight refresh. Engine observations showed 511 running requests
 before each refresh. This is a correctness fixture, not a new sustained
-throughput measurement. Disabling caching explicitly selects 1,024 recurrent
-slots on B300. Check memory again for a different model; these are not H100 pools.
+throughput measurement. The generic cache-off B300 starting configuration uses 1,024 recurrent
+slots; users must set these values explicitly. Check memory again for a different model; these are not H100 pools.
 
 The unfinished-sample budget is automatic unless explicitly set. It uses
 `max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
@@ -169,43 +169,30 @@ The [H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurem
 select **512 with caching disabled** on the realistic prompt mixture: 16.7K native
 tokens/s versus 14.5K for cached 320. The H100 profile uses 6,684,672 KV tokens,
 512 recurrent slots, graph batch 512 and memory fraction 0.9 in uncached mode.
-Explicitly enabled caching selects 320 with 4,456,448 KV tokens and 1,920 slots.
+The separately measured cached-320 alternative uses 4,456,448 KV tokens and
+1,920 slots; configure it explicitly in generic mode.
 The complete two-wave numerical comparison found no aggregate Core-error increase
 for the selected H100 configuration; paired intervals and coupling limits are in
 the guide. These measurements used the experimental runtime; the updated image
 also passed a short H100 deployment check. The fully async trainer-consumption
-check used B300. Profiles preserve explicit cache-mode overrides.
+check used B300. Presets do not accept cache-mode overrides.
 
 Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
-provenance. Planning and submission warn about profile bypasses, overrides,
-generic fallbacks and fleet extrapolation. See
-[deliberately departing from a profile](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-profile)
-for advisory codes, override examples and validation guidance. When the checkpoint is on remote WEKA and its `config.json` is not
-available locally, the plan says `pending_model_metadata`; the final selection
-is recorded after preparation in `resolved-plan.json` and `inference-profile.json`.
-Unknown model shapes, other context caps, colocation and non-TP1 engines use the
-conservative generic defaults. Those defaults still require a memory check for a
-new model. The profile is a measured starting point, not a memory-fit guarantee.
+provenance. A profile is a measured preset applied whole. Omitted or `generic`
+profiles preserve existing defaults and explicit settings, with a one-line hint
+if a measured preset matches. The learning examples opt into `auto`: it applies
+a matching preset or falls back to generic. A named profile requires a match.
+Neither auto nor named presets accept explicit values for preset-owned keys,
+even equal values. Topology, metrics, producer budget and trainer controls remain
+separate. Unknown remote checkpoint metadata is resolved after preparation.
 
-Set `inference.profile = "generic"` to disable automatic selection, or choose
-`"olmo35-b300-v1"` / `"olmo35-h100-v1"` explicitly to require that profile's
-model/topology match. Named profiles do not bypass compatibility checks. Every
-individual setting remains overrideable, for example:
-
-```bash
-python -m open_instruct.miles plan configs/miles/examples/node.toml \
-  --set inference.sglang_max_running_requests=256
-```
-
-Admission overrides derive pools only up to the selected cache variant's measured
-admission. Higher admission requires explicit KV and recurrent pools, subject to
-capacity and conservative memory-budget checks. These checks do not replace
-measuring graph/workspace memory. Selecting a documented cache alternative alone
-does not trigger a modified-profile warning. A profile selects cache mode unless explicitly overridden; it does not change the
-trainer, policy-lag limit, response cap or publication schedule. Automatic producer
-sizing follows the resolved engine capacities; an explicit global `[async]` budget wins. Changing clusters recomputes the choice
-instead of carrying B300 pools to an H100. Startup checks the matched GPU family
-and memory capacity once per node, without adding checks to token generation.
+To tune admission, pools or cache mode, select generic and write the settings
+explicitly. Conflict errors show the offending keys, a complete editable TOML
+block, and the two ways out: remove the keys to keep the preset, or use generic.
+See [departing from a preset](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-preset)
+for a full example. Generic mode does not resize pools or retain a hardware pin;
+changing clusters requires reviewing the explicit configuration. Existing native
+capacity checks remain, but there is no profile memory estimator.
 
 These templates inherit the disabled optional startup weight snapshot/reset audit
 (`check_weight_update_equal = false`) and explicitly disable periodic score-reuse

@@ -26,6 +26,7 @@ def _miles(overrides):
         RunSpec.load(
             EXAMPLE,
             overrides=[
+                'inference.profile="generic"',
                 "inference.radix_cache=false",
                 "inference.sglang_server_concurrency=64",
                 "inference.sglang_max_running_requests=64",
