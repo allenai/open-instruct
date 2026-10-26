@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from scripts.miles import analyze_throughput, sample_gpu_usage, throughput_occupancy
 
-from open_instruct.miles.configuration import throughput, validation
+from open_instruct.miles.configuration import inference_profiles, throughput, validation
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
@@ -79,8 +79,14 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
 
 
 @pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("large", 2432)])
-def test_learning_examples_preserve_producer_budget_and_qualification(profile, producer_budget):
-    config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
+def test_learning_examples_preserve_producer_budget_and_qualification(tmp_path, profile, producer_budget):
+    spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
+    pending = spec.compile()
+    assert pending.inference_profile["status"] == "pending_model_metadata"
+    assert pending.miles["sglang_max_running_requests"] == 64
+    assert pending.miles["async_max_concurrent_samples"] == producer_budget
+    (tmp_path / "config.json").write_text(json.dumps(inference_profiles.MODEL_SHAPE | {"dtype": "bfloat16"}))
+    config = spec.compile({"hf_checkpoint": str(tmp_path)})
     plan = config.plan()
     capacity = plan["async_capacity"]
     assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]

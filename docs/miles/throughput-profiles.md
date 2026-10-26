@@ -129,6 +129,36 @@ can be audited. Record filtering or truncation explicitly. Fixed-weight cache
 results also need validation across production weight refreshes, which can change
 cache reuse and prefill work.
 
+## Automatic selection and overrides
+
+The learning examples use `inference.profile = "auto"`. Selection reads only the
+checkpoint's `config.json`, matches the measured model geometry and BF16 dtype,
+and combines cluster GPU family with dedicated TP1 placement and the measured
+34,816-token context / 32,768-token response caps. It does not infer fit from the
+Olmo model-family name alone. Other shapes retain generic defaults, with the
+reason recorded in `plan.runtime.inference_profile`.
+
+When model metadata is unavailable on the submission host, local planning reports
+`pending_model_metadata`. Preparation resolves against the actual checkpoint and
+writes the final values to `resolved-plan.json`. Named profiles
+`olmo35-b300-v1` and `olmo35-h100-v1` require a match; `generic` disables selection.
+Explicit TOML values win over profiles, and `--set` replaces the corresponding
+TOML value. Plan output records each resolved value and its source. Existing
+conflict checks still reject contradictory aliases for the same native option.
+
+The B300 candidate supports the examples' cache-disabled mode with 1,024 recurrent
+slots and the experimental cache-enabled mode with 3,072. The H100 candidate
+currently requires explicitly enabled caching; its cache-disabled alternative is
+still being measured. Profiles do not enable caching or change runtime pins.
+These are candidates pending exact-runtime and production-refresh qualification.
+
+The global producer budget is independent: profiles preserve its generic sizing
+basis, and examples retain explicit 768/2,432 budgets. An explicit running-request
+override adjusts otherwise-unset graph, KV and recurrent capacities within the
+selected profile; an explicit pool override wins. H100 retains the bounded KV
+pool rather than promising all requests can reach full context simultaneously.
+Startup verifies the expected GPU family and memory once, outside generation.
+
 ## H100 measurements for the studied Olmo 3.5 checkpoint
 
 The first H100 panel used the same approximately 23.31-GiB checkpoint as the

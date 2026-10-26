@@ -44,8 +44,9 @@ def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkey
         output={"root": str(tmp_path)},
         launch={"auto_resume": False, "coordination": {"startup_timeout": 30}},
         judges={},
+        compile=lambda: SimpleNamespace(inference_profile=None),
     )
-    node = {"ray_gpus": 1}
+    node = {"ray_gpus": 1, "rollout_gpus": 1}
     commands = {}
     batches = []
 

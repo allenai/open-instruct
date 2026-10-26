@@ -123,8 +123,9 @@ the recurrent-state pool is still required for active requests. See
 The learning templates (`node`, `large`) propose **512 running requests, 512 HTTP
 permits and decode graphs through batch 512 per B300 engine**. They reserve
 17,825,792 KV tokens (512 × 34,816), retain memory fraction 0.7, and keep prefill
-chunks at 8,192. These are explicit example settings; generic loader defaults and
-other clusters are unchanged. `dev` retains eight requests and its small pools
+chunks at 8,192 when the model and topology match. `inference.profile = "auto"`
+selects the starting point from checkpoint geometry, cluster hardware, dedicated
+TP1 placement and context caps; explicit serving settings override it. `dev` retains eight requests and its small pools
 because its tiny trainer and engine share one GPU.
 
 This starting point comes from an Olmo 3.5 checkpoint with approximately 23.31 GiB
@@ -137,7 +138,7 @@ See the [measurements and saved artifacts](https://github.com/allenai/oe-plannin
 
 The measurements used a newer experimental serving runtime with prefix caching;
 these examples do not change the pinned runtime or enable its unsupported prefix-cache
-path. The examples retain 1,024 recurrent slots, sufficient for 512 active requests
+path. The B300 profile supplies 1,024 recurrent slots for 512 active requests
 with caching off. The measured cache-on runtime used 3,072 slots. Throughput and
 fully async mid-sequence refresh still need qualification on the exact example
 runtime. Check memory again for a different model; these are not H100 settings.
@@ -152,13 +153,38 @@ tokens, oldest-token age and stale-work discards. The existing `large` budget is
 already 9.5 batch-equivalents; neither that ratio nor a capacity limit predicts
 actual policy age. Completed siblings can remain outside the unfinished budget.
 
-The [initial H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
-favor 256 over 224 for this checkpoint, using a smaller KV pool and the experimental
-runtime. Numerical and production-refresh qualification remain pending, so they
-do not yet change these example settings. Broader model guidance will extend this recommendation.
-A future automatic choice needs GPU memory, model geometry, context and placement
-as well as cluster identity, with explicit overrides and visible resolved values.
-Changing `launch.cluster` currently does not resize these example pools.
+The [H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
+favor 320 over 256 for the original workload, using a smaller KV pool and the
+experimental cache-capable runtime. The cache-disabled H100 comparison and
+numerical qualification remain pending. Automatic H100 selection therefore uses
+the measured candidate only when caching is explicitly enabled on a compatible
+runtime; otherwise it reports a generic fallback.
+
+Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
+provenance. When the checkpoint is on remote WEKA and its `config.json` is not
+available locally, the plan says `pending_model_metadata`; the final selection
+is recorded after preparation in `resolved-plan.json` and `inference-profile.json`.
+Unknown model shapes, other context caps, colocation and non-TP1 engines use the
+conservative generic defaults. Those defaults still require a memory check for a
+new model. The profile is a measured starting point, not a memory-fit guarantee.
+
+Set `inference.profile = "generic"` to disable automatic selection, or choose
+`"olmo35-b300-v1"` / `"olmo35-h100-v1"` explicitly to require that profile's
+model/topology match. Named profiles do not bypass compatibility checks. Every
+individual setting remains overrideable, for example:
+
+```bash
+python -m open_instruct.miles plan configs/miles/examples/node.toml \
+  --set inference.sglang_max_running_requests=256
+```
+
+Running admission overrides also resize otherwise-unset graph and recurrent-pool
+defaults. Explicit pool sizes always win. A profile never changes the cache mode,
+trainer, policy-lag limit, response cap or publication schedule. Automatic profile
+selection also preserves the previous generic producer-budget basis; tune the
+global `[async]` budget independently. Changing clusters recomputes the choice
+instead of carrying B300 pools to an H100. Startup checks the matched GPU family
+and memory capacity once per node, without adding checks to token generation.
 
 These templates inherit the disabled optional startup weight snapshot/reset audit
 (`check_weight_update_equal = false`) and explicitly disable periodic score-reuse
