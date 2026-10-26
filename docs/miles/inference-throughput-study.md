@@ -25,7 +25,7 @@ high-admission sweeps are not needed to select a practical starting point.
 | Static memory fraction | 0.7 | This measured B300 setting is not an H100 recommendation |
 | Prefill | Chunk 8,192; native maximum 16,384; prefill graphs disabled | Long-prefix cache/chunk comparison |
 | Response / context caps | 32,768 / 34,816 tokens | Short-response and long-prefix panels |
-| Engine fleet | One TP1 engine measured | Two-engine scaling, then actual production refresh |
+| Engine fleet | One and two TP1 engines measured; two retain 98% of ideal scaling | Fleet numerical check, larger-fleet capacity and actual production refresh |
 
 These are a reproducible fixed-policy candidate and pending decisions, not a
 production preset. HTTP capacity 1,024 left roughly 511 requests waiting inside
@@ -270,6 +270,39 @@ protected window and execution cap are both 75 minutes, with no automatic restar
 The image includes the cancellation and resource-observer fixes; the node with
 observed disk exhaustion is excluded. This run is still a fixed-policy capacity
 check and does not qualify production policy-age filtering or weight refresh.
+
+The run completed successfully. All 304 archived files passed local hash checks;
+all 298 collector-declared reports are present, with no skipped files. It delivered
+44,755,862 response tokens in 935.283 seconds: **47,852.7 tokens/s**, or 23,926.4
+per GPU. Native decode counters report 23,976.7 and 23,545.9 tokens/s for the two
+engines, totaling 47,522.6. Relative to the selected single-engine case, these are
+1.961× delivered and 1.962× native throughput, approximately **98% of ideal doubling**.
+These are separate runs on different GPUs, not paired hardware replicates or
+confidence intervals. The fleet image also includes cancellation and telemetry
+fixes; serving arithmetic is unchanged.
+
+Both engines have complete measured gauge coverage, with mean running counts
+510.33 and 510.70 out of 512 and mean queued counts 0.006 and zero. GPU observations
+also cover the full measurement, with memory maxima 138.93 GiB on each device.
+All 5,632 delivered samples have matched timing records and zero reported
+retractions. Mean response length is 7,946.7 tokens; mean producer-to-response
+residence is 339.5 seconds. Startup took 336.9 seconds and final drain 262.8 seconds,
+outside the measurement. Shutdown leaves no active generation, producer or HTTP
+tasks or waiters; retained completed siblings are recorded separately.
+
+The consumer used 0.594–0.598 CPU-core equivalents while processing 47.62 MiB/s of
+uncompressed route payloads. That excludes separate router and engine processes
+and does not establish eight-engine CPU headroom. There were no failed resource
+queries; sampled temporary storage retained at least 546.5 GiB available. No logged
+slow compilation overlapped measurement; the last prior warning was about 596
+seconds earlier. See `analysis/two-engines-summary.json` and the full archived data.
+
+The [two-engine numerical check](https://beaker.org/ex/01M5V1MYRJ9BE2C0JTC7TET8X9)
+has launched separately. An opt-in router response header records the actual engine
+serving each replay trajectory. Offline reports require attribution, show coverage
+per engine and wave, and compare matched serving/Core scores for each engine's
+subset. The change adds no per-token check or routing change. Forced-token replay
+timings are diagnostic overhead, not throughput measurements; results are pending.
 
 ## Correctness and retained evidence
 
