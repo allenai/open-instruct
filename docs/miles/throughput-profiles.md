@@ -274,11 +274,29 @@ The uncached candidate is 15.4% faster by native counters. It uses 6,684,672 KV
 tokens, 512 recurrent slots and decode graphs through 512. Both cases had zero
 reported retractions with complete delivered-response timing coverage. All 607
 archived files (551.5 MB) passed hash verification; full response-source joins
-are retained. This selects 512 uncached for the numerical follow-up. The comparison
+are retained. This supports 512 uncached as the selected starting point. The comparison
 changes multiple capacity settings and has no repeated control, so it cannot
 isolate caching or establish a universal admission peak.
-Numerical validation and production async refresh qualification remain pending. Do not copy B300 pools to H100 or enable prefix caching
-on a runtime that lacks the required snapshot support.
+
+The [complete H100 numerical replay](https://beaker.org/ex/01M5VKRGF4159AM219QK9EGDNB)
+finished both waves under 512-request background load. All 540 files (1.70 GB)
+were downloaded and hash-verified, with no collector omissions. The 512
+foreground traces cover 64 prompt clusters and 3,953,730 response tokens including
+repeats; all scores and full expert-route payloads passed integrity checks.
+Background requests were joined before the next wave and shutdown completed.
+Relative to the same frozen Core reference, the paired mean absolute error change
+from B300 to H100 was +0.0000064, with a prompt-cluster 95% interval of
+[-0.000051, +0.000061]. Both per-wave intervals also include zero. This finds no
+aggregate error increase; it does not establish bitwise or learning equivalence.
+Expert membership differs by 3.16% (95% interval 2.91–3.39%), with no invalid IDs.
+Hardware, cache mode, memory pools and HTTP/background concurrency differ together.
+Both arms use the measured experimental runtime. The first 45-minute attempt
+timed out and remains separately archived; the identical replacement completed
+in 52.5 minutes with a 75-minute budget.
+
+Production async refresh qualification on the examples' exact runtime remains
+pending. Do not copy B300 pools to H100 or enable prefix caching on a runtime that
+lacks the required snapshot support.
 
 The [candidate-runtime H100 deployment check](https://beaker.org/ex/01M5VMR1YJ24M6HN74QR578CGS)
 completed two batches of 512 requests, each generating 512 tokens, with the

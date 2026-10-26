@@ -134,7 +134,7 @@ per slot. On B300, the selected single-engine case achieved 24.4K delivered
 tokens/s; two engines achieved 47.9K, about 98% of ideal doubling. At 512 admission,
 512 HTTP permits kept approximately 510–511 requests running per engine with
 almost no engine queue. The larger 1,024-permit setting mainly added queueing.
-See the [measurements and saved artifacts](https://github.com/allenai/oe-planning/issues/31#issuecomment-6407109947).
+See the [measurements and saved artifacts](https://github.com/allenai/oe-planning/issues/31#issuecomment-6410668511).
 
 The measurements used a newer experimental serving runtime with prefix caching;
 these examples do not change the pinned runtime or enable its unsupported prefix-cache
@@ -158,8 +158,10 @@ select **512 with caching disabled** on the realistic prompt mixture: 16.7K nati
 tokens/s versus 14.5K for cached 320. The H100 profile uses 6,684,672 KV tokens,
 512 recurrent slots, graph batch 512 and memory fraction 0.9 in uncached mode.
 Explicitly enabled caching selects 320 with 4,456,448 KV tokens and 1,920 slots.
-These comparisons used the experimental runtime; numerical and exact-runtime
-qualification remain pending. Profiles preserve the user's cache mode.
+The complete two-wave numerical comparison found no aggregate Core-error increase
+for the selected H100 configuration; paired intervals and coupling limits are in
+the guide. These measurements used the experimental runtime. Exact-runtime
+async-refresh qualification remains pending. Profiles preserve the user's cache mode.
 
 Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
 provenance. When the checkpoint is on remote WEKA and its `config.json` is not
