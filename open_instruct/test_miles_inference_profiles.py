@@ -95,14 +95,14 @@ def test_hardware_check_uses_allocated_devices_and_rejects_wrong_gpu(monkeypatch
 
     monkeypatch.setattr(gpu_hardware.subprocess, "check_output", query)
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2")
-    assert profiles.check_hardware(report) == [("NVIDIA B300", 275040.0)]
+    assert profiles.check_hardware(report, node={"trainer_gpus": 0, "rollout_gpus": 1}) == [("NVIDIA B300", 275040.0)]
     assert calls[0][0][-1] == "--id=2"
     assert calls[0][1]["timeout"] == 15
     with pytest.raises(ValueError, match="expects B300"):
         profiles.validate_hardware(report, [("NVIDIA H100", 81559)])
     with pytest.raises(ValueError, match="expects B300"):
         profiles.validate_hardware(report, [("NVIDIA B300", 100000)])
-    assert profiles.check_hardware({"selected": "generic"}) == []
+    assert profiles.check_hardware({"selected": "generic"}, node={"trainer_gpus": 0, "rollout_gpus": 1}) == []
     assert len(calls) == 1
 
 
@@ -212,7 +212,7 @@ def test_prepared_profile_checks_every_replica_even_when_startup_was_pending(tmp
             json.dumps({"profile": pending, "rollout_gpus": len(devices), "hardware": devices})
         )
     resolved = profiles.resolve("olmo35-b300-v1", "ai2/holmes", model(), options())
-    with pytest.raises(ValueError, match="inference-profile-2.*expects B300"):
+    with pytest.raises(ValueError, match="^Inference profile .*expects B300"):
         profiles.check_cluster_hardware(resolved, tmp_path, layout)
     (tmp_path / "inference-profile-2.json").write_text(
         json.dumps({"rollout_gpus": 1, "hardware": [["NVIDIA B300", 275040]]})
@@ -260,7 +260,7 @@ def test_workflow_validates_remote_inventory_after_preparation(tmp_path, monkeyp
     monkeypatch.setattr(workflow, "train_config", lambda config, **kwargs: trained.append(config))
     if failure:
         message = (
-            "inference-profile-1.*expects B300"
+            "^Inference profile .*expects B300"
             if failure == "wrong_gpu"
             else "prepared checkpoint config.json is unavailable"
         )
@@ -471,15 +471,15 @@ def test_commands_emit_same_warning_set_and_json_is_clean(tmp_path, monkeypatch,
 
 def test_measured_http_equality_does_not_ask_for_different_preset(tmp_path):
     config = run_spec(tmp_path).compile()
-    assert not any("End-to-end request capacity equals" in w for w in config.plan()["async_capacity"]["warnings"])
+    assert not any("Producer budget equals one wave" in w for w in config.plan()["async_capacity"]["warnings"])
     limited = run_spec(tmp_path, ["async.async_max_concurrent_samples=3072"]).compile()
-    assert any("End-to-end request capacity equals" in w for w in limited.plan()["async_capacity"]["warnings"])
+    assert any("Producer budget equals one wave" in w for w in limited.plan()["async_capacity"]["warnings"])
 
 
 def test_pasted_generic_preset_has_same_numeric_http_advice(tmp_path):
     overrides = [f"inference.{key}={json.dumps(value)}" for key, value in profiles.PRESETS["olmo35-b300-v1"].items()]
     config = run_spec(tmp_path, overrides, profile="generic").compile()
-    assert not any("End-to-end request capacity equals" in w for w in config.plan()["async_capacity"]["warnings"])
+    assert not any("Producer budget equals one wave" in w for w in config.plan()["async_capacity"]["warnings"])
 
 
 def test_advisor_flags_copied_pools_without_changing_settings(tmp_path):
@@ -503,5 +503,23 @@ def test_core_template_is_not_checkpoint_metadata(tmp_path):
 def test_malformed_inventory_name_is_contextual_input_error(tmp_path):
     report = profiles.resolve("olmo35-b300-v1", "ai2/holmes", model(), options())
     (tmp_path / "inference-profile-0.json").write_text(json.dumps({"rollout_gpus": 1, "hardware": [[123, 275040]]}))
-    with pytest.raises(ValueError, match="Cannot qualify rollout hardware.*expects B300"):
+    with pytest.raises(ValueError, match="^Inference profile .*expects B300"):
+        profiles.check_cluster_hardware(report, tmp_path, {"replicas": 1, "nodes": [{"rollout_gpus": 1}]})
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"sglang_attention_backend": "flashinfer"}, {"sglang_page_size": 16}, {"sglang_disable_overlap_schedule": True}],
+)
+def test_advisor_does_not_recommend_a_preset_rejected_by_shared_capacity_rules(change):
+    values = options() | change
+    report = profiles.resolve("generic", "ai2/holmes", model(), values)
+    _, tips = profiles.advise(report, "ai2/holmes", model(), values, set(change))
+    assert tips == []
+
+
+def test_malformed_inventory_json_keeps_file_context(tmp_path):
+    report = profiles.resolve("olmo35-b300-v1", "ai2/holmes", model(), options())
+    (tmp_path / "inference-profile-0.json").write_text("not JSON")
+    with pytest.raises(ValueError, match="Cannot qualify rollout hardware from .*inference-profile-0.json"):
         profiles.check_cluster_hardware(report, tmp_path, {"replicas": 1, "nodes": [{"rollout_gpus": 1}]})

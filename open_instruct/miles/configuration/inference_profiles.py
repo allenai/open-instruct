@@ -7,6 +7,7 @@ The read-only advisor recommends presets without selecting or resizing settings.
 import json
 from pathlib import Path
 
+from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.infrastructure import gpu_hardware
 
@@ -131,13 +132,12 @@ def incompatibility(name, cluster, model, options):
         or options.get("rollout_max_response_len") != MEASURED_RESPONSE
     ):
         return f"Measured presets cover {MEASURED_CONTEXT:,} context / {MEASURED_RESPONSE:,} response caps"
-    if not PRESETS[name]["sglang_disable_radix_cache"]:
-        if options.get("sglang_attention_backend", "triton") != "triton":
-            return "Cached KDA serving requires sglang_attention_backend=triton"
-        if options.get("sglang_page_size", 1) != 1:
-            return "Cached KDA serving requires sglang_page_size=1"
-        if options.get("sglang_disable_overlap_schedule", False):
-            return "Cached KDA serving requires overlap scheduling"
+    try:
+        # Apply the same capacity rules as generic configuration. The advisor
+        # checks the whole proposed preset, never derives it from overrides.
+        validation.inference_capacity({**options, **PRESETS[name]})
+    except InputError as error:
+        return str(error)
     if model is not None:
         shape = {key: model.get(key) for key in MODEL_SHAPE}
         if shape != MODEL_SHAPE or model.get("dtype", model.get("torch_dtype")) != "bfloat16":
@@ -257,16 +257,12 @@ def validate_hardware(report, devices):
         )
 
 
-def check_hardware(report, *, node=None):
-    """Check visible devices once before starting a matched serving profile."""
+def check_hardware(report, *, node):
+    """Check only this node's rollout slice before starting a named preset."""
     if not report or report.get("selected") not in PROFILES:
         return []
     inventory = gpu_hardware.inventory()
-    devices = (
-        gpu_hardware.rollout_inventory(node, inventory)["hardware"]
-        if node is not None
-        else [(device["name"], device["memory_mib"]) for device in inventory]
-    )
+    devices = gpu_hardware.rollout_inventory(node, inventory)["hardware"]
     validate_hardware(report, devices)
     return devices
 
@@ -292,6 +288,8 @@ def check_cluster_hardware(report, directory, layout):
             if count:
                 validate_hardware(report, devices)
             inventories.append(record)
+        except InputError:
+            raise
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise InputError(f"Cannot qualify rollout hardware from {path}: {error}") from error
     if sorted(record["rollout_gpus"] for record in inventories) != expected:

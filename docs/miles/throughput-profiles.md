@@ -233,18 +233,17 @@ run bounded measurements rather than interpolating these pools. Unknown shapes
 receive no preset recommendation. Users and agents can inspect the structured
 codes above without parsing the rendered tips box.
 
-The B300 two-engine throughput check does not establish multi-engine fully async
-refresh qualification. The updated-runtime trainer-consumption check used one
-B300 engine; H100 replay/deployment checks have their own scope below. Fleet
-advisories therefore remain visible even for two engines using a preset.
+Fleet advisories remain visible for any named preset with more than one engine.
+Per-engine measurements do not establish fully async refresh or useful throughput
+for a different fleet.
 Managed replicas inventory their rollout GPUs at startup. After preparation, all
 inventories are checked against an applied preset, excluding trainer/judge GPUs.
 Direct single-node training checks the rollout slice; a matched multi-node preset
 requires managed per-replica inventories. Checks run outside generation.
 
-The HTTP-equality warning is omitted whenever HTTP permits equal admission and
-the producer supplies more than one wave, including an identical generic block. A producer limited to exactly one wave
-still gets headroom advice. An underfeeding producer retains its own advisory.
+A producer budget equal to one wave of engine slots gets producer-backfill advice,
+regardless of HTTP headroom or profile selection. HTTP capacity below admission
+and an underfeeding producer have separate advisories.
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to
 whole groups (or one collection, whichever is larger). Applied presets give
