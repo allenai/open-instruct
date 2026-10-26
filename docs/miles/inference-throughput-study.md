@@ -1,8 +1,9 @@
 # Olmo 3.5 inference configuration study
 
 This study is in progress. The measurements below do not yet qualify a new
-default. It isolates fixed-policy MILES inference, with no trainer, publication,
-evaluation or reward computation. See the [benchmark contract](inference-benchmark.md)
+default. Its capacity panels isolate fixed-policy MILES inference, with no trainer,
+publication, evaluation or reward computation. A separate production-path run
+qualifies actual updates and fully async mid-sequence refresh. See the [benchmark contract](inference-benchmark.md)
 and [tracking discussion](https://github.com/allenai/oe-planning/issues/31#issuecomment-6401660900).
 
 ## Working candidate for this pass
@@ -17,15 +18,15 @@ high-admission sweeps are not needed to select a practical starting point.
 
 | Control | Candidate or measured control | Qualification still needed |
 |---|---|---|
-| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Fleet check and production refresh; fixed-policy numerical controls complete |
+| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Production refresh; one/two-engine fixed-policy numerical controls complete |
 | HTTP concurrency | 512 per engine is the candidate; both 512 and 1,024 measured | Check fleet refill behavior |
 | Producer sample budget | 1,024 for one engine is the candidate | Qualify fleet-wide budget and policy age separately |
 | Full-attention KV pool | 17,825,792 tokens = 512 × 34,816 | Inspect resolved capacity and retractions for each shape |
 | Recurrent pool | 3,072 slots, extra-buffer radix caching | Recheck memory and cache behavior after changing model or context |
 | Static memory fraction | 0.7 | This measured B300 setting is not an H100 recommendation |
-| Prefill | Chunk 8,192; native maximum 16,384; prefill graphs disabled | Long-prefix cache/chunk comparison |
-| Response / context caps | 32,768 / 34,816 tokens | Short-response and long-prefix panels |
-| Engine fleet | One and two TP1 engines measured; two retain 98% of ideal scaling | Fleet numerical check, larger-fleet capacity and actual production refresh |
+| Prefill | Chunk 8,192; native maximum 16,384; prefill graphs disabled | Realistic prompt-stream cache comparison; long-prefix bracket complete |
+| Response / context caps | 32,768 / 34,816 tokens | Realistic-mixture transfer; short-response and long-prefix panels complete |
+| Engine fleet | One and two TP1 engines measured; two retain 98% of ideal scaling | Larger-fleet capacity and actual production refresh |
 
 These are a reproducible fixed-policy candidate and pending decisions, not a
 production preset. HTTP capacity 1,024 left roughly 511 requests waiting inside
@@ -36,14 +37,18 @@ The trainer, global batch 256 and
 lag limit 6 stay fixed during production qualification; do not increase the lag
 limit merely to accommodate more queued work. Fully asynchronous mid-sequence
 weight refresh must pass before promoting the candidate to a learning example.
-The prepared production check starts with an explicit global budget of 1,024
-unfinished samples, or four batch-equivalents, keeping batch 256 and lag 6 fixed.
+The [submitted production check](https://beaker.org/ex/01M5V5YP9DPRB9J2VDKQKV2PMC)
+uses the default node topology: two EP2 trainer GPUs and six inference engines on
+one eight-B300 Holmes node. It preserves the default global producer budget of
+768 unfinished samples, batch 256 and lag 6, for 16 optimizer updates.
 Partly completed sibling groups and completed buffers can retain additional work;
 this budget does not bound total retained samples or oldest-token age. It also
-cannot fill eight engines' combined 4,096 admission slots. That check measures
+cannot fill six engines' combined 3,072 admission slots. That check measures
 actual publication, freshness and useful consumption; the separate fixed-policy
-fleet check measures saturated serving capacity. The larger production run is
-still awaiting resource approval and has not launched.
+fleet check measures saturated serving capacity. The run has high priority,
+90-minute allocation protection and execution timeout, and no automatic restart.
+It retains the studied optimized runtime/cache settings, full rollout captures
+and refresh diagnostics. The old unlaunched 16-GPU proposal is superseded.
 
 ## Checkpoint and workload
 
@@ -298,11 +303,29 @@ slow compilation overlapped measurement; the last prior warning was about 596
 seconds earlier. See `analysis/two-engines-summary.json` and the full archived data.
 
 The [two-engine numerical check](https://beaker.org/ex/01M5V1MYRJ9BE2C0JTC7TET8X9)
-has launched separately. An opt-in router response header records the actual engine
+completed separately. An opt-in router response header records the actual engine
 serving each replay trajectory. Offline reports require attribution, show coverage
 per engine and wave, and compare matched serving/Core scores for each engine's
 subset. The change adds no per-token check or routing change. Forced-token replay
-timings are diagnostic overhead, not throughput measurements; results are pending.
+timings are diagnostic overhead, not throughput measurements. All 543 archive
+files (1,723,832,559 bytes) passed hash verification, with no collector omissions.
+Both engines served foreground trajectories in both 256-trajectory waves, from
+64 prompt clusters. Background streams joined before each subsequent wave.
+No invalid or duplicate expert IDs were found. Core-relative mean absolute
+log-probability error changed by -0.00001554 versus single-engine 512, with paired
+prompt-cluster 95% interval [-0.00006977, +0.00004022]. Both per-engine and both
+overall per-wave error-change intervals include zero. One exploratory stratum
+(second wave, response positions 1,024–8,191) has a +0.0271 percentage-point
+ratio-outlier change with an unadjusted interval excluding zero; retain it for
+follow-up alongside the aggregate, whose interval includes zero. Stratum intervals
+are not adjusted for multiple comparisons.
+
+The reference is natural-routing Core EP1; this does not establish bitwise
+identity, packed EP2 training equivalence or learning quality. Single-engine replay
+used HTTP 1,024, while the fleet uses HTTP 512 per engine and includes the later
+cancellation/attribution fixes. It qualifies that coupled transfer for the bounded
+production check, not an isolated engine-count effect. See
+`analysis/fleet-replay-gate-decision.json` and the full comparison.
 
 ## Correctness and retained evidence
 
@@ -743,8 +766,15 @@ Preparation code is `scripts/miles/prepare_realistic_cache_workload.py`.
 The [Saturn CPU attempt](https://beaker.org/ex/01M5V5P2A2P9FEVZYRW87VVA30)
 was canceled before execution after scheduler events reported no free slots.
 The [Jupiter fallback](https://beaker.org/ex/01M5V5R3DZVPKTKWE8TZJ4S4ZV)
-retains 4 CPUs, 32 GiB RAM, high unallocated priority, no restart and a 30-minute
-execution cap. No realistic-cache GPU result is available yet.
+also had no free slots and was canceled before execution. Local preparation then
+completed under a 30-minute cap. All 102,014 rows passed exact text reconstruction;
+all artifact hashes and source-order joins were verified. The pinned native loader
+accepted every row without filtering or reordering. Prompt token lengths are
+median 158, p99 1,130 and maximum 2,013, so the existing 2,048 prompt limit fits
+the full mixture. There are 94,881 unique rendered prompts; all 7,133 duplicate
+rows remain. Full source records, order, prepared inputs, tokenizer and hashes
+total 2,761,893,977 bytes before the hash-list file. No realistic-cache GPU result
+is available yet.
 
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
