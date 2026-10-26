@@ -191,7 +191,7 @@
     "save_checkpoints": "Boolean, default true; false removes save cadence and conflicts with explicit save_interval.",
     "trainer_diagnostics": "Boolean mapped to core.diagnostic_interval as 1 or 0.",
     "trainer_flash_attention_version": "2, 3 or 4; selects the corresponding Core flash backend; hardware support varies.",
-    "profile": "inference.profile: auto (default), generic, olmo35-b300-v1 or olmo35-h100-v1. Match checkpoint geometry, cluster hardware, dedicated TP1 placement and measured context caps. Explicit native settings override profile defaults; producer budgets stay independent. Model metadata unavailable during local planning is resolved after preparation."
+    "profile": "inference.profile: auto (default), generic, olmo35-b300-v1 or olmo35-h100-v1. Match checkpoint geometry, cluster hardware, dedicated TP1 placement and measured context caps. Explicit native settings override profile defaults; omitted producer budgets use resolved serving capacity, while explicit budgets win. Model metadata unavailable during local planning is resolved after preparation. Explicit auto surfaces fallback advisories; implicit auto records ordinary fallbacks in JSON."
   },
   "structured": {
     "compiler_cache.diagnostics": "Boolean; maps to core.compiler_cache_diagnostics (default false).",

@@ -25,7 +25,7 @@ from urllib import request
 from open_instruct.miles.configuration import inference_profiles, topology
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import rendezvous
-from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.infrastructure import gpu_hardware, infra_timeouts
 from open_instruct.miles.rewards import judge_registry, judge_server, judging
 
 
@@ -260,20 +260,16 @@ def run(path):
         node = assignments[address]
         print(f"Replica {rank} address={address} assignment={node}; reports={root}", flush=True)
         head = min(assignments, key=ipaddress.IPv4Address)
-        mask = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if mask:
-            visible = mask.split(",")
-        else:
-            result = subprocess.check_output(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"], text=True)
-            visible = [str(index) for index, _ in enumerate(result.strip().splitlines())]
-        if any(not device.isdecimal() for device in visible):
-            raise RuntimeError("The pinned MILES serving adapter requires numeric CUDA_VISIBLE_DEVICES")
+        inventory = gpu_hardware.inventory()
+        visible = [device["id"] for device in inventory]
         if len(visible) != layout["gpus_per_replica"]:
             raise RuntimeError("Visible devices differ from the Beaker GPU allocation")
         ray_devices, judges = topology.devices(node, visible)
+        inventory_report = gpu_hardware.rollout_inventory(node, inventory)
         profile = spec.compile().inference_profile
-        hardware = inference_profiles.check_hardware(profile, ray_devices) if node["rollout_gpus"] else []
-        write(root / f"inference-profile-{rank}.json", {"profile": profile, "hardware": hardware})
+        if node["rollout_gpus"]:
+            inference_profiles.validate_hardware(profile, inventory_report["hardware"])
+        write(root / f"inference-profile-{rank}.json", {"profile": profile, "address": address, **inventory_report})
         # Three Ray agent ports everywhere; the head needs three more Ray ports.
         ports = iter(free_ports(len(judges) + (6 if address == head else 3)))
         write(
@@ -355,6 +351,7 @@ def run(path):
         print(f"Replica {rank}: starting Ray with {node['ray_gpus']} policy GPUs", flush=True)
         supervisor.start("ray", ray_command, env)
         env["RAY_ADDRESS"] = ray_address
+        env["OI_MILES_INFERENCE_REPORT_DIR"] = str(root)
         if address == head:
             # Run readiness/probes in a child so heartbeats and failure monitoring
             # continue while Ray or HTTP operations block.

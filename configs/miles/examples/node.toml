@@ -87,9 +87,8 @@ use_rollout_routing_replay = true
 
 [async]
 fully_async = true
-# Preserve the previous global producer budget while raising per-engine ceilings.
-# Fleet saturation and policy age need separate tuning with batch 256 / lag 6.
-async_max_concurrent_samples = 768
+# Omitted producer budget scales with resolved engine capacity and fleet size.
+# Review policy-age warnings before scaling; an explicit budget still overrides it.
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

@@ -24,6 +24,7 @@ from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.infrastructure import gpu_hardware
 from open_instruct.miles.rewards import judging
 
 RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "tracking", "runtime")
@@ -33,7 +34,6 @@ BEAKER_MIN_RUNTIME_LIMIT_SECONDS = 8 * 3600
 JUPITER_CLUSTER = "ai2/jupiter"
 SATURN_CLUSTER = "ai2/saturn"
 COMPAT_DRIVER_CLUSTERS = (JUPITER_CLUSTER, SATURN_CLUSTER)
-CLUSTER_ATTENTION_BACKENDS = {JUPITER_CLUSTER: "flash_3", SATURN_CLUSTER: "flash_2"}
 JUPITER_LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -597,7 +597,10 @@ class RunSpec:
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
         # FlashAttention 4 (CuTe) runs only on Blackwell; the runtime also provides FlashAttention 3 for
         # Jupiter's H100s and FlashAttention 2 for Saturn's A100s.
-        core.setdefault("attention_backend", CLUSTER_ATTENTION_BACKENDS.get(self.launch.get("cluster"), "flash_4"))
+        core.setdefault(
+            "attention_backend",
+            gpu_hardware.CLUSTERS.get(self.launch.get("cluster"), {}).get("attention_backend", "flash_4"),
+        )
         core.setdefault("row_specialization", "dynamic")
         # Roll native checkpoints by default: keep the newest committed one (the
         # final save is always the newest). Set core.checkpoint_keep_every to also
@@ -733,16 +736,8 @@ class RunSpec:
         if asynchronous:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
-            producer_options = dict(miles)
-            # Hardware profiles size engines, not policy-age headroom. Preserve
-            # the pre-profile automatic producer budget unless explicitly tuned.
-            if profile["status"] == "candidate":
-                if "miles.sglang_max_running_requests" not in origins:
-                    producer_options["sglang_max_running_requests"] = 64
-                if "miles.sglang_server_concurrency" not in origins:
-                    producer_options["sglang_server_concurrency"] = 2 * producer_options["sglang_max_running_requests"]
-                profile["producer_budget_policy"] = "Generic capacity basis; explicit async budget overrides it"
-            miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(producer_options))
+            profile["producer_budget_policy"] = "Two waves of resolved serving slots; explicit budget overrides it"
+            miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             miles.setdefault("async_unused_samples_handler", "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
@@ -821,6 +816,7 @@ class RunSpec:
             for key in inference_profiles.PROFILE_KEYS
             if key in miles
         }
+        profile["explicit_selection"] = "inference_profile" in controls
         profile["warnings"] = inference_profiles.advisories(profile, reference, miles)
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
@@ -856,8 +852,8 @@ class RunSpec:
             )
         return warnings
 
-    def plan(self) -> dict[str, Any]:
-        compiled = self.compile()
+    def plan(self, compiled=None) -> dict[str, Any]:
+        compiled = compiled if compiled is not None else self.compile()
         runtime = compiled.plan()
         return {
             "schema_version": 1,
@@ -875,7 +871,7 @@ class RunSpec:
             "runtime": runtime,
             "evaluation": evaluation.plan(self, compiled.miles),
             **self.judges,
-            "allocation": topology.plan(self),
+            "allocation": topology.plan(self, compiled),
             "runtime_validated": False,
             "stages": ["prepare_model", "prepare_data", "validate", "train"]
             + (["export_hf"] if self.output["export_hf"] else []),

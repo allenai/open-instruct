@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from open_instruct.miles.configuration import specs, validation
+from open_instruct.miles.configuration import advisories, specs, validation
 from open_instruct.miles.configuration.config import RunConfig
 from open_instruct.miles.distillation import opd_config
 from open_instruct.miles.errors import InputError
@@ -71,9 +71,7 @@ def execute(parser, options):
     )
     if options.command == "plan":
         planned = config.plan()
-        runtime = planned.get("runtime", planned)
-        for warning in (runtime.get("inference_profile") or {}).get("warnings", []):
-            print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
+        advisories.emit(planned)
         print(json.dumps(planned, indent=2))
         return
     if options.command in ("run", "status"):
@@ -97,15 +95,7 @@ def execute(parser, options):
     if options.command == "validate":
         if structured:
             planned_spec = config.plan()  # Validate physical allocation as well as trainer options.
-            for warning in planned_spec["launch_warnings"]:
-                print(f"Warning: {warning}", file=sys.stderr)
-            compiled = config.compile()
-            compiled.arguments()
-            planned = compiled.plan()
-            for warning in planned["async_capacity"]["warnings"]:
-                print(f"Warning: {warning}", file=sys.stderr)
-            for warning in planned["throughput"]["warnings"]:
-                print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
+            advisories.emit(planned_spec)
             print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
         else:
             workflow.parse_runtime(config)

@@ -144,15 +144,24 @@ before each refresh. This is a correctness fixture, not a new sustained
 throughput measurement. Disabling caching explicitly selects 1,024 recurrent
 slots on B300. Check memory again for a different model; these are not H100 pools.
 
-The global unfinished-sample budgets remain at their previous resolved values:
-768 for `node` and 2,432 for `large`, now explicit. Raising per-engine ceilings
-therefore does not silently expand producer work to 6,144 or 19,456 samples while
-batch 256 and lag 6 stay fixed. These budgets cannot saturate every engine at 512;
-the change supplies a per-engine capacity starting point, not a measured fleet
-training-throughput improvement. Tune producer budget using trainer wait, useful
-tokens, oldest-token age and stale-work discards. The existing `large` budget is
-already 9.5 batch-equivalents; neither that ratio nor a capacity limit predicts
-actual policy age. Completed siblings can remain outside the unfinished budget.
+The unfinished-sample budget is automatic unless explicitly set. It uses
+`max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
+rounded to complete prompt groups, after profile resolution. For the matched
+512-admission profiles this gives 6,144 for six engines in `node`, and 19,456 for
+19 engines in `large`; changing GPU count or admission recalculates the budget.
+Generic 64-admission configurations still resolve to 768 / 2,432 respectively.
+The previous fixed budgets are no longer in the examples. Set
+`async.async_max_concurrent_samples` explicitly to impose a smaller work budget;
+the underfeeding warning explains when it cannot fill the requested slots.
+
+This is a capacity-based starting heuristic, not a measured learning optimum.
+Batch 256 and lag 6 are unchanged: the larger automatic budgets span many batch
+equivalents and trigger policy-age advisories. Measure trainer wait, useful tokens,
+oldest-token age and stale-work discards; reduce producer budget or inference fleet
+size if production outruns useful consumption. Completed siblings can remain
+outside the unfinished budget. Omitted budgets are recomputed against prepared
+checkpoint metadata, so inspect `resolved-plan.json` before interpreting a local
+plan whose profile is still pending.
 
 The [H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
 select **512 with caching disabled** on the realistic prompt mixture: 16.7K native
@@ -187,10 +196,9 @@ python -m open_instruct.miles plan configs/miles/examples/node.toml \
 ```
 
 Running admission overrides also resize otherwise-unset graph and recurrent-pool
-defaults. Explicit pool sizes always win. A profile never changes the cache mode,
-trainer, policy-lag limit, response cap or publication schedule. Automatic profile
-selection also preserves the previous generic producer-budget basis; tune the
-global `[async]` budget independently. Changing clusters recomputes the choice
+defaults. Explicit pool sizes always win. A profile selects cache mode unless explicitly overridden; it does not change the
+trainer, policy-lag limit, response cap or publication schedule. Automatic producer
+sizing follows the resolved engine capacities; an explicit global `[async]` budget wins. Changing clusters recomputes the choice
 instead of carrying B300 pools to an H100. Startup checks the matched GPU family
 and memory capacity once per node, without adding checks to token generation.
 
