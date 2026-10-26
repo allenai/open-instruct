@@ -282,9 +282,13 @@ agreement nor this one improvement qualifies it. The full matched report is
 the [first replacement](https://beaker.org/ex/01M5TMC66743TX59RVBJGKZ8N9)
 was also preempted during its first 512 wave. Its full 278-file archive retains
 251 aligned score vectors and matching route hashes; these partial observations
-do not qualify the setting. The [next replacement](https://beaker.org/ex/01M5TQ4T1HCFAGBD7RNZK03CDN)
-retains 512 and closing 64 with two waves each, explicitly across attempts.
-It uses application image `01M5TNPB5BXFE2675SD2XNJAWB` (source `5241f527a`):
+do not qualify the setting. The next attempt was also preempted during its first
+512 wave; all 126 archive files and 97 completed score vectors are retained.
+The [protected replacement](https://beaker.org/ex/01M5TRRQMV4AHS79SNBDHRDSGQ)
+retains 512 and closing 64 with two waves each, explicitly across attempts. It
+requests 150-minute protection on one B300 at high priority, matching its existing
+150-minute execution cap, with no automatic restart. It uses application image
+`01M5TNPB5BXFE2675SD2XNJAWB` (source `5241f527a`):
 the added optional Core route scorer and publication diagnostic changes are
 inactive in this serving-only replay, and the serving replay path is unchanged.
 
