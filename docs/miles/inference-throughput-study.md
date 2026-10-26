@@ -475,8 +475,11 @@ Its first attempt failed before generation: continuation preparation omitted
 disabled. The preparation fix emits an explicit null label when targets exist
 only in verifier metadata. A native CPU regression reproduces the old failure
 and loads all 194 corrected rows, preserving their exact text and token IDs.
-The failed attempt is fully archived and supplies no throughput result; a new
-immutable corpus is being prepared for the replacement panel.
+The failed attempt is fully archived and supplies no throughput result. The
+[immutable corpus repair](https://beaker.org/ex/01M5TTN7VXYST3J4DKZHF4XBRF)
+passed the native loader check and preserves the original corpus. The
+[replacement panel](https://beaker.org/ex/01M5TTYXF8JSB8RTZ246MA3F73) retains
+the same runtime, serving settings and resource cap.
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
 new evidence for trainer batch size, policy-lag limits, publication intervals or
