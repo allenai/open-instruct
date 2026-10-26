@@ -152,9 +152,12 @@ def test_reward_fixes_drop_ungradable_rows(row, reason):
     assert dolci.render_row(row, Tokenizer(), SOURCE, reward_fixes=True) == (None, reason)
 
 
-def test_reward_fixes_registry_masks_code_failures_and_scores_if_strictly():
+def test_reward_fixes_registry_masks_code_failures_and_scores_if_and_math_strictly():
     registry = dolci.verifier_registry(dolci.DEFAULT_CODE_API_URL, reward_fixes=True)
     built = {name: rewards._resolve_verifier(spec) for name, spec in registry.items()}
+    assert isinstance(built["math"], math_rewards.MathVerifyVerifier)
+    # Math-Verify's SIGALRM timeouts need the main-thread math worker.
+    assert isinstance(rewards._resolve_verifier(registry["math"], isolate_symbolic=True), rewards._IsolatedVerifier)
     assert isinstance(built["ifeval"], if_rewards.StrictIFVerifier)
     assert built["code"].config.failure_policy == built["code_stdio"].config.failure_policy == "mask"
 

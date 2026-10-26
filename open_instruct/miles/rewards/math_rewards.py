@@ -1,13 +1,28 @@
-"""Math prompt formatting and data checks for the MILES math reward.
+"""The MILES math reward: Math-Verify on the boxed answer, prompt formatting and data checks.
 
-MathVerifier reads an answer from ``\\boxed{}``, a "the final answer is X" sentence or
-the last math span, so a correct answer written any other way scores zero. Almost
-no Dolci math prompt states the expected format, which made learning to box most of
-the Phase 1 math gain. ``add_boxed_instruction`` states the format in the prompt;
-``math_row_problems`` names source rows whose targets cannot be trusted.
+``MathVerifyVerifier`` scores a response with Hugging Face Math-Verify in its strict
+configuration: the answer must be in ``\\boxed{}`` (or follow an explicit "final answer"
+anchor), and Math-Verify decides symbolic equivalence. There is no bare-number fallback,
+so the boxed format is the one format that pays. Almost no Dolci math prompt states that
+format, which made learning to box most of the Phase 1 math gain, so
+``add_boxed_instruction`` states it in the prompt. ``math_row_problems`` names source
+rows whose targets cannot be trusted.
+
+The shared ``ground_truth_utils.MathVerifier`` is unchanged, so the vLLM GRPO trainers
+keep their rewards.
 """
 
+import dataclasses
 import re
+
+from math_verify import ExprExtractionConfig, LatexExtractionConfig, parse, verify
+
+from open_instruct.ground_truth_utils import (
+    VerificationResult,
+    VerifierConfig,
+    VerifierFunction,
+    remove_thinking_section,
+)
 
 MATH_BOXED_INSTRUCTION = "Please reason step by step, and put your final answer within \\boxed{}."
 
@@ -40,3 +55,54 @@ def math_row_problems(row: dict) -> list[str]:
     if target.strip() == "-1":
         return ["placeholder_target"]
     return []
+
+
+# Targets are bare LaTeX ("\\frac{1}{2}", " n = 5 "), so they parse as one math span.
+_GOLD_EXTRACTION = [LatexExtractionConfig(), ExprExtractionConfig()]
+# open-r1's strict response extraction: boxed or anchored LaTeX only, no bare expressions.
+_ANSWER_EXTRACTION = [LatexExtractionConfig(boxed_match_priority=0, try_extract_without_anchor=False)]
+
+
+@dataclasses.dataclass
+class MathVerifyConfig(VerifierConfig):
+    parsing_timeout_seconds: int = 5
+    verify_timeout_seconds: int = 5
+
+
+class MathVerifyVerifier(VerifierFunction):
+    """Math-Verify equivalence on the response's boxed (or anchored) answer.
+
+    Math-Verify's timeouts use SIGALRM, so the MILES reward bridge runs this verifier in
+    its main-thread math worker process, like ``MathVerifier``.
+    """
+
+    def __init__(self, verifier_config: MathVerifyConfig | None = None) -> None:
+        self.config = verifier_config or MathVerifyConfig()
+        super().__init__("math_verify", weight=1.0, verifier_config=self.config)
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return MathVerifyConfig
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str | list[str],
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        answer = parse(
+            remove_thinking_section(prediction),
+            extraction_config=_ANSWER_EXTRACTION,
+            parsing_timeout=self.config.parsing_timeout_seconds,
+        )
+        if not answer:
+            return VerificationResult(score=0.0)
+        for target in label if isinstance(label, list) else [label]:
+            gold = parse(
+                f"${target}$", extraction_config=_GOLD_EXTRACTION, parsing_timeout=self.config.parsing_timeout_seconds
+            )
+            if gold and verify(gold, answer, timeout_seconds=self.config.verify_timeout_seconds):
+                return VerificationResult(score=1.0)
+        return VerificationResult(score=0.0)

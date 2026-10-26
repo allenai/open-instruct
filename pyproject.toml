@@ -14,6 +14,7 @@ dependencies = [
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
+    "math-verify==0.9.0",
     "matplotlib>=3.9.3",
     "multiprocess<0.70.18", # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",

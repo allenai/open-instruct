@@ -2,3 +2,6 @@
 langdetect==1.0.9
 immutabledict==1.2.0
 nltk==3.9.2
+# Math-Verify for math_rewards.MathVerifyVerifier; sympy is already in the runtime.
+math-verify==0.9.0
+latex2sympy2_extended==1.11.0

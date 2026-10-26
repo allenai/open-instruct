@@ -35,6 +35,7 @@ logger = logger_utils.setup_logger(__name__)
 _MATH_FACTORIES = {
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.ground_truth_utils.StrictMathVerifier",
+    "open_instruct.miles.rewards.math_rewards.MathVerifyVerifier",
 }
 # SGLang rollouts keep the stop token in the response text (``no_stop_trim`` with special
 # tokens kept), but Open Instruct verifiers expect the detokenized answer that the vLLM

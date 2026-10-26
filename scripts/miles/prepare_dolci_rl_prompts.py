@@ -17,7 +17,8 @@ writes Miles ``data.prompt_data`` / ``data.eval_prompt_data`` JSONL plus the
 ``--reward-fixes`` applies the MOPD retrain audit's data and scoring fixes (data v3):
 
 - math prompts that ask for no answer format get a boxed-answer instruction, and rows with
-  empty or ``-1`` placeholder targets are dropped;
+  empty or ``-1`` placeholder targets are dropped, and ``math`` is scored by
+  ``math_rewards.MathVerifyVerifier`` (Math-Verify on the boxed answer);
 - instruction-following rows that cannot be fully satisfied (contradictory or invalid
   constraints) or that the one-letter answer "a" fully passes are dropped, and
   ``ifeval`` is scored all-or-nothing by ``if_rewards.StrictIFVerifier``;
@@ -66,16 +67,18 @@ def verifier_registry(code_api_url, reward_fixes=False):
     """The trusted ``data.reward_config``: Open Instruct's verifier for each source verifier name.
 
     Code follows the Olmo 3 RL recipe: the pass rate when at least 99% of the tests pass, else 0.
-    With ``reward_fixes``, instruction following is scored all-or-nothing and code grader
-    failures are masked from the loss.
+    With ``reward_fixes``, math is scored by Math-Verify on the boxed answer, instruction
+    following is scored all-or-nothing and code grader failures are masked from the loss.
     """
     code = {"api_url": code_api_url, "pass_rate_reward_threshold": 0.99}
+    math = {"factory": "open_instruct.ground_truth_utils.MathVerifier"}
     ifeval = {"factory": "open_instruct.ground_truth_utils.IFEvalVerifier"}
     if reward_fixes:
+        math = {"factory": "open_instruct.miles.rewards.math_rewards.MathVerifyVerifier"}
         code["failure_policy"] = "mask"
         ifeval = {"factory": "open_instruct.miles.rewards.if_rewards.StrictIFVerifier"}
     return {
-        "math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"},
+        "math": math,
         "ifeval": ifeval,
         "code": {"factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier", "config": code},
         "code_stdio": {

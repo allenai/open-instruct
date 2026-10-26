@@ -12,10 +12,8 @@ eval_logger = logger_utils.setup_logger("math_utils")
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187
 def last_boxed_only_string(string: str) -> str | None:
     idx = string.rfind("\\boxed")
-    # Use the space form only when the last box is written that way, so an earlier
-    # "\\boxed 5" cannot shadow a later "\\boxed{42}".
-    if idx >= 0 and string.startswith("\\boxed ", idx):
-        return "\\boxed " + string[idx + len("\\boxed ") :].split("$")[0]
+    if "\\boxed " in string:
+        return "\\boxed " + string.split("\\boxed ")[-1].split("$")[0]
     if idx < 0:
         idx = string.rfind("\\fbox")
         if idx < 0:
@@ -45,7 +43,7 @@ def remove_boxed(s: str) -> str:
         assert s[: len(left)] == left
         return s[len(left) :]
 
-    left = "\\fbox{" if s.startswith("\\fbox{") else "\\boxed{"
+    left = "\\boxed{"
 
     assert s[: len(left)] == left
     assert s[-1] == "}"
@@ -62,40 +60,6 @@ def get_unnormalized_answer(text: str) -> str:
         return match.group(1).strip()
     else:
         return INVALID_ANSWER
-
-
-# Display math is listed before inline math so "$$x$$" is one span, not two empty ones.
-_MATH_SPAN_PATTERN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(.+?)\$", re.DOTALL)
-# "final answer is X" or "Final Answer: X", allowing Markdown bold around the label.
-_FINAL_ANSWER_PATTERN = re.compile(r"final\s+answer(?:\s*\*\*)?\s*(?:is\b|:)", re.IGNORECASE)
-
-
-def last_math_span(text: str) -> str | None:
-    """Return the contents of the last $$...$$, \\[...\\], \\(...\\) or $...$ span."""
-    spans = [
-        next(group for group in match.groups() if group is not None) for match in _MATH_SPAN_PATTERN.finditer(text)
-    ]
-    spans = [span.strip() for span in spans if span.strip()]
-    return spans[-1] if spans else None
-
-
-def get_final_answer_phrase(text: str) -> str | None:
-    """Return the answer after the last "final answer is" or "Final Answer:" label.
-
-    Reads the rest of that line (or the next non-empty line when the label ends
-    its line), dropping the Minerva "I hope it is correct." suffix, Markdown bold
-    and a trailing period. There is deliberately no bare-number fallback.
-    """
-    matches = list(_FINAL_ANSWER_PATTERN.finditer(text))
-    if not matches:
-        return None
-    rest = text[matches[-1].end() :]
-    lines = [line.strip() for line in rest.split("\n")]
-    answer = next((line for line in lines if line.strip("* ")), "")
-    answer = answer.split("I hope it is correct")[0].strip()
-    answer = answer.lstrip(":* ").rstrip("* ")
-    answer = answer.rstrip(".").strip().strip("*").strip()
-    return answer or None
 
 
 SUBSTITUTIONS = [

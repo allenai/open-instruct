@@ -67,5 +67,6 @@ RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/source
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
 
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
+RUN python -c "from open_instruct.miles.rewards.math_rewards import MathVerifyVerifier; v = MathVerifyVerifier(); assert v([], 'So \\\\boxed{\\\\frac{1}{2}}.', '0.5').score == 1; assert v([], 'The answer is 0.5', '0.5').score == 0"
 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
