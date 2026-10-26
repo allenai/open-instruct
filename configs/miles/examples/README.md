@@ -152,7 +152,10 @@ tokens, oldest-token age and stale-work discards. The existing `large` budget is
 already 9.5 batch-equivalents; neither that ratio nor a capacity limit predicts
 actual policy age. Completed siblings can remain outside the unfinished budget.
 
-H100 measurements and broader model guidance will extend this recommendation.
+The [initial H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
+favor 256 over 224 for this checkpoint, using a smaller KV pool and the experimental
+runtime. Numerical and production-refresh qualification remain pending, so they
+do not yet change these example settings. Broader model guidance will extend this recommendation.
 A future automatic choice needs GPU memory, model geometry, context and placement
 as well as cluster identity, with explicit overrides and visible resolved values.
 Changing `launch.cluster` currently does not resize these example pools.
