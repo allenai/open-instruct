@@ -19,6 +19,8 @@ REF = {
     "lm_head.norm.weight": [D],
     "lm_head.w_out.weight": [V * D],
 }
+REF2 = {"embeddings.weight": [V, D], "embedding_norm.weight": [D], "blocks.0.attention.w_q.weight": [D, D],
+        "lm_head.norm.weight": [D], "lm_head.w_out.weight": [V, D]}
 LM_CFG = {"d_model": D, "vocab_size": V, "n_layers": 1, "block": {"name": "x"}}
 
 
@@ -137,7 +139,7 @@ def test_no_overwrite():
         assert "exists" in fails(sv.cmd_apply, aa)
 
 
-def setup_st(tmp, img_token=100280):
+def setup_st(tmp, img_token=100280, transpose_head=False, extra_lm=False):
     """A weights-only bf16 safetensors export with lm./vision./connector. keys and image_patch_token_id in the pad rows."""
     import torch
     from safetensors.torch import save_file
@@ -146,6 +148,8 @@ def setup_st(tmp, img_token=100280):
     json.dump({"keys": {k: {"shape": s, "dtype": "float32"} for k, s in REF.items()}}, open(ref, "w"))
     refcfg = os.path.join(tmp, "ref_config.json")
     json.dump({"model": LM_CFG}, open(refcfg, "w"))
+    shapes = os.path.join(tmp, "ref_shapes.json")
+    json.dump({"shapes": REF2}, open(shapes, "w"))
     src = os.path.join(tmp, "src")
     os.makedirs(src)
     lm = dict(LM_CFG, init_seed=7, n_extra_vocab=0, block={"name": "x", "ep": {"share_combine_out": True}})
@@ -155,9 +159,12 @@ def setup_st(tmp, img_token=100280):
               open(os.path.join(src, "olmo_core_config.json"), "w"))
     g = torch.Generator().manual_seed(0)
     t = {}
-    for k, s in REF.items():
-        shape = (V, D) if k in sv.VOCAB_KEYS else (s[0],)
+    for k, shape in REF2.items():
+        if transpose_head and k == "lm_head.w_out.weight":
+            shape = shape[::-1]
         t[f"lm.{k}"] = torch.randn(shape, generator=g).to(torch.bfloat16)
+    if extra_lm:
+        t["lm.final_norm.weight"] = torch.randn(D, generator=g).to(torch.bfloat16)
     t["vision.patch_embed.weight"] = torch.randn(6, generator=g).to(torch.bfloat16)
     t["connector.projector.w1.weight"] = torch.randn(4, generator=g).to(torch.bfloat16)
     st = os.path.join(src, "model.safetensors")
@@ -165,7 +172,7 @@ def setup_st(tmp, img_token=100280):
     pa = SimpleNamespace(ref=ref, ref_config=refcfg, src=src, out=os.path.join(tmp, "plan.json"), lm_prefix="lm.",
                          lm_config_key="model.lm", mm_tokenizer_size=T, text_vocab=T, src_safetensors=st,
                          src_config=os.path.join(src, "olmo_core_config.json"), allow_bf16_upcast=True,
-                         pad_rows="passthrough")
+                         pad_rows="passthrough", ref_shapes=shapes)
     aa = SimpleNamespace(plan=pa.out, masters_in=None, masters_out=os.path.join(tmp, "out"),
                          receipt=os.path.join(tmp, "receipt.json"))
     return t, pa, aa
@@ -181,6 +188,19 @@ def test_safetensors_bf16_passthrough():
         out = np.load(os.path.join(aa.masters_out, "embeddings.weight.npy"))
         assert np.array_equal(out, t["lm.embeddings.weight"].float().numpy().reshape(-1))
         assert rec["pad_rows"]["embeddings.weight"]["first_row"] == T
+
+
+def test_safetensors_transposed_or_extra_lm_fails():
+    with tempfile.TemporaryDirectory() as tmp:
+        _, pa, _ = setup_st(tmp, transpose_head=True)
+        assert "shape" in fails(sv.cmd_plan, pa)
+    with tempfile.TemporaryDirectory() as tmp:
+        _, pa, _ = setup_st(tmp, extra_lm=True)
+        assert "extra LM-like" in fails(sv.cmd_plan, pa)
+    with tempfile.TemporaryDirectory() as tmp:
+        _, pa, _ = setup_st(tmp)
+        pa.ref_shapes = None
+        assert "ref-shapes" in fails(sv.cmd_plan, pa)
 
 
 def test_safetensors_needs_rulings():

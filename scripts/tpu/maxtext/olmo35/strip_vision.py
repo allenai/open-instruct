@@ -116,6 +116,15 @@ def get_path(d, dotted):
     return d
 
 
+def safetensors_shapes(path):
+    import struct
+
+    with open(path, "rb") as f:
+        h = json.loads(f.read(struct.unpack("<Q", f.read(8))[0]))
+    h.pop("__metadata__", None)
+    return {k: v["shape"] for k, v in h.items()}
+
+
 def safetensors_keys(path):
     """{module.<key>.main: (numel, dtype)} from a safetensors header (weights-only export), and the header's sha256."""
     import struct
@@ -160,6 +169,10 @@ def cmd_plan(a, keys=None, md_sha="fixture", permissive=False):
             md, md_sha, permissive = read_dcp_metadata(a.src)
             keys = main_keys(md)
     ok_dtypes = {"float32"} | ({"bfloat16"} if getattr(a, "allow_bf16_upcast", False) else set())
+    full_shapes = safetensors_shapes(st_path) if st_path else None
+    ref_shapes = json.load(open(a.ref_shapes))["shapes"] if getattr(a, "ref_shapes", None) else None
+    if full_shapes is not None and ref_shapes is None:
+        raise Fail("--ref-shapes is required for a safetensors source: numel alone can't catch a transposed tensor")
 
     runtime, diffs = [], []
     for d in config_diffs(ref_cfg, src_cfg):
@@ -196,8 +209,16 @@ def cmd_plan(a, keys=None, md_sha="fixture", permissive=False):
                     raise Fail(f"{full}: {rows} rows < B0's {V_ref}")
             elif n != want:
                 raise Fail(f"{full}: {n} elements, B0 has {want}")
-            kept[name] = {"src_key": full, "numel": n, "rows": rows}
-        elif looks_lm(name):
+            if full_shapes is not None:
+                got_shape = full_shapes[full[len("module.") : -len(".main")]]
+                if name in VOCAB_KEYS:
+                    want_shape = [rows, D]
+                else:
+                    want_shape = ref_shapes.get(name)
+                if list(got_shape) != list(want_shape or []):
+                    raise Fail(f"{full}: shape {got_shape}, expected {want_shape} (B0 layout, row-major)")
+            kept[name] = {"src_key": full, "numel": n, "rows": rows, "dtype": dt}
+        elif looks_lm(name) or (a.lm_prefix and prefixed):
             raise Fail(f"extra LM-like key {full} (not one of B0's masters)")
         else:
             dropped.append({"key": full, "numel": n, "dtype": dt})
@@ -212,10 +233,15 @@ def cmd_plan(a, keys=None, md_sha="fixture", permissive=False):
     tok = a.mm_tokenizer_size
     if tok is None:
         raise Fail("--mm-tokenizer-size is required: without it, image tokens in rows 100278..100351 can't be ruled out")
-    if text_vocab < tok <= V_ref:
-        raise Fail(f"tokenizer size {tok}: image tokens sit in the padding rows {text_vocab}..{V_ref - 1}; needs a decision")
-    img = [v for k, v in _walk(src_cfg_all) if k.endswith("token_id") and isinstance(v, int) and text_vocab <= v < V_ref]
     pad_rule = getattr(a, "pad_rows", "fail")
+    if text_vocab < tok <= V_ref and pad_rule != "passthrough":
+        raise Fail(f"tokenizer size {tok}: image tokens sit in the padding rows {text_vocab}..{V_ref - 1}; needs a decision")
+    img = []
+    for k, v in _walk(src_cfg_all):
+        if re.search(r"token_ids?$", k):
+            for x in (v if isinstance(v, list) else [v]):
+                if isinstance(x, int) and not isinstance(x, bool) and text_vocab <= x < V_ref:
+                    img.append(x)
     if img and pad_rule != "passthrough":
         raise Fail(f"config names token ids {sorted(set(img))} inside the padding rows; needs a ruling (--pad-rows passthrough)")
     if tok > V_ref and rows < tok:
@@ -272,6 +298,11 @@ def cmd_apply(a, writer=_write):
     tmp = a.masters_out + ".tmp"
     if os.path.exists(tmp):
         raise Fail(f"{tmp} exists; not overwriting")
+    rp = os.path.abspath(a.receipt)
+    if os.path.exists(rp):
+        raise Fail(f"{rp} exists; not overwriting")
+    if rp.startswith(os.path.abspath(a.masters_out) + os.sep) or rp.startswith(os.path.abspath(tmp) + os.sep):
+        raise Fail("the receipt must not be written inside the output dir")
     os.makedirs(tmp)
     D, V, T = plan["d_model"], plan["ref_vocab_rows"], plan["text_vocab"]
     rec = {"plan_sha256": sha_file(a.plan), "tensors": {}, "pad_rows": {}}
@@ -280,12 +311,17 @@ def cmd_apply(a, writer=_write):
         import torch
         from safetensors import safe_open
 
+        _, hsha = safetensors_keys(plan["safetensors_path"])
+        if hsha != plan["dcp_metadata_sha256"]:
+            raise Fail(f"safetensors header sha {hsha[:16]} != plan's {plan['dcp_metadata_sha256'][:16]}")
         st = safe_open(plan["safetensors_path"], "pt")
     for name, info in sorted(plan["kept"].items()):
         src_name = info["src_key"][len("module.") : -len(".main")]
         src_bits = None
         if st is not None:
             t = st.get_tensor(src_name).contiguous()
+            if str(t.dtype).replace("torch.", "") != info.get("dtype", "float32"):
+                raise Fail(f"{src_name}: dtype {t.dtype}, planned {info.get('dtype')}")
             bits_dt = {torch.bfloat16: torch.int16, torch.float16: torch.int16, torch.float32: torch.int32}[t.dtype]
             src_bits = t.view(bits_dt).numpy().reshape(-1)
             src = t.float().numpy().reshape(-1)  # bf16 -> fp32 is exact
@@ -386,6 +422,14 @@ def _walk(d, path=""):
             yield from _walk(v, p)
 
 
+def cmd_verify_receipt(a):
+    r = json.load(open(os.path.join(a.dir, "RECEIPT.json")))
+    for f, v in r["files"].items():
+        if sha_file(os.path.join(a.dir, f)) != v["sha256"]:
+            raise Fail(f"{f}: sha256 differs from RECEIPT.json")
+    print(f"RECEIPT-OK {len(r['files'])} files")
+
+
 def build_parser():
     p = argparse.ArgumentParser()
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -401,11 +445,14 @@ def build_parser():
     pl.add_argument("--lm-config-key", default="model")
     pl.add_argument("--mm-tokenizer-size", type=int)
     pl.add_argument("--text-vocab", type=int, default=100278)
+    pl.add_argument("--ref-shapes", help="B0's 2-D parameter shapes (json {shapes: {name: shape}}); required for safetensors")
     pl.add_argument("--src-safetensors", help="weights-only OLMo-core export (model.safetensors) instead of a DCP")
     pl.add_argument("--src-config", help="config file when it isn't <src>/config.json (e.g. olmo_core_config.json)")
     pl.add_argument("--allow-bf16-upcast", action="store_true", help="accept bf16 weights; written as exact fp32 upcasts")
     pl.add_argument("--pad-rows", choices=("fail", "passthrough"), default="fail",
                     help="token ids inside the padding rows: fail (default) or pass every row through (a ruling)")
+    vr = sp.add_parser("verify-receipt")
+    vr.add_argument("dir")
     ap = sp.add_parser("apply")
     ap.add_argument("--plan", required=True)
     ap.add_argument("--masters-in", required=True)
@@ -416,5 +463,5 @@ def build_parser():
 
 if __name__ == "__main__":
     args = build_parser().parse_args()
-    {"inspect": cmd_inspect, "plan": cmd_plan, "apply": cmd_apply}[args.cmd](args)
+    {"inspect": cmd_inspect, "plan": cmd_plan, "apply": cmd_apply, "verify-receipt": cmd_verify_receipt}[args.cmd](args)
     sys.exit(0)

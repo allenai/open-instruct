@@ -102,4 +102,4 @@ for name in "${!SRC[@]}"; do
   bash $CODE/convert_mm.sh $name $(dcpdir $D) $W/strip $STAGE "${LMPREFIX:-}" >> $W/strip.out 2>&1 && log "[$name] $(grep -h APPLY-OK $W/strip/convert_mm.log | tail -1)" \
     || { log "[$name] STRIP-FAIL: $(grep -h STRIP-FAIL $W/strip/convert_mm.log | tail -1)"; fail=1; }
 done
-log "JOB-DONE fail=$fail"; exit $fail
+log "JOB-DONE fail=$fail"; exit $fail  # superseded: B1/B2 ran on Hammond from the exports (mm_hammond.sh)

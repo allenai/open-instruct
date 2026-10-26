@@ -40,7 +40,9 @@ args=(--ref "$REF" --ref-config "$REFCFG" --src "$src" --out "$W/plan.json")
 log "$(grep PLAN-OK "$W/convert_mm.log" | tail -1)"
 [ "${STOP_AFTER_PLAN:-}" = 1 ] && { log "plan only"; exit 0; }
 raw=$STAGE/$name-masters-mm-raw-h134 out=$STAGE/$name-masters-stripped-h134
-[ -e "$raw/DONE" ] || { log "stage 1 start"; "$PY" "$OI/dump_olmocore_masters_mm.py" "$src" "$W/plan.json" "$raw" | tee -a "$W/convert_mm.log"; touch "$raw/DONE"; }
+ps=$(sha256sum "$W/plan.json" | cut -d' ' -f1)
+if [ -e "$raw/DONE" ]; then [ "$(cat "$raw/DONE")" = "$ps" ] || { log "$raw was dumped for another plan; not reusing"; exit 4; }
+else log "stage 1 start"; "$PY" "$OI/dump_olmocore_masters_mm.py" "$src" "$W/plan.json" "$raw" | tee -a "$W/convert_mm.log"; echo "$ps" > "$raw/DONE"; fi
 log "stage 1b start"
 "$PY" "$OI/strip_vision.py" apply --plan "$W/plan.json" --masters-in "$raw" --masters-out "$out" --receipt "$W/strip_receipt.json" | tee -a "$W/convert_mm.log"
 log "CONVERT-MM-DONE $out"

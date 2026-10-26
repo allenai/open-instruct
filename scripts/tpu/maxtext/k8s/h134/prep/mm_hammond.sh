@@ -25,6 +25,7 @@ for name in olmo35-small-mm-ckpt1-64k olmo35-small-mm-ckpt2-256k-amt; do
     log "[$name] receipt + copy $src -> $D"
     mkdir -p $D.tmp
     (cd $src && find . -type f -printf '%P\n' | sort) > $W/files.txt
+    grep -qx RECEIPT.json $W/files.txt && { log "[$name] source holds a RECEIPT.json; refusing (it would be overwritten)"; fail=1; continue; }
     while read -r f; do
       s=$(sha256sum "$src/$f" | cut -d' ' -f1); mkdir -p "$(dirname "$D.tmp/$f")"
       cp -n "$src/$f" "$D.tmp/$f" || { log "[$name] COPY-FAIL $f"; fail=1; break; }
@@ -42,14 +43,16 @@ json.dump({"source": sys.argv[2], "source_format": "OLMo-core weights-only expor
 PY
       mv $D.tmp $D && log "[$name] COPY-OK $D: $n files, RECEIPT.json $(sha256sum $D/RECEIPT.json | cut -c1-16)"
     else log "[$name] COPY-FAIL: $n/$ns files, $nb sha mismatches; partial copy kept at $D.tmp"; fail=1; continue; fi
-  else log "[$name] $D/RECEIPT.json exists; using the verified copy"; fi
+  else
+    $PY $CODE/strip_vision.py verify-receipt $D >> $R/run.log 2>&1 || { log "[$name] RECEIPT-VERIFY-FAIL on the existing copy"; fail=1; continue; }
+    log "[$name] $D verified against its RECEIPT.json"; fi
   out=$STAGE/$name-$step-masters-stripped-h134
   $PY $CODE/strip_vision.py plan --ref $J/b0_lm_manifest.json --ref-config $J/b0_config.json --src $D \
       --src-safetensors $D/model.safetensors --src-config $D/olmo_core_config.json --lm-prefix lm. --lm-config-key model.lm \
-      --mm-tokenizer-size 100278 --allow-bf16-upcast --pad-rows passthrough --out $W/plan.json >> $R/run.log 2>&1 \
+      --mm-tokenizer-size 100278 --ref-shapes $J/b0_param_shapes.json --allow-bf16-upcast --pad-rows passthrough --out $W/plan.json >> $R/run.log 2>&1 \
     || { log "[$name] PLAN-FAIL: $(tail -1 $R/run.log)"; fail=1; continue; }
   $PY $CODE/strip_vision.py apply --plan $W/plan.json --masters-in /nonexistent --masters-out $out --receipt $W/strip_receipt.json >> $R/run.log 2>&1 \
     || { log "[$name] APPLY-FAIL: $(tail -1 $R/run.log)"; fail=1; continue; }
   log "[$name] STRIP-OK $out"
 done
-log "RUN-DONE fail=$fail"
+log "RUN-DONE fail=$fail"; exit $fail
