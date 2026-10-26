@@ -168,6 +168,17 @@ and large logs. Symlink targets are recorded without being copied; external
 checkpoint weights therefore stay external. A changing source tree fails the
 snapshot. Download this archive along with the ordinary Beaker result.
 
+For an async production run with full rollout capture, use `python -m
+scripts.miles.audit_refresh_samples RECOVERED_RUN MODEL_CONFIG_JSON AUDIT_OUTPUT`
+on trusted local artifacts. It checks every consumed sample against rollout
+accounting, reconciles relative and absolute policy-version spans, checks finite
+aligned behavior scores, and validates the full route payload against the model's
+MoE layout. Reports retain the oldest version separately from the final replay
+version. These are offline checks with no serving cost. Final payload consistency
+does not independently prove that pre-refresh scores were preserved unchanged;
+trainer contracts, publication acknowledgments and request timelines remain
+separate qualification evidence.
+
 For a separate same-prefix diagnostic, copy the benchmark run to a new output
 directory, set `benchmark.replay_reference` to the absolute path of a completed
 case, and set `miles.sglang_enable_custom_logit_processor=true`. It replays the
