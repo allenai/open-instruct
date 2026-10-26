@@ -139,18 +139,23 @@ use `generic` and write them explicitly.** There are two behaviors:
   unset values; your explicit settings are retained. If model, hardware and
   topology match a measured preset, the plan prints a one-line hint naming it.
   The hint changes no settings and never requires adopting the preset.
-- **`profile = "auto"` or a named profile:** apply the selected preset verbatim.
-  Every explicit preset-owned key conflicts, even if its value equals the preset.
-  Native aliases and `--set` values count too. Auto falls back to generic when no
-  measured preset matches; a named profile rejects a mismatch. When checkpoint
-  metadata is unavailable, final matching waits for preparation.
+- **A named profile:** apply that preset verbatim. Every explicit preset-owned
+  key conflicts, even if its value equals the preset. Native aliases and `--set`
+  values count too. Incompatible model, hardware or topology is an error, never
+  a fallback to different settings. `auto` is not a supported selector.
 
-The learning examples explicitly request `auto`. Matching reads the checkpoint's
-`config.json` and requires the studied geometry, BF16 weights, dedicated TP1
-engines, and the measured 34,816-token context / 32,768-token response caps.
-Hardware mapping selects B300 on Holmes and H100 on Jupiter. The model-family
-name alone does not establish a match. Named profiles pin that match; they do not
-permit overrides or bypass compatibility checks.
+The learning examples pin `profile = "olmo35-b300-v1"` on Holmes. To use Jupiter,
+change both the cluster and the profile to `olmo35-h100-v1`. A wrong cluster error
+names the matching hardware's preset. The planner checks known hardware,
+dedicated TP1 placement, context/response caps and cached-KDA prerequisites
+without needing model metadata.
+
+The model guard reads the checkpoint's `config.json` and requires the studied
+geometry and BF16 weights; the model-family name alone is insufficient. It runs
+during planning when the actual checkpoint is local, otherwise after preparation.
+A named preset applies the same settings at both stages. Missing or incompatible
+metadata after preparation stops training. An OLMo-core conversion template is
+not treated as evidence of the source checkpoint's geometry.
 
 | Preset | Cache | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Memory fraction |
 |---|---|---:|---:|---:|---:|
@@ -172,7 +177,7 @@ A conflicting setting stops planning with the offending normalized keys and a
 complete preset block as TOML. The error offers two paths:
 
 1. Remove the explicit preset-owned settings, including their native aliases,
-   and retain `auto` or the named profile.
+   and retain the named profile.
 2. Select `generic`, paste the displayed block into the existing `[inference]`
    section, and edit the settings yourself. Merge the block; do not create a
    duplicate TOML section.
@@ -205,20 +210,26 @@ must also be configured explicitly in generic mode.
 
 ### Planning evidence and fleet capacity
 
-Profile hints/advisories appear once in `runtime.inference_profile.warnings`.
-Capacity and throughput advisories remain in their own sections. `plan`,
-`validate` and `run` print the same complete warning set to stderr; plan JSON
-remains on stdout. Submission reports conflicts before building when the required
-metadata is available; explicit preset-owned keys also conflict while otherwise
-matching metadata is pending. Preparation records final values and provenance in
-`resolved-plan.json` and `inference-profile.json`.
+Configuration advice is read-only. Actionable suggestions appear in
+`runtime.inference_profile.tips` and a single **Configuration tips** box at the
+end of stderr. Routine evidence notes remain in `inference_profile.warnings`;
+capacity and throughput warnings stay in their own sections and print as plain
+lines. `plan`, `validate` and `run` print the same advice; plan JSON stays on stdout.
+Preparation checks again and records values and provenance in `resolved-plan.json`
+and `inference-profile.json`.
 
 | Code | Meaning |
 |---|---|
-| `inference_profile_available` | A measured preset matches a generic run. It is a one-line hint; settings are unchanged. |
-| `inference_profile_fallback` | Auto found no matching preset and retained generic behavior. Read the mismatch reason. |
-| `inference_profile_pending` | Auto or a named profile needs checkpoint metadata. Inspect the resolved plan after preparation. |
-| `inference_fleet_extrapolation` | An applied preset covers per-engine settings, not this fleet's routing, publication latency or useful throughput. |
+| `inference_profile_available` | Tip: a measured preset matches a generic run. Names the setting to add; changes nothing. |
+| `inference_pool_hardware_mismatch` | Tip: explicit KV and recurrent pools equal a preset for a different GPU. Review before running; this is a heuristic, not a memory-fit check. |
+| `inference_metadata_unavailable` | Generic model metadata is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
+| `inference_model_guard_deferred` | A named preset is selected; its model guard must pass after preparation before training. |
+| `inference_fleet_extrapolation` | A named preset covers per-engine settings, not this fleet's routing, publication latency or useful throughput. |
+
+For a new model or topology, start with generic settings, inspect the plan, and
+run bounded measurements rather than interpolating these pools. Unknown shapes
+receive no preset recommendation. Users and agents can inspect the structured
+codes above without parsing the rendered tips box.
 
 The B300 two-engine throughput check does not establish multi-engine fully async
 refresh qualification. The updated-runtime trainer-consumption check used one
@@ -229,8 +240,8 @@ inventories are checked against an applied preset, excluding trainer/judge GPUs.
 Direct single-node training checks the rollout slice; a matched multi-node preset
 requires managed per-replica inventories. Checks run outside generation.
 
-The generic HTTP-equality warning is omitted for unchanged preset settings when
-the producer supplies more than one wave. A producer limited to exactly one wave
+The HTTP-equality warning is omitted whenever HTTP permits equal admission and
+the producer supplies more than one wave, including an identical generic block. A producer limited to exactly one wave
 still gets headroom advice. An underfeeding producer retains its own advisory.
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to

@@ -654,7 +654,7 @@ class RunConfig:
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         return {
             "argv": argv,
-            "async_capacity": async_capacity.report(options, self.core.max_policy_lag, self.inference_profile),
+            "async_capacity": async_capacity.report(options, self.core.max_policy_lag),
             "throughput": throughput.report(options, self.core),
             "inference_profile": self.inference_profile,
             "runtime_validated": False,

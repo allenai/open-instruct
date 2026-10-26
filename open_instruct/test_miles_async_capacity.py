@@ -50,7 +50,7 @@ def test_http_headroom_tracks_engine_limit_without_growing_gpu_batches(tmp_path,
 
 
 @pytest.mark.parametrize(
-    "http,producer,warn", [(64, 768, True), (64, 1536, True), (128, 768, True), (128, 1536, False)]
+    "http,producer,warn", [(64, 768, True), (64, 1536, False), (128, 768, True), (128, 1536, False)]
 )
 def test_one_wave_warning_covers_both_end_to_end_limits(tmp_path, http, producer, warn):
     config = configured(

@@ -1,10 +1,9 @@
 """Measured serving starting points, selected without importing a GPU runtime.
 
-Only checkpoint metadata is read. Unknown shapes keep the generic defaults;
-these profiles describe a measured workload, not a universal memory estimator.
+Named presets guard a measured workload; generic settings remain user-owned.
+The read-only advisor recommends presets without selecting or resizing settings.
 """
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -62,7 +61,8 @@ def model_metadata(model, prepared):
     """Read config.json when available, including after remote preparation."""
     source = prepared.get("hf_checkpoint")
     if source is None:
-        source = model["source"] if model["format"] == "hf" else model.get("hf_template")
+        # An HF template describes conversion, not the source Core checkpoint.
+        source = model["source"] if model["format"] == "hf" else None
     path = Path(source) / "config.json" if source else None
     if path is None or not path.is_file():
         return None, None
@@ -109,131 +109,147 @@ def editable_toml(name):
     return "\n".join(lines)
 
 
-def resolve(selector, cluster, model, options):
-    """Apply a whole preset, or retain generic settings with an optional hint."""
-    if not isinstance(selector, str) or selector not in ("auto", "generic", *PROFILES):
-        raise InputError(f"inference.profile must be auto, generic or one of {sorted(PROFILES)}")
-    report = {
-        "requested": selector,
-        "selected": "generic",
-        "status": "generic" if selector == "generic" else "fallback",
-        "expected_gpu": gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu"),
-        "defaults": {},
-        "qualification": "Starting point only; runtime, workload and async-refresh qualification remain required.",
-    }
-
-    def no_match(reason):
-        if selector in PROFILES:
-            raise InputError(f"inference.profile={selector}: {reason}")
-        report["reason"] = reason
-        return report
-
+def incompatibility(name, cluster, model, options):
+    """Guard a preset's known model/hardware/topology contract; never select settings."""
+    gpu = PROFILES[name]
+    cluster_gpu = gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu")
+    if cluster_gpu not in (None, gpu):
+        alternative = next((key for key, value in PROFILES.items() if value == cluster_gpu), "generic")
+        return f"Preset expects {gpu.upper()}, but {cluster} uses {cluster_gpu.upper()}; choose {alternative} or change the cluster"
     if options.get("colocate") or options.get("rollout_num_gpus_per_engine", 1) != 1:
-        return no_match("Measured presets require dedicated TP1 inference engines")
-    if any(options.get(name) for name in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")):
-        return no_match("External engine settings are owned by their provider")
-    if any(options.get(name, 1) != 1 for name in ("sglang_dp_size", "sglang_ep_size", "sglang_pp_size")):
-        return no_match("Measured presets require ordinary single-rank engines")
-    gpu = PROFILES.get(selector, gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu"))
-    if gpu not in PROFILES.values():
-        return no_match("No measured hardware mapping for this cluster")
-    if selector in PROFILES and gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu") not in (None, gpu):
-        return no_match("Named preset conflicts with the cluster GPU type")
+        return "Measured presets require dedicated TP1 inference engines"
+    if any(options.get(key) for key in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")):
+        return "External engine settings are owned by their provider"
+    if any(options.get(key, 1) != 1 for key in ("sglang_dp_size", "sglang_ep_size", "sglang_pp_size")):
+        return "Measured presets require ordinary single-rank engines"
     if options.get("sglang_quantization"):
-        return no_match("Quantized inference was not measured")
+        return "Quantized inference was not measured"
     if options.get("sglang_dtype", "auto") not in ("auto", "bfloat16"):
-        return no_match("Serving dtype differs from the measured BF16 configuration")
+        return "Serving dtype differs from the measured BF16 configuration"
     if (
         options.get("rollout_max_context_len") != MEASURED_CONTEXT
         or options.get("rollout_max_response_len") != MEASURED_RESPONSE
     ):
-        return no_match(f"Measured presets cover {MEASURED_CONTEXT:,} context / {MEASURED_RESPONSE:,} response caps")
+        return f"Measured presets cover {MEASURED_CONTEXT:,} context / {MEASURED_RESPONSE:,} response caps"
+    if not PRESETS[name]["sglang_disable_radix_cache"]:
+        if options.get("sglang_attention_backend", "triton") != "triton":
+            return "Cached KDA serving requires sglang_attention_backend=triton"
+        if options.get("sglang_page_size", 1) != 1:
+            return "Cached KDA serving requires sglang_page_size=1"
+        if options.get("sglang_disable_overlap_schedule", False):
+            return "Cached KDA serving requires overlap scheduling"
     if model is not None:
         shape = {key: model.get(key) for key in MODEL_SHAPE}
-        report["model_shape_sha256"] = hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()
         if shape != MODEL_SHAPE or model.get("dtype", model.get("torch_dtype")) != "bfloat16":
-            return no_match("Model geometry or weight dtype differs from the measured checkpoint")
+            return "Model geometry or weight dtype differs from the measured checkpoint; use generic for this model"
         if model.get("quantization_config"):
-            return no_match("Quantized inference was not measured")
-    name = f"olmo35-{gpu}-v1"
+            return "Quantized inference was not measured"
+    return None
+
+
+def resolve(selector, cluster, model, options, *, require_model_metadata=False):
+    """Apply only an explicit named preset. Generic never changes serving settings."""
+    if not isinstance(selector, str) or selector not in ("generic", *PROFILES):
+        raise InputError(
+            f"inference.profile must be generic (or omitted) or one of {sorted(PROFILES)}; auto was removed. Planning offers recommendations without changing settings."
+        )
+    report = {
+        "requested": selector,
+        "selected": selector,
+        "defaults": {},
+        "model_metadata_available": model is not None,
+    }
     if selector == "generic":
-        report["reason"] = "Generic settings retained"
-        if model is not None:
-            report["available_profile"] = name
         return report
+    reason = incompatibility(selector, cluster, model, options)
+    if reason:
+        raise InputError(f"inference.profile={selector}: {reason}")
     conflicts = sorted(set(PROFILE_KEYS).intersection(options))
     if conflicts:
         values = ", ".join(f"{key}={options[key]!r}" for key in conflicts)
         raise InputError(
-            f"inference.profile={selector} applies {name} as a whole preset. "
-            f"Explicit preset-owned settings conflict: {values}. Equal values also conflict.\n"
-            "Either remove these settings (including native aliases) and keep the preset, "
-            "or select generic and manage the settings explicitly. "
-            "Merge this complete editable preset block into your inference section, then change it as needed:\n\n"
-            + editable_toml(name)
+            f"inference.profile={selector} is a whole preset. Explicit preset-owned settings conflict: {values}. Equal values also conflict.\n"
+            "Either remove these settings (including native aliases) and keep the preset, or select generic and manage them explicitly. "
+            "Merge this editable preset block into your inference section, then change it as needed:\n\n"
+            + editable_toml(selector)
         )
-    if model is None:
-        report.update(
-            status="pending_model_metadata",
-            reason="Model config.json is unavailable here; resolve again after model preparation",
+    if model is None and require_model_metadata:
+        raise InputError(
+            f"inference.profile={selector}: prepared checkpoint config.json is unavailable; cannot verify model geometry. Fix model preparation or select generic explicitly."
         )
-        return report
-    report.update(
-        selected=name,
-        status="candidate",
-        expected_gpu=gpu,
-        reason="Matched model geometry, dedicated TP1 placement, context caps and GPU family",
-        defaults=dict(PRESETS[name]),
-    )
+    report.update(expected_gpu=PROFILES[selector], defaults=dict(PRESETS[selector]))
     return report
 
 
-def advisories(report, options):
-    """Expose preset availability, missing matches and fleet evidence boundaries."""
-    if report["requested"] == "generic":
-        available = report.get("available_profile")
-        return (
-            [
+def advise(report, cluster, model, options, explicit_keys):
+    """Read-only suggestions and evidence notes, independent of configuration selection."""
+    warnings, tips = [], []
+    selected = report["selected"]
+    if selected == "generic":
+        cluster_gpu = gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu")
+        for name, preset in PRESETS.items():
+            if (
+                model is not None
+                and cluster_gpu == PROFILES[name]
+                and not incompatibility(name, cluster, model, options)
+            ):
+                tips.append(
+                    {
+                        "code": "inference_profile_available",
+                        "message": f'Measured preset {name} matches. To adopt it whole, add inference.profile = "{name}" and remove its explicit serving keys. Your current settings are unchanged.',
+                    }
+                )
+            pool_keys = ("sglang_max_total_tokens", "sglang_max_mamba_cache_size")
+            if (
+                cluster_gpu
+                and cluster_gpu != PROFILES[name]
+                and all(key in explicit_keys and options.get(key) == preset[key] for key in pool_keys)
+            ):
+                tips.append(
+                    {
+                        "code": "inference_pool_hardware_mismatch",
+                        "message": f"Your explicit KV/recurrent pools resemble {name} ({PROFILES[name].upper()}), but {cluster} uses {cluster_gpu.upper()}. Review GPU memory and the matching hardware's preset before running; settings are unchanged.",
+                    }
+                )
+        if model is None:
+            warnings.append(
                 {
-                    "code": "inference_profile_available",
-                    "message": f"Measured preset {available} matches; generic settings are unchanged. Select auto or that name to use it whole.",
+                    "code": "inference_metadata_unavailable",
+                    "message": "Model metadata is unavailable here; preset recommendations will be checked after preparation. Generic settings are unchanged.",
                 }
-            ]
-            if available
-            else []
-        )
-    if report["status"] != "candidate":
-        return [
-            {
-                "code": "inference_profile_pending"
-                if report["status"] == "pending_model_metadata"
-                else "inference_profile_fallback",
-                "message": f"Inference profile {report['requested']}: {report['reason']}. Generic settings are provisional; inspect resolved-plan.json after preparation.",
-            }
-        ]
-    engines = options.get("rollout_num_gpus", 1) // options.get("rollout_num_gpus_per_engine", 1)
-    if engines <= 1:
-        return []
-    return [
-        {
-            "code": "inference_fleet_extrapolation",
-            "message": f"This plan requests {engines} inference engines. Preset {report['selected']} covers per-engine settings, "
-            "not this fleet's routing, producer capacity or publication latency. The B300 two-engine throughput check "
-            "does not qualify multi-engine fully async refresh. Inspect async_capacity and validate occupancy, policy age/discards "
-            "and publication acknowledgments on the intended placement. See docs/miles/throughput-profiles.md.",
-            "requested_engines": engines,
-        }
-    ]
+            )
+    else:
+        if model is None:
+            warnings.append(
+                {
+                    "code": "inference_model_guard_deferred",
+                    "message": f"Preset {selected} is selected; model geometry must be verified after preparation before training.",
+                }
+            )
+        engines = options.get("rollout_num_gpus", 1) // options.get("rollout_num_gpus_per_engine", 1)
+        if engines > 1:
+            warnings.append(
+                {
+                    "code": "inference_fleet_extrapolation",
+                    "message": f"This plan requests {engines} inference engines. Preset {selected} covers per-engine settings, not fleet routing, producer capacity or publication latency. The B300 two-engine throughput check does not qualify multi-engine fully async refresh; validate the intended placement. See docs/miles/throughput-profiles.md.",
+                    "requested_engines": engines,
+                }
+            )
+    return warnings, tips
 
 
 def validate_hardware(report, devices):
     """One startup check per node, not a token-path runtime check."""
-    if not report or report["status"] != "candidate":
+    if not report or report.get("selected") not in PROFILES:
         return
     expected = report["expected_gpu"]
     minimum_mib = MINIMUM_MEMORY_MIB[expected]
     if not devices or any(
-        expected not in name.lower() or memory is None or memory < minimum_mib for name, memory in devices
+        not isinstance(name, str)
+        or expected not in name.lower()
+        or not isinstance(memory, (int, float))
+        or memory < minimum_mib
+        for name, memory in devices
     ):
         raise InputError(
             f"Inference profile {report['selected']} expects {expected.upper()} GPUs with at least "
@@ -241,11 +257,11 @@ def validate_hardware(report, devices):
         )
 
 
-def check_hardware(report, device_ids=None, *, node=None):
+def check_hardware(report, *, node=None):
     """Check visible devices once before starting a matched serving profile."""
-    if not report or report["status"] != "candidate":
+    if not report or report.get("selected") not in PROFILES:
         return []
-    inventory = gpu_hardware.inventory(device_ids)
+    inventory = gpu_hardware.inventory()
     devices = (
         gpu_hardware.rollout_inventory(node, inventory)["hardware"]
         if node is not None
@@ -261,7 +277,7 @@ def check_cluster_hardware(report, directory, layout):
     Inventory is collected independently of checkpoint availability. The fresh
     rendezvous directory is passed only by the managed cluster launcher.
     """
-    if not report or report["status"] != "candidate":
+    if not report or report.get("selected") not in PROFILES:
         return []
     inventories = []
     expected = sorted(node["rollout_gpus"] for node in layout["nodes"])

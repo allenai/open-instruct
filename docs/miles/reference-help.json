@@ -191,7 +191,7 @@
     "save_checkpoints": "Boolean, default true; false removes save cadence and conflicts with explicit save_interval.",
     "trainer_diagnostics": "Boolean mapped to core.diagnostic_interval as 1 or 0.",
     "trainer_flash_attention_version": "2, 3 or 4; selects the corresponding Core flash backend; hardware support varies.",
-    "profile": "inference.profile: generic (default/omitted), auto, olmo35-b300-v1 or olmo35-h100-v1. Generic keeps explicit settings and offers a one-line matching-preset hint. Auto/named apply a measured preset whole; explicit preset-owned keys conflict even when equal, with an editable TOML block in the error. Auto falls back when no preset matches; named profiles require a match. Model metadata unavailable during planning is resolved after preparation. Producer/trainer/topology controls are separate."
+    "profile": "inference.profile: generic (default/omitted), olmo35-b300-v1 or olmo35-h100-v1. Generic preserves explicit settings; the read-only planner advisor suggests matching presets and flags copied pools for different hardware. Named presets apply whole; explicit preset-owned keys conflict even when equal, with an editable TOML block in the error. Known hardware/topology conflicts fail at plan time; the model guard must pass after preparation. No auto selector or silent fallback. Producer/trainer/topology controls are separate."
   },
   "structured": {
     "compiler_cache.diagnostics": "Boolean; maps to core.compiler_cache_diagnostics (default false).",

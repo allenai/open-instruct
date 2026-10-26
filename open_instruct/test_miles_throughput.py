@@ -79,12 +79,12 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
 
 
 @pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("large", 2432)])
-def test_learning_examples_resize_producer_budget_after_preparation(tmp_path, profile, producer_budget):
+def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()
-    assert pending.inference_profile["status"] == "pending_model_metadata"
-    assert pending.miles["sglang_max_running_requests"] == 64
-    assert pending.miles["async_max_concurrent_samples"] == producer_budget
+    assert pending.inference_profile["model_metadata_available"] is False
+    assert pending.miles["sglang_max_running_requests"] == 512
+    assert pending.miles["async_max_concurrent_samples"] == 8 * producer_budget
     (tmp_path / "config.json").write_text(json.dumps(inference_profiles.MODEL_SHAPE | {"dtype": "bfloat16"}))
     config = spec.compile({"hf_checkpoint": str(tmp_path)})
     plan = config.plan()

@@ -296,7 +296,16 @@ def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatc
         return json.dumps([{"id": f"experiment-{len(submitted)}"}])
 
     monkeypatch.setattr(launch.subprocess, "check_output", check_output)
+    original_compile = RunSpec.compile
+    compilations = []
+
+    def compile_once(*args, **kwargs):
+        compilations.append(1)
+        return original_compile(*args, **kwargs)
+
+    monkeypatch.setattr(RunSpec, "compile", compile_once)
     first = launch.submit("test-user/image-alias", run)
+    assert len(compilations) == 1
     assert first["image"] == IMAGE_ID and first["requested_image"] == "test-user/image-alias"
     assert first["revision"] == "source-revision"
     assert first["spec_sha256"] == workflow.fingerprint(run.to_dict())

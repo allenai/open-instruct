@@ -112,7 +112,7 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-For the matched Olmo 3.5 geometry, automatic profiles enable prefix caching on
+For the matched Olmo 3.5 geometry, the named presets enable prefix caching on
 B300 and disable it on H100. To change cache mode, select `inference.profile = "generic"` and provide
 the serving settings explicitly. Presets are applied whole. Generic configurations and the colocated `dev` example keep caching
 disabled. Cached hybrid serving requires the FP32 tracked-state implementation
@@ -123,10 +123,13 @@ the image when changing pins. See
 The learning templates (`node`, `large`) propose **512 running requests, 512 HTTP
 permits and decode graphs through batch 512 per B300 engine**. They use
 17,825,792 KV tokens (512 × 34,816), 3,072 recurrent slots, memory fraction 0.7, and prefill
-chunks at 8,192 when the model and topology match. `inference.profile = "auto"`
-selects the starting point from checkpoint geometry, cluster hardware, dedicated
-TP1 placement and context caps. Explicit preset-owned settings conflict with it. `dev` retains eight requests and its small pools
-because its tiny trainer and engine share one GPU.
+chunks at 8,192. Both examples pin `inference.profile = "olmo35-b300-v1"`
+on Holmes. Switching to Jupiter also requires `profile = "olmo35-h100-v1"`.
+Named presets apply whole; explicit preset-owned settings conflict. Known
+hardware/topology mismatches fail during planning. The model guard runs when the
+actual checkpoint is available and must pass after preparation before training.
+`dev` retains eight requests and its small pools because its tiny trainer and
+engine share one GPU.
 
 This starting point comes from an Olmo 3.5 checkpoint with approximately 23.31 GiB
 of weights, 4 KiB of full-attention KV per token and 14.34 MiB of recurrent state
@@ -161,9 +164,9 @@ the fleet/trainer tradeoff; batch-equivalents are not a prediction of policy age
 or drain duration. Measure trainer wait, useful tokens,
 oldest-token age and stale-work discards; reduce producer budget or inference fleet
 size if production outruns useful consumption. Completed siblings can remain
-outside the unfinished budget. Omitted budgets are recomputed against prepared
-checkpoint metadata, so inspect `resolved-plan.json` before interpreting a local
-plan whose profile is still pending.
+outside the unfinished budget. Named preset settings and their derived producer
+budgets are identical before and after model preparation; inspect
+`resolved-plan.json` for the final compatibility checks and provenance.
 
 The [H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
 select **512 with caching disabled** on the realistic prompt mixture: 16.7K native
@@ -177,14 +180,14 @@ the guide. These measurements used the experimental runtime; the updated image
 also passed a short H100 deployment check. The fully async trainer-consumption
 check used B300. Presets do not accept cache-mode overrides.
 
-Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
-provenance. A profile is a measured preset applied whole. Omitted or `generic`
-profiles preserve existing defaults and explicit settings, with a one-line hint
-if a measured preset matches. The learning examples opt into `auto`: it applies
-a matching preset or falls back to generic. A named profile requires a match.
-Neither auto nor named presets accept explicit values for preset-owned keys,
-even equal values. Topology, metrics, producer budget and trainer controls remain
-separate. Unknown remote checkpoint metadata is resolved after preparation.
+Inspect `plan.runtime.inference_profile` for the selected preset, its values and
+model metadata. Omitted or `generic` profiles preserve existing defaults and
+explicit settings. The planner offers read-only tips when a measured preset
+matches or explicit pools resemble a preset for different hardware. Tips appear
+in a small stderr box and in `inference_profile.tips` in JSON; routine warnings
+remain plain lines. The advisor never changes settings. There is no `auto`
+selector. Named presets reject explicit preset-owned values, even equal values.
+Topology, metrics, producer budget and trainer controls remain separate.
 
 To tune admission, pools or cache mode, select generic and write the settings
 explicitly. Conflict errors show the offending keys, a complete editable TOML
