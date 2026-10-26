@@ -413,7 +413,7 @@ Each case has 300 seconds of warmup and 600 seconds of measurement. One B300 is
 protected for the 90-minute timeout, at high priority with no automatic restart;
 Ray log deduplication is disabled to retain every engine observation. This is a
 controlled workload-shape comparison, not a claim that the final queue setting
-has been selected. The 8K-response and long-prefill panels remain prepared but
+has been selected. The intermediate 8K-response panel remains prepared but
 unlaunched.
 
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
@@ -422,6 +422,13 @@ prefixes were verified locally using the downloaded tokenizer. Ninety-five other
 length-eligible captures lacked an exact text/token boundary and were excluded.
 This small corpus can make repeated cache-on runs prefix-hit dominated; include a
 separately qualified cache-off comparison for uncached prefill mechanics.
+The [long-prefill panel](https://beaker.org/ex/01M5TSJ42J1TZRK9KBYWB3ZE6Z)
+uses these prefixes with a 2K response cap and 10,240-token context at admission
+512. Its cases are cache-on/chunk-8192 → cache-off/chunk-8192 →
+cache-off/chunk-4096 → cache-on/chunk-8192, keeping pools, graphs and request
+headroom fixed. It has the same 300-second warmup, 600-second measurements and
+protected one-B300, 90-minute execution cap as the short-response panel. This
+separates uncached prefill chunking from reuse on the small repeated corpus.
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
 new evidence for trainer batch size, policy-lag limits, publication intervals or
