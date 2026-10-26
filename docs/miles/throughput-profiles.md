@@ -146,11 +146,19 @@ Explicit TOML values win over profiles, and `--set` replaces the corresponding
 TOML value. Plan output records each resolved value and its source. Existing
 conflict checks still reject contradictory aliases for the same native option.
 
-The B300 candidate supports the examples' cache-disabled mode with 1,024 recurrent
-slots and the experimental cache-enabled mode with 3,072. H100 selects 512 with caching disabled (512 recurrent slots and 6,684,672 KV
-tokens), or 320 when caching is explicitly enabled (1,920 slots and 4,456,448 KV
-tokens). The uncached candidate was faster on the realistic prompt mixture. Profiles do not enable caching or change runtime pins.
-These are candidates pending exact-runtime and production-refresh qualification.
+The selected capacities are per engine:
+
+| GPU and cache mode | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Static memory fraction |
+|---|---:|---:|---:|---:|
+| B300, caching disabled | 512 | 17,825,792 | 1,024 | 0.7 |
+| B300, caching explicitly enabled | 512 | 17,825,792 | 3,072 | 0.7 |
+| H100, caching disabled | 512 | 6,684,672 | 512 | 0.9 |
+| H100, caching explicitly enabled | 320 | 4,456,448 | 1,920 | 0.9 |
+
+All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
+Profiles do not enable caching or change runtime pins. These are candidates
+pending deployment qualification on the examples' exact runtime; the measured
+runtime's async-refresh coverage is described below.
 
 The global producer budget is independent: profiles preserve its generic sizing
 basis, and examples retain explicit 768/2,432 budgets. An explicit running-request
@@ -179,10 +187,42 @@ counter snapshots, batches and response records without marking its workflow com
 
 The measured adapter also needs a compatibility change before enabling caching
 on the examples' newer SGLang pin: that runtime requires selected recurrent-state
-snapshots written from FP32 accumulators. The adapter currently lacks that contract,
-and the runtime rejects the unsupported path. Casting BF16 intermediate states to
-FP32 would not restore the missing precision. This is tracked separately from the
-configuration gains; profiles do not enable caching or silently change runtime pins.
+snapshots written from FP32 accumulators. The pinned adapter lacks that contract,
+and the runtime rejects the unsupported path. An isolated implementation passed
+[eight GPU precision/layout cases and two dispatch cases](https://beaker.org/ex/01M5VGGMDMTV1KFFH7N94WR7S4).
+Full-model deployment qualification remains separate. Casting BF16 intermediate
+states to FP32 would not restore the missing precision. Profiles do not enable
+caching or silently change runtime pins.
+
+## Fully async refresh coverage and retained evidence
+
+The [ordered-fixture validation](https://beaker.org/ex/01M5VF9BVN115C8E3VQHB99YMB)
+completed two optimizer updates with the default two-GPU EP2 trainer, one B300
+engine, batch 256, lag 6, producer 768 and cached admission 512. Both publications
+occurred with generation active: the nearest engine observations showed 512 and
+505 running requests within four seconds before publication. Publication took
+3.85 and 3.65 seconds. All 512 consumed samples passed finite-score, alignment,
+version-ledger and expert-route consistency checks, including 105 responses that
+crossed a weight version. No invalid expert IDs were found.
+
+This fixture deliberately repeats short, reward-varying prompt clusters before
+the remaining real-reward prompts. It exercises overlap and trainer consumption;
+it does not measure representative learning throughput or establish learning
+equivalence. All 69 regular source files, including both rollout tensors
+(2.65 GB total), were recovered and hash-verified. The experimental runtime differs
+from the example pins. The [shipping-runtime validation](https://beaker.org/ex/01M5VJEFM27YYWX57JYY2VQDSD)
+also exercises automatic profile resolution; it must complete before transferring
+the production qualification.
+
+The study retains raw results and a machine-readable fitting table under
+`runs/inference-throughput-20261025`. `analysis/fit-observations.jsonl` contains
+31 completed cases with full model geometry, workload lengths, native options,
+immutable image IDs, exact producing-job allocation and artifact hashes.
+`analysis/artifact-catalog.json` indexes the attempts and archives. Failed and
+interrupted attempts remain available; a completed measurement followed by an
+interrupted drain is labeled separately. This is evidence for one model shape,
+not a fitted estimator for arbitrary models. New shapes need their own memory
+calculation and a small measured admission bracket.
 
 ## H100 measurements for the studied Olmo 3.5 checkpoint
 
@@ -190,7 +230,7 @@ The first H100 panel used the same approximately 23.31-GiB checkpoint as the
 B300 measurements, one active TP1 engine, a 34,816-token context and a 32,768-token
 response cap. It used the experimental cache-capable runtime, with `extra_buffer`
 recurrent caching, full decode graphs, prefill chunks of 8,192 and static memory
-fraction 0.9. These results do not qualify the examples' older pinned runtime.
+fraction 0.9. These results do not qualify the examples' different pinned runtime.
 
 | Admission / HTTP permits | Producer samples | KV tokens | Recurrent slots | Native decode tokens/s | Peak GPU memory |
 |---|---:|---:|---:|---:|---:|
