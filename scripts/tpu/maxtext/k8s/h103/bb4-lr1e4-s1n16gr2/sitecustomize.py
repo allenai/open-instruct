@@ -17,6 +17,7 @@ if os.environ.get("GCSFS_RETRIES"):
         import asyncio
         import contextvars
         import random
+        import threading
         import time
 
         import gcsfs
@@ -39,8 +40,11 @@ if os.environ.get("GCSFS_RETRIES"):
         _stat = {"requests": 0, "max_attempts": 1, "max_wait": 0.0}
         _cur = contextvars.ContextVar("gcsfs_retry_cur", default=None)
         _stagger = {"delay": None, "until": None}
+        _stagger_lock = threading.Lock()  # gcsfs may run event loops on several threads
         if os.environ.get("GCSFS_STAGGER_STEP_S"):
             _idx = int(os.environ["JOB_COMPLETION_INDEX"])  # KeyError/ValueError -> not patched, exit 3
+            if _idx < 0:
+                raise ValueError(f"JOB_COMPLETION_INDEX {_idx} < 0")
             _groups = int(os.environ.get("GCSFS_STAGGER_GROUPS", "16"))
             _stagger["delay"] = (_idx % _groups) * float(os.environ["GCSFS_STAGGER_STEP_S"])
             _stagger["idx"] = _idx
@@ -49,11 +53,17 @@ if os.environ.get("GCSFS_RETRIES"):
             d = _stagger["delay"]
             if d is None:
                 return
-            now = time.monotonic()
-            if _stagger["until"] is None:
-                _stagger["until"] = now + d
-                print(f"GCSFS-STAGGER host={_stagger['idx']} delay={d:.1f}s", file=sys.stderr, flush=True)
-            left = _stagger["until"] - now
+            with _stagger_lock:
+                now = time.monotonic()
+                first = _stagger["until"] is None
+                if first:
+                    _stagger["until"] = now + d
+                left = _stagger["until"] - now
+            if first:
+                try:  # a diagnostic must never fail a request
+                    print(f"GCSFS-STAGGER host={_stagger['idx']} delay={d:.1f}s", file=sys.stderr, flush=True)
+                except Exception:
+                    pass
             if left > 0:
                 await _real_sleep(left)
 
