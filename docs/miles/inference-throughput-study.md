@@ -212,9 +212,25 @@ while the panel continued. It delivered 14,177,712 response tokens in 610.754 s
 coverage. All 1,792 measured responses have timing records and report zero
 retractions; all 256 requested captures are present. Startup and drain were
 373.99/392.89 s outside measurement. This repeats the approximate 23–24K delivered
-tokens/s range at 512, but does not yet settle HTTP headroom: the other supply
-cases and closing control remain pending. Different collection windows and
+tokens/s range at 512. Different collection windows and
 unfinished work account for different delivered/native rates.
+
+The second case, HTTP 512 / producer 2,048, also completed and was
+[fully snapshotted](https://beaker.org/ex/01M5TVWWJH2H0WGZPTCKX9FPBK), with all
+298 source-file hashes verified. It delivered 16,742,615 tokens in 656.308 s
+(25,510.3 tokens/s); native decode was 24,637.7 tokens/s. Mean running/queued
+requests were 510.98/0.015 with full observation coverage. All 2,048 measured
+responses have valid timing records and zero reported retractions; all 256
+captures are present. Peak memory remained 138.93 GiB.
+
+Compared with the opening case, native decode rose 2.2% while delivered throughput
+rose 9.9%; these are different counters, not independent estimates of one gain.
+The smaller HTTP capacity kept admission almost full and removed the engine queue,
+but waiting moved to the producer: mean producer wait rose from 295.4 to 450.4 s,
+while producer-to-response duration remained about 625.3 versus 620.8 s. This
+supports testing less queued work, not a claim that total policy age improved.
+The smaller producer case and closing control remain pending. Full records are
+in `analysis/supply-headroom-interim.json` and the ten-row fit dataset.
 
 ## Correctness and retained evidence
 
@@ -466,7 +482,10 @@ regressions fail on the old runtime and pass with MILES fix
 [`ff7be7a`](https://github.com/allenai/miles-olmo-core/commit/ff7be7a31d4c2b05eb75d443314a7e2991df9b7a).
 The fix also passes 33 existing boundary/refresh tests and 36 full producer-loop
 trials with synthetic generations. It changes completion cleanup, not mid-sequence
-publication. The replacement image pins this fix; GPU qualification remains pending.
+publication. The rebuilt image `01M5TVRMG3856ZFJ5R67KB39ZZ` passes all 35 tests
+without source overlays. The [replacement panel](https://beaker.org/ex/01M5TVTEZQ6MJMEGF31T2JCG45)
+uses the same workload and 90-minute one-B300 budget with this pin; GPU transition
+qualification remains pending.
 
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
 retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
