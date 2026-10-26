@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Resolve MILES inference starting profiles from checkpoint geometry, hardware and placement, with explicit overrides, visible provenance and independent producer budgets (https://github.com/allenai/open-instruct/pull/2076).
+- Resolve MILES inference and cache starting profiles from checkpoint geometry, hardware and placement, with explicit overrides, visible provenance and independent producer budgets; pin FP32 KDA cache snapshots and inference robustness fixes validated with async refresh (https://github.com/allenai/open-instruct/pull/2076).
 - Propose measured B300 inference limits in the MILES learning examples while preserving global producer budgets and documenting runtime/model qualification limits; expose per-replica host memory for GRPO/OPD launches to avoid unnecessary GPU-slot allocation (https://github.com/allenai/open-instruct/pull/2076).
 - Skip MILES Core startup evaluation when resuming beyond step 0; preserve configured initial evaluation at step 0 and periodic evaluation (https://github.com/allenai/open-instruct/pull/2072).
 - Reject async-only timing on synchronous Miles OPD configurations before launch (https://github.com/allenai/open-instruct/pull/2051).

@@ -23,7 +23,7 @@ maintained example TOMLs encode a choice, the example is authoritative.
 - **Completed buffer** (one collection): separate from unfinished-request headroom; enlarging it retains more completed work without fixing response transport.
 - **Submission granularity** (`"sample"`): engines refill as individual responses finish rather than waiting for whole groups.
 - **Activation recomputation** (on for long contexts): trades extra compute for memory; turning it off is reasonable for short contexts once memory fit is checked.
-- **Radix caching** (disabled in the examples): compatible kernels can benefit from repeated long prefixes, but the current pinned Olmo KDA runtime lacks the required tracked-state support. Do not infer support from the experimental runtime used in the throughput study.
+- **Radix caching** (automatic for matched profiles: on for B300, off for H100; off for generic/colocated setups): the realistic-prompt comparison favored cached 512 on B300 and uncached 512 on H100. Explicit `inference.radix_cache` wins. Cached hybrid serving needs the pinned FP32 tracked-state implementation; rebuild images after changing runtime pins. Recheck this choice for different prompt reuse and lengths.
 - **Compiler cache** (on): shortens repeat startup and does not change training.
 - **Weight equality audit** (off in learning templates, on in mechanics templates): startup snapshot/reset qualification is separate from the required publication protocol.
 - **Trainer scoring** (`scoring_pass_required = false`): reuse the training forward only when the recipe permits it. Learning templates set `scoring_check_interval = 0` to retain startup/resume validation without periodic extra scoring forwards; TIS and required scoring remain active.

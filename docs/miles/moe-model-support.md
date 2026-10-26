@@ -47,18 +47,21 @@ so captured graphs retain valid pointers.
 
 ## Current limits
 
-Keep prefix caching disabled (`inference.radix_cache = false`, the structured
-default) with the pinned runtime. SGLang's `extra_buffer` path requires FP32
-tracked-state snapshots, which `OlmoPackedKDAKernel` does not implement. The
-backend rejects tracked prefill batches rather than restoring unwritten states.
-The Olmo adapter overrides the prefill kernel, so selecting the generic Triton
-prefill option does not fix this incompatibility. The learning examples inherit
-disabled prefix caching while retaining recurrent-state storage for active
-requests.
+The pinned Olmo KDA kernel supports SGLang's `extra_buffer` cache path using
+tracked-state snapshots written directly from FP32 accumulators. Casting BF16
+intermediate states to FP32 does not satisfy this contract. Rebuild the runtime
+image when updating the adapter pin; older images reject tracked prefill batches.
+Automatic inference profiles enable caching for the measured dedicated B300
+geometry and keep it off for H100. Explicit `inference.radix_cache` overrides
+the profile. Generic and colocated setups retain disabled caching; recurrent
+state storage is still required for active requests.
 
 Synchronous barrier publication with EP4 training and TP1 fused-rounding serving
-is supported for this profile. Mixed-policy refresh, long context and save/resume
-are untested for it.
+is supported for this profile. A two-update validation with the default EP2
+trainer, one B300 TP1 engine and a 32K response cap exercised fully async refresh
+and training on mixed-version responses. See the
+[recorded coverage and limits](throughput-profiles.md#fully-async-refresh-coverage-and-retained-evidence).
+This does not establish long-run learning equivalence or save/resume support.
 
 Matching greedy tokens does not imply matching probabilities against an HF
 reference. Use Core's actual scoring policy for rollout comparisons and retain

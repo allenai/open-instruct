@@ -15,6 +15,8 @@ from open_instruct.miles.errors import InputError
 CLUSTER_GPUS = {"ai2/holmes": "b300", "ai2/jupiter": "h100"}
 PROFILES = {"olmo35-b300-v1": "b300", "olmo35-h100-v1": "h100"}
 PROFILE_KEYS = (
+    "sglang_disable_radix_cache",
+    "sglang_mamba_radix_cache_strategy",
     "sglang_max_running_requests",
     "sglang_server_concurrency",
     "sglang_cuda_graph_backend_decode",
@@ -116,7 +118,7 @@ def resolve(selector, cluster, model, options):
         return fallback("Serving dtype differs from the measured BF16 configuration")
     if options.get("rollout_max_context_len") != 34816 or options.get("rollout_max_response_len") != 32768:
         return fallback("Automatic profiles currently cover the measured 34,816 context / 32,768 response caps")
-    cache_off = options.get("sglang_disable_radix_cache", True)
+    cache_off = options.get("sglang_disable_radix_cache", gpu != "b300")
     running = options.get("sglang_max_running_requests", 512 if gpu == "b300" or cache_off else 320)
     kv_contexts = running if gpu == "b300" else min(running, 192 if cache_off else 128)
     state_multiplier = (2 if gpu == "b300" else 1) if cache_off else 6
@@ -126,6 +128,8 @@ def resolve(selector, cluster, model, options):
         expected_gpu=gpu,
         reason="Matched model geometry, dedicated TP1 placement, context caps and GPU family",
         defaults={
+            "sglang_disable_radix_cache": cache_off,
+            **({"sglang_mamba_radix_cache_strategy": "extra_buffer"} if not cache_off else {}),
             "sglang_max_running_requests": running,
             "sglang_server_concurrency": running,
             "sglang_cuda_graph_backend_decode": "full",
