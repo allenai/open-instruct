@@ -349,6 +349,7 @@ STRUCTURED_FIELDS = {
 # Map special run-file controls to their compiler branch. Ordinary aliases use
 # FIELD_MAP; these need transformations or deferred multi-field resolution.
 SPECIAL_CONTROLS = {
+    "profile": "inference_profile",
     "gpus": "gpus",
     "placement_mode": "deferred",
     "max_context_length": "deferred",

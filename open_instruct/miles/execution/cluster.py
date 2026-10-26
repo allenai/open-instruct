@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 from urllib import request
 
-from open_instruct.miles.configuration import topology
+from open_instruct.miles.configuration import inference_profiles, topology
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import rendezvous
 from open_instruct.miles.infrastructure import infra_timeouts
@@ -271,6 +271,9 @@ def run(path):
         if len(visible) != layout["gpus_per_replica"]:
             raise RuntimeError("Visible devices differ from the Beaker GPU allocation")
         ray_devices, judges = topology.devices(node, visible)
+        profile = spec.compile().inference_profile
+        hardware = inference_profiles.check_hardware(profile, ray_devices) if node["rollout_gpus"] else []
+        write(root / f"inference-profile-{rank}.json", {"profile": profile, "hardware": hardware})
         # Three Ray agent ports everywhere; the head needs three more Ray ports.
         ports = iter(free_ports(len(judges) + (6 if address == head else 3)))
         write(

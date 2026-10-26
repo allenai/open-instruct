@@ -12,7 +12,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, constraints, options, topology, validation
+from open_instruct.miles.configuration import (
+    async_capacity,
+    constraints,
+    inference_profiles,
+    options,
+    topology,
+    validation,
+)
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
@@ -434,7 +441,7 @@ class RunSpec:
         return launch
 
     def compile(self, prepared: dict | None = None) -> RunConfig:
-        """Resolve settings without opening checkpoints, datasets or GPU libraries."""
+        """Resolve settings using optional model JSON, without loading weights or GPU libraries."""
         prepared = prepared or {}
         if unknown := set(prepared) - {
             "hf_checkpoint",
@@ -485,7 +492,9 @@ class RunSpec:
             for key, value in self.sections[section].items():
                 origin = f"{section}.{key}"
                 control = constraints.SPECIAL_CONTROLS.get(key)
-                if control == "gpus" and section in ("trainer", "inference"):
+                if key == "profile" and section == "inference":
+                    controls["inference_profile"] = (value, origin)
+                elif control == "gpus" and section in ("trainer", "inference"):
                     put(
                         "miles.actor_num_gpus_per_node" if section == "trainer" else "miles.rollout_num_gpus",
                         value,
@@ -623,6 +632,14 @@ class RunSpec:
                 f"Rollout context {miles['rollout_max_context_len']} exceeds Core ({length}) or SGLang "
                 f"({miles['sglang_context_length']}) context capacity; use inference.max_context_length to set all three."
             )
+        selector = controls.get("inference_profile", ("auto", ""))[0]
+        metadata, metadata_path = (
+            inference_profiles.model_metadata(self.model, prepared) if selector != "generic" else (None, None)
+        )
+        profile = inference_profiles.resolve(selector, self.launch["cluster"], metadata, miles)
+        profile["model_metadata_path"] = metadata_path
+        for key, value in profile["defaults"].items():
+            miles.setdefault(key, value)
         defaults = {
             "fully_async": asynchronous,
             "offload_train": False,
@@ -706,7 +723,16 @@ class RunSpec:
         if asynchronous:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
-            miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
+            producer_options = dict(miles)
+            # Hardware profiles size engines, not policy-age headroom. Preserve
+            # the pre-profile automatic producer budget unless explicitly tuned.
+            if profile["status"] == "candidate":
+                if "miles.sglang_max_running_requests" not in origins:
+                    producer_options["sglang_max_running_requests"] = 64
+                if "miles.sglang_server_concurrency" not in origins:
+                    producer_options["sglang_server_concurrency"] = 2 * producer_options["sglang_max_running_requests"]
+                profile["producer_budget_policy"] = "Generic capacity basis; explicit async budget overrides it"
+            miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(producer_options))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             miles.setdefault("async_unused_samples_handler", "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
@@ -780,7 +806,12 @@ class RunSpec:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
-        result = RunConfig(CoreConfig(**core), miles)
+        profile["values"] = {
+            key: {"value": miles[key], "source": origins.get(f"miles.{key}", profile["selected"])}
+            for key in inference_profiles.PROFILE_KEYS
+            if key in miles
+        }
+        result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
             raise InputError(
