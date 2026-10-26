@@ -63,7 +63,7 @@ samples_per_prompt = 4
 max_response_length = 32768
 max_context_length = 34816
 # Select measured defaults only when model geometry, hardware and placement match.
-# The plan explains pending metadata and generic fallbacks; every knob is overrideable.
+# Presets apply whole. To tune their settings, select generic and copy the preset block.
 profile = "auto"
 
 [tracking]
