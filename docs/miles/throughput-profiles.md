@@ -121,7 +121,13 @@ client logs, memory/occupancy samples, response-length distribution, retractions
 and warmup/measurement boundaries for every case, including failed attempts.
 Report repeated-control drift and cache-hit rates with throughput. Small repeated
 prompt sets can make cached prefill unusually cheap; include uncached prefill
-when generalizing to new workloads.
+when generalizing to new workloads. Test cache choices on a frozen stream from
+the intended prompt mixture, retaining normal sibling counts and natural
+duplicates while avoiding dataset cycling during measurement. Preserve source
+IDs and prompt order so each window's task mix and actual prompt/response lengths
+can be audited. Record filtering or truncation explicitly. Fixed-weight cache
+results also need validation across production weight refreshes, which can change
+cache reuse and prefill work.
 
 ## Other serving and training settings
 
