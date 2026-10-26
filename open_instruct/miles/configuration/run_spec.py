@@ -646,7 +646,11 @@ class RunSpec:
             "auto" if selector == "generic" else selector,
             self.launch["cluster"],
             metadata,
-            {key: value for key, value in miles.items() if key not in inference_profiles.PROFILE_KEYS},
+            {
+                key: value
+                for key, value in miles.items()
+                if key not in inference_profiles.PROFILE_KEYS or key == "sglang_disable_radix_cache"
+            },
         )
         profile["model_metadata_path"] = metadata_path
         for key, value in profile["defaults"].items():
@@ -816,6 +820,7 @@ class RunSpec:
             for key in inference_profiles.PROFILE_KEYS
             if key in miles
         }
+        profile["matched_reference_defaults"] = reference["defaults"]
         profile["explicit_selection"] = "inference_profile" in controls
         profile["warnings"] = inference_profiles.advisories(profile, reference, miles)
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)

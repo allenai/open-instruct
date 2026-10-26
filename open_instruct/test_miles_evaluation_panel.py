@@ -270,3 +270,17 @@ def test_panel_manages_safety_judges(large):
     strongreject = next(task for task in judges if task["task"].startswith("strongreject"))
     assert strongreject["harness"]["auxiliary_providers.sr_judge.model"] == "google/gemma-2b"
     assert strongreject["harness"]["auxiliary_providers.sr_judge.kwargs.enable_lora"] is True
+
+
+@pytest.mark.parametrize("mask", ["", "-1", "0,0", "0,-1", "0,"])
+def test_evaluator_rejects_hidden_duplicate_or_empty_mask_entries(monkeypatch, mask):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    with pytest.raises(ValueError, match="visible GPUs"):
+        evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+
+
+def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", " MIG-a , MIG-b ")
+    policy, judge = evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+    assert policy["CUDA_VISIBLE_DEVICES"] == "MIG-a"
+    assert judge["CUDA_VISIBLE_DEVICES"] == "MIG-b"

@@ -58,6 +58,8 @@ def recovery_configuration_matches(root, previous, document):
         return False
     if "memory" in document["launch"]:
         # Launchers requested this amount before it became a configurable field.
+        # Do not use current loader defaults: this authenticates the historical
+        # resource commitment even if future launch defaults change.
         # Preserve explicit saved values so actual resource changes still fail.
         recorded.setdefault("launch", {}).setdefault("memory", "256 GiB")
     for key in ("auto_resume", "max_retries"):
@@ -335,11 +337,19 @@ def execute(spec):
         config = spec.compile({**prepared, "hf_checkpoint": hf})
         profile = getattr(config, "inference_profile", None)
         inventory_root = os.environ.get("OI_MILES_INFERENCE_REPORT_DIR")
-        hardware = (
-            inference_profiles.check_cluster_hardware(profile, inventory_root, topology.plan(spec, config))
-            if inventory_root
-            else inference_profiles.check_hardware(profile)
-        )
+        if profile and profile["status"] == "candidate":
+            layout = topology.plan(spec, config)
+            if inventory_root:
+                hardware = inference_profiles.check_cluster_hardware(profile, inventory_root, layout)
+            elif layout["replicas"] == 1:
+                hardware = inference_profiles.check_hardware(profile, node=layout["nodes"][0])
+            else:
+                raise InputError(
+                    "A matched multi-node inference profile requires per-replica GPU inventories; "
+                    "use the managed cluster launcher instead of direct train."
+                )
+        else:
+            hardware = []
         write_json(root / "inference-profile.json", {"profile": profile, "hardware": hardware})
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
