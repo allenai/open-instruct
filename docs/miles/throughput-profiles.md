@@ -280,6 +280,18 @@ isolate caching or establish a universal admission peak.
 Numerical validation and production async refresh qualification remain pending. Do not copy B300 pools to H100 or enable prefix caching
 on a runtime that lacks the required snapshot support.
 
+The [candidate-runtime H100 deployment check](https://beaker.org/ex/01M5VMR1YJ24M6HN74QR578CGS)
+completed two batches of 512 requests, each generating 512 tokens, with the
+automatically selected uncached profile. All 1,024 response payloads passed an
+independent finite-score, token-alignment and full expert-route audit; no invalid
+expert IDs or retractions were found. Request timestamps show all 512 requests
+had finished prefill before the first completion in both batches. Decode graphs
+were configured and captured through 512; these logs do not directly establish
+per-step graph replay. Shutdown completed, and all 1,037 files (307.3 MB) were
+downloaded and hash-verified. This checks short-generation deployment on the
+candidate image, not long-context throughput, Core numerical agreement or
+mid-sequence refresh. The examples' runtime pins remain unchanged.
+
 ## Other serving and training settings
 
 * Enable **full decode CUDA graphs** through the configured request admission;
