@@ -149,7 +149,7 @@ case "$MODE" in
         else
             CACHE=062b8a3d20-6068a350
         fi
-        export CONVERT_TOKENIZER="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE/tokenizer"
+        export CONVERT_TOKENIZER="${OI_NUMPY_CACHE_ROOT:-/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache}/numpy_sft/$CACHE/tokenizer"
         ;;
     *) echo "Expected train, train_full, tokenize, gate or convert" >&2; exit 1 ;;
 esac

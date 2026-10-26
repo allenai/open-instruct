@@ -9,3 +9,11 @@ C11_CACHE=f4702f53ad-6068a350-rowaligned
 C11_STEPS=16304  # S = round(phi11 x I_C11 / 16); I_C11 = 399,714 packed instances (OLMo-core packing, DOCB)
 C11_REPLAY_STEPS=18416  # S' = round(S x (I_C + I_R) / I_C); I_C + I_R = 451,489 (51,775 replay docs)
 C11_REPLAY_DIR=$C11_DATA/replay-v2  # 51,775 docs, 2,372,036,476 loss tokens = 0.10 x the cache loss tokens
+# H119 (c11-decon, 14t): C11 minus the 92,109 flagged-pair Dolci rows; weights by H111's rule on the treatment counts.
+H119_DATA=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/h119
+C11_DECON_DOLCI=$H119_DATA/data/dolci-think-clean-v1-en-dbv-5bd68837-h119.parquet   # 1,960,536 rows (gate D1)
+C11_DECON_WN=0.827392  # N_C10 / (phi_T x T_N); phi_T = D_C10 / T_D' = 0.686634, T_D' = 17,968,117,658
+C11_DECON_WS=2.912761  # 2 / phi_T
+C11_DECON_CACHE=TODO   # treatment cache dir name (gate D2)
+C11_DECON_STEPS=TODO   # S_T = round(phi_T x I_T / 16) (gate D2)
+C11_DECON_CACHE_ROOT=$H119_DATA/cache

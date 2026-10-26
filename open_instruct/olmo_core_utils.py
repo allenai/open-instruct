@@ -733,7 +733,10 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     tokenizer = tc.tokenizer
     dataset_config.local_cache_dir = os.path.abspath(dataset_config.local_cache_dir)
     if utils.is_beaker_job():
-        dataset_config.local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        # OI_NUMPY_CACHE_ROOT lets a job read a numpy cache built off the full oe-adapt bucket (ledger H119, C13).
+        dataset_config.local_cache_dir = os.environ.get(
+            "OI_NUMPY_CACHE_ROOT", "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        )
     return tokenizer
 
 
