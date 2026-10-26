@@ -206,14 +206,14 @@ claim that the profile's fleet evidence transfers to them.
 For example, retain a matched profile but experiment with admission:
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/medium.toml \
+python -m open_instruct.miles plan configs/miles/examples/node.toml \
   --set 'inference.sglang_max_running_requests=256' > plan.json
 ```
 
 Or deliberately use generic defaults and specify your own settings:
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/medium.toml \
+python -m open_instruct.miles plan configs/miles/examples/node.toml \
   --set 'inference.profile="generic"' \
   --set 'inference.sglang_max_running_requests=128' > plan.json
 ```

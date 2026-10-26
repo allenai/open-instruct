@@ -166,7 +166,10 @@ also passed a short H100 deployment check. The fully async trainer-consumption
 check used B300. Profiles preserve explicit cache-mode overrides.
 
 Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
-provenance. When the checkpoint is on remote WEKA and its `config.json` is not
+provenance. Planning and submission warn about profile bypasses, overrides,
+generic fallbacks and fleet extrapolation. See
+[deliberately departing from a profile](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-profile)
+for advisory codes, override examples and validation guidance. When the checkpoint is on remote WEKA and its `config.json` is not
 available locally, the plan says `pending_model_metadata`; the final selection
 is recorded after preparation in `resolved-plan.json` and `inference-profile.json`.
 Unknown model shapes, other context caps, colocation and non-TP1 engines use the
