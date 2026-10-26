@@ -37,10 +37,10 @@ The trainer, global batch 256 and
 lag limit 6 stay fixed during production qualification; do not increase the lag
 limit merely to accommodate more queued work. Fully asynchronous mid-sequence
 weight refresh must pass before promoting the candidate to a learning example.
-The [submitted production check](https://beaker.org/ex/01M5V5YP9DPRB9J2VDKQKV2PMC)
+The [initial production check](https://beaker.org/ex/01M5V5YP9DPRB9J2VDKQKV2PMC)
 uses the default node topology: two EP2 trainer GPUs and six inference engines on
 one eight-B300 Holmes node. It preserves the default global producer budget of
-768 unfinished samples, batch 256 and lag 6, for 16 optimizer updates.
+768 unfinished samples, batch 256 and lag 6, with a planned 16 optimizer updates.
 Partly completed sibling groups and completed buffers can retain additional work;
 this budget does not bound total retained samples or oldest-token age. It also
 cannot fill six engines' combined 3,072 admission slots. That check measures
@@ -48,7 +48,17 @@ actual publication, freshness and useful consumption; the separate fixed-policy
 fleet check measures saturated serving capacity. The run has high priority,
 90-minute allocation protection and execution timeout, and no automatic restart.
 It retains the studied optimized runtime/cache settings, full rollout captures
-and refresh diagnostics. The old unlaunched 16-GPU proposal is superseded.
+and refresh diagnostics. It was intentionally stopped after two successful optimizer
+updates: all six engines were idle at both publications, and none of the 3,932
+logged response summaries crossed a weight version. Publication took 6.19 and
+4.87 seconds. This demonstrates publication but does not exercise mid-sequence
+refresh. The [replacement check](https://beaker.org/ex/01M5VBEBR6BAK33Q5T6YTQH2JP)
+keeps the same two trainer GPUs and training settings, with one inference engine
+on three B300s, three updates and a 75-minute protected execution cap. Fewer
+engines increase request residence while preserving the fully async path. Actual
+mixed-version responses and their consumption still need verification. Full
+binary rollout artifacts from the stopped run are recovered separately from the
+ordinary collector. The old unlaunched 16-GPU proposal is superseded.
 
 ## Checkpoint and workload
 
@@ -791,11 +801,13 @@ No realistic-cache GPU result is available yet.
 
 The [H100 transfer panel](https://beaker.org/ex/01M5V23DSCQE90HWD86944WHE9)
 completed 128/192/128/256 admission, followed by the separately submitted
-[224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK). Both exited
-successfully. All 1,506 files (353,895,162 bytes) were downloaded and hash-verified,
-with no collector omissions. Five complete case records extend the fitting table
-to 26 observations. Full reports are in `analysis/h100-throughput-summary.json`,
-`analysis/h100-transfer-v1/` and `analysis/h100-admit224-v1/` in the study archive.
+[224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK) and
+[320 probe](https://beaker.org/ex/01M5VA8KDF63EJKHV8MNMHWH4J). All exited
+successfully. All 1,809 files (426,898,573 bytes) were downloaded and hash-verified,
+with no collector omissions. Six complete case records extend the fitting table
+to 27 observations. Full reports are in `analysis/h100-throughput-summary.json`,
+`analysis/h100-transfer-v1/`, `analysis/h100-admit224-v1/` and
+`analysis/h100-admit320-v1/` in the study archive.
 
 | Admission | Delivered tokens/s | Native decode tokens/s | Peak GPU MiB | KV tokens | Recurrent slots |
 |---|---:|---:|---:|---:|---:|
@@ -804,6 +816,7 @@ to 26 observations. Full reports are in `analysis/h100-throughput-summary.json`,
 | 128, after | 9,016.2 | 8,528.9 | 55,256 | 4,456,448 | 768 |
 | 224, separate job | 13,100.7 | 12,468.9 | 66,312 | 4,456,448 | 1,536 |
 | 256 | 14,322.6 | 13,321.0 | 66,356 | 4,456,448 | 1,536 |
+| 320, separate job | 15,501.0 | 14,654.1 | 71,946 | 4,456,448 | 1,920 |
 
 All cases use one active H100 80GB engine, HTTP permits equal to admission,
 producer capacity twice admission, context 34,816, response cap 32,768,
@@ -829,12 +842,22 @@ pool candidate for the measured length distribution, not 256 guaranteed 34K
 contexts. Its maximum observed full-token usage was 47.5%, leaving room for a
 bounded higher-admission probe. The [320 follow-up](https://beaker.org/ex/01M5VA8KDF63EJKHV8MNMHWH4J)
 retains that KV pool, raises the state pool to 1,920 and decode graphs to 320,
-and uses HTTP 320 / producer 640. It requests one Jupiter H100, urgent allocated
-45 minutes with a 45-minute execution cap and no automatic restart. Estimated
-memory from the 256 observation plus extra states is about 70.2 GiB before the
-additional graph/workspace delta; actual fit and throughput remain unverified.
+and uses HTTP 320 / producer 640. It completed on one allocated Jupiter H100,
+with 319.42 mean running requests and zero reported retractions across all 1,280
+measured responses. Native throughput is 10.01% above 256; delivered throughput
+is 8.23% higher. Peak memory is 70.26 GiB, and maximum full-token usage is 57.6%.
+The comparison crosses hosts and changes state/graph capacity, without a repeated
+control. The peak remains unestablished.
 
-256 is currently the best measured H100 candidate, not an established peak.
+The [realistic-prompt follow-up](https://beaker.org/ex/01M5VC43SYKSF300X9VYEP6XZ5)
+compares cache enabled at 320 with cache disabled at 512 on the frozen 102,014-row
+Dolci mixture described above. The latter uses 6,684,672 KV tokens, 512 recurrent
+slots, 512 HTTP permits and a 1,024-sample producer. It is a comparison of two
+candidate configurations, not an isolated cache-effect estimate. Both cases use
+300-second warmup and 600-second measurement windows on one Jupiter H100,
+urgent priority, a 75-minute protected execution cap and no automatic restart.
+It uses the realistic-workload image `01M5V15NFRYWNJF2PSRA7W095B`; the model-math
+pins are unchanged, but native router attribution differs from the earlier panel.
 Numerical and fully async production-refresh qualification remain pending.
 This study supplies no new evidence for changing trainer batch size, policy-lag
 limits, publication intervals or evaluation placement.
