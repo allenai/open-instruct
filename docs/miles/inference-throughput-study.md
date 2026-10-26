@@ -17,8 +17,8 @@ high-admission sweeps are not needed to select a practical starting point.
 
 | Control | Candidate or measured control | Qualification still needed |
 |---|---|---|
-| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Complete two-wave numerical replay and production refresh |
-| HTTP concurrency | 1,024 per engine in the measured case | Compare 512 against 1,024 at fixed running admission |
+| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Closing numerical control, fleet check and production refresh |
+| HTTP concurrency | 512 per engine is the interim candidate; both 512 and 1,024 measured | Finish the closing control and check fleet refill behavior |
 | Producer sample budget | 2,048 for the measured single engine | Compare 1,024 against 2,048; check fleet and policy-age effects separately |
 | Full-attention KV pool | 17,825,792 tokens = 512 × 34,816 | Inspect resolved capacity and retractions for each shape |
 | Recurrent pool | 3,072 slots, extra-buffer radix caching | Recheck memory and cache behavior after changing model or context |
@@ -28,9 +28,10 @@ high-admission sweeps are not needed to select a practical starting point.
 | Engine fleet | One TP1 engine measured | Two-engine scaling, then actual production refresh |
 
 These are a reproducible fixed-policy candidate and pending decisions, not a
-production preset. The completed case had roughly 511 requests waiting inside the
-engine in addition to 511 running requests. Its large HTTP queue is therefore
-not automatically part of the recommendation. The trainer, global batch 256 and
+production preset. HTTP capacity 1,024 left roughly 511 requests waiting inside
+the engine in addition to 511 running requests. Capacity 512 retained almost the
+same running occupancy with essentially no engine queue. The producer budget
+still needs its separate comparison. The trainer, global batch 256 and
 lag limit 6 stay fixed during production qualification; do not increase the lag
 limit merely to accommodate more queued work. Fully asynchronous mid-sequence
 weight refresh must pass before promoting the candidate to a learning example.
@@ -349,6 +350,36 @@ requests 150-minute protection on one B300 at high priority, matching its existi
 the added optional Core route scorer and publication diagnostic changes are
 inactive in this serving-only replay, and the serving replay path is unchanged.
 
+Its admission-512 case has now completed both loaded waves and clean background
+shutdown. The [full snapshot](https://beaker.org/ex/01M5TWA7HCKRAXPM6E96R91F14)
+retains 535 source files (1,689,661,500 bytes), all hash-verified locally. Each wave
+has 256 trajectories, 64 original prompt clusters and 1,976,865 response tokens.
+Mean running occupancy was 505.93 and 507.95, with 99.86% and effectively 100%
+observation coverage. No invalid expert IDs or duplicate selected experts were
+found in either complete prompt/response routing payload.
+
+| Matched comparison | Change in Core mean absolute logprob error, 95% interval | Change in Core ratio-outlier rate, percentage points, 95% interval |
+|---|---:|---:|
+| 512 versus earlier 64 | +0.00000416 [-0.0000621, +0.0000788] | +0.0161 [-0.0037, +0.0356] |
+| 512 versus earlier 256 | +0.000000069 [-0.0000473, +0.0000538] | -0.0059 [-0.0224, +0.0103] |
+
+Intervals resample paired prompt clusters, preserving siblings and waves. They
+support no detected increase in these aggregate Core discrepancies; they do not
+prove equivalence or cover machine/day variation. The closing 64 control remains
+pending, and the natural Core reference uses EP1 rather than packed EP8 training.
+
+Routing and individual scores still differ: 512 versus 64 changes 3.125% of expert
+memberships, with mean absolute serving-score difference 0.03305. The maximum
+serving difference is 6.87347 at the previously localized sample 171 / offset 974.
+At that position, 512 scores -6.06491/-7.62550 in its two waves versus Core
+-5.69095 and the earlier control's -0.75204. The maximum Core error across the
+entire 512 case is 3.29321. Keep these tails visible despite the stable averages;
+no additional tail-probe jobs are planned for this pass. Full comparisons and
+threshold counts are retained in `analysis/replay-v7-numerical-summary.json`,
+`analysis/replay-v7-64-vs512.json`, `analysis/replay-v7-256-vs512.json` and
+`analysis/replay-v7-tail-audit.json`. Fleet behavior and actual mid-sequence
+publication remain separate gates.
+
 Across the original draws, the retained earlier replay wave and both corrected
 control waves, eight token positions exceed absolute Core logprob error one in
 all four observations. The same space token remains the largest discrepancy;
@@ -433,7 +464,7 @@ result files and SHA-256 inventories. The ledger and launch receipts are retaine
 alongside them. The initial panel predates the unlimited benchmark report
 collector; its [WEKA inventory/recovery](https://beaker.org/ex/01M5TA4FSVAK5VR84GPQABPMD4)
 verified all 1,194 source files (excluding the checkpoint symlink trees), totaling
-249,077,758 bytes. `analysis/fit-observations.jsonl` preserves eight audited
+249,077,758 bytes. `analysis/fit-observations.jsonl` preserves ten audited
 measurements with full model geometry, settings, hardware observations and hashed
 analysis/source references. Its records explicitly retain pending numerical
 qualification rather than presenting every completed case as a recommendation.
