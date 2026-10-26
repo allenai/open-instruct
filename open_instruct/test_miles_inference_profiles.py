@@ -152,6 +152,25 @@ def test_generic_profile_keeps_cache_disabled_and_explicit_native_override_wins(
     )
 
 
+@pytest.mark.parametrize("cluster,slots", [("ai2/holmes", 4096), ("ai2/jupiter", 2048)])
+def test_explicit_cache_pool_uses_resolved_profile_strategy(tmp_path, cluster, slots):
+    config = run_spec(
+        tmp_path,
+        [
+            f'launch.cluster="{cluster}"',
+            "inference.radix_cache=true",
+            f"inference.sglang_max_mamba_cache_size={slots}",
+        ],
+    ).compile()
+    assert config.miles["sglang_max_mamba_cache_size"] == slots
+    assert config.miles["sglang_mamba_radix_cache_strategy"] == "extra_buffer"
+    with pytest.raises(ValueError, match="must exceed"):
+        run_spec(
+            tmp_path,
+            [f'launch.cluster="{cluster}"', "inference.radix_cache=true", "inference.sglang_max_mamba_cache_size=1"],
+        ).compile()
+
+
 def test_generic_selector_and_prepared_metadata(tmp_path):
     run = run_spec(tmp_path, ['inference.profile="generic"'])
     assert run.compile().miles["sglang_max_running_requests"] == 64

@@ -43,10 +43,10 @@ def fingerprint(document):
 
 
 def recovery_configuration_matches(root, previous, document):
-    """Allow changing recovery policy without changing the training recipe.
+    """Allow recovery policy changes and normalize historical launch defaults.
 
-    Authenticate the recorded full specification before allowing this one
-    operational change, including for older runs that hashed auto_resume.
+    Authenticate the recorded full specification before normalizing it, including
+    older runs that hashed auto_resume or predate the explicit host-memory field.
     """
     if previous["spec_sha256"] == fingerprint(document):
         return True
@@ -56,6 +56,10 @@ def recovery_configuration_matches(root, previous, document):
     recorded = json.loads(path.read_text())
     if fingerprint(recorded) != previous["spec_sha256"]:
         return False
+    if "memory" in document["launch"]:
+        # Launchers requested this amount before it became a configurable field.
+        # Preserve explicit saved values so actual resource changes still fail.
+        recorded.setdefault("launch", {}).setdefault("memory", "256 GiB")
     for key in ("auto_resume", "max_retries"):
         if key in document["launch"]:
             recorded.setdefault("launch", {})[key] = document["launch"][key]
