@@ -226,7 +226,8 @@ class Supervisor:
 
 def run(path):
     spec = RunSpec.load(path)
-    layout = topology.plan(spec)
+    compiled = spec.compile()
+    layout = topology.plan(spec, compiled)
     if (Path(spec.output["root"]) / "workflow.json").exists() and not spec.launch["auto_resume"]:
         raise RuntimeError(
             "This run directory already has a workflow; choose a new output.root before starting services"
@@ -266,7 +267,7 @@ def run(path):
             raise RuntimeError("Visible devices differ from the Beaker GPU allocation")
         ray_devices, judges = topology.devices(node, visible)
         inventory_report = gpu_hardware.rollout_inventory(node, inventory)
-        profile = spec.compile().inference_profile
+        profile = compiled.inference_profile
         if node["rollout_gpus"]:
             inference_profiles.validate_hardware(profile, inventory_report["hardware"])
         write(root / f"inference-profile-{rank}.json", {"profile": profile, "address": address, **inventory_report})

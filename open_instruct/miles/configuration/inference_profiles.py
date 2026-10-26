@@ -11,6 +11,15 @@ from pathlib import Path
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.infrastructure import gpu_hardware
 
+MEASURED_CONTEXT = 34816
+MEASURED_RESPONSE = 32768
+MINIMUM_MEMORY_MIB = {"b300": 270000, "h100": 80000}
+# Conservative lower bounds for MODEL_SHAPE only: weights rounded down, plus
+# attention KV and FP32 recurrent matrices; convolution/workspace/graphs add more.
+WEIGHTS_LOWER_BOUND_MIB = 23 * 1024
+KV_BYTES_PER_TOKEN = 4096
+RECURRENT_MATRIX_MIB_PER_SLOT = 14
+
 PROFILES = {"olmo35-b300-v1": "b300", "olmo35-h100-v1": "h100"}
 PROFILE_KEYS = (
     "sglang_disable_radix_cache",
@@ -107,8 +116,13 @@ def resolve(selector, cluster, model, options):
         return fallback("Quantized inference was not measured")
     if options.get("sglang_dtype", "auto") not in ("auto", "bfloat16"):
         return fallback("Serving dtype differs from the measured BF16 configuration")
-    if options.get("rollout_max_context_len") != 34816 or options.get("rollout_max_response_len") != 32768:
-        return fallback("Automatic profiles currently cover the measured 34,816 context / 32,768 response caps")
+    if (
+        options.get("rollout_max_context_len") != MEASURED_CONTEXT
+        or options.get("rollout_max_response_len") != MEASURED_RESPONSE
+    ):
+        return fallback(
+            f"Automatic profiles currently cover the measured {MEASURED_CONTEXT:,} context / {MEASURED_RESPONSE:,} response caps"
+        )
     if model is None:
         report["status"] = "pending_model_metadata"
         return fallback("Model config.json is unavailable here; resolve again after model preparation")
@@ -119,7 +133,17 @@ def resolve(selector, cluster, model, options):
     if model.get("quantization_config"):
         return fallback("Quantized inference was not measured")
     cache_off = options.get("sglang_disable_radix_cache", gpu != "b300")
-    running = options.get("sglang_max_running_requests", 512 if gpu == "b300" or cache_off else 320)
+    measured_running = 512 if gpu == "b300" or cache_off else 320
+    running = options.get("sglang_max_running_requests", measured_running)
+    if running > measured_running and any(
+        key not in options for key in ("sglang_max_total_tokens", "sglang_max_mamba_cache_size")
+    ):
+        raise InputError(
+            f"Admission {running} exceeds the {measured_running}-request {gpu.upper()} "
+            f"cache-{'off' if cache_off else 'on'} profile. Automatic pool extrapolation is not qualified; "
+            "lower admission or explicitly size both sglang_max_total_tokens and sglang_max_mamba_cache_size "
+            "and validate graph/workspace memory on the target GPU."
+        )
     kv_contexts = running if gpu == "b300" else min(running, 192 if cache_off else 128)
     state_multiplier = (2 if gpu == "b300" else 1) if cache_off else 6
     report.update(
@@ -135,20 +159,39 @@ def resolve(selector, cluster, model, options):
             "sglang_cuda_graph_backend_decode": "full",
             "sglang_cuda_graph_max_bs_decode": running,
             "sglang_cuda_graph_backend_prefill": "disabled",
-            "sglang_max_total_tokens": kv_contexts * 34816,
+            "sglang_max_total_tokens": kv_contexts * MEASURED_CONTEXT,
             "sglang_max_mamba_cache_size": running * state_multiplier,
             "sglang_mem_fraction_static": 0.7 if gpu == "b300" else 0.9,
             "sglang_chunked_prefill_size": 8192,
         },
     )
+    validate_pool_budget(report, {**report["defaults"], **options})
     return report
+
+
+def validate_pool_budget(report, options):
+    """Reject impossible matched pools; passing is not a full memory-fit proof."""
+    lower_bound = (
+        WEIGHTS_LOWER_BOUND_MIB
+        + options["sglang_max_total_tokens"] * KV_BYTES_PER_TOKEN / (1024 * 1024)
+        + options["sglang_max_mamba_cache_size"] * RECURRENT_MATRIX_MIB_PER_SLOT
+    )
+    budget = MINIMUM_MEMORY_MIB[report["expected_gpu"]] * options["sglang_mem_fraction_static"]
+    report["memory_lower_bound_mib"] = lower_bound
+    report["profile_memory_budget_mib"] = budget
+    if lower_bound > budget:
+        raise InputError(
+            f"Requested profile pools need at least {lower_bound / 1024:.2f} GiB for weights/KV/recurrent matrices, "
+            f"above this profile's {budget / 1024:.2f} GiB static-memory budget before graphs/workspaces. "
+            "Reduce explicit pools/admission or choose generic and qualify the different hardware/memory budget."
+        )
 
 
 def advisories(report, reference, options):
     """Explain departures from measured defaults without changing user choices.
 
-    The reference ignores serving overrides but retains model/workload/topology
-    eligibility. Fleet coverage is deliberately separate from per-engine fit.
+    The reference preserves the selected cache variant and model/workload/topology
+    eligibility, while ignoring other serving overrides. Fleet coverage is deliberately separate from per-engine fit.
     """
     warnings = []
 
@@ -192,8 +235,8 @@ def advisories(report, reference, options):
         )
         warn(
             "inference_profile_modified",
-            f"Resolved settings differ from hardware defaults for {reference['selected']}: {description}. "
-            "Overrides remain in effect. Some cache alternatives have separate measurements; "
+            f"Resolved settings differ from cache-variant defaults for {reference['selected']}: {description}. "
+            "Overrides remain in effect. The selected cache variant is the comparison baseline; "
             "other derived capacities are arithmetic, not measured optima. See docs/miles/throughput-profiles.md "
             "and validate throughput, memory and async refresh for the resulting configuration.",
             differences=differences,
@@ -220,7 +263,7 @@ def validate_hardware(report, devices):
     if not report or report["status"] != "candidate":
         return
     expected = report["expected_gpu"]
-    minimum_mib = 270000 if expected == "b300" else 80000
+    minimum_mib = MINIMUM_MEMORY_MIB[expected]
     if not devices or any(
         expected not in name.lower() or memory is None or memory < minimum_mib for name, memory in devices
     ):
@@ -230,11 +273,16 @@ def validate_hardware(report, devices):
         )
 
 
-def check_hardware(report, device_ids=None):
+def check_hardware(report, device_ids=None, *, node=None):
     """Check visible devices once before starting a matched serving profile."""
     if not report or report["status"] != "candidate":
         return []
-    devices = [(device["name"], device["memory_mib"]) for device in gpu_hardware.inventory(device_ids)]
+    inventory = gpu_hardware.inventory(device_ids)
+    devices = (
+        gpu_hardware.rollout_inventory(node, inventory)["hardware"]
+        if node is not None
+        else [(device["name"], device["memory_mib"]) for device in inventory]
+    )
     validate_hardware(report, devices)
     return devices
 

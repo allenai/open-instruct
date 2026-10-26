@@ -21,8 +21,15 @@ def inventory(device_ids=None):
     MILES' pinned serving adapter requires numeric CUDA device IDs, not MIG
     instances. Unknown/N/A memory is retained as None and cannot qualify a profile.
     """
-    mask = device_ids if device_ids is not None else os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-    mask = list(mask) if mask and mask != [""] else []
+    raw_mask = device_ids if device_ids is not None else os.environ.get("CUDA_VISIBLE_DEVICES")
+    if raw_mask is None:
+        mask = []  # Unset means all physical devices; explicitly empty means none.
+    else:
+        mask = [item.strip() for item in (raw_mask.split(",") if isinstance(raw_mask, str) else raw_mask)]
+        if not mask or mask in ([""], ["-1"]):
+            return []
+        if len(set(mask)) != len(mask):
+            raise InputError("CUDA_VISIBLE_DEVICES contains duplicate devices")
     if any(not device.isdecimal() for device in mask):
         raise InputError(
             "The pinned MILES serving adapter requires numeric CUDA_VISIBLE_DEVICES; MIG/UUID masks are unsupported"

@@ -17,7 +17,7 @@ def producer_default(options):
     return ((target + samples - 1) // samples) * samples
 
 
-def report(options, max_policy_lag):
+def report(options, max_policy_lag, inference_profile=None):
     """Requested capacities, not a claim about model fit or achieved throughput.
 
     Missing low-level settings stay unresolved rather than assuming native defaults.
@@ -60,7 +60,15 @@ def report(options, max_policy_lag):
         )
     if http_slots is not None and engine_slots is not None and effective is not None:
         request_slots = min(http_slots, effective)
-        if request_slots == engine_slots:
+        reference = (inference_profile or {}).get("matched_reference_defaults", {})
+        measured_equality = (
+            (inference_profile or {}).get("status") == "candidate"
+            and bool(reference)
+            and all(options.get(key) == value for key, value in reference.items())
+            and http == running
+            and effective > engine_slots
+        )
+        if request_slots == engine_slots and not measured_equality:
             warnings.append(
                 "End-to-end request capacity equals GPU running capacity; requests in transit or awaiting "
                 "response processing still hold permits and can leave engines idle. Give both "

@@ -156,7 +156,9 @@ the underfeeding warning explains when it cannot fill the requested slots.
 
 This is a capacity-based starting heuristic, not a measured learning optimum.
 Batch 256 and lag 6 are unchanged: the larger automatic budgets span many batch
-equivalents and trigger policy-age advisories. Measure trainer wait, useful tokens,
+equivalents and trigger policy-age advisories. These advisories intentionally expose
+the fleet/trainer tradeoff; batch-equivalents are not a prediction of policy age
+or drain duration. Measure trainer wait, useful tokens,
 oldest-token age and stale-work discards; reduce producer budget or inference fleet
 size if production outruns useful consumption. Completed siblings can remain
 outside the unfinished budget. Omitted budgets are recomputed against prepared
@@ -195,8 +197,11 @@ python -m open_instruct.miles plan configs/miles/examples/node.toml \
   --set inference.sglang_max_running_requests=256
 ```
 
-Running admission overrides also resize otherwise-unset graph and recurrent-pool
-defaults. Explicit pool sizes always win. A profile selects cache mode unless explicitly overridden; it does not change the
+Admission overrides derive pools only up to the selected cache variant's measured
+admission. Higher admission requires explicit KV and recurrent pools, subject to
+capacity and conservative memory-budget checks. These checks do not replace
+measuring graph/workspace memory. Selecting a documented cache alternative alone
+does not trigger a modified-profile warning. A profile selects cache mode unless explicitly overridden; it does not change the
 trainer, policy-lag limit, response cap or publication schedule. Automatic producer
 sizing follows the resolved engine capacities; an explicit global `[async]` budget wins. Changing clusters recomputes the choice
 instead of carrying B300 pools to an H100. Startup checks the matched GPU family

@@ -168,20 +168,49 @@ scopes, described below.
 The global producer budget is overrideable. When omitted it uses two waves of
 resolved serving capacity (or one collection, whichever is larger), rounded to
 whole groups. The matched node/large examples resolve to 6,144/19,456 samples;
-generic defaults resolve to 768/2,432. Trainer batch and lag limits are unchanged. An explicit running-request
-override adjusts otherwise-unset graph, KV and recurrent capacities within the
-selected profile; an explicit pool override wins. H100 retains the bounded KV
+generic defaults resolve to 768/2,432. Trainer batch and lag limits are unchanged.
+
+The resulting policy-age advisory is intentional: these examples provision
+inference capacity, not a validated trainer/producer balance. Six 512-slot engines
+already require 3,072 active samples (12 batches of 256) to fill one wave. A static
+cap near six batches cannot both fill that fleet and bound its retained work.
+A producer budget of 6,144 is 24 batch-equivalents, but this does **not** predict
+24 optimizer updates of policy age or 24 update-times of drain. Those depend on
+remaining generation lengths, reward latency, consumer speed and drain behavior.
+Measure them in the fully async workload. Use an explicit smaller producer budget
+or fewer inference engines when useful consumption cannot keep up; the underfeed
+advisory then describes a deliberate tradeoff. We do not silently change batch,
+lag, admission or producer sizing merely to make these advisories disappear.
+
+An explicit running-request override adjusts otherwise-unset graph, KV and
+recurrent capacities up to the selected cache variant's measured admission
+(512 on B300, 512 on uncached H100, 320 on cached H100). Above that admission,
+provide **both** KV-token and recurrent-slot pools explicitly; automatic pool
+extrapolation is rejected. The matched model's conservative weight/KV/recurrent
+memory lower bound must fit the profile's static-memory budget. Passing that
+check is not proof that graphs, convolution states and workspace peaks fit;
+qualify explicit pools on the actual device. Explicit pool sizes remain subject
+to the existing active-state capacity constraints. H100 retains the bounded KV
 pool rather than promising all requests can reach full context simultaneously.
 Every managed replica inventories its rollout GPUs at startup, separately from
 trainer and judge GPUs. After checkpoint preparation, the workflow validates all
 replica inventories against the final profile before training, including hub and
-Core sources unavailable during local planning. Checks run outside generation.
+Core sources unavailable during local planning. Direct single-node `train` checks
+only the rollout slice of visible GPUs. A matched multi-node profile requires the
+managed launcher's per-replica inventories. Checks run outside generation.
+
+The generic equality-of-HTTP-and-admission warning is omitted when all serving
+settings match the selected measured cache variant and the producer has more
+than one wave available. This preserves the measured equal-limit configuration.
+Changed serving settings or a producer limited to exactly one wave still receive
+the generic headroom advice; an underfeeding budget retains its own advisory.
 
 ### Deliberately departing from a profile
 
 `auto` selects a measured per-engine starting point; it is not an autotuner or
 an assurance that the complete fleet has been validated. Changing admission
-within a matched profile derives related capacities arithmetically. Changing
+within a matched profile derives related capacities arithmetically up to its
+measured admission; higher admission requires explicit pools. Changing
 model geometry, precision, context caps or engine topology does not interpolate
 to a new optimum: it falls back to generic defaults. Generic defaults themselves
 are not a memory-fit guarantee.
@@ -204,8 +233,8 @@ checks wait for preparation.
 |---|---|
 | `inference_profile_fallback` | Explicit auto could not match the model, hardware, workload or engine topology. Read the specific reason and qualify the generic or explicit settings on that shape. |
 | `inference_profile_pending` | Checkpoint metadata could not be inspected yet. Preparation checks again; inspect `resolved-plan.json` before interpreting the profile as matched or bypassed. An explicit generic choice remains usable even when advisory metadata cannot be read. |
-| `inference_profile_bypassed` | `generic` was explicitly selected even though a measured profile matches. The warning's `differences` map compares configured values to hardware defaults. Keep the deliberate choice, or select `auto` / the matching named profile. |
-| `inference_profile_modified` | Explicit overrides and their derived capacities differ from hardware defaults. The warning reports configured/default values. Some alternate cache configurations have separate measurements below; a difference alone does not imply an invalid configuration. |
+| `inference_profile_bypassed` | `generic` was explicitly selected even though a measured profile matches. The warning's `differences` map compares configured values to the selected cache variant's defaults. Keep the deliberate choice, or select `auto` / the matching named profile. |
+| `inference_profile_modified` | Explicit overrides and their derived capacities differ from the selected cache variant. The warning reports configured/default values. Selecting a documented cache alternative alone does not trigger this warning; a difference alone does not imply an invalid configuration. |
 | `inference_fleet_extrapolation` | More than one engine is requested for a matching profile. Per-engine measurements do not establish fleet routing, publication latency, policy age or producer sufficiency. Review the separate capacity warnings and validate the intended placement. |
 
 The fleet advisory also applies when `generic` bypasses a matching profile. It

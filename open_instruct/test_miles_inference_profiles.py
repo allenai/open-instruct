@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles import __main__ as cli
+from open_instruct.miles.configuration import advisories
 from open_instruct.miles.configuration import inference_profiles as profiles
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import launch, workflow
@@ -474,3 +475,93 @@ def test_workflow_validates_remote_inventory_after_preparation(tmp_path, monkeyp
         assert workflow.execute(run)["status"] == "complete"
         assert len(trained) == 1
         assert trained[0].inference_profile["status"] == "candidate"
+
+
+@pytest.mark.parametrize("cluster,cache", [("ai2/holmes", False), ("ai2/jupiter", True)])
+def test_measured_cache_alternatives_are_reference_baselines(tmp_path, cluster, cache):
+    config = run_spec(
+        tmp_path, [f'launch.cluster="{cluster}"', f"inference.radix_cache={str(cache).lower()}"]
+    ).compile()
+    assert "inference_profile_modified" not in warning_map(config)
+    assert config.inference_profile["matched_reference_defaults"]["sglang_disable_radix_cache"] is not cache
+
+
+def test_measured_http_equality_is_not_advised_away_but_supply_changes_are(tmp_path):
+    config = run_spec(tmp_path).compile()
+    assert not any("End-to-end request capacity equals" in w for w in config.plan()["async_capacity"]["warnings"])
+    limited = run_spec(tmp_path, ["async.async_max_concurrent_samples=3072"]).compile()
+    assert any("End-to-end request capacity equals" in w for w in limited.plan()["async_capacity"]["warnings"])
+    changed = run_spec(tmp_path, ["inference.sglang_max_running_requests=256"]).compile()
+    assert any("End-to-end request capacity equals" in w for w in changed.plan()["async_capacity"]["warnings"])
+
+
+def test_profile_pool_extrapolation_requires_explicit_memory_choices(tmp_path):
+    overrides = [
+        'launch.cluster="ai2/jupiter"',
+        "inference.radix_cache=true",
+        "inference.sglang_max_running_requests=512",
+    ]
+    with pytest.raises(ValueError, match="Automatic pool extrapolation"):
+        run_spec(tmp_path, overrides)
+    with pytest.raises(ValueError, match="above this profile.*static-memory budget"):
+        run_spec(
+            tmp_path,
+            overrides + ["inference.sglang_max_total_tokens=4456448", "inference.sglang_max_mamba_cache_size=3072"],
+        )
+    # Explicit larger pools can pass the lower-bound check on a GPU with room;
+    # this does not claim that graph/workspace peaks or throughput are qualified.
+    explicit = run_spec(
+        tmp_path,
+        [
+            "inference.sglang_max_running_requests=768",
+            "inference.sglang_max_total_tokens=17825792",
+            "inference.sglang_max_mamba_cache_size=4608",
+        ],
+    ).compile()
+    assert explicit.miles["sglang_max_running_requests"] == 768
+    assert "inference_profile_modified" in warning_map(explicit)
+
+
+def test_single_node_hardware_check_only_uses_rollout_slice(monkeypatch):
+    report = profiles.resolve("auto", "ai2/holmes", model(), options())
+    monkeypatch.setattr(
+        gpu_hardware,
+        "inventory",
+        lambda *args: [
+            {"id": "0", "name": "NVIDIA H100", "memory_mib": 81559},
+            {"id": "1", "name": "NVIDIA B300", "memory_mib": 275040},
+            {"id": "2", "name": "NVIDIA A100", "memory_mib": 81559},
+        ],
+    )
+    assert profiles.check_hardware(report, node={"trainer_gpus": 1, "rollout_gpus": 1}) == [("NVIDIA B300", 275040)]
+    with pytest.raises(ValueError, match="expects B300"):
+        profiles.check_hardware(report, node={"trainer_gpus": 0, "rollout_gpus": 1})
+
+
+@pytest.mark.parametrize("mask", ["", "-1"])
+def test_hidden_gpu_mask_never_becomes_all_gpus(monkeypatch, mask):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    monkeypatch.setattr(
+        gpu_hardware.subprocess, "check_output", lambda *args, **kwargs: pytest.fail("Queried hidden GPUs")
+    )
+    assert gpu_hardware.inventory() == []
+
+
+def test_duplicate_startup_gpu_mask_is_rejected():
+    with pytest.raises(ValueError, match="duplicate"):
+        gpu_hardware.inventory(["0", "0"])
+
+
+@pytest.mark.parametrize(
+    "plan",
+    [
+        {"runtime": {"async_capacity": None, "throughput": None, "inference_profile": None}},
+        {"async_capacity": None},
+        {"warnings": ["OPD warning"]},
+    ],
+)
+def test_advisory_renderer_handles_supported_optional_sections(capsys, plan):
+    advisories.emit(plan)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ("Warning: OPD warning\n" if "warnings" in plan else "")
