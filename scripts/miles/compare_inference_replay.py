@@ -281,6 +281,56 @@ def core_comparison(root, reference_sha256, left, right, *, bootstrap=2000, seed
     }
 
 
+def engine_attribution(summary, rows):
+    urls = summary.get("worker_urls")
+    if urls is None:
+        return {"available": False, "reason": "Older replay did not retain serving-engine attribution"}
+    if not urls or len(set(urls)) != len(urls):
+        raise ValueError("Replay worker URLs must be nonempty and unique")
+    if any(row.get("worker_url") not in urls for row in rows):
+        raise ValueError("Replay has missing or unknown worker attribution")
+    waves = []
+    count = summary["trajectories"]
+    for repeat in range(summary["repeats"]):
+        wave = rows[repeat * count : (repeat + 1) * count]
+        engines = {}
+        for url in urls:
+            subset = [row for row in wave if row["worker_url"] == url]
+            engines[url] = {
+                "trajectories": len(subset),
+                "prompt_clusters": len({row["group_index"] for row in subset}),
+                "response_tokens": sum(row["response_tokens"] for row in subset),
+            }
+        waves.append({"repeat": repeat, "engines": engines})
+    return {
+        "available": True,
+        "waves": waves,
+        "all_engines_sampled_each_wave": all(
+            engine["trajectories"] > 0 for wave in waves for engine in wave["engines"].values()
+        ),
+    }
+
+
+def compare_engine_subsets(roots, summaries, records, core):
+    result = {}
+    for side, (root, summary) in enumerate(zip(roots, summaries, strict=True)):
+        engines = {}
+        for url in summary.get("worker_urls", []):
+            indices = [i for i, row in enumerate(records[side]) if row["worker_url"] == url]
+            if not indices:
+                continue
+            arms = [[rows[i] for i in indices] for rows in records]
+            engines[url] = {"paired_serving_difference": paired_metrics(*arms)}
+            if core is not None:
+                engines[url]["core_comparison"] = core_comparison(core, summary["reference_sha256"], *arms)
+        result[str(root)] = engines
+    return {
+        "arms": result,
+        "scope": "Matched comparisons conditioned on observed engine routing. Subsets differ across engines; "
+        "intervals retain prompt clusters and are not adjusted for multiple comparisons.",
+    }
+
+
 def compare(left, right, core=None):
     summaries, records = [], []
     for root in (Path(left), Path(right)):
@@ -314,6 +364,10 @@ def compare(left, right, core=None):
             for start, stop, arms in response_position_slices(*records)
         ],
         "route_agreement": route_agreement(left, right, *records),
+        "engine_attribution": {
+            str(root): engine_attribution(summary, rows)
+            for root, summary, rows in zip((left, right), summaries, records, strict=True)
+        },
         "diagnostic_occupancy": {
             str(root): [
                 {
@@ -329,6 +383,7 @@ def compare(left, right, core=None):
     }
     if core is not None:
         result["core_comparison"] = core_comparison(core, summaries[0]["reference_sha256"], *records)
+    result["by_serving_engine"] = compare_engine_subsets((left, right), summaries, records, core)
     result["per_wave"] = []
     count = summaries[0]["trajectories"]
     for repeat in range(summaries[0]["repeats"]):

@@ -170,6 +170,19 @@ Reports also separate matching replay waves and response-position bands (0–1K,
 1K–8K, 8K–16K, 16K–32K and beyond when present). Position bands include only
 trajectories reaching them, so inspect their prompt counts; they are conditional
 diagnostics and their intervals are not adjusted for multiple comparisons.
+New replays request the MILES router's opt-in `x-miles-worker-url` response
+header and save the selected engine and request ID with each foreground score.
+Background completions retain the engine URL too. The router adds the header
+only when `x-miles-report-worker: 1` is requested, without parsing the response
+body; no per-token serving checks are involved. Ordinary requests do not enable
+this diagnostic header.
+The comparison reports per-wave engine coverage and matched serving/Core score
+differences for each engine's observed subset. Require every engine to contribute
+foreground scores in each wave before claiming fleet coverage. These subsets
+depend on actual routing and can contain different prompt populations; their
+intervals are not independent engine-performance comparisons. Older replays
+explicitly report unavailable attribution. Declared engine metadata with missing
+or unknown score attribution is rejected during offline analysis.
 When routing matrices are present, comparison reports ordered expert-slot and
 response-conditioning token disagreement, including per-layer rates, rather than
 only whether any route changed in an entire trajectory. It separately measures

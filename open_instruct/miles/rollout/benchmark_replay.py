@@ -60,7 +60,7 @@ async def run(args, settings, root):
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
     waves = []
     background_streams = capacity if settings["replay_background"] else 0
-    worker_urls = await get_worker_urls(args) if background_streams else []
+    worker_urls = await get_worker_urls(args)
 
     def payload(record, *, details):
         prompt_length = record["prompt_tokens"]
@@ -85,6 +85,7 @@ async def run(args, settings, root):
     async with httpx.AsyncClient(
         timeout=settings["collection_timeout"],
         limits=httpx.Limits(max_connections=capacity + (len(records) if background_streams else 0)),
+        headers={"x-miles-report-worker": "1"},
     ) as client:
         for repeat in range(settings["replay_repeats"]):
             route_root = root / "benchmark-replay-routes" / str(repeat)
@@ -122,6 +123,8 @@ async def run(args, settings, root):
                     "source_index": record["source_index"],
                     "copy_index": record["copy_index"],
                     "group_index": record["group_index"],
+                    "worker_url": response.headers.get("x-miles-worker-url"),
+                    "request_id": meta.get("id"),
                     "prompt_tokens": prompt_length,
                     "response_tokens": len(output_ids),
                     "logprobs": [row[0] for row in probabilities],
@@ -157,6 +160,7 @@ async def run(args, settings, root):
                             row.update(
                                 outcome="completed" if tokens == record["response_tokens"] else "aborted",
                                 response_tokens=tokens,
+                                worker_url=response.headers.get("x-miles-worker-url"),
                             )
                         finally:
                             row["finished_unix"] = time.time()
@@ -191,6 +195,7 @@ async def run(args, settings, root):
         "copies": settings["replay_copies"],
         "background": settings["replay_background"],
         "background_streams": background_streams,
+        "worker_urls": worker_urls,
         "repeats": settings["replay_repeats"],
         "waves": waves,
         "response_tokens_per_repeat": sum(r["response_tokens"] for r in records),

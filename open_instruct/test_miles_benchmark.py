@@ -389,17 +389,40 @@ def test_replay_wave_reports_do_not_hide_opposite_signed_changes(tmp_path):
                     "trajectories": 1,
                     "repeats": 2,
                     "response_tokens_per_repeat": 2,
+                    "worker_urls": ["http://engine-0", "http://engine-1"],
                 }
             )
         )
         for repeat in range(2):
-            changed = {**row, "logprobs": [-1.0 + side * (0.1 if repeat == 0 else -0.1)] * 2}
+            changed = {
+                **row,
+                "logprobs": [-1.0 + side * (0.1 if repeat == 0 else -0.1)] * 2,
+                "worker_url": f"http://engine-{repeat}",
+            }
             (path / f"benchmark-replay-{repeat}.jsonl").write_text(json.dumps(changed) + "\n")
     report = compare_inference_replay.compare(*paths)
     assert report["metrics"]["mean_signed_logprob_delta"]["value"] == pytest.approx(0)
     assert [x["metrics"]["mean_signed_logprob_delta"]["value"] for x in report["per_wave"]] == pytest.approx(
         [0.1, -0.1]
     )
+    attribution = report["engine_attribution"][str(paths[1])]
+    assert not attribution["all_engines_sampled_each_wave"]
+    assert attribution["waves"][0]["engines"]["http://engine-1"]["trajectories"] == 0
+    engines = report["by_serving_engine"]["arms"][str(paths[1])]
+    assert [
+        engines[f"http://engine-{i}"]["paired_serving_difference"]["metrics"]["mean_signed_logprob_delta"]["value"]
+        for i in range(2)
+    ] == pytest.approx([0.1, -0.1])
+
+
+@pytest.mark.parametrize("url", [None, "http://unknown-engine"])
+def test_replay_engine_attribution_rejects_unattributed_scores(url):
+    with pytest.raises(ValueError, match="missing or unknown worker attribution"):
+        compare_inference_replay.engine_attribution(
+            {"worker_urls": ["http://engine-0"], "trajectories": 1, "repeats": 1},
+            [{"worker_url": url, "group_index": 0, "response_tokens": 1}],
+        )
+    assert not compare_inference_replay.engine_attribution({}, [])["available"]
 
 
 def test_replay_copies_keep_distinct_ids_and_shared_prompt_clusters():
