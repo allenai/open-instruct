@@ -32,13 +32,27 @@ def fake(dtype, shape):
     )
 
 
+def sm100_compile_options(*, device_tuned):
+    """Target the visible Blackwell device, or cross-compile for sm_100a.
+
+    FA4's SM100 kernels read the DSL's detected architecture in their constructors
+    and tune for it (B300 is sm_103 and skips exponent emulation). Forcing sm_100a
+    on such a device configures the kernel for one chip and compiles it for
+    another, which libNVVM rejects. Production compiles never pass an explicit
+    architecture; mirror that on Blackwell. Arch-independent kernels still
+    cross-compile for sm_100a on other GPUs; device-tuned FA4 kernels skip there.
+    """
+    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11):
+        return "--enable-tvm-ffi"
+    if device_tuned and torch.cuda.is_available():
+        pytest.skip("FA4 SM100 compilation requires no visible GPU or an SM100/SM110 device")
+    return "--gpu-arch=sm_100a --enable-tvm-ffi"
+
+
 @pytest.mark.parametrize("backward", [False, True])
 @pytest.mark.parametrize("packed", [False, True])
 def test_sm100_attention_compiles_without_auxdata_warning(backward, packed):
-    # FA4's constructor inspects the visible device before cute.compile receives
-    # its explicit target. Run these offline in a container without GPU devices.
-    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] not in (10, 11):
-        pytest.skip("SM100 offline compilation requires no visible GPU or an SM100/SM110 device")
+    options = sm100_compile_options(device_tuned=True)
     prefix = () if packed else (cute.sym_int(),)
     q = fake(cutlass.BFloat16, (*prefix, cute.sym_int(), 8, 128))
     k = fake(cutlass.BFloat16, (*prefix, cute.sym_int(), 4, 128))
@@ -63,7 +77,7 @@ def test_sm100_attention_compiles_without_auxdata_warning(backward, packed):
             mCuSeqlensK=seqlens,
             aux_data=utils.AuxData(),
             stream=cuda.CUstream(0),
-            options="--gpu-arch=sm_100a --enable-tvm-ffi",
+            options=options,
         )
 
 
@@ -87,7 +101,7 @@ def test_auxdata_empty_and_nonempty_compile(tensors, scalars):
     output = fake(cutlass.Float32, (1,))
     aux = utils.AuxData([output] if tensors else None, (cutlass.Float32(2),) if scalars else None)
     with reject_auxdata_warning():
-        cute.compile(aux_launch, output, aux, cuda.CUstream(0), options="--gpu-arch=sm_100a --enable-tvm-ffi")
+        cute.compile(aux_launch, output, aux, cuda.CUstream(0), options=sm100_compile_options(device_tuned=False))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")

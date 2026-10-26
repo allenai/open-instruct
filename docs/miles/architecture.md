@@ -48,8 +48,11 @@ The main `runtime/miles/Dockerfile` adds FlashAttention 2 and 3 to the original
 binary base. Its separate `flash-attention-build` stage compiles FA3 from an
 immutable source commit against that base's Torch/CUDA libraries, and downloads
 checksum-verified FA2 and FA4 wheels. The runtime stage installs FA3 and FA2,
-then restores FA4's overlapping files. Source trees, compiler outputs and wheels
-stay in the build stage. A cold build needs network access and CUDA compilation
+then restores FA4's overlapping files and patches FA4's `AuxData` NamedTuple with
+CuTe's JIT argument protocols (`runtime/miles/patch_flash_attn_auxdata.py`),
+so the installed `flash_attn/cute/utils.py` intentionally differs from the wheel.
+The patch verifies the wheel version and source hash and fails the build on any
+other FA4. Source trees, compiler outputs and wheels stay in the build stage. A cold build needs network access and CUDA compilation
 time, but no GPU; Docker caches this work independently of application changes.
 FA3 compilation defaults to two jobs (`FLASH_ATTENTION_MAX_JOBS` build argument).
 Build-time imports check that the extensions load; submitted jobs run the GPU
