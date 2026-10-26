@@ -561,10 +561,8 @@ class RunSpec:
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
         validation.runtime_values(miles)
-        # Check explicit capacity without making the generic cache default an
-        # override of a later matched profile. Final validation checks resolved
-        # cache mode and pools together.
-        validation.inference_capacity({"sglang_disable_radix_cache": True, **miles})
+        # Cross-field capacity validation below waits for the profile's cache
+        # strategy and pools; scalar validation stays ahead of derived arithmetic.
         CoreConfig(**core)
         if "placement_mode" in controls:
             placement, origin = controls["placement_mode"]
@@ -641,6 +639,7 @@ class RunSpec:
         for key, value in profile["defaults"].items():
             miles.setdefault(key, value)
         miles.setdefault("sglang_disable_radix_cache", True)
+        validation.inference_capacity(miles)
         defaults = {
             "fully_async": asynchronous,
             "offload_train": False,
