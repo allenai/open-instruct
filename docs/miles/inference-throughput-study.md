@@ -773,8 +773,19 @@ accepted every row without filtering or reordering. Prompt token lengths are
 median 158, p99 1,130 and maximum 2,013, so the existing 2,048 prompt limit fits
 the full mixture. There are 94,881 unique rendered prompts; all 7,133 duplicate
 rows remain. Full source records, order, prepared inputs, tokenizer and hashes
-total 2,761,893,977 bytes before the hash-list file. No realistic-cache GPU result
-is available yet.
+total 2,761,893,977 bytes before the hash-list file. The committed Beaker artifact
+`01M5V69A61TA9ASGC75HX0FCX0` contains all 15 files, including that hash list;
+every uploaded size and SHA-256 digest matches the local copy.
+
+The [realistic-cache bracket](https://beaker.org/ex/01M5V6YDN8FKT670Q4Y6Z7WH76)
+has been submitted and assigned one Holmes B300. It uses high priority, 120-minute
+allocation protection and execution timeout, and no automatic restart. Cache
+on/off/on arms each get 600 seconds warmup and 900 seconds measurement at the
+32K response cap, with the studied runtime, admission/HTTP 512, producer 1,024,
+3,072 recurrent states and 17,825,792 KV tokens. Host RAM is explicitly 128 GiB
+in the Beaker spec; the immutable image predates the new `launch.memory` field.
+The whole immutable prompt artifact is mounted directly, with no WEKA copy.
+No realistic-cache GPU result is available yet.
 
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
