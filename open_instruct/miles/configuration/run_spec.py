@@ -354,6 +354,7 @@ class RunSpec:
             min_runtime="0s",
             auto_resume=True,
             max_retries=-1,
+            memory="256 GiB",
             shared_memory="200 GiB",
             timeout="3h",
         )
@@ -364,7 +365,7 @@ class RunSpec:
         for key, default in (("startup_timeout", 1200), ("heartbeat_timeout", 120)):
             coordination.setdefault(key, default)
             _positive(coordination[key], f"launch.coordination.{key}")
-        for key in ("workspace", "budget", "cluster", "priority", "shared_memory"):
+        for key in ("workspace", "budget", "cluster", "priority", "memory", "shared_memory"):
             _text(launch[key], f"launch.{key}")
         for key in ("min_runtime", "timeout"):
             seconds = validation.duration(launch[key], f"launch.{key}", allow_blank=key == "min_runtime")

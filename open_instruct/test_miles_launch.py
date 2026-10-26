@@ -65,8 +65,18 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     task = launch.specification(IMAGE_ID, run)["tasks"][0]
     assert task["resources"]["gpuCount"] == gpus
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
+    assert task["resources"]["memory"] == "256 GiB"
     assert task["context"]["priority"] == "high"
     assert task["context"]["minRuntime"] == "0s"
+
+
+def test_host_memory_override_reaches_beaker_and_submitted_config(tmp_path):
+    run = spec(tmp_path, launch={"memory": "128 GiB", "shared_memory": "64 GiB"})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert task["resources"]["memory"] == "128 GiB"
+    assert task["resources"]["sharedMemory"] == "64 GiB"
+    submitted = payload(task["arguments"][0])
+    assert RunSpec.from_dict(submitted).launch["memory"] == "128 GiB"
 
 
 @pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])

@@ -226,10 +226,11 @@ def test_registered_verifiers_score_held_out_samples(tmp_path):
     assert asyncio.run(run()) == [1.0, 1.0, 0.0]
 
 
-def test_opd_honors_shared_memory_setting():
-    spec = specs.load(CONFIG, ['launch.shared_memory="48 GiB"'])
+def test_opd_honors_host_and_shared_memory_settings():
+    spec = specs.load(CONFIG, ['launch.memory="128 GiB"', 'launch.shared_memory="48 GiB"'])
     task = launch.specification("test-image", spec)["tasks"][0]
     assert task["resources"]["sharedMemory"] == "48 GiB"
+    assert task["resources"]["memory"] == "128 GiB"
 
 
 def _child_pid(path):

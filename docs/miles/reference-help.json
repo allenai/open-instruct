@@ -239,6 +239,7 @@
     "launch.min_runtime": "Beaker preemption-protected minimum runtime as a Go-style duration (45m, 4h, 2h30m); defaults to 0s (unallocated) when omitted. Integer 0, string 0, 0s or a blank value also selects unallocated scheduling on any topology and is submitted as 0s. Values above Beaker's usual 8h limit warn; Beaker enforces scheduling limits.",
     "launch.priority": "low, normal, high or urgent; default high.",
     "launch.secrets": "Environment-name to Beaker secret-name mapping, default empty; no overlap with env.",
+    "launch.memory": "Host RAM quantity per Beaker replica; default 256 GiB. Size from the workload working set. A RAM request above the per-slot allowance can allocate more GPU slots than gpuCount requests. This is separate from GPU memory pools and shared_memory.",
     "launch.shared_memory": "Shared memory quantity string; default 200 GiB.",
     "launch.timeout": "Beaker task timeout as a Go-style duration; default 3h (examples override). Independent of min_runtime and may be shorter. Zero requests no explicit execution timeout, subject to Beaker's cluster policy. A longer or zero timeout warns unless periodic checkpoints and auto_resume are enabled, because the job can be preempted after min_runtime.",
     "launch.weka_mounts": "Array of filesystem/mount tables; default oe-training-default at /weka/oe-training-default.",

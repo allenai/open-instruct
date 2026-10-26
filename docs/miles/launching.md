@@ -96,6 +96,21 @@ before building, including mount coverage. The MILES image wrapper passes the
 frozen configuration directly to `open_instruct.miles.execution.submit`; no
 debug launch script is involved.
 
+## Host memory and allocated GPU slots
+
+`launch.memory` requests host RAM per Beaker replica (default `"256 GiB"`);
+`launch.shared_memory` separately sizes shared memory. Both GRPO and OPD launchers
+honor these fields. They do not set SGLang GPU memory pools.
+
+Beaker can assign extra GPU slots to satisfy a host-memory request. During an
+H100 inference check on Jupiter, one requested GPU with 256 GiB of host RAM
+received two GPU slots. Inspect the assigned resources in job events and record
+both requested/active GPUs and allocated GPUs when reporting throughput or cost.
+For a small inference-only workload, a lower request such as `launch.memory =
+"128 GiB"` with `launch.shared_memory = "64 GiB"` may avoid this extra allocation.
+Check the host working set, model loading and response-buffer peaks before
+reducing it; do not copy that limit into a full trainer job without measurement.
+
 ## Jupiter CUDA compatibility
 
 For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` or `"ai2/saturn"` (both have
