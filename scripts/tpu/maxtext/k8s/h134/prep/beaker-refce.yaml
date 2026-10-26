@@ -25,4 +25,5 @@ tasks:
     constraints:
       cluster:
         - ai2/jupiter
+        - ai2/holmes
     timeout: 4h0m0s

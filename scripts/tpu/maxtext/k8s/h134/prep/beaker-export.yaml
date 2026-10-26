@@ -21,12 +21,14 @@ tasks:
     resources:
       gpuCount: 1
       cpuCount: 16
-      memory: 400GiB
+      memory: 256GiB
     context:
       priority: high
       minRuntime: 5m0s
       autoResume: true
     constraints:
       cluster:
+        - ai2/holmes
         - ai2/jupiter
+        - ai2/saturn
     timeout: 3h0m0s
