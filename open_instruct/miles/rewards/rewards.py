@@ -41,6 +41,10 @@ _MATH_FACTORIES = {
 # trainers pass them. Without this, end-anchored checks such as IFEval's
 # ``startend:quotation`` or ``detectable_format:json_format`` can never pass.
 _END_OF_TURN_TOKENS = ("<|im_end|>", "<|endoftext|>", "<|end_of_text|>", "<|eot_id|>", "</s>")
+# ``metadata`` key naming the verifier that could not grade a sample, set when that verifier's
+# diagnostics carry ``exclude_from_training`` (the code verifier's ``failure_policy="mask"``).
+# The reward post-process hooks leave such samples out of the loss and the group baseline.
+EXCLUDED_KEY = "reward_excluded"
 _POOLS = weakref.WeakKeyDictionary()
 _CHILDREN = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
@@ -313,11 +317,19 @@ def _strip_end_of_turn(response):
     return response
 
 
+def excluded_from_training(sample):
+    """The reason a sample's reward is not a grade (``EXCLUDED_KEY``), or None when it is."""
+    metadata = getattr(sample, "metadata", None)
+    return metadata.get(EXCLUDED_KEY) if isinstance(metadata, dict) else None
+
+
 async def _score(args, sample):
     registry = _registry(args.olmo_core.reward_config)
     metadata = sample.metadata
     if not isinstance(metadata, dict) or not isinstance(metadata.get("verifiers"), list) or not metadata["verifiers"]:
         raise ValueError("Each sample requires nonempty metadata.verifiers")
+    # A retried sample is graded afresh.
+    metadata.pop(EXCLUDED_KEY, None)
     weighted_specs = []
     for spec in metadata["verifiers"]:
         if spec["name"] not in registry:
@@ -376,6 +388,8 @@ async def _score(args, sample):
         if not isinstance(diagnostics, dict):
             diagnostics = {"kind": "adapter", "status": "completed"}
         metadata.setdefault("verifier_diagnostics", {})[name] = diagnostics
+        if diagnostics.get("exclude_from_training"):
+            metadata[EXCLUDED_KEY] = f"{name}:{diagnostics.get('rejection') or diagnostics.get('status')}"
     total = _finite(total, "combined reward")
     metadata["reward_components"] = components
     return total

@@ -9,6 +9,9 @@ leave truncated responses out of training instead:
 - each group's baseline (mean, and standard deviation when enabled) uses only the
   responses that finished.
 
+Responses a verifier could not grade (``rewards.EXCLUDED_KEY``, set by the code
+verifier's ``failure_policy="mask"``) are left out the same way.
+
 Raw rewards are returned unchanged so reward metrics stay comparable across runs.
 Excluded responses still count in response-averaged loss denominators.
 """
@@ -19,24 +22,30 @@ import torch
 from miles.rollout.filter_hub import base_types, common_filters
 from miles.utils.types import Sample
 
+from open_instruct.miles.rewards import rewards
+
+
+def _excluded(sample) -> bool:
+    return sample.status == Sample.Status.TRUNCATED or rewards.excluded_from_training(sample) is not None
+
 
 def filter_finished_reward_variance(args, samples, **kwargs):
     """Drop groups with no reward variation among responses eligible for training."""
-    finished = [sample for sample in base_types.iter_samples(samples) if sample.status != Sample.Status.TRUNCATED]
+    finished = [sample for sample in base_types.iter_samples(samples) if not _excluded(sample)]
     if len(finished) < 2:
         return base_types.FilterOutput(keep=False, reason="insufficient_finished_responses")
     return common_filters.apply_reward_nonzero_std_filter(args, finished, **kwargs)
 
 
 def exclude_truncated(args, samples: list[Sample]) -> tuple[list[float], list[float]]:
-    """Return raw rewards and group-normalized rewards computed over finished responses only."""
+    """Return raw rewards and group-normalized rewards computed over finished, graded responses only."""
     raw = [sample.get_reward_value(args) for sample in samples]
     normalized = [0.0] * len(samples)
     groups: dict[int, list[int]] = defaultdict(list)
     for index, sample in enumerate(samples):
         if sample.group_index is None:
             raise ValueError("exclude_truncated requires every sample to carry its prompt group index")
-        if sample.status == Sample.Status.TRUNCATED:
+        if _excluded(sample):
             sample.remove_sample = True
         else:
             groups[sample.group_index].append(index)

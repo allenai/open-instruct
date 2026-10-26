@@ -29,10 +29,12 @@ from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
 from open_instruct.math_utils import (
+    get_final_answer_phrase,
     get_unnormalized_answer,
     hendrycks_is_equiv,
     is_equiv,
     last_boxed_only_string,
+    last_math_span,
     normalize_final_answer,
     remove_boxed,
 )
@@ -258,12 +260,19 @@ class MathVerifier(VerifierFunction):
         if minerva_answer is not None and minerva_answer != "[invalidanswer]":
             all_answers.append(minerva_answer)
 
+        # Attempt extraction from a "the final answer is X" sentence in any wording
+        # the Minerva pattern misses. Only used when no stricter format matched, so
+        # a response cannot earn credit by stating two different answers.
+        if not all_answers:
+            phrase_answer = get_final_answer_phrase(raw_answer)
+            if phrase_answer is not None:
+                all_answers.append(normalize_final_answer(phrase_answer))
+
         # Attempt extraction from the last LaTeX-formatted answer.
         if not all_answers:
-            dollars = [m.start() for m in re.finditer(r"\$", raw_answer)]
-            if len(dollars) > 1:
-                answer = normalize_final_answer(raw_answer[dollars[-2] + 1 : dollars[-1]])
-                all_answers.append(answer)
+            math_span = last_math_span(raw_answer)
+            if math_span is not None:
+                all_answers.append(normalize_final_answer(math_span))
 
         # Fallback to the full output.
         if not all_answers:

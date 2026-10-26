@@ -82,7 +82,11 @@ def test_teacher_free_dispatch_and_roundtrip():
     assert beaker["description"] == "Miles Megatron GRPO: qwen3-grpo-test"
     assert task["resources"]["gpuCount"] == 4 and not task["context"]["autoResume"]
     assert "teacher" not in spec.to_dict() and "distillation" not in spec.to_dict()
-    assert spec.to_dict()["reward"] == {"zero_truncated": False, "final_answer_only": False}
+    assert spec.to_dict()["reward"] == {
+        "zero_truncated": False,
+        "final_answer_only": False,
+        "exclude_truncated": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -382,6 +386,46 @@ def test_center_rewards_before_native_grpo_and_preserve_evidence(tmp_path, monke
     samples[1].teacher_log_probs = [0.0]
     with pytest.raises(ValueError, match="Teacher"):
         grpo_hooks.post_process(args, samples)
+
+
+def test_exclude_truncated_leaves_truncated_samples_out_of_loss_and_baseline(tmp_path, monkeypatch):
+    monkeypatch.setenv(grpo_hooks.OUTPUT_ENV, str(tmp_path))
+    statuses = ["completed", "truncated", "completed", "completed"]
+    samples = [
+        SimpleNamespace(
+            index=i,
+            reward=value,
+            tokens=[1, 2, 3 + i],
+            response_length=1,
+            response="answer",
+            status=SimpleNamespace(value=status),
+            metadata={"verifiers": []},
+            group_index=i // 2,
+            remove_sample=False,
+        )
+        for i, (value, status) in enumerate(zip([0.0, 1.0, 0.0, 1.0], statuses, strict=True))
+    ]
+    args = SimpleNamespace(n_samples_per_prompt=2, grpo_std_normalization=False)
+    assert grpo_hooks.post_process(args, samples)[1] == [-0.5, 0.5, -0.5, 0.5]
+    assert not any(sample.remove_sample for sample in samples)
+    for key, value in grpo_hooks.reward_environment(
+        "/fixed/verifiers.json", {"zero_truncated": False, "final_answer_only": False, "exclude_truncated": True}
+    ).items():
+        monkeypatch.setenv(key, value)
+    raw, centered = grpo_hooks.post_process(args, samples)
+    assert raw == [0.0, 1.0, 0.0, 1.0]
+    # The truncated sample's reward of 1 no longer lifts its group's baseline or earns an advantage.
+    assert centered == [0.0, 0.0, -0.5, 0.5]
+    assert [sample.remove_sample for sample in samples] == [False, True, False, False]
+
+
+def test_zero_and_exclude_truncated_are_mutually_exclusive():
+    doc = document()
+    doc["reward"] = {"zero_truncated": True, "exclude_truncated": True}
+    with pytest.raises(InputError, match="mutually exclusive"):
+        specs.from_dict(doc)
+    doc["reward"] = {"exclude_truncated": True}
+    assert specs.from_dict(doc).to_dict()["reward"]["exclude_truncated"] is True
 
 
 def _evidence_rows(step, rewards):

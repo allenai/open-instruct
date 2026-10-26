@@ -14,6 +14,19 @@ writes Miles ``data.prompt_data`` / ``data.eval_prompt_data`` JSONL plus the
 - ``verifiers.json``, which scores each row with the verifier Open Instruct uses for it;
 - ``manifest.json`` with the source revision, row counts, drops and file hashes.
 
+``--reward-fixes`` applies the MOPD retrain audit's data and scoring fixes (data v3):
+
+- math prompts that ask for no answer format get a boxed-answer instruction, and rows with
+  empty or ``-1`` placeholder targets are dropped;
+- instruction-following rows that cannot be fully satisfied (contradictory or invalid
+  constraints) or that the one-letter answer "a" fully passes are dropped, and
+  ``ifeval`` is scored all-or-nothing by ``if_rewards.StrictIFVerifier``;
+- code rows whose tests can never pass or exceed the service's payload limit are dropped,
+  prompts that never name the tested function or (stdio) never ask for Python get a
+  sentence that does, and grader failures are masked from the loss instead of scored 0;
+- prompts that appear with different targets are dropped, and training excludes rows whose
+  normalized user text matches a held-out row.
+
 Example (inside the Miles image, writing to WEKA):
 
     python scripts/miles/prepare_dolci_rl_prompts.py \\
@@ -37,6 +50,7 @@ import datasets
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
+from open_instruct.miles.rewards import code_rewards, if_rewards, math_rewards
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -48,15 +62,21 @@ _USER_PREFIX = "user: "
 _OTHER_TURN = re.compile(r"\n(?:assistant|system|user): ")
 
 
-def verifier_registry(code_api_url):
+def verifier_registry(code_api_url, reward_fixes=False):
     """The trusted ``data.reward_config``: Open Instruct's verifier for each source verifier name.
 
     Code follows the Olmo 3 RL recipe: the pass rate when at least 99% of the tests pass, else 0.
+    With ``reward_fixes``, instruction following is scored all-or-nothing and code grader
+    failures are masked from the loss.
     """
     code = {"api_url": code_api_url, "pass_rate_reward_threshold": 0.99}
+    ifeval = {"factory": "open_instruct.ground_truth_utils.IFEvalVerifier"}
+    if reward_fixes:
+        code["failure_policy"] = "mask"
+        ifeval = {"factory": "open_instruct.miles.rewards.if_rewards.StrictIFVerifier"}
     return {
         "math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"},
-        "ifeval": {"factory": "open_instruct.ground_truth_utils.IFEvalVerifier"},
+        "ifeval": ifeval,
         "code": {"factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier", "config": code},
         "code_stdio": {
             "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
@@ -119,7 +139,33 @@ def compressed_tests(ground_truth):
     return ground_truth
 
 
-def render_row(row, tokenizer, source):
+def fix_prompt(name, content, target):
+    """(content, fixes) with the ``--reward-fixes`` prompt fixes applied, or (None, reason) to drop the row."""
+    if name == "math":
+        problems = math_rewards.math_row_problems({"ground_truth": target})
+        if problems:
+            return None, f"math_{problems[0]}"
+        fixed = math_rewards.add_boxed_instruction(content)
+        return fixed, ["boxed_instruction"] if fixed != content else []
+    if name == "ifeval":
+        problems = if_rewards.if_row_problems({"prompt": content, "ground_truth": target})
+        return (None, f"ifeval_{problems[0].split(':')[0]}") if problems else (content, [])
+    problems = code_rewards.code_target_problems(name, target, content)
+    blocking = [p for p in problems if p not in code_rewards.FIXABLE_PROBLEMS and p != "non_assert_test"]
+    if blocking:
+        return None, f"code_{blocking[0]}"
+    fixes = []
+    if "function_name_missing" in problems:
+        function_name = code_rewards.function_name_from_tests(code_rewards.decode_tests_safely(target))
+        content = code_rewards.add_function_name_hint(content, function_name)
+        fixes.append("function_name_hint")
+    if "language_unspecified" in problems:
+        content = code_rewards.add_python_hint(content)
+        fixes.append("python_hint")
+    return content, fixes
+
+
+def render_row(row, tokenizer, source, reward_fixes=False):
     """One prepared Miles row, or (None, reason) when the source row is outside the study."""
     names = row["dataset"]
     if not isinstance(names, list) or len(names) != 1:
@@ -138,11 +184,20 @@ def render_row(row, tokenizer, source):
         target = verifier_target(name, truths[0])
     except (ValueError, SyntaxError, KeyError, IndexError, TypeError):
         return None, "malformed_target"
+    fixes = None
+    label = truths[0]
+    if reward_fixes:
+        content, fixes = fix_prompt(name, content, target)
+        if content is None:
+            return None, fixes
+        if name == "ifeval":
+            # State the count relation the prompt implies, so the stored target matches the prompt.
+            target = label = if_rewards.normalize_if_target(content, target)
     messages = [{"role": "user", "content": content}]
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
     return {
         "input": prompt,
-        "label": truths[0],
+        "label": label,
         "metadata": {
             "source_dataset": source["source"],
             "source_revision": source["revision"],
@@ -152,17 +207,27 @@ def render_row(row, tokenizer, source):
             "original_dataset": row["original_dataset"],
             "query": content,
             "verifiers": [{"name": name, "target": target, "weight": 1.0}],
+            **({"prompt_fixes": fixes} if fixes is not None else {}),
         },
     }, domain
 
 
-def split_domain(rows, eval_count, seed):
-    """Deterministic (eval, train) split; train excludes any prompt that is also held out."""
+def normalized_query(row):
+    """The user text lowercased with punctuation and whitespace runs collapsed, for leakage checks."""
+    return " ".join(re.sub(r"[^\w\s]", " ", row["metadata"]["query"].lower()).split())
+
+
+def split_domain(rows, eval_count, seed, key=None):
+    """Deterministic (eval, train) split; train excludes any prompt that is also held out.
+
+    ``key`` (default: the rendered input) decides which training rows count as held out.
+    """
+    key = key or (lambda row: row["input"])
     shuffled = list(rows)
     random.Random(seed).shuffle(shuffled)
     held_out = shuffled[:eval_count]
-    inputs = {row["input"] for row in held_out}
-    return held_out, [row for row in shuffled[eval_count:] if row["input"] not in inputs]
+    keys = {key(row) for row in held_out}
+    return held_out, [row for row in shuffled[eval_count:] if key(row) not in keys]
 
 
 def parse_mix(text):
@@ -201,6 +266,9 @@ def main():
     parser.add_argument("--max-prompt-tokens", type=int, default=2048, help="Drop longer rendered prompts")
     parser.add_argument("--code-api-url", default=DEFAULT_CODE_API_URL, help="Code execution /test_program URL")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--reward-fixes", action="store_true", help="Apply the MOPD retrain audit's data and scoring fixes (v3)"
+    )
     parser.add_argument("--output", required=True, help="Fresh output directory")
     args = parser.parse_args()
 
@@ -220,24 +288,35 @@ def main():
     by_domain = {domain: [] for domain in DOMAINS}
     drops = {}
     seen = set()
+    labels = {}
     for row in dataset:
-        prepared, outcome = render_row(row, tokenizer, source)
+        prepared, outcome = render_row(row, tokenizer, source, args.reward_fixes)
         if prepared is None:
             drops[outcome] = drops.get(outcome, 0) + 1
             continue
         if prepared["input"] in seen:
             drops["duplicate_prompt"] = drops.get("duplicate_prompt", 0) + 1
+            labels[prepared["input"]].add(prepared["label"])
             continue
         if len(tokenizer.encode(prepared["input"], add_special_tokens=False)) > args.max_prompt_tokens:
             drops["prompt_too_long"] = drops.get("prompt_too_long", 0) + 1
             continue
         seen.add(prepared["input"])
+        labels[prepared["input"]] = {prepared["label"]}
         by_domain[outcome].append(prepared)
+    if args.reward_fixes:
+        # A prompt seen with different targets has no single right answer: drop it entirely.
+        for domain, rows in by_domain.items():
+            kept = [row for row in rows if len(labels[row["input"]]) == 1]
+            if len(kept) != len(rows):
+                drops["conflicting_targets"] = drops.get("conflicting_targets", 0) + len(rows) - len(kept)
+            by_domain[domain] = kept
 
     files = {}
     train = {}
     for domain, rows in by_domain.items():
-        held_out, train[domain] = split_domain(rows, args.eval_per_domain, args.seed)
+        key = normalized_query if args.reward_fixes else None
+        held_out, train[domain] = split_domain(rows, args.eval_per_domain, args.seed, key)
         files[f"eval_{domain}"] = held_out
         files[f"train_{domain}"] = train[domain]
     mix_counts = {}
@@ -253,6 +332,7 @@ def main():
         "enable_thinking": False,
         "seed": args.seed,
         "max_prompt_tokens": args.max_prompt_tokens,
+        "reward_fixes": args.reward_fixes,
         "dropped": dict(sorted(drops.items())),
         "mixes": {name: {"weights": mixes[name], "counts": mix_counts[name]} for name in mixes},
         "files": {},
@@ -268,7 +348,7 @@ def main():
             verifiers[name] = verifiers.get(name, 0) + 1
         manifest["files"][stem] = {"records": len(rows), "verifiers": verifiers, "sha256": _sha(raw)}
         logger.info("%s: %d prompts %s", stem, len(rows), verifiers)
-    registry = verifier_registry(args.code_api_url)
+    registry = verifier_registry(args.code_api_url, args.reward_fixes)
     (output / "verifiers.json").write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     logger.info("Dropped %s; wrote %s", manifest["dropped"], output)

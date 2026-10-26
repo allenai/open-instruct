@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from miles.utils.types import Sample
 
+from open_instruct.miles.rewards import rewards
 from open_instruct.miles.rewards.truncation import exclude_truncated, filter_finished_reward_variance
 
 
@@ -14,9 +15,10 @@ def args(std=False, normalize=True):
     )
 
 
-def sample(group, reward, truncated=False, index=None):
+def sample(group, reward, truncated=False, index=None, ungraded=False):
     status = Sample.Status.TRUNCATED if truncated else Sample.Status.COMPLETED
-    return Sample(group_index=group, index=index, reward=reward, status=status)
+    metadata = {rewards.EXCLUDED_KEY: "code:service_error"} if ungraded else {}
+    return Sample(group_index=group, index=index, reward=reward, status=status, metadata=metadata)
 
 
 def test_truncated_responses_leave_the_baseline_and_the_loss():
@@ -58,3 +60,17 @@ def test_filter_ignores_truncated_reward_before_batch_admission(finished, expect
     if expected:
         _, normalized = exclude_truncated(args(), samples)
         assert normalized == [-0.5, 0.5, 0.0]
+
+
+def test_ungraded_responses_are_excluded_like_truncated_ones():
+    samples = [
+        sample(0, 1.0, index=0),
+        sample(0, 0.0, index=1),
+        sample(0, 0.0, index=2, ungraded=True),  # a grader failure, not a failed program
+    ]
+    raw, normalized = exclude_truncated(args(), samples)
+    assert raw == [1.0, 0.0, 0.0]
+    assert normalized == pytest.approx([0.5, -0.5, 0.0])
+    assert [s.remove_sample for s in samples] == [False, False, True]
+    only_one_graded = [sample(0, 1.0, index=0), sample(0, 0.0, index=1, ungraded=True)]
+    assert not filter_finished_reward_variance(args(), only_one_graded).keep

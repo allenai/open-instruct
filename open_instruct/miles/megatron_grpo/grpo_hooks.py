@@ -4,6 +4,9 @@
 same registry, ``metadata.verifiers`` and weighted sum as the Core backend). ``post_process`` is
 ``--custom-reward-post-process-path``: it records the raw verifier rewards and centers them within
 each complete prompt group, which MILES' GRPO estimator then broadcasts over response tokens.
+Samples a verifier could not grade (``rewards.EXCLUDED_KEY``), and length-truncated samples when
+``reward.exclude_truncated`` is set, get ``remove_sample``, a zero advantage, and no part in their
+group's baseline.
 Settings arrive as ``OI_GRPO_*`` environment from ``grpo_runtime``.
 """
 
@@ -21,6 +24,7 @@ OUTPUT_ENV = "OI_GRPO_OUTPUT"
 REWARD_CONFIG_ENV = "OI_GRPO_REWARD_CONFIG"
 ZERO_TRUNCATED_ENV = "OI_GRPO_REWARD_ZERO_TRUNCATED"
 FINAL_ANSWER_ONLY_ENV = "OI_GRPO_REWARD_FINAL_ANSWER_ONLY"
+EXCLUDE_TRUNCATED_ENV = "OI_GRPO_REWARD_EXCLUDE_TRUNCATED"
 EVIDENCE = "verifier-rewards.jsonl"
 REPLAYED = "verifier-rewards.replayed.jsonl"
 
@@ -31,6 +35,7 @@ def reward_environment(registry, reward_gates):
         REWARD_CONFIG_ENV: str(registry),
         ZERO_TRUNCATED_ENV: "1" if reward_gates["zero_truncated"] else "0",
         FINAL_ANSWER_ONLY_ENV: "1" if reward_gates["final_answer_only"] else "0",
+        EXCLUDE_TRUNCATED_ENV: "1" if reward_gates.get("exclude_truncated") else "0",
     }
 
 
@@ -120,16 +125,26 @@ def post_process(args, samples, **kwargs):
         group = getattr(sample, "group_index", None)
         groups.setdefault(group if group is not None else index // args.n_samples_per_prompt, []).append(index)
     centered = [0.0] * len(samples)
+    exclude_truncated = os.environ.get(EXCLUDE_TRUNCATED_ENV, "0") == "1"
     for indices in groups.values():
         if len(indices) != args.n_samples_per_prompt:
             raise ValueError("GRPO requires complete fixed-fanout prompt groups")
         prefixes = [samples[i].tokens[: len(samples[i].tokens) - samples[i].response_length] for i in indices]
         if any(prefix != prefixes[0] for prefix in prefixes):
             raise ValueError("GRPO prompt group contains different tokenized prompts")
-        mean = sum(values[i] for i in indices) / len(indices)
-        denominator = 1.0
-        if args.grpo_std_normalization:
-            denominator = math.sqrt(sum((values[i] - mean) ** 2 for i in indices) / (len(indices) - 1)) + 1e-6
+        graded = []
         for i in indices:
+            truncated = exclude_truncated and _status(samples[i]) == "truncated"
+            if not truncated and rewards.excluded_from_training(samples[i]) is None:
+                graded.append(i)
+            else:
+                samples[i].remove_sample = True
+        if not graded:
+            continue
+        mean = sum(values[i] for i in graded) / len(graded)
+        denominator = 1.0
+        if args.grpo_std_normalization and len(graded) > 1:
+            denominator = math.sqrt(sum((values[i] - mean) ** 2 for i in graded) / (len(graded) - 1)) + 1e-6
+        for i in graded:
             centered[i] = (values[i] - mean) / denominator
     return values, centered

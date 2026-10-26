@@ -43,7 +43,9 @@ DEFAULTS = {
     },
     # The registered-verifier gates of the Core backend (CoreConfig.reward_zero_truncated and
     # reward_final_answer_only). Both off: the whole response is graded, truncated or not.
-    "reward": {"zero_truncated": False, "final_answer_only": False},
+    # exclude_truncated instead leaves length-truncated responses out of the loss and out of their
+    # group's baseline (overlong filtering), keeping their raw reward for metrics.
+    "reward": {"zero_truncated": False, "final_answer_only": False, "exclude_truncated": False},
     "output": dict(opd_config.DEFAULTS["output"]),
     "tracking": {**opd_config.DEFAULTS["tracking"], "wandb_project": "rl-backend-comparison"},
 }
@@ -205,8 +207,10 @@ class MegatronGRPORunSpec:
             raise InputError("objective.policy_loss=dppo requires objective.use_rollout_logprobs=true")
         if objective["use_rollout_logprobs"] and inf["top_p"] != 1.0:
             raise InputError("inference.top_p must be 1.0 when the rollout log-probs anchor the policy ratio")
-        for key in ("zero_truncated", "final_answer_only"):
+        for key in ("zero_truncated", "final_answer_only", "exclude_truncated"):
             validation.boolean(document["reward"][key], f"reward.{key}")
+        if document["reward"]["zero_truncated"] and document["reward"]["exclude_truncated"]:
+            raise InputError("reward.zero_truncated and reward.exclude_truncated are mutually exclusive")
         for key in ("root", "assets"):
             document["output"][key] = run_spec._path(document["output"][key], base.parent, f"output.{key}")
         root, assets = (Path(document["output"][k]) for k in ("root", "assets"))

@@ -45,6 +45,9 @@ The schema matches the tagged run files. Beyond the shared OPD sections
 - `[reward]` holds the registered-verifier gates of the Core backend:
   `zero_truncated` and `final_answer_only`, both off by default, so the whole
   response is graded whether or not it was truncated (the tagged runs' behavior).
+  `exclude_truncated` (off by default, exclusive with `zero_truncated`) instead
+  removes length-truncated responses from the loss and from their group's
+  baseline, keeping their raw reward for metrics.
 - `data.prompt_data`, `data.eval_prompt_data` name/path pairs and the trusted
   `data.reward_config` registry are required;
   `scripts/miles/prepare_qwen35_math_prompts.py` writes them for math, and

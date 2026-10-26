@@ -30,8 +30,20 @@ _InstructionArgsDtype = dict[str, int | str | Sequence[str]] | None
 
 _LANGUAGES = instructions_util.LANGUAGE_CODES
 
+# langdetect is randomized by default; a fixed seed makes language checks repeatable.
+langdetect.DetectorFactory.seed = 0
+
 # The relational operation for comparison.
 _COMPARISON_RELATION = ("less than", "at least")
+
+# Explicit exact-count relation for checkers whose description states only a count.
+_EXACT_RELATION = "exactly"
+
+
+def _word_pattern(word):
+    """A regex for `word` as a whole word, escaped so keywords match literally."""
+    return r"(?<!\w)" + re.escape(word) + r"(?!\w)"
+
 
 # The maximum number of sentences.
 _MAX_NUM_SENTENCES = 20
@@ -177,6 +189,8 @@ class ResponseLanguageChecker(Instruction):
         """
         assert isinstance(value, str)
 
+        if not any(character.isalpha() for character in value):
+            return False
         try:
             return langdetect.detect(value) == self._language
         except langdetect.LangDetectException as e:
@@ -415,7 +429,7 @@ class ConstrainedStartChecker(Instruction):
           True if the response starts with the given phrase or keyword that is
           contained in `instruction_args`; otherwise, False.
         """
-        response_pattern = r"^\s*" + self._starter + r".*$"
+        response_pattern = r"^\s*" + re.escape(self._starter) + r".*$"
         response_with_constrained_start = re.search(response_pattern, value, flags=re.MULTILINE)
         return bool(response_with_constrained_start)
 
@@ -530,7 +544,7 @@ class SectionChecker(Instruction):
           True if the number of sections in the response is greater than or equal to
           the minimum number of sections; otherwise, False.
         """
-        section_splitter_patten = r"\s?" + self._section_spliter + r"\s?\d+\s?"
+        section_splitter_patten = r"\s?" + re.escape(self._section_spliter) + r"\s?\d+\s?"
         sections = re.split(section_splitter_patten, value)
         num_sections = len(sections) - 1
         return num_sections >= self._num_sections
@@ -640,7 +654,7 @@ class PostscriptChecker(Instruction):
         elif self._postscript_marker == "P.S.":
             postscript_pattern = r"\s*p\.\s?s\..*$"
         else:
-            postscript_pattern = r"\s*" + self._postscript_marker.lower() + r".*$"
+            postscript_pattern = r"\s*" + re.escape(self._postscript_marker.lower()) + r".*$"
         postscript = re.findall(postscript_pattern, value, flags=re.MULTILINE)
         return bool(postscript)
 
@@ -742,7 +756,7 @@ class KeywordChecker(Instruction):
 
     def check_following(self, value):
         """Check if the response contain the expected keywords."""
-        return all(re.search(keyword, value, flags=re.IGNORECASE) for keyword in self._keywords)
+        return all(re.search(re.escape(keyword), value, flags=re.IGNORECASE) for keyword in self._keywords)
 
 
 class KeywordFrequencyChecker(Instruction):
@@ -800,7 +814,7 @@ class KeywordFrequencyChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response contain the keyword with required frequency."""
-        actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
+        actual_occurrences = len(re.findall(re.escape(self._keyword), value, flags=re.IGNORECASE))
 
         if self._comparison_relation == _COMPARISON_RELATION[0]:
             return actual_occurrences < self._frequency
@@ -918,9 +932,11 @@ class ParagraphFirstWordCheck(Instruction):
         if self._num_paragraphs is None or self._num_paragraphs < 0:
             self._num_paragraphs = random.randint(1, _NUM_PARAGRAPHS)
 
+        # A given out-of-range paragraph is kept, so the check fails deterministically
+        # instead of being redrawn at random on every call.
         self._nth_paragraph = nth_paragraph
-        if self._nth_paragraph is None or self._nth_paragraph <= 0 or self._nth_paragraph > self._num_paragraphs:
-            self._nth_paragraph = random.randint(1, self._num_paragraphs + 1)
+        if self._nth_paragraph is None:
+            self._nth_paragraph = random.randint(1, self._num_paragraphs)
 
         self._first_word = first_word
         if self._first_word is None:
@@ -971,7 +987,7 @@ class ParagraphFirstWordCheck(Instruction):
                 num_paragraphs -= 1
 
         # check that index doesn't go out of bounds
-        if self._nth_paragraph <= num_paragraphs:
+        if 1 <= self._nth_paragraph <= num_paragraphs:
             paragraph = paragraphs[self._nth_paragraph - 1].strip()
             if not paragraph:
                 return False
@@ -1079,7 +1095,7 @@ class ForbiddenWords(Instruction):
 
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
-        return all(not re.search(r"\b" + word + r"\b", value, flags=re.IGNORECASE) for word in self._forbidden_words)
+        return all(not re.search(_word_pattern(word), value, flags=re.IGNORECASE) for word in self._forbidden_words)
 
 
 class RephraseParagraph(Instruction):
@@ -1356,7 +1372,7 @@ class CapitalLettersEnglishChecker(Instruction):
         assert isinstance(value, str)
 
         try:
-            return value.isupper() and langdetect.detect(value) == "en"
+            return value.isupper() and langdetect.detect(value.lower()) == "en"
         except langdetect.LangDetectException as e:
             # Count as instruction is followed.
             logging.error("Unable to detect language for text %s due to %s", value, e)  # refex: disable=pytotw.037
@@ -1529,7 +1545,7 @@ class RepeatPhraseChecker(Instruction):
         first_word = self._phrase.split()[0]
         last_word = self._phrase.split()[-1]
 
-        found_phrases = re.findall(rf"{first_word} .*? {last_word}", value)
+        found_phrases = re.findall(rf"{re.escape(first_word)} .*? {re.escape(last_word)}", value)
         if len(found_phrases) != self._small_n:
             return False
         num_satisfied_phrases = 0
@@ -1646,6 +1662,8 @@ class SentenceHyphenChecker(Instruction):
         sentences_gold = re.sub("-", " ", value)
         sentences_gold = instructions_util.split_into_sentences(sentences_gold)
         sentences = value.split("-")
+        if len(sentences) < 2 or len(sentences) != len(sentences_gold):
+            return False
         # Check if there are any spaces between sentences
         for sentence, gold in zip(sentences, sentences_gold):
             if sentence.strip() != sentence or sentence != gold:
@@ -1742,7 +1760,7 @@ class KeywordFrequencyOnceChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response contain the keyword with required frequency."""
-        actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
+        actual_occurrences = len(re.findall(_word_pattern(self._keyword), value, flags=re.IGNORECASE))
 
         return actual_occurrences == 1
 
@@ -1777,9 +1795,10 @@ class KeywordFrequencyCheckerDifferent(Instruction):
 
         if relation is None:
             self._comparison_relation = random.choice(_COMPARISON_RELATION)
-        elif relation not in _COMPARISON_RELATION:
+        elif relation not in (*_COMPARISON_RELATION, _EXACT_RELATION):
             raise ValueError(
-                f"The supported relation for comparison must be in {_COMPARISON_RELATION}, but {relation} is given."
+                f"The supported relation for comparison must be in {_COMPARISON_RELATION} or "
+                f"{_EXACT_RELATION!r}, but {relation} is given."
             )
         else:
             self._comparison_relation = relation
@@ -1800,8 +1819,10 @@ class KeywordFrequencyCheckerDifferent(Instruction):
 
     def check_following(self, value):
         """Checks if the response contain the keyword with required frequency."""
-        actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
+        actual_occurrences = len(re.findall(_word_pattern(self._keyword), value, flags=re.IGNORECASE))
 
+        if self._comparison_relation == _EXACT_RELATION:
+            return actual_occurrences == self._frequency
         if self._comparison_relation == _COMPARISON_RELATION[0]:
             return actual_occurrences < self._frequency
         elif self._comparison_relation == _COMPARISON_RELATION[1]:
@@ -1840,7 +1861,7 @@ class ExcludeWordHarderChecker(Instruction):
 
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
-        return " " + self._keyword + " " not in value
+        return not re.search(_word_pattern(self._keyword), value, flags=re.IGNORECASE)
 
 
 class ParagraphBasicChecker(Instruction):
@@ -2490,8 +2511,8 @@ class CountIncrementWordChecker(Instruction):
           True if the response contains the expected number of keywords;
           otherwise, False.
         """
-        actual_occurrences1 = len(re.findall(self._keyword1, value, flags=re.IGNORECASE))
-        actual_occurrences2 = len(re.findall(self._keyword2, value, flags=re.IGNORECASE))
+        actual_occurrences1 = len(re.findall(_word_pattern(self._keyword1), value, flags=re.IGNORECASE))
+        actual_occurrences2 = len(re.findall(_word_pattern(self._keyword2), value, flags=re.IGNORECASE))
 
         return bool(actual_occurrences1 == 1 and actual_occurrences2 == 2)
 
@@ -2520,8 +2541,8 @@ class PalindromeBasicChecker(Instruction):
         Returns:
           True if the response contains a palindrome; otherwise, False.
         """
-        palindromes = [word for word in value.split() if word == word[::-1]]
-        return len(palindromes) > 0
+        words = (re.sub(r"[\W_]", "", word.lower()) for word in value.split())
+        return any(len(word) >= 3 and word == word[::-1] and any(c.isalpha() for c in word) for word in words)
 
 
 class KeywordSpecificPositionChecker(Instruction):
