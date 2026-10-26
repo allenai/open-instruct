@@ -159,6 +159,31 @@ selected profile; an explicit pool override wins. H100 retains the bounded KV
 pool rather than promising all requests can reach full context simultaneously.
 Startup verifies the expected GPU family and memory once, outside generation.
 
+## Realistic-prompt cache comparison on B300
+
+The [cache-on/off/on comparison](https://beaker.org/ex/01M5V6YDN8FKT670Q4Y6Z7WH76)
+used the pinned 102,014-row Dolci-Think-RL-7B prompt mixture, four siblings and a
+fixed order, with admission/HTTP 512, producer 1,024, prefill chunk 8,192 and the
+same 32K response cap. Native decode rates were **23,906 / 19,746 / 23,989 tokens/s**:
+cached controls were 21.1–21.5% faster than uncached, with 0.34% control drift.
+Delivered complete-group rates were 23,700 / 20,026 / 23,496 tokens/s. These
+different accounting boundaries include different unfinished work; native counters
+are the primary engine measure. Window populations differ, so the bracket is
+not a paired confidence interval or a learning-throughput result.
+
+All three measurement windows completed. The parent hit its two-hour timeout
+during the closing arm's drain, so that arm does not establish successful shutdown.
+All 902 collected files (871.6 MB) were downloaded and hash-verified, with no
+collector omissions. The closing window was audited from its retained boundaries,
+counter snapshots, batches and response records without marking its workflow complete.
+
+The measured adapter also needs a compatibility change before enabling caching
+on the examples' newer SGLang pin: that runtime requires selected recurrent-state
+snapshots written from FP32 accumulators. The adapter currently lacks that contract,
+and the runtime rejects the unsupported path. Casting BF16 intermediate states to
+FP32 would not restore the missing precision. This is tracked separately from the
+configuration gains; profiles do not enable caching or silently change runtime pins.
+
 ## H100 measurements for the studied Olmo 3.5 checkpoint
 
 The first H100 panel used the same approximately 23.31-GiB checkpoint as the
