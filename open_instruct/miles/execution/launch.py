@@ -114,7 +114,11 @@ def specification(image, spec, *, hostnames=None):
         arguments=[command],
         datasets=[{"mountPath": mount["mount_path"], "source": {"weka": mount["weka"]}} for mount in mounts],
         result={"path": "/output"},
-        resources={"gpuCount": allocated, "memory": "256 GiB", "sharedMemory": spec.launch["shared_memory"]},
+        resources={
+            "gpuCount": allocated,
+            "memory": spec.launch["memory"],
+            "sharedMemory": spec.launch["shared_memory"],
+        },
         context={
             "priority": spec.launch["priority"],
             "minRuntime": spec.launch["min_runtime"],
