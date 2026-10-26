@@ -201,7 +201,13 @@ rollout_batch_size = 64
 samples_per_prompt = 4
 max_response_length = 32768
 max_context_length = 34816
-sglang_max_mamba_cache_size = 1024
+# B300 starting point from Olmo 3.5 inference measurements; see README.md.
+# Explicit per-engine limits: no automatic H100 or other-model selection.
+sglang_max_running_requests = 512
+sglang_server_concurrency = 512
+sglang_cuda_graph_max_bs_decode = 512
+sglang_max_total_tokens = 17825792 # 512 x 34,816; bytes/token depend on the model.
+sglang_max_mamba_cache_size = 1024 # Cache-off runtime: one slot per active request.
 sglang_mem_fraction_static = 0.7
 
 [tracking]
@@ -226,6 +232,9 @@ sglang_chunked_prefill_size = 8192
 
 [async]
 fully_async = true
+# Preserve the previous global producer budget while raising per-engine ceilings.
+# Fleet saturation and policy age need separate tuning with batch 256 / lag 6.
+async_max_concurrent_samples = 2432
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

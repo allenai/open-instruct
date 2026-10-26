@@ -13,7 +13,7 @@ these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused
 The examples keep inputs, topology, resource limits and recipe-specific overrides.
 Launch settings, mounts and input/output paths remain explicit. The examples
 rely on the structured loader's defaults for optimizer settings, seeds,
-microbatching, recomputation, dynamic rows and async capacity. Single-node trainer
+microbatching, recomputation and dynamic rows. Single-node trainer
 counts, TP1 inference, one-GPU judges and rubric defaults (2,048 output tokens,
 temperature 1.0) are omitted where they match the run. Non-default topology and
 qualification settings remain explicit. See the
@@ -120,12 +120,42 @@ the Olmo adapter's kernel override. Keep prefix caching disabled for this runtim
 the recurrent-state pool is still required for active requests. See
 [hybrid model limits](../../../docs/miles/moe-model-support.md#current-limits).
 
-The learning templates (`node`, `large`) separate 64 GPU-running requests per
-engine from 128 end-to-end HTTP permits. The automatically sized producer supplies
-two waves; the completed buffer holds one collection. HTTP permits include
-response delivery/processing, so setting both limits to 64 can leave GPU slots
-empty. Increasing only the producer cannot bypass the HTTP limit. Confirm warm
-occupancy, latency and memory on your workload before increasing either further.
+The learning templates (`node`, `large`) propose **512 running requests, 512 HTTP
+permits and decode graphs through batch 512 per B300 engine**. They reserve
+17,825,792 KV tokens (512 × 34,816), retain memory fraction 0.7, and keep prefill
+chunks at 8,192. These are explicit example settings; generic loader defaults and
+other clusters are unchanged. `dev` retains eight requests and its small pools
+because its tiny trainer and engine share one GPU.
+
+This starting point comes from an Olmo 3.5 checkpoint with approximately 23.31 GiB
+of weights, 4 KiB of full-attention KV per token and 14.34 MiB of recurrent state
+per slot. On B300, the selected single-engine case achieved 24.4K delivered
+tokens/s; two engines achieved 47.9K, about 98% of ideal doubling. At 512 admission,
+512 HTTP permits kept approximately 510–511 requests running per engine with
+almost no engine queue. The larger 1,024-permit setting mainly added queueing.
+See the [measurements and saved artifacts](https://github.com/allenai/oe-planning/issues/31#issuecomment-6407109947).
+
+The measurements used a newer experimental serving runtime with prefix caching;
+these examples do not change the pinned runtime or enable its unsupported prefix-cache
+path. The examples retain 1,024 recurrent slots, sufficient for 512 active requests
+with caching off. The measured cache-on runtime used 3,072 slots. Throughput and
+fully async mid-sequence refresh still need qualification on the exact example
+runtime. Check memory again for a different model; these are not H100 settings.
+
+The global unfinished-sample budgets remain at their previous resolved values:
+768 for `node` and 2,432 for `large`, now explicit. Raising per-engine ceilings
+therefore does not silently expand producer work to 6,144 or 19,456 samples while
+batch 256 and lag 6 stay fixed. These budgets cannot saturate every engine at 512;
+the change supplies a per-engine capacity starting point, not a measured fleet
+training-throughput improvement. Tune producer budget using trainer wait, useful
+tokens, oldest-token age and stale-work discards. The existing `large` budget is
+already 9.5 batch-equivalents; neither that ratio nor a capacity limit predicts
+actual policy age. Completed siblings can remain outside the unfinished budget.
+
+H100 measurements and broader model guidance will extend this recommendation.
+A future automatic choice needs GPU memory, model geometry, context and placement
+as well as cluster identity, with explicit overrides and visible resolved values.
+Changing `launch.cluster` currently does not resize these example pools.
 
 These templates inherit the disabled optional startup weight snapshot/reset audit
 (`check_weight_update_equal = false`) and explicitly disable periodic score-reuse

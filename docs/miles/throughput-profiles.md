@@ -18,8 +18,10 @@ Their [generated recipe tables](configuration.md#example-recipes) show GPU
 allocations and batch geometry from the current TOMLs. For the runtime image, see
 the [MILES GRPO guide](grpo.md). Do not transfer a short-context
 no-recomputation setting to long packs without checking memory; the maintained
-node and large use recomputation and engine admission 64, sized as described
-below.
+node and large use recomputation and a provisional B300 engine admission of 512.
+Their [capacity notes](../../configs/miles/examples/README.md#capacity-and-qualification-settings)
+record the measured model, runtime differences and pending qualification. The
+generic loader still defaults to 64; size other models and GPUs as described below.
 
 ## Size engine admission from memory
 
@@ -52,6 +54,8 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
 1. Set `sglang_max_running_requests` and `sglang_cuda_graph_max_bs_decode` to `R`.
    For async runs, start `sglang_server_concurrency` at `2 × R`. Structured
    configs derive this when omitted. This adds transport headroom, not GPU slots.
+   Measured B300 example overrides use `R`: at 512 admission, additional HTTP
+   headroom mostly increased queueing. Recheck occupancy for other workloads.
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
    request at full context, so KV capacity never forces a retraction.
 3. Keep `sglang_max_mamba_cache_size` at least `R` with radix caching off. The
@@ -61,11 +65,14 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    that a model's kernel supports prefix-cache snapshots.
 4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
    slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
-5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to
+5. When `async.async_max_concurrent_samples` is omitted, the producer sizes itself to
    `max(collection, 2 × engines × R)` samples when HTTP capacity is at least `R`.
    Both producer and HTTP capacity need headroom: raising only one leaves the
    other as a bottleneck. Two waves are a starting point, not a measured guarantee
    of full occupancy; monitor response latency, host memory and stale work.
+   The learning examples preserve their previous global budgets explicitly while
+   increasing engine ceilings. Do not multiply a fixed-policy per-engine budget
+   into a training fleet without checking policy age and useful consumption.
 
 For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 
@@ -77,9 +84,10 @@ For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 | 128 | 68 GiB | 135 GiB |
 
 On a large-memory GPU, memory may stop binding well before other limits such as
-router and transport capacity. Keep `R ≤ 64` as the starting point (see
-[development defaults](development-defaults.md)) and raise it only while the
-router and engines stay healthy. On a smaller GPU, run the same arithmetic before
+router and transport capacity. The generic starting admission remains 64 (see
+[development defaults](development-defaults.md)); the B300 examples override it
+for the measured smaller-state Olmo 3.5 architecture. Their 512 setting does not
+follow from the larger-model arithmetic above. On a smaller GPU, run the same arithmetic before
 lowering anything: an 80 GiB GPU at static fraction 0.7 leaves about 21 GiB after
 the example weights, so reduce `R` or the state-slot count to fit that.
 
