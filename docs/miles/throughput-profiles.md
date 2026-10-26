@@ -31,9 +31,9 @@ Engine admission is the number of requests each SGLang engine decodes at once.
 and the two memory pools below size GPU capacity. `sglang_server_concurrency`
 instead sizes end-to-end HTTP permits per engine: a request holds its permit
 while in transit and while its response is processed, even when the GPU has
-finished it. Decode throughput grows with batch size until the
-GPU saturates, so an admission set below what memory allows leaves throughput
-unused whenever training waits for batches.
+finished it. Increasing admission can improve decode throughput, but memory fit
+is only a capacity bound. Kernel efficiency, memory bandwidth, CPU scheduling,
+prefill and transport can reach diminishing returns before GPU memory fills.
 
 As a worked example, consider a hybrid MoE served on one GPU per engine whose
 weights occupy 34.5 GiB, with 4 full-attention layers × 8 KV heads × 128 dims and
@@ -57,14 +57,20 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    Measured B300 example overrides use `R`: at 512 admission, additional HTTP
    headroom mostly increased queueing. Recheck occupancy for other workloads.
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
-   request at full context, so KV capacity never forces a retraction.
+   request at full context in the nominal capacity calculation. Verify the
+   resolved token capacity and retractions after startup; this does not prevent
+   retractions required by mid-sequence weight refresh.
 3. Keep `sglang_max_mamba_cache_size` at least `R` with radix caching off. The
    pinned Olmo hybrid backend requires this mode; see [model limits](moe-model-support.md#current-limits).
    For compatible KDA backends with radix caching enabled, the capacity validator
    requires more than `5 × R` slots. Passing capacity validation does not establish
    that a model's kernel supports prefix-cache snapshots.
 4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
-   slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
+   slot) fits within `sglang_mem_fraction_static` × visible GPU memory, leaving
+   room for decode graphs, activation/workspace peaks and runtime overhead. The
+   sum is a lower bound on the footprint, not a complete memory-fit guarantee.
+   With explicit pool sizes, changing the memory fraction alone does not resize
+   those requested pools; inspect the actual allocations after graph capture.
 5. When `async.async_max_concurrent_samples` is omitted, the producer sizes itself to
    `max(collection, 2 × engines × R)` samples when HTTP capacity is at least `R`.
    Both producer and HTTP capacity need headroom: raising only one leaves the
@@ -97,8 +103,25 @@ After launch, confirm the setting from the engine metrics:
 - `token usage` should stay below 1, with few retractions.
 - Per-engine generation throughput should rise over a lower-admission baseline.
 
-If requests run at the cap with KV usage far below one half while training waits,
-admission is too low.
+If requests run at the cap while training waits, compare a higher admission at
+the same workload. Low KV usage suggests memory headroom; it does not establish
+a throughput gain. Keep the smaller setting when marginal throughput gains are
+small or queueing, response age and memory costs rise. The measured B300 model
+showed diminishing returns above roughly 512 despite additional memory room.
+
+For a new GPU, use model geometry to narrow the search before launching: compare
+two plausible admissions, repeat the lower control, and add one capacity probe
+only if useful. Repeat the selected setting at representative prompt and response
+lengths. Full-context KV sizing is conservative; a smaller pool can support more
+short requests, but long responses may trigger retractions. Label that tradeoff
+and measure it rather than treating the larger admission as guaranteed capacity.
+
+Retain the resolved config, runtime revisions, hardware identity, raw engine and
+client logs, memory/occupancy samples, response-length distribution, retractions
+and warmup/measurement boundaries for every case, including failed attempts.
+Report repeated-control drift and cache-hit rates with throughput. Small repeated
+prompt sets can make cached prefill unusually cheap; include uncached prefill
+when generalizing to new workloads.
 
 ## Other serving and training settings
 
