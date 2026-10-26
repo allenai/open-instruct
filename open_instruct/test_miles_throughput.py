@@ -79,7 +79,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
 
 
 @pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("large", 2432)])
-def test_learning_examples_preserve_producer_budget_and_qualification(tmp_path, profile, producer_budget):
+def test_learning_examples_resize_producer_budget_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()
     assert pending.inference_profile["status"] == "pending_model_metadata"
@@ -90,8 +90,9 @@ def test_learning_examples_preserve_producer_budget_and_qualification(tmp_path, 
     plan = config.plan()
     capacity = plan["async_capacity"]
     assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]
-    # Raising per-engine ceilings must not silently multiply unfinished work or policy lag.
-    assert capacity["producer_sample_budget"] == producer_budget < capacity["global_http_slots"]
+    # Automatic supply follows the prepared profile; batch/lag are independent.
+    assert capacity["producer_sample_budget"] == 8 * producer_budget == 2 * capacity["global_http_slots"]
+    assert any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["global_batch_size"] == 256
     assert config.core.max_policy_lag == 6
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]

@@ -651,7 +651,6 @@ class RunConfig:
         argv = self.arguments()
         options = self.resolved_miles()
         throughput_report = throughput.report(options, self.core)
-        throughput_report["warnings"].extend((self.inference_profile or {}).get("warnings", []))
         world = options.get("actor_num_nodes", 1) * options.get("actor_num_gpus_per_node", 1)
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         return {

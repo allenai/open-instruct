@@ -6,13 +6,11 @@ these profiles describe a measured workload, not a universal memory estimator.
 
 import hashlib
 import json
-import os
-import subprocess
 from pathlib import Path
 
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.infrastructure import gpu_hardware
 
-CLUSTER_GPUS = {"ai2/holmes": "b300", "ai2/jupiter": "h100"}
 PROFILES = {"olmo35-b300-v1": "b300", "olmo35-h100-v1": "h100"}
 PROFILE_KEYS = (
     "sglang_disable_radix_cache",
@@ -81,13 +79,13 @@ def resolve(selector, cluster, model, options):
         "requested": selector,
         "selected": "generic",
         "status": "fallback",
-        "expected_gpu": CLUSTER_GPUS.get(cluster),
+        "expected_gpu": gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu"),
         "defaults": {},
         "qualification": "Starting point only; runtime, workload and async-refresh qualification remain required.",
     }
 
     def fallback(reason):
-        if selector in PROFILES and model is not None:
+        if selector in PROFILES and report["status"] != "pending_model_metadata":
             raise InputError(f"inference.profile={selector}: {reason}")
         report["reason"] = reason
         return report
@@ -100,11 +98,17 @@ def resolve(selector, cluster, model, options):
         return fallback("External engine settings are owned by their provider")
     if any(options.get(name, 1) != 1 for name in ("sglang_dp_size", "sglang_ep_size", "sglang_pp_size")):
         return fallback("Measured profiles require ordinary single-rank engines")
-    gpu = PROFILES.get(selector, CLUSTER_GPUS.get(cluster))
-    if gpu is None:
+    gpu = PROFILES.get(selector, gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu"))
+    if gpu not in PROFILES.values():
         return fallback("No measured hardware mapping for this cluster")
-    if selector in PROFILES and CLUSTER_GPUS.get(cluster) not in (None, gpu):
+    if selector in PROFILES and gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu") not in (None, gpu):
         return fallback("Named profile conflicts with the cluster GPU type")
+    if options.get("sglang_quantization"):
+        return fallback("Quantized inference was not measured")
+    if options.get("sglang_dtype", "auto") not in ("auto", "bfloat16"):
+        return fallback("Serving dtype differs from the measured BF16 configuration")
+    if options.get("rollout_max_context_len") != 34816 or options.get("rollout_max_response_len") != 32768:
+        return fallback("Automatic profiles currently cover the measured 34,816 context / 32,768 response caps")
     if model is None:
         report["status"] = "pending_model_metadata"
         return fallback("Model config.json is unavailable here; resolve again after model preparation")
@@ -112,12 +116,8 @@ def resolve(selector, cluster, model, options):
     report["model_shape_sha256"] = hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()
     if shape != MODEL_SHAPE or model.get("dtype", model.get("torch_dtype")) != "bfloat16":
         return fallback("Model geometry or weight dtype differs from the measured checkpoint")
-    if model.get("quantization_config") or options.get("sglang_quantization"):
+    if model.get("quantization_config"):
         return fallback("Quantized inference was not measured")
-    if options.get("sglang_dtype", "auto") not in ("auto", "bfloat16"):
-        return fallback("Serving dtype differs from the measured BF16 configuration")
-    if options.get("rollout_max_context_len") != 34816 or options.get("rollout_max_response_len") != 32768:
-        return fallback("Automatic profiles currently cover the measured 34,816 context / 32,768 response caps")
     cache_off = options.get("sglang_disable_radix_cache", gpu != "b300")
     running = options.get("sglang_max_running_requests", 512 if gpu == "b300" or cache_off else 320)
     kv_contexts = running if gpu == "b300" else min(running, 192 if cache_off else 128)
@@ -155,7 +155,7 @@ def advisories(report, reference, options):
     def warn(code, message, **details):
         warnings.append({"code": code, "message": message, **details})
 
-    if report["requested"] != "generic" and report["status"] != "candidate":
+    if report.get("explicit_selection") and report["requested"] != "generic" and report["status"] != "candidate":
         warn(
             "inference_profile_pending"
             if report["status"] == "pending_model_metadata"
@@ -217,11 +217,13 @@ def advisories(report, reference, options):
 
 def validate_hardware(report, devices):
     """One startup check per node, not a token-path runtime check."""
-    if report["status"] != "candidate":
+    if not report or report["status"] != "candidate":
         return
     expected = report["expected_gpu"]
     minimum_mib = 270000 if expected == "b300" else 80000
-    if not devices or any(expected not in name.lower() or memory < minimum_mib for name, memory in devices):
+    if not devices or any(
+        expected not in name.lower() or memory is None or memory < minimum_mib for name, memory in devices
+    ):
         raise InputError(
             f"Inference profile {report['selected']} expects {expected.upper()} GPUs with at least "
             f"{minimum_mib} MiB; found {devices}. Select inference.profile=generic or the correct profile."
@@ -232,16 +234,34 @@ def check_hardware(report, device_ids=None):
     """Check visible devices once before starting a matched serving profile."""
     if not report or report["status"] != "candidate":
         return []
-    command = ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]
-    mask = ",".join(device_ids) if device_ids is not None else os.environ.get("CUDA_VISIBLE_DEVICES")
-    if mask:
-        command.append(f"--id={mask}")
-    try:
-        output = subprocess.check_output(command, text=True, timeout=15)
-        devices = [
-            (name.strip(), float(memory)) for name, memory in (line.rsplit(",", 1) for line in output.splitlines())
-        ]
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
-        raise InputError(f"Cannot verify hardware for inference profile {report['selected']}: {error}") from error
+    devices = [(device["name"], device["memory_mib"]) for device in gpu_hardware.inventory(device_ids)]
     validate_hardware(report, devices)
     return devices
+
+
+def check_cluster_hardware(report, directory, layout):
+    """Validate every rollout replica's startup inventory after model preparation.
+
+    Inventory is collected independently of checkpoint availability. The fresh
+    rendezvous directory is passed only by the managed cluster launcher.
+    """
+    if not report or report["status"] != "candidate":
+        return []
+    inventories = []
+    expected = sorted(node["rollout_gpus"] for node in layout["nodes"])
+    for rank in range(layout["replicas"]):
+        path = Path(directory) / f"inference-profile-{rank}.json"
+        try:
+            record = json.loads(path.read_text())
+            count = record["rollout_gpus"]
+            devices = record["hardware"]
+            if type(count) is not int or count < 0 or len(devices) != count:
+                raise ValueError("Rollout device inventory is incomplete")
+            if count:
+                validate_hardware(report, devices)
+            inventories.append(record)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise InputError(f"Cannot qualify rollout hardware from {path}: {error}") from error
+    if sorted(record["rollout_gpus"] for record in inventories) != expected:
+        raise InputError("Rollout hardware inventory does not match the planned replica placement")
+    return inventories

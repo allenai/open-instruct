@@ -10,14 +10,13 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
+from open_instruct.miles.configuration import advisories, specs, topology
 from open_instruct.miles.configuration import config as miles_config
-from open_instruct.miles.configuration import specs, topology
 from open_instruct.miles.distillation import opd_config, opd_launch
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import workflow
@@ -31,13 +30,13 @@ def receipt_path(spec):
     return directory / f"{spec.name}-{key}.json"
 
 
-def specification(image, spec, *, hostnames=None):
+def specification(image, spec, *, hostnames=None, compiled=None):
     if isinstance(spec, opd_config.OPDRunSpec):
         if hostnames is not None:
             raise InputError("OPD uses a single cluster allocation; hostname overrides are unsupported")
         return opd_launch.specification(image, spec)
-    config = spec.compile()
-    layout = topology.plan(spec)
+    config = compiled if compiled is not None else spec.compile()
+    layout = topology.plan(spec, config)
     host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])
     allocated = layout["gpus_per_replica"]
     mounts = spec.launch["weka_mounts"]
@@ -194,21 +193,15 @@ def collect_results(root, destination):
 
 def run(path, overrides):
     spec = specs.load(path, overrides)
-    # Validate launch feasibility before spending time building an image.
-    specification("pending-build", spec)
-    warnings = (
-        spec.plan()["warnings"]
-        if isinstance(spec, opd_config.OPDRunSpec)
-        else spec.launch_warnings(spec.compile().miles)
-    )
-    for warning in warnings:
-        print(f"Warning: {warning}", file=sys.stderr)
-    if not isinstance(spec, opd_config.OPDRunSpec):
-        runtime = spec.compile().plan()
-        for warning in runtime["async_capacity"]["warnings"]:
-            print(f"Warning: {warning}", file=sys.stderr)
-        for warning in runtime["throughput"]["warnings"]:
-            print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
+    # Reuse one compilation for allocation, validation and warning output.
+    if isinstance(spec, opd_config.OPDRunSpec):
+        specification("pending-build", spec)
+        planned = spec.plan()
+    else:
+        compiled = spec.compile()
+        specification("pending-build", spec, compiled=compiled)
+        planned = spec.plan(compiled)
+    advisories.emit(planned)
     with tempfile.TemporaryDirectory(prefix="miles-submitted-run-") as directory:
         frozen = Path(directory) / "run.json"
         workflow.write_json(frozen, spec.to_dict())

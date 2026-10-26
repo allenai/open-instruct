@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from open_instruct import logger_utils
-from open_instruct.miles.configuration import inference_profiles
+from open_instruct.miles.configuration import inference_profiles, topology
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import artifacts
@@ -334,7 +334,12 @@ def execute(spec):
         registry_module.validate_data(prepared, resolved)
         config = spec.compile({**prepared, "hf_checkpoint": hf})
         profile = getattr(config, "inference_profile", None)
-        hardware = inference_profiles.check_hardware(profile)
+        inventory_root = os.environ.get("OI_MILES_INFERENCE_REPORT_DIR")
+        hardware = (
+            inference_profiles.check_cluster_hardware(profile, inventory_root, topology.plan(spec, config))
+            if inventory_root
+            else inference_profiles.check_hardware(profile)
+        )
         write_json(root / "inference-profile.json", {"profile": profile, "hardware": hardware})
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
