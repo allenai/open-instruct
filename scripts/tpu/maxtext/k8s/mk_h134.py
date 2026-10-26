@@ -7,9 +7,9 @@ Writes, per data-order seed s in {0, 1}:
                         LR_SCHEDULE_STEPS = 16,304 (C11's count) and the names. Mesh (fsdp16 x ep8), factor 2.5, LR 5e-5,
                         3% warmup, NUM_EPOCH, DATA_SEED, checkpoint_period 300, keep 10, batch-hash and drop logging and
                         the image are H123's.
-  h134/pf-b0-c11-s<s>/  P3 preflight: the production overlay at 6 steps, scratch output, no checkpoints, maxRestarts 0.
-                        Records the required ragged_buffer_factor and the drops over steps 1-6, the step-1 CE (gate 1)
-                        and the BATCH-HASH lines the loader logs.
+  h134/pf-b0-c11-s<s>/  P3 preflight: the production overlay run for 20 steps (P3 reads steps 1-6), scratch output, no
+                        checkpoints, maxRestarts 0. Records the required ragged_buffer_factor and the drops over steps 1-6,
+                        the step-1 CE (gate 1) and BATCH-HASH n=1..20 for P4, as H123's pf-ep8 ran 20 steps.
   h134/pfd-ep8-b0-s<s>/ P4 diagnostic candidate (not a launch gate, ledger-manager 2026-10-26): pf-b0-c11-s<s> with
                         load_balance_loss_weight=0 (#620), as H123's pf-ep8.
   h134/pfd-x16-b0-s<s>/ P4 diagnostic reference on a borrowed 8x8x16: the candidate on fsdp16 x ep64, factor 5.0, r2 data
@@ -73,20 +73,20 @@ for s in (0, 1):
     pf = K / "h134" / f"pf-b0-c11-s{s}"
     write(pf, prod, ((f"h134-b0-c11-s{s}", f"h134-pf-b0-c11-s{s}"),),
           kust=(("  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs\n", "  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch\n"),
-                ("  - STEPS=16304\n", "  - STEPS=6\n"),
+                ("  - STEPS=16304\n", "  - STEPS=20\n"),   # P3 reads steps 1-6; P4's BATCH-HASH n=1..20 vs H122's replay
                 (" checkpoint_period=300 ", " checkpoint_period=100000 ")),
           jobset=(("maxRestarts: 3", "maxRestarts: 0"),),
-          header=lambda t: t.replace(f"# H134 b0-c11-s{s}:", f"# H134 pf-b0-c11-s{s} (P3 preflight, 6 steps, scratch):", 1))
+          header=lambda t: t.replace(f"# H134 b0-c11-s{s}:", f"# H134 pf-b0-c11-s{s} (P3/P4 preflight, 20 steps, scratch):", 1))
     assert "  - LR_SCHEDULE_STEPS=16304\n" in (pf / "kustomization.yaml").read_text()
 
     ep8 = K / "h134" / f"pfd-ep8-b0-s{s}"
     write(ep8, pf, ((f"h134-pf-b0-c11-s{s}", f"h134-pfd-ep8-b0-s{s}"),),
           kust=((" emo_enabled=false ", " emo_enabled=false load_balance_loss_weight=0 "),),
-          header=lambda t: t.replace(f"# H134 pf-b0-c11-s{s} (P3 preflight, 6 steps, scratch):",
+          header=lambda t: t.replace(f"# H134 pf-b0-c11-s{s} (P3/P4 preflight, 20 steps, scratch):",
                                      f"# H134 pfd-ep8-b0-s{s} (P4 diagnostic candidate, lb weight 0):", 1))
 
     x16 = K / "h134" / f"pfd-x16-b0-s{s}"
-    write(x16, ep8, ((f"h134-pfd-ep8-b0-s{s}", f"h134-pfd-x16-b0-s{s}"),),
+    write(x16, ep8, ((f"h134-pfd-ep8-b0-s{s}", f"h134-pfd-x16-b0-s{s}"), ("  - STEPS=20\n", "  - STEPS=6\n")),
           kust=(("  - MAXTEXT_LOG_BATCH_HASH=1\n", "  - MAXTEXT_LOG_BATCH_HASH=1\n  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32\n"),
                 ("  - TOTAL_DEVICES=128\n", "  - TOTAL_DEVICES=1024\n"),
                 ("  - PER_DEVICE_BATCH=0.125\n", "  - PER_DEVICE_BATCH=0.015625\n"),
