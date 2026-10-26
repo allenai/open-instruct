@@ -154,11 +154,12 @@ already 9.5 batch-equivalents; neither that ratio nor a capacity limit predicts
 actual policy age. Completed siblings can remain outside the unfinished budget.
 
 The [H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
-favor 320 over 256 for the original workload, using a smaller KV pool and the
-experimental cache-capable runtime. The cache-disabled H100 comparison and
-numerical qualification remain pending. Automatic H100 selection therefore uses
-the measured candidate only when caching is explicitly enabled on a compatible
-runtime; otherwise it reports a generic fallback.
+select **512 with caching disabled** on the realistic prompt mixture: 16.7K native
+tokens/s versus 14.5K for cached 320. The H100 profile uses 6,684,672 KV tokens,
+512 recurrent slots, graph batch 512 and memory fraction 0.9 in uncached mode.
+Explicitly enabled caching selects 320 with 4,456,448 KV tokens and 1,920 slots.
+These comparisons used the experimental runtime; numerical and exact-runtime
+qualification remain pending. Profiles preserve the user's cache mode.
 
 Inspect `plan.runtime.inference_profile` for the choice, reason and per-setting
 provenance. When the checkpoint is on remote WEKA and its `config.json` is not
