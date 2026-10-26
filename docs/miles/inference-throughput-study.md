@@ -689,8 +689,62 @@ uses the selected HTTP 512 / producer 1,024 supply settings, retaining admission
 512 and the same four cache/chunk cases, corpus, context, sampling and pools.
 The image includes cancellation and resource-observation fixes. It excludes the
 affected node and retains the one-B300, high-priority, protected 90-minute window
-and execution cap, without automatic restart. Results remain pending; the failed
-attempt is retained separately and is not treated as a completed bracket.
+and execution cap, without automatic restart. It completed all four cases and
+exited successfully. All 1,203 archived files (277,746,082 bytes) have verified
+hashes; the collector omitted no files. Every case reached `shutdown_complete`
+with zero active producer/generation/HTTP tasks, admission waiters and unfinished
+samples. The failed attempt remains separately retained.
+
+| 8K-prefix / 2K-response case | Delivered tokens/s | Native decode tokens/s | Prefix cache hit fraction |
+|---|---:|---:|---:|
+| Cache on, chunk 8192, opening | 13,593.7 | 14,085.1 | 98.11% |
+| Cache off, chunk 8192 | 8,295.7 | 8,657.9 | 0% |
+| Cache off, chunk 4096 | 6,994.5 | 7,288.4 | 0% |
+| Cache on, chunk 8192, closing | 15,137.4 | 14,632.1 | 99.17% |
+
+The closing native control drift is +3.88%. Chunk 4096 is 15.82% below chunk
+8192 in the uncached comparison, so retain 8192 for this measured shape. Cache
+hit fraction is cached tokens divided by cached plus uncached input tokens;
+the input-token counter alone is not the denominator. These exceptionally high
+hit rates reflect the tiny repeated continuation corpus and do not justify a
+general cache recommendation. All measured responses have timing records and
+zero reported retractions. Engine-gauge coverage is 83.71–89.41%, while GPU
+sampling covers 97.08–99.80%; missing observations are not idle time. Native
+counter and delivered-group windows differ, particularly by about 50 seconds in
+the cache-off/8192 case. Their rates are complementary measurements, not an
+identical time partition. See `analysis/long8k-v3-summary.json` and the complete
+per-case reports.
+
+### Realistic prompt-stream cache comparison
+
+The next cache comparison uses the full, pinned
+[`allenai/Dolci-Think-RL-7B` mixture](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B/tree/0fb6466d31ef3a9dd16985ef635e6429e05a6491).
+This published Olmo 3 workload is a representative proxy, not an established
+future Olmo 3.5 production distribution. Preparation retains all 102,014 source
+rows, source identities and answers, natural duplicates and prompt lengths.
+It verifies message text against the published prompt before rerendering with
+the target checkpoint's chat template. Any reconstruction mismatch fails the
+preparation instead of silently filtering data. These artifacts are explicitly
+reward-free benchmarks, not training-ready reward conversions.
+
+Freeze a deterministic prompt order and retain four sibling responses per prompt.
+Use `data.shuffle=false`, join response `group_index` to the retained order, and
+verify that the measured run never rolls over the dataset. Choose context limits
+from the audited length distribution; do not silently truncate or drop long
+prompts. Compare cache-on/off/on at the selected 512 admission and HTTP limits,
+1,024 producer budget and 8,192 prefill chunks, keeping pool geometry and sampling
+fixed within a bracket. Retain source mix and prompt/response length distributions
+for each measured window, prefix hits, retractions, occupancy coverage, memory,
+startup/drain times and raw outputs. Different response caps are separate panels.
+The fixed-policy bracket measures serving capacity; the production qualification
+must also exercise cache behavior across fully async mid-sequence weight refresh.
+
+Preparation code is `scripts/miles/prepare_realistic_cache_workload.py`.
+The [Saturn CPU attempt](https://beaker.org/ex/01M5V5P2A2P9FEVZYRW87VVA30)
+was canceled before execution after scheduler events reported no free slots.
+The [Jupiter fallback](https://beaker.org/ex/01M5V5R3DZVPKTKWE8TZJ4S4ZV)
+retains 4 CPUs, 32 GiB RAM, high unallocated priority, no restart and a 30-minute
+execution cap. No realistic-cache GPU result is available yet.
 
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
