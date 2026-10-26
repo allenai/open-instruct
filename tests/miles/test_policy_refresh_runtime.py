@@ -306,7 +306,7 @@ def test_request_deadline_is_independent_of_drain_and_cancels_timeout(monkeypatc
         async def post(*args, **kwargs):
             try:
                 await asyncio.sleep(0.02)
-                return {"meta_info": {"finish_reason": {"type": "stop"}}}
+                return b'{"meta_info":{"finish_reason":{"type":"stop"}}}'
             finally:
                 finalized.append(True)
 
@@ -362,7 +362,7 @@ def test_transport_failure_logs_request_identity_without_resampling(monkeypatch,
         assert caught.value is failure
         assert len(calls) == 1
         _, payload, kwargs = calls[0]
-        assert kwargs == {"max_retries": 1, "headers": {"x-miles-request-id": payload["rid"]}}
+        assert kwargs == {"max_retries": 1, "headers": {"x-miles-request-id": payload["rid"]}, "return_bytes": True}
         assert value.rollout_log_probs == original_scores
         assert f"request={payload['rid']} group=0 sample=17" in caplog.text
         assert "delivery=unknown" in caplog.text
