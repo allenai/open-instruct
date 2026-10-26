@@ -144,28 +144,33 @@ fraction 0.9. These results do not qualify the examples' older pinned runtime.
 | 128, closing control | 256 | 4,456,448 | 768 | 8,529 | 53.96 GiB |
 | 224, separate job | 448 | 4,456,448 | 1,536 | 12,469 | 64.76 GiB |
 | 256 | 512 | 4,456,448 | 1,536 | 13,321 | 64.80 GiB |
+| 320, separate job | 640 | 4,456,448 | 1,920 | 14,654 | 70.26 GiB |
 
-The [128/192/128/256 panel](https://beaker.org/ex/01M5V23DSCQE90HWD86944WHE9)
-and [224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK) completed
-successfully. All 1,506 archived files passed hash verification. Measured running
+The [128/192/128/256 panel](https://beaker.org/ex/01M5V23DSCQE90HWD86944WHE9), [224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK) and
+[320 probe](https://beaker.org/ex/01M5VA8KDF63EJKHV8MNMHWH4J) completed
+successfully. All 1,809 archived files passed hash verification. Measured running
 requests averaged at least 99.7% of admission, and all completed measured responses
 had timing records with zero reported retractions. The repeated 128 native
 control declined 2.95%. At 256, native throughput was 6.83% above 224; delivered
 complete-group throughput was 14,323 versus 13,101 tokens/s. Native counters include
 unfinished responses, so those rates have different boundaries.
 
-Treat 256 as the best measured candidate, not an established peak or production
-recommendation. The 224 job ran on a different host with fewer CPU/RAM resources;
+At 320, native throughput increased another 10.01% over 256, with delivered
+throughput of 15,501 tokens/s. Treat 320 as the best measured candidate on this
+workload, not an established peak or production recommendation. The 224 job ran on a different host with fewer CPU/RAM resources;
 the other panel reserved two GPU slots because of its host-memory request while
 using only one engine. Per-allocated-GPU throughput for that panel is half the
-per-active-engine rate. The 224 job requested 128 GiB host RAM and reserved one
+per-active-engine rate. The 224 and 320 jobs requested 128 GiB host RAM and each reserved one
 GPU. Record both denominators when comparing cost.
 
-The 256 pool holds only 128 full-length contexts: higher admission relies on the
+The 256 and 320 KV pools each hold only 128 full-length contexts: higher admission relies on the
 actual length distribution and is not a guarantee that every request can reach
-the cap simultaneously. Pool sizes also changed between 128 and 192. A bounded
-320 probe and numerical validation remain pending, as does production async
-refresh qualification. Do not copy B300 pools to H100 or enable prefix caching
+the cap simultaneously. Pool sizes also changed between 128 and 192; 320 adds
+recurrent slots and a larger graph ceiling. A
+[realistic-prompt comparison](https://beaker.org/ex/01M5VC43SYKSF300X9VYEP6XZ5)
+of cache enabled at 320 versus cache disabled at 512 is running. It changes
+multiple capacity settings and therefore cannot isolate the effect of caching.
+Numerical validation and production async refresh qualification remain pending. Do not copy B300 pools to H100 or enable prefix caching
 on a runtime that lacks the required snapshot support.
 
 ## Other serving and training settings
