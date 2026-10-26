@@ -144,11 +144,14 @@ async def train(args, *, export_hf=None):
             )
             if args.start_rollout_id == 0 and background["initial"]:
                 coordinator.dispatch(0, args.hf_checkpoint)
-        if evaluation is not None and args.eval_interval is not None and not args.skip_eval_before_train:
+        if (
+            evaluation is not None
+            and args.eval_interval is not None
+            and not args.skip_eval_before_train
+            and args.start_rollout_id == 0
+        ):
             with evaluation_stage(args, args.start_rollout_id, initial=True):
-                await evaluation.dispatch(
-                    args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
-                )
+                await evaluation.dispatch(args.start_rollout_id, hf_dir=args.hf_checkpoint)
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
