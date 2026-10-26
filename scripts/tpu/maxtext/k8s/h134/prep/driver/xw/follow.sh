@@ -11,5 +11,6 @@ while :; do
   echo "$(date -u +%FT%TZ) $JS following $p"
   $K logs -f --since=3m pod/$p 2>/dev/null | grep --line-buffered -E "$KEEP" >> logs/$JS/$p.follow.log
   echo "$(date -u +%FT%TZ) $JS follow of $p ended"
+  [ -n "$($K get jobset $JS -o jsonpath='{.status.terminalState}' 2>/dev/null)" ] && { echo "$(date -u +%FT%TZ) $JS terminal, follower done"; exit 0; }
   sleep 10
 done
