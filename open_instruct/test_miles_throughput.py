@@ -78,13 +78,18 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "large") else 0)
 
 
-@pytest.mark.parametrize("profile", ["node", "large"])
-def test_learning_examples_separate_transport_capacity_and_qualification(profile):
+@pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("large", 2432)])
+def test_learning_examples_preserve_producer_budget_and_qualification(profile, producer_budget):
     config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
     plan = config.plan()
     capacity = plan["async_capacity"]
-    assert capacity["global_http_slots"] == 2 * capacity["requested_engine_slots"]
-    assert capacity["producer_sample_budget"] >= capacity["global_http_slots"]
+    assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]
+    # Raising per-engine ceilings must not silently multiply unfinished work or policy lag.
+    assert capacity["producer_sample_budget"] == producer_budget < capacity["global_http_slots"]
+    assert config.miles["global_batch_size"] == 256
+    assert config.core.max_policy_lag == 6
+    assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
+    assert config.miles["sglang_max_total_tokens"] == 512 * 34816
     assert capacity["completed_buffer_samples"] == capacity["samples_per_collection"]
     assert "--check-weight-update-equal" not in config.arguments()
     assert plan["scoring_pass"]["standalone"] is False

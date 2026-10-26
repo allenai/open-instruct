@@ -48,7 +48,10 @@ rollout_batch_size = 4
 samples_per_prompt = 2
 max_response_length = 256
 max_context_length = 512
+# Colocated tiny-model mechanics: retain small pools and an eight-request limit.
+# Dedicated B300 learning-engine defaults do not establish colocated memory fit.
 sglang_max_running_requests = 8
+sglang_server_concurrency = 8
 sglang_max_total_tokens = 32768
 sglang_mem_fraction_static = 0.2
 sglang_cuda_graph_backend_decode = "disabled"
