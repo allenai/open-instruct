@@ -39,7 +39,7 @@ case "$ARM" in
     # tags are ordinary BPE pieces, as in the H028 anchors. The cache hash is known only once
     # the tokenize job has run; pass it as H038_CACHE. Steps come from the cache token count
     # (0.5 epoch of the union), passed as TRAIN_FULL_STEPS.
-    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both)
+    olmo35|olmo35-simfc|olmo35-nemotron|olmo35-both|olmo35-h134-targeted|olmo35-h134-random)
         IMAGE="$BUILT_IMAGE"; THINK_TOKENS=0; ARM_CACHE="${H038_CACHE:-}"
         export TOKENIZER=allenai/dolma2-tokenizer-olmo35
         export TOKENIZER_REVISION=8b9717061fae09d5be814373d189919a62a9a00d
@@ -49,6 +49,11 @@ case "$ARM" in
             olmo35-simfc) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0" ;;
             olmo35-nemotron) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
             olmo35-both) FULL_MIXER="allenai/Dolci-Think-SFT 1.0 allenai/simfc-thinking-qwen35 1.0 allenai/nemotron-sft-agentic-v2-tool-calling-oi 1.0" ;;
+            # H134: Dolci-Think with one set of math rows removed. targeted drops the
+            # rows Kimi K3 judges contradictory; random drops an equal-character draw
+            # from the same screened pool. Same recipe as olmo35, only the data differs.
+            olmo35-h134-targeted) FULL_MIXER="allenai/Dolci-Think-SFT-H134-Targeted 1.0" ;;
+            olmo35-h134-random) FULL_MIXER="allenai/Dolci-Think-SFT-H134-Random 1.0" ;;
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
@@ -57,7 +62,7 @@ case "$ARM" in
                 echo "H038_CACHE=$ARM_CACHE is an olmo123 cache; the olmo35 arms need their own" >&2; exit 1 ;;
         esac
         ;;
-    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both])" >&2; exit 1 ;;
+    *) echo "Unknown arm: $ARM (expected aligned, legacy, think or olmo35[-simfc|-nemotron|-both|-h134-targeted|-h134-random])" >&2; exit 1 ;;
 esac
 case "$MODE" in
     train)
