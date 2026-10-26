@@ -19,7 +19,7 @@ high-admission sweeps are not needed to select a practical starting point.
 |---|---|---|
 | Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Closing numerical control, fleet check and production refresh |
 | HTTP concurrency | 512 per engine is the interim candidate; both 512 and 1,024 measured | Finish the closing control and check fleet refill behavior |
-| Producer sample budget | 2,048 for the measured single engine | Compare 1,024 against 2,048; check fleet and policy-age effects separately |
+| Producer sample budget | 1,024 for one engine is the interim candidate | Finish the closing control; qualify fleet-wide budget and policy age separately |
 | Full-attention KV pool | 17,825,792 tokens = 512 × 34,816 | Inspect resolved capacity and retractions for each shape |
 | Recurrent pool | 3,072 slots, extra-buffer radix caching | Recheck memory and cache behavior after changing model or context |
 | Static memory fraction | 0.7 | This measured B300 setting is not an H100 recommendation |
@@ -30,8 +30,9 @@ high-admission sweeps are not needed to select a practical starting point.
 These are a reproducible fixed-policy candidate and pending decisions, not a
 production preset. HTTP capacity 1,024 left roughly 511 requests waiting inside
 the engine in addition to 511 running requests. Capacity 512 retained almost the
-same running occupancy with essentially no engine queue. The producer budget
-still needs its separate comparison. The trainer, global batch 256 and
+same running occupancy with essentially no engine queue. Reducing the producer
+budget to 1,024 retained that occupancy and roughly halved request residence time.
+The trainer, global batch 256 and
 lag limit 6 stay fixed during production qualification; do not increase the lag
 limit merely to accommodate more queued work. Fully asynchronous mid-sequence
 weight refresh must pass before promoting the candidate to a learning example.
@@ -231,7 +232,18 @@ but waiting moved to the producer: mean producer wait rose from 295.4 to 450.4 s
 while producer-to-response duration remained about 625.3 versus 620.8 s. This
 supports testing less queued work, not a claim that total policy age improved.
 The smaller producer case and closing control remain pending. Full records are
-in `analysis/supply-headroom-interim.json` and the ten-row fit dataset.
+in `analysis/supply-headroom-interim.json` and the fit dataset.
+
+The HTTP 512 / producer 1,024 case also completed, with its full
+[snapshot](https://beaker.org/ex/01M5TX6W2P7KDPE3T21PG51TRK) retained. It delivered
+16,091,649 tokens in 659.292 s (24,407.5 tokens/s), with native decode 24,216.3
+tokens/s. Mean running/queued requests were 510.60/0.008, with full coverage and
+zero reported retractions across all 2,048 measured responses. Native decode was
+1.7% below the producer-2,048 case; mean producer-to-response duration fell from
+620.8 to 326.6 s, and producer waiting from 450.4 to 161.7 s. This favors the
+smaller budget for this ballpark pass, pending the closing control. Do not blindly
+multiply it by fleet size in training: the global budget interacts with batch 256
+and lag 6, and this fixed-policy result has no version-age filtering.
 
 ## Correctness and retained evidence
 
@@ -464,7 +476,7 @@ result files and SHA-256 inventories. The ledger and launch receipts are retaine
 alongside them. The initial panel predates the unlimited benchmark report
 collector; its [WEKA inventory/recovery](https://beaker.org/ex/01M5TA4FSVAK5VR84GPQABPMD4)
 verified all 1,194 source files (excluding the checkpoint symlink trees), totaling
-249,077,758 bytes. `analysis/fit-observations.jsonl` preserves ten audited
+249,077,758 bytes. `analysis/fit-observations.jsonl` preserves completed audited
 measurements with full model geometry, settings, hardware observations and hashed
 analysis/source references. Its records explicitly retain pending numerical
 qualification rather than presenting every completed case as a recommendation.
@@ -516,7 +528,8 @@ trials with synthetic generations. It changes completion cleanup, not mid-sequen
 publication. The rebuilt image `01M5TVRMG3856ZFJ5R67KB39ZZ` passes all 35 tests
 without source overlays. The [replacement panel](https://beaker.org/ex/01M5TVTEZQ6MJMEGF31T2JCG45)
 uses the same workload and 90-minute one-B300 budget with this pin; GPU transition
-qualification remains pending.
+from the opening 512 case to the 256 case has now succeeded. Retain its lifecycle
+artifacts and closing transition before marking the whole panel complete.
 
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
 retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
@@ -541,6 +554,28 @@ The failed attempt is fully archived and supplies no throughput result. The
 passed the native loader check and preserves the original corpus. The
 [replacement panel](https://beaker.org/ex/01M5TTYXF8JSB8RTZ246MA3F73) retains
 the same runtime, serving settings and resource cap.
+
+Its opening cache-on case completed and was
+[fully snapshotted](https://beaker.org/ex/01M5TWXRCJ3NM5P95A7203KA0G). It delivered
+7,679,371 tokens in 686.376 s (11,188.3 tokens/s), with native decode 12,900.9
+tokens/s. All 3,840 measured prompts had 8,192 tokens; mean response length was
+1,999.84, maximum 2,046, and 93.26% were truncated. All requested captures and
+response timings are present, with zero reported retractions. Native prefill
+counters attribute 98.12% of tokens to cache hits, so this small repeated corpus
+does not measure uncached 8K prefill. Cache-off comparisons remain in progress.
+
+Resource sampling stopped early: GPU observations cover only 2.85% of the
+measurement, and engine gauges cover 45.93%. Do not interpret those gaps as idle
+time, infer peak memory, or extrapolate consumer CPU. The resource observer could
+exit permanently on one `nvidia-smi` timeout or OS error and report it only during
+cleanup. The fix records failed samples and retries at the existing cadence,
+while preserving cancellation and child-process cleanup. Two failure regressions
+reproduce the old behavior; all 935 MILES host tests pass with the fix. Existing
+missing observations cannot be recovered. Engine HTTP scrape failures also
+contributed gaps; that observer already retries, and their underlying cause is
+not yet established. See `ITP-012`, `analysis/long8k-cache-on-summary.json` and the
+full retained logs.
+
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
 new evidence for trainer batch size, policy-lag limits, publication intervals or

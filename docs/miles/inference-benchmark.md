@@ -117,6 +117,11 @@ RUN_DIRECTORY --output analysis.json`. The analyzer recomputes collection totals
 checks response accounting, and aligns length distributions, GPU measurements and
 queue/engine observations to the measured window. Missing observation coverage
 remains unknown rather than becoming zero utilization.
+Resource-query timeouts and OS errors are recorded as failed samples and retried;
+CPU counters remain available when that sample's GPU query fails. Cancellation
+still joins the active query subprocess. Inspect coverage before treating an
+observed memory maximum as the peak for the measurement. Older images can stop
+resource sampling after the first error even when generation completes normally.
 When counter snapshots are available, the report also computes native execution
 token rates, prefill work and forward-time deltas. These include work on unfinished
 responses and complement delivered throughput. Decode counters exclude the first

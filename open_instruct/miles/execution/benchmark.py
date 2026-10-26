@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-import resource
 import time
 from functools import partial
 from pathlib import Path
@@ -23,7 +22,7 @@ from miles.utils.http_utils import init_http_client
 from scripts.miles import snapshot_options
 
 from open_instruct import logger_utils
-from open_instruct.miles.execution import workflow
+from open_instruct.miles.execution import benchmark_resources, workflow
 from open_instruct.miles.rollout import benchmark_metrics, benchmark_replay
 
 logger = logger_utils.setup_logger(__name__)
@@ -32,40 +31,6 @@ logger = logger_utils.setup_logger(__name__)
 async def no_reward(args, sample, **kwargs):
     """Keep the generation contract; benchmark validation disables reward filters."""
     return [0.0] * len(sample) if isinstance(sample, list) else 0.0
-
-
-async def observe_resources(root):
-    """Keep hardware identity, GPU activity/memory and consumer CPU outside timings."""
-    with (root / "benchmark-resources.jsonl").open("w", buffering=1) as stream:
-        while True:
-            process = await asyncio.create_subprocess_exec(
-                "nvidia-smi",
-                "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu,power.draw,clocks.sm",
-                "--format=csv,noheader,nounits",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
-            finally:
-                if process.returncode is None:
-                    process.kill()
-                    await process.wait()
-            usage = resource.getrusage(resource.RUSAGE_SELF)
-            stream.write(
-                json.dumps(
-                    {
-                        "time_unix": time.time(),
-                        "gpu_csv": stdout.decode(),
-                        "stderr": stderr.decode(),
-                        "returncode": process.returncode,
-                        "consumer_cpu_seconds": usage.ru_utime + usage.ru_stime,
-                        "consumer_max_rss_kib": usage.ru_maxrss,
-                    }
-                )
-                + "\n"
-            )
-            await asyncio.sleep(2)
 
 
 def inference_specs(args, specs):
@@ -186,7 +151,7 @@ async def consume(producer, args, settings, root):
 
 async def run(args, settings, root):
     if settings["score_reference"]:
-        observer = asyncio.create_task(observe_resources(root))
+        observer = asyncio.create_task(benchmark_resources.observe_resources(root))
         try:
             score = load_function("open_instruct.miles.execution.benchmark_core_reference.run")
             result = await asyncio.to_thread(score, args, settings, root)
@@ -206,7 +171,7 @@ async def run(args, settings, root):
         args.custom_rm_path = "open_instruct.miles.execution.benchmark.no_reward"
     started = time.monotonic()
     workers = inference = producer = source = engine_observer = None
-    observer = asyncio.create_task(observe_resources(root))
+    observer = asyncio.create_task(benchmark_resources.observe_resources(root))
     failure = None
     result = None
     try:
