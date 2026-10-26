@@ -2,11 +2,14 @@
 
 import copy
 import json
+import sys
 
 import pytest
 
+from open_instruct.miles import __main__ as cli
 from open_instruct.miles.configuration import inference_profiles as profiles
 from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.execution import launch
 
 
 def model():
@@ -199,3 +202,92 @@ def test_hardware_check_uses_allocated_devices_and_rejects_wrong_gpu(monkeypatch
         profiles.validate_hardware(report, [("NVIDIA B300", 100000)])
     assert profiles.check_hardware({"status": "fallback"}) == []
     assert len(calls) == 1
+
+
+def warning_map(config):
+    return {warning["code"]: warning for warning in config.plan()["throughput"]["warnings"]}
+
+
+def test_fleet_extrapolation_is_independent_of_capacity_warnings(tmp_path):
+    config = run_spec(tmp_path, ["inference.gpus=78", "async.async_max_concurrent_samples=39936"]).compile()
+    warning = warning_map(config)["inference_fleet_extrapolation"]
+    assert warning["requested_engines"] == 78
+    assert "publication" in warning["message"]
+    assert "inference_profile_modified" not in warning_map(config)
+    assert config.miles["sglang_max_running_requests"] == 512
+
+
+@pytest.mark.parametrize("selector", ["auto", "olmo35-b300-v1"])
+def test_matching_single_engine_and_equal_overrides_do_not_warn(tmp_path, selector):
+    config = run_spec(
+        tmp_path, [f'inference.profile="{selector}"', "inference.gpus=1", "inference.sglang_max_running_requests=512"]
+    ).compile()
+    assert config.inference_profile["warnings"] == []
+
+
+def test_generic_matching_profile_warns_without_changing_settings(tmp_path):
+    config = run_spec(tmp_path, ['inference.profile="generic"']).compile()
+    warning = warning_map(config)["inference_profile_bypassed"]
+    assert warning["differences"]["sglang_max_running_requests"] == {"configured": 64, "profile_default": 512}
+    assert config.miles["sglang_disable_radix_cache"] is True
+    assert config.inference_profile["selected"] == "generic"
+    unknown = run_spec(tmp_path, ['inference.profile="generic"', 'launch.cluster="ai2/saturn"']).compile()
+    assert "inference_profile_bypassed" not in warning_map(unknown)
+
+
+def test_derived_and_explicit_profile_departures_are_reported(tmp_path):
+    config = run_spec(tmp_path, ["inference.sglang_max_running_requests=256"]).compile()
+    differences = warning_map(config)["inference_profile_modified"]["differences"]
+    assert differences["sglang_max_running_requests"]["configured"] == 256
+    assert differences["sglang_cuda_graph_max_bs_decode"]["configured"] == 256
+    assert differences["sglang_max_mamba_cache_size"]["configured"] == 1536
+    assert config.miles["sglang_max_running_requests"] == 256
+
+
+def test_fallback_and_pending_metadata_are_visible_and_rechecked(tmp_path):
+    fallback = run_spec(tmp_path, ["inference.rollout_tensor_parallel_size=2"]).compile()
+    assert "dedicated TP1" in warning_map(fallback)["inference_profile_fallback"]["message"]
+    run = run_spec(tmp_path)
+    (tmp_path / "model" / "config.json").unlink()
+    assert "inference_profile_pending" in warning_map(run.compile())
+    prepared = tmp_path / "prepared"
+    prepared.mkdir()
+    (prepared / "config.json").write_text(json.dumps(model()))
+    assert "inference_profile_pending" not in warning_map(run.compile({"hf_checkpoint": str(prepared)}))
+    generic = run_spec(tmp_path, ['inference.profile="generic"'])
+    (tmp_path / "model" / "config.json").write_text("invalid json")
+    assert "inference_profile_pending" in warning_map(generic.compile())
+    assert "inference_profile_bypassed" in warning_map(generic.compile({"hf_checkpoint": str(prepared)}))
+
+
+@pytest.mark.parametrize("command", ["plan", "validate"])
+def test_cli_surfaces_advisories_and_keeps_plan_json_clean(tmp_path, monkeypatch, capsys, command):
+    run = run_spec(tmp_path, ['inference.profile="generic"'])
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(run.to_dict()))
+    monkeypatch.setattr(sys, "argv", ["miles", command, str(path)])
+    cli.main()
+    captured = capsys.readouterr()
+    assert "Warning [inference_profile_bypassed]" in captured.err
+    assert "Warning [inference_fleet_extrapolation]" in captured.err
+    if command == "plan":
+        plan = json.loads(captured.out)
+        assert plan["runtime"]["inference_profile"]["selected"] == "generic"
+
+
+def test_submission_surfaces_advisories_before_build(tmp_path, monkeypatch, capsys):
+    run = run_spec(tmp_path, ['inference.profile="generic"'])
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(run.to_dict()))
+    builds = []
+
+    def build(command, **kwargs):
+        captured = capsys.readouterr()
+        assert "Warning [inference_profile_bypassed]" in captured.err
+        assert "Warning [inference_fleet_extrapolation]" in captured.err
+        builds.append(command)
+
+    monkeypatch.setattr(launch.subprocess, "run", build)
+    launch.run(path, [])
+    assert len(builds) == 1
+    assert "--miles" in builds[0]

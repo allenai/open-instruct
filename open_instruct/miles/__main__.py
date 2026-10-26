@@ -70,7 +70,11 @@ def execute(parser, options):
         else RunConfig.from_dict(payload, options.overrides)
     )
     if options.command == "plan":
-        print(json.dumps(config.plan(), indent=2))
+        planned = config.plan()
+        runtime = planned.get("runtime", planned)
+        for warning in (runtime.get("inference_profile") or {}).get("warnings", []):
+            print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
+        print(json.dumps(planned, indent=2))
         return
     if options.command in ("run", "status"):
         if not structured:
