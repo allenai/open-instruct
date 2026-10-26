@@ -333,10 +333,17 @@ related selected trajectories, mean absolute error falls from 0.031038 to
 accounts for much of this selected discrepancy, while a residual arithmetic
 gap remains. `analysis/tail-r3-wave0.json` retains every target and full-vector
 comparison. The [second-wave diagnostic](https://beaker.org/ex/01M5TQY1HE1RJNKHN8WP9EESP1)
-checks the routes from the wave containing the flipped target.
+also completed, with all 19 archive files saved. For the truncated space target,
+serving scores -7.438107967 and Core with that wave's routes scores -7.438108444,
+an absolute difference of 4.77e-7. Selected-trajectory mean error is 0.013093 and
+maximum error remains 0.24637. Thus the recorded route change reproduces the
+large score change in Core; this does not establish why serving changed routes
+between identical requests. `analysis/tail-r3-paired-summary.json` compares both
+waves. Stop the targeted tail probes here and retain broader admission and
+production qualification as separate gates.
 
-Observed native route-context setup took 5.467 seconds on the first call and
-3.82–5.00 milliseconds on the remaining calls. This includes native padding,
+Observed native route-context setup took 5.467 and 9.748 seconds on the first
+calls of the two runs and 2.82–5.04 milliseconds on subsequent calls. This includes native padding,
 conversion and existing GPU checks, with no added synchronization; it is not
 isolated per-check cost or a packed EP8 trainer estimate. The first call includes
 cold setup. These selected EP1 diagnostics do not estimate a population error
