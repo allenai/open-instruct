@@ -21,6 +21,9 @@ ce = sorted({float(x) for x in re.findall(r"LOSS-PARTS step=1 ce=([0-9.]+)", tex
 hf = json.load(open(f"{W}/refce/refce_c11-s{s}.json"))["ce"]
 h20 = sum(1 for (p, n) in got if p % 4 == 0 and p < 32 and n <= 20)
 msgs = []
+top = max(steps, default=0)
+if top >= 2 and not ce: msgs.append("no step-1 LOSS-PARTS ce recorded")
+if top >= 30 and h20 < 160: msgs.append(f"steps 1-20 hashes incomplete ({h20}/160)")
 if bad: msgs.append(f"BATCH-HASH mismatch at {len(bad)} (process, step), first {sorted(bad)[:3]}")
 if ce and max(abs(c - hf) for c in ce) > 1e-3: msgs.append(f"step-1 ce {ce} vs HF {hf:.6f} off by more than 1e-3")
 print(f"s{s}: step {max(steps, default=0)}, step-1 ce {ce or '-'} (HF {hf:.6f}), hashes compared {cmp_} mismatched {len(bad)} (steps 1-20 seen {h20}/160)"

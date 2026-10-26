@@ -30,7 +30,11 @@ log() { echo "$(date -u +%FT%TZ) $*" | tee -a $W/prod/prod.log >> $W/events.log;
 get() { cat $ST/$1 2>/dev/null; }
 put() { echo "$2" > $ST/$1.tmp && mv $ST/$1.tmp $ST/$1; }
 wl() { $K get workloads -o name 2>/dev/null | grep "/jobset-$1-[0-9a-f]*$" | head -1; }
-active() { local w; w=$(wl $1); [ -n "$w" ] && [ "$($K get $w -o jsonpath='{.spec.active}' 2>/dev/null)" != false ]; }
+astate() { # active | inactive | unknown (a failed lookup is never read as inactive)
+  local w a; w=$($K get workloads -o name 2>/dev/null) || { echo unknown; return; }; w=$(echo "$w" | grep "/jobset-$1-[0-9a-f]*$" | head -1)
+  [ -n "$w" ] || { echo unknown; return; }; a=$($K get $w -o jsonpath='{.spec.active}' 2>/dev/null) || { echo unknown; return; }
+  [ "$a" = false ] && echo inactive || echo active; }
+deact() { setactive $1 false; sleep 5; [ "$(astate $1)" = inactive ]; }   # 0 only once inactivity is confirmed
 admitted() { local w; w=$(wl $1); [ -n "$w" ] && [ "$($K get $w -o jsonpath='{.status.conditions[?(@.type=="Admitted")].status}' 2>/dev/null)" = True ]; }
 setactive() { local w; w=$(wl $1); [ -n "$w" ] && $K patch $w --type merge -p "{\"spec\":{\"active\":$2}}" > /dev/null 2>&1; }
 terminal() { $K get jobset $1 -o jsonpath='{.status.terminalState}' 2>/dev/null; }
@@ -54,14 +58,17 @@ lock_take() { # $1 holder, $2 "spaced" or "now": take or refresh it if free or o
   flock -u 8; exec 8>&-; return 1; }
 lock_holder() { read -r h t < "$RL_STATE" 2>/dev/null; echo "${h:-free}"; }
 save() { # $1 jobset: append kept lines of every pod since the last save (+60 s overlap; readers dedupe)
-  local d=$(dir_of $1) now=$(date +%s) last since=""; mkdir -p $d; last=$(cat $d/.last 2>/dev/null || echo 0)
+  local d=$(dir_of $1) now=$(date +%s) last since="" ok=1 pods; mkdir -p $d; last=$(cat $d/.last 2>/dev/null || echo 0)
   [ "$last" -gt 0 ] && since="--since=$(( now - last + 60 ))s"
-  for p in $($K get pods -l jobset.sigs.k8s.io/jobset-name=$1 -o name 2>/dev/null); do
-    $K logs $p $since 2>/dev/null | grep -aE "BATCH-HASH|LOSS-PARTS|REQUIRED_RBF|completed step|schedule, LR|Restored|GoogleEgressBandwidth|Traceback|Error|nan|inf" >> $d/$(basename $p).log
-  done; echo $now > $d/.last; }
+  pods=$($K get pods -l jobset.sigs.k8s.io/jobset-name=$1 -o name 2>/dev/null) || ok=0
+  for p in $pods; do
+    $K logs $p $since > $d/.fetch 2>/dev/null || { ok=0; continue; }   # a pod not yet started has no log: not a failure of the cursor below
+    grep -aE "BATCH-HASH|LOSS-PARTS|REQUIRED_RBF|completed step|schedule, LR|Restored|GoogleEgressBandwidth|Traceback|Error|nan|inf" $d/.fetch >> $d/$(basename $p).log
+  done
+  [ $ok = 1 ] && echo $now > $d/.last; }   # on any fetch failure the cursor stays, so the next save re-reads the gap
 egress() { [ -f $ST/$1.t ] && find $(dir_of $1) -newer $ST/$1.t -name '*.log' -print0 2>/dev/null | xargs -0 grep -l GoogleEgressBandwidth 2>/dev/null | head -1; }
 stop_js() { # $1 jobset, $2 why: deactivate; the caller marks it stopped only once it reads inactive
-  log "STOP $1: $2"; setactive $1 false; put $1.stopping "$2"; [ "$(lock_holder)" = "$1" ] && restore_lock_release $1; rm -f $ST/$1.held; }
+  log "STOP $1: $2"; setactive $1 false; put $1.stopping "$2"; }   # the lock is released once inactivity is confirmed
 ensure_watchers() { # $1 production jobset, $2 seed
   local p; p=$(get follow_$1.pid); { [ -n "$p" ] && kill -0 $p 2>/dev/null; } || { (cd xw && setsid -f nohup bash ./follow.sh $1 >> follow_s$2.out 2>&1 < /dev/null)
     sleep 1; p=$(ps -eo pid,args | awk -v j=$1 '$2=="bash" && $3=="./follow.sh" && $4==j {print $1}' | tail -1); put follow_$1.pid "$p"; log "follower for $1 pid $p"; }
@@ -82,13 +89,18 @@ start_js() { # $1 overlay, $2 jobset, $3 output prefix: apply (new) or activate 
   put $2.run 0; put $2.phase running; return 0; }
 watch_js() { # $1 jobset: one pass over a started JobSet; echoes nothing, updates state
   local J=$1 st r nr held m why
-  if [ -f $ST/$J.stopping ]; then active $J && { setactive $J false; return; }; log "$J inactive after stop ($(get $J.stopping))"; put $J.phase stopped; rm -f $ST/$J.stopping; return; fi
+  if [ -f $ST/$J.stopping ]; then [ "$(astate $J)" = inactive ] || { setactive $J false; return; }
+    log "$J inactive after stop ($(get $J.stopping))"; put $J.phase stopped; rm -f $ST/$J.stopping $ST/$J.held; [ "$(lock_holder)" = "$J" ] && restore_lock_release $J; return; fi
+  if [ -f $ST/$J.stopping_for_lock ]; then deact $J && { rm -f $ST/$J.held $ST/$J.stopping_for_lock; put $J.phase inactive; log "$J inactive (waiting for the lock)"; }; return; fi
   save $J; st=$(terminal $J)
-  if [ -z "$st" ] && [ ! -f $ST/$J.deadline ] && ! active $J; then log "$J was deactivated outside this driver (xw2.py's #550 stop or by hand): stopped"; put $J.phase stopped; [ "$(lock_holder)" = "$J" ] && restore_lock_release $J; rm -f $ST/$J.held; return; fi
+  if [ -n "$st" ]; then [ -f $ST/$J.held ] && { restore_lock_release $J; rm -f $ST/$J.held; }; rm -f $ST/$J.deadline; put $J.phase "terminal:$st"; log "$J terminal: $st"; return; fi
+  if [ ! -f $ST/$J.deadline ] && [ "$(astate $J)" = inactive ]; then log "$J was deactivated outside this driver (xw2.py's #550 stop or by hand): stopped"; put $J.phase stopped; [ "$(lock_holder)" = "$J" ] && restore_lock_release $J; rm -f $ST/$J.held; return; fi
   # admission: an activated JobSet not admitted within 10 min goes inactive and frees the lock; it is retried later
   if [ -f $ST/$J.deadline ]; then
     if admitted $J; then rm -f $ST/$J.deadline
-    elif [ $(date +%s) -gt $(get $J.deadline) ]; then setactive $J false; restore_lock_release $J; rm -f $ST/$J.deadline $ST/$J.held; put $J.phase inactive; log "$J not admitted in 10 min: inactive, lock released, retry later"; return; fi
+    elif [ $(date +%s) -gt $(get $J.deadline) ]; then
+      deact $J || { log "$J not admitted in 10 min; deactivation not yet confirmed, retrying (lock kept)"; return; }
+      restore_lock_release $J; rm -f $ST/$J.deadline $ST/$J.held; put $J.phase inactive; log "$J not admitted in 10 min: inactive, lock released, retry later"; return; fi
   fi
   [ -n "$(egress $J)" ] && { stop_js $J "GoogleEgressBandwidth in its logs since its last (re)start"; return; }
   r=$($K get jobset $J -o jsonpath='{.status.restarts}' 2>/dev/null); r=${r:-0}; nr=$(running $J)
@@ -98,13 +110,14 @@ watch_js() { # $1 jobset: one pass over a started JobSet; echoes nothing, update
   if [ -n "$why" ]; then
     m=$(maxstep $J); touch $ST/$J.t
     if lock_take $J now; then put $J.held "${m:-0}"; log "$why of $J after step ${m:-0}: lock held until it trains past it"
-    else log "$why of $J while $(lock_holder) holds the lock: deactivating, re-activate under the lock later"; setactive $J false; rm -f $ST/$J.held; put $J.phase inactive; return; fi
+    else log "$why of $J while $(lock_holder) holds the lock: deactivating, re-activate under the lock later"; put $J.stopping_for_lock 1
+      deact $J && { rm -f $ST/$J.held $ST/$J.stopping_for_lock; put $J.phase inactive; }; return; fi
   fi
   if [ -f $ST/$J.held ]; then held=$(get $J.held); m=$(maxstep $J)
     if [ "${m:-0}" -gt "$held" ]; then restore_lock_release $J; rm -f $ST/$J.held; log "$J trained past step $held (step $m): lock released"
     else lock_take $J now > /dev/null || log "WARN: $J holds no lock during its restore (holder $(lock_holder))"; fi
   fi
-  [ -n "$st" ] && { [ -f $ST/$J.held ] && { restore_lock_release $J; rm -f $ST/$J.held; }; put $J.phase "terminal:$st"; log "$J terminal: $st"; }; }
+  :; }
 # ---- preconditions: P2's references and the converted base ----
 for s in $SEEDS; do [ -f $W/refce/refce_c11-s$s.json ] || { log "no HF step-1 reference refce_c11-s$s.json; not starting"; exit 1; }; done
 gcloud storage ls $INIT/commit_success.txt >/dev/null 2>&1 || { log "init $INIT not committed on GCS; not starting"; exit 1; }
@@ -116,7 +129,7 @@ while :; do
     PJ=h134-pf-b0-c11-s$s; J=h134-b0-c11-s$s
     # preflight
     case "$(get $PJ.phase)" in
-      ""|inactive) [ $h131 = 1 ] && start_js pf-b0-c11-s$s $PJ gs://ai2-olmo-dev/post-training/scratch/olmo35-sft-h134-pf-b0-c11-s$s; busy=1;;
+      ""|inactive) [ $h131 = 1 ] && start_js pf-b0-c11-s$s $PJ gs://ai2-olmo-dev/post-training/scratch/olmo35-sft-h134-pf-b0-c11-s$s "$(maxstep $PJ)"; busy=1;;
       running) watch_js $PJ; busy=1;;
       terminal:*) if [ ! -f $ST/$PJ.gate ]; then
           if [ "$(get $PJ.phase)" = terminal:Completed ] && grep -qh "completed step: 20," pf/logs/$PJ/*.log 2>/dev/null; then $PY $W/gate_pf.py $s; rc=$?
