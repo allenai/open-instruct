@@ -200,6 +200,11 @@ async def run(args, settings, root):
             result = await consume(producer, args, settings, root)
         result["startup_seconds"] = startup_seconds
         result["reward_mode"] = settings["reward_mode"]
+        # Draining long generations can outlive the job timeout. Preserve the
+        # completed measurement independently of successful worker teardown.
+        workflow.write_json(
+            root / "benchmark-measurement.json", {"status": "measurement_complete_shutdown_pending", "summary": result}
+        )
         workflow.write_json(root / "benchmark-server-end.json", await server_info(args))
     except BaseException as error:
         failure = error
