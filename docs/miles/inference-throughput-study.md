@@ -17,9 +17,9 @@ high-admission sweeps are not needed to select a practical starting point.
 
 | Control | Candidate or measured control | Qualification still needed |
 |---|---|---|
-| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Closing numerical control, fleet check and production refresh |
-| HTTP concurrency | 512 per engine is the interim candidate; both 512 and 1,024 measured | Finish the closing control and check fleet refill behavior |
-| Producer sample budget | 1,024 for one engine is the interim candidate | Finish the closing control; qualify fleet-wide budget and policy age separately |
+| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Fleet check and production refresh; fixed-policy numerical controls complete |
+| HTTP concurrency | 512 per engine is the candidate; both 512 and 1,024 measured | Check fleet refill behavior |
+| Producer sample budget | 1,024 for one engine is the candidate | Qualify fleet-wide budget and policy age separately |
 | Full-attention KV pool | 17,825,792 tokens = 512 × 34,816 | Inspect resolved capacity and retractions for each shape |
 | Recurrent pool | 3,072 slots, extra-buffer radix caching | Recheck memory and cache behavior after changing model or context |
 | Static memory fraction | 0.7 | This measured B300 setting is not an H100 recommendation |
@@ -36,6 +36,14 @@ The trainer, global batch 256 and
 lag limit 6 stay fixed during production qualification; do not increase the lag
 limit merely to accommodate more queued work. Fully asynchronous mid-sequence
 weight refresh must pass before promoting the candidate to a learning example.
+The prepared production check starts with an explicit global budget of 1,024
+unfinished samples, or four batch-equivalents, keeping batch 256 and lag 6 fixed.
+Partly completed sibling groups and completed buffers can retain additional work;
+this budget does not bound total retained samples or oldest-token age. It also
+cannot fill eight engines' combined 4,096 admission slots. That check measures
+actual publication, freshness and useful consumption; the separate fixed-policy
+fleet check measures saturated serving capacity. The larger production run is
+still awaiting resource approval and has not launched.
 
 ## Checkpoint and workload
 
@@ -552,8 +560,30 @@ trials with synthetic generations. It changes completion cleanup, not mid-sequen
 publication. The rebuilt image `01M5TVRMG3856ZFJ5R67KB39ZZ` passes all 35 tests
 without source overlays. The [replacement panel](https://beaker.org/ex/01M5TVTEZQ6MJMEGF31T2JCG45)
 uses the same workload and 90-minute one-B300 budget with this pin; GPU transition
-through both 512 → 256 and 256 → 512 case transitions has now succeeded. Retain
-its lifecycle artifacts and final shutdown before marking the whole panel complete.
+through both 512 → 256 and 256 → 512 cases succeeded, and the whole panel exited
+successfully. All 905 archive files have verified hashes. Each case reached
+`shutdown_complete` with zero active producer tasks, unfinished samples, generation
+calls, admission waiters and HTTP requests. The final cancellation join after
+generation paused took less than one second in each case. Completed and partially
+completed sibling inventory remains recorded separately from active tasks.
+
+| 2K-response case | Delivered tokens/s | Native decode tokens/s | Mean response tokens | Truncated |
+|---|---:|---:|---:|---:|
+| 512, opening | 19,182.7 | 19,641.4 | 1,869.4 | 79.39% |
+| 256 | 14,742.2 | 14,758.2 | 1,872.4 | 79.65% |
+| 512, closing | 21,513.7 | 19,422.6 | 1,875.3 | 79.86% |
+
+The native 512 rates exceed 256 by 31.6–33.1%, with closing-control drift of
+-1.11%. Delivered rates differ more because of completed-group ordering and
+inventory across collection boundaries; they are not independent gain estimates.
+All measured responses have timing records and zero reported retractions. Opening
+512 engine gauges cover only 85.06% of its window, and consumer CPU is higher
+(0.767–0.774 core equivalents versus 0.426–0.431 in closing 512). Retain these
+limitations rather than attributing the change to admission alone. No logged slow
+compilation overlaps the measured windows. This panel still uses the earlier
+HTTP/producer headroom; it establishes a shorter-response comparison and actual
+shutdown regression, not the final queue recommendation for every length.
+See `analysis/short2k-summary.json` and all three complete per-case reports.
 
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
 retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
@@ -588,6 +618,15 @@ response timings are present, with zero reported retractions. Native prefill
 counters attribute 98.12% of tokens to cache hits, so this small repeated corpus
 does not measure uncached 8K prefill. The following cache-off case failed during
 shutdown with local disk exhaustion, so the cache comparison remains incomplete.
+
+The 2,046-token maximum is explained by the pinned SGLang request limits: its
+worker advertises `context_length - 1`, and the scheduler allows at most that
+limit minus input length minus one. With an 8,192-token prefix and 10,240 context,
+the effective maximum is 2,046 despite the requested 2,048 cap. This is the
+runtime's context-budget arithmetic, not evidence of lost generated tokens.
+Retain actual lengths when comparing shapes; do not alter a running bracket or
+remove native guards to obtain the nominal cap. Source evidence is saved in
+`analysis/context-boundary-cap.json`.
 
 Resource sampling stopped early: GPU observations cover only 2.85% of the
 measurement, and engine gauges cover 45.93%. Do not interpret those gaps as idle
