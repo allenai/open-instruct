@@ -6,10 +6,17 @@ from transformers.models.olmo2.modeling_olmo2 import Olmo2Config, Olmo2Model, Ol
 from transformers.models.olmoe.modeling_olmoe import OlmoeConfig, OlmoeModel, OlmoePreTrainedModel
 
 
+def _num_labels(config: Olmo2Config | OlmoeConfig) -> int:
+    num_labels = config.num_labels
+    if num_labels is None:
+        raise ValueError("Set `num_labels` in the model config, e.g. `num_labels=1` for a reward model.")
+    return num_labels
+
+
 class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
     def __init__(self, config: Olmo2Config):
         super().__init__(config)
-        self.num_labels = config.num_labels
+        self.num_labels = _num_labels(config)
         self.model = Olmo2Model(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
@@ -113,7 +120,7 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
 class OlmoeForSequenceClassification(OlmoePreTrainedModel):
     def __init__(self, config: OlmoeConfig):
         super().__init__(config)
-        self.num_labels = config.num_labels
+        self.num_labels = _num_labels(config)
         self.model = OlmoeModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 

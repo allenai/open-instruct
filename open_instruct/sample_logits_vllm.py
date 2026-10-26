@@ -32,7 +32,7 @@ import vllm
 import yaml
 from vllm.logprobs import FlatLogprobs
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, vllm_utils
 from open_instruct.dataset_transformation import INPUT_IDS_KEY, TokenizerConfig, get_cached_dataset_tulu
 from open_instruct.distillkit.compression import DistributionQuantizationConfig, LogprobCompressor
 from open_instruct.distillkit.sample_common import StreamingParquetWriter, compressed_logit_schema
@@ -314,6 +314,7 @@ def main(args: SampleLogitsArguments, tc: TokenizerConfig) -> None:
         "max_logprobs": k,
         "logprobs_mode": "raw_logprobs",
         "max_model_len": args.max_seq_length,
+        "hf_overrides": vllm_utils.flatten_olmo3_rope_parameters,
     }
     if args.model_dtype is not None:
         llm_kwargs["dtype"] = args.model_dtype

@@ -1,10 +1,14 @@
+import copy
+import json
 import logging
 import unittest
+from pathlib import Path
 from unittest import mock
 from unittest.mock import MagicMock
 
 import vllm
 from parameterized import parameterized
+from transformers import Olmo3Config, Qwen3Config
 
 from open_instruct import vllm_utils
 from open_instruct.data_types import PromptRequest
@@ -216,6 +220,32 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
         self.assertEqual(result.request_info.rollout_states, [{}, {}])
+
+
+class TestFlattenOlmo3RopeParameters(unittest.TestCase):
+    def setUp(self):
+        fixture = Path(__file__).parents[1] / "tests" / "miles" / "fixtures" / "olmo3-think-dpo-config.json"
+        self.config = Olmo3Config(**json.loads(fixture.read_text()))
+
+    def test_native_vllm_gets_full_attention_entry(self):
+        full_attention = dict(self.config.rope_parameters["full_attention"])
+        with mock.patch.object(vllm, "__version__", "0.19.1+cu130"):
+            config = vllm_utils.flatten_olmo3_rope_parameters(self.config)
+        self.assertEqual(config.rope_parameters, full_attention)
+        self.assertEqual(config.rope_parameters["rope_type"], "yarn")
+        self.assertEqual(config.rope_parameters["rope_theta"], 500000)
+
+    def test_transformers_backend_keeps_layer_types(self):
+        rope_parameters = copy.deepcopy(self.config.rope_parameters)
+        with mock.patch.object(vllm, "__version__", "0.26.0"):
+            config = vllm_utils.flatten_olmo3_rope_parameters(self.config)
+        self.assertEqual(config.rope_parameters, rope_parameters)
+
+    def test_other_models_unchanged(self):
+        config = Qwen3Config()
+        rope_parameters = copy.deepcopy(config.rope_parameters)
+        with mock.patch.object(vllm, "__version__", "0.19.1"):
+            self.assertEqual(vllm_utils.flatten_olmo3_rope_parameters(config).rope_parameters, rope_parameters)
 
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):
