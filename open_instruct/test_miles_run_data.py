@@ -221,18 +221,17 @@ def test_generated_multiplication_is_reproducible_and_preserves_reward_weights(e
     )
 
 
-def test_prepared_mode_never_applies_template(environment, tmp_path):
+@pytest.mark.parametrize("label", [{}, {"label": None}, {"label": "1"}])
+def test_prepared_mode_never_applies_template(environment, tmp_path, label):
     prompt = tmp_path / "input.jsonl"
-    original = {
-        "input": "ALREADY RENDERED",
-        "label": "1",
-        "metadata": {"verifiers": [{"name": "trusted", "target": "1"}]},
-    }
+    original = {"input": "ALREADY RENDERED", **label, "metadata": {"verifiers": [{"name": "trusted", "target": "1"}]}}
     prompt.write_text(json.dumps(original) + "\n")
     registry = tmp_path / "registry.json"
     registry.write_text('{"trusted":{"factory":"trusted.module.Factory"}}')
     result = prepare(environment, {"prompt_data": str(prompt), "reward_config": str(registry)})
-    assert json.loads(Path(result["prompt_data"]).read_text())["input"] == original["input"]
+    row = json.loads(Path(result["prompt_data"]).read_text())
+    assert row["input"] == original["input"]
+    assert row["label"] == original.get("label")
     assert not environment[2].rendered
 
 

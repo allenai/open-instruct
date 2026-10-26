@@ -237,6 +237,10 @@ def _verify_row(row, tokenizer, limit, known):
         raise InputError("Prepared prompt token IDs differ under this tokenizer/template")
     metadata["run_prompt_tokens"] = len(ids)
     metadata["run_prompt_token_ids_sha256"] = _sha(_encoded(ids))
+    # RunSpec always selects label_key="label" in the native MILES loader.
+    # Verifier targets may live entirely in metadata (including benchmarks
+    # without targets), but the serialized row must still contain this key.
+    row.setdefault("label", None)
 
 
 def _adopt(data, tokenizer, template, inputs):

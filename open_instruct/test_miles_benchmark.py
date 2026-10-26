@@ -579,6 +579,9 @@ def test_continuation_preparation_preserves_exact_prefixes_and_prompt_clusters(t
     rows = [json.loads(line) for line in Path(result["prompt_data"]).read_text().split("\n") if line]
     assert len(rows) == 1
     assert rows[0]["input"] == "abcd"
+    # The compiled MILES data source always selects label_key="label", even
+    # when this benchmark has no reward target.
+    assert rows[0]["label"] is None
     assert rows[0]["metadata"]["prompt_token_ids"] == list(map(ord, "abcd"))
     assert len(rows[0]["metadata"]["continuation_origins"]) == 2
     selection = json.loads((tmp_path / "corpus/selection.json").read_text())
