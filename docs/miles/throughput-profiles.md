@@ -171,6 +171,69 @@ selected profile; an explicit pool override wins. H100 retains the bounded KV
 pool rather than promising all requests can reach full context simultaneously.
 Startup verifies the expected GPU family and memory once, outside generation.
 
+### Deliberately departing from a profile
+
+`auto` selects a measured per-engine starting point; it is not an autotuner or
+an assurance that the complete fleet has been validated. Changing admission
+within a matched profile derives related capacities arithmetically. Changing
+model geometry, precision, context caps or engine topology does not interpolate
+to a new optimum: it falls back to generic defaults. Generic defaults themselves
+are not a memory-fit guarantee.
+
+Planning emits these advisory codes to stderr and records them in
+`runtime.inference_profile.warnings` and `runtime.throughput.warnings` in the
+JSON plan. `validate` and `run` also print them, with submission warnings emitted
+before an image build. JSON remains on stdout, so it can be saved independently.
+
+| Code | Meaning and next step |
+|---|---|
+| `inference_profile_fallback` | Auto could not match the model, hardware, workload or engine topology. Read the specific reason and qualify the generic or explicit settings on that shape. |
+| `inference_profile_pending` | Checkpoint metadata could not be inspected yet. Preparation checks again; inspect `resolved-plan.json` before interpreting the profile as matched or bypassed. An explicit generic choice remains usable even when advisory metadata cannot be read. |
+| `inference_profile_bypassed` | `generic` was explicitly selected even though a measured profile matches. The warning's `differences` map compares configured values to hardware defaults. Keep the deliberate choice, or select `auto` / the matching named profile. |
+| `inference_profile_modified` | Explicit overrides and their derived capacities differ from hardware defaults. The warning reports configured/default values. Some alternate cache configurations have separate measurements below; a difference alone does not imply an invalid configuration. |
+| `inference_fleet_extrapolation` | More than one engine is requested for a matching profile. Per-engine measurements do not establish fleet routing, publication latency, policy age or producer sufficiency. Review the separate capacity warnings and validate the intended placement. |
+
+The fleet advisory also applies when `generic` bypasses a matching profile. It
+is independent of whether queues have enough capacity: a ten-node configuration
+can be internally consistent while still exceeding the validation evidence.
+The B300 study includes a two-engine throughput check, but that is not a
+multi-engine fully async weight-refresh qualification. The updated-runtime
+trainer-consumption check used one B300 engine; H100 replay and deployment checks
+have their own scope below. The advisory therefore remains visible even for two
+engines. Unsupported topologies receive the fallback advisory rather than a
+claim that the profile's fleet evidence transfers to them.
+
+For example, retain a matched profile but experiment with admission:
+
+```bash
+python -m open_instruct.miles plan configs/miles/examples/medium.toml \
+  --set 'inference.sglang_max_running_requests=256' > plan.json
+```
+
+Or deliberately use generic defaults and specify your own settings:
+
+```bash
+python -m open_instruct.miles plan configs/miles/examples/medium.toml \
+  --set 'inference.profile="generic"' \
+  --set 'inference.sglang_max_running_requests=128' > plan.json
+```
+
+Omitting `inference.profile` means `auto`. A matching named profile is also a
+valid selection and does not receive a bypass warning. Explicit values equal to
+the profile defaults do not receive a modification warning. `--set` overrides
+TOML values; individual explicit settings override profile defaults. Selecting
+`generic` does not disable the capacity advisories or existing validity checks.
+These advisories require no approval and do not change your configuration.
+
+For a deliberate departure, save the resolved plan, checkpoint/runtime versions,
+full logs and response results. Begin with a bounded run on the intended shape;
+check memory, sustained useful throughput, engine occupancy, policy age/discards,
+and publication acknowledgments with fully async refresh during generation.
+Changing fleet size does not automatically retune producer budgets, trainer
+batches or lag limits. Inspect `runtime.async_capacity` as well as the profile
+before scaling. Record any new measurements with their exact scope rather than
+treating a successful startup as throughput or correctness qualification.
+
 ## Realistic-prompt cache comparison on B300
 
 The [cache-on/off/on comparison](https://beaker.org/ex/01M5V6YDN8FKT670Q4Y6Z7WH76)

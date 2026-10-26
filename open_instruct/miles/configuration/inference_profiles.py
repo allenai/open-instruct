@@ -144,6 +144,77 @@ def resolve(selector, cluster, model, options):
     return report
 
 
+def advisories(report, reference, options):
+    """Explain departures from measured defaults without changing user choices.
+
+    The reference ignores serving overrides but retains model/workload/topology
+    eligibility. Fleet coverage is deliberately separate from per-engine fit.
+    """
+    warnings = []
+
+    def warn(code, message, **details):
+        warnings.append({"code": code, "message": message, **details})
+
+    if report["requested"] != "generic" and report["status"] != "candidate":
+        warn(
+            "inference_profile_pending"
+            if report["status"] == "pending_model_metadata"
+            else "inference_profile_fallback",
+            f"Inference profile {report['requested']}: {report['reason']}. "
+            "Generic settings are provisional starting points, not a memory-fit or throughput guarantee. "
+            "Inspect resolved-plan.json after preparation and qualify the intended workload before scaling.",
+        )
+    if report["requested"] == "generic" and reference["status"] == "pending_model_metadata":
+        warn(
+            "inference_profile_pending",
+            "Generic inference settings were explicitly selected, but checkpoint metadata is unavailable; "
+            "a matching measured profile cannot yet be checked. Inspect resolved-plan.json after preparation.",
+        )
+    if reference["status"] != "candidate":
+        return warnings
+    differences = {
+        key: {"configured": options.get(key), "profile_default": value}
+        for key, value in reference["defaults"].items()
+        if options.get(key) != value
+    }
+    if report["requested"] == "generic":
+        warn(
+            "inference_profile_bypassed",
+            f"Measured profile {reference['selected']} matches this model, hardware and engine topology, "
+            "but inference.profile=generic bypasses it. Compare the recorded setting differences; "
+            "use inference.profile=auto or the named profile to adopt its defaults, or retain generic deliberately.",
+            differences=differences,
+        )
+    elif differences:
+        description = "; ".join(
+            f"{key}={values['configured']!r} (profile default {values['profile_default']!r})"
+            for key, values in differences.items()
+        )
+        warn(
+            "inference_profile_modified",
+            f"Resolved settings differ from hardware defaults for {reference['selected']}: {description}. "
+            "Overrides remain in effect. Some cache alternatives have separate measurements; "
+            "other derived capacities are arithmetic, not measured optima. See docs/miles/throughput-profiles.md "
+            "and validate throughput, memory and async refresh for the resulting configuration.",
+            differences=differences,
+        )
+    gpus = options.get("rollout_num_gpus", 1)
+    engines = gpus // options.get("rollout_num_gpus_per_engine", 1)
+    if engines > 1:
+        warn(
+            "inference_fleet_extrapolation",
+            f"This plan requests {engines} inference engines. Profile {reference['selected']} selects "
+            "per-engine settings; it does not certify this fleet's routing, producer capacity or weight-publication "
+            "latency. The B300 study includes a separate two-engine throughput check, but no multi-engine "
+            "fully-async refresh qualification; the updated-runtime async trainer-consumption check used one B300 "
+            "engine. H100 deployment/replay checks have a separate scope. Inspect async_capacity warnings and "
+            "measure occupancy, policy age/discards and publication acknowledgments on the intended placement "
+            "before scaling. See docs/miles/throughput-profiles.md.",
+            requested_engines=engines,
+        )
+    return warnings
+
+
 def validate_hardware(report, devices):
     """One startup check per node, not a token-path runtime check."""
     if report["status"] != "candidate":

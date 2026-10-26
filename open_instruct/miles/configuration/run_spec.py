@@ -631,10 +631,20 @@ class RunSpec:
                 f"({miles['sglang_context_length']}) context capacity; use inference.max_context_length to set all three."
             )
         selector = controls.get("inference_profile", ("auto", ""))[0]
-        metadata, metadata_path = (
-            inference_profiles.model_metadata(self.model, prepared) if selector != "generic" else (None, None)
-        )
+        try:
+            metadata, metadata_path = inference_profiles.model_metadata(self.model, prepared)
+        except InputError:
+            if selector != "generic":
+                raise
+            # Generic is an escape hatch; advisory metadata must not make it fail.
+            metadata, metadata_path = None, None
         profile = inference_profiles.resolve(selector, self.launch["cluster"], metadata, miles)
+        reference = inference_profiles.resolve(
+            "auto" if selector == "generic" else selector,
+            self.launch["cluster"],
+            metadata,
+            {key: value for key, value in miles.items() if key not in inference_profiles.PROFILE_KEYS},
+        )
         profile["model_metadata_path"] = metadata_path
         for key, value in profile["defaults"].items():
             miles.setdefault(key, value)
@@ -811,6 +821,7 @@ class RunSpec:
             for key in inference_profiles.PROFILE_KEYS
             if key in miles
         }
+        profile["warnings"] = inference_profiles.advisories(profile, reference, miles)
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:

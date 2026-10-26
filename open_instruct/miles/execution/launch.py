@@ -203,6 +203,12 @@ def run(path, overrides):
     )
     for warning in warnings:
         print(f"Warning: {warning}", file=sys.stderr)
+    if not isinstance(spec, opd_config.OPDRunSpec):
+        runtime = spec.compile().plan()
+        for warning in runtime["async_capacity"]["warnings"]:
+            print(f"Warning: {warning}", file=sys.stderr)
+        for warning in runtime["throughput"]["warnings"]:
+            print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
     with tempfile.TemporaryDirectory(prefix="miles-submitted-run-") as directory:
         frozen = Path(directory) / "run.json"
         workflow.write_json(frozen, spec.to_dict())
