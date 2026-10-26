@@ -147,9 +147,9 @@ TOML value. Plan output records each resolved value and its source. Existing
 conflict checks still reject contradictory aliases for the same native option.
 
 The B300 candidate supports the examples' cache-disabled mode with 1,024 recurrent
-slots and the experimental cache-enabled mode with 3,072. The H100 candidate
-currently requires explicitly enabled caching; its cache-disabled alternative is
-still being measured. Profiles do not enable caching or change runtime pins.
+slots and the experimental cache-enabled mode with 3,072. H100 selects 512 with caching disabled (512 recurrent slots and 6,684,672 KV
+tokens), or 320 when caching is explicitly enabled (1,920 slots and 4,456,448 KV
+tokens). The uncached candidate was faster on the realistic prompt mixture. Profiles do not enable caching or change runtime pins.
 These are candidates pending exact-runtime and production-refresh qualification.
 
 The global producer budget is independent: profiles preserve its generic sizing
@@ -223,8 +223,20 @@ actual length distribution and is not a guarantee that every request can reach
 the cap simultaneously. Pool sizes also changed between 128 and 192; 320 adds
 recurrent slots and a larger graph ceiling. A
 [realistic-prompt comparison](https://beaker.org/ex/01M5VC43SYKSF300X9VYEP6XZ5)
-of cache enabled at 320 versus cache disabled at 512 is running. It changes
-multiple capacity settings and therefore cannot isolate the effect of caching.
+of cache enabled at 320 versus cache disabled at 512 completed successfully:
+
+| Candidate | Native decode tokens/s | Delivered tokens/s | Peak GPU memory |
+|---|---:|---:|---:|
+| Cache enabled, admission/HTTP 320, producer 640 | 14,485 | 14,730 | 70.23 GiB |
+| Cache disabled, admission/HTTP 512, producer 1,024 | 16,714 | 16,796 | 59.36 GiB |
+
+The uncached candidate is 15.4% faster by native counters. It uses 6,684,672 KV
+tokens, 512 recurrent slots and decode graphs through 512. Both cases had zero
+reported retractions with complete delivered-response timing coverage. All 607
+archived files (551.5 MB) passed hash verification; full response-source joins
+are retained. This selects 512 uncached for the numerical follow-up. The comparison
+changes multiple capacity settings and has no repeated control, so it cannot
+isolate caching or establish a universal admission peak.
 Numerical validation and production async refresh qualification remain pending. Do not copy B300 pools to H100 or enable prefix caching
 on a runtime that lacks the required snapshot support.
 

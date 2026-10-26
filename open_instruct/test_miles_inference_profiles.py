@@ -51,14 +51,28 @@ def test_model_family_name_is_not_enough(key, value):
     assert report["selected"] == "generic"
 
 
-def test_unknown_hardware_missing_model_and_unqualified_cache_mode():
+def test_unknown_hardware_missing_model_and_named_profile_mismatch():
     assert profiles.resolve("auto", "unknown", model(), options())["selected"] == "generic"
     assert profiles.resolve("auto", "ai2/holmes", None, options())["status"] == "pending_model_metadata"
-    assert profiles.resolve("auto", "ai2/jupiter", model(), options())["selected"] == "generic"
     with pytest.raises(ValueError, match="conflicts"):
         profiles.resolve("olmo35-b300-v1", "ai2/jupiter", model(), options())
     with pytest.raises(ValueError, match="geometry"):
         profiles.resolve("olmo35-b300-v1", "ai2/holmes", {"model_type": "other"}, options())
+
+
+def test_h100_cache_disabled_candidate_and_explicit_admission():
+    report = profiles.resolve("auto", "ai2/jupiter", model(), options())
+    defaults = report["defaults"]
+    assert report["selected"] == "olmo35-h100-v1"
+    assert defaults["sglang_max_running_requests"] == defaults["sglang_server_concurrency"] == 512
+    assert defaults["sglang_max_total_tokens"] == 6684672
+    assert defaults["sglang_max_mamba_cache_size"] == 512
+    assert defaults["sglang_mem_fraction_static"] == 0.9
+    smaller = profiles.resolve("auto", "ai2/jupiter", model(), options() | {"sglang_max_running_requests": 128})[
+        "defaults"
+    ]
+    assert smaller["sglang_max_total_tokens"] == 128 * 34816
+    assert smaller["sglang_max_mamba_cache_size"] == smaller["sglang_cuda_graph_max_bs_decode"] == 128
 
 
 def run_spec(tmp_path, overrides=()):

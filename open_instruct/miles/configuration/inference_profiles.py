@@ -117,9 +117,9 @@ def resolve(selector, cluster, model, options):
     if options.get("rollout_max_context_len") != 34816 or options.get("rollout_max_response_len") != 32768:
         return fallback("Automatic profiles currently cover the measured 34,816 context / 32,768 response caps")
     cache_off = options.get("sglang_disable_radix_cache", True)
-    if gpu == "h100" and cache_off:
-        return fallback("H100 cache-disabled candidate qualification is still pending")
-    running = options.get("sglang_max_running_requests", 512 if gpu == "b300" else 320)
+    running = options.get("sglang_max_running_requests", 512 if gpu == "b300" or cache_off else 320)
+    kv_contexts = running if gpu == "b300" else min(running, 192 if cache_off else 128)
+    state_multiplier = (2 if gpu == "b300" else 1) if cache_off else 6
     report.update(
         selected=f"olmo35-{gpu}-v1",
         status="candidate",
@@ -131,8 +131,8 @@ def resolve(selector, cluster, model, options):
             "sglang_cuda_graph_backend_decode": "full",
             "sglang_cuda_graph_max_bs_decode": running,
             "sglang_cuda_graph_backend_prefill": "disabled",
-            "sglang_max_total_tokens": (running if gpu == "b300" else min(running, 128)) * 34816,
-            "sglang_max_mamba_cache_size": running * (2 if cache_off else 6),
+            "sglang_max_total_tokens": kv_contexts * 34816,
+            "sglang_max_mamba_cache_size": running * state_multiplier,
             "sglang_mem_fraction_static": 0.7 if gpu == "b300" else 0.9,
             "sglang_chunked_prefill_size": 8192,
         },
