@@ -457,6 +457,17 @@ controlled workload-shape comparison, not a claim that the final queue setting
 has been selected. The intermediate 8K-response panel remains prepared but
 unlaunched.
 
+The short-response attempt was stopped after shutdown stalled. Its complete
+305-file archive retains `generation_paused` with zero active generation calls,
+1,021 parked waiters and no `shutdown_complete`; the workflow never completed and
+does not qualify a throughput row. A pinned-runtime CPU probe reproduced producer
+cancellation being swallowed while retiring completion tasks. Two deterministic
+regressions fail on the old runtime and pass with MILES fix
+[`ff7be7a`](https://github.com/allenai/miles-olmo-core/commit/ff7be7a31d4c2b05eb75d443314a7e2991df9b7a).
+The fix also passes 33 existing boundary/refresh tests and 36 full producer-loop
+trials with synthetic generations. It changes completion cleanup, not mid-sequence
+publication. The replacement image pins this fix; GPU qualification remains pending.
+
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
 retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
 prefixes were verified locally using the downloaded tokenizer. Ninety-five other
