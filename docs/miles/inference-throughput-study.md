@@ -205,6 +205,17 @@ history; the change follows the actual preemption losses, not a predicted succes
 probability. This panel isolates whether the large queue and producer budget
 improve throughput.
 
+The fourth attempt's opening case completed and was [fully snapshotted](https://beaker.org/ex/01M5TT85287XVYE221YJTSJKQY)
+while the panel continued. It delivered 14,177,712 response tokens in 610.754 s
+(23,213.5 tokens/s); native decode counters give 24,107.9 tokens/s. Peak memory was
+138.93 GiB, with mean running/queued requests 511.42/511.20 and full observation
+coverage. All 1,792 measured responses have timing records and report zero
+retractions; all 256 requested captures are present. Startup and drain were
+373.99/392.89 s outside measurement. This repeats the approximate 23–24K delivered
+tokens/s range at 512, but does not yet settle HTTP headroom: the other supply
+cases and closing control remain pending. Different collection windows and
+unfinished work account for different delivered/native rates.
+
 ## Correctness and retained evidence
 
 The [diagnostic smoke](https://beaker.org/ex/01M5T6RNDNE1YRK4ZW2KEC0QKA)
@@ -459,6 +470,13 @@ cache-off/chunk-4096 → cache-on/chunk-8192, keeping pools, graphs and request
 headroom fixed. It has the same 300-second warmup, 600-second measurements and
 protected one-B300, 90-minute execution cap as the short-response panel. This
 separates uncached prefill chunking from reuse on the small repeated corpus.
+Its first attempt failed before generation: continuation preparation omitted
+`label`, which the pinned native dataset loader requires even with rewards
+disabled. The preparation fix emits an explicit null label when targets exist
+only in verifier metadata. A native CPU regression reproduces the old failure
+and loads all 194 corrected rows, preserving their exact text and token IDs.
+The failed attempt is fully archived and supplies no throughput result; a new
+immutable corpus is being prepared for the replacement panel.
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
 new evidence for trainer batch size, policy-lag limits, publication intervals or
