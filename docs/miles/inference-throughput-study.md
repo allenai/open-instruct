@@ -231,8 +231,7 @@ The smaller HTTP capacity kept admission almost full and removed the engine queu
 but waiting moved to the producer: mean producer wait rose from 295.4 to 450.4 s,
 while producer-to-response duration remained about 625.3 versus 620.8 s. This
 supports testing less queued work, not a claim that total policy age improved.
-The smaller producer case and closing control remain pending. Full records are
-in `analysis/supply-headroom-interim.json` and the fit dataset.
+Full records are in `analysis/supply-headroom-interim.json` and the fit dataset.
 
 The HTTP 512 / producer 1,024 case also completed, with its full
 [snapshot](https://beaker.org/ex/01M5TX6W2P7KDPE3T21PG51TRK) retained. It delivered
@@ -241,9 +240,28 @@ tokens/s. Mean running/queued requests were 510.60/0.008, with full coverage and
 zero reported retractions across all 2,048 measured responses. Native decode was
 1.7% below the producer-2,048 case; mean producer-to-response duration fell from
 620.8 to 326.6 s, and producer waiting from 450.4 to 161.7 s. This favors the
-smaller budget for this ballpark pass, pending the closing control. Do not blindly
+smaller budget for this ballpark pass. Do not blindly
 multiply it by fleet size in training: the global budget interacts with batch 256
 and lag 6, and this fixed-policy result has no version-age filtering.
+
+The closing HTTP 1,024 / producer 2,048 control completed successfully. It delivered
+23,674.2 tokens/s with native decode 24,197.7 tokens/s, just 0.37% above the opening
+native rate. Mean running/queued requests were 511.24/511.27; all 2,048 measured
+responses have valid timings and zero reported retractions. All four cases used
+the same GPU. The complete panel's 1,203 archive files have verified local hashes,
+and the collector skipped no files. This supports carrying admission 512,
+HTTP 512 and producer 1,024 per engine into the fleet check, rather than retaining
+the much larger queues for a small unreplicated throughput difference.
+
+The [two-engine check](https://beaker.org/ex/01M5TZ4D4NA60T95YR28M2BGRV) uses two
+B300s on one Holmes node, with global HTTP capacity 1,024 and producer budget
+2,048. It preserves the checkpoint, 32K response cap, 34,816-token context,
+sampling, graph and pool settings. Warmup is 600 seconds and measurement 900
+seconds, with per-engine counters and occupancy retained. Its high-priority
+protected window and execution cap are both 75 minutes, with no automatic restart.
+The image includes the cancellation and resource-observer fixes; the node with
+observed disk exhaustion is excluded. This run is still a fixed-policy capacity
+check and does not qualify production policy-age filtering or weight refresh.
 
 ## Correctness and retained evidence
 
@@ -374,11 +392,17 @@ found in either complete prompt/response routing payload.
 |---|---:|---:|
 | 512 versus earlier 64 | +0.00000416 [-0.0000621, +0.0000788] | +0.0161 [-0.0037, +0.0356] |
 | 512 versus earlier 256 | +0.000000069 [-0.0000473, +0.0000538] | -0.0059 [-0.0224, +0.0103] |
+| 512 versus closing 64 | -0.00000542 [-0.0000654, +0.0000559] | +0.0020 [-0.0132, +0.0189] |
+| Closing 64 versus earlier 64 | +0.00000958 [-0.0000422, +0.0000615] | +0.0140 [-0.0029, +0.0304] |
 
 Intervals resample paired prompt clusters, preserving siblings and waves. They
 support no detected increase in these aggregate Core discrepancies; they do not
-prove equivalence or cover machine/day variation. The closing 64 control remains
-pending, and the natural Core reference uses EP1 rather than packed EP8 training.
+prove equivalence or cover machine/day variation. Both cases in the protected
+panel completed, with all 1,081 archive files hash-verified and no collector
+omissions. Closing 64 and 512 share a GPU; the earlier 64 control was a separate
+attempt. Closing waves also passed route-ID/uniqueness and background-join checks.
+The natural Core reference uses EP1 rather than packed EP8 training. See
+`analysis/replay-v7-closing-audit.json` and the matched comparison reports.
 
 Routing and individual scores still differ: 512 versus 64 changes 3.125% of expert
 memberships, with mean absolute serving-score difference 0.03305. The maximum
@@ -528,8 +552,8 @@ trials with synthetic generations. It changes completion cleanup, not mid-sequen
 publication. The rebuilt image `01M5TVRMG3856ZFJ5R67KB39ZZ` passes all 35 tests
 without source overlays. The [replacement panel](https://beaker.org/ex/01M5TVTEZQ6MJMEGF31T2JCG45)
 uses the same workload and 90-minute one-B300 budget with this pin; GPU transition
-from the opening 512 case to the 256 case has now succeeded. Retain its lifecycle
-artifacts and closing transition before marking the whole panel complete.
+through both 512 → 256 and 256 → 512 case transitions has now succeeded. Retain
+its lifecycle artifacts and final shutdown before marking the whole panel complete.
 
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
 retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
@@ -587,6 +611,14 @@ enough objects to fill the disk. File ownership and exact cause remain unknown.
 `ITP-013` retains the timeline, node and scheduler evidence. Subsequent benchmark
 images sample temporary-filesystem byte and inode availability alongside existing
 resource observations; they do not change inference concurrency or spill policy.
+
+The [replacement long-prefix panel](https://beaker.org/ex/01M5TZ8JVY0Y8S2ZQ6MWA8Q7Z3)
+uses the selected HTTP 512 / producer 1,024 supply settings, retaining admission
+512 and the same four cache/chunk cases, corpus, context, sampling and pools.
+The image includes cancellation and resource-observation fixes. It excludes the
+affected node and retains the one-B300, high-priority, protected 90-minute window
+and execution cap, without automatic restart. Results remain pending; the failed
+attempt is retained separately and is not treated as a completed bracket.
 
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no
