@@ -5,6 +5,36 @@ default. It isolates fixed-policy MILES inference, with no trainer, publication,
 evaluation or reward computation. See the [benchmark contract](inference-benchmark.md)
 and [tracking discussion](https://github.com/allenai/oe-planning/issues/31#issuecomment-6401660900).
 
+## Working candidate for this pass
+
+Use **512 running requests per engine** as the ballpark candidate for the
+checkpoint and B300 workload below. Its completed fixed-policy case delivered
+23,956 tokens/s at 139.03 GiB peak memory. Increasing to 768 delivered 7.84% more
+tokens/s at 188.35 GiB; 1,024 did not improve delivered throughput further.
+Those coupled configurations and their measurement limits are detailed below.
+The existing upper-end observations are sufficient for this pass; additional
+high-admission sweeps are not needed to select a practical starting point.
+
+| Control | Candidate or measured control | Qualification still needed |
+|---|---|---|
+| Running admission / decode graph maximum | 512 / 512 per engine, full decode graphs | Complete two-wave numerical replay and production refresh |
+| HTTP concurrency | 1,024 per engine in the measured case | Compare 512 against 1,024 at fixed running admission |
+| Producer sample budget | 2,048 for the measured single engine | Compare 1,024 against 2,048; check fleet and policy-age effects separately |
+| Full-attention KV pool | 17,825,792 tokens = 512 × 34,816 | Inspect resolved capacity and retractions for each shape |
+| Recurrent pool | 3,072 slots, extra-buffer radix caching | Recheck memory and cache behavior after changing model or context |
+| Static memory fraction | 0.7 | This measured B300 setting is not an H100 recommendation |
+| Prefill | Chunk 8,192; native maximum 16,384; prefill graphs disabled | Long-prefix cache/chunk comparison |
+| Response / context caps | 32,768 / 34,816 tokens | Short-response and long-prefix panels |
+| Engine fleet | One TP1 engine measured | Two-engine scaling, then actual production refresh |
+
+These are a reproducible fixed-policy candidate and pending decisions, not a
+production preset. The completed case had roughly 511 requests waiting inside the
+engine in addition to 511 running requests. Its large HTTP queue is therefore
+not automatically part of the recommendation. The trainer, global batch 256 and
+lag limit 6 stay fixed during production qualification; do not increase the lag
+limit merely to accommodate more queued work. Fully asynchronous mid-sequence
+weight refresh must pass before promoting the candidate to a learning example.
+
 ## Checkpoint and workload
 
 The checkpoint is `olmo35-fixedtok-sft-20260921-4t-non-emo-dolci-think/emo/step5402/hf`
