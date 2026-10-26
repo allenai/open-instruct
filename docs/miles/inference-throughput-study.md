@@ -562,7 +562,8 @@ tokens/s. All 3,840 measured prompts had 8,192 tokens; mean response length was
 1,999.84, maximum 2,046, and 93.26% were truncated. All requested captures and
 response timings are present, with zero reported retractions. Native prefill
 counters attribute 98.12% of tokens to cache hits, so this small repeated corpus
-does not measure uncached 8K prefill. Cache-off comparisons remain in progress.
+does not measure uncached 8K prefill. The following cache-off case failed during
+shutdown with local disk exhaustion, so the cache comparison remains incomplete.
 
 Resource sampling stopped early: GPU observations cover only 2.85% of the
 measurement, and engine gauges cover 45.93%. Do not interpret those gaps as idle
@@ -575,6 +576,17 @@ missing observations cannot be recovered. Engine HTTP scrape failures also
 contributed gaps; that observer already retries, and their underlying cause is
 not yet established. See `ITP-012`, `analysis/long8k-cache-on-summary.json` and the
 full retained logs.
+
+The full failed attempt is retained under `archives/length-long8k-response2k-v2`.
+Ray reported zero available GB on its 878.155 GB temporary filesystem at
+00:51:50 UTC, before the first inference-engine launch at 00:52:17 UTC. Later
+worker logs and shutdown failed with `ENOSPC`; the final exception occurred while
+Ray tried to create its spill directory during cleanup. This is evidence of
+storage pressure predating generation, not evidence that this workload spilled
+enough objects to fill the disk. File ownership and exact cause remain unknown.
+`ITP-013` retains the timeline, node and scheduler evidence. Subsequent benchmark
+images sample temporary-filesystem byte and inode availability alongside existing
+resource observations; they do not change inference concurrency or spill policy.
 
 An H100 check needs its own memory-feasible pools. Only then
 should examples carry a measured serving recommendation. This study supplies no

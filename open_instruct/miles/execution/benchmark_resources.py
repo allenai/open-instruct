@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import os
 import resource
+import tempfile
 import time
 from contextlib import suppress
 
@@ -11,13 +13,31 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
+def temporary_storage():
+    """Observe the temp filesystem, without scanning files or attributing ownership."""
+    path = None
+    try:
+        path = tempfile.gettempdir()
+        usage = os.statvfs(path)
+    except OSError as error:
+        return {"path": path, "error_type": type(error).__name__, "error": str(error)}
+    return {
+        "path": path,
+        "capacity_bytes": usage.f_blocks * usage.f_frsize,
+        "available_bytes": usage.f_bavail * usage.f_frsize,
+        "free_bytes": usage.f_bfree * usage.f_frsize,
+        "inodes": usage.f_files,
+        "available_inodes": usage.f_favail,
+    }
+
+
 async def observe_resources(root):
     """Retain failed samples and retry; cancellation still joins the active child."""
     with (root / "benchmark-resources.jsonl").open("w", buffering=1) as stream:
         while True:
             process = None
             stdout = stderr = b""
-            row = {"started_unix": time.time()}
+            row = {"started_unix": time.time(), "temporary_storage": temporary_storage()}
             try:
                 process = await asyncio.create_subprocess_exec(
                     "nvidia-smi",

@@ -122,6 +122,9 @@ CPU counters remain available when that sample's GPU query fails. Cancellation
 still joins the active query subprocess. Inspect coverage before treating an
 observed memory maximum as the peak for the measurement. Older images can stop
 resource sampling after the first error even when generation completes normally.
+Samples also retain temporary-filesystem byte and inode availability. These are
+filesystem totals, not job-owned usage or proof of Ray spilling. Collection uses
+the existing sampling cadence and does not scan directories or add serving checks.
 When counter snapshots are available, the report also computes native execution
 token rates, prefill work and forward-time deltas. These include work on unfinished
 responses and complement delivered throughput. Decode counters exclude the first

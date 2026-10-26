@@ -66,3 +66,14 @@ def test_resource_sampling_cancellation_reaps_child(tmp_path, monkeypatch):
     child.kill.assert_called_once()
     child.wait.assert_awaited_once()
     assert (tmp_path / "benchmark-resources.jsonl").read_text() == ""
+
+
+def test_storage_failure_does_not_stop_gpu_sampling(tmp_path, monkeypatch):
+    monkeypatch.setattr(benchmark_resources.os, "statvfs", Mock(side_effect=OSError("unavailable")))
+    monkeypatch.setattr(benchmark_resources.asyncio, "create_subprocess_exec", AsyncMock(return_value=process()))
+    monkeypatch.setattr(benchmark_resources.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(benchmark_resources.observe_resources(tmp_path))
+    row = json.loads((tmp_path / "benchmark-resources.jsonl").read_text())
+    assert row["temporary_storage"]["error_type"] == "OSError"
+    assert "GPU-test" in row["gpu_csv"]
