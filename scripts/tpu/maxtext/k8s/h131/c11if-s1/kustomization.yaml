@@ -29,7 +29,7 @@ configMapGenerator:
   # its safetensors (sha256 0490d666, e127ea47, f3ddff10) are unchanged from 7941e113 through a81bae42. 4K loss parity passed on it (#1933).
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo3-1025-7b/0/items
   - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo35-8b971706-h045
-  - TRAIN_FILES=/mnt/post-training/data/h131/c11if-r3-s1/*.parquet
+  - TRAIN_FILES=/mnt/post-training/data/h131/c11if-r4-s1/*.parquet
   - MODEL_NAME=olmo3-7b
   - MAXTEXT_SFT_LABELS=prefix
   - TOTAL_DEVICES=128

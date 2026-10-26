@@ -16,8 +16,8 @@ def subs(arm, k):
             ("/mnt/post-training/data/h122/c11-s0/", f"/mnt/post-training/data/h131/{DATA[arm]}-s{k}/")]
 
 
-# H131 Amendment 1 (2026-10-26): c11if trains on the r3 streams (C12's filtered IF build); the control is unchanged.
-DATA = {"c11if": "c11if-r3", "c11": "c11"}
+# H131 Amendment 1 (2026-10-26): c11if trains on the r4 streams (five copies of C12's filtered IF build); control unchanged.
+DATA = {"c11if": "c11if-r4", "c11": "c11"}
 
 
 for arm, seeds in (("c11if", (0, 1, 2, 3)), ("c11", (2, 3))):
