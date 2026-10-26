@@ -7,7 +7,7 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
-from scripts.miles import inference_counter_metrics, throughput_occupancy
+from scripts.miles import gpu_allocation_metrics, inference_counter_metrics, throughput_occupancy
 
 from open_instruct.miles.rollout import benchmark_metrics
 
@@ -72,7 +72,7 @@ def request_timings(root, responses):
     }
 
 
-def analyze(root):
+def analyze(root, *, job_metadata=None):
     root = Path(root)
     if read_json(root / "workflow.json")["status"] != "complete":
         raise ValueError("Only completed benchmark workflows can qualify throughput")
@@ -127,6 +127,9 @@ def analyze(root):
     return {
         "root": str(root),
         "summary": summary,
+        "gpu_accounting": gpu_allocation_metrics.summarize(
+            summary, options["rollout_num_gpus"], (start, end), job_metadata
+        ),
         "capture_coverage": {
             "requested": requested_captures,
             "captured": len(captures),
@@ -200,8 +203,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--job-metadata", type=Path, help="Saved beaker job get --format json for the producing attempt"
+    )
     args = parser.parse_args()
-    report = analyze(args.root)
+    report = analyze(args.root, job_metadata=read_json(args.job_metadata) if args.job_metadata else None)
     text = json.dumps(report, indent=2) + "\n"
     if args.output:
         args.output.write_text(text)

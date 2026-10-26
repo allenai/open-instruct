@@ -78,7 +78,14 @@ the attempt. Actual durations, including response checks and consumer accounting
 are recorded rather than substituting the requested duration in the denominator.
 
 The primary rate is **response tokens in complete delivered groups / measured wall
-seconds**; the GPU-normalized rate divides by allocated inference GPUs. Prompt
+seconds**; the legacy GPU-normalized rate divides by configured inference GPUs.
+Its historical `allocated_gpus` field also means configured `rollout_num_gpus`,
+not scheduler-assigned GPUs. A host-memory request can reserve additional GPU
+slots. The offline analyzer reports these denominators separately under
+`gpu_accounting`; allocation remains unknown unless supplied with saved
+`beaker job get JOB_ID --format json` metadata using `--job-metadata FILE`.
+Select the producing attempt, including the correct retry. The analyzer checks
+that the measurement window lies within that attempt. Prompt
 tokens are not counted as output throughput. Startup/cache/graph capture and final
 drain are reported separately. Configured rewards and filtering, if enabled, are
 inside the measured collection time.
@@ -151,6 +158,15 @@ accounting and timing cover the recorded workload. Keep workload provenance and
 launch receipts alongside the archives. Future fits should condition on model
 architecture, GPU, runtime revision, pools, scheduling, fleet size and observed
 length distributions; do not pool different shapes into a universal admission rule.
+
+For complete binary artifacts or files omitted by an older collector, run
+`python -m scripts.miles.snapshot_run_artifacts RUN_DIRECTORY OUTPUT_DIRECTORY`
+where the run filesystem is mounted, after every producing attempt is terminal.
+The fresh output directory must be outside the source tree. This writes a lossless
+archive of all regular files and a SHA-256 manifest, including tensors, Parquet
+and large logs. Symlink targets are recorded without being copied; external
+checkpoint weights therefore stay external. A changing source tree fails the
+snapshot. Download this archive along with the ordinary Beaker result.
 
 For a separate same-prefix diagnostic, copy the benchmark run to a new output
 directory, set `benchmark.replay_reference` to the absolute path of a completed
