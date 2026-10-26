@@ -41,7 +41,7 @@ and data paths are placeholders that must be replaced for the selected run.
 
 ## Configuration conventions
 
-The maintained examples are `dev.toml`, `node.toml` and `large.toml`
+The maintained examples are `dev.toml`, `node.toml` and `three-node.toml`
 under `configs/miles/examples/`. Keep these templates unchanged for individual
 runs. Copy one to Git-ignored `runs/` for experiments, sweeps and debugging.
 Add a maintained example only for an agreed, distinct user-facing purpose;

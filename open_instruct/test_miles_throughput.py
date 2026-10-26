@@ -62,7 +62,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
 
 @pytest.mark.parametrize(
     "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
-    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("large", 24, 3, 4, 19, 1)],
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 4, 19, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
@@ -75,10 +75,10 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert layout["judge_gpus"] == judge_gpus
     assert layout["unused_gpus"] == 0
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
-    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "large") else 0)
+    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
 
 
-@pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("large", 2432)])
+@pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("three-node", 2432)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()

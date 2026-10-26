@@ -15,7 +15,7 @@ evaluation joins the last collection's batch, merging periodic and final tasks a
 the same update. The worker submits accepted receipts sequentially; it does not
 queue additional collections or wait at shutdown.
 
-The [large example](../../configs/miles/examples/large.toml) opts into background
+The [three-node example](../../configs/miles/examples/three-node.toml) opts into background
 evaluation with a pinned sandbox-enabled image and the 25-entry post-training
 development/text-safety panel. It sets `interval=0`, `initial=true` and `final=true`
 to evaluate the full panel before and after training only, including when the run

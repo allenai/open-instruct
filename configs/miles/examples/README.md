@@ -4,7 +4,7 @@
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
-| [large.toml](large.toml) | Three-node learning: 4 trainer GPUs (EP4), 19 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [three-node.toml](three-node.toml) | Three-node learning: 4 trainer GPUs (EP4), 19 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -51,7 +51,7 @@ Trainer images are built separately from the TOMLs. Follow the
 [image build instructions](../../../docs/miles/launching.md#laptop-choose-or-build-an-image)
 to build the intended application revision and runtime lock. `MILES_EXISTING_IMAGE`
 can reuse a compatible immutable image; local changes are not overlaid onto it.
-`large` separately pins its evaluator image.
+`three-node` separately pins its evaluator image.
 
 ## Inputs and expected outputs
 
@@ -82,7 +82,7 @@ and `node` for disaggregated learning. A single-GPU run with the full policy nee
 its combined trainer/inference memory footprint checked before replacing the
 `dev` checkpoint; single-GPU inference alone does not establish that fit.
 
-`large` matches H1's three-node, 24-GPU footprint, replacing one of H1's 20 inference
+`three-node` matches H1's three-node, 24-GPU footprint, replacing one of H1's 20 inference
 GPUs with a judge. The nodes contain 4 training + 4 inference GPUs, 8 inference
 GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs are unused.
 Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
@@ -112,90 +112,57 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-For the matched Olmo 3.5 geometry, the named presets enable prefix caching on
-B300 and disable it on H100. To change cache mode, select `inference.profile = "generic"` and provide
-the serving settings explicitly. Presets are applied whole. Generic configurations and the colocated `dev` example keep caching
-disabled. Cached hybrid serving requires the FP32 tracked-state implementation
-in the updated [runtime lock](../../../runtime/miles/runtime.lock.json); rebuild
-the image when changing pins. See
-[hybrid model limits](../../../docs/miles/moe-model-support.md#current-limits).
+The learning examples pin `inference.profile = "olmo35-b300-v1"` on Holmes.
+The preset sets **512 running requests, 512 HTTP permits and decode graphs through
+batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
+0.7 and prefill chunks of 8,192. It enables radix caching with `extra_buffer`.
+Cached hybrid serving requires FP32 tracked-state snapshots in the pinned
+[runtime](../../../runtime/miles/runtime.lock.json); rebuild the image when its
+pins change. See [model limits](../../../docs/miles/moe-model-support.md#current-limits).
 
-The learning templates (`node`, `large`) propose **512 running requests, 512 HTTP
-permits and decode graphs through batch 512 per B300 engine**. They use
-17,825,792 KV tokens (512 × 34,816), 3,072 recurrent slots, memory fraction 0.7, and prefill
-chunks at 8,192. Both examples pin `inference.profile = "olmo35-b300-v1"`
-on Holmes. Switching to Jupiter also requires `profile = "olmo35-h100-v1"`.
-Named presets apply whole; explicit preset-owned settings conflict. Known
-hardware/topology mismatches fail during planning. The model guard runs when the
-actual checkpoint is available and must pass after preparation before training.
-`dev` retains eight requests and its small pools because its tiny trainer and
-engine share one GPU.
+To move an example to Jupiter, change both the cluster and profile to
+`olmo35-h100-v1`. This preset also uses admission/HTTP/graph batch 512 and prefill
+chunks of 8,192, but disables caching and uses 6,684,672 KV tokens, 512 recurrent
+slots and memory fraction 0.9. Both presets require the studied BF16 Olmo 3.5
+geometry, dedicated TP1 engines and 34,816 context / 32,768 response caps.
+These settings are starting points, not universal memory-fit or throughput guarantees.
 
-This starting point comes from an Olmo 3.5 checkpoint with approximately 23.31 GiB
-of weights, 4 KiB of full-attention KV per token and 14.34 MiB of recurrent state
-per slot. On B300, the selected single-engine case achieved 24.4K delivered
-tokens/s; two engines achieved 47.9K, about 98% of ideal doubling. At 512 admission,
-512 HTTP permits kept approximately 510–511 requests running per engine with
-almost no engine queue. The larger 1,024-permit setting mainly added queueing.
-See the [measurements and saved artifacts](https://github.com/allenai/oe-planning/issues/31#issuecomment-6410668511).
+Named presets apply whole. Any explicit preset-owned key conflicts, even an equal
+value; errors show the offending keys, an editable TOML block, and two exits:
+remove the keys to keep the preset, or select `generic` and manage the settings.
+Known hardware/topology mismatches fail during planning. Model geometry is checked
+when actual checkpoint metadata is readable and must pass after preparation before
+training. Preset settings remain identical before and after preparation.
 
-The throughput measurements used a separate experimental runtime. The updated
-runtime was checked independently with the default EP2 trainer and one B300
-engine: both optimizer updates completed, including training on 29 responses
-that crossed a weight refresh. Engine observations showed 511 running requests
-before each refresh. This is a correctness fixture, not a new sustained
-throughput measurement. The generic cache-off B300 starting configuration uses 1,024 recurrent
-slots; users must set these values explicitly. Check memory again for a different model; these are not H100 pools.
+Omitted or `generic` profiles preserve generic defaults and explicit settings.
+The default recurrent pool is 128 slots. A separately measured **cache-off B300
+alternative uses 1,024 recurrent slots**; configure that alternative explicitly
+in generic mode. A cached-320 H100 alternative uses 4,456,448 KV tokens and 1,920
+recurrent slots and likewise requires explicit generic settings. Neither alternative
+is selected automatically. `dev` retains its explicit small colocated configuration.
 
-The unfinished-sample budget is automatic unless explicitly set. It uses
+The planner offers read-only tips when a preset matches or explicit pools resemble
+a preset for different hardware. Tips appear in a stderr box and
+`plan.runtime.inference_profile.tips`; routine warnings remain plain lines.
+There is no `auto` selector. Topology, metrics, producer budget and trainer controls
+remain separate. To experiment, follow
+[departing from a preset](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-preset).
+Generic mode does not resize pools, estimate memory fit or retain a hardware pin.
+
+The unfinished-sample budget, when omitted, is
 `max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
-rounded to complete prompt groups, after profile resolution. For the matched
-512-admission profiles this gives 6,144 for six engines in `node`, and 19,456 for
-19 engines in `large`; changing GPU count or admission recalculates the budget.
-Generic 64-admission configurations still resolve to 768 / 2,432 respectively.
-The previous fixed budgets are no longer in the examples. Set
-`async.async_max_concurrent_samples` explicitly to impose a smaller work budget;
-the underfeeding warning explains when it cannot fill the requested slots.
+rounded to complete prompt groups. This gives **6,144 for node and 19,456 for
+three-node** with the named presets; generic 64-admission settings give 768 and
+2,432. Explicit `async.async_max_concurrent_samples` wins. A smaller budget may
+underfeed the engines, while a larger one may produce more stale work than the
+trainer can use. Completed siblings can remain outside the unfinished budget.
 
-This is a capacity-based starting heuristic, not a measured learning optimum.
-Batch 256 and lag 6 are unchanged: the larger automatic budgets span many batch
-equivalents and trigger policy-age advisories. These advisories intentionally expose
-the fleet/trainer tradeoff; batch-equivalents are not a prediction of policy age
-or drain duration. Measure trainer wait, useful tokens,
-oldest-token age and stale-work discards; reduce producer budget or inference fleet
-size if production outruns useful consumption. Completed siblings can remain
-outside the unfinished budget. Named preset settings and their derived producer
-budgets are identical before and after model preparation; inspect
-`resolved-plan.json` for the final compatibility checks and provenance.
-
-The [H100 measurements](../../../docs/miles/throughput-profiles.md#h100-measurements-for-the-studied-olmo-35-checkpoint)
-select **512 with caching disabled** on the realistic prompt mixture: 16.7K native
-tokens/s versus 14.5K for cached 320. The H100 profile uses 6,684,672 KV tokens,
-512 recurrent slots, graph batch 512 and memory fraction 0.9 in uncached mode.
-The separately measured cached-320 alternative uses 4,456,448 KV tokens and
-1,920 slots; configure it explicitly in generic mode.
-The complete two-wave numerical comparison found no aggregate Core-error increase
-for the selected H100 configuration; paired intervals and coupling limits are in
-the guide. These measurements used the experimental runtime; the updated image
-also passed a short H100 deployment check. The fully async trainer-consumption
-check used B300. Presets do not accept cache-mode overrides.
-
-Inspect `plan.runtime.inference_profile` for the selected preset, its values and
-model metadata. Omitted or `generic` profiles preserve existing defaults and
-explicit settings. The planner offers read-only tips when a measured preset
-matches or explicit pools resemble a preset for different hardware. Tips appear
-in a small stderr box and in `inference_profile.tips` in JSON; routine warnings
-remain plain lines. The advisor never changes settings. There is no `auto`
-selector. Named presets reject explicit preset-owned values, even equal values.
-Topology, metrics, producer budget and trainer controls remain separate.
-
-To tune admission, pools or cache mode, select generic and write the settings
-explicitly. Conflict errors show the offending keys, a complete editable TOML
-block, and the two ways out: remove the keys to keep the preset, or use generic.
-See [departing from a preset](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-preset)
-for a full example. Generic mode does not resize pools or retain a hardware pin;
-changing clusters requires reviewing the explicit configuration. Existing native
-capacity checks remain, but there is no profile memory estimator.
+Batch 256 and lag 6 are unchanged, so these budgets intentionally trigger policy-age
+advisories. Batch-equivalents do not predict actual policy age or drain duration.
+Measure trainer wait, useful throughput, oldest-token age and stale-work discards;
+reduce the producer budget or fleet when production outruns useful consumption.
+Per-engine settings do not qualify a whole fleet's routing, refresh latency or
+learning behavior. See [qualification limits](../../../docs/miles/throughput-profiles.md#qualification-limits).
 
 These templates inherit the disabled optional startup weight snapshot/reset audit
 (`check_weight_update_equal = false`) and explicitly disable periodic score-reuse
@@ -208,7 +175,7 @@ cadence from measured save cost and acceptable recovery loss.
 All three examples explicitly retain two native checkpoints and disable router
 auxiliary losses; these differ from the defaults. The learning recipes also keep
 their model-specific context, packing, cache and memory settings. Review these
-choices when changing models. `large` keeps its background evaluator configuration
+choices when changing models. `three-node` keeps its background evaluator configuration
 explicit because evaluation changes independently of training topology.
 
 `plan` reports copied configurations with no request headroom, forced rescoring,

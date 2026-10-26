@@ -62,7 +62,7 @@ name or equal split count does not prove identical questions or reward semantics
 
 ## Large training mixture
 
-`large.toml` targets the full `train` split of
+`three-node.toml` targets the full `train` split of
 [`allenai/Dolci-Think-RL-7B`](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B),
 pinned to revision `0fb6466d31ef3a9dd16985ef635e6429e05a6491`.
 This is the dataset selected by the checked-in

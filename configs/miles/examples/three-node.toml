@@ -4,13 +4,13 @@
 # Setup and workload requirements: configs/miles/examples/README.md
 # Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
 schema_version = 1
-name = "large"
+name = "three-node"
 
 [model]
 source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/checkpoints/policy-hf"
 
 [output]
-root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/large"
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/three-node"
 export_hf = true
 
 [launch]
@@ -209,7 +209,7 @@ profile = "olmo35-b300-v1"
 wandb_mode = "offline"
 wandb_team = "ai2-llm"
 wandb_project = "open-instruct-miles"
-wandb_group = "large"
+wandb_group = "three-node"
 
 [core]
 checkpoint_keep_last = 2

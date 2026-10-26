@@ -38,7 +38,7 @@ def _miles(overrides):
     )
 
 
-@pytest.mark.parametrize("profile", ["dev", "node", "large"])
+@pytest.mark.parametrize("profile", ["dev", "node", "three-node"])
 def test_example_cache_mode_matches_explicit_preset(profile):
     miles = RunSpec.load(EXAMPLE.with_name(f"{profile}.toml")).compile().miles
     assert miles["sglang_disable_radix_cache"] is (profile == "dev")

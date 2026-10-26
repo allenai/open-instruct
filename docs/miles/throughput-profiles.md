@@ -1,7 +1,7 @@
 # Throughput starting configurations
 
 Use the trainer size and **desired optimization batch** to choose a starting
-profile, then provision inference to keep completed-group waiting near zero.
+example, then provision inference to keep completed-group waiting near zero.
 Measure decode CUDA graphs, engine admission and trainer wait together. Faster
 training can shift the bottleneck to rollout supply.
 
@@ -11,16 +11,16 @@ guidance here as a starting point and check capacity for each new combination.
 [Development defaults](development-defaults.md) summarizes the recommended
 starting values.
 
-## Choose a profile
+## Choose an example
 
 Choose among the three [maintained starters](../../configs/miles/examples/README.md).
 Their [generated recipe tables](configuration.md#example-recipes) show GPU
 allocations and batch geometry from the current TOMLs. For the runtime image, see
 the [MILES GRPO guide](grpo.md). Do not transfer a short-context
 no-recomputation setting to long packs without checking memory; the maintained
-node and large use recomputation and a measured B300 engine starting admission of 512.
+node and three-node examples use recomputation and a measured B300 engine starting admission of 512.
 Their [capacity notes](../../configs/miles/examples/README.md#capacity-and-qualification-settings)
-record the measured model, runtime differences and qualification limits. The
+describe the supported model geometry, runtime requirements and qualification limits. The
 generic loader still defaults to 64; size other models and GPUs as described below.
 
 ## Size engine admission from memory
@@ -54,14 +54,15 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
 1. Set `sglang_max_running_requests` and `sglang_cuda_graph_max_bs_decode` to `R`.
    For async runs, start `sglang_server_concurrency` at `2 × R`. Structured
    configs derive this when omitted. This adds transport headroom, not GPU slots.
-   Measured B300 example overrides use `R`: at 512 admission, additional HTTP
+   The named B300 preset uses `R`: at 512 admission, additional HTTP
    headroom mostly increased queueing. Recheck occupancy for other workloads.
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
    request at full context in the nominal capacity calculation. Verify the
    resolved token capacity and retractions after startup; this does not prevent
    retractions required by mid-sequence weight refresh.
 3. Keep `sglang_max_mamba_cache_size` at least `R` with radix caching off. The
-   pinned Olmo hybrid backend requires this mode; see [model limits](moe-model-support.md#current-limits).
+   pinned Olmo hybrid backend also supports the qualified cached path; see
+   [model limits](moe-model-support.md#current-limits).
    For compatible KDA backends with radix caching enabled, the capacity validator
    requires more than `5 × R` slots. Passing capacity validation does not establish
    that a model's kernel supports prefix-cache snapshots.
@@ -92,7 +93,7 @@ For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 
 On a large-memory GPU, memory may stop binding well before other limits such as
 router and transport capacity. The generic starting admission remains 64 (see
-[development defaults](development-defaults.md)); the B300 examples override it
+[development defaults](development-defaults.md)); the named B300 preset changes it
 for the measured smaller-state Olmo 3.5 architecture. Their 512 setting does not
 follow from the larger-model arithmetic above. On a smaller GPU, run the same arithmetic before
 lowering anything: an 80 GiB GPU at static fraction 0.7 leaves about 21 GiB after
@@ -132,13 +133,13 @@ cache reuse and prefill work.
 
 ## Whole presets and explicit settings
 
-**A profile is a measured preset applied whole. To change any of its settings,
+**A named profile applies a measured preset whole. To change any of its settings,
 use `generic` and write them explicitly.** There are two behaviors:
 
 - **Omitted profile or `profile = "generic"`:** existing generic defaults fill
   unset values; your explicit settings are retained. If model, hardware and
-  topology match a measured preset, the plan prints a one-line hint naming it.
-  The hint changes no settings and never requires adopting the preset.
+  topology match a measured preset, the plan prints a boxed tip naming it.
+  The tip changes no settings and never requires adopting the preset.
 - **A named profile:** apply that preset verbatim. Every explicit preset-owned
   key conflicts, even if its value equals the preset. Native aliases and `--set`
   values count too. Incompatible model, hardware or topology is an error, never
@@ -169,7 +170,7 @@ that set, such as topology, context/response caps, metrics, producer budget,
 trainer batch and policy lag, remain separate controls. Existing compatibility
 checks still apply. Presets do not interpolate, resize pools, estimate memory fit,
 or change the runtime image. Cached hybrid serving requires the pinned FP32
-snapshot implementation described below.
+snapshot implementation described in [model limits](moe-model-support.md#current-limits).
 
 ### Deliberately departing from a preset
 
@@ -203,9 +204,10 @@ sglang_mem_fraction_static = 0.7
 Only admission changed here. The other pools and limits remain explicit; nothing
 is resized implicitly. This is an experiment, not another measured preset. Generic
 mode does not reject a cluster change merely because the block came from B300.
-On H100, the availability hint names the matching H100 preset, but you own the
+On H100, the availability tip names the matching H100 preset, but you own the
 explicit memory configuration. Qualify any copied block on its target device.
-The separately measured cache-off B300 and cached-320 H100 alternatives below
+The separately measured cache-off B300 and cached-320 H100 alternatives in the
+[example notes](../../configs/miles/examples/README.md#capacity-and-qualification-settings)
 must also be configured explicitly in generic mode.
 
 ### Planning evidence and fleet capacity
@@ -222,7 +224,7 @@ and `inference-profile.json`.
 |---|---|
 | `inference_profile_available` | Tip: a measured preset matches a generic run. Names the setting to add; changes nothing. |
 | `inference_pool_hardware_mismatch` | Tip: explicit KV and recurrent pools equal a preset for a different GPU. Review before running; this is a heuristic, not a memory-fit check. |
-| `inference_metadata_unavailable` | Generic model metadata is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
+| `inference_metadata_unavailable` | The model metadata for this generic run is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
 | `inference_model_guard_deferred` | A named preset is selected; its model guard must pass after preparation before training. |
 | `inference_fleet_extrapolation` | A named preset covers per-engine settings, not this fleet's routing, publication latency or useful throughput. |
 
@@ -246,7 +248,7 @@ still gets headroom advice. An underfeeding producer retains its own advisory.
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to
 whole groups (or one collection, whichever is larger). Applied presets give
-6,144/19,456 samples for node/large; generic defaults give 768/2,432. Explicit
+6,144/19,456 samples for node/three-node; generic defaults give 768/2,432. Explicit
 budgets win. Batch 256 and lag 6 are unchanged. The policy-age advisory is
 intentional: one full wave across six 512-slot engines already represents 12
 batches. A cap near six batches necessarily underfeeds that fleet. Neither 24
@@ -259,171 +261,13 @@ full logs and response results. Begin with a bounded run on the intended shape;
 check memory, sustained useful throughput, occupancy and mid-generation refresh.
 There is no profile memory estimator or automatic pool adjustment in generic mode.
 
-## Realistic-prompt cache comparison on B300
+## Qualification limits
 
-The [cache-on/off/on comparison](https://beaker.org/ex/01M5V6YDN8FKT670Q4Y6Z7WH76)
-used the pinned 102,014-row Dolci-Think-RL-7B prompt mixture, four siblings and a
-fixed order, with admission/HTTP 512, producer 1,024, prefill chunk 8,192 and the
-same 32K response cap. Native decode rates were **23,906 / 19,746 / 23,989 tokens/s**:
-cached controls were 21.1–21.5% faster than uncached, with 0.34% control drift.
-Delivered complete-group rates were 23,700 / 20,026 / 23,496 tokens/s. These
-different accounting boundaries include different unfinished work; native counters
-are the primary engine measure. Window populations differ, so the bracket is
-not a paired confidence interval or a learning-throughput result.
-
-All three measurement windows completed. The parent hit its two-hour timeout
-during the closing arm's drain, so that arm does not establish successful shutdown.
-All 902 collected files (871.6 MB) were downloaded and hash-verified, with no
-collector omissions. The closing window was audited from its retained boundaries,
-counter snapshots, batches and response records without marking its workflow complete.
-
-The examples' SGLang pin requires selected recurrent-state snapshots written
-from FP32 accumulators. The updated adapter implements that contract. It passed
-[eight GPU precision/layout cases and two dispatch cases](https://beaker.org/ex/01M5VGGMDMTV1KFFH7N94WR7S4).
-Full-model deployment was checked separately below. Casting BF16 intermediate
-states to FP32 would not restore the missing precision. Older images lacking
-this implementation reject the cached path; changing a configuration does not
-update their runtime.
-
-## Fully async refresh coverage and retained evidence
-
-The [ordered-fixture validation](https://beaker.org/ex/01M5VF9BVN115C8E3VQHB99YMB)
-completed two optimizer updates with the default two-GPU EP2 trainer, one B300
-engine, batch 256, lag 6, producer 768 and cached admission 512. Both publications
-occurred with generation active: the nearest engine observations showed 512 and
-505 running requests within four seconds before publication. Publication took
-3.85 and 3.65 seconds. All 512 consumed samples passed finite-score, alignment,
-version-ledger and expert-route consistency checks, including 105 responses that
-crossed a weight version. No invalid expert IDs were found.
-
-This fixture deliberately repeats short, reward-varying prompt clusters before
-the remaining real-reward prompts. It exercises overlap and trainer consumption;
-it does not measure representative learning throughput or establish learning
-equivalence. All 69 regular source files, including both rollout tensors
-(2.65 GB total), were recovered and hash-verified. The experimental runtime differs
-from the updated example pins.
-
-The [updated-runtime validation](https://beaker.org/ex/01M5VP6DPS9XJCTPWY2XK5EN07)
-completed two optimizer steps per trainer rank and exited successfully. It used
-the same default EP2 trainer, batch 256, lag 6 and producer budget 768. The second
-batch contained **29 mixed-version responses**, confirmed by both trainer ranks'
-scoring records. Engine observations showed 511 running requests before each
-publication; the updates took **2.70 and 2.99 seconds**. All four workers restored
-their compiler caches. The first cold attempt also completed both updates but
-consumed zero mixed-version responses, so it was insufficient to qualify that
-path. Neither run changes the trainer settings to force overlap.
-
-The 56-file result/log archive passed hash verification, profile-resolution,
-version-ledger, engine-occupancy and per-rank optimizer checks. All 76 regular
-source files (2.64 GB), including both rollout tensors, were recovered and
-hash-verified. All 512 consumed samples passed finite-score, token/version
-alignment and full expert-route checks, including all 29 mixed-version responses;
-no invalid expert IDs were found. Automatic B300 cache selection
-resolves to exactly the native and Core options exercised by this explicit-cache
-fixture. These short checks establish mechanics, not representative training
-throughput or learning equivalence. The optional startup GC-freeze race and a
-five-second child shutdown timeout are retained in the issue log; a separate
-startup-readiness fix is available but is not part of this validated image.
-
-The study retains raw results and a machine-readable fitting table under
-`runs/inference-throughput-20261025`. `analysis/fit-observations.jsonl` contains
-31 completed cases with full model geometry, workload lengths, native options,
-immutable image IDs, exact producing-job allocation and artifact hashes.
-`analysis/fit-observations.csv` provides a verified 59-column projection, with
-metric definitions and fitting limits in `analysis/fit-observations.README.md`.
-`analysis/artifact-catalog.json` indexes the attempts and archives. Failed and
-interrupted attempts remain available; a completed measurement followed by an
-interrupted drain is labeled separately. This is evidence for one model shape,
-not a fitted estimator for arbitrary models. New shapes need their own memory
-calculation and a small measured admission bracket.
-
-## H100 measurements for the studied Olmo 3.5 checkpoint
-
-The first H100 panel used the same approximately 23.31-GiB checkpoint as the
-B300 measurements, one active TP1 engine, a 34,816-token context and a 32,768-token
-response cap. It used the experimental cache-capable runtime, with `extra_buffer`
-recurrent caching, full decode graphs, prefill chunks of 8,192 and static memory
-fraction 0.9. These are measured-runtime throughput results; the updated-runtime
-deployment check below has a separate scope.
-
-| Admission / HTTP permits | Producer samples | KV tokens | Recurrent slots | Native decode tokens/s | Peak GPU memory |
-|---|---:|---:|---:|---:|---:|
-| 128, opening control | 256 | 4,456,448 | 768 | 8,788 | 53.84 GiB |
-| 192 | 384 | 6,684,672 | 1,152 | 11,417 | 68.04 GiB |
-| 128, closing control | 256 | 4,456,448 | 768 | 8,529 | 53.96 GiB |
-| 224, separate job | 448 | 4,456,448 | 1,536 | 12,469 | 64.76 GiB |
-| 256 | 512 | 4,456,448 | 1,536 | 13,321 | 64.80 GiB |
-| 320, separate job | 640 | 4,456,448 | 1,920 | 14,654 | 70.26 GiB |
-
-The [128/192/128/256 panel](https://beaker.org/ex/01M5V23DSCQE90HWD86944WHE9), [224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK) and
-[320 probe](https://beaker.org/ex/01M5VA8KDF63EJKHV8MNMHWH4J) completed
-successfully. All 1,809 archived files passed hash verification. Measured running
-requests averaged at least 99.7% of admission, and all completed measured responses
-had timing records with zero reported retractions. The repeated 128 native
-control declined 2.95%. At 256, native throughput was 6.83% above 224; delivered
-complete-group throughput was 14,323 versus 13,101 tokens/s. Native counters include
-unfinished responses, so those rates have different boundaries.
-
-At 320, native throughput increased another 10.01% over 256, with delivered
-throughput of 15,501 tokens/s. Treat 320 as the best measured candidate on this
-workload, not an established peak or production recommendation. The 224 job ran on a different host with fewer CPU/RAM resources;
-the other panel reserved two GPU slots because of its host-memory request while
-using only one engine. Per-allocated-GPU throughput for that panel is half the
-per-active-engine rate. The 224 and 320 jobs requested 128 GiB host RAM and each reserved one
-GPU. Record both denominators when comparing cost.
-
-The 256 and 320 KV pools each hold only 128 full-length contexts: higher admission relies on the
-actual length distribution and is not a guarantee that every request can reach
-the cap simultaneously. Pool sizes also changed between 128 and 192; 320 adds
-recurrent slots and a larger graph ceiling. A
-[realistic-prompt comparison](https://beaker.org/ex/01M5VC43SYKSF300X9VYEP6XZ5)
-of cache enabled at 320 versus cache disabled at 512 completed successfully:
-
-| Candidate | Native decode tokens/s | Delivered tokens/s | Peak GPU memory |
-|---|---:|---:|---:|
-| Cache enabled, admission/HTTP 320, producer 640 | 14,485 | 14,730 | 70.23 GiB |
-| Cache disabled, admission/HTTP 512, producer 1,024 | 16,714 | 16,796 | 59.36 GiB |
-
-The uncached candidate is 15.4% faster by native counters. It uses 6,684,672 KV
-tokens, 512 recurrent slots and decode graphs through 512. Both cases had zero
-reported retractions with complete delivered-response timing coverage. All 607
-archived files (551.5 MB) passed hash verification; full response-source joins
-are retained. This supports 512 uncached as the selected starting point. The comparison
-changes multiple capacity settings and has no repeated control, so it cannot
-isolate caching or establish a universal admission peak.
-
-The [complete H100 numerical replay](https://beaker.org/ex/01M5VKRGF4159AM219QK9EGDNB)
-finished both waves under 512-request background load. All 540 files (1.70 GB)
-were downloaded and hash-verified, with no collector omissions. The 512
-foreground traces cover 64 prompt clusters and 3,953,730 response tokens including
-repeats; all scores and full expert-route payloads passed integrity checks.
-Background requests were joined before the next wave and shutdown completed.
-Relative to the same frozen Core reference, the paired mean absolute error change
-from B300 to H100 was +0.0000064, with a prompt-cluster 95% interval of
-[-0.000051, +0.000061]. Both per-wave intervals also include zero. This finds no
-aggregate error increase; it does not establish bitwise or learning equivalence.
-Expert membership differs by 3.16% (95% interval 2.91–3.39%), with no invalid IDs.
-Hardware, cache mode, memory pools and HTTP/background concurrency differ together.
-Both arms use the measured experimental runtime. The first 45-minute attempt
-timed out and remains separately archived; the identical replacement completed
-in 52.5 minutes with a 75-minute budget.
-
-The updated-runtime fully async trainer-consumption check used B300. Do not copy
-B300 pools to H100 or enable prefix caching on a runtime that lacks the required
-snapshot support.
-
-The [candidate-runtime H100 deployment check](https://beaker.org/ex/01M5VMR1YJ24M6HN74QR578CGS)
-completed two batches of 512 requests, each generating 512 tokens, with the
-automatically selected uncached profile. All 1,024 response payloads passed an
-independent finite-score, token-alignment and full expert-route audit; no invalid
-expert IDs or retractions were found. Request timestamps show all 512 requests
-had finished prefill before the first completion in both batches. Decode graphs
-were configured and captured through 512; these logs do not directly establish
-per-step graph replay. Shutdown completed, and all 1,037 files (307.3 MB) were
-downloaded and hash-verified. This checks short-generation deployment on the
-candidate image, not long-context throughput, Core numerical agreement or
-mid-sequence refresh. This is the same dependency set selected in the updated
-runtime lock.
+The presets are starting points for the studied BF16 Olmo 3.5 geometry and workload,
+not established optima for other models, context distributions, prompt reuse or fleets.
+Short correctness and per-engine throughput checks do not establish sustained
+fully async fleet throughput, learning equivalence or save/resume reliability;
+validate the intended workload and placement before a long run.
 
 ## Other serving and training settings
 
@@ -552,7 +396,7 @@ separate run identities and private cache locations, not delete shared caches.
 
 ## Plan, validate, and launch
 
-Copy a profile, replace the model and output paths, and inspect the resolved
+Copy an example, replace the model and output paths, and inspect the resolved
 allocation and advisories before launching:
 
 ```bash

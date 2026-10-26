@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def large():
-    return RunSpec.load(ROOT / "configs/miles/examples/large.toml")
+    return RunSpec.load(ROOT / "configs/miles/examples/three-node.toml")
 
 
 def test_large_panel_preserves_protocols_and_before_after_cadence(large):
