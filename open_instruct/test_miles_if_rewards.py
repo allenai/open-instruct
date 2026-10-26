@@ -245,8 +245,9 @@ def test_unknown_instruction():
             (("punctuation:punctuation_dot", {}), ("detectable_content:postscript", {"postscript_marker": "P.S."})),
             "punctuation_dot+required_dot",
         ),
-        pytest.param(
-            (("startend:quotation", {}), ("keywords:start_end", {})), "quotation+start_end", marks=needs_punkt
+        (
+            (("startend:quotation", {}), ("first_word:first_word_answer", {"first_word": "hello"})),
+            "quotation+first_word_answer",
         ),
         (
             (
@@ -284,15 +285,18 @@ def test_empty_copy_span_is_a_contradiction_not_a_crash():
     assert "contradiction:copy+other" in found
 
 
-@pytest.mark.parametrize(
-    "constraints",
-    [
-        pytest.param((("startend:quotation", {}), ("keywords:start_end", {})), marks=needs_punkt),
-        (("startend:quotation", {}), ("first_word:first_word_answer", {"first_word": "hello"})),
-    ],
-)
-def test_quotation_contradictions_hold_on_the_checkers(constraints):
-    """The quotation rules match what the checkers do on plausible attempts."""
-    label = target(*constraints)
+def test_quotation_contradiction_holds_on_the_checkers():
+    """The quotation rule matches what the checkers do on plausible attempts."""
+    label = target(("startend:quotation", {}), ("first_word:first_word_answer", {"first_word": "hello"}))
     for attempt in ('"hello world hello"', '" hello world hello "', '"hello"'):
         assert score(attempt, label) == 0.0
+
+
+@needs_punkt
+def test_quotation_with_start_end_is_satisfiable():
+    label = target(("startend:quotation", {}), ("keywords:start_end", {}))
+    assert score('" hello world hello "', label) == 1.0
+    assert not any(
+        p.startswith("contradiction:")
+        for p in problems("Write.", ("startend:quotation", {}), ("keywords:start_end", {}))
+    )

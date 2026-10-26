@@ -329,11 +329,10 @@ def _contradictions(checkers: list[tuple[str, Any]]) -> list[str]:
     if "punctuation:punctuation_exclamation" in ids and any("!" in phrase for phrase in end_phrases):
         flag("punctuation_exclamation+end_checker")
 
-    # A response wrapped in quotes starts and ends with a quote token.
-    if "startend:quotation" in ids:
-        for other in ("keywords:start_end", "first_word:first_word_answer"):
-            if other in ids:
-                flag(f"quotation+{other.split(':')[1]}")
+    # A response wrapped in quotes starts with a quote token. (keywords:start_end is compatible: its
+    # tokenizer separates the quotes, so '" hello world hello "' passes both.)
+    if "startend:quotation" in ids and "first_word:first_word_answer" in ids:
+        flag("quotation+first_word_answer")
 
     # Copy-type checks fix the whole response; the other constraints must accept it.
     copy_candidates = []
