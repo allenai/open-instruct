@@ -387,10 +387,24 @@ For this pass, use admission 512 as the ballpark tuning point. The completed
 768 and 1,024 measurements are sufficient upper-end exploration; no 1,536/2,048
 runs or fine search for the knee are planned. Finish the remaining controls and
 numerical qualification, independently tune request supply and prefill, and
-validate the selected setting on multiple engines. Then exercise shorter response budgets on the same prompts and
-a separately identified longer-prefill workload, retaining actual length and
-truncation distributions. Check whether admission recommendations transfer across
-those workloads rather than assuming the 32K-cap result is universal.
+validate the selected setting on multiple engines. Exercise shorter response
+budgets on the same prompts and a separately identified longer-prefill workload,
+retaining actual length and truncation distributions. Check whether admission
+recommendations transfer across those workloads rather than assuming the 32K-cap
+result is universal.
+
+The [2K-response panel](https://beaker.org/ex/01M5TR6117TJFDWMNC7BBM9Q6D)
+runs independently of the 32K supply comparison. It uses the original prompts,
+a 4,096-token context and admission 512 → 256 → 512. HTTP capacity stays at twice
+admission and producer budget at four times admission; graph batch and full-context
+KV capacity scale with admission, while the 3,072-slot KDA pool stays fixed.
+Each case has 300 seconds of warmup and 600 seconds of measurement. One B300 is
+protected for the 90-minute timeout, at high priority with no automatic restart;
+Ray log deduplication is disabled to retain every engine observation. This is a
+controlled workload-shape comparison, not a claim that the final queue setting
+has been selected. The 8K-response and long-prefill panels remain prepared but
+unlaunched.
+
 The [continuation preparation](https://beaker.org/ex/01M5TDG8K8CHYRXQVR4QDHXE9D)
 retains 194 exact 8,192-token prefixes from 32 original prompt clusters. All
 prefixes were verified locally using the downloaded tokenizer. Ninety-five other
