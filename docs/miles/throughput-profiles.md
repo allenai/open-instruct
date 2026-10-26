@@ -129,6 +129,45 @@ can be audited. Record filtering or truncation explicitly. Fixed-weight cache
 results also need validation across production weight refreshes, which can change
 cache reuse and prefill work.
 
+## H100 measurements for the studied Olmo 3.5 checkpoint
+
+The first H100 panel used the same approximately 23.31-GiB checkpoint as the
+B300 measurements, one active TP1 engine, a 34,816-token context and a 32,768-token
+response cap. It used the experimental cache-capable runtime, with `extra_buffer`
+recurrent caching, full decode graphs, prefill chunks of 8,192 and static memory
+fraction 0.9. These results do not qualify the examples' older pinned runtime.
+
+| Admission / HTTP permits | Producer samples | KV tokens | Recurrent slots | Native decode tokens/s | Peak GPU memory |
+|---|---:|---:|---:|---:|---:|
+| 128, opening control | 256 | 4,456,448 | 768 | 8,788 | 53.84 GiB |
+| 192 | 384 | 6,684,672 | 1,152 | 11,417 | 68.04 GiB |
+| 128, closing control | 256 | 4,456,448 | 768 | 8,529 | 53.96 GiB |
+| 224, separate job | 448 | 4,456,448 | 1,536 | 12,469 | 64.76 GiB |
+| 256 | 512 | 4,456,448 | 1,536 | 13,321 | 64.80 GiB |
+
+The [128/192/128/256 panel](https://beaker.org/ex/01M5V23DSCQE90HWD86944WHE9)
+and [224 probe](https://beaker.org/ex/01M5V8ASGNV8H28GNSBBFQKDPK) completed
+successfully. All 1,506 archived files passed hash verification. Measured running
+requests averaged at least 99.7% of admission, and all completed measured responses
+had timing records with zero reported retractions. The repeated 128 native
+control declined 2.95%. At 256, native throughput was 6.83% above 224; delivered
+complete-group throughput was 14,323 versus 13,101 tokens/s. Native counters include
+unfinished responses, so those rates have different boundaries.
+
+Treat 256 as the best measured candidate, not an established peak or production
+recommendation. The 224 job ran on a different host with fewer CPU/RAM resources;
+the other panel reserved two GPU slots because of its host-memory request while
+using only one engine. Per-allocated-GPU throughput for that panel is half the
+per-active-engine rate. The 224 job requested 128 GiB host RAM and reserved one
+GPU. Record both denominators when comparing cost.
+
+The 256 pool holds only 128 full-length contexts: higher admission relies on the
+actual length distribution and is not a guarantee that every request can reach
+the cap simultaneously. Pool sizes also changed between 128 and 192. A bounded
+320 probe and numerical validation remain pending, as does production async
+refresh qualification. Do not copy B300 pools to H100 or enable prefix caching
+on a runtime that lacks the required snapshot support.
+
 ## Other serving and training settings
 
 * Enable **full decode CUDA graphs** through the configured request admission;
