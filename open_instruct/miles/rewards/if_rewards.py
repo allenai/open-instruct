@@ -344,12 +344,20 @@ def _contradictions(checkers: list[tuple[str, Any]]) -> list[str]:
     for args in by_id.get("new:copy_span_idx", []):
         copy_candidates.append(args["prompt_to_repeat"][args["n_start"] : args["n_end"]])
     if copy_candidates and not any(
-        all(checker.check_following(text) for _, checker in checkers)
+        _all_pass(text, checkers)
         for candidate in copy_candidates
         for text in (candidate.strip(), candidate.strip().lower(), candidate.strip().upper())
     ):
         flag("copy+other")
     return problems
+
+
+def _all_pass(text: str, checkers: list[tuple[str, Any]]) -> bool:
+    """Whether ``text`` satisfies every constraint; a checker that fails on it (e.g. empty text) does not pass."""
+    try:
+        return all(constraint_results(text, checkers))
+    except Exception:
+        return False
 
 
 def if_row_problems(

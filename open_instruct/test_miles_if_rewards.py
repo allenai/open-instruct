@@ -274,6 +274,16 @@ def test_copy_with_compatible_constraint_is_not_a_contradiction():
     assert not any(problem.startswith("contradiction:") for problem in found)
 
 
+def test_empty_copy_span_is_a_contradiction_not_a_crash():
+    # The v3 prep crashed here: LastWordAnswerChecker indexes the last word of the empty span.
+    found = problems(
+        "Write a story.",
+        ("new:copy_span_idx", {"prompt_to_repeat": "write a story", "n_start": 3, "n_end": 3}),
+        ("last_word:last_word_answer", {"last_word": "story"}),
+    )
+    assert "contradiction:copy+other" in found
+
+
 @pytest.mark.parametrize(
     "constraints",
     [
