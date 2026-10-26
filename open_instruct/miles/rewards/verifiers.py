@@ -1,8 +1,8 @@
 """Define the GSM8K reward variant selected by MILES dataset preparation.
 It extracts the response's final number and compares numeric labels as exact decimal
 values, so equivalent formatting such as 18 and 18.00 receives the same reward.
-Keeping this verifier separate preserves the behavior of legacy scoring callers
-while allowing the prepared MILES reward registry to select it explicitly.
+This factory path remains stable for existing prepared MILES reward registries.
+The shared GSM8K verifier also supports exact numeric comparison.
 """
 
 import re

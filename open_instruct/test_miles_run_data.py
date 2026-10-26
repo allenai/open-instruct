@@ -465,3 +465,21 @@ def test_missing_tokenizer_directory_is_an_input_error(environment):
             max_prompt_length=2000,
             seed=17,
         )
+
+
+@pytest.mark.parametrize("split", ["train", "eval"])
+def test_manifest_missing_judge_fails_with_binding_guidance(environment, tmp_path, split):
+    path = source_manifest(tmp_path)
+    source = path.parent / f"{split}.jsonl"
+    row = json.loads(source.read_text())
+    row["metadata"]["verifiers"] = [{"name": "general-quality", "target": ""}]
+    source.write_text(json.dumps(row) + "\n")
+    manifest = json.loads(path.read_text())
+    manifest["artifacts"][split]["sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    path.write_text(json.dumps(manifest))
+    hf, output, _ = environment
+    with pytest.raises(InputError, match=f"{split} row 1: Missing named judge binding.*general-quality"):
+        run_data.prepare_data(
+            {"rl_manifest": str(path)}, hf, output, max_prompt_length=2000, seed=17, registry_overrides={}
+        )
+    assert not output.exists()

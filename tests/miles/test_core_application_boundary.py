@@ -72,7 +72,14 @@ def test_snapshot_callback_preserves_schedule_and_output(tmp_path):
 
 def test_backend_modules_have_no_application_imports():
     for path in Path(core_utils.__file__).parent.rglob("*.py"):
-        assert "open_instruct" not in path.read_text(), path
+        source = path.read_text()
+        # Core's explicit argument hook lazily enters the optional application.
+        # All other backend code must remain independent of Open-Instruct.
+        if path.name == "integration.py":
+            assert source.count("open_instruct") == 1
+            assert 'load_function("open_instruct.miles.configuration.arguments.load_core_args")' in source
+        else:
+            assert "open_instruct" not in source, path
     assert actor.OLMoCoreTrainRayActor.__module__ == "miles.backends.core_utils.actor"
     assert async_buffer.HomogeneousPolicyDataBuffer.__module__ == "miles.backends.core_utils.rollout.async_buffer"
 

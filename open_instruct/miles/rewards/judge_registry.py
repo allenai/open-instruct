@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib import request
 
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import general_judge, judging
 
 
@@ -58,6 +59,7 @@ def resolve_request(args, name, query, prediction, target):
 
 def validate_data(prepared, value):
     paths = [prepared["prompt_data"], *prepared.get("eval_prompt_data", [])[1::2]]
+    verifiers = json.loads(Path(prepared["reward_config"]).read_text()) if prepared.get("reward_config") else {}
     seen = set()
     for path in paths:
         with Path(path).open() as stream:
@@ -66,18 +68,17 @@ def validate_data(prepared, value):
                 metadata = row.get("metadata", {})
                 for verifier in metadata.get("verifiers", []):
                     name = verifier["name"]
+                    judging.require_binding(name, value["bindings"], verifiers.get(name))
                     if name not in value["bindings"]:
-                        if name.startswith("general-"):
-                            raise ValueError(f"Missing named judge binding for {name}")
                         continue
                     seen.add(name)
                     if not isinstance(metadata.get("judge_query"), str) or not metadata["judge_query"]:
-                        raise ValueError("Judged data requires the preserved full metadata.judge_query")
+                        raise InputError("Judged data requires the preserved full metadata.judge_query")
                     profile = value["rubrics"][value["bindings"][name]["rubric"]]["profile"]
                     if profile != "open-instruct/general-quality" and verifier.get("target") in (None, ""):
-                        raise ValueError(f"{name} requires reference targets")
+                        raise InputError(f"{name} requires reference targets")
     if unused := set(value["bindings"]) - seen:
-        raise ValueError(f"Judge bindings absent from train/eval data: {sorted(unused)}")
+        raise InputError(f"Judge bindings absent from train/eval data: {sorted(unused)}")
 
 
 async def probe(output):

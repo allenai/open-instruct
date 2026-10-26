@@ -172,7 +172,7 @@ def test_option_strings_are_preserved():
 def test_all_starting_profiles_compile():
     root = Path(__file__).parents[1]
     paths = sorted((root / "configs/miles/examples").glob("*.toml"))
-    assert {p.stem for p in paths} == {"dev", "small", "medium", "large"}
+    assert {p.stem for p in paths} == {"dev", "node", "large"}
     assert set((root / "configs/miles").rglob("*.toml")) == set(paths)
     for path in paths:
         assert RunSpec.load(path).compile().plan()["argv"]
@@ -211,3 +211,19 @@ def test_supported_resume_and_snapshot_options_compile():
     assert "--eval-hf-dir" in argv
     assert "--no-save-optim" not in argv
     assert "--disable-compute-advantages-and-returns" not in argv
+
+
+@pytest.mark.parametrize("prefix", ["sglang_", "eval_sglang_"])
+@pytest.mark.parametrize(
+    "old,replacement,value",
+    [
+        ("mamba_scheduler_strategy", "mamba_radix_cache_strategy", "no_buffer"),
+        ("disable_piecewise_cuda_graph", 'cuda_graph_backend_prefill="disabled"', True),
+        ("enable_breakable_cuda_graph", 'cuda_graph_backend_prefill="breakable"', True),
+        ("enforce_piecewise_cuda_graph", 'cuda_graph_backend_prefill="tc_piecewise"', True),
+    ],
+)
+def test_removed_serving_alias_has_migration_guidance(prefix, old, replacement, value):
+    with pytest.raises(ValueError, match="Miles v0.1.2 removed") as error:
+        options.encode_options({prefix + old: value})
+    assert prefix + replacement in str(error.value)
