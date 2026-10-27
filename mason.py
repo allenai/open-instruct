@@ -104,6 +104,17 @@ MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS = 8
 MIN_RUNTIME_USUAL_UPPER_BOUND_NS = MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS * 60 * 60 * 1_000_000_000
 
 
+def _timeout_within(timeout_str: str | None, min_runtime_ns: int) -> bool:
+    """Whether a --timeout is set and ends the job before its min runtime does; an unparsable timeout counts as yes."""
+    if not timeout_str:
+        return False
+    try:
+        timeout_ns = beaker.common.to_nanoseconds(timeout_str)
+    except ValueError:
+        return True
+    return 0 < timeout_ns <= min_runtime_ns
+
+
 def parse_min_runtime(min_runtime_str: str) -> str:
     """Validate a Beaker min runtime duration string such as '30m' or '2h'."""
     # beaker-py reads a bare number as seconds, so '300' meant as minutes would silently protect for 5 minutes.
@@ -284,6 +295,7 @@ def get_args():
         )
     if mason_args.auto_resume and mason_args.min_runtime is None:
         parser.error("--auto_resume requires --min_runtime")
+    # Hard errors on --min_runtime live in parse_min_runtime; these are soft warnings that need other flags.
     if mason_args.min_runtime is not None:
         min_runtime_ns = beaker.common.to_nanoseconds(mason_args.min_runtime)
         if min_runtime_ns > MIN_RUNTIME_USUAL_UPPER_BOUND_NS:
@@ -296,6 +308,12 @@ def get_args():
             console.log(
                 "--min_runtime 0 without --auto_resume runs as unallocated backfill and is not requeued after "
                 "preemption; pass --auto_resume (or use --preemptible) so Beaker requeues it after preemption."
+            )
+        elif not mason_args.auto_resume and not _timeout_within(mason_args.timeout, min_runtime_ns):
+            console.log(
+                f"--min_runtime {mason_args.min_runtime} protects the job only for that long; without --auto_resume, "
+                "a preemption after that ends the job and Beaker does not requeue it. Pass --auto_resume, or a "
+                "--timeout no longer than the min runtime."
             )
     commands = parse_commands(command_args)
 

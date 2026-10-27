@@ -383,6 +383,8 @@ class TestGetArgsMinRuntime(unittest.TestCase):
             ("above_usual_upper_bound", ["--min_runtime", "9h", "--auto_resume"], "8h maximum"),
             ("zero_without_auto_resume", ["--min_runtime", "0"], "not requeued"),
             ("auto_resume_without_resumable_command", ["--min_runtime", "2h", "--auto_resume"], "restarts it"),
+            ("allocated_without_auto_resume", ["--min_runtime", "1h"], "does not requeue"),
+            ("timeout_beyond_min_runtime", ["--min_runtime", "1h", "--timeout", "6h"], "does not requeue"),
         ]
     )
     def test_warns(self, name, mason_args, expected):
@@ -392,12 +394,14 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         [
             ("allocated", ["--min_runtime", "2h", "--auto_resume"]),
             ("zero_with_auto_resume", ["--min_runtime", "0", "--auto_resume"]),
+            ("timeout_within_min_runtime", ["--min_runtime", "2h", "--timeout", "1h"]),
         ]
     )
     def test_does_not_warn(self, name, mason_args):
         warnings = self._warnings(*mason_args)
         self.assertNotIn("8h maximum", warnings)
         self.assertNotIn("not requeued", warnings)
+        self.assertNotIn("does not requeue", warnings)
 
     def test_auto_resume_with_non_resumable_flag_warns(self):
         command = ("python", "open_instruct/grpo_fast.py")
