@@ -14,6 +14,6 @@ H119_DATA=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/h119
 C11_DECON_DOLCI=$H119_DATA/data/dolci-think-clean-v1-en-dbv-5bd68837-h119.parquet   # 1,960,536 rows (gate D1)
 C11_DECON_WN=0.827392  # N_C10 / (phi_T x T_N); phi_T = D_C10 / T_D' = 0.686634, T_D' = 17,968,117,658
 C11_DECON_WS=2.912761  # 2 / phi_T
-C11_DECON_CACHE=TODO   # treatment cache dir name (gate D2)
-C11_DECON_STEPS=TODO   # S_T = round(phi_T x I_T / 16) (gate D2)
+C11_DECON_CACHE=f67dd5104f-6068a350-rowaligned   # treatment cache (gate D2, 2026-10-27)
+C11_DECON_STEPS=16304   # S_T = round(phi_T x I_T / 16) = round(0.686634 x 379,914 / 16) (gate D2, 2026-10-27)
 C11_DECON_CACHE_ROOT=$H119_DATA/cache
