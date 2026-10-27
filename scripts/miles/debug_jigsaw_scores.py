@@ -257,6 +257,25 @@ def serving_controls(engine, args, samples):
     """Hold the exact prefix fixed and vary request batch size / suffix scoring."""
     report = {"mode": "serving-controls", "records": [], "batch_first_tokens": []}
     requested = sorted({t for sample in samples for t in sample["tokens"][-sample["response_length"] :]})
+    if args.whole_sequence_first:
+        report["initial_whole_sequence"] = []
+        for index, sample in enumerate(samples):
+            n = sample["response_length"]
+            response = sample["tokens"][-n:]
+            prompt = sample["metadata"]["vision"]["prepared"]["placeholder_token_ids"]
+            result = engine.generate(
+                input_ids=prompt + response,
+                image_data=[i["path"] for i in sample["metadata"]["vision"]["images"]],
+                sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+                return_logprob=True,
+                logprob_start_len=len(sample["tokens"]) - n - 1,
+            )
+            values = result["meta_info"]["input_token_logprobs"][-n:]
+            assert [v[1] for v in values] == response
+            report["initial_whole_sequence"].append(
+                {"index": index, "log_probs": [v[0] for v in values], "meta_info": result["meta_info"]}
+            )
+            write(args.output, report)
     cache = {}
     for index, sample in enumerate(samples):
         response = sample["tokens"][-sample["response_length"] :]
@@ -331,7 +350,9 @@ def serving_controls(engine, args, samples):
         )
         values = result["meta_info"]["input_token_logprobs"][-n:]
         assert [v[1] for v in values] == response
-        report["whole_sequence"].append({"index": index, "log_probs": [v[0] for v in values]})
+        report["whole_sequence"].append(
+            {"index": index, "log_probs": [v[0] for v in values], "meta_info": result["meta_info"]}
+        )
         result = engine.generate(
             input_ids=list(prompt),
             image_data=images,
@@ -410,6 +431,7 @@ def main():
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="torch_native")
+    parser.add_argument("--whole-sequence-first", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(8)
     torch.manual_seed(17)
