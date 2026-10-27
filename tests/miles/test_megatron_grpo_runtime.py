@@ -76,6 +76,11 @@ def test_dppo_loss_matches_the_pinned_custom_loss_contract():
         assert name in log_probs
 
 
+def test_dppo_loss_reports_opd_reverse_kl_like_the_native_loss():
+    assert 'batch.get("opd_reverse_kl")' in inspect.getsource(losses)
+    assert 'metrics["opd_reverse_kl"]' in inspect.getsource(dppo_loss.policy_loss)
+
+
 def test_async_producer_is_the_managed_native_producer():
     assert issubclass(grpo_async.VerifierAsyncRollout, async_rollout.ManagedFullyAsyncRolloutFn)
     assert grpo_async.VerifierAsyncRollout.eval_reward_path == grpo_config.REWARD_HOOK

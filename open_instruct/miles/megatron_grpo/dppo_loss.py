@@ -66,4 +66,7 @@ def policy_loss(args, batch, logits, sum_of_sample_mean):
         "dppo_ratio": sum_of_sample_mean(ratio.detach() * active).detach(),
         "train_rollout_logprob_abs_diff": sum_of_sample_mean(ppo_kl.abs()).detach(),
     }
+    # OPD folds the teacher term into the advantages; report its reverse KL as the native loss does.
+    if batch.get("opd_reverse_kl") is not None:
+        metrics["opd_reverse_kl"] = sum_of_sample_mean(torch.cat(batch["opd_reverse_kl"], dim=0)).clone().detach()
     return loss, metrics
