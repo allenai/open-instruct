@@ -16,24 +16,50 @@ index instead of inferring component labels.
 
 | Input field | Prepared use |
 |---|---|
-| `instruction` | System message, including tool descriptions and response-format instructions |
-| `input` | User message containing the recorded dialogue, including any previous tool observations |
-| `output` | Reference target in `ground_truth` and verifier metadata; never appended to the prompt |
+| `instruction` | Extracted function definitions in `tools`; upstream response-format instructions are discarded |
+| `input` | Structured user, assistant (reasoning/calls/text), and tool-result turns |
+| `output` | Canonical function names and typed arguments in the verifier target; never appended to the prompt |
 
-The existing dialogue is retained verbatim as text. A training attempt generates
-the next response only; it does not interact with a live multi-turn environment.
-The source uses JSON calls inside `<tool_call>` and reasoning inside `<think>`.
-It is not converted to Olmo's native `<function=...>` XML call syntax. Retaining
-this source format is useful for a baseline, but format adaptation and GPU
-qualification are separate work before the matched atomic-token experiment.
+The selected checkpoint's chat template supplies the system message, tool menu,
+call syntax, conversation markers, and generation prefix. For Olmo 3.5 this is
+`<tool_call><function=NAME><parameter=KEY>VALUE</parameter></function></tool_call>`
+(with newlines). Parallel calls have separate `<tool_call>` wrappers. Ordinary
+answers are plain text after reasoning, without `<response>` tags. Historical
+observations become tool turns, rendered as environment/tool-response messages.
+Training generates one next assistant turn against an offline reference; it does
+not execute tools or continue a live environment.
 
-| Reference calls per row | Rows |
+The manifest declares `tools_key` and `tool_format = "olmo-toolrl-v1"`. MILES
+passes structured tools to `apply_chat_template` and checks that the selected
+template renders the native function/parameter syntax. It does not replace the
+checkpoint's template. Old JSON-format manifests/targets must be regenerated;
+the verifier rejects their unversioned string targets.
+
+Tool definitions use JSON Schema. The adapter translates Python-like source types
+(`int`, `List[float]`, etc.), treats parameters marked optional or given defaults
+as optional, and represents source callable expressions as strings without
+executing them. Argument values are decoded using the declared top-level type;
+numeric strings become numbers, JSON containers become containers, and string
+arguments remain strings (outer whitespace is stripped). Nested container values
+are preserved; this is not a full JSON Schema validator.
+
+| Native preparation outcome | Rows |
 |---|---:|
-| None | 482 |
-| One | 1,823 |
-| Two or more, structurally valid | 1,694 |
-| Rejected malformed reference | 1 |
-| Source total | 4,000 |
+| No-call targets | 456 |
+| One reference call | 1,615 |
+| Two or more reference calls | 1,515 |
+| Retained total | 3,586 |
+| Excluded during reference/history/schema conversion | 414 |
+| Retained references with normalized argument values | 371 |
+
+Unlike the initial JSON-format draft, preparation checks that reference and
+historical calls name available functions and declared parameters, and that their
+argument values can be decoded. Some upstream rows contain truncated JSON inside
+argument strings, expressions in numeric fields, or unavailable function names.
+These are excluded with their original row index, reference hash, and reason;
+they are not guessed or repaired. The manifest also lists normalized-reference
+indices. This filtering changes the training population, so it is not a pure
+serialization ablation or reproduction of the paper's dataset split.
 
 ## Prepare and select
 
@@ -50,12 +76,11 @@ existing output directory and writes `train.jsonl`, `eval.jsonl`, and
 
 The default requests 80 held-out rows with seed 31415. Identical dialogue inputs
 stay together, even if their tool menus differ. Whole groups may exceed the
-requested count slightly. Of 4,000 source rows, 3,999 are retained, with duplicates
-retained within their assigned partition. Source row 572 (zero-based) contains
-four calls with empty function names and is excluded, not repaired. Rejected
-reference indices, hashes, and reasons are recorded. The manifest records counts, hashes,
-source IDs, and the split algorithm. This is a new split, not the paper's random
-row split. It is not a semantic deduplication or BFCL contamination audit.
+requested count slightly. The default native preparation produces 3,506 training
+rows and 80 evaluation rows. Duplicates stay in their assigned partition. The
+manifest records artifact hashes, source IDs, conversion outcomes, and the split
+algorithm. This is a new split, not the paper's random row split. It is not a
+semantic deduplication or BFCL contamination audit.
 
 Select the resulting manifest in a copy of a supported MILES configuration:
 
@@ -113,36 +138,45 @@ normalized. Keep `reward_final_answer_only=false` so the grader receives the
 reasoning delimiters and call format. This flag does not reward the reasoning's
 content or prescribe its opening words.
 
-Local validation with the saved C11 tokenizer rendered all 3,999 retained rows;
-the longest prompt was 3,821 tokens and 15 exceeded 2,048. A 4,096-token prompt
-budget accommodates this source under that tokenizer. Recheck lengths for the
-actual checkpoint and any format adaptation rather than silently truncating.
+Local validation with the saved C11 tokenizer rendered and graded all 3,586
+retained references successfully, including parallel calls and no-call answers.
+The longest prompt was 3,770 tokens; a 4,096-token prompt budget accommodates this
+source under that tokenizer. Recheck lengths for the actual checkpoint rather
+than silently truncating. These are CPU checks, not GPU rollout qualification.
 
 ## Reward behavior
 
-The adapter implements upstream's fixed default reward settings. It does not
+The adapter retains upstream's fixed default semantic call scoring, with native
+Olmo formatting and canonical typed targets. It does not
 vendor the veRL trainer or enable upstream's optional length and scheduling
 variants.
 
 | Component | Meaning | Range |
 |---|---|---|
-| Format | Expected reasoning and call/response delimiters, including newlines | 0 or 1 |
+| Format | One reasoning block followed by native calls or a plain answer; flexible whitespace | 0 or 1 |
 | Call correctness | Multiset overlap of tool names, followed by greedy matching of parameter names and values | -3 to 3 |
 | Total | Sum of those two components | -3 to 4 |
 
 This reward is not a probability or a BFCL accuracy score. A correct call target
 with the expected format earns 4. Missing, extra, or wrong calls can receive
-partial credit. For the 482 no-call targets, call correctness is always zero:
+partial credit. For the 456 no-call targets, call correctness is always zero:
 only the response **format** is graded, not the factual answer. Track those
 examples separately when interpreting learning curves.
 
-The port deliberately hardens malformed-output handling: duplicate JSON keys,
-nonfinite constants, invalid call shapes, and repeated call blocks are rejected;
-calls quoted only inside reasoning are not actions. It requires a single
-reasoning block for format credit. These are differences from upstream on
-malformed responses, not a claim of byte-for-byte paper reproduction. The
-parameter-value comparison and greedy matching semantics otherwise follow the
-upstream defaults, including Python's numeric equality semantics.
+The offline native parser requires complete call blocks and rejects duplicate
+parameters, malformed tails, nonfinite JSON constants, and top-level type
+mismatches. Calls quoted only inside reasoning are not actions. Separate complete
+parallel-call blocks are accepted. Whitespace between reasoning and calls or
+between calls is not a reward signal. The two verifier bindings still differ
+only in whether `<think>` is already in the prompt; neither forces particular
+reasoning words.
+
+This parser is deliberately stricter than permissive serving parsers, and has no
+vLLM or SGLang import dependency. Unknown predicted function/parameter names are
+scored as semantic errors with upstream partial credit. Parameter equality and
+greedy matching retain upstream semantics (including Python numeric equality),
+but compare normalized targets rather than the upstream serialization. No-call
+answers receive format credit only; no factual correctness is claimed.
 
 The code attribution is retained in `open_instruct/toolrl_utils.py`; upstream
 code is Apache-2.0. The constituent datasets retain their own terms. This

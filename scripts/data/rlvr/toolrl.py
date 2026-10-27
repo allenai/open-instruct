@@ -7,6 +7,7 @@ Only preparation is performed: no tools, training, or Hub uploads are invoked.
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import tempfile
 from collections import Counter
@@ -29,6 +30,133 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def parameter_schema(source):
+    """Translate the source's Python-like type labels into JSON Schema."""
+    result = {key: value for key, value in source.items() if key != "type"}
+    kind = source.get("type", "string")
+    aliases = {
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "dict": "object",
+        "list": "array",
+        "set": "array",
+    }
+    if isinstance(kind, list):
+        result["type"] = [aliases.get(item.lower(), item.lower()) for item in kind]
+        return result
+    bare = kind.split(", optional", 1)[0].split(", default=", 1)[0]
+    if bare.startswith("List["):
+        result.update(type="array", items=parameter_schema({"type": bare[5:-1]}))
+    elif bare.startswith("Tuple["):
+        result.update(
+            type="array", prefixItems=[parameter_schema({"type": item.strip()}) for item in bare[6:-1].split(",")]
+        )
+    elif bare.startswith("Union["):
+        result["type"] = [parameter_schema({"type": item.strip()})["type"] for item in bare[6:-1].split(",")]
+    elif bare.startswith("Callable["):
+        # Offline examples encode functions as strings; no function is executed.
+        result["type"] = "string"
+        result["description"] = result.get("description", "") + f" (Source type: {kind})"
+    else:
+        result["type"] = aliases.get(bare.lower(), bare.lower())
+    if result["type"] not in ("string", "integer", "number", "boolean", "array", "object", "null") and not isinstance(
+        result["type"], list
+    ):
+        raise ValueError(f"Unsupported source parameter type: {kind}")
+    return result
+
+
+def source_tools(instruction):
+    try:
+        menu = instruction.split("**Available Tools**", 1)[1].split("**Steps for Each Turn**", 1)[0]
+    except IndexError as error:
+        raise ValueError("Missing source tool menu") from error
+    pattern = r"(?:^|\n)\d+\. Name: (.*?)\nDescription: (.*?)\nParameters: (.*?)(?=\n\d+\. Name: |\Z)"
+    tools = []
+    for name, description, raw in re.findall(pattern, menu.strip(), re.DOTALL):
+        parameters = json.loads(raw)
+        properties = {key: parameter_schema(value) for key, value in parameters.items()}
+        required = [
+            key
+            for key, value in parameters.items()
+            if "optional" not in str(value.get("type", ""))
+            and "default" not in value
+            and "default=" not in str(value.get("type", ""))
+        ]
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {"type": "object", "properties": properties, "required": required},
+                },
+            }
+        )
+    if not tools or len({tool["function"]["name"] for tool in tools}) != len(tools):
+        raise ValueError("Missing or duplicate tool definitions")
+    return tools
+
+
+def canonical_calls(calls, tools):
+    schemas = {tool["function"]["name"]: tool["function"]["parameters"]["properties"] for tool in tools}
+    result = []
+    for call in calls:
+        if call["name"] not in schemas:
+            raise ValueError("Reference/history calls an unavailable function")
+        parameters = {}
+        for key, value in call["parameters"].items():
+            if key not in schemas[call["name"]]:
+                raise ValueError("Reference/history uses an undeclared parameter")
+            raw = value if isinstance(value, str) else json.dumps(value, allow_nan=False)
+            parameters[key] = toolrl_utils.parameter_value(raw, schemas[call["name"]][key])
+        result.append({"name": call["name"], "parameters": parameters})
+    return result
+
+
+def source_messages(history, tools):
+    header = "**Dialogue Records History**"
+    if not history.startswith(header):
+        raise ValueError("Missing dialogue history header")
+    remaining = history[len(header) :].strip()
+    messages, reasoning = [], None
+    while remaining:
+        match = re.match(r"<(user|think|tool_call|obs|response)>(.*?)</\1>", remaining, re.DOTALL)
+        if not match:
+            raise ValueError("Malformed dialogue history")
+        tag, content = match[1], match[2].strip()
+        if tag == "think":
+            if reasoning is not None:
+                raise ValueError("Repeated history reasoning")
+            reasoning = content
+        elif tag in ("tool_call", "response"):
+            if reasoning is None:
+                raise ValueError("History assistant turn lacks reasoning")
+            message = {
+                "role": "assistant",
+                "content": content if tag == "response" else "",
+                "reasoning_content": reasoning,
+            }
+            if tag == "tool_call":
+                calls = canonical_calls(toolrl_utils.parse_calls(match[0]), tools)
+                message["tool_calls"] = [
+                    {"type": "function", "function": {"name": call["name"], "arguments": call["parameters"]}}
+                    for call in calls
+                ]
+            messages.append(message)
+            reasoning = None
+        else:
+            if reasoning is not None:
+                raise ValueError("Unfinished history reasoning")
+            messages.append({"role": "user" if tag == "user" else "tool", "content": content})
+        remaining = remaining[match.end() :].strip()
+    if reasoning is not None or not messages or messages[-1]["role"] not in ("user", "tool"):
+        raise ValueError("History must end at a user/tool turn")
+    return messages
+
+
 def convert_rows(rows, *, eval_count=80, seed=31415, think_prefix_in_prompt=False):
     """Retain structurally valid examples; identical inputs stay in one partition.
 
@@ -45,6 +173,7 @@ def convert_rows(rows, *, eval_count=80, seed=31415, think_prefix_in_prompt=Fals
     converted = []
     rejected = []
     call_counts = Counter()
+    normalized_reference_rows = []
     verifier = "toolrl_think_prefix" if think_prefix_in_prompt else "toolrl"
     for index, row in enumerate(rows):
         if not isinstance(row, dict) or any(
@@ -53,6 +182,13 @@ def convert_rows(rows, *, eval_count=80, seed=31415, think_prefix_in_prompt=Fals
             raise ValueError(f"Row {index}: expected nonempty instruction, input, and output strings")
         try:
             _, calls = toolrl_utils.reference_parts(row["output"])
+            tools = source_tools(row["instruction"])
+            messages = source_messages(row["input"], tools)
+            source_calls = calls
+            calls = canonical_calls(calls, tools)
+            if encoded(source_calls) != encoded(calls):
+                normalized_reference_rows.append(index)
+            target = {"format": "olmo-toolrl-v1", "calls": calls, "tools": tools}
         except ValueError as error:
             rejected.append(
                 {"source_row": index, "reason": str(error), "reference_sha256": sha(row["output"].encode())}
@@ -63,11 +199,9 @@ def convert_rows(rows, *, eval_count=80, seed=31415, think_prefix_in_prompt=Fals
         call_counts[len(calls)] += 1
         converted.append(
             {
-                "messages": [
-                    {"role": "system", "content": row["instruction"]},
-                    {"role": "user", "content": row["input"]},
-                ],
-                "ground_truth": row["output"],
+                "messages": messages,
+                "tools": tools,
+                "ground_truth": target,
                 "dataset": "toolrl",
                 "metadata": {
                     "prepared_sample_id": f"toolrl:{REVISION}:{index}",
@@ -75,7 +209,7 @@ def convert_rows(rows, *, eval_count=80, seed=31415, think_prefix_in_prompt=Fals
                     "source_row": index,
                     "dialogue_group": group,
                     "reference_call_count": len(calls),
-                    "verifiers": [{"name": verifier, "target": row["output"], "weight": 1.0}],
+                    "verifiers": [{"name": verifier, "target": target, "weight": 1.0}],
                 },
             }
         )
@@ -95,6 +229,8 @@ def convert_rows(rows, *, eval_count=80, seed=31415, think_prefix_in_prompt=Fals
         "source_rows": len(rows),
         "retained_rows": len(converted),
         "rejected_rows": rejected,
+        "normalized_reference_rows": normalized_reference_rows,
+        "target_format": "olmo-toolrl-v1",
         "unique_dialogues": len(groups),
         "reference_call_counts": dict(sorted(call_counts.items())),
         "partition_rows": {split: len(values) for split, values in partitions.items()},
@@ -133,6 +269,8 @@ def prepare(source: bytes, output: Path, **options):
             "artifacts": artifacts,
             "miles": {
                 "input_key": "messages",
+                "tools_key": "tools",
+                "tool_format": "olmo-toolrl-v1",
                 "metadata_key": "metadata",
                 "label_key": "ground_truth",
                 "apply_chat_template": True,

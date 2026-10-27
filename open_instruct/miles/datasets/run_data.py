@@ -17,6 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from open_instruct import toolrl_utils
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
@@ -176,7 +177,7 @@ def _source_rows(name):
     return importlib.import_module("datasets").load_dataset(dataset, revision=revision, split="train")
 
 
-def _messages(row, *, strip_answer):
+def _messages(row, *, strip_answer, with_tools=False):
     messages = copy.deepcopy(row.get("messages"))
     if messages is None:
         question = row.get("question", row.get("prompt"))
@@ -188,23 +189,29 @@ def _messages(row, *, strip_answer):
     for message in messages:
         if (
             not isinstance(message, dict)
-            or message.get("role") not in ("system", "user", "assistant")
+            or message.get("role")
+            not in (("system", "user", "assistant", "tool") if with_tools else ("system", "user", "assistant"))
             or not isinstance(message.get("content"), str)
         ):
-            raise InputError("Only text system/user/assistant messages are supported")
+            raise InputError("Messages need a supported role and text content; tool turns require structured tools")
     if strip_answer:
         messages = messages[
             : next((i for i, message in enumerate(messages) if message["role"] == "assistant"), len(messages))
         ]
-    if not messages or messages[-1]["role"] != "user":
-        raise InputError("Prepared prompt must end in a user turn; reference answers are not prompts")
+    if not messages or messages[-1]["role"] not in (("user", "tool") if with_tools else ("user",)):
+        raise InputError(
+            "Prepared prompt must end in a user turn (or tool turn with structured tools); reference answers are not prompts"
+        )
     return messages
 
 
-def _render(messages, tokenizer, template):
+def _render(messages, tokenizer, template, tools=None):
     if not isinstance(template, str) or not template:
         raise InputError("Supply an explicit HF or manifest chat template")
-    return tokenizer.apply_chat_template(messages, chat_template=template, tokenize=False, add_generation_prompt=True)
+    options = {"tools": tools} if tools is not None else {}
+    return tokenizer.apply_chat_template(
+        messages, chat_template=template, tokenize=False, add_generation_prompt=True, **options
+    )
 
 
 def _verify_row(row, tokenizer, limit, known):
@@ -230,6 +237,10 @@ def _verify_row(row, tokenizer, limit, known):
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
         if spec["name"] in ("toolrl", "toolrl_think_prefix"):
+            try:
+                toolrl_utils.validate_target(spec["target"])
+            except ValueError as error:
+                raise InputError(str(error)) from error
             expects_prefix = spec["name"] == "toolrl_think_prefix"
             suffix = re.search(r"<think>\s*$", row["input"])
             if suffix and suffix[0] != "<think>":
@@ -276,6 +287,32 @@ def _adopt(data, tokenizer, template, inputs):
             template = raw.decode()
         except UnicodeError as error:
             raise InputError(f"{path}: chat template must be UTF-8") from error
+    if options.get("tool_format") == "olmo-toolrl-v1":
+        probe_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "format_probe",
+                    "parameters": {"type": "object", "properties": {"value": {"type": "string"}}},
+                },
+            }
+        ]
+        probe = tokenizer.apply_chat_template(
+            [
+                {"role": "user", "content": "probe"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "format_probe", "arguments": {"value": "sentinel"}}}],
+                },
+            ],
+            tools=probe_tools,
+            chat_template=template,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        if "<function=format_probe>" not in probe or "<parameter=value>" not in probe or "<tools>" not in probe:
+            raise InputError("ToolRL requires an inherited Olmo XML tool chat template")
     partitions = {}
     artifacts = validation.mapping(manifest.get("artifacts"), f"{path}: artifacts")
     for split, artifact in artifacts.items():
@@ -293,12 +330,28 @@ def _adopt(data, tokenizer, template, inputs):
         for index, row in enumerate(source, 1):
             context = f"{path}: {split} row {index}"
             _required_mapping(row, context, (options["input_key"], options["metadata_key"], options["label_key"]))
-            messages = _messages({"messages": row[options["input_key"]]}, strip_answer=False)
+            tools = None
+            if "tools_key" in options:
+                validation.text(options["tools_key"], f"{path}: miles.tools_key")
+                tools = row.get(options["tools_key"])
+                if not isinstance(tools, list) or not tools:
+                    raise InputError(f"{context}: requires nonempty structured tools")
+                for tool in tools:
+                    function = tool.get("function") if isinstance(tool, dict) else None
+                    if (
+                        not isinstance(function, dict)
+                        or not isinstance(function.get("name"), str)
+                        or not isinstance(function.get("parameters"), dict)
+                    ):
+                        raise InputError(f"{context}: invalid function schema")
+            messages = _messages(
+                {"messages": row[options["input_key"]]}, strip_answer=False, with_tools=tools is not None
+            )
             metadata = copy.deepcopy(validation.mapping(row[options["metadata_key"]], f"{context}: metadata"))
             metadata.setdefault("query", messages[-1]["content"])
             partitions[split].append(
                 {
-                    "input": _render(messages, tokenizer, template),
+                    "input": _render(messages, tokenizer, template, tools),
                     "label": row[options["label_key"]],
                     "metadata": metadata,
                 }

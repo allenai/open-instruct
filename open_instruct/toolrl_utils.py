@@ -5,12 +5,11 @@
 
 Source: verl/utils/reward_score/rlla.py (Apache-2.0; see LICENSE).
 Changes: dependency-free functions, explicit fixed default reward settings,
-structured diagnostics, strict JSON validation, and scoring calls only after
-the reasoning block. No tool execution, length bonus, or reward schedules.
+structured diagnostics, native Olmo XML call parsing, canonical targets, and
+scoring calls only after the reasoning block. No tool execution, length bonus, or reward schedules.
 """
 
 import dataclasses
-import functools
 import json
 import re
 from collections import Counter
@@ -58,7 +57,6 @@ def parse_calls(body: str) -> list[dict]:
     return calls
 
 
-@functools.lru_cache(maxsize=8192)
 def reference_parts(reference: str) -> tuple[str, list[dict]]:
     """Reject malformed targets as data errors, not model failures."""
     match = re.fullmatch(r"<think>.*?</think>\n(.*)", reference, re.DOTALL)
@@ -104,35 +102,114 @@ def _call_score(expected, predicted):
     return -3.0 + 6.0 * score / possible
 
 
-def score_response(prediction: str, reference: str, *, think_prefix_in_prompt: bool = False) -> ToolRLScore:
-    """Return upstream's fixed default format (0..1) + call (-3..3) reward.
+def validate_target(reference):
+    """Versioned canonical targets prevent silently grading old JSON-format data."""
+    if not isinstance(reference, dict) or reference.get("format") != "olmo-toolrl-v1":
+        raise ValueError("ToolRL reference requires olmo-toolrl-v1; regenerate the manifest")
+    if not isinstance(reference.get("calls"), list) or not isinstance(reference.get("tools"), list):
+        raise ValueError("ToolRL reference requires calls and tools")
+    names = set()
+    for tool in reference["tools"]:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+            raise ValueError("Malformed ToolRL reference function schema")
+        parameters = function.get("parameters")
+        if not isinstance(parameters, dict) or not isinstance(parameters.get("properties"), dict):
+            raise ValueError("Malformed ToolRL reference parameters schema")
+        if function["name"] in names:
+            raise ValueError("Duplicate ToolRL reference function schema")
+        names.add(function["name"])
+    for call in reference["calls"]:
+        if (
+            not isinstance(call, dict)
+            or set(call) != {"name", "parameters"}
+            or not isinstance(call["name"], str)
+            or call["name"] not in names
+            or not isinstance(call["parameters"], dict)
+        ):
+            raise ValueError("Malformed canonical ToolRL reference call")
+    return reference["calls"]
 
-    No-call targets receive only a format reward; their answer text is not graded.
-    Set think_prefix_in_prompt only when the generation prompt already ends with
-    <think>. It is prepended literally, never inferred from a malformed response.
+
+def parameter_value(value, schema):
+    """Decode native unquoted strings and JSON scalars/containers using the tool schema."""
+    value = value.strip()
+    kind = schema.get("type", "string")
+    if kind == "string":
+        return value
+    decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
+    json.dumps(decoded, allow_nan=False)  # Reject overflow such as 1e999, including nested values.
+    kinds = kind if isinstance(kind, list) else [kind]
+    matches = {
+        "null": decoded is None,
+        "boolean": type(decoded) is bool,
+        "integer": type(decoded) is int,
+        "number": type(decoded) in (int, float),
+        "array": isinstance(decoded, list),
+        "object": isinstance(decoded, dict),
+        "string": isinstance(decoded, str),
+    }
+    if not any(matches.get(item, False) for item in kinds):
+        raise ValueError("Parameter value does not match its declared type")
+    return decoded
+
+
+def parse_native_calls(body, tools):
+    """Parse complete Olmo XML-style calls without a vLLM/SGLang dependency.
+
+    This is the offline reward's strict parser, not a permissive serving parser.
+    All non-whitespace action text must belong to a call. Parallel calls have
+    separate wrappers, and duplicate parameters or malformed tails fail closed.
     """
-    kind, expected = reference_parts(reference)
+    schemas = {tool["function"]["name"]: tool["function"]["parameters"]["properties"] for tool in tools}
+    calls = []
+    remaining = body.strip()
+    while remaining:
+        match = re.match(r"<tool_call>\s*<function=([^<>]+)>(.*?)</function>\s*</tool_call>", remaining, re.DOTALL)
+        if not match:
+            raise ValueError("Expected a complete native function call")
+        name, parameters = match[1], {}
+        content = match[2].strip()
+        while content:
+            parameter = re.match(r"<parameter=([^<>]+)>(.*?)</parameter>", content, re.DOTALL)
+            if not parameter or parameter[1] in parameters:
+                raise ValueError("Malformed or duplicate parameter")
+            key, value = parameter[1], parameter[2]
+            if re.search(r"</?(?:tool_call|function|parameter)(?:[=>])", value):
+                raise ValueError("Ambiguous structural tag in parameter")
+            parameters[key] = parameter_value(value, schemas.get(name, {}).get(key, {}))
+            content = content[parameter.end() :].strip()
+        calls.append({"name": name, "parameters": parameters})
+        remaining = remaining[match.end() :].strip()
+    if not calls:
+        raise ValueError("Empty tool call")
+    return calls
+
+
+def score_response(prediction: str, reference: dict, *, think_prefix_in_prompt: bool = False) -> ToolRLScore:
+    """Native format credit plus upstream's fixed semantic call reward.
+
+    No-call targets grade plain answer format only, never factual correctness.
+    Whitespace after reasoning and between calls is not a reward signal.
+    """
+    expected = validate_target(reference)
     if think_prefix_in_prompt:
         prediction = "<think>" + prediction
-    match = re.fullmatch(r"<think>.*?</think>\n(.*)", prediction, re.DOTALL)
-    body = match[1] if match else ""
-    pattern = r"<tool_call>\n.*?\n</tool_call>" if kind == "tool_call" else r"<response>.*?</response>"
-    formatted = (
-        match is not None
-        and prediction.count("<think>") == prediction.count("</think>") == 1
-        and re.fullmatch(pattern, body, re.DOTALL) is not None
-        and body.count(f"<{kind}>") == body.count(f"</{kind}>") == 1
-    )
-    format_score = float(formatted)
-    correctness = 0.0
+    match = re.fullmatch(r"<think>.*?</think>\s*(.*)", prediction, re.DOTALL)
+    formatted = match is not None and prediction.count("<think>") == prediction.count("</think>") == 1
+    action = prediction.split("</think>", 1)[1].strip() if "</think>" in prediction else prediction.strip()
+    if "<think>" in action:
+        action = ""
     if expected:
-        # Missing reasoning tags need not erase a valid call's correctness,
-        # but calls quoted inside reasoning must never count as actions.
-        action = prediction.split("</think>", 1)[1] if "</think>" in prediction else prediction
-        if "<think>" in action:
-            action = ""
         try:
-            correctness = _call_score(expected, parse_calls(action))
+            calls = parse_native_calls(action, reference["tools"])
+            correctness = _call_score(expected, calls)
         except (ValueError, TypeError, RecursionError):
-            correctness = -3.0
+            formatted, correctness = False, -3.0
+    else:
+        formatted = (
+            formatted and bool(action) and not re.search(r"</?(?:tool_call|function|parameter|response)\b", action)
+        )
+        correctness = 0.0
+    format_score = float(formatted)
     return ToolRLScore(format_score + correctness, format_score, correctness)

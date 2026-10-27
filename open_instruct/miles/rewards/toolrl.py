@@ -36,7 +36,7 @@ class ToolRLVerifier:
                 "status": "completed",
                 "format_score": result.format_score,
                 "correctness_score": result.correctness_score,
-                "reference_has_calls": bool(toolrl_utils.reference_parts(label)[1]),
+                "reference_has_calls": bool(toolrl_utils.validate_target(label)),
             },
         )
 
