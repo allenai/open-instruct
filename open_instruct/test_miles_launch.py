@@ -65,8 +65,18 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     task = launch.specification(IMAGE_ID, run)["tasks"][0]
     assert task["resources"]["gpuCount"] == gpus
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
+    assert task["resources"]["memory"] == "256 GiB"
     assert task["context"]["priority"] == "high"
     assert task["context"]["minRuntime"] == "0s"
+
+
+def test_host_memory_override_reaches_beaker_and_submitted_config(tmp_path):
+    run = spec(tmp_path, launch={"memory": "128 GiB", "shared_memory": "64 GiB"})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert task["resources"]["memory"] == "128 GiB"
+    assert task["resources"]["sharedMemory"] == "64 GiB"
+    submitted = payload(task["arguments"][0])
+    assert RunSpec.from_dict(submitted).launch["memory"] == "128 GiB"
 
 
 @pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])
@@ -286,7 +296,16 @@ def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatc
         return json.dumps([{"id": f"experiment-{len(submitted)}"}])
 
     monkeypatch.setattr(launch.subprocess, "check_output", check_output)
+    original_compile = RunSpec.compile
+    compilations = []
+
+    def compile_once(*args, **kwargs):
+        compilations.append(1)
+        return original_compile(*args, **kwargs)
+
+    monkeypatch.setattr(RunSpec, "compile", compile_once)
     first = launch.submit("test-user/image-alias", run)
+    assert len(compilations) == 1
     assert first["image"] == IMAGE_ID and first["requested_image"] == "test-user/image-alias"
     assert first["revision"] == "source-revision"
     assert first["spec_sha256"] == workflow.fingerprint(run.to_dict())

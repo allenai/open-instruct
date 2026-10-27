@@ -26,6 +26,7 @@ def _miles(overrides):
         RunSpec.load(
             EXAMPLE,
             overrides=[
+                'inference.profile="generic"',
                 "inference.radix_cache=false",
                 "inference.sglang_server_concurrency=64",
                 "inference.sglang_max_running_requests=64",
@@ -37,11 +38,12 @@ def _miles(overrides):
     )
 
 
-@pytest.mark.parametrize("profile", ["dev", "node", "large"])
-def test_example_default_is_cache_off_with_a_slot_per_request(profile):
+@pytest.mark.parametrize("profile", ["dev", "node", "three-node"])
+def test_example_cache_mode_matches_explicit_preset(profile):
     miles = RunSpec.load(EXAMPLE.with_name(f"{profile}.toml")).compile().miles
-    assert miles["sglang_disable_radix_cache"] is True
-    assert "sglang_mamba_radix_cache_strategy" not in miles
+    assert miles["sglang_disable_radix_cache"] is (profile == "dev")
+    if profile != "dev":
+        assert miles["sglang_mamba_radix_cache_strategy"] == "extra_buffer"
     assert miles["sglang_max_mamba_cache_size"] >= miles["sglang_max_running_requests"]
 
 

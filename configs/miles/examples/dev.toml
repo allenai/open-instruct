@@ -48,6 +48,7 @@ rollout_batch_size = 4
 samples_per_prompt = 2
 max_response_length = 256
 max_context_length = 512
+# Small pools and eight running requests for colocated tiny-model mechanics.
 sglang_max_running_requests = 8
 sglang_max_total_tokens = 32768
 sglang_mem_fraction_static = 0.2

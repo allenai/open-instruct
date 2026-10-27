@@ -6,7 +6,7 @@ See the [scheduling contract](launching.md#distributed-scheduling-contract)
 before submitting a multi-node run. Short execution checks do not establish
 mixture learning quality.
 
-Start from [large.toml](../../configs/miles/examples/large.toml), copying it to
+Start from [three-node.toml](../../configs/miles/examples/three-node.toml), copying it to
 `runs/` before changing policy, dataset, verifier and judge inputs. Run `plan` and
 `validate` on that personal file, inspect the rendered replica group, then submit
 through the [committed-image launcher](launching.md). The example paths are
@@ -28,7 +28,7 @@ All replicas have the same allocation size; the plan reports any unused GPUs.
 | 2 trainer + 6 rollout, no judge (`node`) | 1 node, 8 GPUs, no unused GPUs |
 | 8 trainer + 7 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
 | 4 trainer + 11 rollout + 1 judge | 2 nodes, 16 GPUs, no unused GPUs |
-| 4 trainer + 19 rollout + 1 judge (`large`) | 3 nodes, 24 GPUs, no unused GPUs |
+| 4 trainer + 19 rollout + 1 judge (`three-node`) | 3 nodes, 24 GPUs, no unused GPUs |
 | 8 trainer + 23 rollout + 1 judge | 4 nodes, 32 GPUs, no unused GPUs |
 | 8 trainer + 8 rollout + 1 judge | 3 nodes, 24 GPUs, 7 unused GPUs |
 
@@ -57,7 +57,7 @@ policy weights or a trainer rank from landing on a judge device.
 The schema follows the Megatron implementation: `[judges.NAME]` declares serving, `[rubrics.NAME]`
 declares grading, and `[judging.bindings.VERIFIER]` maps prepared verifier names to
 both. Two rubrics can use one fixed service. Only bound services consume GPUs.
-The large example binds `general-quality` and `general-quality_ref`.
+The three-node example binds `general-quality` and `general-quality_ref`.
 The node example uses only math, instruction-following and code verifiers and
 allocates no judge GPU.
 
@@ -128,7 +128,7 @@ Core optimizer/publication/replay contracts and retained rollout metadata.
 `driver-RANK.log` and `judge-NAME-RANK.log` stay on WEKA. A successful tiny run must
 include finite optimizer steps, policy refresh and actual judge replies; process
 exit alone is insufficient. Startup controls do not establish judge calibration
-or throughput for a production mixture. The full judged `large` combination, 32K
+or throughput for a production mixture. The full judged `three-node` combination, 32K
 judged responses and sustained multi-node performance are untested.
 
 ## Policy-engine health

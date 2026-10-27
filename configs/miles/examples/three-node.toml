@@ -4,13 +4,13 @@
 # Setup and workload requirements: configs/miles/examples/README.md
 # Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
 schema_version = 1
-name = "large"
+name = "three-node"
 
 [model]
 source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/checkpoints/policy-hf"
 
 [output]
-root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/large"
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/three-node"
 export_hf = true
 
 [launch]
@@ -45,7 +45,7 @@ BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 [data]
 # Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.
 # Source revision: 0fb6466d31ef3a9dd16985ef635e6429e05a6491.
-# Preparation contract: docs/miles/data-and-evaluation.md#large-training-mixture
+# Preparation contract: docs/miles/data-and-evaluation.md#three-node-training-mixture
 prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/train.jsonl"
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/verifiers.json"
 
@@ -201,14 +201,15 @@ rollout_batch_size = 64
 samples_per_prompt = 4
 max_response_length = 32768
 max_context_length = 34816
-sglang_max_mamba_cache_size = 1024
-sglang_mem_fraction_static = 0.7
+# Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
+# Presets apply whole. To tune their settings, select generic and copy the preset block.
+profile = "olmo35-b300-v1"
 
 [tracking]
 wandb_mode = "offline"
 wandb_team = "ai2-llm"
 wandb_project = "open-instruct-miles"
-wandb_group = "large"
+wandb_group = "three-node"
 
 [core]
 checkpoint_keep_last = 2
@@ -222,10 +223,11 @@ scoring_check_interval = 0
 [miles]
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
-sglang_chunked_prefill_size = 8192
 
 [async]
 fully_async = true
+# Omitted producer budget scales with resolved engine capacity and fleet size.
+# Review policy-age warnings before scaling; an explicit budget still overrides it.
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

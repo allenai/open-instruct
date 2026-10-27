@@ -17,20 +17,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def large():
-    return RunSpec.load(ROOT / "configs/miles/examples/large.toml")
+def three_node():
+    return RunSpec.load(ROOT / "configs/miles/examples/three-node.toml")
 
 
-def test_large_panel_preserves_protocols_and_before_after_cadence(large):
-    tasks = large.evaluation["tasks"]
+def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_node):
+    tasks = three_node.evaluation["tasks"]
     assert len(tasks) == len({task["task"] for task in tasks}) == 25
     assert all(not task["generation"] and not task["scoring"] for task in tasks)
-    milestones = large.plan()["evaluation"]["milestones"]
+    milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
     assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
     assert len(milestones[0]["groups"]) == 5
     # Extending the run never introduces periodic full-panel evaluations.
-    document = large.to_dict()
+    document = three_node.to_dict()
     document["training"]["num_rollouts"] = 2500
     extended = RunSpec.from_dict(document)
     assert [point["update"] for point in extended.plan()["evaluation"]["milestones"]] == [0, 2500]
@@ -39,8 +39,8 @@ def test_large_panel_preserves_protocols_and_before_after_cadence(large):
     assert sum(map(len, evaluation.groups(extended.evaluation, 2500, 2500))) == 25
 
 
-def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large, tmp_path, monkeypatch):
-    document = large.to_dict()
+def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three_node, tmp_path, monkeypatch):
+    document = three_node.to_dict()
     document["output"]["root"] = str(tmp_path / "run")
     document["training"]["num_rollouts"] = 2500
     run = RunSpec.from_dict(document)
@@ -109,8 +109,8 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large
     assert len(calls) == 10
 
 
-def test_panel_groups_keep_execution_requirements_separate(large):
-    groups = evaluation.groups(large.evaluation, 0, 200)
+def test_panel_groups_keep_execution_requirements_separate(three_node):
+    groups = evaluation.groups(three_node.evaluation, 0, 200)
     assert sorted(map(len, groups)) == [1, 1, 1, 5, 17]
     for group in groups:
         for task in group:
@@ -136,15 +136,15 @@ def test_panel_groups_keep_execution_requirements_separate(large):
         ({"task": "scicode", "kind": "external", "arguments": {"split": "validation"}}, "reference data"),
     ],
 )
-def test_invalid_panel_settings_fail_before_launch(large, patch, message):
-    config = copy.deepcopy(large.evaluation)
+def test_invalid_panel_settings_fail_before_launch(three_node, patch, message):
+    config = copy.deepcopy(three_node.evaluation)
     config["tasks"] = [{"task": "ifeval", **patch}]
     with pytest.raises(InputError, match=message):
-        evaluation.parse(config, large.launch)
+        evaluation.parse(config, three_node.launch)
 
 
-def test_harness_options_precede_task_overrides(large):
-    task = next(task for task in large.evaluation["tasks"] if task["task"] == "harmbench:wg_judge_thinking")
+def test_harness_options_precede_task_overrides(three_node):
+    task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "harmbench:wg_judge_thinking")
     task = {**task, "scoring": {"limit": 2}}
     args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
     index = args.index("--task")
@@ -153,8 +153,8 @@ def test_harness_options_precede_task_overrides(large):
     assert "limit=2" in args[index:]
 
 
-def test_scicode_uses_external_cli_with_frozen_server(large):
-    task = next(task for task in large.evaluation["tasks"] if task["task"] == "scicode")
+def test_scicode_uses_external_cli_with_frozen_server(three_node):
+    task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
     args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
     assert args[:2] == ["olmo-eval", "run-external"]
     assert args[args.index("--model") + 1] == "/frozen/hf"
@@ -163,11 +163,11 @@ def test_scicode_uses_external_cli_with_frozen_server(large):
     assert "--task" not in args
 
 
-def test_sandbox_environment_is_only_enabled_for_code_jobs(large):
-    for group in evaluation.groups(large.evaluation, 0, 200):
+def test_sandbox_environment_is_only_enabled_for_code_jobs(three_node):
+    for group in evaluation.groups(three_node.evaluation, 0, 200):
         receipt = {
-            "evaluation": evaluation.runtime(large, large.compile().miles),
-            "training": {"name": large.name},
+            "evaluation": evaluation.runtime(three_node, three_node.compile().miles),
+            "training": {"name": three_node.name},
             "update": 0,
             "tasks": group,
             "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
@@ -263,10 +263,24 @@ def test_managed_judge_rejects_insufficient_gpus(monkeypatch):
         evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
 
 
-def test_panel_manages_safety_judges(large):
-    judges = [task for task in large.evaluation["tasks"] if task.get("auxiliary_gpus")]
+def test_panel_manages_safety_judges(three_node):
+    judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
     assert len(judges) == 6
     assert all(not any(key.endswith("base_url") for key in task["harness"]) for task in judges)
     strongreject = next(task for task in judges if task["task"].startswith("strongreject"))
     assert strongreject["harness"]["auxiliary_providers.sr_judge.model"] == "google/gemma-2b"
     assert strongreject["harness"]["auxiliary_providers.sr_judge.kwargs.enable_lora"] is True
+
+
+@pytest.mark.parametrize("mask", ["", "-1", "0,0", "0,-1", "0,"])
+def test_evaluator_rejects_hidden_duplicate_or_empty_mask_entries(monkeypatch, mask):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    with pytest.raises(ValueError, match="visible GPUs"):
+        evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+
+
+def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", " MIG-a , MIG-b ")
+    policy, judge = evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+    assert policy["CUDA_VISIBLE_DEVICES"] == "MIG-a"
+    assert judge["CUDA_VISIBLE_DEVICES"] == "MIG-b"

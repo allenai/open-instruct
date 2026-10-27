@@ -34,7 +34,10 @@ def test_enable_recovery_for_existing_run_and_preserve_new_identity(tmp_path):
     assert json.loads((tmp_path / "workflow.json").read_text())["spec_sha256"] == workflow.fingerprint(document)
 
 
-@pytest.mark.parametrize("section,key,value", [("optimizer", "learning_rate", 2e-6), ("trainer", "gpus", 4)])
+@pytest.mark.parametrize(
+    "section,key,value",
+    [("optimizer", "learning_rate", 2e-6), ("trainer", "gpus", 4), ("launch", "memory", "128 GiB")],
+)
 def test_enabling_recovery_cannot_change_training_recipe(tmp_path, section, key, value):
     document, previous = saved_run(tmp_path)
     document["launch"]["auto_resume"] = True
@@ -49,6 +52,34 @@ def test_modified_saved_spec_cannot_authorize_recipe_change(tmp_path):
     workflow.write_json(tmp_path / "run-spec.json", changed)
     changed["launch"]["auto_resume"] = True
     assert not workflow.recovery_configuration_matches(tmp_path, previous, changed)
+
+
+def test_old_run_resumes_with_historical_host_memory_default(tmp_path):
+    document, _ = saved_run(tmp_path)
+    document["launch"].update(auto_resume=True, memory="256 GiB")
+    spec = SimpleNamespace(
+        output=document["output"], launch=document["launch"], to_dict=lambda: document, plan=lambda: {}
+    )
+    with workflow.run_directory(spec):
+        assert json.loads((tmp_path / "run-spec.json").read_text()) == document
+    assert json.loads((tmp_path / "workflow.json").read_text())["spec_sha256"] == workflow.fingerprint(document)
+
+
+def test_memory_normalization_cannot_authenticate_a_modified_saved_spec(tmp_path):
+    document, previous = saved_run(tmp_path)
+    document["launch"]["memory"] = "256 GiB"
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    document["launch"]["auto_resume"] = True
+    assert not workflow.recovery_configuration_matches(tmp_path, previous, document)
+
+
+def test_explicit_saved_memory_cannot_be_replaced_by_default(tmp_path):
+    document, previous = saved_run(tmp_path)
+    document["launch"]["memory"] = "128 GiB"
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    document["launch"].update(auto_resume=True, memory="256 GiB")
+    assert not workflow.recovery_configuration_matches(tmp_path, previous, document)
 
 
 def test_recovery_does_not_restart_completed_runs(tmp_path):

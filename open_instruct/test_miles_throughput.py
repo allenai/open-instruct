@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from scripts.miles import analyze_throughput, sample_gpu_usage, throughput_occupancy
 
-from open_instruct.miles.configuration import throughput, validation
+from open_instruct.miles.configuration import inference_profiles, throughput, validation
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
@@ -62,7 +62,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
 
 @pytest.mark.parametrize(
     "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
-    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("large", 24, 3, 4, 19, 1)],
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 4, 19, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
@@ -75,16 +75,33 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert layout["judge_gpus"] == judge_gpus
     assert layout["unused_gpus"] == 0
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
-    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "large") else 0)
+    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
 
 
-@pytest.mark.parametrize("profile", ["node", "large"])
-def test_learning_examples_separate_transport_capacity_and_qualification(profile):
-    config = RunSpec.load(f"configs/miles/examples/{profile}.toml").compile()
+@pytest.mark.parametrize("profile,producer_budget", [("node", 1536), ("three-node", 19456)])
+def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
+    spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
+    pending = spec.compile()
+    assert pending.inference_profile["model_metadata_available"] is False
+    assert pending.miles["sglang_max_running_requests"] == 512
+    assert pending.miles["async_max_concurrent_samples"] == producer_budget
+    (tmp_path / "config.json").write_text(json.dumps(inference_profiles.MODEL_SHAPE | {"dtype": "bfloat16"}))
+    config = spec.compile({"hf_checkpoint": str(tmp_path)})
     plan = config.plan()
     capacity = plan["async_capacity"]
-    assert capacity["global_http_slots"] == 2 * capacity["requested_engine_slots"]
-    assert capacity["producer_sample_budget"] >= capacity["global_http_slots"]
+    assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]
+    # Explicit node supply stays bounded; the three-node heuristic remains separate.
+    assert capacity["producer_sample_budget"] == producer_budget
+    if profile == "node":
+        assert producer_budget < capacity["global_http_slots"]
+        assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
+    else:
+        assert producer_budget == 2 * capacity["global_http_slots"]
+        assert any("Producer budget alone" in warning for warning in capacity["warnings"])
+    assert config.miles["global_batch_size"] == 256
+    assert config.core.max_policy_lag == 6
+    assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
+    assert config.miles["sglang_max_total_tokens"] == 512 * 34816
     assert capacity["completed_buffer_samples"] == capacity["samples_per_collection"]
     assert "--check-weight-update-equal" not in config.arguments()
     assert plan["scoring_pass"]["standalone"] is False
