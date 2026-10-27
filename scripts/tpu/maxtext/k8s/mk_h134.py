@@ -1,19 +1,21 @@
-"""H134 mm-ckpt-sft b0 overlays (tpu-worker, 2026-10-26), generated from H123's if4c overlays (A0''s TPU recipe on the
-drop-count image) with only the init weights, data paths, step count and run names changed.
-  python mk_h134.py <k8s dir>
+"""H134 mm-ckpt-sft overlays (tpu-worker, 2026-10-26), generated from H123's if4c overlays (A0''s TPU recipe on the
+drop-count image) with only the init weights, data paths, step count and run names changed. Every arm shares the ep8 x fsdp16
+4x4x8 mesh (ledger-manager 2026-10-26: no big-slice placement for any arm).
+  python mk_h134.py <k8s dir>                                      # B0 (+ the optional P4 diagnostics)
+  python mk_h134.py <k8s dir> --arm b1 --init gs://.../0/items     # B1 or B2, from the strip fork's MaxText items
 Writes, per data-order seed s in {0, 1}:
-  h134/b0-c11-s<s>/     production: h123/if4c-s<s> with LOAD_PARAMETERS_PATH the 14T base (olmo35-small-14t600b-mtlc-emo,
-                        lc/step5961, converted by o35/ unchanged), TRAIN_FILES H122's c11-s<s> shards, STEPS =
-                        LR_SCHEDULE_STEPS = 16,304 (C11's count) and the names. Mesh (fsdp16 x ep8), factor 2.5, LR 5e-5,
-                        3% warmup, NUM_EPOCH, DATA_SEED, checkpoint_period 300, keep 10, batch-hash and drop logging and
-                        the image are H123's.
-  h134/pf-b0-c11-s<s>/  P3 preflight: the production overlay run for 20 steps (P3 reads steps 1-6), scratch output, no
-                        checkpoints, maxRestarts 0. Records the required ragged_buffer_factor and the drops over steps 1-6,
-                        the step-1 CE (gate 1) and BATCH-HASH n=1..20 for P4, as H123's pf-ep8 ran 20 steps.
-  h134/pfd-ep8-b0-s<s>/ P4 diagnostic candidate (not a launch gate, ledger-manager 2026-10-26): pf-b0-c11-s<s> with
-                        load_balance_loss_weight=0 (#620), as H123's pf-ep8.
-  h134/pfd-x16-b0-s<s>/ P4 diagnostic reference on a borrowed 8x8x16: the candidate on fsdp16 x ep64, factor 5.0, r2 data
-                        emulation 8:2:128:32, with the gcsfs restore patch, as H123's pf-x16 (mk_x16.py). Optional."""
+  h134/<arm>-c11-s<s>/     production: h123/if4c-s<s> with LOAD_PARAMETERS_PATH the arm's base, TRAIN_FILES H122's c11-s<s>
+                           shards, STEPS = LR_SCHEDULE_STEPS = 16,304 (C11's count) and the names. Mesh (fsdp16 x ep8),
+                           factor 2.5, LR 5e-5, 3% warmup, NUM_EPOCH, DATA_SEED, checkpoint_period 300, keep 10, batch-hash
+                           and drop logging and the image are H123's.
+  h134/pf-<arm>-c11-s<s>/  P3/P4 preflight: the production overlay run for 20 steps (P3 reads steps 1-6; P4's BATCH-HASH
+                           n=1..20), scratch output, no checkpoints, maxRestarts 0 (ledger-manager accepted 20 as a superset).
+  B0 only, optional P4 diagnostics (not a launch gate, ledger-manager 2026-10-26):
+  h134/pfd-ep8-b0-s<s>/    pf-b0-c11-s<s> with load_balance_loss_weight=0 (#620), as H123's pf-ep8.
+  h134/pfd-x16-b0-s<s>/    the same on a borrowed 8x8x16 (fsdp16 x ep64, factor 5.0, r2 emulation 8:2:128:32, 6 steps,
+                           H123's gcsfs patch), as H123's pf-x16 (mk_x16.py).
+B0 starts from bf16 like B1/B2, which are bf16-only exports (ledger-manager 2026-10-26): the 14T fp32 masters rounded to bf16
+(round-to-nearest-even), stored as their exact fp32 upcast in h134-lc-step5961-bf16."""
 import pathlib
 import sys
 
@@ -21,7 +23,10 @@ import gcsfs_patch  # default restore-only gcsfs retry patch on every 8x8x16 ove
 
 K = pathlib.Path(sys.argv[1])
 FILES = ("jobset.yaml", "kustomization.yaml", "train_sft.sh")
-INIT = "gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-14t600b-mtlc-emo/h134-lc-step5961/0/items"
+ARM, INIT = "b0", "gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-14t600b-mtlc-emo/h134-lc-step5961-bf16/0/items"
+if "--arm" in sys.argv:
+    ARM, INIT = sys.argv[sys.argv.index("--arm") + 1], sys.argv[sys.argv.index("--init") + 1]
+    assert ARM in ("b1", "b2") and INIT.startswith("gs://") and INIT.endswith("/0/items"), (ARM, INIT)
 
 
 def sub(t, pairs, what):
@@ -40,7 +45,7 @@ def write(dst, src, rename, kust=None, jobset=None, header=None):
         if f == "kustomization.yaml" and kust:
             t = sub(t, kust, dst.name)
         if f == "kustomization.yaml" and header:
-            t = header(t)
+            t = header + t
         if f == "jobset.yaml" and jobset:
             t = sub(t, jobset, dst.name)
         (dst / f).write_text(t)
@@ -49,42 +54,44 @@ def write(dst, src, rename, kust=None, jobset=None, header=None):
 
 for s in (0, 1):
     src = K / "h123" / f"if4c-s{s}"
-    prod = K / "h134" / f"b0-c11-s{s}"
-    write(prod, src, ((f"h123-if4c-s{s}", f"h134-b0-c11-s{s}"), (f"olmo35-sft-h123-if4c-s{s}", f"olmo35-sft-h134-b0-c11-s{s}")),
+    js, pfjs = f"h134-{ARM}-c11-s{s}", f"h134-pf-{ARM}-c11-s{s}"
+    prod = K / "h134" / f"{ARM}-c11-s{s}"
+    write(prod, src, ((f"h123-if4c-s{s}", js),),
           kust=(("  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items\n",
                  f"  - LOAD_PARAMETERS_PATH={INIT}\n"),
                 (f"  - TRAIN_FILES=/mnt/post-training/data/h123/if4c-s{s}/*.parquet\n",
                  f"  - TRAIN_FILES=/mnt/post-training/data/h122/c11-s{s}/*.parquet\n"),
                 ("  - LR_SCHEDULE_STEPS=11768\n", "  - LR_SCHEDULE_STEPS=16304\n"),
                 ("  - STEPS=11768\n", "  - STEPS=16304\n")),
-          header=lambda t: (f"# H134 b0-c11-s{s}: H123's if4c-s{s} (A0''s recipe, drop-count image) with the 14T base, H122's c11-s{s}\n"
-                            f"# shards and C11's 16,304 steps; generated by mk_h134.py.\n") + t)
+          header=(f"# H134 {ARM}-c11-s{s}: H123's if4c-s{s} (A0''s recipe, drop-count image) with base {ARM} ({INIT}),\n"
+                  f"# H122's c11-s{s} shards and C11's 16,304 steps; generated by mk_h134.py.\n"))
     kt = (prod / "kustomization.yaml").read_text()
     for keep in (" ici_fsdp_parallelism=16 ici_expert_parallelism=8 ", "  - LR=5e-5\n", "  - WARMUP_FRAC=0.03\n", "  - DATA_SEED=0\n",
                  "  - NUM_EPOCH=2\n", "  - GLOBAL_BATCH=16\n", "  - SEQ_LEN=65536\n", " ragged_buffer_factor=2.5 ", " checkpoint_period=300 ",
                  " max_num_checkpoints_to_keep=10 ", " log_moe_dropped_tokens=true ", "  - MAXTEXT_LOG_BATCH_HASH=1\n",
                  "  - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo35-8b971706-h045\n", "  - MAXTEXT_SFT_LABELS=prefix\n",
-                 "newTag: 51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea\n"):
+                 f"  - RUN_NAME=olmo35-sft-{js}\n", "newTag: 51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea\n"):
         assert keep in kt, keep
-    assert f"  - RUN_NAME=olmo35-sft-h134-b0-c11-s{s}\n" in kt and "if4c" not in kt.split("configMapGenerator:", 1)[1]
+    assert "if4c" not in kt.split("configMapGenerator:", 1)[1]
     assert "MAXTEXT_R2_DATA_EMULATION" not in kt and "load_balance_loss_weight" not in kt
     assert "maxRestarts: 3" in (prod / "jobset.yaml").read_text()
+    assert "cloud.google.com/gke-tpu-topology: 4x4x8" in (prod / "jobset.yaml").read_text()
 
-    pf = K / "h134" / f"pf-b0-c11-s{s}"
-    write(pf, prod, ((f"h134-b0-c11-s{s}", f"h134-pf-b0-c11-s{s}"),),
+    pf = K / "h134" / f"pf-{ARM}-c11-s{s}"
+    write(pf, prod, ((js, pfjs),),
           kust=(("  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs\n", "  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch\n"),
-                ("  - STEPS=16304\n", "  - STEPS=20\n"),   # P3 reads steps 1-6; P4's BATCH-HASH n=1..20 vs H122's replay
+                ("  - STEPS=16304\n", "  - STEPS=20\n"),  # P3 reads steps 1-6; P4's BATCH-HASH n=1..20 vs H122's replay
                 (" checkpoint_period=300 ", " checkpoint_period=100000 ")),
           jobset=(("maxRestarts: 3", "maxRestarts: 0"),),
-          header=lambda t: t.replace(f"# H134 b0-c11-s{s}:", f"# H134 pf-b0-c11-s{s} (P3/P4 preflight, 20 steps, scratch):", 1))
+          header=f"# H134 pf-{ARM}-c11-s{s}: P3/P4 preflight, 20 steps, scratch output.\n")
     assert "  - LR_SCHEDULE_STEPS=16304\n" in (pf / "kustomization.yaml").read_text()
 
+    if ARM != "b0":
+        continue  # the P4 x16 diagnostic is staged for B0 only
     ep8 = K / "h134" / f"pfd-ep8-b0-s{s}"
-    write(ep8, pf, ((f"h134-pf-b0-c11-s{s}", f"h134-pfd-ep8-b0-s{s}"),),
+    write(ep8, pf, ((pfjs, f"h134-pfd-ep8-b0-s{s}"),),
           kust=((" emo_enabled=false ", " emo_enabled=false load_balance_loss_weight=0 "),),
-          header=lambda t: t.replace(f"# H134 pf-b0-c11-s{s} (P3/P4 preflight, 20 steps, scratch):",
-                                     f"# H134 pfd-ep8-b0-s{s} (P4 diagnostic candidate, lb weight 0):", 1))
-
+          header=f"# H134 pfd-ep8-b0-s{s}: P4 diagnostic candidate, lb weight 0.\n")
     x16 = K / "h134" / f"pfd-x16-b0-s{s}"
     write(x16, ep8, ((f"h134-pfd-ep8-b0-s{s}", f"h134-pfd-x16-b0-s{s}"), ("  - STEPS=20\n", "  - STEPS=6\n")),
           kust=(("  - MAXTEXT_LOG_BATCH_HASH=1\n", "  - MAXTEXT_LOG_BATCH_HASH=1\n  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32\n"),
@@ -95,6 +102,5 @@ for s in (0, 1):
           jobset=(("parallelism: 32 # Hosts per slice.", "parallelism: 256 # Hosts per slice."),
                   ("completions: 32", "completions: 256"),
                   ("cloud.google.com/gke-tpu-topology: 4x4x8", "cloud.google.com/gke-tpu-topology: 8x8x16")),
-          header=lambda t: t.replace(f"# H134 pfd-ep8-b0-s{s} (P4 diagnostic candidate, lb weight 0):",
-                                     f"# H134 pfd-x16-b0-s{s} (P4 diagnostic reference, 8x8x16, optional):", 1))
+          header=f"# H134 pfd-x16-b0-s{s}: P4 diagnostic reference, 8x8x16, optional.\n")
     gcsfs_patch.apply(x16)

@@ -1,0 +1,29 @@
+version: v2
+description: 'H134 P2 gate 1: HF step-1 CE of the bf16-rounded 14T base (b0) on C11 s0/s1 step-1 batches'
+budget: ai2/oe-other
+tasks:
+  - name: refce
+    image:
+      beaker: 01M5APNCNKVNSR8WQBWMKTERHE
+    command: [bash, /weka/oe-eval-default/abhishekr/watch/tpu/h134/refce/run_gpu_arm.sh, /weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf/olmo35-small-14t600b-mtlc-emo-lc5961-bf16-base-h134, /weka/oe-eval-default/abhishekr/watch/tpu/h134/refce/b0]
+    datasets:
+      - mountPath: /weka/oe-eval-default
+        source:
+          weka: oe-eval-default
+      - mountPath: /weka/olmo-3p5-post-checkpoints
+        source:
+          weka: olmo-3p5-post-checkpoints
+    result:
+      path: /output
+    resources:
+      gpuCount: 1
+      sharedMemory: 10 GiB
+    context:
+      priority: high
+      minRuntime: 5m0s
+      autoResume: true
+    constraints:
+      cluster:
+        - ai2/jupiter
+        - ai2/holmes
+    timeout: 4h0m0s
