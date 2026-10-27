@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import olmo_sglang
 import sglang
 import torch
+from debug_jigsaw_controls import core_controls
 from miles.backends.core_utils import models, vision_models
 from miles.backends.training_utils import loss, parallel
 from miles.utils.ft_utils.process_group_utils import GroupInfo
@@ -158,7 +159,8 @@ def core(args, samples, checkpoint):
     visual = vision_model.OlmoVisionStack(hf, device="cuda", dtype=torch.bfloat16)
     visual.load_weights((k, v) for k, v in state.items() if not k.startswith("language_model."))
     weight_audit = {"tensors": 0, "publication_rounding": [], "export_mismatches": []}
-    for name, value in olmo3.iter_olmo3_moe_hf_state(model, hf.text_config):
+    exported_state = () if args.core_controls else olmo3.iter_olmo3_moe_hf_state(model, hf.text_config)
+    for name, value in exported_state:
         original = state["language_model." + name]
         exported = value.detach().cpu()
         weight_audit["tensors"] += 1
@@ -197,8 +199,10 @@ def core(args, samples, checkpoint):
 
         return hook
 
-    handles = [block.register_forward_hook(capture(f"layer_{i}")) for i, block in enumerate(model.blocks.values())]
-    handles.append(model.lm_head.norm.register_forward_hook(capture("head_input")))
+    handles = []
+    if not args.core_controls:
+        handles = [block.register_forward_hook(capture(f"layer_{i}")) for i, block in enumerate(model.blocks.values())]
+        handles.append(model.lm_head.norm.register_forward_hook(capture("head_input")))
     write(args.output, report)
     with torch.no_grad():
         for index, sample in enumerate(samples):
@@ -267,11 +271,14 @@ def core(args, samples, checkpoint):
                     "direct_score_max_abs": float((scores - direct).abs().max()),
                     "seconds": time.perf_counter() - started,
                 }
-                head_input = captured["head_input"].reshape(-1, model.d_model)
-                fp32_logits = torch.mm(head_input[-n - 1 : -1], model.lm_head.w_out.weight.T, out_dtype=torch.float32)
-                row[variant]["fp32_head_log_probs"] = (
-                    fp32_logits.log_softmax(-1).gather(1, tokens[-n:, None]).flatten().tolist()
-                )
+                if captured:
+                    head_input = captured["head_input"].reshape(-1, model.d_model)
+                    fp32_logits = torch.mm(
+                        head_input[-n - 1 : -1], model.lm_head.w_out.weight.T, out_dtype=torch.float32
+                    )
+                    row[variant]["fp32_head_log_probs"] = (
+                        fp32_logits.log_softmax(-1).gather(1, tokens[-n:, None]).flatten().tolist()
+                    )
                 if index == 0 and serving_trace is not None:
                     row[variant]["activation_comparison"] = {
                         name: differences(value.reshape_as(serving_trace[name]), serving_trace[name].to("cuda"))
@@ -285,6 +292,10 @@ def core(args, samples, checkpoint):
             report["records"].append(row)
             write(args.output, report)
             print(json.dumps(row), flush=True)
+    if args.core_controls:
+        report["instrumentation_controls"] = core_controls(
+            model, visual, module, hf, processor, samples[0], args.output
+        )
     report["peak_allocated_bytes"] = torch.cuda.max_memory_allocated()
     report["complete"] = True
     write(args.output, report)
@@ -524,6 +535,7 @@ def main():
     parser.add_argument("--serving-trace", type=Path)
     parser.add_argument("--fp32-head", action="store_true")
     parser.add_argument("--publication-roundtrip", action="store_true")
+    parser.add_argument("--core-controls", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(8)
     torch.manual_seed(17)

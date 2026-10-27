@@ -1,6 +1,6 @@
 """Opt-in hooks for a copied, pinned serving package in numerical diagnostics.
 
-The payload builder appends ``install(Olmo3MoeVisionForCausalLM)`` to its copy of
+The payload builder appends ``install(Olmo3MoeVisionForConditionalGeneration)`` to its copy of
 the serving model module. No installed or production source is modified.
 """
 
@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 import torch
+from torch.nn import functional as F
 
 
 def install(model_class):
@@ -21,13 +22,27 @@ def install(model_class):
 
     def initialize(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
+        if os.environ.get("OI_JIGSAW_SPLIT_QKV") == "1":
+            for layer in self.language_model.model.layers:
+                attention = layer.self_attn
+                if not hasattr(attention, "key_dim"):
+                    continue
+                projection = attention.qkv_proj
+                widths = (attention.key_dim, attention.key_dim, attention.value_dim)
+
+                def split_projection(value, projection=projection, widths=widths):
+                    return torch.cat([F.linear(value, w) for w in projection.weight.split(widths)], dim=-1), None
+
+                projection.forward = split_projection
         self._jigsaw_capture = None
         self._jigsaw_captured = False
 
         def capture(name):
             def hook(module, inputs, output):
                 if self._jigsaw_capture is not None:
-                    self._jigsaw_capture[name] = output.detach().clone()
+                    value = output[0] if isinstance(output, tuple) else output
+                    if isinstance(value, torch.Tensor):
+                        self._jigsaw_capture[name] = value.detach().clone()
 
             return hook
 
@@ -39,6 +54,10 @@ def install(model_class):
         for index, layer in enumerate(self.language_model.model.layers):
             layer.register_forward_hook(capture(f"layer_{index}"))
         self.language_model.model.norm.register_forward_hook(capture("head_input"))
+        if os.environ.get("OI_JIGSAW_TRACE_DETAIL") == "1":
+            for name, module in self.language_model.model.layers[0].named_modules():
+                if name:
+                    module.register_forward_hook(capture("detail." + name))
 
     def forward(self, input_ids, positions, forward_batch, *args, **kwargs):
         mm_inputs = getattr(forward_batch, "mm_inputs", None)
@@ -71,6 +90,7 @@ def install(model_class):
                 "fp32_lm_head": self.language_model.logits_processor.use_fp32_lm_head,
                 "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
                 "float32_matmul_precision": torch.get_float32_matmul_precision(),
+                "split_qkv": os.environ.get("OI_JIGSAW_SPLIT_QKV") == "1",
                 "weights": weights,
             }
             target.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
