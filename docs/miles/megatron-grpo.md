@@ -107,18 +107,22 @@ responses for every async run.
    and the trainer's advantages in `debug/train_data` against the centered
    rewards, and completes the HF export. A rollout whose groups all have equal
    rewards is recorded as `zero_signal` rather than failed: its advantages and
-   gradient norm are legitimately zero. Before training, verifier records past
-   the latest checkpoint move to `verifier-rewards.replayed.jsonl` (all records
-   when not resuming), and a torn final line goes to
-   `verifier-rewards.replayed.partial`, so the audit sees exactly one record per
-   trained response. `audit.json` reports the cumulative counts as
-   `replayed_records` and `torn_fragments` (upper bounds if a launch died while
-   reconciling). Resuming requires an unchanged rollout batch size times samples
-   per prompt. A changed run configuration is already rejected; for an output
-   root without `workflow.json`, the launch also checks the previous
-   `native-arguments.json`. An output root written before this
-   reconciliation existed is reconciled on its next launch;
+   gradient norm are legitimately zero;
 6. reloads the export in a fresh SGLang process and probes a training prompt.
+
+**Resuming.** Before training, each launch reconciles the verifier evidence with
+the latest checkpoint, so the audit sees exactly one record per trained response:
+
+- records past the latest checkpoint (all records when not resuming) move to
+  `verifier-rewards.replayed.jsonl`, and a torn final line goes to
+  `verifier-rewards.replayed.partial`;
+- `audit.json` reports the cumulative counts as `replayed_records` and
+  `torn_fragments` (upper bounds if a launch died while reconciling);
+- resuming requires an unchanged rollout batch size times samples per prompt.
+  A changed run configuration is already rejected; for an output root without
+  `workflow.json`, the launch also checks the previous `native-arguments.json`;
+- an output root written before this reconciliation existed is reconciled on
+  its next launch.
 
 A previously completed, independently load-audited **initial TP2/PP1 native
 release** can be supplied as an inline `[model.native_checkpoint]` provenance
