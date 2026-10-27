@@ -51,6 +51,14 @@ layers or Git URLs. For standalone source preparation, pass
 Existing published images retain their original sources; rebuild after changing
 the lock.
 
+For local committed changes that have not been published to GitHub, provide all
+three `--source-cache NAME=PATH` arguments to `build_image.py` (`olmo-core`,
+`miles`, and `olmo-sglang`). The builder fetches only each lock-pinned commit into
+temporary shallow repositories and passes them as a local Docker build context.
+It ignores dirty files and moving branch tips, requires no GitHub credential,
+and does not push Git branches. This produces a local image; uploading that image
+and launching a run are separate actions through the normal launcher.
+
 prepare_runtime refuses to replace existing source directories. Its --cache
 arguments can use local clones as fetch sources; they do not select uncommitted
 sibling code. build_image checks the immutable base Docker ID. For actual

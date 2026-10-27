@@ -19,6 +19,7 @@ ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_rewar
 FINISHED_STD_FILTER = "open_instruct.miles.rewards.truncation.filter_finished_reward_variance"
 EXCLUDE_TRUNCATED = "open_instruct.miles.rewards.truncation.exclude_truncated"
 EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
+VISION_GENERATOR = "open_instruct.miles.datasets.vision_rollout.generate"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 
@@ -311,6 +312,23 @@ class RunConfig:
             options["rollout_sample_filter_path"] = EXPERT_SCHEDULE
         elif hook == EXPERT_SCHEDULE:
             raise constraints.error("The expert schedule hook requires core.expert_balanced_packing=true")
+        if options.get("custom_generate_function_path") == VISION_GENERATOR:
+            if options.get("sglang_enable_multimodal") is False:
+                raise constraints.error("The vision rollout hook requires sglang_enable_multimodal=true")
+            options["sglang_enable_multimodal"] = True
+            if not self.core.freeze_image_encoder or not self.core.freeze_connector:
+                raise constraints.error("The vision pilot requires a frozen image encoder and full connector")
+            if self.core.publication_mode != "barrier" or self.core.sequence_packing:
+                raise constraints.error("The vision pilot requires barrier publication without sequence packing")
+            if options.get("apply_chat_template") or options.get("multimodal_keys"):
+                raise constraints.error(
+                    "The vision pilot requires document prompts without generic multimodal preprocessing"
+                )
+            if any(
+                options.get(name)
+                for name in ("partial_rollout", "use_rollout_routing_replay", "use_rollout_indexer_replay")
+            ):
+                raise constraints.error("Partial rollouts and routing/indexer replay are not qualified for vision")
         return options
 
     @classmethod

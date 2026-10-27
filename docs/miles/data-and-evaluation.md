@@ -52,6 +52,8 @@ features separately from the current language patch-token embedding.
 Set `miles.custom_generate_function_path` to
 `open_instruct.miles.datasets.vision_rollout.generate`. Keep document prompts
 without chat-template rendering or generic `multimodal_keys` preprocessing.
+The hook selects SGLang multimodal mode and registers the external Olmo image
+processor in the serving worker environment.
 Use barrier publication, one document per microbatch, per-expert publication,
 and no routing/indexer replay. Partial continuations, asynchronous refresh,
 sequence packing and unfrozen visual training are not qualified.
