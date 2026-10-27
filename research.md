@@ -802,3 +802,39 @@ not GSM8K learning or full serving/decode qualification.
 The real GRPO learner bypassed OLMo-core's forward autocast context, leaving FlashAttention inputs in FP32 with one learner and no FSDP cast. The standalone numerical gate used its own autocast and did not cover this path. GRPO now sets autocast from `model_dtype` and wraps learner, old-policy, and reference-policy forwards; optimizer parameters remain FP32. CPU regression tests cover all three actual forward paths.
 [Corrected rerun](https://beaker.org/ex/01M5ZAPEQFTT3YEMK107ZSVFK4) is submitted with the verified 2-GPU/auto-resume/every-100 checkpoint spec. See [the run log](experiment.md#olmo-hybrid-release-275m-bf16-rerun-2026-10-27). No end-to-end RL result is claimed.
 See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).
+
+
+## Temporary MILES hybrid serving qualification
+
+**Status:** ACTIVE — five-scale BF16 serving qualified; native MILES RL validation pending.
+
+Can a temporary bridge reuse the pinned release Gated DeltaNet implementation
+and SGLang scheduling without requiring a full custom inference kernel?
+Implementation lives on `codex/hybrid-mainline` in the sibling
+`miles-olmo-core-hybrid` and `open-instruct-miles-hybrid` checkouts. The original
+Saturn rerun continues on Open Instruct/Core/vLLM.
+
+Finding: compare cached serving with HF cached decode as well as full-sequence
+HF evaluation. At 810m and a one-token prefix, HF cached-versus-full KL reaches
+0.00176434, exactly reproducing the initial SGLang-versus-full result. An FP32
+output head alone only reduces this to 0.00151127. This is a real precision/path
+difference relevant to RL logprobs, not sufficient evidence of a serving bug.
+The expanded qualification retains both diagnostics and requires separate
+selected-token and full-distribution parity with the cached reference.
+
+See [the interactive experiment](experiment.md#interactive-rhea-sglang-qualification-2026-10-27)
+and [attachment instructions](BEAKER_ATTACH.md#interactive-rhea-gpu-qualification-2026-10-27).
+
+
+Serving finding (2026-10-27): all five final-midtrain sizes passed the BF16
+reference-backbone fallback on Rhea: 160 functional requests and 40 dense probes,
+including long prompts, queued requests, slot reuse, and disk reload. Maximum
+selected-token logprob error stayed below 5e-4 and greedy agreement was 100%.
+This selects `MILES_HYBRID_REFERENCE_BACKBONE=1` with BF16 logits for the temporary
+recipe. It localizes the earlier discrepancy to differences introduced by the
+faster packed/RadixAttention path, without isolating one specific operation.
+That path remains unqualified across the whole family. The fallback is slower
+(roughly 62–67 output tokens/s at 275m and 20–22 at 2.7b for these warm batches).
+HF cached-versus-full discrepancies remain, so native RL publication, importance
+ratios, restart recovery, and learning evidence are still pending; the overall
+MILES integration question remains ACTIVE.

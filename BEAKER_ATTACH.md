@@ -127,7 +127,7 @@ running experiments, so code edits apply without rebuilding:
 ```bash
 cd /weka/oe-adapt-default/michaeln/miles-olmo-core-hybrid
 export PYTHONPATH="$PWD:$PYTHONPATH"
-python tools/hybrid/qualify_sglang.py --size 275m --output-dir /weka/oe-adapt-default/michaeln/open-instruct-hybrid/qualification/my-test
+python tools/hybrid/qualify_sglang.py --size 275m --reference-backbone --output-dir /weka/oe-adapt-default/michaeln/open-instruct-hybrid/qualification/my-test
 # Or: --size all --sizes 450m 810m 1.4b 2.7b
 ```
 
@@ -136,3 +136,9 @@ in the existing Hammond session supports it. Rhea rejects protected sessions
 without an allocation, so explicitly use `--min-runtime 0` when creating a
 replacement. Weka mounts do not accept `mode=readonly`; the qualification code
 only reads release checkpoints and writes its own report directory.
+
+The BF16 reference-backbone mode reuses the release HF/FLA model under SGLang
+scheduling. Without `--reference-backbone`, the faster packed/RadixAttention path
+has numerical parity failures at some scales; successful loading is not a pass.
+For MILES-managed workers the equivalent setting is
+`MILES_HYBRID_REFERENCE_BACKBONE=1`, already explicit in the temporary recipe.

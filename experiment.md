@@ -861,3 +861,70 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
 - Validation: 34 focused precision/resume/GRPO/release CPU tests passed; formatting,
   lint, compilation, and type checks passed. GPU execution status at submission:
   QUEUED. Neither a successful GRPO update nor preemption recovery is claimed.
+
+
+## Interactive Rhea SGLang qualification (2026-10-27)
+
+- User explicitly requested direct experimentation in an interactive Rhea session.
+  Session `01M5ZB6KJDNFG7KYKWHN8X948W`, node `rhea-cs-aus-473.reviz.ai2.in`,
+  one RTX A6000 48GB, CPU12, host memory96GiB, shm16GiB, normal priority,
+  minRuntime0, timeout90m; workspace ai2/open-instruct-dev, budget ai2/oe-other.
+  Image `01M5ZA7AP531QVWGSAGSC8M5B8`, Torch2.13/CUDA13, Transformers5.12.1,
+  SGLang0.5.19.dev49+g3145136, FLA0.5.2, scaling-ladders plugin `0fb485ce`.
+- Live Weka source `/weka/oe-adapt-default/michaeln/miles-olmo-core-hybrid`,
+  branch `codex/hybrid-mainline`; tmux `hybrid-tests`; preserve the image's
+  PYTHONPATH after prepending the checkout. No local Docker builds.
+- All five final midtrain releases: 275m/450m step0038147, 810m step0023842,
+  1.4b/2.7b step0011921. BF16, TP1/PP1, no CUDA graphs, prefix cache, chunked
+  prefill, or quantization. Four running requests, memory fraction0.35, context4096.
+- Initial batch `01M5ZA7ZXSFH1T18AQFMX8P9RQ` was stopped after exposing a
+  harness bug: SGLang's returned prompt suffix includes an initial None; dropping
+  it shifted token alignment. Corrected harness regression tests cover this.
+- Expanded source `d023770c`: 275m/1.4b/2.7b passed selected-token/full-sequence
+  checks before and after disk reload; 450m/810m exceeded the 0.08 pointwise
+  logprob bound. All sizes loaded and decoded. Reports:
+  `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/qualification/rhea-interactive-d023770c`.
+- Follow-up whole-vocabulary checks exposed 810m cached-versus-full-sequence
+  KL 0.00176434 at prompt length1. Independent HF cached-versus-full evaluation
+  reproduced that exact KL and TV0.0244253. FP32 logits alone: KL 0.00151127.
+  No tolerance relaxed; the reference now records cached and full-sequence paths
+  separately. This distinction does not validate learner/rollout importance ratios.
+
+### Completed BF16 reference-backbone qualification
+
+All five final-midtrain sizes PASSED on the same A6000 and harness/adapter
+revision `8bb6da4a`, with BF16 model computation and BF16 logits (no FP32-head
+override). Each passed 16 functional requests before plus 16 after disk reload,
+and four dense-distribution probes before plus four after reload: 160 functional
+requests and 40 dense probes total. Greedy agreement was 1.0 in every case.
+
+| Size | Result | Max selected logprob error | Warm output tokens/s |
+| --- | --- | ---: | ---: |
+| 275m | PASSED | 1.23978e-05 | 62.1–67.1 |
+| 450m | PASSED | 3.00407e-05 | 42.2–45.0 |
+| 810m | PASSED | 0.000198603 | 39.2–45.0 |
+| 1.4b | PASSED | 0.000464261 | 28.9–32.0 |
+| 2.7b | PASSED | 9.9659e-05 | 19.8–22.4 |
+
+Throughput ranges are complete warm batches after reload, including prefill and
+request overhead; these are short synthetic serving measurements, not RL throughput.
+Maximum measured cached-reference KL was0 after nonnegative clamping at float32
+resolution; the small nonzero logprob errors above mean this is not exact equality.
+HF cached-versus-full discrepancies remain (450m up to 0.00240536; 810m0.00176434),
+so training/rollout importance-ratio calibration remains a separate GPU requirement.
+
+Reports: `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/qualification/rhea-hf-bf16-8bb6da4a`.
+Harness SHA256: `e0f9d51f60e463149cffd72ed6f7bec92e0d013ce12eec82830a49387c37307c`.
+Adapter SHA256: `73e345ec258aded60a37bea5e93d70a5bc5f753199bc41b004c809a6ebf4df62`.
+No checkpoint weights were modified. This qualifies the HF-backbone fallback;
+the packed/RadixAttention path does not pass the same matrix at every scale.
+Native MILES learner updates, live publication, restart recovery, and learning
+quality remain pending. CPU validation:19 runtime tests and148 companion tests
+passed; scoped Ruff and companion formatting/lint/compile/type checks passed.
+
+Saturn rerun status refresh (2026-10-27): initial job
+`01M5ZAPEVK9K2S43GCB1JPT57B` was preempted by an urgent allocated workload
+while starting at 19:34 UTC. autoResume created replacement
+`01M5ZDP3XP4YA4V7WASNNGC0RT`, scheduled at 19:41 UTC. No learner logs or
+completed update yet. This verifies scheduler requeue, not policy/optimizer
+checkpoint restoration. The experiment and durable output/W&B identity are unchanged.
