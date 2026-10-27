@@ -143,6 +143,7 @@ def core(args, samples, checkpoint):
         router_z_loss_weight=0.0,
         max_sequence_length=2048,
         compile_optimizer=True,
+        fp32_lm_head=args.fp32_head,
     )
     hf = AutoConfig.from_pretrained(checkpoint, trust_remote_code=True)
     cfg = models.model_config_from_hf(hf, options)
@@ -159,7 +160,9 @@ def core(args, samples, checkpoint):
     visual = vision_model.OlmoVisionStack(hf, device="cuda", dtype=torch.bfloat16)
     visual.load_weights((k, v) for k, v in state.items() if not k.startswith("language_model."))
     weight_audit = {"tensors": 0, "publication_rounding": [], "export_mismatches": []}
-    exported_state = () if args.core_controls else olmo3.iter_olmo3_moe_hf_state(model, hf.text_config)
+    exported_state = (
+        () if args.core_controls or args.lightweight else olmo3.iter_olmo3_moe_hf_state(model, hf.text_config)
+    )
     for name, value in exported_state:
         original = state["language_model." + name]
         exported = value.detach().cpu()
@@ -200,7 +203,7 @@ def core(args, samples, checkpoint):
         return hook
 
     handles = []
-    if not args.core_controls:
+    if not (args.core_controls or args.lightweight):
         handles = [block.register_forward_hook(capture(f"layer_{i}")) for i, block in enumerate(model.blocks.values())]
         handles.append(model.lm_head.norm.register_forward_hook(capture("head_input")))
     write(args.output, report)
@@ -467,6 +470,71 @@ def publication_roundtrip(engine, args, samples, checkpoint, report):
         print(json.dumps(stage), flush=True)
 
 
+def fresh_responses(engine, args, samples):
+    """Sample a prespecified prompt set at the training temperature, retaining every token."""
+    report = {"mode": "fresh", "records": [], "temperature": 1.0, "samples_per_prompt": args.samples_per_prompt}
+
+    async def generate_group(sample):
+        return await asyncio.gather(
+            *[
+                engine.async_generate(
+                    input_ids=list(sample["metadata"]["vision"]["prepared"]["placeholder_token_ids"]),
+                    image_data=[item["path"] for item in sample["metadata"]["vision"]["images"]],
+                    sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 16},
+                    return_logprob=True,
+                )
+                for _ in range(args.samples_per_prompt)
+            ]
+        )
+
+    async def generate_batch(batch):
+        return await asyncio.gather(*(generate_group(sample) for sample in batch))
+
+    for start in range(0, len(samples), 2):
+        results = engine.loop.run_until_complete(generate_batch(samples[start : start + 2]))
+        for offset, group in enumerate(results):
+            for result in group:
+                ids = result["output_ids"]
+                values = result["meta_info"]["output_token_logprobs"]
+                assert ids and [value[1] for value in values] == ids
+                report["records"].append(
+                    {
+                        "source_index": start + offset,
+                        "response_token_ids": ids,
+                        "response": result["text"],
+                        "rollout_log_probs": [value[0] for value in values],
+                        "meta_info": result["meta_info"],
+                    }
+                )
+        write(args.output, report)
+        print(
+            json.dumps({"fresh_prompts": min(start + 2, len(samples)), "responses": len(report["records"])}),
+            flush=True,
+        )
+    report["complete"] = True
+    write(args.output, report)
+    return report
+
+
+def rebuild_samples(samples, generated):
+    assert generated["complete"], "Refuse a partially generated population"
+    rebuilt = []
+    for row in generated["records"]:
+        source = samples[row["source_index"]]
+        ids = row["response_token_ids"]
+        assert len(ids) == len(row["rollout_log_probs"])
+        rebuilt.append(
+            {
+                **source,
+                "tokens": source["tokens"][: -source["response_length"]] + ids,
+                "response_length": len(ids),
+                "response": row["response"],
+                "rollout_log_probs": row["rollout_log_probs"],
+            }
+        )
+    return rebuilt
+
+
 def serving(args, samples, checkpoint):
     olmo_sglang.register()
     engine = sglang.Engine(
@@ -490,6 +558,9 @@ def serving(args, samples, checkpoint):
     )
     report = {"mode": "serving", "attention_backend": args.attention_backend, "records": []}
     try:
+        if args.mode == "fresh":
+            samples = rebuild_samples(samples, fresh_responses(engine, args, samples))
+            args.output = args.output.with_name(args.output.stem + "-prefill.json")
         if args.mode == "serving-controls":
             serving_controls(engine, args, samples)
             return
@@ -527,7 +598,7 @@ def serving(args, samples, checkpoint):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["core", "serving", "vision", "serving-controls"])
+    parser.add_argument("mode", choices=["core", "serving", "vision", "serving-controls", "fresh"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="torch_native")
@@ -536,12 +607,24 @@ def main():
     parser.add_argument("--fp32-head", action="store_true")
     parser.add_argument("--publication-roundtrip", action="store_true")
     parser.add_argument("--core-controls", action="store_true")
+    parser.add_argument("--lightweight", action="store_true", help="Score without export audits or activation hooks")
+    parser.add_argument("--capture-name", default="0.pt", help="Trusted capture filename under root/rollouts")
+    parser.add_argument("--limit-prompts", type=int)
+    parser.add_argument("--samples-per-prompt", type=int, default=4)
+    parser.add_argument("--generated-responses", type=Path)
     args = parser.parse_args()
     torch.set_num_threads(8)
     torch.manual_seed(17)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    samples = torch.load(args.root / "rollouts/0.pt", map_location="cpu", weights_only=False, mmap=True)["samples"]
-    {"core": core, "serving": serving, "vision": vision, "serving-controls": serving}[args.mode](
+    samples = torch.load(
+        args.root / "rollouts" / args.capture_name, map_location="cpu", weights_only=False, mmap=True
+    )["samples"]
+    if args.limit_prompts is not None:
+        samples = samples[: args.limit_prompts]
+    if args.generated_responses is not None:
+        generated = json.loads(args.generated_responses.read_text())
+        samples = rebuild_samples(samples, generated)
+    {"core": core, "serving": serving, "vision": vision, "serving-controls": serving, "fresh": serving}[args.mode](
         args, samples, args.root / "prepared/hf"
     )
 
