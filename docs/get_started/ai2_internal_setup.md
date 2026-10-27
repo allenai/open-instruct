@@ -74,6 +74,8 @@ python mason.py \
 
 Pass `--min_runtime` with the time the job needs to reach a checkpoint (e.g. `--min_runtime 2h`), plus `--auto_resume` if Beaker should requeue it after preemption. On allocation-scheduled clusters this makes the job allocated: it queues ahead of backfill and is protected until its min runtime ends, and shorter min runtimes schedule sooner. Your workspace needs an allocation on that cluster, or Beaker rejects the job at submission. The legacy `--preemptible` runs only as backfill and may wait indefinitely, and passing neither flag, as in the example above, requests an 8-hour protected job, the hardest kind to schedule. Run `python mason.py --help` for details.
 
+### What mason.py does automatically
+
 `mason.py` does a few things:
 
 **Auto set HF cache environment variables:**
