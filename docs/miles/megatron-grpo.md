@@ -107,14 +107,14 @@ responses for every async run.
    and the trainer's advantages in `debug/train_data` against the centered
    rewards, and completes the HF export. A rollout whose groups all have equal
    rewards is recorded as `zero_signal` rather than failed: its advantages and
-   gradient norm are legitimately zero. Before training starts, records past the
-   latest checkpoint (rollouts a resumed trainer replays, or every record when
-   not resuming) move from `verifier-rewards.jsonl` to
-   `verifier-rewards.replayed.jsonl` (a torn final line goes to
-   `verifier-rewards.replayed.partial`), so the audit sees exactly one record per
-   trained response; `audit.json` reports the set-aside count, summed over every
-   launch into the output root, as `replayed_records` (and partial lines as
-   `torn_fragments`);
+   gradient norm are legitimately zero. Before training, verifier records past
+   the latest checkpoint move to `verifier-rewards.replayed.jsonl` (all records
+   when not resuming), and a torn final line goes to
+   `verifier-rewards.replayed.partial`, so the audit sees exactly one record per
+   trained response. `audit.json` reports the cumulative counts as
+   `replayed_records` and `torn_fragments`. Resuming requires an unchanged
+   rollout batch size and samples per prompt. An output root written before this
+   reconciliation existed is reconciled on its next launch;
 6. reloads the export in a fresh SGLang process and probes a training prompt.
 
 A previously completed, independently load-audited **initial TP2/PP1 native

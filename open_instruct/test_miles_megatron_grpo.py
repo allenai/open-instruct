@@ -204,23 +204,23 @@ def test_resume_restores_checkpoint_without_restepping_the_scheduler(tmp_path):
 
 def test_reconcile_evidence_keeps_checkpointed_rollouts_and_sets_replayed_records_aside(tmp_path):
     evidence, replayed = tmp_path / grpo_hooks.EVIDENCE, tmp_path / grpo_hooks.REPLAYED
-    assert grpo_hooks.reconcile_evidence(tmp_path, 0, 2) == 0
-    with pytest.raises(ValueError, match="missing"):
+    assert grpo_hooks.reconcile_evidence(tmp_path, 0, 2) == (0, False)
+    with pytest.raises(InputError, match="is missing; 1 checkpointed rollouts need 2"):
         grpo_hooks.reconcile_evidence(tmp_path, 1, 2)
     # Rollouts 0 and 1 checkpointed; rollout 2 was scored, then the job stopped mid-write in rollout 3.
     lines = [json.dumps({"sample_index": index}) + "\n" for index in range(6)]
     evidence.write_text("".join(lines) + '{"sample_index": 6')
-    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 2
+    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == (2, True)
     assert evidence.read_text() == "".join(lines[:4])
     assert replayed.read_text() == "".join(lines[4:])
     assert (tmp_path / grpo_hooks.TORN).read_text() == '{"sample_index": 6\n'
-    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 0
+    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == (0, False)
     assert evidence.read_text() == "".join(lines[:4])
-    with pytest.raises(ValueError, match="missing records"):
+    with pytest.raises(InputError, match="has 4 complete records; 3 checkpointed rollouts need 6"):
         grpo_hooks.reconcile_evidence(tmp_path, 3, 2)
     # A partial line inside the checkpointed rollouts is lost evidence, not a replay.
     evidence.write_text("".join(lines[:3]) + '{"sample_index": 3')
-    with pytest.raises(ValueError, match="missing records"):
+    with pytest.raises(InputError, match="has 3 complete records"):
         grpo_hooks.reconcile_evidence(tmp_path, 2, 2)
 
 
@@ -428,7 +428,9 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
             marker = root / "checkpoints/latest_checkpointed_iteration.txt"
             marker.parent.mkdir(parents=True)
             marker.write_text("0")
-            assert grpo_hooks.reconcile_evidence(root, grpo_args.checkpointed_rollouts(spec), 16) == 16
+            with (root / grpo_hooks.EVIDENCE).open("a") as stream:
+                stream.write('{"sample_index": 16')
+            assert grpo_hooks.reconcile_evidence(root, grpo_args.checkpointed_rollouts(spec), 16) == (16, True)
         batch = _evidence_rows(
             step, [0.0 if case == "zero_signal" and step == 1 else float(index == 1) for index in range(16)]
         )
@@ -471,7 +473,7 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
         assert [row["zero_signal"] for row in result["rollouts"]] == [False, zero]
         assert result["export"]["changed_tensors"] == 1
         assert result["replayed_records"] == (16 if case == "replayed" else 0)
-        assert result["torn_fragments"] == 0
+        assert result["torn_fragments"] == (1 if case == "replayed" else 0)
         assert registries == {"/fixed/registry"}
     if case == "replayed":
         # Without reconciliation the stale rollout 1 records stay and the audit rejects the count.

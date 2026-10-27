@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import rewards
 
 OUTPUT_ENV = "OI_GRPO_OUTPUT"
@@ -36,7 +37,9 @@ def reward_environment(registry, reward_gates):
 
 
 def reconcile_evidence(root, rollouts, batch):
-    """Keep exactly ``rollouts`` complete rollouts of verifier evidence; return how many records moved.
+    """Keep exactly ``rollouts`` complete rollouts of verifier evidence.
+
+    Returns how many records moved and whether this call set a partial write aside.
 
     ``post_process`` appends a rollout's records before that rollout's training is checkpointed, so a
     preempted run leaves records for rollouts the resumed trainer replays. The hook is not told the
@@ -44,17 +47,21 @@ def reconcile_evidence(root, rollouts, batch):
     ``rollouts * batch`` lines are the checkpointed rollouts. Later complete lines move to ``REPLAYED``
     and the replay appends their replacements; a trailing partial write is not a record and moves to
     ``TORN`` so ``REPLAYED`` stays valid JSONL. The tail is copied before it is truncated, so a launch
-    killed in between copies it again next time: set-aside counts are then upper bounds.
+    killed in between copies it again next time: set-aside counts are then upper bounds. Resuming
+    requires an unchanged batch shape, since ``batch`` comes from the current run file.
     """
     path = Path(root) / EVIDENCE
+    expected = rollouts * batch
     if not path.exists():
         if rollouts:
-            raise ValueError("Verifier evidence is missing for checkpointed rollouts")
-        return 0
+            raise InputError(f"{path} is missing; {rollouts} checkpointed rollouts need {expected} records")
+        return 0, False
     with path.open("r+b") as stream:
-        for _ in range(rollouts * batch):
+        for found in range(expected):
             if not stream.readline().endswith(b"\n"):
-                raise ValueError("Verifier evidence is missing records for checkpointed rollouts")
+                raise InputError(
+                    f"{path} has {found} complete records; {rollouts} checkpointed rollouts need {expected}"
+                )
         boundary = stream.tell()
         tail = stream.read()
         if tail:
@@ -66,7 +73,7 @@ def reconcile_evidence(root, rollouts, batch):
                 with (Path(root) / TORN).open("ab") as partial:
                     partial.write(torn + b"\n")
             stream.truncate(boundary)
-    return tail.count(b"\n")
+    return tail.count(b"\n"), not tail.endswith(b"\n") and bool(tail)
 
 
 def scoring_args(args=None, environment=None):

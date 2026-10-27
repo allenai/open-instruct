@@ -144,6 +144,7 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         values["custom-async-data-buffer-path"] = opd_config.ASYNC_BUFFER
     if opt["lr_decay_style"] != "constant":
         values["lr-decay-iters"] = training["num_rollouts"]
+    # Not marker.exists(): checkpointed_rollouts also rejects a marker that holds no rollout ID.
     resume = checkpointed_rollouts(spec) > 0
     if resume:
         # Megatron restores weights, optimizer and RNG; MILES restores the data cursor. The
