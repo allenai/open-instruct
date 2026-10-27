@@ -33,20 +33,13 @@ logger = logger_utils.setup_logger(__name__)
 # async verifier path scores in a thread pool, so load them once at import.
 detector_factory.init_factory()
 
-# Constraint types the Phase 1 audit found unsatisfied in every run
-# (runs/mopd-phase1-log.md, 2026-10-20): copy-type checks demand the response
-# equal a prompt span while always paired with another constraint, and the other
-# two need exact sentence/word positions the policy never met.
-KNOWN_UNSAT_TYPES = frozenset(
-    {
-        "new:copy_span_idx",
-        "copy:copy",
-        "copy:copying_simple",
-        "copy:copying_multiple",
-        "count:counting_composition",
-        "keywords:keyword_specific_position",
-    }
-)
+# Constraint types no prompt-following answer can pass. ``new:copy_span_idx`` asks for the
+# span "between (and including)" two character indices while its checker excludes the
+# end index, so the instructed answer fails it. The Phase 1 list also banned the copy
+# types, ``count:counting_composition`` and ``keywords:keyword_specific_position``;
+# constructed answers pass all of them, so they are hard, not unsatisfiable, and the
+# copy rows that really are impossible are caught per row by ``copy+other``.
+KNOWN_UNSAT_TYPES = frozenset({"new:copy_span_idx"})
 
 _HIDDEN_RELATION_ID = "keywords:word_count_different_numbers"
 _EXACT = "exactly"

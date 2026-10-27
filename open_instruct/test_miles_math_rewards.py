@@ -55,7 +55,7 @@ def test_add_boxed_instruction():
     [
         (["42"], []),
         ("42", []),
-        (["-1"], ["placeholder_target"]),
+        (["-1"], []),
         ([" "], ["empty_target"]),
         ([], ["not_single_target"]),
         (None, ["empty_target"]),
@@ -63,3 +63,11 @@ def test_add_boxed_instruction():
 )
 def test_math_row_problems(ground_truth, problems):
     assert math_rewards.math_row_problems({"ground_truth": ground_truth}) == problems
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "equal"),
+    [("60", "60^\\circ", True), ("2\\sqrt 2", "2\\sqrt{2}", True), (" 1000 ", "1000", True), ("3", "4", False)],
+)
+def test_targets_equivalent(first, second, equal):
+    assert math_rewards.targets_equivalent(first, second) is equal

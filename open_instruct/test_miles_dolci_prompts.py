@@ -142,10 +142,7 @@ def test_reward_fixes_add_answer_format_and_hints():
 
 @pytest.mark.parametrize(
     "row,reason",
-    [
-        (source_row("math", "-1"), "math_placeholder_target"),
-        (source_row("code_stdio", json.dumps([{"input": ["1"], "output": ["2"]}])), "code_non_string_stdio_test"),
-    ],
+    [(source_row("code_stdio", json.dumps([{"input": ["1"], "output": ["2"]}])), "code_non_string_stdio_test")],
 )
 def test_reward_fixes_drop_ungradable_rows(row, reason):
     assert dolci.render_row(row, Tokenizer(), SOURCE) != (None, reason)
@@ -189,3 +186,29 @@ def test_reward_fixes_drop_unsatisfiable_and_trivial_if_rows():
     )
     row, _ = dolci.render_row(source_row("ifeval", IF_TARGET), Tokenizer(), SOURCE, reward_fixes=True)
     assert row is None or row["metadata"]["domain"] == "ifeval"
+
+
+def test_reward_fixes_keep_minus_one_math_targets():
+    row, domain = dolci.render_row(source_row("math", "-1"), Tokenizer(), SOURCE, reward_fixes=True)
+    assert domain == "math" and row["label"] == "-1"
+
+
+def test_resolve_duplicates_keeps_agreeing_copies_and_drops_conflicts():
+    def copy(name, label, target=None):
+        domain = next(d for d, members in dolci.DOMAINS.items() if name in members)
+        return {
+            "label": label,
+            "metadata": {"domain": domain, "verifiers": [{"name": name, "target": target or label}]},
+        }
+
+    same = [copy("math", "60"), copy("math", "60")]
+    assert dolci.resolve_duplicates(same) is same[0]
+    degrees = [copy("math", "60"), copy("math", "60^\\circ")]
+    assert dolci.resolve_duplicates(degrees) is degrees[0]
+    assert dolci.resolve_duplicates([copy("math", "3"), copy("math", "4")]) is None
+    few, many = (
+        copy("code", json.dumps(tests), tests)
+        for tests in (["assert f(1) == 1"], ["assert f(1) == 1", "assert f(2) == 2"])
+    )
+    assert dolci.resolve_duplicates([few, many]) is many
+    assert dolci.resolve_duplicates([copy("ifeval", "a"), copy("ifeval", "b")]) is None

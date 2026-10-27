@@ -182,11 +182,18 @@ def test_trivial_answer_rows_are_flagged():
 def test_known_unsat_and_invalid_kwargs():
     found = problems(
         "Write a story.",
-        ("keywords:keyword_specific_position", {"keyword": "dog", "n": 2, "m": 3}),
+        ("new:copy_span_idx", {"prompt_to_repeat": "Write a story.", "n_start": 0, "n_end": 4}),
         ("length_constraints:nth_paragraph_first_word", {"num_paragraphs": 2, "nth_paragraph": 4, "first_word": "so"}),
     )
-    assert "known_unsat_type:keywords:keyword_specific_position" in found
+    assert "known_unsat_type:new:copy_span_idx" in found
     assert "invalid_kwargs:length_constraints:nth_paragraph_first_word" in found
+
+
+def test_hard_but_satisfiable_types_are_kept():
+    # A constructed answer passes each of these, so they are not banned by type.
+    assert problems("Write a story.", ("keywords:keyword_specific_position", {"keyword": "dog", "n": 2, "m": 3})) == []
+    assert problems("Write a story.", ("count:counting_composition", {"n_sent": 2, "n_words": 3})) == []
+    assert problems("Copy this.", ("copy:copying_simple", {"prompt_to_repeat": "Copy this."})) == []
 
 
 def test_missing_kwargs_are_nondeterministic():

@@ -16,8 +16,8 @@ writes Miles ``data.prompt_data`` / ``data.eval_prompt_data`` JSONL plus the
 
 ``--reward-fixes`` applies the MOPD retrain audit's data and scoring fixes (data v3):
 
-- math prompts that ask for no answer format get a boxed-answer instruction, and rows with
-  empty or ``-1`` placeholder targets are dropped, and ``math`` is scored by
+- math prompts that ask for no answer format get a boxed-answer instruction, rows with
+  empty targets are dropped, and ``math`` is scored by
   ``math_rewards.MathVerifyVerifier`` (Math-Verify on the boxed answer);
 - instruction-following rows that cannot be fully satisfied (contradictory or invalid
   constraints) or that the one-letter answer "a" fully passes are dropped, and
@@ -25,8 +25,9 @@ writes Miles ``data.prompt_data`` / ``data.eval_prompt_data`` JSONL plus the
 - code rows whose tests can never pass or exceed the service's payload limit are dropped,
   prompts that never name the tested function or (stdio) never ask for Python get a
   sentence that does, and grader failures are masked from the loss instead of scored 0;
-- prompts that appear with different targets are dropped, and training excludes rows whose
-  normalized user text matches a held-out row.
+- a prompt that appears with different targets keeps one row when the targets agree (math
+  targets Math-Verify reads as equal; for code, the copy with the most tests) and is dropped
+  otherwise, and training excludes rows whose normalized user text matches a held-out row.
 
 Example (inside the Miles image, writing to WEKA):
 
@@ -215,6 +216,24 @@ def render_row(row, tokenizer, source, reward_fixes=False):
     }, domain
 
 
+def resolve_duplicates(rows):
+    """The row to keep among the prepared copies of one prompt, or None when their targets disagree.
+
+    Math copies whose targets Math-Verify reads as the same answer keep the first. Code copies
+    carry test lists for the same problem, often one a subset of another, so the copy with the
+    most tests is kept.
+    """
+    labels = [row["label"] for row in rows]
+    if all(label == labels[0] for label in labels):
+        return rows[0]
+    domains = {row["metadata"]["domain"] for row in rows}
+    if domains == {"math"} and all(math_rewards.targets_equivalent(labels[0], label) for label in labels[1:]):
+        return rows[0]
+    if domains == {"code"}:
+        return max(rows, key=lambda row: len(code_rewards.decode_tests_safely(row["metadata"]["verifiers"][0]["target"]) or []))
+    return None
+
+
 def normalized_query(row):
     """The user text lowercased with punctuation and whitespace runs collapsed, for leakage checks."""
     return " ".join(re.sub(r"[^\w\s]", " ", row["metadata"]["query"].lower()).split())
@@ -290,29 +309,34 @@ def main():
     dataset = datasets.load_dataset(repo, revision=revision, split="train", columns=COLUMNS)
     by_domain = {domain: [] for domain in DOMAINS}
     drops = {}
-    seen = set()
-    labels = {}
+    copies = {}
     for row in dataset:
         prepared, outcome = render_row(row, tokenizer, source, args.reward_fixes)
         if prepared is None:
             drops[outcome] = drops.get(outcome, 0) + 1
             continue
-        if prepared["input"] in seen:
+        if prepared["input"] in copies:
             drops["duplicate_prompt"] = drops.get("duplicate_prompt", 0) + 1
-            labels[prepared["input"]].add(prepared["label"])
+            copies[prepared["input"]].append(prepared)
             continue
         if len(tokenizer.encode(prepared["input"], add_special_tokens=False)) > args.max_prompt_tokens:
             drops["prompt_too_long"] = drops.get("prompt_too_long", 0) + 1
             continue
-        seen.add(prepared["input"])
-        labels[prepared["input"]] = {prepared["label"]}
+        copies[prepared["input"]] = [prepared]
         by_domain[outcome].append(prepared)
+    resolved_targets = {}
     if args.reward_fixes:
-        # A prompt seen with different targets has no single right answer: drop it entirely.
         for domain, rows in by_domain.items():
-            kept = [row for row in rows if len(labels[row["input"]]) == 1]
-            if len(kept) != len(rows):
-                drops["conflicting_targets"] = drops.get("conflicting_targets", 0) + len(rows) - len(kept)
+            kept = []
+            for row in rows:
+                group = copies[row["input"]]
+                chosen = resolve_duplicates(group)
+                if chosen is None:
+                    drops["conflicting_targets"] = drops.get("conflicting_targets", 0) + 1
+                    continue
+                if len({copy["label"] for copy in group}) > 1:
+                    resolved_targets[domain] = resolved_targets.get(domain, 0) + 1
+                kept.append(chosen)
             by_domain[domain] = kept
 
     files = {}
@@ -337,6 +361,7 @@ def main():
         "max_prompt_tokens": args.max_prompt_tokens,
         "reward_fixes": args.reward_fixes,
         "dropped": dict(sorted(drops.items())),
+        "resolved_duplicate_targets": dict(sorted(resolved_targets.items())),
         "mixes": {name: {"weights": mixes[name], "counts": mix_counts[name]} for name in mixes},
         "files": {},
     }

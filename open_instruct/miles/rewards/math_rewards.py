@@ -41,9 +41,8 @@ def math_row_problems(row: dict) -> list[str]:
     """Reasons a source math row needs review or removal; empty when the target looks usable.
 
     ``row["ground_truth"]`` is the Open Instruct target, either a string or a
-    one-element list of strings. ``placeholder_target`` marks "-1": 168 prepared
-    math rows carry it, and the Phase 1 audit could not tell genuine answers from
-    placeholders, so these rows need review before they train or evaluate anything.
+    one-element list of strings. A "-1" target is kept: in the Dolci rows it is almost
+    always a real answer (for example "if it's impossible, answer with -1").
     """
     target = row.get("ground_truth")
     if isinstance(target, list):
@@ -52,8 +51,6 @@ def math_row_problems(row: dict) -> list[str]:
         target = target[0]
     if not isinstance(target, str) or not target.strip():
         return ["empty_target"]
-    if target.strip() == "-1":
-        return ["placeholder_target"]
     return []
 
 
@@ -106,3 +103,12 @@ class MathVerifyVerifier(VerifierFunction):
             if gold and verify(gold, answer, timeout_seconds=self.config.verify_timeout_seconds):
                 return VerificationResult(score=1.0)
         return VerificationResult(score=0.0)
+
+
+def targets_equivalent(first: str, second: str, timeout_seconds: int = 5) -> bool:
+    """Whether Math-Verify reads two gold targets as the same answer ("60" and "60^\\circ")."""
+    parsed = [
+        parse(f"${target}$", extraction_config=_GOLD_EXTRACTION, parsing_timeout=timeout_seconds)
+        for target in (first, second)
+    ]
+    return all(parsed) and bool(verify(parsed[0], parsed[1], timeout_seconds=timeout_seconds))
