@@ -366,6 +366,89 @@ class SerperSearchToolConfig(BaseEnvConfig):
     """Timeout in seconds for the API request."""
 
 
+class SerplySearchTool(Tool):
+    """
+    Search tool using the Serply API (Google Search results).
+    Requires SERPLY_API_KEY environment variable.
+    """
+
+    config_name = "serply_search"
+    description = "Google search via the Serply API"
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "The search query for Google"}},
+        "required": ["query"],
+    }
+
+    def __init__(self, call_name: str, num_results: int = 5, timeout: int = 10) -> None:
+        self.call_name = call_name
+        self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("SERPLY_API_KEY")
+        if not self.api_key:
+            raise ValueError("Missing SERPLY_API_KEY environment variable.")
+
+    async def step(self, call: EnvCall) -> StepResult:
+        """Search Google via Serply for documents matching the query."""
+        args = coerce_args(self.parameters, call.args)
+        query = args.get("query", "")
+        if not query or not query.strip():
+            result = StepResult(
+                result="", metadata={"error": "Empty query. Please provide a search query.", "runtime": 0}
+            )
+            log_env_call(self.call_name, query or "", result)
+            return result
+
+        start_time = time.time()
+        api_response = await make_api_request(
+            url="https://api.serply.io/v1/search/",
+            timeout_seconds=self.timeout,
+            params={"q": query, "num": self.num_results},
+            method="GET",
+            # Serply's edge rejects some default client user agents.
+            headers={"X-Api-Key": self.api_key, "User-Agent": "open-instruct"},
+        )
+
+        if api_response.error:
+            result = StepResult(
+                result=api_response.error,
+                metadata={
+                    "error": api_response.error,
+                    "timeout": api_response.timed_out,
+                    "runtime": time.time() - start_time,
+                },
+            )
+            log_env_call(self.call_name, query, result)
+            return result
+
+        snippets = []
+        for item in api_response.data.get("results", [])[: self.num_results]:
+            title = item.get("title", "")
+            description = item.get("description", "")
+            link = item.get("link", "")
+            if description:
+                snippets.append(f"**{title}**\n{description}\nSource: {link}")
+
+        error = "" if snippets else "Query returned no results."
+        output = "\n\n".join(snippets).strip() if snippets else error
+
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, query, result)
+        return result
+
+
+@dataclass
+class SerplySearchToolConfig(BaseEnvConfig):
+    """Configuration for the Serply (Google Search) tool."""
+
+    tool_class: ClassVar[type[Tool]] = SerplySearchTool
+
+    num_results: int = 5
+    """Number of results to return from Serply."""
+    timeout: int = 10
+    """Timeout in seconds for the API request."""
+
+
 YOU_SEARCH_URL = "https://ydc-index.io/v1/search"
 # Attribution token sent only on requests to You.com.
 YOU_USER_AGENT = "youdotcom-integration/allenai-open-instruct"
@@ -757,6 +840,7 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
+    SerplySearchToolConfig.tool_class.config_name: SerplySearchToolConfig,
     YouSearchToolConfig.tool_class.config_name: YouSearchToolConfig,
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
