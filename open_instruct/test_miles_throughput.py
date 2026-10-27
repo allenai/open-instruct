@@ -78,21 +78,26 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
 
 
-@pytest.mark.parametrize("profile,producer_budget", [("node", 768), ("three-node", 2432)])
+@pytest.mark.parametrize("profile,producer_budget", [("node", 1536), ("three-node", 19456)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()
     assert pending.inference_profile["model_metadata_available"] is False
     assert pending.miles["sglang_max_running_requests"] == 512
-    assert pending.miles["async_max_concurrent_samples"] == 8 * producer_budget
+    assert pending.miles["async_max_concurrent_samples"] == producer_budget
     (tmp_path / "config.json").write_text(json.dumps(inference_profiles.MODEL_SHAPE | {"dtype": "bfloat16"}))
     config = spec.compile({"hf_checkpoint": str(tmp_path)})
     plan = config.plan()
     capacity = plan["async_capacity"]
     assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]
-    # Automatic supply follows the prepared profile; batch/lag are independent.
-    assert capacity["producer_sample_budget"] == 8 * producer_budget == 2 * capacity["global_http_slots"]
-    assert any("Producer budget alone" in warning for warning in capacity["warnings"])
+    # Explicit node supply stays bounded; the three-node heuristic remains separate.
+    assert capacity["producer_sample_budget"] == producer_budget
+    if profile == "node":
+        assert producer_budget < capacity["global_http_slots"]
+        assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
+    else:
+        assert producer_budget == 2 * capacity["global_http_slots"]
+        assert any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["global_batch_size"] == 256
     assert config.core.max_policy_lag == 6
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]

@@ -51,7 +51,9 @@ def report(options, max_policy_lag):
     if usable_slots is not None and effective is not None and effective < usable_slots:
         warnings.append(
             f"Producer budget {effective} is below {usable_slots} requested serving slots across {engines} engines; "
-            "raise async_max_concurrent_samples or omit it in a structured run for automatic sizing."
+            "some reserved serving capacity cannot be filled. This can be intentional when inference supplies "
+            "the trainer fast enough. Increase async_max_concurrent_samples only if generation limits useful "
+            "throughput; compare trainer wait, queue age and stale-work discards."
         )
     if http is not None and running is not None and http < running:
         warnings.append(

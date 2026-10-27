@@ -243,15 +243,19 @@ requires managed per-replica inventories. Checks run outside generation.
 
 A producer budget equal to one wave of engine slots gets producer-backfill advice,
 regardless of HTTP headroom or profile selection. HTTP capacity below admission
-and an underfeeding producer have separate advisories.
+and a producer budget below requested capacity have separate advisories. A smaller
+budget can intentionally leave serving capacity unused when inference already
+supplies the trainer fast enough; the advisory alone is not a reason to raise it.
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to
-whole groups (or one collection, whichever is larger). Applied presets give
-6,144/19,456 samples for node/three-node; generic defaults give 768/2,432. Explicit
-budgets win. Batch 256 and lag 6 are unchanged. The policy-age advisory is
-intentional: one full wave across six 512-slot engines already represents 12
-batches. A cap near six batches necessarily underfeeds that fleet. Neither 24
-batch-equivalents nor a static lag limit predicts drain time or actual policy age.
+whole groups (or one collection, whichever is larger). The node example explicitly
+uses 1,536 unfinished samples. Without that limit its preset would resolve to
+6,144; the three-node example still uses the unqualified 19,456-sample heuristic.
+Generic configurations with omitted budgets give 768/2,432 for those topologies.
+Explicit budgets win. Batch 256 and lag 6 are unchanged. One full wave across six
+512-slot engines represents 12 batches, but keeping those slots occupied is a
+different objective from keeping the trainer supplied. Neither batch-equivalents
+nor a static lag limit predicts drain time or actual policy age.
 Measure useful consumption, queue age/discards and publication latency in the
 fully async workload; explicitly reduce the producer budget or fleet when needed.
 
