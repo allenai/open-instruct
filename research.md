@@ -775,7 +775,7 @@ See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](exper
 
 ## Olmo Hybrid release 275m GSM8K learning and resume
 
-**Status:** ACTIVE — correcting the learner precision failure before rerunning 1,000 updates on two Saturn A100s.
+**Status:** ACTIVE — learner BF16 forward fix committed; corrected 1,000-update Saturn rerun submitted.
 
 Does correctness-only GRPO on the primary 275m midtrain release improve held-out
 GSM8K accuracy, and does the run restore policy/optimizer/data state after preemption?
@@ -800,5 +800,5 @@ not GSM8K learning or full serving/decode qualification.
 [GPU gate](https://beaker.org/ex/01M5H2C69J8HBS8F70X3HT2K3C) passed.
 [Training](https://beaker.org/ex/01M5HYS6EMRWQ01SDFJW85F1GF) failed on its initial attempt and all three retries before the first update.
 The real GRPO learner bypassed OLMo-core's forward autocast context, leaving FlashAttention inputs in FP32 with one learner and no FSDP cast. The standalone numerical gate used its own autocast and did not cover this path. GRPO now sets autocast from `model_dtype` and wraps learner, old-policy, and reference-policy forwards; optimizer parameters remain FP32. CPU regression tests cover all three actual forward paths.
-See [the corrected rerun](experiment.md#olmo-hybrid-release-275m-bf16-rerun-2026-10-27). No end-to-end RL result is claimed.
+[Corrected rerun](https://beaker.org/ex/01M5ZAPEQFTT3YEMK107ZSVFK4) is submitted with the verified 2-GPU/auto-resume/every-100 checkpoint spec. See [the run log](experiment.md#olmo-hybrid-release-275m-bf16-rerun-2026-10-27). No end-to-end RL result is claimed.
 See [the run log](experiment.md#olmo-hybrid-release-275m-gsm8k-1000-updates-2026-10-22).

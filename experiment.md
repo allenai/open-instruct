@@ -845,4 +845,19 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
   preemptible priority, minRuntime 0, auto-resume, three retries, 24h timeout;
   workspace ai2/open-instruct-dev; budget ai2/oe-other. Weka native checkpoint
   and HF save every 100 updates; evaluation every 100 plus step zero.
-- Image build and submission pending; build runs on the existing Beaker session.
+- Image built and published on the existing Beaker session (no local Docker build):
+  `01M5ZA477GD4BSRBTTSP5692QB`, source `c8b5da548`, layered on the validated
+  release image `01M5H2BXPNCMGW951BABKEPJGF`; dependency versions unchanged.
+- [Rerun](https://beaker.org/ex/01M5ZAPEQFTT3YEMK107ZSVFK4), submitted via
+  `RUN_NAME=hybrid-release-275m-gsm8k-1k-bf16-20261027 ./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_release_275m.sh`.
+- Verified stored spec: 2 GPUs on Saturn, minRuntime 0s, autoResume true,
+  3 retries, timeout 24h. Stable W&B ID `bmauwnfk`, WANDB_RESUME=allow.
+  Native state directory:
+  `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/hybrid-release-275m-gsm8k-1k-bf16-20261027/native`.
+- Cluster preparation required unsetting the session's malformed BEAKER_TOKEN,
+  temporary GitHub credentials for the pinned private plugin, and
+  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.1 to avoid a slow Weka
+  git-describe timeout. These affected the launch environment, not the image.
+- Validation: 34 focused precision/resume/GRPO/release CPU tests passed; formatting,
+  lint, compilation, and type checks passed. GPU execution status at submission:
+  QUEUED. Neither a successful GRPO update nor preemption recovery is claimed.
