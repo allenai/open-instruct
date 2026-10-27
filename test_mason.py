@@ -330,6 +330,7 @@ class TestParseMinRuntime(unittest.TestCase):
             ("bare_number", "3600"),
             ("bare_decimal", "1.5"),
             ("decimal_zero", "0.0"),
+            # On the CLI, argparse only hands this to the validator as --min_runtime=-5m (see test_rejects).
             ("negative", "-5m"),
             ("not_a_duration", "soon"),
         ]
@@ -367,6 +368,7 @@ class TestGetArgsMinRuntime(unittest.TestCase):
             ("min_runtime_with_preemptible", ["--min_runtime", "30m", "--preemptible"]),
             ("auto_resume_without_min_runtime", ["--auto_resume"]),
             ("min_runtime_below_lower_bound", ["--min_runtime", "4m"]),
+            ("negative_min_runtime", ["--min_runtime=-5m"]),
         ]
     )
     def test_rejects(self, name, mason_args):

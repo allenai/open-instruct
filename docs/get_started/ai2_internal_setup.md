@@ -91,6 +91,10 @@ so during runtime we issue fewer HF API calls, which sometimes could fail due to
 
 mason.py will auto call `--cache_dataset_only` for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.
 
+**Choosing how the job is scheduled:**
+
+Pass `--min_runtime` with the time the job needs to reach a checkpoint (e.g. `--min_runtime 2h`), plus `--auto_resume` if Beaker should requeue it after preemption. On allocation-scheduled clusters this makes the job allocated: it queues ahead of backfill and is protected until its min runtime ends, and shorter min runtimes schedule sooner. The legacy `--preemptible` runs only as backfill and may wait indefinitely, and passing neither flag requests an 8-hour protected job, the hardest kind to schedule. Run `python mason.py --help` for details.
+
 
 ## Ai2 Internal Evaluation
 
