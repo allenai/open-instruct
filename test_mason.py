@@ -385,6 +385,7 @@ class TestGetArgsMinRuntime(unittest.TestCase):
             ("auto_resume_without_resumable_command", ["--min_runtime", "2h", "--auto_resume"], "restarts it"),
             ("allocated_without_auto_resume", ["--min_runtime", "1h"], "does not requeue"),
             ("timeout_beyond_min_runtime", ["--min_runtime", "1h", "--timeout", "6h"], "does not requeue"),
+            ("zero_timeout_means_none", ["--min_runtime", "1h", "--timeout", "0"], "does not requeue"),
         ]
     )
     def test_warns(self, name, mason_args, expected):
@@ -395,6 +396,8 @@ class TestGetArgsMinRuntime(unittest.TestCase):
             ("allocated", ["--min_runtime", "2h", "--auto_resume"]),
             ("zero_with_auto_resume", ["--min_runtime", "0", "--auto_resume"]),
             ("timeout_within_min_runtime", ["--min_runtime", "2h", "--timeout", "1h"]),
+            ("timeout_equal_to_min_runtime", ["--min_runtime", "2h", "--timeout", "2h"]),
+            ("unparsable_timeout_left_to_beaker", ["--min_runtime", "2h", "--timeout", "soon"]),
         ]
     )
     def test_does_not_warn(self, name, mason_args):

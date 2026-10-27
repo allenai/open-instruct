@@ -104,8 +104,11 @@ MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS = 8
 MIN_RUNTIME_USUAL_UPPER_BOUND_NS = MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS * 60 * 60 * 1_000_000_000
 
 
-def _timeout_within(timeout_str: str | None, min_runtime_ns: int) -> bool:
-    """Whether a --timeout is set and ends the job before its min runtime does; an unparsable timeout counts as yes."""
+def _timeout_ends_before_min_runtime(timeout_str: str | None, min_runtime_ns: int) -> bool:
+    """Whether a nonzero --timeout ends the job no later than its min runtime does.
+
+    An unparsable timeout returns True so mason does not warn on top of the error Beaker raises for it.
+    """
     if not timeout_str:
         return False
     try:
@@ -309,11 +312,11 @@ def get_args():
                 "--min_runtime 0 without --auto_resume runs as unallocated backfill and is not requeued after "
                 "preemption; pass --auto_resume (or use --preemptible) so Beaker requeues it after preemption."
             )
-        elif not mason_args.auto_resume and not _timeout_within(mason_args.timeout, min_runtime_ns):
+        elif not mason_args.auto_resume and not _timeout_ends_before_min_runtime(mason_args.timeout, min_runtime_ns):
             console.log(
                 f"--min_runtime {mason_args.min_runtime} protects the job only for that long; without --auto_resume, "
-                "a preemption after that ends the job and Beaker does not requeue it. Pass --auto_resume, or a "
-                "--timeout no longer than the min runtime."
+                "a preemption after that ends the job and Beaker does not requeue it. Pass --auto_resume, or, if the "
+                "job finishes within it, a --timeout no longer than the min runtime."
             )
     commands = parse_commands(command_args)
 
