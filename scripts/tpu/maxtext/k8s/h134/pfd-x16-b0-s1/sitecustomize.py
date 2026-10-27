@@ -6,6 +6,9 @@
 # only how long a failed GCS request is retried. Pinned: if gcsfs is not GCSFS_PIN or a wrapped method is missing,
 # it logs "GCSFS-RETRY not patched" and exits 3, so the launcher (set -e) stops before any restore.
 # Logs: "GCSFS-RETRY retried ..." for each request that needed a retry (attempts, wait), plus a running max.
+# gr2 stagger (2026-10-26): with GCSFS_STAGGER_STEP_S set, the first gcsfs request of the process opens a window of
+# (JOB_COMPLETION_INDEX mod GCSFS_STAGGER_GROUPS) x GCSFS_STAGGER_STEP_S seconds; every request issued inside it waits
+# for its end, once per process, logged as "GCSFS-STAGGER host=<idx> delay=<s>". A missing or non-integer index exits 3.
 import os
 import sys
 
@@ -14,6 +17,7 @@ if os.environ.get("GCSFS_RETRIES"):
         import asyncio
         import contextvars
         import random
+        import threading
         import time
 
         import gcsfs
@@ -35,6 +39,33 @@ if os.environ.get("GCSFS_RETRIES"):
         _host = os.environ.get("HOSTNAME", "?")
         _stat = {"requests": 0, "max_attempts": 1, "max_wait": 0.0}
         _cur = contextvars.ContextVar("gcsfs_retry_cur", default=None)
+        _stagger = {"delay": None, "until": None}
+        _stagger_lock = threading.Lock()  # gcsfs may run event loops on several threads
+        if os.environ.get("GCSFS_STAGGER_STEP_S"):
+            _idx = int(os.environ["JOB_COMPLETION_INDEX"])  # KeyError/ValueError -> not patched, exit 3
+            if _idx < 0:
+                raise ValueError(f"JOB_COMPLETION_INDEX {_idx} < 0")
+            _groups = int(os.environ.get("GCSFS_STAGGER_GROUPS", "16"))
+            _stagger["delay"] = (_idx % _groups) * float(os.environ["GCSFS_STAGGER_STEP_S"])
+            _stagger["idx"] = _idx
+
+        async def _stagger_wait():
+            d = _stagger["delay"]
+            if d is None:
+                return
+            with _stagger_lock:
+                now = time.monotonic()
+                first = _stagger["until"] is None
+                if first:
+                    _stagger["until"] = now + d
+                left = _stagger["until"] - now
+            if first:
+                try:  # a diagnostic must never fail a request
+                    print(f"GCSFS-STAGGER host={_stagger['idx']} delay={d:.1f}s", file=sys.stderr, flush=True)
+                except Exception:
+                    pass
+            if left > 0:
+                await _real_sleep(left)
 
         _real_sleep = asyncio.sleep
 
@@ -64,6 +95,7 @@ if os.environ.get("GCSFS_RETRIES"):
             retried = _retry.retry_request(retries=_n)(counted)
 
             async def outer(*a, **kw):
+                await _stagger_wait()
                 c = [0, 0.0]  # attempts, seconds waited
                 tok = _cur.set(c)
                 t0 = time.monotonic()
@@ -95,7 +127,7 @@ if os.environ.get("GCSFS_RETRIES"):
         _core.GCSFileSystem.retries = _n
         if os.environ.get("GCSFS_RETRY_QUIET") != "1":
             print(f"GCSFS-RETRY patched host={_host} gcsfs={gcsfs.__version__} methods={list(_names)} retries={_n} "
-                  f"jitter<={_jit}s", file=sys.stderr, flush=True)
+                  f"jitter<={_jit}s stagger={_stagger['delay']} ts_gcs_concurrency={os.environ.get('TENSORSTORE_GCS_REQUEST_CONCURRENCY', 'default')}", file=sys.stderr, flush=True)
     except Exception as e:  # pinned: never fall back to stock gcsfs
         print(f"GCSFS-RETRY not patched: {e!r}; exiting before any restore", file=sys.stderr, flush=True)
         sys.stderr.flush()

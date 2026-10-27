@@ -10,13 +10,16 @@ Writes, per data-order seed s in {0, 1}:
                            and drop logging and the image are H123's.
   h134/pf-<arm>-c11-s<s>/  P3/P4 preflight: the production overlay run for 20 steps (P3 reads steps 1-6; P4's BATCH-HASH
                            n=1..20), scratch output, no checkpoints, maxRestarts 0 (ledger-manager accepted 20 as a superset).
-  B0 only, optional P4 diagnostics (not a launch gate, ledger-manager 2026-10-26):
-  h134/pfd-ep8-b0-s<s>/    pf-b0-c11-s<s> with load_balance_loss_weight=0 (#620), as H123's pf-ep8.
-  h134/pfd-x16-b0-s<s>/    the same on a borrowed 8x8x16 (fsdp16 x ep64, factor 5.0, r2 emulation 8:2:128:32, 6 steps,
-                           H123's gcsfs patch), as H123's pf-x16 (mk_x16.py).
+  Every arm, optional P4 diagnostics (not a launch gate, ledger-manager 2026-10-26):
+  h134/pfd-ep8-<arm>-s<s>/ pf-<arm>-c11-s<s> with load_balance_loss_weight=0 (#620), as H123's pf-ep8.
+  h134/pfd-x16-<arm>-s<s>/ the same on a borrowed 8x8x16 (fsdp16 x ep64, factor 5.0, r2 emulation 8:2:128:32, 6 steps),
+                           as H123's pf-x16 (mk_x16.py), with H103's gr2 restore knobs (GCSFS_RETRIES 30, a per-host stagger
+                           of index mod 16 x 8 s, TENSORSTORE_GCS_REQUEST_CONCURRENCY 8; h103-gr2-overlay @bb1085a17),
+                           the default for 8x8x16 restores since 2026-10-26 (ledger-manager).
 B0 starts from bf16 like B1/B2, which are bf16-only exports (ledger-manager 2026-10-26): the 14T fp32 masters rounded to bf16
 (round-to-nearest-even), stored as their exact fp32 upcast in h134-lc-step5961-bf16."""
 import pathlib
+import shutil
 import sys
 
 import gcsfs_patch  # default restore-only gcsfs retry patch on every 8x8x16 overlay
@@ -86,14 +89,12 @@ for s in (0, 1):
           header=f"# H134 pf-{ARM}-c11-s{s}: P3/P4 preflight, 20 steps, scratch output.\n")
     assert "  - LR_SCHEDULE_STEPS=16304\n" in (pf / "kustomization.yaml").read_text()
 
-    if ARM != "b0":
-        continue  # the P4 x16 diagnostic is staged for B0 only
-    ep8 = K / "h134" / f"pfd-ep8-b0-s{s}"
-    write(ep8, pf, ((pfjs, f"h134-pfd-ep8-b0-s{s}"),),
+    ep8 = K / "h134" / f"pfd-ep8-{ARM}-s{s}"
+    write(ep8, pf, ((pfjs, f"h134-pfd-ep8-{ARM}-s{s}"),),
           kust=((" emo_enabled=false ", " emo_enabled=false load_balance_loss_weight=0 "),),
-          header=f"# H134 pfd-ep8-b0-s{s}: P4 diagnostic candidate, lb weight 0.\n")
-    x16 = K / "h134" / f"pfd-x16-b0-s{s}"
-    write(x16, ep8, ((f"h134-pfd-ep8-b0-s{s}", f"h134-pfd-x16-b0-s{s}"), ("  - STEPS=20\n", "  - STEPS=6\n")),
+          header=f"# H134 pfd-ep8-{ARM}-s{s}: P4 diagnostic candidate, lb weight 0.\n")
+    x16 = K / "h134" / f"pfd-x16-{ARM}-s{s}"
+    write(x16, ep8, ((f"h134-pfd-ep8-{ARM}-s{s}", f"h134-pfd-x16-{ARM}-s{s}"), ("  - STEPS=20\n", "  - STEPS=6\n")),
           kust=(("  - MAXTEXT_LOG_BATCH_HASH=1\n", "  - MAXTEXT_LOG_BATCH_HASH=1\n  - MAXTEXT_R2_DATA_EMULATION=8:2:128:32\n"),
                 ("  - TOTAL_DEVICES=128\n", "  - TOTAL_DEVICES=1024\n"),
                 ("  - PER_DEVICE_BATCH=0.125\n", "  - PER_DEVICE_BATCH=0.015625\n"),
@@ -102,5 +103,13 @@ for s in (0, 1):
           jobset=(("parallelism: 32 # Hosts per slice.", "parallelism: 256 # Hosts per slice."),
                   ("completions: 32", "completions: 256"),
                   ("cloud.google.com/gke-tpu-topology: 4x4x8", "cloud.google.com/gke-tpu-topology: 8x8x16")),
-          header=f"# H134 pfd-x16-b0-s{s}: P4 diagnostic reference, 8x8x16, optional.\n")
+          header=f"# H134 pfd-x16-{ARM}-s{s}: P4 diagnostic reference, 8x8x16, optional.\n")
     gcsfs_patch.apply(x16)
+    # gr2 (H103, h103-gr2-overlay @bb1085a17): retries 20 -> 30, per-host stagger, TensorStore GCS request cap 8
+    shutil.copyfile(K / "gcsfs_retry" / "sitecustomize_gr2.py", x16 / "sitecustomize.py")
+    kx = x16 / "kustomization.yaml"
+    kx.write_text(sub(kx.read_text(), (("  - GCSFS_RETRIES=20\n", "  - GCSFS_RETRIES=30\n"),
+                                       ("  - GCSFS_PIN=2026.2.0\n", "  - GCSFS_PIN=2026.2.0\n"
+                                        "  # gr2: the first gcsfs request of each process waits (JOB_COMPLETION_INDEX mod 16) x 8 s, once;\n"
+                                        "  # TensorStore's per-host GCS request cap 32 -> 8 carries the bulk checkpoint reads. Restore I/O only.\n"
+                                        "  - GCSFS_STAGGER_GROUPS=16\n  - GCSFS_STAGGER_STEP_S=8\n  - TENSORSTORE_GCS_REQUEST_CONCURRENCY=8\n")), x16.name))

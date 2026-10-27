@@ -30,9 +30,14 @@ configMapGenerator:
   literals:
   # Restore-only gcsfs retry patch (gcsfs_patch.py; ledger #643): /launcher first so sitecustomize.py loads.
   - PYTHONPATH=/launcher:/deps/src
-  - GCSFS_RETRIES=20
+  - GCSFS_RETRIES=30
   - GCSFS_JITTER_S=4
   - GCSFS_PIN=2026.2.0
+  # gr2: the first gcsfs request of each process waits (JOB_COMPLETION_INDEX mod 16) x 8 s, once;
+  # TensorStore's per-host GCS request cap 32 -> 8 carries the bulk checkpoint reads. Restore I/O only.
+  - GCSFS_STAGGER_GROUPS=16
+  - GCSFS_STAGGER_STEP_S=8
+  - TENSORSTORE_GCS_REQUEST_CONCURRENCY=8
   - RUN_NAME=olmo35-sft-h134-pfd-x16-b0-s1
   - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch
   # OLMo-core step5961 converted with o35/convert_olmocore_to_maxtext.py (fp32 masters, padded 100352 vocab).
