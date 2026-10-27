@@ -6,6 +6,7 @@ optimizer and distributed trainer buffers so the probe fits one H100.
 """
 
 import argparse
+import asyncio
 import gc
 import json
 import time
@@ -284,13 +285,24 @@ def serving_controls(engine, args, samples):
             report["records"].append(row)
             write(args.output, report)
             print(json.dumps(row), flush=True)
-    batch = engine.generate(
-        input_ids=[s["metadata"]["vision"]["prepared"]["placeholder_token_ids"] for s in samples],
-        image_data=[[i["path"] for i in s["metadata"]["vision"]["images"]] for s in samples],
-        sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
-        return_logprob=True,
-        token_ids_logprob=requested,
-    )
+
+    async def concurrent_requests():
+        return await asyncio.gather(
+            *[
+                engine.async_generate(
+                    input_ids=list(s["metadata"]["vision"]["prepared"]["placeholder_token_ids"]),
+                    image_data=[i["path"] for i in s["metadata"]["vision"]["images"]],
+                    sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+                    return_logprob=True,
+                    token_ids_logprob=requested,
+                )
+                for s in samples
+            ]
+        )
+
+    # Use independent requests, as MILES does. The pinned local Engine batch API
+    # raised a rid_to_state KeyError for this multimodal batch.
+    batch = engine.loop.run_until_complete(concurrent_requests())
     for index, (sample, result) in enumerate(zip(samples, batch, strict=True)):
         target = sample["tokens"][-sample["response_length"]]
         values = {v[1]: v[0] for v in result["meta_info"]["output_token_ids_logprobs"][0]}
@@ -302,6 +314,36 @@ def serving_controls(engine, args, samples):
                 "rollout_log_prob": sample["rollout_log_probs"][0],
             }
         )
+    write(args.output, report)
+    report["whole_sequence"] = []
+    report["repeat_prefix"] = []
+    for index, sample in enumerate(samples):
+        n = sample["response_length"]
+        response = sample["tokens"][-n:]
+        prompt = sample["metadata"]["vision"]["prepared"]["placeholder_token_ids"]
+        images = [i["path"] for i in sample["metadata"]["vision"]["images"]]
+        result = engine.generate(
+            input_ids=prompt + response,
+            image_data=images,
+            sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+            return_logprob=True,
+            logprob_start_len=len(sample["tokens"]) - n - 1,
+        )
+        values = result["meta_info"]["input_token_logprobs"][-n:]
+        assert [v[1] for v in values] == response
+        report["whole_sequence"].append({"index": index, "log_probs": [v[0] for v in values]})
+        result = engine.generate(
+            input_ids=list(prompt),
+            image_data=images,
+            sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+            return_logprob=True,
+            token_ids_logprob=requested,
+        )
+        values = {v[1]: v[0] for v in result["meta_info"]["output_token_ids_logprobs"][0]}
+        report["repeat_prefix"].append(
+            {"index": index, "log_probs": values, "initial_log_probs": cache[(tuple(prompt), tuple(images))]}
+        )
+        write(args.output, report)
     report["complete"] = True
     write(args.output, report)
     print(json.dumps({"batch_first_tokens": report["batch_first_tokens"]}), flush=True)
