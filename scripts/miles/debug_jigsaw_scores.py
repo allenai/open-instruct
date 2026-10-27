@@ -252,6 +252,61 @@ def core(args, samples, checkpoint):
     dist.destroy_process_group()
 
 
+def serving_controls(engine, args, samples):
+    """Hold the exact prefix fixed and vary request batch size / suffix scoring."""
+    report = {"mode": "serving-controls", "records": [], "batch_first_tokens": []}
+    requested = sorted({t for sample in samples for t in sample["tokens"][-sample["response_length"] :]})
+    cache = {}
+    for index, sample in enumerate(samples):
+        response = sample["tokens"][-sample["response_length"] :]
+        prompt = sample["metadata"]["vision"]["prepared"]["placeholder_token_ids"]
+        images = [item["path"] for item in sample["metadata"]["vision"]["images"]]
+        for position, target in enumerate(response):
+            prefix = prompt + response[:position]
+            key = (tuple(prefix), tuple(images))
+            if key not in cache:
+                result = engine.generate(
+                    input_ids=prefix,
+                    image_data=images,
+                    sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+                    return_logprob=True,
+                    token_ids_logprob=requested,
+                )
+                values = result["meta_info"]["output_token_ids_logprobs"][0]
+                cache[key] = {v[1]: v[0] for v in values}
+            row = {
+                "index": index,
+                "position": position,
+                "token_id": target,
+                "prefix_log_prob": cache[key][target],
+                "rollout_log_prob": sample["rollout_log_probs"][position],
+            }
+            report["records"].append(row)
+            write(args.output, report)
+            print(json.dumps(row), flush=True)
+    batch = engine.generate(
+        input_ids=[s["metadata"]["vision"]["prepared"]["placeholder_token_ids"] for s in samples],
+        image_data=[[i["path"] for i in s["metadata"]["vision"]["images"]] for s in samples],
+        sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+        return_logprob=True,
+        token_ids_logprob=requested,
+    )
+    for index, (sample, result) in enumerate(zip(samples, batch, strict=True)):
+        target = sample["tokens"][-sample["response_length"]]
+        values = {v[1]: v[0] for v in result["meta_info"]["output_token_ids_logprobs"][0]}
+        report["batch_first_tokens"].append(
+            {
+                "index": index,
+                "token_id": target,
+                "batch_log_prob": values[target],
+                "rollout_log_prob": sample["rollout_log_probs"][0],
+            }
+        )
+    report["complete"] = True
+    write(args.output, report)
+    print(json.dumps({"batch_first_tokens": report["batch_first_tokens"]}), flush=True)
+
+
 def serving(args, samples, checkpoint):
     olmo_sglang.register()
     engine = sglang.Engine(
@@ -274,6 +329,9 @@ def serving(args, samples, checkpoint):
     )
     report = {"mode": "serving", "attention_backend": args.attention_backend, "records": []}
     try:
+        if args.mode == "serving-controls":
+            serving_controls(engine, args, samples)
+            return
         for index, sample in enumerate(samples):
             n = sample["response_length"]
             response_ids = sample["tokens"][-n:]
@@ -306,7 +364,7 @@ def serving(args, samples, checkpoint):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["core", "serving", "vision"])
+    parser.add_argument("mode", choices=["core", "serving", "vision", "serving-controls"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="torch_native")
@@ -315,7 +373,9 @@ def main():
     torch.manual_seed(17)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     samples = torch.load(args.root / "rollouts/0.pt", map_location="cpu", weights_only=False, mmap=True)["samples"]
-    {"core": core, "serving": serving, "vision": vision}[args.mode](args, samples, args.root / "prepared/hf")
+    {"core": core, "serving": serving, "vision": vision, "serving-controls": serving}[args.mode](
+        args, samples, args.root / "prepared/hf"
+    )
 
 
 if __name__ == "__main__":
