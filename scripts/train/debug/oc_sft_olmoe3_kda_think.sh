@@ -409,10 +409,6 @@ case "$MODE" in
     # checkpoint (207 GB, ~95 s to write from 16 ranks), so 2000 costs ~2% wall
     # and caps a preemption at ~75 min of lost work.
     RESUME_FLAGS="${RESUME_FROM:+--resume_from_checkpoint $RESUME_FROM}"
-    # SAVE_ASYNC=1 drops --no_save_async (olmo-core's async default). The flag was a debugging leftover from #1821:
-    # the H100 hang it chased was an FSDP reduce-scatter hang (OLMo-core #829), not saving. A sync save of the 14T
-    # model blocks ~70 s, so async lets relaunched long runs save every 512 steps (2026-10-26).
-    SAVE_ASYNC_FLAG="--no_save_async"; [[ "${SAVE_ASYNC:-0}" == 1 ]] && SAVE_ASYNC_FLAG=""
     # Where the run writes. mason mints CHECKPOINT_OUTPUT_DIR under
     # /weka/oe-adapt-default/allennlp/deletable_checkpoint_states and keeps any
     # explicit --output_dir that already lives under /weka/. That bucket hit 0
@@ -474,7 +470,7 @@ case "$MODE" in
         $RESUME_FLAGS \
         --keep_last_n_checkpoints "$KEEP_LAST_N" \
         --dist_timeout_hours "${DIST_TIMEOUT_HOURS:-2}" \
-        $SAVE_ASYNC_FLAG \
+        --no_save_async \
         --with_tracking \
         --run_name "${RUN_NAME:-sft-${BASE}-${MODE}}" \
         --logging_steps 1 \
