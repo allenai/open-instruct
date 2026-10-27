@@ -243,7 +243,8 @@ NATIVE_VALIDATION_OPTIONS = (
             "rewards_normalization",
             "rollout_all_samples_process_path",
             "rollout_batch_size",
-            "rollout_external",
+            "rollout_external_engine_addrs",
+            "custom_inference_engine_provider_path",
             "rollout_function_path",
             "rollout_num_gpus_per_engine",
             "rollout_sample_filter_path",
@@ -270,11 +271,22 @@ NATIVE_VALIDATION_OPTIONS = (
 )
 
 
+def external_rollout(options):
+    return any(
+        options.get(name) is not None
+        for name in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")
+    )
+
+
 def native_values(args, supplied_flags):
     """Select native arguments for the same validator used by CPU planning."""
     fields = {
         name: value for name in sorted(NATIVE_VALIDATION_OPTIONS) if (value := getattr(args, name, None)) is not None
     }
+    # Upstream fills in its internal provider path after deriving this boolean.
+    # Do not reinterpret that generated default as a user-supplied external pool.
+    if getattr(args, "rollout_external", None) is False:
+        fields.pop("custom_inference_engine_provider_path", None)
     for name in EXPLICIT_NATIVE_OPTIONS:
         if "--" + name.replace("_", "-") in supplied_flags:
             fields[name] = getattr(args, name)
@@ -292,6 +304,7 @@ STRUCTURED_FIELDS = {
         "env",
         "gpus_per_replica",
         "max_retries",
+        "memory",
         "min_runtime",
         "priority",
         "secrets",
@@ -318,6 +331,7 @@ STRUCTURED_FIELDS = {
         "backend",
         "chat_template",
         "context_extension",
+        "cuda_graphs",
         "endpoint",
         "gpus",
         "max_concurrent_calls",
@@ -336,6 +350,7 @@ STRUCTURED_FIELDS = {
 # Map special run-file controls to their compiler branch. Ordinary aliases use
 # FIELD_MAP; these need transformations or deferred multi-field resolution.
 SPECIAL_CONTROLS = {
+    "profile": "inference_profile",
     "gpus": "gpus",
     "placement_mode": "deferred",
     "max_context_length": "deferred",

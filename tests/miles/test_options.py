@@ -74,11 +74,11 @@ def test_mixed_native_controls_round_trip(parser):
         assert getattr(parsed, key) == value
 
 
-def test_serving_json_and_legacy_aliases(parser):
+def test_serving_json_and_native_options(parser):
     requested = {
         "sglang_cuda_graph_config": {"decode": {"backend": "full", "max_bs": 4}},
-        "sglang_mamba_scheduler_strategy": "extra_buffer",
-        "sglang_disable_piecewise_cuda_graph": True,
+        "sglang_mamba_radix_cache_strategy": "extra_buffer",
+        "sglang_cuda_graph_backend_prefill": "disabled",
         "sglang_disable_cuda_graph": False,
         "sglang_json_model_override_args": {"max_position_embeddings": 8192},
     }

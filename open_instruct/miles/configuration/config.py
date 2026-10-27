@@ -274,6 +274,7 @@ def scoring_pass(core: CoreConfig, options: dict[str, Any]) -> ScoringPass:
 class RunConfig:
     core: CoreConfig
     miles: dict[str, Any]
+    inference_profile: dict[str, Any] | None = None
 
     def resolved_miles(self) -> dict[str, Any]:
         """Resolve the default group filter for plans, native argv and direct CLI callers."""
@@ -528,7 +529,12 @@ class RunConfig:
                 "engine_drain requires diagnostic_interval=0; full publication audits run at startup",
                 constraints.Category.NOT_IMPLEMENTED,
             )
-        for name in ("partial_rollout", "use_fault_tolerance", "rollout_external"):
+        if constraints.external_rollout(options):
+            raise constraints.error(
+                "engine_drain does not yet support external rollout; use publication_mode=barrier",
+                constraints.Category.NOT_IMPLEMENTED,
+            )
+        for name in ("partial_rollout", "use_fault_tolerance"):
             if options.get(name, False):
                 raise constraints.error(
                     f"engine_drain does not yet support miles.{name}; disable it or use publication_mode=barrier",
@@ -650,6 +656,7 @@ class RunConfig:
             "argv": argv,
             "async_capacity": async_capacity.report(options, self.core.max_policy_lag),
             "throughput": throughput.report(options, self.core),
+            "inference_profile": self.inference_profile,
             "runtime_validated": False,
             "core": dataclasses.asdict(self.core),
             "miles": options,

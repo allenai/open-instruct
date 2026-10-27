@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 from miles.backends.core_utils import contract, data, packing
-from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
+from miles.backends.training_utils.loss import objective as miles_loss
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from torch import distributed as dist
 
@@ -38,6 +38,8 @@ def test_packing_preserves_rl_objective_and_gradients(tmp_path, token_average, s
             loss_type="policy_loss",
             advantage_estimator="grpo",
             use_rollout_logprobs=False,
+            use_sampling_support_replay=False,
+            debug_unified_grad_fused_logprob=False,
             skip_actor_forward_only=skip_scoring,
             entropy_coef=0.0,
             observe_training_entropy=False,

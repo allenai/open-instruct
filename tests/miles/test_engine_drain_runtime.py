@@ -235,6 +235,8 @@ def test_direct_request_checks_execution_version_and_releases_before_reward(monk
             rollout_max_context_len=32,
             use_rollout_routing_replay=False,
             use_rollout_indexer_replay=False,
+            use_sampling_support_replay=False,
+            rollout_top_logprobs_num=0,
             lora_rank=0,
             sglang_speculative_algorithm=None,
         )
@@ -268,7 +270,7 @@ def test_consuming_clock_advances_before_snapshot_capacity_wait():
             calls.append((method, {}))
             return [WeightSnapshot(1, (), 0, 0)]
 
-        manager = SimpleNamespace(core_engine_drain=SimpleNamespace(remote=control))
+        manager = SimpleNamespace(core_engine_drain=control)
         inference = SimpleNamespace(
             start_update_weights=AsyncMock(return_value=SimpleNamespace(snapshot_cell_id_to_hashes={})),
             end_update_weights=AsyncMock(),

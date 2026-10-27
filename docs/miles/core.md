@@ -129,10 +129,11 @@ Logprob checks and the initial HF comparison are separate checks. The
 round trip adds a second full transfer, with `repeated_version=true` in the
 publication log; include both transfers when measuring diagnostic overhead.
 The async producer remains paused until the check completes.
-The interval defaults to zero, leaving these periodic probes disabled. The maintained training
-examples explicitly keep `core.diagnostic_interval=0` and
+The interval defaults to zero, leaving these periodic probes disabled. The maintained
+examples inherit that default. The dev mechanics example enables
 `check_weight_update_equal=true`: the full weight audit runs at startup, including
-resume, and does not run after ordinary training updates. Reserve a positive
+resume, and does not run after ordinary training updates. The node and three-node
+learning examples disable this optional audit. Reserve a positive
 interval for investigating publication correctness. This interval
 also controls the extra gradient-norm and sampled-parameter-update diagnostics;
 setting it to zero does not disable the separate policy-version, logprob, replay,

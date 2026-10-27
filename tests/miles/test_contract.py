@@ -15,8 +15,8 @@ import pytest
 import torch
 from miles.backends.core_utils import contract
 from miles.backends.core_utils.publication.state import PolicyClock
-from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
+from miles.backends.training_utils.loss import objective as miles_loss
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from olmo_core.nn.moe import loss as auxiliary
 from olmo_core.nn.moe.v2 import replay
@@ -38,6 +38,8 @@ def loss_args(token_average):
         loss_type="policy_loss",
         advantage_estimator="grpo",
         use_rollout_logprobs=True,
+        use_sampling_support_replay=False,
+        debug_unified_grad_fused_logprob=False,
         skip_actor_forward_only=False,
         entropy_coef=0.0,
         observe_training_entropy=False,

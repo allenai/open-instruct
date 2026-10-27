@@ -13,10 +13,23 @@ from open_instruct.miles.configuration import constraints, validation
 from open_instruct.miles.errors import InputError
 
 REGISTRY_ENV = "OI_MILES_JUDGE_REGISTRY"
+DEFAULT_REQUEST_TIMEOUT = 600
 PROFILES = {
     "open-instruct/" + name: name
     for name in ("general-quality", "general-quality_ref", "general-web_instruct_general_verifier")
 }
+
+
+def require_binding(name, bindings, verifier_spec=None):
+    """Reject judge-dependent data even when the run has no judge configuration."""
+    named_factory = "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"
+    factory = verifier_spec.get("factory") if isinstance(verifier_spec, dict) else None
+    if name not in bindings and (name.startswith("general-") or factory == named_factory):
+        raise InputError(
+            f"Missing named judge binding for verifier {name!r}. "
+            f'Configure [judging.bindings."{name}"] with a configured judge and rubric, '
+            "or remove the dataset requiring this verifier."
+        )
 
 
 def parse(document):
@@ -37,10 +50,15 @@ def parse(document):
         mode = service.get("mode")
         if mode not in ("managed", "external"):
             raise InputError("judge mode must be managed or external")
-        for key, default in (("max_context_length", 40960), ("max_concurrent_calls", 16), ("timeout", 120)):
+        for key, default in (
+            ("max_context_length", 40960),
+            ("max_concurrent_calls", 16),
+            ("timeout", DEFAULT_REQUEST_TIMEOUT),
+        ):
             service.setdefault(key, default)
             validation.integer(service[key], f"judges.{name}.{key}")
         if mode == "managed":
+            validation.boolean(service.get("cuda_graphs", False), f"judges.{name}.cuda_graphs")
             if service.get("context_extension", "none") not in ("none", "qwen3-yarn-128k"):
                 raise InputError("Managed judge context_extension must be none or qwen3-yarn-128k")
             if service.get("context_extension") == "qwen3-yarn-128k" and (
@@ -72,16 +90,20 @@ def parse(document):
                 or endpoint.password
             ):
                 raise InputError("external judge requires an HTTP(S) endpoint without credentials")
-            if set(service) & {
+            managed_fields = set(service) & {
+                "backend",
+                "chat_template",
+                "context_extension",
+                "cuda_graphs",
                 "gpus",
-                "tensor_parallel_size",
                 "prepared_dir",
                 "revision",
-                "chat_template",
-                "backend",
-                "context_extension",
-            }:
-                raise InputError("external judge cannot specify managed placement fields")
+                "tensor_parallel_size",
+            }
+            if managed_fields:
+                raise InputError(
+                    f"external judge cannot specify managed fields in judges.{name}: {', '.join(sorted(managed_fields))}"
+                )
     for name, rubric in rubrics.items():
         validation.mapping(rubric, f"rubrics.{name}")
         validation.fields(rubric, f"rubrics.{name}", constraints.STRUCTURED_FIELDS["rubrics.NAME"])

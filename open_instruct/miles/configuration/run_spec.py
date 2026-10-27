@@ -12,11 +12,19 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, constraints, options, topology, validation
+from open_instruct.miles.configuration import (
+    async_capacity,
+    constraints,
+    inference_profiles,
+    options,
+    topology,
+    validation,
+)
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.infrastructure import gpu_hardware
 from open_instruct.miles.rewards import judging
 
 RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "tracking", "runtime")
@@ -26,7 +34,6 @@ BEAKER_MIN_RUNTIME_LIMIT_SECONDS = 8 * 3600
 JUPITER_CLUSTER = "ai2/jupiter"
 SATURN_CLUSTER = "ai2/saturn"
 COMPAT_DRIVER_CLUSTERS = (JUPITER_CLUSTER, SATURN_CLUSTER)
-CLUSTER_ATTENTION_BACKENDS = {JUPITER_CLUSTER: "flash_3", SATURN_CLUSTER: "flash_2"}
 JUPITER_LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -354,6 +361,7 @@ class RunSpec:
             min_runtime="0s",
             auto_resume=True,
             max_retries=-1,
+            memory="256 GiB",
             shared_memory="200 GiB",
             timeout="3h",
         )
@@ -364,7 +372,7 @@ class RunSpec:
         for key, default in (("startup_timeout", 1200), ("heartbeat_timeout", 120)):
             coordination.setdefault(key, default)
             _positive(coordination[key], f"launch.coordination.{key}")
-        for key in ("workspace", "budget", "cluster", "priority", "shared_memory"):
+        for key in ("workspace", "budget", "cluster", "priority", "memory", "shared_memory"):
             _text(launch[key], f"launch.{key}")
         for key in ("min_runtime", "timeout"):
             seconds = validation.duration(launch[key], f"launch.{key}", allow_blank=key == "min_runtime")
@@ -433,7 +441,7 @@ class RunSpec:
         return launch
 
     def compile(self, prepared: dict | None = None) -> RunConfig:
-        """Resolve settings without opening checkpoints, datasets or GPU libraries."""
+        """Resolve settings using optional model JSON, without loading weights or GPU libraries."""
         prepared = prepared or {}
         if unknown := set(prepared) - {
             "hf_checkpoint",
@@ -484,7 +492,9 @@ class RunSpec:
             for key, value in self.sections[section].items():
                 origin = f"{section}.{key}"
                 control = constraints.SPECIAL_CONTROLS.get(key)
-                if control == "gpus" and section in ("trainer", "inference"):
+                if key == "profile" and section == "inference":
+                    controls["inference_profile"] = (value, origin)
+                elif control == "gpus" and section in ("trainer", "inference"):
                     put(
                         "miles.actor_num_gpus_per_node" if section == "trainer" else "miles.rollout_num_gpus",
                         value,
@@ -551,7 +561,8 @@ class RunSpec:
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
         validation.runtime_values(miles)
-        validation.inference_capacity(miles)
+        # Cross-field capacity validation below waits for the profile's cache
+        # strategy and pools; scalar validation stays ahead of derived arithmetic.
         CoreConfig(**core)
         if "placement_mode" in controls:
             placement, origin = controls["placement_mode"]
@@ -586,7 +597,10 @@ class RunSpec:
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
         # FlashAttention 4 (CuTe) runs only on Blackwell; the runtime also provides FlashAttention 3 for
         # Jupiter's H100s and FlashAttention 2 for Saturn's A100s.
-        core.setdefault("attention_backend", CLUSTER_ATTENTION_BACKENDS.get(self.launch.get("cluster"), "flash_4"))
+        core.setdefault(
+            "attention_backend",
+            gpu_hardware.CLUSTERS.get(self.launch.get("cluster"), {}).get("attention_backend", "flash_4"),
+        )
         core.setdefault("row_specialization", "dynamic")
         # Roll native checkpoints by default: keep the newest committed one (the
         # final save is always the newest). Set core.checkpoint_keep_every to also
@@ -619,6 +633,21 @@ class RunSpec:
                 f"Rollout context {miles['rollout_max_context_len']} exceeds Core ({length}) or SGLang "
                 f"({miles['sglang_context_length']}) context capacity; use inference.max_context_length to set all three."
             )
+        selector = controls.get("inference_profile", ("generic", ""))[0]
+        try:
+            metadata, metadata_path = inference_profiles.model_metadata(self.model, prepared)
+        except InputError:
+            if selector != "generic":
+                raise
+            # Generic is an escape hatch; advisory metadata must not make it fail.
+            metadata, metadata_path = None, None
+        profile = inference_profiles.resolve(
+            selector, self.launch["cluster"], metadata, miles, require_model_metadata="hf_checkpoint" in prepared
+        )
+        profile["model_metadata_path"] = metadata_path
+        miles.update(profile["preset_values"])
+        miles.setdefault("sglang_disable_radix_cache", True)
+        validation.inference_capacity(miles)
         defaults = {
             "fully_async": asynchronous,
             "offload_train": False,
@@ -655,10 +684,8 @@ class RunSpec:
             "clip_grad": 1.0,
             "update_weight_buffer_size": 1073741824,
             "update_weights_interval": 1,
-            "sglang_server_concurrency": 64,
             "sglang_max_running_requests": 64,
             "sglang_mem_fraction_static": 0.4 if miles["colocate"] else 0.6,
-            "sglang_disable_radix_cache": True,
             "sglang_max_mamba_cache_size": 128,
             "sglang_cuda_graph_backend_decode": "full",
             "sglang_cuda_graph_max_bs_decode": 64,
@@ -675,6 +702,12 @@ class RunSpec:
         }
         for key, value in defaults.items():
             miles.setdefault(key, value)
+        # HTTP permits cover the entire request, including response delivery and
+        # decoding. Leave transport headroom without increasing GPU batch/cache
+        # limits. Preserve explicit limits, including deliberately small checks.
+        miles.setdefault(
+            "sglang_server_concurrency", miles["sglang_max_running_requests"] * (2 if asynchronous else 1)
+        )
         miles.setdefault("global_batch_size", miles["rollout_batch_size"] * miles["n_samples_per_prompt"])
         miles.setdefault("sglang_max_total_tokens", max(524288, miles["sglang_max_running_requests"] * length))
         if miles.get("use_rollout_routing_replay"):
@@ -699,7 +732,7 @@ class RunSpec:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
-            miles.setdefault("async_data_buffer_capacity_factor", 2.0)
+            miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             miles.setdefault("async_unused_samples_handler", "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
             # a finished sibling frees its slot instead of idling until its slowest
@@ -772,7 +805,19 @@ class RunSpec:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
-        result = RunConfig(CoreConfig(**core), miles)
+        profile["values"] = {
+            key: {"value": miles[key], "source": origins.get(f"miles.{key}", profile["selected"])}
+            for key in inference_profiles.PROFILE_KEYS
+            if key in miles
+        }
+        profile["warnings"], profile["tips"] = inference_profiles.advise(
+            profile,
+            self.launch["cluster"],
+            metadata,
+            miles,
+            {key.removeprefix("miles.") for key in origins if key.startswith("miles.")},
+        )
+        result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
         if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
             raise InputError(
@@ -806,8 +851,8 @@ class RunSpec:
             )
         return warnings
 
-    def plan(self) -> dict[str, Any]:
-        compiled = self.compile()
+    def plan(self, compiled=None) -> dict[str, Any]:
+        compiled = compiled if compiled is not None else self.compile()
         runtime = compiled.plan()
         return {
             "schema_version": 1,
@@ -825,7 +870,7 @@ class RunSpec:
             "runtime": runtime,
             "evaluation": evaluation.plan(self, compiled.miles),
             **self.judges,
-            "allocation": topology.plan(self),
+            "allocation": topology.plan(self, compiled),
             "runtime_validated": False,
             "stages": ["prepare_model", "prepare_data", "validate", "train"]
             + (["export_hf"] if self.output["export_hf"] else []),

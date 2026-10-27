@@ -27,7 +27,7 @@ def test_async_defaults_are_real_tis_and_eight_by_eight(tmp_path):
     config = spec(tmp_path, **{"async": {"fully_async": True}}).compile()
     assert config.miles["use_tis"] is True
     assert config.miles["use_rollout_logprobs"] is False
-    assert config.miles["async_data_buffer_capacity_factor"] == 2
+    assert config.miles["async_data_buffer_capacity_factor"] == 1
     assert config.miles["colocate"] is False
     assert config.miles["rollout_batch_size"] == config.miles["n_samples_per_prompt"] == 8
     assert config.miles["global_batch_size"] == 64
@@ -367,7 +367,7 @@ def test_explicit_prepared_input_and_tracking_disable(tmp_path):
 def test_all_researcher_examples_compile_to_native_arguments():
     root = Path(__file__).parents[1] / "configs" / "miles"
     paths = sorted((root / "examples").glob("*.toml"))
-    assert {path.stem for path in paths} == {"dev", "small", "medium", "large"}
+    assert {path.stem for path in paths} == {"dev", "node", "three-node"}
     for path in paths:
         run = RunSpec.load(path)
         config = run.compile()

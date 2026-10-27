@@ -43,6 +43,8 @@ def main():
         [
             "docker",
             "build",
+            "--platform",
+            "linux/amd64",
             "--file",
             "runtime/miles/Dockerfile",
             "--build-arg",
