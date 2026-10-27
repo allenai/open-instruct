@@ -69,6 +69,16 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     assert task["context"]["minRuntime"] == "0s"
 
 
+@pytest.mark.parametrize(
+    "settings,memory,shared",
+    [({}, "256 GiB", "200 GiB"), ({"memory": "128 GiB", "shared_memory": "32 GiB"}, "128 GiB", "32 GiB")],
+)
+def test_launch_memory_request(tmp_path, settings, memory, shared):
+    run = spec(tmp_path, trainer={"gpus": 1}, inference={"gpus": 1, "placement_mode": "disaggregated"}, launch=settings)
+    resources = launch.specification(IMAGE_ID, run)["tasks"][0]["resources"]
+    assert resources == {"gpuCount": 2, "memory": memory, "sharedMemory": shared}
+
+
 @pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])
 def test_multinode_native_replica_group(tmp_path, monkeypatch, minimum):
     def no_inventory(*args, **kwargs):

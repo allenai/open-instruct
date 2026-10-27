@@ -53,3 +53,6 @@ throughput, consumed policy age/stale drops, and checkpoint/restart behavior.
 The initial serving matrix qualifies the BF16 HF fallback, not the native RL path.
 
 See [the preparation batch](experiment.md#gsm8k-infrastructure-comparison-275m-and-450m-500-updates-2026-10-27).
+
+
+450m-first update (2026-10-27): user approved only the two 450m stacks; 275m GPU runs deferred. Run one two-update MILES smoke on two Rhea A6000s, then the two 500-update jobs (four GPUs peak) only if it passes. Initial smoke [01M5ZFP2Z9D41ZFW6YW4AJR85C](https://beaker.org/ex/01M5ZFP2Z9D41ZFW6YW4AJR85C) was stopped before training: the hard-coded 256 GiB RAM request caused three GPU slots to be allocated. Launcher now supports explicit host memory; comparison requests use 128 GiB RAM and 32 GiB shared memory. Native RL validation is still pending.

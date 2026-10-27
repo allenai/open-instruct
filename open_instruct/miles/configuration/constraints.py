@@ -292,6 +292,7 @@ STRUCTURED_FIELDS = {
         "env",
         "gpus_per_replica",
         "max_retries",
+        "memory",
         "min_runtime",
         "priority",
         "secrets",

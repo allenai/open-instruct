@@ -161,3 +161,6 @@ Launch files: MILES `configs/miles/benchmarks/hybrid_{275m,450m}_gsm8k_compare_5
 Core/vLLM `scripts/train/olmo-hybrid-small/gsm8k_infra_compare_500.sh` with
 MODEL_SIZE=275m or450m. Run-file schema planning passed; images/data are prepared
 on the existing Hammond CPU session, with no local Docker build.
+
+
+450m-first update (2026-10-27): user approved only the two 450m stacks; 275m GPU runs deferred. Run one two-update MILES smoke on two Rhea A6000s, then the two 500-update jobs (four GPUs peak) only if it passes. Initial smoke [01M5ZFP2Z9D41ZFW6YW4AJR85C](https://beaker.org/ex/01M5ZFP2Z9D41ZFW6YW4AJR85C) was stopped before training: the hard-coded 256 GiB RAM request caused three GPU slots to be allocated. Launcher now supports explicit host memory; comparison requests use 128 GiB RAM and 32 GiB shared memory. Native RL validation is still pending.
