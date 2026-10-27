@@ -100,7 +100,8 @@ case "$MODE" in
         # minRuntime shield's preemption window unnecessarily early.
         # TRAIN_FULL_STEPS (H038) moves the step count with the mixture's token count; the
         # mid-run checkpoint stays at the half-way step.
-        export STEPS="${TRAIN_FULL_STEPS:-11768}" NNODES=2 NPROC=8 EPHEMERAL_STEPS=1024
+        # TRAIN_FULL_EPHEMERAL_STEPS: relaunches of long runs save every 512 steps with SAVE_ASYNC=1 (2026-10-26).
+        export STEPS="${TRAIN_FULL_STEPS:-11768}" NNODES=2 NPROC=8 EPHEMERAL_STEPS="${TRAIN_FULL_EPHEMERAL_STEPS:-1024}"
         export CKPT_STEPS=$(( STEPS / 2 ))
         export JOB_TIMEOUT="${JOB_TIMEOUT:-9h}"
         # RUN_TAG keeps the run name and output dir distinct from the 3072-update
