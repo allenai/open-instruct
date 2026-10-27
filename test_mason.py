@@ -320,6 +320,10 @@ class TestParseMinRuntime(unittest.TestCase):
     def test_valid(self, name, value):
         self.assertEqual(mason.parse_min_runtime(value), value)
 
+    @parameterized.parameterized.expand([("plus_zero", "+0"), ("minus_zero", "-0"), ("zero_seconds", "0s")])
+    def test_zero_spellings_normalize(self, name, value):
+        self.assertEqual(mason.parse_min_runtime(value), "0")
+
     @parameterized.parameterized.expand(
         [
             ("below_lower_bound", "4m"),

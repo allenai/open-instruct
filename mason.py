@@ -116,7 +116,8 @@ def parse_min_runtime(min_runtime_str: str) -> str:
         raise argparse.ArgumentTypeError(f"Invalid min runtime: {min_runtime_str}") from e
     if nanoseconds != 0 and nanoseconds < MIN_RUNTIME_LOWER_BOUND_NS:
         raise argparse.ArgumentTypeError(f"Min runtime must be 0 or at least 5m, got: {min_runtime_str}")
-    return min_runtime_str
+    # Normalize spellings such as '+0', '-0' and '0s' so Beaker always receives a plain 0.
+    return "0" if nanoseconds == 0 else min_runtime_str
 
 
 # by default, we turn off vllm compile cache
