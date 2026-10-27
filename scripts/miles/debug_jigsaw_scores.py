@@ -410,6 +410,48 @@ def serving_controls(engine, args, samples):
     print(json.dumps({"batch_first_tokens": report["batch_first_tokens"]}), flush=True)
 
 
+def publication_roundtrip(engine, args, samples, checkpoint, report):
+    """A/B/A intervention through the serving weight-update API, without training."""
+    index = json.loads((checkpoint / "model.safetensors.index.json").read_text())["weight_map"]
+    names = [name for name in index if name.startswith("language_model.") and name.endswith((".A_log", ".dt_bias"))]
+    originals = []
+    for filename in sorted({index[name] for name in names}):
+        with safe_open(checkpoint / filename, framework="pt", device="cpu") as reader:
+            originals.extend((name, reader.get_tensor(name).cuda()) for name in names if index[name] == filename)
+    report["publication_parameters"] = [
+        {
+            "name": name,
+            "dtype": str(value.dtype),
+            "changed_elements": int((value.float() != value.bfloat16().float()).sum()),
+            "rounding_max_abs": float((value.float() - value.bfloat16().float()).abs().max()),
+        }
+        for name, value in originals
+    ]
+    report["publication_roundtrip"] = []
+    for label, payload in (
+        ("bf16_publication", [(name, value.bfloat16()) for name, value in originals]),
+        ("restored_original", originals),
+    ):
+        result = engine.update_weights_from_tensor(payload, flush_cache=True)
+        stage = {"variant": label, "update_result": str(result), "records": []}
+        report["publication_roundtrip"].append(stage)
+        for sample in samples:
+            n = sample["response_length"]
+            response = sample["tokens"][-n:]
+            result = engine.generate(
+                input_ids=sample["metadata"]["vision"]["prepared"]["placeholder_token_ids"] + response,
+                image_data=[i["path"] for i in sample["metadata"]["vision"]["images"]],
+                sampling_params={"temperature": 1.0, "top_p": 1.0, "max_new_tokens": 1},
+                return_logprob=True,
+                logprob_start_len=len(sample["tokens"]) - n - 1,
+            )
+            values = result["meta_info"]["input_token_logprobs"][-n:]
+            assert [v[1] for v in values] == response
+            stage["records"].append({"log_probs": [v[0] for v in values]})
+            write(args.output, report)
+        print(json.dumps(stage), flush=True)
+
+
 def serving(args, samples, checkpoint):
     olmo_sglang.register()
     engine = sglang.Engine(
@@ -460,6 +502,8 @@ def serving(args, samples, checkpoint):
             report["records"].append(row)
             write(args.output, report)
             print(json.dumps(row), flush=True)
+        if args.publication_roundtrip:
+            publication_roundtrip(engine, args, samples, checkpoint, report)
     finally:
         engine.shutdown()
     report["complete"] = True
@@ -475,6 +519,7 @@ def main():
     parser.add_argument("--whole-sequence-first", action="store_true")
     parser.add_argument("--serving-trace", type=Path)
     parser.add_argument("--fp32-head", action="store_true")
+    parser.add_argument("--publication-roundtrip", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(8)
     torch.manual_seed(17)
