@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from scripts.miles import analyze_throughput, sample_gpu_usage, throughput_occupancy
 
-from open_instruct.miles.configuration import throughput, validation
+from open_instruct.miles.configuration import inference_profiles, throughput, validation
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
@@ -60,13 +60,81 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
     } <= codes
 
 
-@pytest.mark.parametrize("profile,gpus", [("dev", 1), ("small", 2), ("medium", 16), ("large", 56)])
-def test_self_contained_example_plans(profile, gpus):
+@pytest.mark.parametrize(
+    "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 4, 19, 1)],
+)
+def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
     assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k-less-noise"
-    assert spec.plan()["allocation"]["allocated_gpus"] == gpus
+    layout = spec.plan()["allocation"]
+    assert layout["allocated_gpus"] == gpus
+    assert layout["replicas"] == replicas
+    assert sum(node["trainer_gpus"] for node in layout["nodes"]) == trainer_gpus
+    assert sum(node["rollout_gpus"] for node in layout["nodes"]) == rollout_gpus
+    assert layout["judge_gpus"] == judge_gpus
+    assert layout["unused_gpus"] == 0
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
-    assert spec.compile().core.max_policy_lag == (6 if profile in ("medium", "large") else 0)
+    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
+
+
+@pytest.mark.parametrize("profile,producer_budget", [("node", 1536), ("three-node", 19456)])
+def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
+    spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
+    pending = spec.compile()
+    assert pending.inference_profile["model_metadata_available"] is False
+    assert pending.miles["sglang_max_running_requests"] == 512
+    assert pending.miles["async_max_concurrent_samples"] == producer_budget
+    (tmp_path / "config.json").write_text(json.dumps(inference_profiles.MODEL_SHAPE | {"dtype": "bfloat16"}))
+    config = spec.compile({"hf_checkpoint": str(tmp_path)})
+    plan = config.plan()
+    capacity = plan["async_capacity"]
+    assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]
+    # Explicit node supply stays bounded; the three-node heuristic remains separate.
+    assert capacity["producer_sample_budget"] == producer_budget
+    if profile == "node":
+        assert producer_budget < capacity["global_http_slots"]
+        assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
+    else:
+        assert producer_budget == 2 * capacity["global_http_slots"]
+        assert any("Producer budget alone" in warning for warning in capacity["warnings"])
+    assert config.miles["global_batch_size"] == 256
+    assert config.core.max_policy_lag == 6
+    assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
+    assert config.miles["sglang_max_total_tokens"] == 512 * 34816
+    assert capacity["completed_buffer_samples"] == capacity["samples_per_collection"]
+    assert "--check-weight-update-equal" not in config.arguments()
+    assert plan["scoring_pass"]["standalone"] is False
+    assert plan["scoring_pass"]["check_interval"] == 0
+    assert not config.core.replay_diagnostics and config.core.diagnostic_interval == 0
+    assert config.miles["save_interval"] == 25
+
+
+def test_dev_retains_weight_qualification():
+    config = RunSpec.load("configs/miles/examples/dev.toml").compile()
+    assert config.miles["check_weight_update_equal"] is True
+
+
+def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
+    with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
+        RunSpec.load("configs/miles/examples/node.toml", ["inference.global_batch_size=128"])
+    config = RunSpec.load(
+        "configs/miles/examples/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+    ).compile()
+    decision = config.plan()["scoring_pass"]
+    assert decision["standalone"] is True
+    assert decision["optimizer_steps_per_collection"] == 2
+    assert decision["check_interval"] == 0
+
+
+def test_optional_qualification_costs_are_visible_in_plan():
+    options = {"check_weight_update_equal": True}
+    codes = {w["code"] for w in throughput.report(options, CoreConfig(scoring_pass_required=True))["warnings"]}
+    assert {"weight_sync_qualification", "forced_trainer_rescoring"} <= codes
+    codes = {w["code"] for w in throughput.report({}, CoreConfig(scoring_check_interval=20))["warnings"]}
+    assert "periodic_scoring_check" in codes
+    codes = {w["code"] for w in throughput.report({}, CoreConfig(scoring_check_interval=0))["warnings"]}
+    assert "periodic_scoring_check" not in codes
 
 
 def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path):

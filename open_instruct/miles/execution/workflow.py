@@ -20,9 +20,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from open_instruct import logger_utils
+from open_instruct.miles.configuration import advisories, inference_profiles, topology
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import artifacts
+from open_instruct.miles.rewards import judging
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -41,10 +43,10 @@ def fingerprint(document):
 
 
 def recovery_configuration_matches(root, previous, document):
-    """Allow changing recovery policy without changing the training recipe.
+    """Allow recovery policy changes and normalize historical launch defaults.
 
-    Authenticate the recorded full specification before allowing this one
-    operational change, including for older runs that hashed auto_resume.
+    Authenticate the recorded full specification before normalizing it, including
+    older runs that hashed auto_resume or predate the explicit host-memory field.
     """
     if previous["spec_sha256"] == fingerprint(document):
         return True
@@ -54,6 +56,12 @@ def recovery_configuration_matches(root, previous, document):
     recorded = json.loads(path.read_text())
     if fingerprint(recorded) != previous["spec_sha256"]:
         return False
+    if "memory" in document["launch"]:
+        # Launchers requested this amount before it became a configurable field.
+        # Do not use current loader defaults: this authenticates the historical
+        # resource commitment even if future launch defaults change.
+        # Preserve explicit saved values so actual resource changes still fail.
+        recorded.setdefault("launch", {}).setdefault("memory", "256 GiB")
     for key in ("auto_resume", "max_retries"):
         if key in document["launch"]:
             recorded.setdefault("launch", {})[key] = document["launch"][key]
@@ -304,38 +312,51 @@ def execute(spec):
     with run_directory(spec) as (root, state):
         hf = prepare_model(spec)
         data = importlib.import_module("open_instruct.miles.datasets.run_data")
-        planned = spec.compile()
+        planned = spec.compile({"hf_checkpoint": hf})
         prepared = data.prepare_data(
             spec.data,
             Path(hf),
             root / "prepared" / "data",
             max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
             seed=planned.miles.get("seed", 17),
-            **(
-                {
-                    "registry_overrides": {
-                        name: {
-                            "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
-                            "config": {"name": name},
-                        }
-                        for name in spec.judges["judging"]["bindings"]
-                    }
+            registry_overrides={
+                name: {
+                    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+                    "config": {"name": name},
                 }
-                if spec.judges["judging"]["bindings"]
-                else {}
-            ),
+                for name in spec.judges["judging"]["bindings"]
+            },
         )
+        registry_module = importlib.import_module("open_instruct.miles.rewards.judge_registry")
+        resolved = judging.registry(spec.judges)
         if spec.judges["judging"]["bindings"]:
-            registry_module = importlib.import_module("open_instruct.miles.rewards.judge_registry")
             resolved = registry_module.registry()
             if resolved is None:
                 raise InputError("Named judges require the managed launcher (or a resolved registry)")
-            registry_module.validate_data(prepared, resolved)
+        registry_module.validate_data(prepared, resolved)
         config = spec.compile({**prepared, "hf_checkpoint": hf})
+        profile = getattr(config, "inference_profile", None)
+        inventory_root = os.environ.get("OI_MILES_INFERENCE_REPORT_DIR")
+        if profile and profile.get("selected") in inference_profiles.PROFILES:
+            layout = topology.plan(spec, config)
+            if inventory_root:
+                hardware = inference_profiles.check_cluster_hardware(profile, inventory_root, layout)
+            elif layout["replicas"] == 1:
+                hardware = inference_profiles.check_hardware(profile, node=layout["nodes"][0])
+            else:
+                raise InputError(
+                    "A matched multi-node inference profile requires per-replica GPU inventories; "
+                    "use the managed cluster launcher instead of direct train."
+                )
+        else:
+            hardware = []
+        write_json(root / "inference-profile.json", {"profile": profile, "hardware": hardware})
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
             config.miles["load"] = str(checkpoint_root)
-        write_json(root / "resolved-plan.json", config.plan())
+        resolved_plan = config.plan()
+        write_json(root / "resolved-plan.json", resolved_plan)
+        advisories.emit(resolved_plan)
         state.update(status="training", training_started_unix=time.time())
         write_json(root / "workflow.json", state)
         result = train_config(

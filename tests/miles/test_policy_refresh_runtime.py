@@ -13,7 +13,7 @@ from miles.backends.core_utils.rollout import refreshing_rollout
 from miles.backends.core_utils.rollout.async_buffer import RefreshPolicyDataBuffer
 from miles.backends.core_utils.rollout.generation_admission import GenerationAdmission
 from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
-from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_function
+from miles.backends.training_utils.loss.hub.corrections import vanilla_tis_function
 from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.rollout.inference_rollout import inference_rollout_common

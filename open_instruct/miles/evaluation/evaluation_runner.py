@@ -56,7 +56,32 @@ def result_directory(receipt):
 
 def command(receipt, output):
     checkpoint = receipt["checkpoint"]
-    args = ["olmo-eval", "run", "--model", checkpoint, "--harness", "default"]
+    first = receipt["tasks"][0]
+    if first.get("kind", "task") == "external":
+        if len(receipt["tasks"]) != 1:
+            raise ValueError("External evaluations execute individually")
+        args = [
+            "olmo-eval",
+            "run-external",
+            "--model",
+            checkpoint,
+            "--eval",
+            first["task"],
+            "--provider",
+            "vllm_server",
+            "--base-url",
+            "http://127.0.0.1:30000/v1",
+            "--provider-kwarg",
+            f"tokenizer={checkpoint}",
+            "--provider-kwarg",
+            "trust_remote_code=true",
+            "--output-dir",
+            str(output),
+        ]
+        for key, value in first["arguments"].items():
+            args.extend(["--arg", f"{key}={json.dumps(value)}"])
+        return args
+    args = ["olmo-eval", "run", "--model", checkpoint, "--harness", first.get("harness_preset", "default")]
     for key, value in {
         "provider.kind": "vllm_server",
         "provider.base_url": "http://127.0.0.1:30000/v1",
@@ -64,6 +89,8 @@ def command(receipt, output):
         "provider.trust_remote_code": True,
         "provider.max_concurrency": 8,
     }.items():
+        args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
+    for key, value in first.get("harness", {}).items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     for task in receipt["tasks"]:
         args.extend(["--task", task["task"]])
@@ -88,8 +115,19 @@ def result_roots(output):
 
 def validate_predictions(output):
     """Reject provider failures that the harness can encode as empty output lists."""
-    paths = [path for root in result_roots(output) for path in root.rglob("*-predictions.jsonl")]
-    if not paths:
+    paths = []
+    external = False
+    for root in result_roots(output):
+        scicode = root / "scicode_results.json"
+        if scicode.is_file():
+            validate_scicode(scicode)
+            external = True
+        else:
+            found = list(root.rglob("*-predictions.jsonl"))
+            if not found:
+                raise ValueError("No evaluation predictions found")
+            paths.extend(found)
+    if not paths and not external:
         raise ValueError("No evaluation predictions found")
     for path in paths:
         count = 0
@@ -102,12 +140,44 @@ def validate_predictions(output):
             raise ValueError(f"Empty evaluation predictions: {path.name}")
 
 
+def validate_scicode(path):
+    """SciCode can report success and zero scores after per-problem infrastructure errors."""
+    result = json.loads(path.read_text())
+    rows = result.get("predictions")
+    if result.get("name") != "scicode" or result.get("success") is not True or result.get("error") or not rows:
+        raise ValueError("Incomplete SciCode evaluation results")
+    ids = set()
+    total = 0
+    for row in rows:
+        count = row.get("total")
+        problem = row.get("problem_id")
+        if (
+            not problem
+            or problem in ids
+            or row.get("error")
+            or type(count) is not int
+            or count < 1
+            or len(row.get("step_results", [])) != count
+            or len(row.get("step_codes", {})) != count
+            or len(row.get("step_texts", {})) != count
+        ):
+            raise ValueError(f"Incomplete SciCode problem: {problem}")
+        ids.add(problem)
+        total += count
+    metrics = result.get("metrics", {})
+    if metrics.get("num_problems") != len(rows) or metrics.get("num_sub_steps") != total:
+        raise ValueError("SciCode result counts disagree with predictions")
+
+
 def scores(output):
     """Read the pinned olmo-eval metrics schema, without treating failures as zero."""
     files = [path for root in result_roots(output) for path in root.rglob("metrics.json")]
     if not files:
         raise ValueError("No olmo-eval metrics.json found")
-    if any(path for root in result_roots(output) for path in root.rglob("*-predictions.jsonl")):
+    if any(
+        (root / "scicode_results.json").is_file() or any(root.rglob("*-predictions.jsonl"))
+        for root in result_roots(output)
+    ):
         validate_predictions(output)
     values = {}
     for path in files:
@@ -271,6 +341,31 @@ def saved_task(output, task):
     return directory, attempt
 
 
+def gpu_environments(receipt):
+    """Keep olmo-eval's managed providers off the frozen policy's GPUs."""
+    policy_count = receipt["evaluation"]["gpus"]
+    auxiliary_count = max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"])
+    total = policy_count + auxiliary_count
+    mask = os.environ.get("CUDA_VISIBLE_DEVICES")
+    # This worker is copied alone into the evaluator image. Unlike the pinned
+    # MILES adapter, evaluator providers accept GPU/MIG UUID masks. Keep that
+    # capability while treating hidden/duplicate devices like the startup helper.
+    devices = (
+        [device.strip() for device in mask.split(",")] if mask is not None else [str(index) for index in range(total)]
+    )
+    if (
+        len(devices) < total
+        or len(set(devices)) != len(devices)
+        or any(not device or device == "-1" for device in devices)
+    ):
+        raise ValueError(f"Evaluation needs {total} visible GPUs for policy and auxiliary providers")
+    policy = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[:policy_count])}
+    evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[policy_count:total])}
+    # The independent evaluator/judge environments must not import training's source overlays.
+    evaluator.pop("PYTHONPATH", None)
+    return policy, evaluator
+
+
 def run_tasks(receipt, output):
     completed = []
     for task in receipt["tasks"]:
@@ -283,7 +378,9 @@ def run_tasks(receipt, output):
             args = command({**receipt, "tasks": [task]}, attempt)
             write_json(attempt / "command.json", args)
             with (attempt / "olmo-eval.log").open("w") as log:
-                subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=True)
+                subprocess.run(
+                    args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
+                )
             values = completed_scores(attempt, [task])
             write_json(
                 directory / "complete.json",
@@ -317,6 +414,14 @@ def run_evaluation_locked(receipt, output):
             write_json(output / "evaluation.json", {"status": "complete"})
             try_publish(receipt, output)
             return
+        if (
+            any(task.get("kind") == "external" or task.get("harness_preset") == "codex_python" for task in pending)
+            and shutil.which("podman") is None
+        ):
+            raise RuntimeError("Code evaluation requires a sandbox-enabled evaluator image with Podman")
+        for task in pending:
+            if task.get("kind") == "external" and not Path(task["arguments"]["h5py_host_path"]).is_file():
+                raise ValueError("SciCode reference data is missing: arguments.h5py_host_path")
         revision = subprocess.check_output(
             ["git", "-C", "/opt/olmo-eval", "rev-parse", "HEAD"], text=True, timeout=10
         ).strip()
@@ -326,7 +431,7 @@ def run_evaluation_locked(receipt, output):
         for name in ("config.json", "tokenizer_config.json"):
             if not (Path(checkpoint) / name).is_file():
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")
-        env = {**os.environ, "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
+        env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
         server_args = [
             sys.executable,
             "-m",

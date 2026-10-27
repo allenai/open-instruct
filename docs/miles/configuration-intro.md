@@ -5,6 +5,11 @@ This is the maintained help for the MILES + OLMo-core wrapper. Start from a
 The tables below are generated; edit reference-help.json or source definitions
 and run `python -m scripts.miles.generate_docs`.
 
+The examples contain inputs, topology, resource limits and recipe-specific
+overrides. Omitted options use the defaults described here; add an option only
+when your run needs to change it. Native training and serving options are listed
+in the [native appendix](native-options.md).
+
 ## Interface and precedence
 
 `python -m open_instruct.miles {plan,validate,train,run,status} run.toml` accepts
@@ -14,7 +19,7 @@ and [miles] and support only plan/validate/train. Structured validate is CPU-saf
 low-level validate invokes the installed native parser. Neither certifies GPU fit.
 
 ```bash
-python -m open_instruct.miles plan configs/miles/examples/medium.toml \
+python -m open_instruct.miles plan configs/miles/examples/node.toml \
   --set training.num_rollouts=20 \
   --set 'tracking.wandb_group="my-comparison"'
 ```
@@ -82,15 +87,20 @@ Context defaults to 6144 tokens during structured compilation. max_context_lengt
 sets Core, SGLang and rollout context together; response must be smaller to leave
 prompt space. max_total_tokens defaults to at least 524288 and at least engine
 admission × context. This is a requested pool capacity, not measured GPU allocation.
+GPU-running admission defaults to 64 requests per engine. HTTP concurrency defaults
+to twice that admission for async runs and equal admission for synchronous runs;
+an explicit `inference.sglang_server_concurrency` takes precedence. Thus the learning
+examples resolve to 64 GPU-running slots, 128 HTTP permits and 2,228,224 token slots
+per engine without repeating those derived settings in each file.
 
 Synchronous colocation is the implicit default; async requires explicit resident
 disaggregation. Structured async enables TIS unless rollout log probabilities are
 explicitly the anchor. TIS and use_rollout_logprobs cannot both be enabled. Async
 derives the omitted producer budget from engine count and request capacity; see
-[async queues and discard metrics](async-pipeline.md). It uses buffer factor 2,
-retry, group submissions, and requires a positive policy lag. Structured async
+[async queues and discard metrics](async-pipeline.md). It uses buffer factor 1,
+retry, sample submissions, and requires a positive policy lag. Structured async
 defaults `async.max_weight_staleness` to six optimizer updates (compiled to
-`core.max_policy_lag`), and the medium and large examples set six explicitly;
+`core.max_policy_lag`), which the node and three-node examples inherit;
 low-level async files must set `core.max_policy_lag` themselves. See
 [development defaults](development-defaults.md). KL > 0 enables the
 reference pass with the prepared starting model unless ref_load is supplied.
@@ -101,8 +111,22 @@ periodic evaluation (interval 20, greedy, one response), using the training resp
 cap unless overridden. Tracking stays disabled unless explicitly enabled or a
 non-disabled wandb_mode is selected. Example offline tracking is an explicit choice.
 
-Core's raw packing default is false and row_specialization is static. The async
-example enables packing and dynamic specialization. Replay is independent:
+Core's raw packing default is false and row_specialization is static. Structured
+runs default to dynamic specialization; the learning examples enable packing.
+Recomputation defaults on. Trainer attention defaults to FlashAttention 4 on Holmes,
+3 on Jupiter and 2 on Saturn; the dev mechanics example explicitly uses Torch.
+Data seed defaults to 17 and shuffle to true; rollout seeds inherit the data seed.
+Compiler-cache persistence and restoration default on; see the
+[cache guide](compiler-cache.md) for the default shared root and lifecycle.
+
+Structured runs retain one native checkpoint by default; all three examples
+explicitly retain two. The examples also override Core's nonzero router auxiliary
+loss coefficients with zero. Learning examples explicitly disable periodic
+score-reuse audits (`core.scoring_check_interval=0`); the raw Core default is 50.
+Their optional weight-equality audit is disabled, while the dev mechanics example
+enables it. These are recipe choices, not universal runtime defaults.
+
+Replay is independent:
 use_rollout_routing_replay requires use_miles_router; structured compilation supplies
 the latter when omitted. The Megatron use_routing_replay option is not the Core switch.
 

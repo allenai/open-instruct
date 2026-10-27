@@ -4,6 +4,7 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import json
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -175,6 +176,21 @@ class TestGSM8KVerifier(unittest.TestCase):
         result = self.verifier([], prediction, label)
         self.assertEqual(result.score, expected_score)
 
+    @parameterized.expand(
+        [
+            ("trailing_zero_decimal", "The total cost is $96.00", "96", 1.0),
+            ("decimal_label_integer_answer", "The answer is 42", "42.0", 1.0),
+            ("thousands_separator_in_answer", "It takes 1,350 minutes", "1350", 1.0),
+            ("thousands_separator_in_label", "It takes 1350 minutes", "1,350", 1.0),
+            ("different_value", "The total cost is $96.50", "96", 0.0),
+            ("rounding_is_not_equality", "About 0.33 of them", "0.3333", 0.0),
+            ("non_numeric_label_uses_string_match", "The answer is 7", "seven", 0.0),
+        ]
+    )
+    def test_numeric_equivalence(self, _name, prediction, label, expected_score):
+        result = self.verifier([], prediction, label)
+        self.assertEqual(result.score, expected_score)
+
 
 def _make_litellm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5):
     return SimpleNamespace(
@@ -242,6 +258,29 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
+    """Regression test: detectable_format:json_format called json.loads on the response and caught only ValueError,
+    so a degenerate, deeply nested response raised RecursionError out of the verifier and stopped an RL run."""
+
+    def test_deeply_nested_response_fails_the_constraint(self):
+        checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
+            "detectable_format:json_format"
+        )
+        checker.build_description()
+        response = "[" * 100_000 + "]" * 100_000
+        with self.assertRaises(RecursionError):
+            json.loads(response)
+        self.assertFalse(checker.check_following(response))
+        self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
+
+    def test_legacy_json_verifier_rejects_deep_nesting(self):
+        verifier = ground_truth_utils.IFEvalVerifierOld()
+        response = "[" * 100_000 + "]" * 100_000
+        self.assertEqual(verifier([], response, {"func_name": "validate_json_format"}).score, 0.0)
+        self.assertEqual(verifier([], '{"a": [1, 2]}', {"func_name": "validate_json_format"}).score, 1.0)
+        self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
 
 
 class TestIFEvalGWordCounting(unittest.TestCase):

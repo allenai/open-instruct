@@ -2,8 +2,8 @@
 
 import pytest
 import torch
-from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
+from miles.backends.training_utils.loss import objective as miles_loss
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from test_contract import batch_for, fixture_data, loss_args
 from torch import distributed as dist
