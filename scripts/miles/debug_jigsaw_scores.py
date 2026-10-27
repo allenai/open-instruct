@@ -22,14 +22,109 @@ from olmo_core.nn.moe.v2 import olmo3
 from olmo_sglang.vision import model as vision_model
 from olmo_sglang.vision import processing
 from PIL import Image
+from safetensors import safe_open
 from torch import distributed as dist
 from transformers import AutoConfig
 
 from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.datasets import vision_replay
 
 
 def write(path, result):
     path.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
+
+
+def differences(a, b):
+    error = (a.float() - b.float()).abs()
+    values, flat_indices = error.flatten().topk(min(12, error.numel()))
+    return {
+        "shape": list(a.shape),
+        "max_abs": float(error.max()),
+        "mean_abs": float(error.mean()),
+        "different_elements": int((a != b).sum()),
+        "elements": a.numel(),
+        "a_max_abs": float(a.abs().max()),
+        "b_max_abs": float(b.abs().max()),
+        "largest": [
+            {"flat_index": int(i), "abs_diff": float(v), "a": float(a.flatten()[i]), "b": float(b.flatten()[i])}
+            for v, i in zip(values, flat_indices, strict=True)
+        ],
+    }
+
+
+def vision(args, samples, checkpoint):
+    """Separate encoder batching from connector batching using identical pixels."""
+    hf = AutoConfig.from_pretrained(checkpoint, trust_remote_code=True)
+    visual = vision_model.OlmoVisionStack(hf, device="cuda", dtype=torch.bfloat16).eval().requires_grad_(False)
+    index = json.loads((checkpoint / "model.safetensors.index.json").read_text())["weight_map"]
+    files = sorted({file for name, file in index.items() if name.startswith(("vision_tower.", "connector."))})
+    state = {}
+    for file in files:
+        with safe_open(checkpoint / file, framework="pt", device="cpu") as reader:
+            names = reader.keys()
+            state.update(
+                {name: reader.get_tensor(name) for name in names if name.startswith(("vision_tower.", "connector."))}
+            )
+    visual.load_weights(state.items())
+    del state
+    processor = processing.OlmoVisionProcessor.from_pretrained(checkpoint)
+    report = {"mode": "vision", "records": [], "hardware": torch.cuda.get_device_name()}
+    seen = set()
+    with torch.no_grad():
+        for sample in samples:
+            identity = sample["metadata"]["prepared_sample_id"]
+            if identity in seen:
+                continue
+            seen.add(identity)
+            images = [Image.open(item["path"]).convert("RGB") for item in sample["metadata"]["vision"]["images"]]
+            prompt, prepared = processor.prepare(
+                sample["metadata"]["vision"]["prepared"]["placeholder_token_ids"], images
+            )
+            replay = vision_replay.training_inputs(prepared, prompt, hf.image_patch_token_id)
+            for key, value in replay.items():
+                assert torch.equal(value, sample["multimodal_train_inputs"][key]), key
+            pixels = replay["images"].to("cuda", torch.bfloat16)
+            pools = replay["pooled_patches_idx"].to("cuda")
+            _, crops, patches, width = pixels.shape
+            together = visual.vision_tower(pixels.reshape(crops, patches, width))
+            each = [
+                visual.vision_tower(p.patches.to("cuda", torch.bfloat16).reshape(-1, patches, width)) for p in prepared
+            ]
+            separate = [torch.cat([h[layer] for h in each], dim=0) for layer in range(len(together))]
+            combined_features = torch.cat([together[i] for i in visual.vit_layers], dim=-1).reshape(
+                1, crops * patches, -1
+            )
+            separate_features = torch.cat([separate[i] for i in visual.vit_layers], dim=-1).reshape(
+                1, crops * patches, -1
+            )
+
+            def per_image_connector(features, prepared=prepared, patches=patches):
+                result = []
+                start = 0
+                for p in prepared:
+                    count = p.patches.shape[1] * patches
+                    result.append(visual.connector(features[:, start : start + count], p.pooling.to("cuda")))
+                    start += count
+                return torch.cat(result, dim=1)
+
+            baseline = visual.connector(combined_features, pools)
+            encoder_only = visual.connector(separate_features, pools)
+            connector_only = per_image_connector(combined_features)
+            both = per_image_connector(separate_features)
+            row = {
+                "id": identity,
+                "pixels_and_pooling_match_capture": True,
+                "encoder_layers": {str(i): differences(together[i], separate[i]) for i in range(len(together))},
+                "selected_encoder_features": differences(combined_features, separate_features),
+                "encoder_only": differences(baseline, encoder_only),
+                "connector_only": differences(baseline, connector_only),
+                "both_separate": differences(baseline, both),
+            }
+            report["records"].append(row)
+            write(args.output, report)
+            print(json.dumps({k: v for k, v in row.items() if k != "encoder_layers"}), flush=True)
+    report["complete"] = True
+    write(args.output, report)
 
 
 def core(args, samples, checkpoint):
@@ -211,7 +306,7 @@ def serving(args, samples, checkpoint):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["core", "serving"])
+    parser.add_argument("mode", choices=["core", "serving", "vision"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="torch_native")
@@ -220,7 +315,7 @@ def main():
     torch.manual_seed(17)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     samples = torch.load(args.root / "rollouts/0.pt", map_location="cpu", weights_only=False, mmap=True)["samples"]
-    {"core": core, "serving": serving}[args.mode](args, samples, args.root / "prepared/hf")
+    {"core": core, "serving": serving, "vision": vision}[args.mode](args, samples, args.root / "prepared/hf")
 
 
 if __name__ == "__main__":
