@@ -825,3 +825,24 @@ Related: [research.md#olmo-hybrid-release-275m-gsm8k-learning-and-resume](resear
 - Initial status: **QUEUED**. Scheduler reports all 27 matching Saturn nodes lack
   sufficient slots for two GPUs. End-to-end RL and actual preemption recovery
   remain unvalidated until the run executes.
+
+
+## Olmo Hybrid release 275m BF16 rerun (2026-10-27)
+
+- User authorized rerunning the previous Saturn experiment with its existing recipe.
+- Prior experiment `01M5HYS6EMRWQ01SDFJW85F1GF` failed on all four attempts
+  during `Trainer._dry_run_batch`: FlashAttention received FP32 tensors. No RL
+  update completed. The standalone gate did not exercise GRPOTrainModule.
+- Root cause/fix: GRPO's overridden train_batch bypassed the base module's
+  forward autocast context. Set autocast_precision from model_dtype and enter
+  that context for reference, old-policy, and differentiable learner forwards.
+  FP32 optimizer parameters are preserved. Three CPU regressions exercise these
+  actual paths, including the dry-run entry; both resume regressions also pass.
+- Recipe unchanged: primary 275m midtrain step0038147, full GSM8K training and
+  platinum evaluation; lr 1e-6; 4 prompts x 4 samples; 16,000 episodes = 1,000
+  updates; prompt/response limits 512/2048; pack length 4096; beta 0.
+- Resources: ai2/saturn, 2 A100 80GB (one learner / one vLLM engine), normal
+  preemptible priority, minRuntime 0, auto-resume, three retries, 24h timeout;
+  workspace ai2/open-instruct-dev; budget ai2/oe-other. Weka native checkpoint
+  and HF save every 100 updates; evaluation every 100 plus step zero.
+- Image build and submission pending; build runs on the existing Beaker session.

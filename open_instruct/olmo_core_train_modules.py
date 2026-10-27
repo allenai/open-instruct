@@ -366,6 +366,7 @@ class GRPOTrainModule(TransformerTrainModule):
             dp_config=dp_config,
             ac_config=ac_config,
             compile_model=compile_model,
+            autocast_precision=grpo_utils.TORCH_DTYPES[grpo_config.model_dtype],
             max_grad_norm=max_grad_norm,
             scheduler=scheduler,
             device=device,
@@ -439,7 +440,7 @@ class GRPOTrainModule(TransformerTrainModule):
         self.model.train()
         data_BT = batch["batch"].to(self.device)
 
-        with torch.no_grad():
+        with torch.no_grad(), self._model_forward_context():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy,
@@ -459,7 +460,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(num_samples)]
         if num_mini_batches > 1:
-            with torch.no_grad():
+            with torch.no_grad(), self._model_forward_context():
                 local_old_logprobs_BT = None
                 if not self.grpo_config.use_vllm_logprobs:
                     local_old_logprobs_BT = grpo_utils.compute_logprobs(
@@ -509,16 +510,17 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
-                new_logprobs, entropy = grpo_utils.forward_for_logprobs(
-                    self.model,
-                    data_BT.query_responses[sample_idx],
-                    data_BT.attention_masks[sample_idx],
-                    data_BT.position_ids[sample_idx],
-                    self.pad_token_id,
-                    self.temperature,
-                    return_entropy=self.grpo_config.record_entropy,
-                    pass_olmo_core_doc_lens=True,
-                )
+                with self._model_forward_context():
+                    new_logprobs, entropy = grpo_utils.forward_for_logprobs(
+                        self.model,
+                        data_BT.query_responses[sample_idx],
+                        data_BT.attention_masks[sample_idx],
+                        data_BT.position_ids[sample_idx],
+                        self.pad_token_id,
+                        self.temperature,
+                        return_entropy=self.grpo_config.record_entropy,
+                        pass_olmo_core_doc_lens=True,
+                    )
 
                 response_mask = data_BT.response_masks[sample_idx][:, 1:]
                 new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
