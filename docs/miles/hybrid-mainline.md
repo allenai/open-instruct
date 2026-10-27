@@ -1,9 +1,16 @@
 # Temporary Olmo Hybrid port
 
-The sibling `/home/mnoukhov/miles-olmo-core-hybrid` checkout owns native model
-construction, strict HF/native interchange, streamed publication, and the SGLang
-adapter. This checkout pins those runtime sources and adds the GSM8K recipe and
-base-prompt dataset preparation. Both use branch `codex/hybrid-mainline`.
+The runtime implementation lives in the pushed
+[allenai/miles-olmo-core branch `codex/hybrid-mainline`](https://github.com/allenai/miles-olmo-core/tree/codex/hybrid-mainline).
+It owns native model construction, strict HF/native interchange, streamed
+publication, and the SGLang adapter. See its
+[runtime implementation guide](https://github.com/allenai/miles-olmo-core/blob/40f27b61aaa8efb09309d17f1edbee7d40344ef7/docs/hybrid-mainline.md).
+
+This Open Instruct branch adds the GSM8K recipe and base-prompt dataset
+preparation. Its [runtime lock](../../runtime/miles/runtime.lock.json) pins MILES
+commit [`40f27b61`](https://github.com/allenai/miles-olmo-core/commit/40f27b61aaa8efb09309d17f1edbee7d40344ef7),
+so builds use that exact implementation. No sibling checkout is required; the
+runtime source preparation fetches the pinned GitHub revision.
 
 The adapter preserves the release FLA Gated DeltaNet implementation (including
 negative eigenvalues) and offers SGLang RadixAttention with NoPE, QK norms, and its
