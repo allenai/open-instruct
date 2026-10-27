@@ -4,7 +4,8 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Bound the one-node and three-node MILES examples to 1,024 and 1,536 unfinished samples and expose opt-in managed-judge decode CUDA graphs, preserving eager defaults and historical omitted-setting recovery (https://github.com/allenai/open-instruct/pull/2086).
+- Lower the one-node MILES example budget from 1,536 to 1,024 unfinished samples and explicitly bound the three-node example to 1,536 instead of its 19,456-sample automatic budget (https://github.com/allenai/open-instruct/pull/2086).
+- Add opt-in managed-judge decode and prefill CUDA graphs while keeping eager execution as the default. Omitting `cuda_graphs` preserves existing run fingerprints; explicit `false` selects eager execution but has a distinct fingerprint (https://github.com/allenai/open-instruct/pull/2086).
 - Add named whole MILES inference presets for B300 and H100 with read-only configuration tips. Preserve generic settings, reject preset overrides with editable TOML, guard model/hardware compatibility before training, and bound the node example to 1,536 unfinished samples independently of serving capacity. Rename the `large.toml` example to `three-node.toml`, document fleet limits, pin validated FP32 KDA snapshots and robustness fixes, query GPU inventories at startup for generic and preset runs, and expose per-replica host memory while preserving historical launch-spec recovery (https://github.com/allenai/open-instruct/pull/2076).
 - Skip MILES Core startup evaluation when resuming beyond step 0; preserve configured initial evaluation at step 0 and periodic evaluation (https://github.com/allenai/open-instruct/pull/2072).
 - Reject async-only timing on synchronous Miles OPD configurations before launch (https://github.com/allenai/open-instruct/pull/2051).
