@@ -226,8 +226,9 @@ use_rollout_routing_replay = true
 
 [async]
 fully_async = true
-# Omitted producer budget scales with resolved engine capacity and fleet size.
-# Review policy-age warnings before scaling; an explicit budget still overrides it.
+# Bound unfinished work independently of the fleet's reserved serving slots.
+# Tune against useful throughput, trainer wait and stale-work discards.
+async_max_concurrent_samples = 1536
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

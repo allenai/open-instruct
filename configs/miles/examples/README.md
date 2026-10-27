@@ -161,15 +161,17 @@ useful throughput and stale-work discards before increasing the budget.
 
 The unfinished-sample budget, when omitted, is
 `max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
-rounded to complete prompt groups. The three-node example still uses this
-heuristic and resolves to **19,456**; removing the node example's explicit limit
-would give 6,144. Generic 64-admission configurations with omitted budgets give
+rounded to complete prompt groups. The three-node example explicitly uses
+**1,536** unfinished samples as a conservative starting budget. Removing the
+explicit limits would give 6,144 for node and 19,456 for three-node. Generic
+64-admission configurations with omitted budgets give
 768 and 2,432 for those topologies. Explicit
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Batch 256 and lag 6 are unchanged. The three-node heuristic triggers policy-age
-advisories and requires separate fleet validation; it is not a measured optimum.
+Batch 256 and lag 6 are unchanged. The three-node setting is a bounded starting
+point, not a measured optimum or a guarantee of steady throughput. Full-recipe
+collection and judging can limit throughput even with spare engine capacity.
 Batch-equivalents do not predict actual policy age or drain duration.
 Measure trainer wait, useful throughput, oldest-token age and stale-work discards;
 reduce the producer budget or fleet when production outruns useful consumption.

@@ -78,7 +78,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
 
 
-@pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 19456)])
+@pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 1536)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()
@@ -90,14 +90,10 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     plan = config.plan()
     capacity = plan["async_capacity"]
     assert capacity["global_http_slots"] == capacity["requested_engine_slots"] == 512 * capacity["engines"]
-    # Explicit node supply stays bounded; the three-node heuristic remains separate.
+    # Both learning examples bound supply independently of reserved engine slots.
     assert capacity["producer_sample_budget"] == producer_budget
-    if profile == "node":
-        assert producer_budget < capacity["global_http_slots"]
-        assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
-    else:
-        assert producer_budget == 2 * capacity["global_http_slots"]
-        assert any("Producer budget alone" in warning for warning in capacity["warnings"])
+    assert producer_budget < capacity["global_http_slots"]
+    assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["global_batch_size"] == 256
     assert config.core.max_policy_lag == 6
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
