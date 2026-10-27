@@ -95,8 +95,9 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
-# Beaker accepts min runtimes of 0 (unallocated, backfill only) or at least 5 minutes. Each cluster's scheduler
-# policy sets the upper bound, which is 8 hours on every Ai2 cluster today; Beaker enforces it, so mason only warns.
+# Beaker accepts min runtimes of 0 (unallocated, backfill only) or at least 5 minutes. The upper bound is each
+# cluster's scheduler policy (minRuntimeUpperBound), which is 8 hours on every Ai2 cluster today; Beaker enforces it,
+# so mason only warns.
 MIN_RUNTIME_LOWER_BOUND_NS = 5 * 60 * 1_000_000_000
 MIN_RUNTIME_USUAL_UPPER_BOUND_NS = 8 * 60 * 60 * 1_000_000_000
 
@@ -196,7 +197,8 @@ def get_args():
     parser.add_argument(
         "--auto_resume",
         action="store_true",
-        help="If given, Beaker requeues the job after it is preempted. Requires --min_runtime.",
+        help="If given, Beaker requeues the job after it is preempted. The command restarts from the beginning and "
+        "continues only if it resumes from its own checkpoints. Requires --min_runtime.",
     )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
@@ -263,7 +265,7 @@ def get_args():
         if min_runtime_ns > MIN_RUNTIME_USUAL_UPPER_BOUND_NS:
             console.log(
                 f"--min_runtime {mason_args.min_runtime} exceeds the 8h maximum that Ai2 clusters currently allow; "
-                "Beaker will not schedule it on a cluster whose scheduler policy keeps that limit."
+                "Beaker refuses it on any cluster whose scheduler policy (minRuntimeUpperBound) keeps that limit."
             )
         if min_runtime_ns == 0 and not mason_args.auto_resume:
             console.log(
