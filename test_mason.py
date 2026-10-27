@@ -399,6 +399,15 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         self.assertNotIn("8h maximum", warnings)
         self.assertNotIn("not requeued", warnings)
 
+    def test_auto_resume_with_non_resumable_flag_warns(self):
+        command = ("python", "open_instruct/grpo_fast.py")
+        warnings = self._warnings("--min_runtime", "2h", "--auto_resume", "--non_resumable", command=command)
+        self.assertIn("restarts it", warnings)
+
+    def test_auto_resume_replaces_generic_non_resumable_log(self):
+        warnings = self._warnings("--min_runtime", "2h", "--auto_resume")
+        self.assertNotIn("OPEN_INSTRUCT_RESUMABLES", warnings)
+
     def test_auto_resume_with_resumable_command_does_not_warn(self):
         command = ("python", "open_instruct/grpo_fast.py")
         warnings = self._warnings("--min_runtime", "2h", "--auto_resume", command=command)

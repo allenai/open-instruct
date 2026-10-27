@@ -308,14 +308,16 @@ def get_args():
 
     # can resume if the command is in OPEN_INSTRUCT_RESUMABLES and --non_resumable is not set
     is_resumable = _commands_include_resumable_target(commands) and not mason_args.non_resumable
-    if not is_resumable and not mason_args.non_resumable:
-        console.log(
-            "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
-        )
+    # Only an explicit --auto_resume gets the restart warning; legacy --preemptible jobs are often short or
+    # restart-safe, so warning on them would add noise to existing scripts.
     if mason_args.auto_resume and not is_resumable:
         console.log(
             "--auto_resume requeues the job after preemption, but mason does not resume this command, so each "
             "requeue restarts it from the beginning unless it resumes from its own checkpoints."
+        )
+    elif not is_resumable and not mason_args.non_resumable:
+        console.log(
+            "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
     mason_args.resumable = is_resumable
 
