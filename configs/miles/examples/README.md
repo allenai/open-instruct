@@ -154,7 +154,7 @@ remain separate. To experiment, follow
 [departing from a preset](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-preset).
 Generic mode does not resize pools, estimate memory fit or retain a hardware pin.
 
-The node example explicitly limits unfinished samples to **1,536**, independently
+The node example explicitly limits unfinished samples to **1,024**, independently
 of the six engines' 3,072 reserved running slots. Filling every reserved slot is
 useful only when the trainer can consume the resulting work. Compare trainer wait,
 useful throughput and stale-work discards before increasing the budget.

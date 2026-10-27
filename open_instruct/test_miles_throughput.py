@@ -78,7 +78,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
 
 
-@pytest.mark.parametrize("profile,producer_budget", [("node", 1536), ("three-node", 19456)])
+@pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 19456)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()

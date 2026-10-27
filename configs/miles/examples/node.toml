@@ -89,7 +89,7 @@ use_rollout_routing_replay = true
 fully_async = true
 # Bound unfinished samples independently of the six engines' reserved capacity.
 # Compare trainer wait and stale-work discards before increasing this budget.
-async_max_concurrent_samples = 1536
+async_max_concurrent_samples = 1024
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

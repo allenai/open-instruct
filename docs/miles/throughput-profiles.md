@@ -79,7 +79,7 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    of full occupancy; monitor response latency, host memory and stale work.
    The three-node example uses this automatic rule after profile resolution and
    resolves to 19,456; that fleet budget remains unqualified. The node example
-   explicitly limits unfinished samples to 1,536. Explicit budgets win.
+   explicitly limits unfinished samples to 1,024. Explicit budgets win.
    Larger fleets can produce much more work than the
    trainer can consume within the lag limit; inspect policy-age warnings and
    measure useful consumption before using the capacity-based budget in a long run.
@@ -258,7 +258,7 @@ supplies the trainer fast enough; the advisory alone is not a reason to raise it
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to
 whole groups (or one collection, whichever is larger). The node example explicitly
-uses 1,536 unfinished samples. Without that limit its preset would resolve to
+uses 1,024 unfinished samples. Without that limit its preset would resolve to
 6,144; the three-node example still uses the unqualified 19,456-sample heuristic.
 Generic configurations with omitted budgets give 768/2,432 for those topologies.
 Explicit budgets win. Batch 256 and lag 6 are unchanged. One full wave across six
