@@ -367,6 +367,11 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
             self._get_args(*mason_args)
 
+    def test_rejects_auto_resume_with_preemptible(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
+            self._get_args("--preemptible", "--auto_resume")
+        self.assertIn("--preemptible, which already auto-resumes", stderr.getvalue())
+
     @parameterized.parameterized.expand(
         [
             ("above_usual_upper_bound", ["--min_runtime", "9h", "--auto_resume"], "8h maximum"),

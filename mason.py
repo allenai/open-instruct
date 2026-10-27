@@ -276,6 +276,11 @@ def get_args():
     )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
+    if mason_args.auto_resume and mason_args.preemptible:
+        parser.error(
+            "--auto_resume cannot be combined with --preemptible, which already auto-resumes; "
+            "use --min_runtime 0 --auto_resume instead"
+        )
     if mason_args.auto_resume and mason_args.min_runtime is None:
         parser.error("--auto_resume requires --min_runtime")
     if mason_args.min_runtime is not None:
