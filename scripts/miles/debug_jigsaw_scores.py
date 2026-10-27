@@ -432,7 +432,11 @@ def publication_roundtrip(engine, args, samples, checkpoint, report):
         ("bf16_publication", [(name, value.bfloat16()) for name, value in originals]),
         ("restored_original", originals),
     ):
-        result = engine.update_weights_from_tensor(payload, flush_cache=True)
+        engine.begin_weight_update()
+        try:
+            result = engine.update_weights_from_tensor(payload, flush_cache=True)
+        finally:
+            engine.end_weight_update()
         stage = {"variant": label, "update_result": str(result), "records": []}
         report["publication_roundtrip"].append(stage)
         for sample in samples:
