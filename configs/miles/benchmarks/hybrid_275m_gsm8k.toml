@@ -82,7 +82,7 @@ weight_decay = 0.0
 kl_loss_coef = 0.0
 entropy_coef = 0.0
 eps_clip = 0.2
-eps_clip_high = 0.2
+eps_clip_high = 0.272
 
 [tracking]
 wandb_mode = "online"
