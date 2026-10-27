@@ -308,13 +308,25 @@ class TestMakeTaskContext(unittest.TestCase):
 
 class TestParseMinRuntime(unittest.TestCase):
     @parameterized.parameterized.expand(
-        [("zero", "0"), ("lower_bound", "5m"), ("hours", "2h30m"), ("upper_bound", "8h")]
+        [
+            ("zero", "0"),
+            ("lower_bound", "5m"),
+            ("hours", "2h30m"),
+            ("usual_upper_bound", "8h"),
+            ("above_usual_upper_bound", "9h"),
+            ("bare_number_is_seconds", "3600"),
+        ]
     )
     def test_valid(self, name, value):
         self.assertEqual(mason.parse_min_runtime(value), value)
 
     @parameterized.parameterized.expand(
-        [("below_lower_bound", "4m"), ("above_upper_bound", "8h1m"), ("not_a_duration", "soon")]
+        [
+            ("below_lower_bound", "4m"),
+            ("bare_seconds_below_lower_bound", "60"),
+            ("negative", "-5m"),
+            ("not_a_duration", "soon"),
+        ]
     )
     def test_invalid(self, name, value):
         with self.assertRaises(argparse.ArgumentTypeError):
@@ -327,6 +339,11 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         with mock.patch.object(sys, "argv", argv):
             return mason.get_args()
 
+    def _warnings(self, *mason_args):
+        with mock.patch.object(mason.console, "log") as log:
+            self._get_args(*mason_args)
+        return " ".join(str(call.args[0]) for call in log.call_args_list)
+
     def test_min_runtime_and_auto_resume(self):
         args, _ = self._get_args("--min_runtime", "30m", "--auto_resume")
         self.assertEqual(args.min_runtime, "30m")
@@ -337,12 +354,32 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         [
             ("min_runtime_with_preemptible", ["--min_runtime", "30m", "--preemptible"]),
             ("auto_resume_without_min_runtime", ["--auto_resume"]),
-            ("min_runtime_out_of_range", ["--min_runtime", "9h"]),
+            ("min_runtime_below_lower_bound", ["--min_runtime", "4m"]),
         ]
     )
     def test_rejects(self, name, mason_args):
         with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
             self._get_args(*mason_args)
+
+    @parameterized.parameterized.expand(
+        [
+            ("above_usual_upper_bound", ["--min_runtime", "9h", "--auto_resume"], "8h maximum"),
+            ("zero_without_auto_resume", ["--min_runtime", "0"], "not requeued"),
+        ]
+    )
+    def test_warns(self, name, mason_args, expected):
+        self.assertIn(expected, self._warnings(*mason_args))
+
+    @parameterized.parameterized.expand(
+        [
+            ("allocated", ["--min_runtime", "2h", "--auto_resume"]),
+            ("zero_with_auto_resume", ["--min_runtime", "0", "--auto_resume"]),
+        ]
+    )
+    def test_does_not_warn(self, name, mason_args):
+        warnings = self._warnings(*mason_args)
+        self.assertNotIn("8h maximum", warnings)
+        self.assertNotIn("not requeued", warnings)
 
 
 MASON_DEFAULT_NAMES = [

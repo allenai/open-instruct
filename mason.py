@@ -95,19 +95,20 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
-# Beaker accepts min runtimes of 0 (unallocated, backfill only) or between 5 minutes and 8 hours.
+# Beaker accepts min runtimes of 0 (unallocated, backfill only) or at least 5 minutes. Each cluster's scheduler
+# policy sets the upper bound, which is 8 hours on every Ai2 cluster today; Beaker enforces it, so mason only warns.
 MIN_RUNTIME_LOWER_BOUND_NS = 5 * 60 * 1_000_000_000
-MIN_RUNTIME_UPPER_BOUND_NS = 8 * 60 * 60 * 1_000_000_000
+MIN_RUNTIME_USUAL_UPPER_BOUND_NS = 8 * 60 * 60 * 1_000_000_000
 
 
 def parse_min_runtime(min_runtime_str: str) -> str:
-    """Validate a Beaker min runtime duration string such as '30m' or '2h'."""
+    """Validate a Beaker min runtime duration string such as '30m' or '2h'; a bare number is seconds."""
     try:
         nanoseconds = beaker.common.to_nanoseconds(min_runtime_str)
     except ValueError as e:
         raise argparse.ArgumentTypeError(f"Invalid min runtime: {min_runtime_str}") from e
-    if nanoseconds != 0 and not MIN_RUNTIME_LOWER_BOUND_NS <= nanoseconds <= MIN_RUNTIME_UPPER_BOUND_NS:
-        raise argparse.ArgumentTypeError(f"Min runtime must be 0 or between 5m and 8h, got: {min_runtime_str}")
+    if nanoseconds != 0 and nanoseconds < MIN_RUNTIME_LOWER_BOUND_NS:
+        raise argparse.ArgumentTypeError(f"Min runtime must be 0 or at least 5m, got: {min_runtime_str}")
     return min_runtime_str
 
 
@@ -180,14 +181,17 @@ def get_args():
     )
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
-    parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
-    parser.add_argument(
+    scheduling_group = parser.add_mutually_exclusive_group()
+    scheduling_group.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    scheduling_group.add_argument(
         "--min_runtime",
         type=parse_min_runtime,
         default=None,
-        help="Minimum runtime before the job can be preempted, as a duration string (e.g., '30m', '2h'). "
-        "Must be 0 or between 5m and 8h. A value above 0 runs as an allocated job, which needs an allocation "
-        "on the cluster; 0 runs as unallocated backfill. Mutually exclusive with --preemptible.",
+        help="Minimum runtime before the job can be preempted, as a duration string (e.g., '30m', '2h'; a bare "
+        "number is seconds). Must be 0 or at least 5m, and Ai2 clusters currently allow at most 8h. A value "
+        "above 0 makes the job allocated: it queues ahead of unallocated backfill jobs, is protected until the "
+        "min runtime ends, and needs an allocation on the cluster. Shorter min runtimes schedule sooner, so use "
+        "the time the job needs to reach a checkpoint. 0 runs as unallocated backfill.",
     )
     parser.add_argument(
         "--auto_resume",
@@ -252,10 +256,20 @@ def get_args():
     )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
-    if mason_args.min_runtime is not None and mason_args.preemptible:
-        parser.error("--min_runtime and --preemptible are mutually exclusive")
     if mason_args.auto_resume and mason_args.min_runtime is None:
         parser.error("--auto_resume requires --min_runtime")
+    if mason_args.min_runtime is not None:
+        min_runtime_ns = beaker.common.to_nanoseconds(mason_args.min_runtime)
+        if min_runtime_ns > MIN_RUNTIME_USUAL_UPPER_BOUND_NS:
+            console.log(
+                f"--min_runtime {mason_args.min_runtime} exceeds the 8h maximum that Ai2 clusters currently allow; "
+                "Beaker will not schedule it on a cluster whose scheduler policy keeps that limit."
+            )
+        if min_runtime_ns == 0 and not mason_args.auto_resume:
+            console.log(
+                "--min_runtime 0 without --auto_resume runs as unallocated backfill and is not requeued after "
+                "preemption; pass --auto_resume (or use --preemptible) to keep it running."
+            )
     commands = parse_commands(command_args)
 
     def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
