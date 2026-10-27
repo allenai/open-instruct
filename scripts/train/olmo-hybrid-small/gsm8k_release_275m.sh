@@ -9,11 +9,13 @@ shift
 RUN_NAME="${RUN_NAME:-hybrid-release-275m-gsm8k-1k-$(date -u +%Y%m%d-%H%M%S)}"
 MODEL_PATH="${MODEL_PATH:-/weka/oe-training-default/yashasbls/hybridish-local/hf/v1/275m/midtrain/step0038147}"
 OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/$RUN_NAME}"
+CLUSTER="${CLUSTER:-ai2/saturn}"
+TOTAL_EPISODES="${TOTAL_EPISODES:-16000}"
 
 uv run --frozen python mason.py \
     --task_name "$RUN_NAME" \
-    --description "Olmo Hybrid release 275m GSM8K: 1000 updates; native checkpoint/resume every 100 updates" \
-    --cluster ai2/saturn \
+    --description "Olmo Hybrid release ${MODEL_SIZE:-275m} GSM8K: $TOTAL_EPISODES episodes; native checkpoint/resume every 100 updates" \
+    --cluster "$CLUSTER" \
     --workspace ai2/open-instruct-dev --budget ai2/oe-other \
     --priority normal --preemptible --max_retries 3 --timeout 24h \
     --pure_docker_mode --image "$BEAKER_IMAGE" --num_nodes 1 --gpus 2 \
@@ -32,7 +34,7 @@ uv run --frozen python mason.py \
     --beta 0.0 --load_ref_policy False --learning_rate 1e-6 \
     --lr_scheduler_type constant --num_epochs 1 --num_mini_batches 1 \
     --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 4 \
-    --total_episodes 16000 --per_device_train_batch_size 1 \
+    --total_episodes "$TOTAL_EPISODES" --per_device_train_batch_size 1 \
     --async_steps 1 --inflight_updates False --active_sampling False \
     --filter_zero_std_samples False --advantage_normalization_type centered \
     --max_prompt_token_length 512 --response_length 2048 --pack_length 4096 \

@@ -928,3 +928,49 @@ while starting at 19:34 UTC. autoResume created replacement
 `01M5ZDP3XP4YA4V7WASNNGC0RT`, scheduled at 19:41 UTC. No learner logs or
 completed update yet. This verifies scheduler requeue, not policy/optimizer
 checkpoint restoration. The experiment and durable output/W&B identity are unchanged.
+
+
+## GSM8K infrastructure comparison: 275m and 450m, 500 updates (2026-10-27)
+
+Status: PREPARED; GPU allocation awaiting resource-plan approval.
+
+Four fresh runs: Core/vLLM and MILES at each of275m and450m, final general-tree
+midtrain step0038147. Each uses BF16, four prompts x four completions (batch16),
+500 optimizer updates (8,000 completions), full GSM8K training and platinum
+evaluation, prompt512/response2048, packed length4096, lr1e-6, seed1, no KL or
+entropy penalty, and retains zero-variance groups. Eval at0/100/200/300/400/500;
+native checkpoints and HF saves every100. Fresh output roots per run, auto-resume,
+normal preemptible priority, minRuntime0, three retries, timeout24h per attempt.
+
+User requested a hard maximum of one optimizer update off-policy. MILES uses
+fully_async=true, max_weight_staleness=1 (Core max_policy_lag=1), barrier publication,
+one group/four samples in flight and one batch of completed buffering. The old
+stack uses async_steps=1, inflight_updates=false, and max_result_age_steps=1.
+The hard guards reject older groups; queue sizing is not the age guarantee.
+
+User chose to retain the stacks' existing reward and optimizer differences, then
+explicitly requested matching the upper PPO clip: lower0.2/upper0.272 in both.
+MILES keeps numeric GSM8K answer comparison, zero warmup, grad clip1 and eval
+top_p0.95; Core/vLLM keeps its exact-string GSM8K answer comparison, existing
+warmup/gradient behavior and eval top_p1. This is an end-to-end stack comparison,
+not an isolated causal test of the inference backend. Sampling is not bit-identical.
+
+Recommended resources: four jobs x two Rhea RTX A6000 48GB, one learner plus
+one inference GPU per job, TP1, all on the same hardware. Eight GPUs peak.
+Rhea had26 free slots at preparation, including two empty eight-GPU nodes;
+Saturn A100 80GB is the alternative if Rhea availability changes. No extra
+learner GPUs recommended for these small models. Budget ai2/oe-other, workspace
+ai2/open-instruct-dev; mounts oe-adapt-default and oe-training-default.
+
+MILES retains the qualified HF-backbone SGLang fallback, no graphs/prefix cache/
+chunked prefill, max_running_requests4 and memory fraction0.35. Core/vLLM keeps
+its existing eager/FLASH_ATTN setup with FP32 SSM cache and memory fraction0.6.
+The new MILES native learner/publication path needs a short two-update lifecycle
+smoke for each size before launching the four longer jobs. Proposed smoke cap:
+two GPUs sequentially, at most1h per size, zero retries, small held-out eval slice,
+checkpoint every update; then the full runs only if both smokes pass.
+
+Launch files: MILES `configs/miles/benchmarks/hybrid_{275m,450m}_gsm8k_compare_500.toml`;
+Core/vLLM `scripts/train/olmo-hybrid-small/gsm8k_infra_compare_500.sh` with
+MODEL_SIZE=275m or450m. Run-file schema planning passed; images/data are prepared
+on the existing Hammond CPU session, with no local Docker build.

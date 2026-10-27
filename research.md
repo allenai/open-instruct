@@ -838,3 +838,18 @@ That path remains unqualified across the whole family. The fallback is slower
 HF cached-versus-full discrepancies remain, so native RL publication, importance
 ratios, restart recovery, and learning evidence are still pending; the overall
 MILES integration question remains ACTIVE.
+
+
+## GSM8K 500-update comparison of Core/vLLM and MILES
+
+Status: ACTIVE — preparation; GPU allocation pending approval.
+
+Do the two stacks show useful learning and acceptable throughput on the275m and
+450m final-midtrain releases? Four fresh runs use500 updates, eval/checkpoint
+every100, BF16, and a hard one-update policy-age limit. Preserve existing reward
+and optimizer differences per user instruction, except match PPO upper clipping
+to0.272. Compare held-out scores, valid reward groups, wall time/update, serving
+throughput, consumed policy age/stale drops, and checkpoint/restart behavior.
+The initial serving matrix qualifies the BF16 HF fallback, not the native RL path.
+
+See [the preparation batch](experiment.md#gsm8k-infrastructure-comparison-275m-and-450m-500-updates-2026-10-27).
