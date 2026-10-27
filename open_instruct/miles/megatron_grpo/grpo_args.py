@@ -25,6 +25,12 @@ def preflight_code(spec):
     )
 
 
+def responses_per_rollout(spec):
+    """Responses one rollout trains on: the global batch, and one verifier evidence record each."""
+    inference = spec.document["inference"]
+    return inference["rollout_batch_size"] * inference["samples_per_prompt"]
+
+
 def checkpoint_marker(root):
     """The file in which Megatron records the latest checkpointed rollout ID."""
     return Path(root) / "checkpoints/latest_checkpointed_iteration.txt"
@@ -68,7 +74,7 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         "expert-model-parallel-size": 1,
         "expert-tensor-parallel-size": 1,
         "micro-batch-size": 1,
-        "global-batch-size": inf["rollout_batch_size"] * inf["samples_per_prompt"],
+        "global-batch-size": responses_per_rollout(spec),
         "rollout-batch-size": inf["rollout_batch_size"],
         "n-samples-per-prompt": inf["samples_per_prompt"],
         "prompt-data": prepared["data"]["prompt_data"],

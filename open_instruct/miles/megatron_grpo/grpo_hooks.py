@@ -43,7 +43,8 @@ def reconcile_evidence(root, rollouts, batch):
     rollout ID, but it writes one fixed-size batch per rollout in rollout order, so the first
     ``rollouts * batch`` lines are the checkpointed rollouts. Later complete lines move to ``REPLAYED``
     and the replay appends their replacements; a trailing partial write is not a record and moves to
-    ``TORN`` so ``REPLAYED`` stays valid JSONL.
+    ``TORN`` so ``REPLAYED`` stays valid JSONL. The tail is copied before it is truncated, so a launch
+    killed in between copies it again next time: set-aside counts are then upper bounds.
     """
     path = Path(root) / EVIDENCE
     if not path.exists():

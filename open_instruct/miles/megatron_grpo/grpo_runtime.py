@@ -171,11 +171,17 @@ def execute(spec):
                 check=True,
                 timeout=180,
             )
-        replayed = grpo_hooks.reconcile_evidence(
-            root, grpo_args.checkpointed_rollouts(spec), inf["rollout_batch_size"] * inf["samples_per_prompt"]
-        )
-        if replayed:
-            logger.info("Moved %s verifier records of replayed rollouts to %s", replayed, root / grpo_hooks.REPLAYED)
+        kept = grpo_args.checkpointed_rollouts(spec)
+        set_aside = grpo_hooks.reconcile_evidence(root, kept, grpo_args.responses_per_rollout(spec))
+        if set_aside:
+            logger.info(
+                "Set aside %s verifier records past the checkpoint (rollout >= %s) in %s",
+                set_aside,
+                kept,
+                root / grpo_hooks.REPLAYED,
+            )
+        if (root / grpo_hooks.TORN).exists():
+            logger.warning("A launch stopped mid-write; partial verifier records are in %s", root / grpo_hooks.TORN)
         process = None
         try:
             with (root / "training.log").open("a") as stream:

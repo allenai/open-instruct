@@ -471,6 +471,7 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
         assert [row["zero_signal"] for row in result["rollouts"]] == [False, zero]
         assert result["export"]["changed_tensors"] == 1
         assert result["replayed_records"] == (16 if case == "replayed" else 0)
+        assert result["torn_fragments"] == 0
         assert registries == {"/fixed/registry"}
     if case == "replayed":
         # Without reconciliation the stale rollout 1 records stay and the audit rejects the count.

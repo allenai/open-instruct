@@ -10,7 +10,7 @@ import torch
 
 from open_instruct.miles.distillation import opd_audit
 from open_instruct.miles.execution import workflow
-from open_instruct.miles.megatron_grpo import grpo_hooks
+from open_instruct.miles.megatron_grpo import grpo_args, grpo_hooks
 from open_instruct.miles.rewards import rewards
 
 
@@ -41,7 +41,7 @@ def audit(spec, prepared):
     # Zero reward variation in every group is a legitimate zero-gradient batch, not a failure.
     steps = opd_audit.audit_optimizer(root, count, require_positive_grad_norm=False)
     inference = spec.document["inference"]
-    batch = inference["rollout_batch_size"] * inference["samples_per_prompt"]
+    batch = grpo_args.responses_per_rollout(spec)
     fanout = inference["samples_per_prompt"]
     records = [json.loads(line) for line in (root / grpo_hooks.EVIDENCE).read_text().splitlines()]
     if len(records) != count * batch:
@@ -89,7 +89,7 @@ def audit(spec, prepared):
             }
         )
     export = opd_audit.complete_export(root, Path(prepared["model"]), count - 1)
-    replayed = root / grpo_hooks.REPLAYED
+    replayed, torn = root / grpo_hooks.REPLAYED, root / grpo_hooks.TORN
     result = {
         "passed": True,
         "algorithm": "grpo",
@@ -98,6 +98,8 @@ def audit(spec, prepared):
         "rollouts": rollouts,
         # Records grpo_hooks.reconcile_evidence set aside, cumulative over every launch into this root.
         "replayed_records": len(replayed.read_text().splitlines()) if replayed.exists() else 0,
+        # Partial final lines of launches that stopped mid-write.
+        "torn_fragments": len(torn.read_text().splitlines()) if torn.exists() else 0,
         "export": export,
         "limits": "Mechanics audit; no learned-quality or trainer/inference numerical-equivalence claim.",
     }
