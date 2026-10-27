@@ -732,7 +732,6 @@ class RunSpec:
         if asynchronous:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
-            profile["producer_budget_policy"] = "Two waves of resolved serving slots; explicit budget overrides it"
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             miles.setdefault("async_unused_samples_handler", "retry")
