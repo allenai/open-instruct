@@ -39,6 +39,7 @@ COPY scripts/miles/prepare_runtime.py /opt/core-rl/build/scripts/miles/prepare_r
 RUN --mount=type=secret,id=github_token,required=true \
     python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources \
     --github-token-file /run/secrets/github_token
+RUN uv pip install --system --no-deps /opt/core-rl/sources/scaling-ladders/ladders/mainline/transformers_plugin
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 # Megatron OPD conversion uses this immutable mbridge revision.
 RUN uv pip install --system --no-deps \

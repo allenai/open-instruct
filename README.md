@@ -99,6 +99,8 @@ bash scripts/train/tulu3/dpo_8b.sh
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
 For supported Olmo MoE models, use the [MILES + OLMo-core integration](docs/miles/grpo.md).
+The [temporary Olmo Hybrid port](docs/miles/hybrid-mainline.md) adds MainlineLadder
+release checkpoints; its GPU serving and end-to-end RL qualification are tracked separately.
 The existing [Core/vLLM and DeepSpeed/vLLM GRPO workflows](docs/algorithms/grpo.md)
 remain available for dense-model training; the commands below use DeepSpeed/vLLM.
 

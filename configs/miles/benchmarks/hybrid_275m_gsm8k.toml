@@ -1,0 +1,129 @@
+# Temporary hybrid port; GPU serving matrix and end-to-end RL validation pending.
+schema_version = 1
+name = "hybrid-275m-gsm8k"
+
+[model]
+source = "/weka/oe-training-default/yashasbls/hybridish-local/hf/v1/275m/midtrain/step0038147"
+format = "hf"
+
+[output]
+root = "/weka/oe-adapt-default/michaeln/open-instruct/runs/hybrid-275m-gsm8k"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/saturn"
+priority = "normal"
+min_runtime = "0s"
+timeout = "24h"
+auto_resume = true
+max_retries = 3
+gpus_per_replica = 2
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[launch.secrets]
+WANDB_API_KEY = "michaeln_WANDB_API_KEY"
+HF_TOKEN = "michaeln_HF_TOKEN"
+
+[launch.env]
+MILES_HYBRID_BRIDGE = "1"
+
+[data]
+prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct-hybrid/data/gsm8k-base/train.jsonl"
+eval_prompt_data = ["gsm8k_platinum", "/weka/oe-adapt-default/michaeln/open-instruct-hybrid/data/gsm8k-base/eval.jsonl"]
+reward_config = "/weka/oe-adapt-default/michaeln/open-instruct-hybrid/data/gsm8k-base/verifiers.json"
+seed = 1
+shuffle = true
+
+[training]
+filter_zero_std_groups = false
+num_rollouts = 1000
+skip_eval_before_train = false
+eval_interval = 100
+save_checkpoints = true
+save_interval = 100
+
+[trainer]
+gpus = 1
+trainer_num_nodes = 1
+expert_parallel_size = 1
+micro_batch_size = 1
+sequence_packing = true
+packing_max_tokens = 4096
+activation_recompute = true
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_tensor_parallel_size = 1
+rollout_batch_size = 4
+samples_per_prompt = 4
+global_batch_size = 16
+max_response_length = 2048
+max_context_length = 4096
+radix_cache = false
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.2
+
+[tracking]
+wandb_mode = "online"
+wandb_team = "ai2-llm"
+wandb_project = "open_instruct_internal"
+wandb_group = "hybrid-275m-gsm8k"
+
+[core]
+model_config = "/weka/oe-training-default/yashasbls/hybridish-local/olmo-core/v1/275m/midtrain/step0038147/config.json"
+attention_backend = "flash_2"
+compile_model = false
+checkpoint_keep_last = 3
+publication_mode = "barrier"
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+
+[miles]
+sglang_disable_cuda_graph = true
+sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_chunked_prefill_size = -1
+sglang_attention_backend = "triton"
+sglang_mem_fraction_static = 0.35
+sglang_max_running_requests = 4
+wandb_random_suffix = false
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+rollout_temperature = 1.0
+rollout_top_p = 1.0
+rollout_seed = 1
+seed = 1
+rollout_max_prompt_len = 512
+disable_grpo_std_normalization = true
+calculate_per_token_loss = true
+tis_clip = 2.0
+eval_temperature = 1.0
+eval_top_p = 0.95
+n_samples_per_eval_prompt = 1
+eval_max_response_len = 2048
+
+[async]
+fully_async = false
+max_weight_staleness = 0
+async_unused_samples_handler = "retry"
+off_policy_correction = "tis"

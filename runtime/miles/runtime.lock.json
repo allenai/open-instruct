@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Pinned MILES/Core runtime; see docs/miles/feature-parity.md for qualified scope",
+  "status": "Temporary MainlineLadder hybrid port; serving GPU qualification and end-to-end RL validation pending",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
@@ -12,12 +12,17 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "4772a6767f1079eb3548d680c59fe98e481d6ff5",
+      "revision": "eb0a510727c34e471f477e1f812eac0cd518ebaa",
       "private": true
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
       "revision": "92b35cdf2771353a9e2c527a5b96b29cbb3d38c8",
+      "private": true
+    },
+    "scaling-ladders": {
+      "repository": "https://github.com/allenai/scaling-ladders.git",
+      "revision": "0fb485ce38733103f7da73973cdf0e74b0fc75db",
       "private": true
     }
   }
