@@ -77,7 +77,7 @@ def execute(spec):
             )
         elif set_aside:
             logger.info(
-                "Set aside %s verifier records from a previous non-resumed launch in %s",
+                "Set aside %s verifier records in %s; this launch starts from rollout 0",
                 set_aside,
                 root / grpo_hooks.REPLAYED,
             )

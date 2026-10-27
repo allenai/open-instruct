@@ -113,7 +113,8 @@ responses for every async run.
 **Resuming.** Before training, each launch reconciles the verifier evidence with
 the latest checkpoint, so the audit sees exactly one record per trained response:
 
-- records past the latest checkpoint (all records when not resuming) move to
+- records past the latest checkpoint (all records when there is no checkpoint
+  to resume from) move to
   `verifier-rewards.replayed.jsonl`, and a torn final line goes to
   `verifier-rewards.replayed.partial`;
 - `audit.json` reports the cumulative counts as `replayed_records` and
