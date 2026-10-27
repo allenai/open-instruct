@@ -274,6 +274,7 @@ def scoring_pass(core: CoreConfig, options: dict[str, Any]) -> ScoringPass:
 class RunConfig:
     core: CoreConfig
     miles: dict[str, Any]
+    inference_profile: dict[str, Any] | None = None
 
     def resolved_miles(self) -> dict[str, Any]:
         """Resolve the default group filter for plans, native argv and direct CLI callers."""
@@ -655,6 +656,7 @@ class RunConfig:
             "argv": argv,
             "async_capacity": async_capacity.report(options, self.core.max_policy_lag),
             "throughput": throughput.report(options, self.core),
+            "inference_profile": self.inference_profile,
             "runtime_validated": False,
             "core": dataclasses.asdict(self.core),
             "miles": options,

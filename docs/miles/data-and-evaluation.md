@@ -60,9 +60,12 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
-## Large training mixture
+<!-- Preserve the former section anchor for existing links. -->
+<a id="large-training-mixture"></a>
 
-`large.toml` targets the full `train` split of
+## Three-node training mixture
+
+`three-node.toml` targets the full `train` split of
 [`allenai/Dolci-Think-RL-7B`](https://huggingface.co/datasets/allenai/Dolci-Think-RL-7B),
 pinned to revision `0fb6466d31ef3a9dd16985ef635e6429e05a6491`.
 This is the dataset selected by the checked-in
@@ -218,8 +221,8 @@ Judge transport failures and invalid or incomplete replies default to zero
 reward after retries, with a warning and per-sample `judge_error` diagnostics.
 Set `OI_MILES_JUDGE_FAILURE_POLICY="raise"` in `[launch.env]` to stop on those
 failures. Detected context overflow and configuration errors raise regardless
-of that fallback policy. The large example explicitly selects `"zero"` for judge
-failures; both node and large select it for code-service failures. Change those
+of that fallback policy. The three-node example explicitly selects `"zero"` for judge
+failures; both node and three-node select it for code-service failures. Change those
 settings to opt into strict handling. Managed judge health-check failures separately stop
 training; the fallback applies to grading requests.
 

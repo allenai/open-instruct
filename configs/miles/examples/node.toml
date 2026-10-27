@@ -62,8 +62,9 @@ rollout_batch_size = 64
 samples_per_prompt = 4
 max_response_length = 32768
 max_context_length = 34816
-sglang_max_mamba_cache_size = 1024
-sglang_mem_fraction_static = 0.7
+# Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
+# Presets apply whole. To tune their settings, select generic and copy the preset block.
+profile = "olmo35-b300-v1"
 
 [tracking]
 wandb_mode = "offline"
@@ -83,10 +84,12 @@ scoring_check_interval = 0
 [miles]
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
-sglang_chunked_prefill_size = 8192
 
 [async]
 fully_async = true
+# Bound unfinished samples independently of the six engines' reserved capacity.
+# Compare trainer wait and stale-work discards before increasing this budget.
+async_max_concurrent_samples = 1536
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

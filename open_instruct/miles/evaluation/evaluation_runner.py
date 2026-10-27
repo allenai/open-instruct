@@ -347,8 +347,17 @@ def gpu_environments(receipt):
     auxiliary_count = max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"])
     total = policy_count + auxiliary_count
     mask = os.environ.get("CUDA_VISIBLE_DEVICES")
-    devices = mask.split(",") if mask is not None else [str(index) for index in range(total)]
-    if len(devices) < total or any(not device.strip() or device == "-1" for device in devices):
+    # This worker is copied alone into the evaluator image. Unlike the pinned
+    # MILES adapter, evaluator providers accept GPU/MIG UUID masks. Keep that
+    # capability while treating hidden/duplicate devices like the startup helper.
+    devices = (
+        [device.strip() for device in mask.split(",")] if mask is not None else [str(index) for index in range(total)]
+    )
+    if (
+        len(devices) < total
+        or len(set(devices)) != len(devices)
+        or any(not device or device == "-1" for device in devices)
+    ):
         raise ValueError(f"Evaluation needs {total} visible GPUs for policy and auxiliary providers")
     policy = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[:policy_count])}
     evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[policy_count:total])}

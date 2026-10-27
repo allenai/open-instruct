@@ -47,18 +47,23 @@ so captured graphs retain valid pointers.
 
 ## Current limits
 
-Keep prefix caching disabled (`inference.radix_cache = false`, the structured
-default) with the pinned runtime. SGLang's `extra_buffer` path requires FP32
-tracked-state snapshots, which `OlmoPackedKDAKernel` does not implement. The
-backend rejects tracked prefill batches rather than restoring unwritten states.
-The Olmo adapter overrides the prefill kernel, so selecting the generic Triton
-prefill option does not fix this incompatibility. The learning examples inherit
-disabled prefix caching while retaining recurrent-state storage for active
-requests.
+The pinned Olmo KDA kernel supports SGLang's `extra_buffer` cache path using
+tracked-state snapshots written directly from FP32 accumulators. Casting BF16
+intermediate states to FP32 does not satisfy this contract. Rebuild the runtime
+image when updating the adapter pin; older images reject tracked prefill batches.
+The named `olmo35-b300-v1` preset enables caching for its supported geometry;
+`olmo35-h100-v1` disables it. Named presets apply whole: an explicit
+`inference.radix_cache` value conflicts, even when equal. To change cache mode,
+select `inference.profile = "generic"` and configure serving settings explicitly.
+Generic and colocated setups default to disabled caching; recurrent state storage
+is still required for active requests.
 
 Synchronous barrier publication with EP4 training and TP1 fused-rounding serving
-is supported for this profile. Mixed-policy refresh, long context and save/resume
-are untested for it.
+is supported for this model geometry. Fully async refresh supports generation
+across weight updates, including training on mixed-version responses; qualify the
+intended hardware, placement and workload using the
+[throughput considerations](throughput-profiles.md#qualification-limits).
+Short checks do not establish long-run learning equivalence or save/resume support.
 
 Matching greedy tokens does not imply matching probabilities against an HF
 reference. Use Core's actual scoring policy for rollout comparisons and retain
