@@ -77,8 +77,10 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    Both producer and HTTP capacity need headroom: raising only one leaves the
    other as a bottleneck. Two waves are a starting point, not a measured guarantee
    of full occupancy; monitor response latency, host memory and stale work.
-   The learning examples use this automatic rule after profile resolution.
-   Explicit budgets still win. Larger fleets can produce much more work than the
+   The three-node example uses this automatic rule after profile resolution and
+   resolves to 19,456; that fleet budget remains unqualified. The node example
+   explicitly limits unfinished samples to 1,536. Explicit budgets win.
+   Larger fleets can produce much more work than the
    trainer can consume within the lag limit; inspect policy-age warnings and
    measure useful consumption before using the capacity-based budget in a long run.
 
