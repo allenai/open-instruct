@@ -390,6 +390,9 @@ def test_center_rewards_before_native_grpo_and_preserve_evidence(tmp_path, monke
 
 def test_exclude_truncated_leaves_truncated_samples_out_of_loss_and_baseline(tmp_path, monkeypatch):
     monkeypatch.setenv(grpo_hooks.OUTPUT_ENV, str(tmp_path))
+    # The runtime preflight runs this file inside the job, whose environment carries the run's gates.
+    for key in (grpo_hooks.ZERO_TRUNCATED_ENV, grpo_hooks.FINAL_ANSWER_ONLY_ENV, grpo_hooks.EXCLUDE_TRUNCATED_ENV):
+        monkeypatch.delenv(key, raising=False)
     statuses = ["completed", "truncated", "completed", "completed"]
     samples = [
         SimpleNamespace(
