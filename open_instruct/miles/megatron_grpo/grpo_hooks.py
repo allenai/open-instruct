@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import rewards
 
 OUTPUT_ENV = "OI_GRPO_OUTPUT"
@@ -22,6 +23,8 @@ REWARD_CONFIG_ENV = "OI_GRPO_REWARD_CONFIG"
 ZERO_TRUNCATED_ENV = "OI_GRPO_REWARD_ZERO_TRUNCATED"
 FINAL_ANSWER_ONLY_ENV = "OI_GRPO_REWARD_FINAL_ANSWER_ONLY"
 EVIDENCE = "verifier-rewards.jsonl"
+REPLAYED = "verifier-rewards.replayed.jsonl"
+TORN = "verifier-rewards.replayed.partial"
 
 
 def reward_environment(registry, reward_gates):
@@ -31,6 +34,48 @@ def reward_environment(registry, reward_gates):
         ZERO_TRUNCATED_ENV: "1" if reward_gates["zero_truncated"] else "0",
         FINAL_ANSWER_ONLY_ENV: "1" if reward_gates["final_answer_only"] else "0",
     }
+
+
+def reconcile_evidence(root, rollouts, batch):
+    """Keep exactly ``rollouts`` complete rollouts of verifier evidence.
+
+    Returns how many records moved and whether this call set a partial write aside.
+
+    ``post_process`` appends a rollout's records before that rollout's training is checkpointed, so a
+    preempted run leaves records for rollouts the resumed trainer replays. The hook is not told the
+    rollout ID, but it writes one fixed-size batch per rollout in rollout order, so the first
+    ``rollouts * batch`` lines are the checkpointed rollouts. Later complete lines move to ``REPLAYED``
+    and the replay appends their replacements; a trailing partial write is not a record and moves to
+    ``TORN`` so ``REPLAYED`` stays valid JSONL. The tail is copied before it is truncated, so a launch
+    killed in between copies it again next time: set-aside counts are then upper bounds. Resuming
+    requires an unchanged batch shape, since ``batch`` comes from the current run file.
+    """
+    path = Path(root) / EVIDENCE
+    expected = rollouts * batch
+    if not path.exists():
+        if rollouts:
+            raise InputError(f"{path} is missing; {rollouts} checkpointed rollouts need {expected} records")
+        return 0, False
+    with path.open("r+b") as stream:
+        for found in range(expected):
+            if not stream.readline().endswith(b"\n"):
+                raise InputError(
+                    f"{path} has {found} complete records; {rollouts} checkpointed rollouts need {expected} "
+                    f"(earlier set-aside records are in {REPLAYED})"
+                )
+        boundary = stream.tell()
+        tail = stream.read()
+        complete, torn = b"", b""
+        if tail:
+            complete, _, torn = tail.rpartition(b"\n")
+            if complete:
+                with (Path(root) / REPLAYED).open("ab") as replayed:
+                    replayed.write(complete + b"\n")
+            if torn:
+                with (Path(root) / TORN).open("ab") as partial:
+                    partial.write(torn + b"\n")
+            stream.truncate(boundary)
+    return complete.count(b"\n") + bool(complete), bool(torn)
 
 
 def scoring_args(args=None, environment=None):

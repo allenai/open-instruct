@@ -63,6 +63,28 @@ def execute(spec):
             state.update(status="complete", finished_unix=time.time())
             workflow.write_json(root / "workflow.json", state)
             return
+        # Reconcile before the runtime tests and conversion: it needs only the output root and the
+        # spec, and must read the previous launch's native-arguments.json before it is rewritten.
+        grpo_args.check_resume_batch(spec)
+        kept = grpo_args.checkpointed_rollouts(spec)
+        set_aside, torn = grpo_hooks.reconcile_evidence(root, kept, grpo_args.responses_per_rollout(spec))
+        if set_aside and kept:
+            logger.info(
+                "Set aside %s verifier records past checkpointed rollout %s in %s",
+                set_aside,
+                kept - 1,
+                root / grpo_hooks.REPLAYED,
+            )
+        elif set_aside:
+            logger.info(
+                "Set aside %s verifier records in %s; this launch starts from rollout 0",
+                set_aside,
+                root / grpo_hooks.REPLAYED,
+            )
+        if torn:
+            logger.warning(
+                "The previous launch stopped mid-write; its partial record is in %s", root / grpo_hooks.TORN
+            )
         native = importlib.util.find_spec("miles")
         if native is None or native.origin is None:
             raise InputError("Use the qualified native Megatron/SGLang image with committed code overlay")
@@ -183,7 +205,7 @@ def execute(spec):
                 )
                 if process.wait():
                     raise RuntimeError("Native verifier GRPO failed; inspect training.log")
-            marker = root / "checkpoints/latest_checkpointed_iteration.txt"
+            marker = grpo_args.checkpoint_marker(root)
             if not marker.exists():
                 raise RuntimeError("Missing recoverable Megatron checkpoint")
             audit = grpo_audit.audit(spec, prepared)

@@ -1,8 +1,10 @@
 """CPU-safe native argument mapping for teacher-free Megatron verifier GRPO."""
 
+import json
 from pathlib import Path
 
 from open_instruct.miles.distillation import opd_config, opd_runtime
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.megatron_grpo import grpo_config
 
 
@@ -22,6 +24,53 @@ def preflight_code(spec):
         f"assert (a.fully_async, a.use_rollout_logprobs, a.loss_type) == {selected!r}; "
         "RolloutDataSourceWithBuffer(a)"
     )
+
+
+def responses_per_rollout(spec):
+    """Responses one rollout trains on: the global batch, and one verifier evidence record each."""
+    inference = spec.document["inference"]
+    return inference["rollout_batch_size"] * inference["samples_per_prompt"]
+
+
+def check_resume_batch(spec):
+    """Reject a resume whose responses per rollout differ from those the previous launch trained on.
+
+    Evidence reconciliation cuts at ``checkpointed_rollouts * responses_per_rollout`` lines, so a
+    changed batch shape would keep the wrong records without any error. ``workflow.run_directory``
+    already rejects a changed run configuration when ``workflow.json`` exists; this backs it up for an
+    output root without one."""
+    previous = Path(spec.output["root"]) / "native-arguments.json"
+    # An older root may lack the arguments file or the flag; there is then nothing to compare.
+    if not (checkpointed_rollouts(spec) and previous.exists()):
+        return
+    arguments = json.loads(previous.read_text())
+    if "--global-batch-size" not in arguments:
+        return
+    recorded = int(arguments[arguments.index("--global-batch-size") + 1])
+    if recorded != responses_per_rollout(spec):
+        raise InputError(
+            f"Resuming {previous.parent} needs {recorded} responses per rollout, as before; "
+            f"rollout_batch_size * samples_per_prompt is now {responses_per_rollout(spec)}"
+        )
+
+
+def checkpoint_marker(root):
+    """The file in which Megatron records the latest checkpointed rollout ID."""
+    return Path(root) / "checkpoints/latest_checkpointed_iteration.txt"
+
+
+def checkpointed_rollouts(spec):
+    """Rollouts a launch will not replay: the latest checkpoint's rollout ID plus one when resuming, else 0.
+
+    MILES saves the Megatron checkpoint for rollout ``r`` as iteration ``r`` and restarts at
+    ``start_rollout_id = r + 1``."""
+    marker = checkpoint_marker(spec.output["root"])
+    if not (spec.document["training"]["resume"] and marker.exists()):
+        return 0
+    try:
+        return int(marker.read_text().strip()) + 1
+    except ValueError as error:
+        raise InputError(f"Resume checkpoint marker {marker} does not hold a rollout ID") from error
 
 
 def native_arguments(spec, prepared, checkpoint, architecture):
@@ -48,7 +97,7 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         "expert-model-parallel-size": 1,
         "expert-tensor-parallel-size": 1,
         "micro-batch-size": 1,
-        "global-batch-size": inf["rollout_batch_size"] * inf["samples_per_prompt"],
+        "global-batch-size": responses_per_rollout(spec),
         "rollout-batch-size": inf["rollout_batch_size"],
         "n-samples-per-prompt": inf["samples_per_prompt"],
         "prompt-data": prepared["data"]["prompt_data"],
@@ -118,7 +167,8 @@ def native_arguments(spec, prepared, checkpoint, architecture):
         values["custom-async-data-buffer-path"] = opd_config.ASYNC_BUFFER
     if opt["lr_decay_style"] != "constant":
         values["lr-decay-iters"] = training["num_rollouts"]
-    resume = training["resume"] and (root / "checkpoints/latest_checkpointed_iteration.txt").exists()
+    # Not marker.exists(): checkpointed_rollouts also rejects a marker that holds no rollout ID.
+    resume = checkpointed_rollouts(spec) > 0
     if resume:
         # Megatron restores weights, optimizer and RNG; MILES restores the data cursor. The
         # scheduler switch below stops MILES stepping the restored LR schedule a second time.
