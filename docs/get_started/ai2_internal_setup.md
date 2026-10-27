@@ -76,8 +76,6 @@ Pass `--min_runtime` with the time the job needs to reach a checkpoint (e.g. `--
 
 ### What mason.py does automatically
 
-`mason.py` does a few things:
-
 **Auto set HF cache environment variables:**
 
 During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets
