@@ -231,7 +231,7 @@ def advise(report, cluster, model, options, explicit_keys):
             warnings.append(
                 {
                     "code": "inference_fleet_extrapolation",
-                    "message": f"This plan requests {engines} inference engines. Preset {selected} covers per-engine settings, not fleet routing, producer capacity or publication latency. The B300 two-engine throughput check does not qualify multi-engine fully async refresh; validate the intended placement. See docs/miles/throughput-profiles.md.",
+                    "message": f"This plan requests {engines} inference engines. Preset {selected} configures individual engines. Validate fleet routing, producer capacity and weight-publication latency for your intended topology. See docs/miles/throughput-profiles.md.",
                     "requested_engines": engines,
                 }
             )
