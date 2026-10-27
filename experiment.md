@@ -164,3 +164,5 @@ on the existing Hammond CPU session, with no local Docker build.
 
 
 450m-first update (2026-10-27): user approved only the two 450m stacks; 275m GPU runs deferred. Run one two-update MILES smoke on two Rhea A6000s, then the two 500-update jobs (four GPUs peak) only if it passes. Initial smoke [01M5ZFP2Z9D41ZFW6YW4AJR85C](https://beaker.org/ex/01M5ZFP2Z9D41ZFW6YW4AJR85C) was stopped before training: the hard-coded 256 GiB RAM request caused three GPU slots to be allocated. Launcher now supports explicit host memory; comparison requests use 128 GiB RAM and 32 GiB shared memory. Native RL validation is still pending.
+
+450m native smoke [01M5ZFZGNFPMQ8F3PPVXG3EACQ](https://beaker.org/ex/01M5ZFZGNFPMQ8F3PPVXG3EACQ) acquired exactly two A6000s and passed the BF16 attention forward/backward preflight, then failed before training: Ray manager rendered SGLang ServerArgs before registering mainline_ladder. Register the hybrid Transformers config in that manager before command rendering; a runtime regression checks registration order. Long runs remain gated on a successful retry.
