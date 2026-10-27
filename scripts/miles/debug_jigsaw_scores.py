@@ -157,6 +157,17 @@ def core(args, samples, checkpoint):
     )
     visual = vision_model.OlmoVisionStack(hf, device="cuda", dtype=torch.bfloat16)
     visual.load_weights((k, v) for k, v in state.items() if not k.startswith("language_model."))
+    weight_audit = {"tensors": 0, "publication_rounding": [], "export_mismatches": []}
+    for name, value in olmo3.iter_olmo3_moe_hf_state(model, hf.text_config):
+        original = state["language_model." + name]
+        exported = value.detach().cpu()
+        weight_audit["tensors"] += 1
+        if not torch.equal(exported.float(), original.float()):
+            weight_audit["export_mismatches"].append(
+                {"name": name, "max_abs": float((exported.float() - original.float()).abs().max())}
+            )
+        if not torch.equal(exported.float(), exported.bfloat16().float()):
+            weight_audit["publication_rounding"].append(name)
     del state
     gc.collect()
     model.eval().requires_grad_(False)
@@ -175,7 +186,19 @@ def core(args, samples, checkpoint):
         "model_config": cfg.as_config_dict(),
         "records": [],
         "hardware": torch.cuda.get_device_name(),
+        "weight_audit": weight_audit,
     }
+    serving_trace = None if args.serving_trace is None else torch.load(args.serving_trace, weights_only=True)
+    captured = {}
+
+    def capture(name):
+        def hook(module, inputs, output):
+            captured[name] = output.detach().clone()
+
+        return hook
+
+    handles = [block.register_forward_hook(capture(f"layer_{i}")) for i, block in enumerate(model.blocks.values())]
+    handles.append(model.lm_head.norm.register_forward_hook(capture("head_input")))
     write(args.output, report)
     with torch.no_grad():
         for index, sample in enumerate(samples):
@@ -213,10 +236,11 @@ def core(args, samples, checkpoint):
                 "separate_image_embedding_max_abs": float(embedding_error.max()),
                 "separate_image_embedding_mean_abs": float(embedding_error.mean()),
             }
-            for variant, embeddings in (
-                ("combined_images", inputs["input_embeddings"]),
-                ("separate_images", separate),
-            ):
+            variants = [("combined_images", inputs["input_embeddings"]), ("separate_images", separate)]
+            if index == 0 and serving_trace is not None:
+                variants.append(("serving_embeddings", serving_trace["input_embeddings"].to("cuda")[None]))
+            for variant, embeddings in variants:
+                captured.clear()
                 started = time.perf_counter()
                 logits = model(tokens[None], input_embeddings=embeddings, loss_div_factor=tokens.numel())
                 scores = loss.get_log_probs_and_entropy(
@@ -243,6 +267,20 @@ def core(args, samples, checkpoint):
                     "direct_score_max_abs": float((scores - direct).abs().max()),
                     "seconds": time.perf_counter() - started,
                 }
+                head_input = captured["head_input"].reshape(-1, model.d_model)
+                fp32_logits = torch.mm(head_input[-n - 1 : -1], model.lm_head.w_out.weight.T, out_dtype=torch.float32)
+                row[variant]["fp32_head_log_probs"] = (
+                    fp32_logits.log_softmax(-1).gather(1, tokens[-n:, None]).flatten().tolist()
+                )
+                if index == 0 and serving_trace is not None:
+                    row[variant]["activation_comparison"] = {
+                        name: differences(value.reshape_as(serving_trace[name]), serving_trace[name].to("cuda"))
+                        for name, value in {"input_embeddings": embeddings, **captured}.items()
+                    }
+                    torch.save(
+                        {name: value.cpu() for name, value in {"input_embeddings": embeddings, **captured}.items()},
+                        args.output.with_name(f"core-{variant}-trace.pt"),
+                    )
                 del logits
             report["records"].append(row)
             write(args.output, report)
@@ -250,6 +288,8 @@ def core(args, samples, checkpoint):
     report["peak_allocated_bytes"] = torch.cuda.max_memory_allocated()
     report["complete"] = True
     write(args.output, report)
+    for handle in handles:
+        handle.remove()
     dist.destroy_process_group()
 
 
@@ -389,6 +429,7 @@ def serving(args, samples, checkpoint):
         sampling_backend="pytorch",
         random_seed=17,
         skip_server_warmup=True,
+        enable_fp32_lm_head=args.fp32_head,
     )
     report = {"mode": "serving", "attention_backend": args.attention_backend, "records": []}
     try:
@@ -432,6 +473,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="torch_native")
     parser.add_argument("--whole-sequence-first", action="store_true")
+    parser.add_argument("--serving-trace", type=Path)
+    parser.add_argument("--fp32-head", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(8)
     torch.manual_seed(17)
