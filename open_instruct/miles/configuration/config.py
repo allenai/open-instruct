@@ -31,7 +31,8 @@ class CoreConfig:
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
-    max_train_rollout_logprob_abs_diff: float | None = None
+    # Gate the global active-token mean absolute gap, not the worst token.
+    max_train_rollout_logprob_abs_diff: float | None = 0.05
     diagnostic_interval: int = 0
     pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
