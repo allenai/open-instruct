@@ -1,0 +1,73 @@
+# Tiny-model colocation check: one GPU.
+# Before setting up a run, review configuration options and defaults:
+# https://allenai.github.io/open-instruct/miles/configuration/
+# Setup and workload requirements: configs/miles/examples/README.md
+# Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
+schema_version = 1
+name = "dev"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/tiny-policy-hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/dev"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "1h"
+timeout = "2h"
+auto_resume = true
+gpus_per_replica = 1
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[[data.tasks]]
+task = "gsm8k-less-noise"
+train_count = 32
+eval_count = 8
+
+[training]
+filter_zero_std_groups = false
+num_rollouts = 4
+eval_interval = 2
+save_interval = 2
+
+[trainer]
+gpus = 1
+
+[inference]
+placement_mode = "colocated"
+gpus = 1
+rollout_batch_size = 4
+samples_per_prompt = 2
+max_response_length = 256
+max_context_length = 512
+# Small pools and eight running requests for colocated tiny-model mechanics.
+sglang_max_running_requests = 8
+sglang_max_total_tokens = 32768
+sglang_mem_fraction_static = 0.2
+sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_max_bs_decode = 8
+sglang_attention_backend = "torch_native"
+check_weight_update_equal = true
+
+[tracking]
+wandb_mode = "offline"
+wandb_project = "open-instruct-miles"
+wandb_group = "core-workflow-basic"
+
+[core]
+checkpoint_keep_last = 2
+attention_backend = "torch"
+max_train_rollout_logprob_abs_diff = 0.05
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

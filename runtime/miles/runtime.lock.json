@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "status": "Pinned MILES/Core runtime with FP32 KDA cache snapshots and async-refresh validation; see docs/miles/throughput-profiles.md for measured scope",
+  "base_image": {
+    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+  },
+  "sources": {
+    "olmo-core": {
+      "repository": "https://github.com/allenai/Olmo-core.git",
+      "revision": "6ceda6530625caa5d23e3be8a455c600f62a7338"
+    },
+    "miles": {
+      "repository": "https://github.com/allenai/miles-olmo-core.git",
+      "revision": "296a1e80c9c726bc41a764ce7cfcab2c886da64a"
+    },
+    "olmo-sglang": {
+      "repository": "https://github.com/allenai/olmo-sglang.git",
+      "revision": "d05d6e2cd5aea5977f32b9cde7becd04652f296d"
+    },
+    "sglang": {
+      "repository": "https://github.com/sgl-project/sglang.git",
+      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+    }
+  }
+}

@@ -1,5 +1,9 @@
+import io
+import shlex
+import subprocess
 import unittest
 from argparse import Namespace
+from unittest import mock
 
 import beaker
 import parameterized
@@ -89,6 +93,86 @@ class TestBuildCommandWithoutArgs(unittest.TestCase):
     def test_build_command_without_args(self, name, command, args_to_remove, expected):
         result = mason.build_command_without_args(command, args_to_remove)
         self.assertEqual(result, expected)
+
+
+class TestQuoteLiteralArgs(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("opening_tag", ["--reserved_slot_tokens", "<think>"], ["--reserved_slot_tokens", "'<think>'"]),
+            ("closing_tag", ["--stop_strings", "</answer>"], ["--stop_strings", "'</answer>'"]),
+            ("pipe_tag", ["--stop_strings", "<|im_end|>"], ["--stop_strings", "'<|im_end|>'"]),
+            ("json", ["--dataset_mixer", '{"a": 1.0}'], ["--dataset_mixer", "'{\"a\": 1.0}'"]),
+            ("json_with_tag", ['{"stop": "<think>"}'], ['\'{"stop": "<think>"}\'']),
+            ("single_quote", ["<it's>"], ["'<it'\"'\"'s>'"]),
+            ("tag_with_attributes", ['<tool name="search">'], ["'<tool name=\"search\">'"]),
+            ("closing_tag_prefix", ["--stop_strings", "</tool_call"], ["--stop_strings", "'</tool_call'"]),
+            (
+                "redirections",
+                ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
+                ["echo", "hi", ">", "out", "2>&1", "<in.txt"],
+            ),
+            (
+                "shell_syntax",
+                ["cd", "/stage", "&&", "echo", "$BEAKER_JOB_ID"],
+                ["cd", "/stage", "&&", "echo", "$BEAKER_JOB_ID"],
+            ),
+        ]
+    )
+    def test_quote_literal_args(self, name, command, expected):
+        self.assertEqual(mason.quote_literal_args(command), expected)
+
+    def test_quoted_args_reach_bash_verbatim(self):
+        args = ["<think>", "</think>", "<|im_end|>", '{"a": "b"}', "<it's>", '<tool name="search">']
+        joined = "printf '%s\\n' " + " ".join(mason.quote_literal_args(args))
+        result = subprocess.run(["/bin/bash", "-c", joined], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), args)
+
+
+class TestMakeInternalCommandQuoting(unittest.TestCase):
+    """Literal args must reach both the local cache run and the job exactly once, with no added quotes."""
+
+    LITERALS = ["<think>", "</think>", '{"a": 1.0}', "</tool_call"]
+
+    def test_cache_command_and_job_command_see_the_same_literals(self):
+        command = [
+            "python", "open_instruct/finetune.py",
+            "--reserved_slot_tokens", "<think>", "</think>",
+            "--dataset_mixer", '{"a": 1.0}',
+            "--stop_strings", "</tool_call",
+        ]  # fmt: skip
+        args = Namespace(
+            artifact_ttl=None,
+            auto_checkpoint_state_dir="",
+            auto_output_dir_path="/weka/oe-adapt-default/test",
+            cluster=["ai2/jupiter"],
+            no_auto_dataset_cache=False,
+            num_nodes=1,
+            pure_docker_mode=True,
+        )
+        cache_commands = []
+
+        class FakeProcess:
+            returncode = 0
+
+            def __init__(self, cmd, **kwargs):
+                cache_commands.append(cmd)
+                self.stdout = io.StringIO("")
+                self.stderr = io.StringIO("")
+
+            def poll(self):
+                return 0
+
+        with (
+            mock.patch.object(mason.subprocess, "Popen", FakeProcess),
+            mock.patch.object(mason.select, "select", lambda r, w, x: (r, w, x)),
+        ):
+            job_command = mason.make_internal_command(list(command), args, "tester", is_external_user=True)
+
+        self.assertEqual(len(cache_commands), 1)
+        for shell_command in (cache_commands[0], job_command):
+            words = shlex.split(shell_command)
+            for literal in self.LITERALS:
+                self.assertEqual(words.count(literal), 1, f"{literal!r} in {shell_command}")
 
 
 class TestExperimentSpec(unittest.TestCase):
@@ -194,6 +278,71 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
+
+
+MASON_DEFAULT_NAMES = [
+    *mason.DEFAULT_ENV_VARS,
+    "HF_TOKEN",
+    "PATH",
+    "HF_HOME",
+    "HF_DATASETS_CACHE",
+    "HF_HUB_CACHE",
+    "CHECKPOINT_OUTPUT_DIR",
+    "NCCL_SOCKET_IFNAME",
+    "NCCL_IB_HCA",
+    "WANDB_RUN_ID",
+    "WANDB_RESUME",
+]
+
+
+class TestGetEnvVars(unittest.TestCase):
+    def _env(self, env=(), secrets=()):
+        env_vars = mason.get_env_vars(False, ["ai2/jupiter"], ["me_HF_TOKEN"], "me", True, 2, list(env), list(secrets))
+        return [(env_var.name, env_var.value, env_var.secret) for env_var in env_vars]
+
+    def _named(self, env_vars, name):
+        return [env_var for env_var in env_vars if env_var[0] == name]
+
+    def test_mason_defaults_are_set_once_without_overrides(self):
+        env_vars = self._env()
+        for name in MASON_DEFAULT_NAMES:
+            self.assertEqual(len(self._named(env_vars, name)), 1, name)
+
+    @parameterized.parameterized.expand([(name,) for name in MASON_DEFAULT_NAMES])
+    def test_explicit_env_replaces_default(self, name):
+        env_vars = self._env(env=[{"name": name, "value": "/explicit"}])
+        self.assertEqual(self._named(env_vars, name), [(name, "/explicit", None)])
+
+    @parameterized.parameterized.expand([(name,) for name in MASON_DEFAULT_NAMES])
+    def test_explicit_secret_replaces_default(self, name):
+        env_vars = self._env(secrets=[{"name": name, "value": "my_secret"}])
+        self.assertEqual(self._named(env_vars, name), [(name, None, "my_secret")])
+
+    def test_explicit_secret_is_kept_beside_unrelated_env(self):
+        env_vars = self._env(env=[{"name": "FOO", "value": "1"}], secrets=[{"name": "BAR", "value": "bar_secret"}])
+        self.assertEqual(self._named(env_vars, "FOO"), [("FOO", "1", None)])
+        self.assertEqual(self._named(env_vars, "BAR"), [("BAR", None, "bar_secret")])
+
+    @parameterized.parameterized.expand(
+        [
+            ("env_first", ["--env", "HF_TOKEN=plain", "--secret", "HF_TOKEN=x"]),
+            ("secret_first", ["--secret", "HF_TOKEN=x", "--env", "HF_TOKEN=plain"]),
+        ]
+    )
+    def test_same_name_as_env_and_secret_raises(self, _, flags):
+        argv = ["mason.py", "--cluster", "ai2/jupiter", "--image", "img", *flags, "--", "echo", "hi"]
+        with mock.patch("sys.argv", argv):
+            args, _ = mason.get_args()
+        with self.assertRaisesRegex(ValueError, "HF_TOKEN"):
+            self._env(env=args.env, secrets=args.secret)
+
+    def test_repeated_env_name_keeps_both_in_order(self):
+        env_vars = self._env(env=[{"name": "HF_HOME", "value": "/a"}, {"name": "HF_HOME", "value": "/b"}])
+        self.assertEqual(self._named(env_vars, "HF_HOME"), [("HF_HOME", "/a", None), ("HF_HOME", "/b", None)])
+
+    def test_empty_env_value_replaces_default(self):
+        env_vars = self._env(env=[mason.parse_env_var("HF_HOME=")])
+        self.assertEqual(self._named(env_vars, "HF_HOME"), [("HF_HOME", "", None)])
 
 
 class TestGetDatasets(unittest.TestCase):
