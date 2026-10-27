@@ -6,10 +6,10 @@ from open_instruct.miles.rewards import task_verifiers
 
 
 def answer(prediction: str) -> str | None:
-    """Accept one choice, optionally parenthesized or prefixed with ``Answer:``."""
+    """Accept one choice and an optional terminal Olmo EOS from native rollouts."""
     if not isinstance(prediction, str):
         return None
-    match = re.fullmatch(r"\s*(?:Answer:\s*)?(?:([AB])|\(([AB])\))\.?\s*", prediction)
+    match = re.fullmatch(r"\s*(?:Answer:\s*)?(?:([AB])|\(([AB])\))\.?\s*(?:<\|endoftext\|>)?\s*", prediction)
     return (match[1] or match[2]) if match else None
 
 
