@@ -31,6 +31,11 @@ def expected_advantages(rows, fanout, std_normalization):
 
 
 def audit(spec, prepared):
+    """Audit a finished run's mechanics and write ``audit.json``.
+
+    Assumes ``grpo_hooks.reconcile_evidence`` ran before this launch's training, so the evidence
+    file holds exactly one record per trained response.
+    """
     root = Path(spec.output["root"])
     count = spec.document["training"]["num_rollouts"]
     # Zero reward variation in every group is a legitimate zero-gradient batch, not a failure.
@@ -91,7 +96,7 @@ def audit(spec, prepared):
         "teacher": None,
         "optimizer": steps,
         "rollouts": rollouts,
-        # Records of rollouts a resumed trainer replayed; grpo_hooks.reconcile_evidence set them aside.
+        # Records grpo_hooks.reconcile_evidence set aside, cumulative over every launch into this root.
         "replayed_records": len(replayed.read_text().splitlines()) if replayed.exists() else 0,
         "export": export,
         "limits": "Mechanics audit; no learned-quality or trainer/inference numerical-equivalence claim.",

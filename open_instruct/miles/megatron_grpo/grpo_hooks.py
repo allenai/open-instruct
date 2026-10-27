@@ -23,6 +23,7 @@ ZERO_TRUNCATED_ENV = "OI_GRPO_REWARD_ZERO_TRUNCATED"
 FINAL_ANSWER_ONLY_ENV = "OI_GRPO_REWARD_FINAL_ANSWER_ONLY"
 EVIDENCE = "verifier-rewards.jsonl"
 REPLAYED = "verifier-rewards.replayed.jsonl"
+TORN = "verifier-rewards.replayed.partial"
 
 
 def reward_environment(registry, reward_gates):
@@ -40,8 +41,9 @@ def reconcile_evidence(root, rollouts, batch):
     ``post_process`` appends a rollout's records before that rollout's training is checkpointed, so a
     preempted run leaves records for rollouts the resumed trainer replays. The hook is not told the
     rollout ID, but it writes one fixed-size batch per rollout in rollout order, so the first
-    ``rollouts * batch`` lines are the checkpointed rollouts. Later lines, including a partial write,
-    move to ``REPLAYED`` for inspection and the replay appends their replacements.
+    ``rollouts * batch`` lines are the checkpointed rollouts. Later complete lines move to ``REPLAYED``
+    and the replay appends their replacements; a trailing partial write is not a record and moves to
+    ``TORN`` so ``REPLAYED`` stays valid JSONL.
     """
     path = Path(root) / EVIDENCE
     if not path.exists():
@@ -55,10 +57,15 @@ def reconcile_evidence(root, rollouts, batch):
         boundary = stream.tell()
         tail = stream.read()
         if tail:
-            with (Path(root) / REPLAYED).open("ab") as replayed:
-                replayed.write(tail if tail.endswith(b"\n") else tail + b"\n")
+            complete, _, torn = tail.rpartition(b"\n")
+            if complete:
+                with (Path(root) / REPLAYED).open("ab") as replayed:
+                    replayed.write(complete + b"\n")
+            if torn:
+                with (Path(root) / TORN).open("ab") as partial:
+                    partial.write(torn + b"\n")
             stream.truncate(boundary)
-    return len(tail.splitlines())
+    return tail.count(b"\n")
 
 
 def scoring_args(args=None, environment=None):

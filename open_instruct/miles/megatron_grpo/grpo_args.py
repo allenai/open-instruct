@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from open_instruct.miles.distillation import opd_config, opd_runtime
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.megatron_grpo import grpo_config
 
 
@@ -24,15 +25,23 @@ def preflight_code(spec):
     )
 
 
+def checkpoint_marker(root):
+    """The file in which Megatron records the latest checkpointed rollout ID."""
+    return Path(root) / "checkpoints/latest_checkpointed_iteration.txt"
+
+
 def checkpointed_rollouts(spec):
     """Rollouts a launch will not replay: the latest checkpoint's rollout ID plus one when resuming, else 0.
 
     MILES saves the Megatron checkpoint for rollout ``r`` as iteration ``r`` and restarts at
     ``start_rollout_id = r + 1``."""
-    marker = Path(spec.output["root"]) / "checkpoints/latest_checkpointed_iteration.txt"
+    marker = checkpoint_marker(spec.output["root"])
     if not (spec.document["training"]["resume"] and marker.exists()):
         return 0
-    return int(marker.read_text().strip()) + 1
+    try:
+        return int(marker.read_text().strip()) + 1
+    except ValueError as error:
+        raise InputError(f"Resume checkpoint marker {marker} does not hold a rollout ID") from error
 
 
 def native_arguments(spec, prepared, checkpoint, architecture):

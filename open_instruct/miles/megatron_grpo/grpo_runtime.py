@@ -188,7 +188,7 @@ def execute(spec):
                 )
                 if process.wait():
                     raise RuntimeError("Native verifier GRPO failed; inspect training.log")
-            marker = root / "checkpoints/latest_checkpointed_iteration.txt"
+            marker = grpo_args.checkpoint_marker(root)
             if not marker.exists():
                 raise RuntimeError("Missing recoverable Megatron checkpoint")
             audit = grpo_audit.audit(spec, prepared)

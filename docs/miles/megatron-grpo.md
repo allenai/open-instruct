@@ -110,8 +110,10 @@ responses for every async run.
    gradient norm are legitimately zero. Before training starts, records past the
    latest checkpoint (rollouts a resumed trainer replays, or every record when
    not resuming) move from `verifier-rewards.jsonl` to
-   `verifier-rewards.replayed.jsonl`, so the audit sees exactly one record per
-   trained response; `audit.json` reports their count as `replayed_records`;
+   `verifier-rewards.replayed.jsonl` (a torn final line goes to
+   `verifier-rewards.replayed.partial`), so the audit sees exactly one record per
+   trained response; `audit.json` reports the set-aside count, summed over every
+   launch into the output root, as `replayed_records`;
 6. reloads the export in a fresh SGLang process and probes a training prompt.
 
 A previously completed, independently load-audited **initial TP2/PP1 native

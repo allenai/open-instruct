@@ -197,6 +197,9 @@ def test_resume_restores_checkpoint_without_restepping_the_scheduler(tmp_path):
     assert grpo_args.checkpointed_rollouts(spec) == 4
     doc["training"]["resume"] = False
     assert grpo_args.checkpointed_rollouts(specs.from_dict(doc)) == 0
+    marker.write_text("release")
+    with pytest.raises(InputError, match="latest_checkpointed_iteration"):
+        grpo_args.checkpointed_rollouts(spec)
 
 
 def test_reconcile_evidence_keeps_checkpointed_rollouts_and_sets_replayed_records_aside(tmp_path):
@@ -207,9 +210,10 @@ def test_reconcile_evidence_keeps_checkpointed_rollouts_and_sets_replayed_record
     # Rollouts 0 and 1 checkpointed; rollout 2 was scored, then the job stopped mid-write in rollout 3.
     lines = [json.dumps({"sample_index": index}) + "\n" for index in range(6)]
     evidence.write_text("".join(lines) + '{"sample_index": 6')
-    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 3
+    assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 2
     assert evidence.read_text() == "".join(lines[:4])
-    assert replayed.read_text() == "".join(lines[4:]) + '{"sample_index": 6\n'
+    assert replayed.read_text() == "".join(lines[4:])
+    assert (tmp_path / grpo_hooks.TORN).read_text() == '{"sample_index": 6\n'
     assert grpo_hooks.reconcile_evidence(tmp_path, 2, 2) == 0
     assert evidence.read_text() == "".join(lines[:4])
     with pytest.raises(ValueError, match="missing records"):
