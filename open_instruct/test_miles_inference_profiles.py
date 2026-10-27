@@ -2,6 +2,7 @@
 
 import copy
 import json
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from open_instruct.miles import __main__ as cli
 from open_instruct.miles.configuration import advisories
 from open_instruct.miles.configuration import inference_profiles as profiles
 from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import launch, workflow
 from open_instruct.miles.infrastructure import gpu_hardware
 
@@ -52,7 +54,7 @@ def test_model_family_name_is_not_enough(key, value):
 
 
 def test_unknown_hardware_missing_model_and_named_profile_mismatch():
-    assert profiles.resolve("generic", "unknown", model(), options())["defaults"] == {}
+    assert profiles.resolve("generic", "unknown", model(), options())["preset_values"] == {}
     assert profiles.resolve("olmo35-b300-v1", "ai2/holmes", None, options())["model_metadata_available"] is False
     with pytest.raises(ValueError, match="expects B300"):
         profiles.resolve("olmo35-b300-v1", "ai2/jupiter", model(), options())
@@ -111,12 +113,16 @@ def warning_map(config):
     return {warning["code"]: warning for warning in report["warnings"] + report["tips"]}
 
 
-def test_fleet_extrapolation_is_independent_of_capacity_warnings(tmp_path):
-    config = run_spec(tmp_path, ["inference.gpus=78", "async.async_max_concurrent_samples=39936"]).compile()
+@pytest.mark.parametrize("cluster,gpu", [("ai2/holmes", "b300"), ("ai2/jupiter", "h100")])
+def test_fleet_extrapolation_is_independent_of_capacity_warnings(tmp_path, cluster, gpu):
+    config = run_spec(
+        tmp_path,
+        [f'launch.cluster="{cluster}"', "inference.gpus=78", "async.async_max_concurrent_samples=39936"],
+        profile=f"olmo35-{gpu}-v1",
+    ).compile()
     warning = warning_map(config)["inference_fleet_extrapolation"]
     assert warning["requested_engines"] == 78
     assert "publication" in warning["message"]
-    assert "inference_profile_modified" not in warning_map(config)
     assert config.miles["sglang_max_running_requests"] == 512
 
 
@@ -189,11 +195,41 @@ def test_shared_gpu_inventory_preserves_mask_order_and_unknown_memory(monkeypatc
     with pytest.raises(ValueError, match="expects H100"):
         profiles.validate_hardware(report, [("NVIDIA H100", None)])
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "MIG-example")
-    with pytest.raises(ValueError, match="MIG/UUID"):
+    with pytest.raises(InputError, match="MIG/UUID"):
         gpu_hardware.inventory()
 
 
-def test_rollout_inventory_excludes_trainers_and_judges():
+@pytest.mark.parametrize(
+    "error",
+    [
+        FileNotFoundError("nvidia-smi"),
+        subprocess.CalledProcessError(1, "nvidia-smi"),
+        subprocess.TimeoutExpired("nvidia-smi", 15),
+    ],
+)
+def test_gpu_inventory_query_failure_is_runtime_error(monkeypatch, error):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    def query(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(gpu_hardware.subprocess, "check_output", query)
+    with pytest.raises(RuntimeError, match="Cannot inspect GPU hardware") as raised:
+        gpu_hardware.inventory()
+    assert raised.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    "output", ["malformed", "0, NVIDIA B300, NaN", "0, NVIDIA B300, 275040\n0, NVIDIA B300, 275040"]
+)
+def test_invalid_gpu_inventory_is_runtime_error(monkeypatch, output):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr(gpu_hardware.subprocess, "check_output", lambda *args, **kwargs: output)
+    with pytest.raises(RuntimeError, match="Cannot inspect GPU hardware"):
+        gpu_hardware.inventory()
+
+
+def test_rollout_inventory_uses_topology_slice():
     devices = [
         {"id": "3", "name": "NVIDIA H100", "memory_mib": 81559},
         {"id": "1", "name": "NVIDIA B300", "memory_mib": 275040},
@@ -300,7 +336,7 @@ def test_hidden_gpu_mask_never_becomes_all_gpus(monkeypatch, mask):
 
 def test_duplicate_startup_gpu_mask_is_rejected(monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,0")
-    with pytest.raises(ValueError, match="duplicate"):
+    with pytest.raises(InputError, match="duplicate"):
         gpu_hardware.inventory()
 
 
@@ -324,17 +360,17 @@ def test_advisory_renderer_handles_supported_optional_sections(capsys, plan):
     [("ai2/holmes", "b300", 17825792, 3072, 0.7, False), ("ai2/jupiter", "h100", 6684672, 512, 0.9, True)],
 )
 def test_presets_apply_verbatim(tmp_path, cluster, gpu, kv, slots, fraction, cache_off):
-    for selector in (f"olmo35-{gpu}-v1",):
-        config = run_spec(tmp_path, [f'launch.cluster="{cluster}"'], profile=selector).compile()
-        for key, value in profiles.PRESETS[f"olmo35-{gpu}-v1"].items():
-            assert config.miles[key] == value
-        assert config.miles["sglang_max_running_requests"] == 512
-        assert config.miles["sglang_max_total_tokens"] == kv
-        assert config.miles["sglang_max_mamba_cache_size"] == slots
-        assert config.miles["sglang_mem_fraction_static"] == fraction
-        assert config.miles["sglang_disable_radix_cache"] is cache_off
-        assert config.miles["async_max_concurrent_samples"] == 6144
-        assert config.core.max_policy_lag == 6
+    selector = f"olmo35-{gpu}-v1"
+    config = run_spec(tmp_path, [f'launch.cluster="{cluster}"'], profile=selector).compile()
+    for key, value in profiles.PRESETS[f"olmo35-{gpu}-v1"].items():
+        assert config.miles[key] == value
+    assert config.miles["sglang_max_running_requests"] == 512
+    assert config.miles["sglang_max_total_tokens"] == kv
+    assert config.miles["sglang_max_mamba_cache_size"] == slots
+    assert config.miles["sglang_mem_fraction_static"] == fraction
+    assert config.miles["sglang_disable_radix_cache"] is cache_off
+    assert config.miles["async_max_concurrent_samples"] == 6144
+    assert config.core.max_policy_lag == 6
 
 
 @pytest.mark.parametrize("selector", ["olmo35-b300-v1"])
@@ -386,7 +422,7 @@ def test_legacy_configs_keep_explicit_settings_and_get_one_hint(tmp_path, cluste
         profile=selector,
     ).compile()
     assert config.inference_profile["selected"] == "generic"
-    assert config.inference_profile["defaults"] == {}
+    assert config.inference_profile["preset_values"] == {}
     assert config.miles["sglang_max_running_requests"] == 64
     assert config.miles["sglang_max_mamba_cache_size"] == 1024
     assert config.miles["sglang_mem_fraction_static"] == 0.7
@@ -433,11 +469,11 @@ def test_generic_paste_and_tweak_is_explicit_not_derived(tmp_path, gpu):
         config.miles["sglang_max_mamba_cache_size"]
         == profiles.PRESETS[f"olmo35-{gpu}-v1"]["sglang_max_mamba_cache_size"]
     )
-    assert config.inference_profile["defaults"] == {}
+    assert config.inference_profile["preset_values"] == {}
 
 
-def test_auto_removed_and_named_no_match(tmp_path):
-    with pytest.raises(ValueError, match="auto was removed"):
+def test_invalid_selector_and_named_no_match(tmp_path):
+    with pytest.raises(ValueError, match="inference.profile must be generic"):
         run_spec(tmp_path, profile="auto")
     with pytest.raises(ValueError, match="dedicated TP1"):
         run_spec(tmp_path, ["inference.rollout_tensor_parallel_size=2"])

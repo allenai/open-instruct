@@ -645,8 +645,7 @@ class RunSpec:
             selector, self.launch["cluster"], metadata, miles, require_model_metadata="hf_checkpoint" in prepared
         )
         profile["model_metadata_path"] = metadata_path
-        for key, value in profile["defaults"].items():
-            miles.setdefault(key, value)
+        miles.update(profile["preset_values"])
         miles.setdefault("sglang_disable_radix_cache", True)
         validation.inference_capacity(miles)
         defaults = {

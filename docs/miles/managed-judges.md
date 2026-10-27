@@ -57,7 +57,7 @@ policy weights or a trainer rank from landing on a judge device.
 The schema follows the Megatron implementation: `[judges.NAME]` declares serving, `[rubrics.NAME]`
 declares grading, and `[judging.bindings.VERIFIER]` maps prepared verifier names to
 both. Two rubrics can use one fixed service. Only bound services consume GPUs.
-The large example binds `general-quality` and `general-quality_ref`.
+The three-node example binds `general-quality` and `general-quality_ref`.
 The node example uses only math, instruction-following and code verifiers and
 allocates no judge GPU.
 

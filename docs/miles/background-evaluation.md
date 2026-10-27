@@ -27,7 +27,7 @@ set zero to opt out under a positive global interval. The global `initial` and
 `final` flags still apply to every task. With both flags false and all intervals
 zero, no background evaluations or evaluation snapshots are scheduled.
 Dev and node retain shared-engine
-evaluation, which also remains the low-level default. The large template is
+evaluation, which also remains the low-level default. The three-node template is
 provisional; check evaluator compatibility for the full model. Remove explicit
 shared settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
 `n_samples_per_eval_prompt`, `data.eval_prompt_data`, positive task `eval_count`)
@@ -80,7 +80,7 @@ not inherit its Beaker token. Outputs and snapshots must be on a WEKA mount
 accessible to both jobs. Inherit the main run's W&B entity, project and actual run
 ID; never configure a separate evaluation run.
 
-The limited GSM8K tasks above are small mechanics examples. The large template
+The limited GSM8K tasks above are small mechanics examples. The three-node template
 uses individual task variants from `math:posttrain:dev`, `general:posttrain:dev`,
 `hillclimb:dev` and `safety_thinking`, deduplicated to 25 entries. Individual names
 avoid depending on the unmerged general/hillclimb suite definitions and do not
@@ -92,7 +92,7 @@ revisions; changing the image/revision can change the benchmark protocol.
 Use the full panel at the initial and final checkpoints for official comparisons.
 The example above shows how one task can additionally run every 100 updates; its
 `scoring.limit` applies at every scheduled point, including initial and final.
-The large template has no such limits or periodic overrides. Progress subsets are
+The three-node template has no such limits or periodic overrides. Progress subsets are
 not enabled by default: fewer prompts still incur separate-job and judge startup
 costs. If adding a periodic development panel, choose fixed example IDs with a
 documented seed and relevant category coverage, and distinguish its metrics from
@@ -107,7 +107,7 @@ olmo-eval task overrides (such as `limit`, scorer settings, or formatting).
 Tasks with the same generation overrides, harness preset, harness overrides and
 execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
 defaults; tasks execute separately while sharing the job's inference server.
-The large panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
+The three-node panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
 five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
 each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
 isolates the policy and auxiliary GPU visibility; olmo-eval manages judge startup
@@ -124,7 +124,7 @@ so auxiliary providers and sandboxes are not mistaken for scoring overrides.
 The frozen checkpoint's `provider` settings cannot be overridden here. Harness
 settings are recorded in receipts and checked when reusing completed tasks.
 
-The large template selects `codex_python` for LiveCodeBench and enables
+The three-node template selects `codex_python` for LiveCodeBench and enables
 `sandboxes.0.inject_swerex` to preinstall the sandbox server. The pinned runtime's
 on-demand installation fallback otherwise invokes an unavailable executable.
 Code jobs receive
@@ -278,7 +278,7 @@ revision before starting. Build evaluator dependencies at image construction.
 External benchmark sandboxes may have their own upstream setup steps. Publish
 the image to Beaker and configure its immutable ID.
 
-The large example sets `image` to the published evaluator image
+The three-node example sets `image` to the published evaluator image
 `01M5MQM50J1EEQ8YJGJWSJFPQ5` and `revision` to olmo-eval
 `710b2b5dab6ea09764c02647f3a4e72819b9ee7c`, which includes `gsm8k:platinum`
 and the [stop-sequence normalization fix](https://github.com/allenai/olmo-eval/pull/450).

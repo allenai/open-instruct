@@ -151,12 +151,12 @@ def resolve(selector, cluster, model, options, *, require_model_metadata=False):
     """Apply only an explicit named preset. Generic never changes serving settings."""
     if not isinstance(selector, str) or selector not in ("generic", *PROFILES):
         raise InputError(
-            f"inference.profile must be generic (or omitted) or one of {sorted(PROFILES)}; auto was removed. Planning offers recommendations without changing settings."
+            f"inference.profile must be generic (the default when omitted) or one of {sorted(PROFILES)}. Planning offers recommendations without changing settings."
         )
     report = {
         "requested": selector,
         "selected": selector,
-        "defaults": {},
+        "preset_values": {},
         "model_metadata_available": model is not None,
     }
     if selector == "generic":
@@ -177,7 +177,7 @@ def resolve(selector, cluster, model, options, *, require_model_metadata=False):
         raise InputError(
             f"inference.profile={selector}: prepared checkpoint config.json is unavailable; cannot verify model geometry. Fix model preparation or select generic explicitly."
         )
-    report.update(expected_gpu=PROFILES[selector], defaults=dict(PRESETS[selector]))
+    report.update(expected_gpu=PROFILES[selector], preset_values=dict(PRESETS[selector]))
     return report
 
 
@@ -196,7 +196,7 @@ def advise(report, cluster, model, options, explicit_keys):
                 tips.append(
                     {
                         "code": "inference_profile_available",
-                        "message": f'Measured preset {name} matches. To adopt it whole, add inference.profile = "{name}" and remove its explicit serving keys. Your current settings are unchanged.',
+                        "message": f'Your model, hardware and topology are compatible with measured preset {name}. To adopt it whole, add inference.profile = "{name}" and remove its explicit serving keys. Your current settings are unchanged.',
                     }
                 )
             pool_keys = ("sglang_max_total_tokens", "sglang_max_mamba_cache_size")

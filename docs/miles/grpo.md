@@ -115,7 +115,7 @@ changes, then try the selected model and topology on a small run.
 
 | Mode | Behavior and use |
 |---|---|
-| `core.publication_mode="refresh"` | Node and large templates. Preserve generated tokens and their original behavior log probabilities across publication; rebuild serving state under the new weights and continue decoding. A response can span multiple policy versions. |
+| `core.publication_mode="refresh"` | Node and three-node templates. Preserve generated tokens and their original behavior log probabilities across publication; rebuild serving state under the new weights and continue decoding. A response can span multiple policy versions. |
 | `barrier` | Low-level default, used by dev mechanics example. Does not continue mixed-policy responses across publication. |
 | `engine_drain` | Independent engine drain: finish requests on their admitted version before swapping weights. This mode is distinct from mixed-policy refresh; see [engine drain](engine-drain.md). |
 

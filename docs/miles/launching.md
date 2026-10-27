@@ -74,6 +74,11 @@ calls `open_instruct.miles.execution.preflight_network` and
 `open_instruct.miles.execution.preflight_attention`; an image missing these
 entrypoints must be rebuilt.
 
+The cached B300 preset also requires the FP32 tracked-state snapshot implementation
+in the current runtime lock. `plan` and image-ID validation do not check that an
+existing image contains it. Verify its build records against
+`runtime/miles/runtime.lock.json`, or rebuild before allocating a run.
+
 To deploy source changes, commit them and build the source overlay instead.
 Read the immutable base identity from the lock and pull it into local Docker:
 
@@ -97,6 +102,11 @@ frozen configuration directly to `open_instruct.miles.execution.submit`; no
 debug launch script is involved.
 
 ## Host memory and allocated GPU slots
+
+MILES replica startup queries `nvidia-smi` for device identity and memory, including
+generic runs with an explicit numeric `CUDA_VISIBLE_DEVICES` mask. An unavailable
+or malformed inventory, or a query exceeding 15 seconds, stops startup. An
+explicitly empty mask or `-1` exposes no GPUs; an unset mask selects all devices.
 
 `launch.memory` requests host RAM per Beaker replica (default `"256 GiB"`);
 `launch.shared_memory` separately sizes shared memory. Both GRPO and OPD launchers
@@ -290,7 +300,7 @@ collective health; local `validate` cannot inspect the future container's networ
 
 At AI2, GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and
 minimum runtimes of one hour (dev), four hours (node) or eight hours
-(large). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
+(three-node). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
 timeout and mounts) and run on Saturn, falling back to Jupiter after canceling
 an unschedulable attempt; not on Holmes.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.

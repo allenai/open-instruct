@@ -100,7 +100,7 @@ derives the omitted producer budget from engine count and request capacity; see
 [async queues and discard metrics](async-pipeline.md). It uses buffer factor 1,
 retry, sample submissions, and requires a positive policy lag. Structured async
 defaults `async.max_weight_staleness` to six optimizer updates (compiled to
-`core.max_policy_lag`), which the node and large examples inherit;
+`core.max_policy_lag`), which the node and three-node examples inherit;
 low-level async files must set `core.max_policy_lag` themselves. See
 [development defaults](development-defaults.md). KL > 0 enables the
 reference pass with the prepared starting model unless ref_load is supplied.

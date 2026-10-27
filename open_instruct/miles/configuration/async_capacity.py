@@ -64,7 +64,7 @@ def report(options, max_policy_lag):
         warnings.append(
             "Producer budget equals one wave of GPU running slots; unfinished samples in transit or awaiting "
             "response processing can leave engines idle. Increase async_max_concurrent_samples for backfill "
-            "(start with two waves), then measure occupancy and policy age. HTTP capacity is reported separately."
+            "(start with two waves), then measure occupancy and policy age. HTTP capacity below running admission is reported separately."
         )
     if buffer_samples is not None and collection is not None and buffer_samples < collection:
         warnings.append(

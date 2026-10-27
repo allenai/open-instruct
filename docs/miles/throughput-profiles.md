@@ -224,24 +224,31 @@ and `inference-profile.json`.
 
 | Code | Meaning |
 |---|---|
-| `inference_profile_available` | Tip: a measured preset matches a generic run. Names the setting to add; changes nothing. |
+| `inference_profile_available` | Tip: the model, hardware and topology are compatible with a measured preset. Names the setting to add; changes nothing. |
 | `inference_pool_hardware_mismatch` | Tip: explicit KV and recurrent pools equal a preset for a different GPU. Review before running; this is a heuristic, not a memory-fit check. |
 | `inference_metadata_unavailable` | The model metadata for this generic run is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
 | `inference_model_guard_deferred` | A named preset is selected; its model guard must pass after preparation before training. |
-| `inference_fleet_extrapolation` | A named preset covers per-engine settings, not this fleet's routing, publication latency or useful throughput. |
+| `inference_fleet_extrapolation` | A named preset configures individual engines. Reminder to validate fleet routing, producer capacity and weight-publication latency for the intended topology. |
 
 For a new model or topology, start with generic settings, inspect the plan, and
 run bounded measurements rather than interpolating these pools. Unknown shapes
 receive no preset recommendation. Users and agents can inspect the structured
 codes above without parsing the rendered tips box.
 
+The compatibility tip can also appear when `generic` was selected explicitly.
+It describes the model, hardware and topology, not agreement between your serving
+settings and the preset. Keeping your explicit configuration is a supported choice.
+
 Fleet advisories remain visible for any named preset with more than one engine.
 Per-engine measurements do not establish fully async refresh or useful throughput
 for a different fleet.
-Managed replicas inventory their rollout GPUs at startup. After preparation, all
-inventories are checked against an applied preset, excluding trainer/judge GPUs.
-Direct single-node training checks the rollout slice; a matched multi-node preset
-requires managed per-replica inventories. Checks run outside generation.
+Managed replicas collect GPU inventories at startup. After preparation, the
+topology-sized rollout slices are checked against an applied preset; direct
+single-node training uses the same slicing convention. This assumes homogeneous
+devices within each Ray pool: Ray assigns trainer and rollout GPUs, so the slice
+does not identify the actual actor placements. Managed judges are outside that
+pool. Mixed-device Ray pools are not qualified by this check. A named multi-node
+preset requires managed per-replica inventories. Checks run outside generation.
 
 A producer budget equal to one wave of engine slots gets producer-backfill advice,
 regardless of HTTP headroom or profile selection. HTTP capacity below admission

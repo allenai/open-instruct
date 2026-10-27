@@ -45,7 +45,7 @@ BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 [data]
 # Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.
 # Source revision: 0fb6466d31ef3a9dd16985ef635e6429e05a6491.
-# Preparation contract: docs/miles/data-and-evaluation.md#large-training-mixture
+# Preparation contract: docs/miles/data-and-evaluation.md#three-node-training-mixture
 prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/train.jsonl"
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/verifiers.json"
 

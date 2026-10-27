@@ -51,6 +51,11 @@ Trainer images are built separately from the TOMLs. Follow the
 [image build instructions](../../../docs/miles/launching.md#laptop-choose-or-build-an-image)
 to build the intended application revision and runtime lock. `MILES_EXISTING_IMAGE`
 can reuse a compatible immutable image; local changes are not overlaid onto it.
+The launcher checks the image ID, not whether its installed sources match
+`runtime/miles/runtime.lock.json`. In particular, the cached B300 preset requires
+the lock's FP32 tracked-state snapshot support; planning cannot detect an older
+image missing that support. Verify the image's build records against the current
+lock, or rebuild before submitting.
 `three-node` separately pins its evaluator image.
 
 ## Inputs and expected outputs
@@ -87,7 +92,7 @@ GPUs with a judge. The nodes contain 4 training + 4 inference GPUs, 8 inference
 GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs are unused.
 Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
 including general-quality tasks, prepared according to the
-[source and preparation contract](../../../docs/miles/data-and-evaluation.md#large-training-mixture). It requires
+[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture). It requires
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;

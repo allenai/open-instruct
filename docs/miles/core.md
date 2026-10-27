@@ -132,7 +132,7 @@ The async producer remains paused until the check completes.
 The interval defaults to zero, leaving these periodic probes disabled. The maintained
 examples inherit that default. The dev mechanics example enables
 `check_weight_update_equal=true`: the full weight audit runs at startup, including
-resume, and does not run after ordinary training updates. The node and large
+resume, and does not run after ordinary training updates. The node and three-node
 learning examples disable this optional audit. Reserve a positive
 interval for investigating publication correctness. This interval
 also controls the extra gradient-norm and sampled-parameter-update diagnostics;
