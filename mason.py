@@ -103,7 +103,11 @@ MIN_RUNTIME_USUAL_UPPER_BOUND_NS = 8 * 60 * 60 * 1_000_000_000
 
 
 def parse_min_runtime(min_runtime_str: str) -> str:
-    """Validate a Beaker min runtime duration string such as '30m' or '2h'; a bare number is seconds."""
+    """Validate a Beaker min runtime duration string such as '30m' or '2h'."""
+    # beaker-py reads a bare number as seconds, so '300' meant as minutes would silently protect for 5 minutes.
+    # Like the MILES launcher, require a unit for anything but 0.
+    if re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)", min_runtime_str.strip()) and float(min_runtime_str) != 0:
+        raise argparse.ArgumentTypeError(f"Min runtime needs a unit (e.g., '30m', '2h'), got: {min_runtime_str}")
     try:
         nanoseconds = beaker.common.to_nanoseconds(min_runtime_str)
     except ValueError as e:
@@ -188,8 +192,8 @@ def get_args():
         "--min_runtime",
         type=parse_min_runtime,
         default=None,
-        help="Minimum runtime before the job can be preempted, as a duration string (e.g., '30m', '2h'; a bare "
-        "number is seconds). Must be 0 or at least 5m, and Ai2 clusters currently allow at most 8h. A value "
+        help="Minimum runtime before the job can be preempted, as a duration string with a unit (e.g., '30m', "
+        "'2h'). Must be 0 or at least 5m, and Ai2 clusters currently allow at most 8h. A value "
         "above 0 makes the job allocated: it queues ahead of unallocated backfill jobs, is protected until the "
         "min runtime ends, and needs an allocation on the cluster. Shorter min runtimes schedule sooner, so use "
         "the time the job needs to reach a checkpoint. 0 runs as unallocated backfill.",
@@ -270,7 +274,7 @@ def get_args():
         if min_runtime_ns == 0 and not mason_args.auto_resume:
             console.log(
                 "--min_runtime 0 without --auto_resume runs as unallocated backfill and is not requeued after "
-                "preemption; pass --auto_resume (or use --preemptible) to keep it running."
+                "preemption; pass --auto_resume (or use --preemptible) so Beaker requeues it after preemption."
             )
     commands = parse_commands(command_args)
 

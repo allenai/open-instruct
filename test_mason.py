@@ -314,7 +314,7 @@ class TestParseMinRuntime(unittest.TestCase):
             ("hours", "2h30m"),
             ("usual_upper_bound", "8h"),
             ("above_usual_upper_bound", "9h"),
-            ("bare_number_is_seconds", "3600"),
+            ("seconds_with_unit", "3600s"),
         ]
     )
     def test_valid(self, name, value):
@@ -323,7 +323,8 @@ class TestParseMinRuntime(unittest.TestCase):
     @parameterized.parameterized.expand(
         [
             ("below_lower_bound", "4m"),
-            ("bare_seconds_below_lower_bound", "60"),
+            ("bare_number", "3600"),
+            ("bare_decimal", "1.5"),
             ("negative", "-5m"),
             ("not_a_duration", "soon"),
         ]
