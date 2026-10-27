@@ -114,7 +114,8 @@ responses for every async run.
    trained response. `audit.json` reports the cumulative counts as
    `replayed_records` and `torn_fragments` (upper bounds if a launch died while
    reconciling). Resuming requires an unchanged rollout batch size times samples
-   per prompt, and the launch checks it against the previous
+   per prompt. A changed run configuration is already rejected; for an output
+   root without `workflow.json`, the launch also checks the previous
    `native-arguments.json`. An output root written before this
    reconciliation existed is reconciled on its next launch;
 6. reloads the export in a fresh SGLang process and probes a training prompt.

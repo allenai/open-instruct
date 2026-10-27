@@ -68,11 +68,17 @@ def execute(spec):
         grpo_args.check_resume_batch(spec)
         kept = grpo_args.checkpointed_rollouts(spec)
         set_aside, torn = grpo_hooks.reconcile_evidence(root, kept, grpo_args.responses_per_rollout(spec))
-        if set_aside:
+        if set_aside and kept:
             logger.info(
-                "Set aside %s verifier records past the checkpoint (rollout >= %s) in %s",
+                "Set aside %s verifier records past checkpointed rollout %s in %s",
                 set_aside,
-                kept,
+                kept - 1,
+                root / grpo_hooks.REPLAYED,
+            )
+        elif set_aside:
+            logger.info(
+                "Set aside %s verifier records from a previous non-resumed launch in %s",
+                set_aside,
                 root / grpo_hooks.REPLAYED,
             )
         if torn:

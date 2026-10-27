@@ -36,8 +36,11 @@ def check_resume_batch(spec):
     """Reject a resume whose responses per rollout differ from those the previous launch trained on.
 
     Evidence reconciliation cuts at ``checkpointed_rollouts * responses_per_rollout`` lines, so a
-    changed batch shape would keep the wrong records without any error."""
+    changed batch shape would keep the wrong records without any error. ``workflow.run_directory``
+    already rejects a changed run configuration when ``workflow.json`` exists; this backs it up for an
+    output root without one."""
     previous = Path(spec.output["root"]) / "native-arguments.json"
+    # An older root may lack the arguments file or the flag; there is then nothing to compare.
     if not (checkpointed_rollouts(spec) and previous.exists()):
         return
     arguments = json.loads(previous.read_text())

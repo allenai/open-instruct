@@ -451,7 +451,9 @@ def test_audit_checks_centered_rewards_in_trainer_dumps(tmp_path, monkeypatch, c
             marker.write_text("0")
             with (root / grpo_hooks.EVIDENCE).open("a") as stream:
                 stream.write('{"sample_index": 16')
-            assert grpo_hooks.reconcile_evidence(root, grpo_args.checkpointed_rollouts(spec), 16) == (16, True)
+            assert grpo_hooks.reconcile_evidence(
+                root, grpo_args.checkpointed_rollouts(spec), grpo_args.responses_per_rollout(spec)
+            ) == (16, True)
         batch = _evidence_rows(
             step, [0.0 if case == "zero_signal" and step == 1 else float(index == 1) for index in range(16)]
         )

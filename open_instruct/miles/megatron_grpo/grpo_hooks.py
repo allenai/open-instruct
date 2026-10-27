@@ -60,7 +60,8 @@ def reconcile_evidence(root, rollouts, batch):
         for found in range(expected):
             if not stream.readline().endswith(b"\n"):
                 raise InputError(
-                    f"{path} has {found} complete records; {rollouts} checkpointed rollouts need {expected}"
+                    f"{path} has {found} complete records; {rollouts} checkpointed rollouts need {expected} "
+                    f"(earlier set-aside records are in {REPLAYED})"
                 )
         boundary = stream.tell()
         tail = stream.read()
