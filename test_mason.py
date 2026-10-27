@@ -340,8 +340,8 @@ class TestParseMinRuntime(unittest.TestCase):
 
 
 class TestGetArgsMinRuntime(unittest.TestCase):
-    def _get_args(self, *mason_args):
-        argv = ["mason.py", "--cluster", "ai2/jupiter", *mason_args, "--", "echo", "hello"]
+    def _get_args(self, *mason_args, command=("echo", "hello")):
+        argv = ["mason.py", "--cluster", "ai2/jupiter", *mason_args, "--", *command]
         with mock.patch.object(sys, "argv", argv):
             return mason.get_args()
 
@@ -351,9 +351,9 @@ class TestGetArgsMinRuntime(unittest.TestCase):
             mason.make_task_context(args).to_json(), {"priority": "normal", "minRuntime": 0, "autoResume": True}
         )
 
-    def _warnings(self, *mason_args):
+    def _warnings(self, *mason_args, command=("echo", "hello")):
         with mock.patch.object(mason.console, "log") as log:
-            self._get_args(*mason_args)
+            self._get_args(*mason_args, command=command)
         return " ".join(str(call.args[0]) for call in log.call_args_list)
 
     def test_min_runtime_and_auto_resume(self):
@@ -382,6 +382,7 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         [
             ("above_usual_upper_bound", ["--min_runtime", "9h", "--auto_resume"], "8h maximum"),
             ("zero_without_auto_resume", ["--min_runtime", "0"], "not requeued"),
+            ("auto_resume_without_resumable_command", ["--min_runtime", "2h", "--auto_resume"], "restarts it"),
         ]
     )
     def test_warns(self, name, mason_args, expected):
@@ -397,6 +398,11 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         warnings = self._warnings(*mason_args)
         self.assertNotIn("8h maximum", warnings)
         self.assertNotIn("not requeued", warnings)
+
+    def test_auto_resume_with_resumable_command_does_not_warn(self):
+        command = ("python", "open_instruct/grpo_fast.py")
+        warnings = self._warnings("--min_runtime", "2h", "--auto_resume", command=command)
+        self.assertNotIn("restarts it", warnings)
 
 
 MASON_DEFAULT_NAMES = [

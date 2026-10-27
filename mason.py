@@ -312,6 +312,11 @@ def get_args():
         console.log(
             "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
+    if mason_args.auto_resume and not is_resumable:
+        console.log(
+            "--auto_resume requeues the job after preemption, but mason does not resume this command, so each "
+            "requeue restarts it from the beginning unless it resumes from its own checkpoints."
+        )
     mason_args.resumable = is_resumable
 
     return mason_args, commands
