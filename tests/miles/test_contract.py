@@ -120,8 +120,13 @@ def reference_loss(logits, samples, token_average, regularized=False):
                 log_ratio = sample["old"][j] + 0.17 - logp
                 term = term - 0.02 * entropy + 0.03 * (log_ratio.exp() - log_ratio - 1)
             values.append(term)
-        terms.append(torch.stack(values).sum() if token_average else torch.stack(values).mean())
-    return torch.stack(terms).sum() / (sum(int(s["mask"].sum()) for s in samples) if token_average else len(samples))
+        terms.append(
+            (torch.stack(values).sum() if token_average else torch.stack(values).mean())
+            if values
+            else logits[i].sum() * 0
+        )
+    denominator = sum(max(int(s["mask"].sum()), 1) for s in samples) if token_average else len(samples)
+    return torch.stack(terms).sum() / denominator
 
 
 class LogitTable(nn.Module):
@@ -145,7 +150,7 @@ class AccumulationModule:
         )
 
 
-def _worker(rank, world, rendezvous, output):
+def _worker(rank, world, rendezvous, output, empty_rank=False):
     torch.set_num_threads(1)
     dist.init_process_group(
         "gloo", init_method=f"file://{rendezvous}", rank=rank, world_size=world, timeout=timedelta(seconds=90)
@@ -166,6 +171,9 @@ def _worker(rank, world, rendezvous, output):
             )
         )
         initial, samples = fixture_data()
+        if empty_rank:
+            for index in (0, 2):
+                samples[index]["mask"].zero_()
         measurements = []
         for token_average, regularized in product((False, True), repeat=2):
             for chunk_size in (1, 2, 4):
@@ -202,6 +210,9 @@ def _worker(rank, world, rendezvous, output):
                 expected_loss.backward()
                 torch.testing.assert_close(actual_loss, expected_loss.detach(), atol=2e-7, rtol=2e-6)
                 torch.testing.assert_close(table.logits.grad, reference.grad, atol=2e-7, rtol=2e-6)
+                if empty_rank:
+                    assert torch.count_nonzero(table.logits.grad[[0, 2]]) == 0
+                    assert torch.count_nonzero(table.logits.grad[[1, 3]]) > 0
                 # Prompt, masked, final-unscored and padded positions must have zero gradient.
                 assert torch.count_nonzero(reference.grad == 0) > reference.numel() // 2
                 actual_optim = torch.optim.AdamW(table.parameters(), lr=0.003, weight_decay=0.01)
@@ -251,10 +262,13 @@ def _worker(rank, world, rendezvous, output):
         dist.destroy_process_group()
 
 
-@pytest.mark.parametrize("world", [1, 2])
-def test_same_global_batch_same_gradient_and_update(world, tmp_path):
+@pytest.mark.parametrize("world,empty_rank", [(1, False), (2, False), (2, True)])
+def test_same_global_batch_same_gradient_and_update(world, empty_rank, tmp_path):
     mp.spawn(
-        _worker, args=(world, str(tmp_path / "rdzv"), str(tmp_path / "measurement.json")), nprocs=world, join=True
+        _worker,
+        args=(world, str(tmp_path / "rdzv"), str(tmp_path / "measurement.json"), empty_rank),
+        nprocs=world,
+        join=True,
     )
     results = json.loads((tmp_path / "measurement.json").read_text())
     assert len(results) == 12

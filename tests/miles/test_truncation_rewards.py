@@ -58,3 +58,11 @@ def test_filter_ignores_truncated_reward_before_batch_admission(finished, expect
     if expected:
         _, normalized = exclude_truncated(args(), samples)
         assert normalized == [-0.5, 0.5, 0.0]
+
+
+def test_fully_truncated_group_remains_excluded_without_nonfinite_advantages():
+    samples = [sample(0, -3.0, truncated=True, index=0), sample(0, -3.0, truncated=True, index=1)]
+    raw, normalized = exclude_truncated(args(std=True), samples)
+    assert raw == [-3.0, -3.0]
+    assert normalized == [0.0, 0.0]
+    assert all(item.remove_sample for item in samples)

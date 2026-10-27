@@ -101,7 +101,11 @@ one data mode at a time. On Beaker, place the files on mounted storage and use
 that mount's absolute path. The truncation postprocessor excludes unfinished
 responses from learning: assigning them zero alone would make truncation more
 rewarding than an incorrect call with negative reward. Keep zero-truncation
-disabled because MILES rejects combining it with reward exclusion. Follow the [MILES launch guide](../miles/launching.md)
+disabled because MILES rejects combining it with reward exclusion. If every
+response in an optimizer batch is excluded across all ranks, Core records a
+`no_active_tokens` skip and consumes the rollout without advancing optimizer,
+learning-rate, or policy-version state. A locally empty rank still participates
+when another rank has active tokens. Follow the [MILES launch guide](../miles/launching.md)
 for model, topology, runtime, and plan/validation checks. The `toolrl` entries are
 **verifier bindings**, not new `[[data.tasks]]` dataset aliases. Manifest adoption
 uses the standard tokenizer, prompt-length validation, and immutable preparation
