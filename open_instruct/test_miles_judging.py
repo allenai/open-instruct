@@ -42,6 +42,30 @@ def document(tmp_path):
     }
 
 
+@pytest.mark.parametrize("mode", ["managed", "external"])
+@pytest.mark.parametrize("timeout", [None, 37])
+def test_judge_timeout_defaults_and_overrides_reach_request_config(document, monkeypatch, mode, timeout):
+    if mode == "external":
+        document["judges"]["general"] = {
+            "mode": "external",
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "http://judge.example/v1",
+        }
+    if timeout is not None:
+        document["judges"]["general"]["timeout"] = timeout
+    run = RunSpec.from_dict(document)
+    value = judging.registry(run.judges)
+    value["judges"]["general"]["endpoint"] = "http://judge.example/v1"
+    monkeypatch.setenv(judging.REGISTRY_ENV, json.dumps(value))
+    monkeypatch.delenv("OI_MILES_JUDGE_TIMEOUT", raising=False)
+    args = SimpleNamespace(llm_judge_api_base="http://judge.example/v1", llm_judge_timeout=timeout)
+    config, *_ = judge_registry.resolve_request(args, "general-quality", "Question", "Answer", None)
+    expected = 600 if timeout is None else timeout
+    assert config.timeout == general_judge.general_judge_config(args).timeout == expected
+    overridden = RunSpec.from_dict(document, overrides=["judges.general.timeout=45"])
+    assert overridden.judges["judges"]["general"]["timeout"] == 45
+
+
 def test_production_topology_and_growth_are_additive(document):
     run = RunSpec.from_dict(document)
     assert RunSpec.from_dict(run.to_dict()).to_dict() == run.to_dict()
@@ -281,6 +305,37 @@ def test_missing_reference_and_unused_bindings_are_rejected(document, tmp_path):
     path.write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
     with pytest.raises(ValueError, match="absent"):
         judge_registry.validate_data({"prompt_data": str(path)}, value)
+
+
+@pytest.mark.parametrize("split", ["train", "eval"])
+@pytest.mark.parametrize("verifier", ["general-quality", "custom-quality"])
+def test_missing_binding_checked_with_no_judges_in_train_and_eval(document, tmp_path, split, verifier):
+    paths = {name: tmp_path / f"{name}.jsonl" for name in ("train", "eval")}
+    for name, path in paths.items():
+        path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "judge_query": "Question",
+                        "verifiers": [{"name": verifier if name == split else "gsm8k", "target": "42"}],
+                    }
+                }
+            )
+            + "\n"
+        )
+    reward = tmp_path / "verifiers.json"
+    reward.write_text(
+        json.dumps({verifier: {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"}})
+    )
+    prepared = {
+        "prompt_data": str(paths["train"]),
+        "eval_prompt_data": ["heldout", str(paths["eval"])],
+        "reward_config": str(reward),
+    }
+    with pytest.raises(InputError, match=f"Missing named judge binding.*{verifier}"):
+        judge_registry.validate_data(prepared, judging.registry(judging.parse({})))
+    document["judging"]["bindings"] = {verifier: {"judge": "general", "rubric": "quality"}}
+    judge_registry.validate_data(prepared, judging.registry(judging.parse(document)))
 
 
 def test_health_probe_tolerates_transient_failures_but_bounds_outage(document, tmp_path, monkeypatch):

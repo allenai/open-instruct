@@ -44,8 +44,9 @@ def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkey
         output={"root": str(tmp_path)},
         launch={"auto_resume": False, "coordination": {"startup_timeout": 30}},
         judges={},
+        compile=lambda: SimpleNamespace(inference_profile=None),
     )
-    node = {"ray_gpus": 1}
+    node = {"ray_gpus": 1, "rollout_gpus": 1, "trainer_gpus": 0}
     commands = {}
     batches = []
 
@@ -73,8 +74,15 @@ def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkey
         batches.append(ports)
         return ports
 
+    monkeypatch.setattr(
+        cluster.gpu_hardware,
+        "inventory",
+        lambda: [{"id": str(index), "name": "NVIDIA B300", "memory_mib": 275040} for index in range(1 + judge_count)],
+    )
     monkeypatch.setattr(cluster.RunSpec, "load", lambda path: spec)
-    monkeypatch.setattr(cluster.topology, "plan", lambda spec: {"replicas": 2, "gpus_per_replica": 1 + judge_count})
+    monkeypatch.setattr(
+        cluster.topology, "plan", lambda spec, compiled=None: {"replicas": 2, "gpus_per_replica": 1 + judge_count}
+    )
     monkeypatch.setattr(cluster.topology, "assign", lambda *args: dict.fromkeys(addresses, node))
     monkeypatch.setattr(cluster.topology, "devices", lambda *args: (["0"], judges))
     monkeypatch.setattr(cluster.rendezvous, "join", lambda *args: tmp_path)

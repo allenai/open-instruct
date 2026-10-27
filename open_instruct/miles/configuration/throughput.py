@@ -67,6 +67,22 @@ def report(options, core):
             "diagnostic_overhead",
             "Trainer/publication or replay diagnostics are enabled. Keep them for correctness qualification; measure their cost separately when selecting throughput defaults.",
         )
+    if options.get("check_weight_update_equal", False):
+        warn(
+            "weight_sync_qualification",
+            "Weight equality qualification snapshots/resets serving weights at startup. Keep it for publication qualification; disable check_weight_update_equal in qualified long runs. Publication acknowledgments remain required.",
+        )
+    if getattr(core, "scoring_pass_required", False):
+        warn(
+            "forced_trainer_rescoring",
+            "scoring_pass_required forces a separate trainer scoring forward. Leave it false to select scoring from the recipe; multiple optimizer steps or KL in advantages still require their pre-update scores.",
+        )
+    interval = getattr(core, "scoring_check_interval", 0)
+    if interval > 0 and not getattr(core, "scoring_pass_required", False):
+        warn(
+            "periodic_scoring_check",
+            f"Scoring validation repeats every {interval} updates when the standalone pass can be skipped. Set scoring_check_interval=0 for startup/resume validation only after qualification; required scoring is unaffected.",
+        )
     if options.get("kl_loss_coef", 0) > 0 or options.get("use_kl_loss", False):
         warn(
             "reference_policy_cost",

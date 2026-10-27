@@ -29,6 +29,11 @@ organized adapter hooks; OLMo-core provides the model, objective and checkpoint
 APIs required by this adapter; olmo-sglang supplies compatible serving models.
 The ordinary Open Instruct environment keeps its own dependency versions.
 
+The MILES pin includes the v0.1.2 async-consumer compatibility fix from
+[miles-olmo-core PR #10](https://github.com/allenai/miles-olmo-core/pull/10).
+Its refresh and engine-drain dequeues accept the native consumer's optional trainer
+identity and preserve Core's explicit rejection of multi-policy training.
+
 Working branches help development, but the lock/image determines a
 run. Source changes require a new application image; dependency/kernel changes may
 require a new, validated binary base. The Dockerfile separates a `runtime-base`
@@ -101,7 +106,7 @@ therefore does not check GPU kernels, distributed gradients or publication.
 The ordinary Open Instruct GPU CI image does not include the private MILES
 runtime; dedicated runtime checks are a separate maintainer validation step.
 
-For a training lifecycle check, copy [small.toml](../../configs/miles/examples/small.toml)
+For a training lifecycle check, copy [dev.toml](../../configs/miles/examples/dev.toml)
 to `runs/`, select a compatible tiny checkpoint, and follow the
 [committed-image launcher](launching.md). Verify the rendered replica group and
 retain image, config and completion artifacts. Test refresh separately when
@@ -213,8 +218,10 @@ throughput arithmetic.
 
 The `olmo-core` revision in
 [`runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the Core source used
-by the runtime. The adapter interfaces it relies on are proposed upstream in
-[OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888).
+by the runtime. The adapter interfaces it relies on were merged in
+[OLMo-core PR #888](https://github.com/allenai/OLMo-core/pull/888). The runtime pins
+merge commit `6ceda6530625caa5d23e3be8a455c600f62a7338`, including the reviewed
+RoPE import fixes, alongside the MILES v0.1.2 integration.
 
 Core's routed-expert `match_eager_rounding` defaults to false. The pinned MILES
 adapter explicitly enables it for policy scoring and accepts legacy MILES

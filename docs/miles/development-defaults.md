@@ -17,12 +17,17 @@ maintained example TOMLs encode a choice, the example is authoritative.
 ## Publication and capacity
 
 - **Publication mode** (`refresh` for full-model async runs, `barrier` for small synchronous checks): refresh keeps generating across weight updates, so long responses span several policy versions; barrier is simpler to reason about but stalls generation at each update.
-- **Engine admission** (64 requests per engine): size it from GPU memory, with `sglang_max_total_tokens = admission × context`; higher values add throughput only while memory and the router keep up.
-- **Producer budget** (`async_max_concurrent_samples` unset): the automatic value scales with the engine fleet; a larger budget fills engines more reliably but leaves more work to age out.
+- **Engine admission** (generic default 64; the named `olmo35-b300-v1` preset uses 512): size it from GPU memory, with `sglang_max_total_tokens = admission × context`; higher values add throughput only while memory and the router keep up. See the [example settings and limits](../../configs/miles/examples/README.md#capacity-and-qualification-settings) before transferring 512 to another model or GPU.
+- **HTTP admission** (generic async default twice running admission; the named `olmo35-b300-v1` preset uses 512/512): permits cover transit and response processing as well as generation. Additional permits can refill GPU slots or just add queueing; measure occupancy and residence time before increasing them.
+- **Producer budget** (automatic when `async_max_concurrent_samples` is unset): the automatic value scales with the engine fleet; a larger budget fills engines more reliably but leaves more work to age out. The node example explicitly limits unfinished samples to 1,536. The three-node example leaves the setting unset and resolves to 19,456 with `olmo35-b300-v1`; that heuristic still requires fleet, policy-age and useful-throughput validation with the unchanged batch and lag limits.
+- **Completed buffer** (one collection): separate from unfinished-request headroom; enlarging it retains more completed work without fixing response transport.
 - **Submission granularity** (`"sample"`): engines refill as individual responses finish rather than waiting for whole groups.
 - **Activation recomputation** (on for long contexts): trades extra compute for memory; turning it off is reasonable for short contexts once memory fit is checked.
-- **Radix caching** (as in the examples): pays off when long prompt prefixes repeat; with short prompts and long responses it matters little.
+- **Radix caching** (set by named presets: on for B300, off for H100; off for generic/colocated setups): the realistic-prompt comparison favored cached 512 on B300 and uncached 512 on H100. Presets are applied whole; use `inference.profile="generic"` and explicit settings to change cache mode. Cached hybrid serving needs the pinned FP32 tracked-state implementation; rebuild images after changing runtime pins. Recheck this choice for different prompt reuse and lengths.
 - **Compiler cache** (on): shortens repeat startup and does not change training.
+- **Weight equality audit** (off in learning templates, on in mechanics templates): startup snapshot/reset qualification is separate from the required publication protocol.
+- **Trainer scoring** (`scoring_pass_required = false`): reuse the training forward only when the recipe permits it. Learning templates set `scoring_check_interval = 0` to retain startup/resume validation without periodic extra scoring forwards; TIS and required scoring remain active.
+- **Native checkpoints** (every 25 updates in learning templates): synchronous saves interrupt training. Adjust using measured save time and acceptable lost work after preemption; keep recovery enabled.
 
 ## Opt-in features
 

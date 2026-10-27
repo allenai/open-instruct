@@ -7,10 +7,11 @@ caching explicitly instead of depending on the absence of a WEKA mount.
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from miles.backends.core_utils import actor
+from miles.backends.core_utils.publication import transport
 from miles.backends.core_utils.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
 
 from open_instruct.miles.configuration.config import CoreConfig
@@ -18,14 +19,26 @@ from open_instruct.miles.execution import driver
 
 
 def install_components(monkeypatch, manager):
+    monkeypatch.setattr(driver.ray, "is_initialized", lambda: True)
+    # The driver now receives typed handles; preserve the event-recording fakes.
+    for name, value in vars(manager).copy().items():
+        if isinstance(value, SimpleNamespace) and hasattr(value, "remote"):
+            setattr(manager, name, value.remote)
+
+    async def update_weights(args, learner, manager, inference, *, rollout_id=None):
+        await learner.update_weights(rollout_id)
+
+    monkeypatch.setattr(driver.placement_group, "update_weights", update_weights)
+    monkeypatch.setattr(driver.wiring, "shutdown_worker_manager", AsyncMock())
+
     async def create_components(args):
         inference = SimpleNamespace(
-            check_weights=manager.check_weights.remote if hasattr(manager, "check_weights") else AsyncMock(),
+            check_weights=manager.check_weights if hasattr(manager, "check_weights") else AsyncMock(),
             prepare_rollout=AsyncMock(),
             dispose=AsyncMock(),
         )
-        manager.get = getattr(manager, "generate", SimpleNamespace(remote=AsyncMock()))
-        manager.set_weight_version = SimpleNamespace(remote=AsyncMock())
+        manager.get = getattr(manager, "generate", AsyncMock())
+        manager.set_weight_version = AsyncMock()
         return inference, manager, 1
 
     monkeypatch.setattr(driver.placement_group, "create_rollout_components", create_components)
@@ -42,10 +55,21 @@ def install_components(monkeypatch, manager):
 @pytest.mark.parametrize("diagnostic_interval", [0, 1])
 @pytest.mark.parametrize("start_rollout", [0, 2])
 @pytest.mark.parametrize("with_eval", [False, True])
+@pytest.mark.parametrize("skip_initial_eval", [False, True])
 def test_driver_quiesces_then_retires_transport_before_engines(
-    monkeypatch, fully_async, diagnostic_interval, start_rollout, with_eval, with_export, early_stop, tmp_path
+    monkeypatch,
+    fully_async,
+    diagnostic_interval,
+    start_rollout,
+    with_eval,
+    with_export,
+    early_stop,
+    skip_initial_eval,
+    tmp_path,
 ):
     events = []
+    tracking_run = Mock()
+    monkeypatch.setattr(driver.wandb, "run", tracking_run)
 
     async def event(name):
         events.append(name)
@@ -92,7 +116,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         update_weights_interval=1,
         debug_exit_after_rollout=1 if early_stop else None,
         eval_interval=1 if with_eval else None,
-        skip_eval_before_train=False,
+        skip_eval_before_train=skip_initial_eval,
         hf_checkpoint="/hf",
         eval_uses_snapshots=False,
         save=str(tmp_path),
@@ -107,6 +131,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
     assert events.count(f"cache-{start_rollout}") == 1
     assert events.index("trained") < events.index(f"cache-{start_rollout}")
 
+    tracking_run.finish.assert_not_called()
     assert result["completed_rollout_ids"] == [start_rollout]
     if with_export and not early_stop:
         export_index = events.index(f"export-{start_rollout}-/final")
@@ -117,9 +142,14 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         assert not any(event.startswith("export-") for event in events)
     timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
     evaluations = [row for row in timings if row["stage"] == "evaluation"]
-    assert len(evaluations) == events.count("evaluated") == (2 if with_eval else 0)
+    expected_phases = []
     if with_eval:
-        assert [row["details"]["phase"] for row in evaluations] == ["initial", "periodic"]
+        if start_rollout == 0 and not skip_initial_eval:
+            expected_phases.append("initial")
+        expected_phases.append("periodic")
+    assert len(evaluations) == events.count("evaluated") == len(expected_phases)
+    assert [row["details"]["phase"] for row in evaluations] == expected_phases
+    if with_eval:
         assert all(
             row["passed"] and row["details"]["configured_serving"]["sglang_server_concurrency"] == 64
             for row in evaluations
@@ -144,7 +174,10 @@ def test_driver_quiesces_then_retires_transport_before_engines(
 
 def test_transport_destruction_starts_on_both_peers_before_wait(monkeypatch):
     events = []
-    updater = SimpleNamespace(
+    updater = object.__new__(transport.DistributedUpdater)
+    updater.__dict__.update(
+        args=SimpleNamespace(),
+        group_name="miles",
         _model_update_groups="group",
         _group_name="miles",
         rollout_engines=[

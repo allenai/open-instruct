@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -70,6 +71,25 @@ def test_async_opd_selects_safe_eval_and_measured_restartable_queue():
     assert values["--data-source-path"] == opd_config.ASYNC_SOURCE
     assert "--use-rollout-logprobs" in flags and "--use-tis" not in flags
     assert specs.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
+
+
+@pytest.mark.parametrize("fully_async", [None, False, True])
+@pytest.mark.parametrize("timing", [None, "", "/tmp/opd-timing", "0"])
+def test_opd_timing_requires_async_driver(fully_async, timing):
+    overrides = []
+    if fully_async is not None:
+        overrides.append(f"miles.fully_async={str(fully_async).lower()}")
+    if fully_async:
+        overrides += ["miles.max_weight_staleness=3", "distillation.use_rollout_logprobs=true"]
+    if timing is not None:
+        overrides.append(f"launch.env.OI_OPD_TIMING={json.dumps(timing)}")
+    # Like the runtime, any nonempty value enables timing, including "0".
+    if timing and not fully_async:
+        with pytest.raises(InputError, match=r"launch.env.OI_OPD_TIMING requires miles.fully_async=true"):
+            specs.load(CONFIG, overrides)
+    else:
+        spec = specs.load(CONFIG, overrides)
+        assert spec.launch["env"].get("OI_OPD_TIMING") == timing
 
 
 @pytest.mark.parametrize(
@@ -206,10 +226,11 @@ def test_registered_verifiers_score_held_out_samples(tmp_path):
     assert asyncio.run(run()) == [1.0, 1.0, 0.0]
 
 
-def test_opd_honors_shared_memory_setting():
-    spec = specs.load(CONFIG, ['launch.shared_memory="48 GiB"'])
+def test_opd_honors_host_and_shared_memory_settings():
+    spec = specs.load(CONFIG, ['launch.memory="128 GiB"', 'launch.shared_memory="48 GiB"'])
     task = launch.specification("test-image", spec)["tasks"][0]
     assert task["resources"]["sharedMemory"] == "48 GiB"
+    assert task["resources"]["memory"] == "128 GiB"
 
 
 def _child_pid(path):
@@ -229,11 +250,23 @@ def _assert_exits(pid):
         except ProcessLookupError:
             return
         # A killed child reparented to a slow reaper lingers as a zombie on Linux.
-        with contextlib.suppress(FileNotFoundError):
+        # The process can disappear before opening stat (ENOENT) or while reading it (ESRCH).
+        with contextlib.suppress(FileNotFoundError, ProcessLookupError):
             if stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
                 return
         assert time.monotonic() < deadline, f"process {pid} survived group cleanup"
         time.sleep(0.05)
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, ProcessLookupError])
+def test_assert_exits_handles_process_disappearing_during_stat_read(error):
+    with (
+        mock.patch.object(os, "kill", side_effect=[None, ProcessLookupError]) as probe,
+        mock.patch.object(Path, "read_text", side_effect=error) as read_stat,
+    ):
+        _assert_exits(12345)
+    read_stat.assert_called_once()
+    assert probe.call_count == 2
 
 
 @pytest.mark.skipif(

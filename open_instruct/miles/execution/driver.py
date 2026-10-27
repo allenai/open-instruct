@@ -10,6 +10,7 @@ import time
 from functools import partial
 from pathlib import Path
 
+import ray
 import wandb
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray import placement_group, wiring
@@ -17,13 +18,14 @@ from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
 from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
-from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
+from miles.utils.hf_utils.config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
+from open_instruct.miles.execution import serving
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -31,6 +33,8 @@ logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args, *, export_hf=None):
+    if getattr(args, "cluster_backend", "ray") != "ray":
+        raise ValueError("Core currently requires the Ray cluster backend")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     stopped_for_time = False
@@ -38,13 +42,7 @@ async def train(args, *, export_hf=None):
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
         startup_cache.prepare(args, application_root=Path(__file__).resolve().parents[3])
-    with stage(args, "placement"):
-        worker_manager = wiring.launch_worker_manager(
-            args, transform_specs=partial(startup_cache.configure_specs, args)
-        )
-    object_store.init_instance(args, contribute_segment=False)
-    init_tracking(args)
-    define_step_key_metric_group("errors", "errors/elapsed_seconds")
+    worker_manager = None
     manager = None
     inference = None
     learner = None
@@ -53,18 +51,30 @@ async def train(args, *, export_hf=None):
     rolling = None
     refresh = args.olmo_core.publication_mode == "refresh"
     try:
+        # Start local Ray before W&B creates WANDB_SERVICE. Otherwise raylet
+        # inherits the driver's service connection, and offline worker writers
+        # collide with the primary run. Preserve an already connected cluster.
+        if not ray.is_initialized():
+            ray.init(address=os.environ.get("RAY_ADDRESS") or "local")
+        # Tracking assigns the run ID before Miles serializes args into worker
+        # specs. Later mutations in the driver cannot reach those worker copies.
+        init_tracking(args)
+        define_step_key_metric_group("errors", "errors/elapsed_seconds")
+        with stage(args, "placement"):
+            worker_manager = wiring.launch_worker_manager(args, transform_specs=partial(serving.configure_specs, args))
+        object_store.init_instance(args, contribute_segment=False)
         with stage(args, "serving_startup"):
             inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
         with stage(args, "trainer_startup"):
-            learner, _ = await placement_group.create_training_models(args, inference, manager)
+            learner, _ = await placement_group.create_training_models(args, manager)
 
         async def publish(rollout_id=None):
             if args.fully_async:
-                await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
+                await manager.core_publication_boundary(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
                 await inference.onload_weights()
             await infra_timeouts.wait_for(
-                placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                placement_group.update_weights(args, learner, manager, inference, rollout_id=rollout_id),
                 timeout=args.olmo_core.engine_update_timeout if refresh else None,
                 operation="Core weight publication",
             )
@@ -84,7 +94,7 @@ async def train(args, *, export_hf=None):
                         skip_list=args.check_weight_update_skip_list,
                     )
                     await infra_timeouts.wait_for(
-                        placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                        placement_group.update_weights(args, learner, manager, inference, rollout_id=rollout_id),
                         timeout=args.olmo_core.engine_update_timeout if refresh else None,
                         operation="Core weight publication",
                     )
@@ -97,7 +107,7 @@ async def train(args, *, export_hf=None):
             if args.offload_rollout:
                 await inference.onload_kv()
             if args.fully_async:
-                await manager.core_publication_boundary.remote(False, **({"refresh": True} if refresh else {}))
+                await manager.core_publication_boundary(False, **({"refresh": True} if refresh else {}))
 
         with stage(args, "initial_publication"):
             await publish()
@@ -134,18 +144,21 @@ async def train(args, *, export_hf=None):
             )
             if args.start_rollout_id == 0 and background["initial"]:
                 coordinator.dispatch(0, args.hf_checkpoint)
-        if evaluation is not None and args.eval_interval is not None and not args.skip_eval_before_train:
+        if (
+            evaluation is not None
+            and args.eval_interval is not None
+            and not args.skip_eval_before_train
+            and args.start_rollout_id == 0
+        ):
             with evaluation_stage(args, args.start_rollout_id, initial=True):
-                await evaluation.dispatch(
-                    args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
-                )
+                await evaluation.dispatch(args.start_rollout_id, hf_dir=args.hf_checkpoint)
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
             with stage(args, "generation_wait", rollout_id):
                 if rolling is None:
                     await inference.prepare_rollout(rollout_id)
-                batch = await manager.get.remote(rollout_id)
+                batch = await manager.get(rollout_id)
             if args.offload_rollout:
                 await inference.offload()
             try:
@@ -185,7 +198,7 @@ async def train(args, *, export_hf=None):
                 # groups regenerate on resume; live inference need not finish or
                 # pause. No new training batch is consumed until this save commits.
                 with stage(args, "checkpoint", rollout_id):
-                    await manager.save.remote(rollout_id)
+                    await manager.save(rollout_id)
                     await learner.save_model(rollout_id, force_sync=True)
                     await learner.finalize_checkpoint(rollout_id)
                 if sentinel:
@@ -218,7 +231,7 @@ async def train(args, *, export_hf=None):
         reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
         if export_hf is not None and (reached_end or stopped_for_time):
             if args.fully_async:
-                await manager.core_publication_boundary.remote(True)
+                await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
         if stopped_for_time and coordinator is not None and background is not None and background["final"]:
@@ -251,7 +264,7 @@ async def train(args, *, export_hf=None):
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
-                lambda: manager.core_publication_boundary.remote(True),
+                lambda: manager.core_publication_boundary(True),
                 (
                     args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
                     if rolling or refresh
@@ -260,10 +273,10 @@ async def train(args, *, export_hf=None):
                 "final_generation_drain",
             ),
             (learner, lambda: learner.execute_workers("close_weight_transport"), 60, "close_weight_transport"),
-            (manager, lambda: manager.dispose.remote(), 120, "rollout_dispose"),
+            (manager, lambda: manager.dispose(), 120, "rollout_dispose"),
             (learner, lambda: learner.dispose(), 60, "trainer_dispose"),
             (inference, lambda: inference.dispose(), 60, "inference_dispose"),
-            (worker_manager, lambda: worker_manager.dispose.remote(), 120, "worker_dispose"),
+            (worker_manager, lambda: wiring.shutdown_worker_manager(worker_manager), 120, "worker_dispose"),
         ):
             if component is None:
                 continue
@@ -277,7 +290,15 @@ async def train(args, *, export_hf=None):
             await startup_cache.finish(args, success=failure is None and cleanup_error is None)
         except Exception:
             logger.exception("Optional compiler-cache finalization failed")
-        finish_tracking()
+        try:
+            # The pinned Miles finish_tracking() has no exit-code parameter.
+            # Finish W&B's run explicitly on failure before generic backend teardown.
+            if (failure is not None or cleanup_error is not None) and wandb.run is not None:
+                wandb.run.finish(exit_code=1)
+        except Exception:
+            logger.exception("Failed to mark W&B run as failed")
+        finally:
+            finish_tracking()
         if failure is None and cleanup_error is not None:
             raise cleanup_error
     return {

@@ -35,7 +35,7 @@ replace checkpoint/output paths, usernames and image placeholders.
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/small.toml runs/my-grpo.toml
+cp configs/miles/examples/dev.toml runs/my-grpo.toml
 # Edit name/output.root to use your username and a fresh run path.
 # Select a tiny checkpoint that fits on one trainer GPU; this starter uses two GPUs.
 python -m open_instruct.miles plan runs/my-grpo.toml
@@ -50,7 +50,7 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
-Choose a starter from the four maintained examples and an image built from the
+Choose a starter from the three maintained examples and an image built from the
 intended application revision and runtime lock. Building requires access to the
 private sources described in [architecture](architecture.md#runtime-sources-and-images).
 Supply model/data paths and any secrets needed by your run. Beaker resource
@@ -74,6 +74,11 @@ calls `open_instruct.miles.execution.preflight_network` and
 `open_instruct.miles.execution.preflight_attention`; an image missing these
 entrypoints must be rebuilt.
 
+The cached B300 preset also requires the FP32 tracked-state snapshot implementation
+in the current runtime lock. `plan` and image-ID validation do not check that an
+existing image contains it. Verify its build records against
+`runtime/miles/runtime.lock.json`, or rebuild before allocating a run.
+
 To deploy source changes, commit them and build the source overlay instead.
 Read the immutable base identity from the lock and pull it into local Docker:
 
@@ -95,6 +100,26 @@ Both modes require a clean, committed checkout and delegate through
 before building, including mount coverage. The MILES image wrapper passes the
 frozen configuration directly to `open_instruct.miles.execution.submit`; no
 debug launch script is involved.
+
+## Host memory and allocated GPU slots
+
+MILES replica startup queries `nvidia-smi` for device identity and memory, including
+generic runs with an explicit numeric `CUDA_VISIBLE_DEVICES` mask. An unavailable
+or malformed inventory, or a query exceeding 15 seconds, stops startup. An
+explicitly empty mask or `-1` exposes no GPUs; an unset mask selects all devices.
+
+`launch.memory` requests host RAM per Beaker replica (default `"256 GiB"`);
+`launch.shared_memory` separately sizes shared memory. Both GRPO and OPD launchers
+honor these fields. They do not set SGLang GPU memory pools.
+
+Beaker can assign extra GPU slots to satisfy a host-memory request. During an
+H100 inference check on Jupiter, one requested GPU with 256 GiB of host RAM
+received two GPU slots. Inspect the assigned resources in job events and record
+both requested/active GPUs and allocated GPUs when reporting throughput or cost.
+For a small inference-only workload, a lower request such as `launch.memory =
+"128 GiB"` with `launch.shared_memory = "64 GiB"` may avoid this extra allocation.
+Check the host working set, model loading and response-buffer peaks before
+reducing it; do not copy that limit into a full trainer job without measurement.
 
 ## Jupiter CUDA compatibility
 
@@ -274,8 +299,8 @@ collective health; local `validate` cannot inspect the future container's networ
 ## Placement, secrets and results
 
 At AI2, GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and
-minimum runtimes of one hour (dev/small), four hours (medium) or eight hours
-(large). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
+minimum runtimes of one hour (dev), four hours (node) or eight hours
+(three-node). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
 timeout and mounts) and run on Saturn, falling back to Jupiter after canceling
 an unschedulable attempt; not on Holmes.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.

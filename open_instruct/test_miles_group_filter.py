@@ -108,11 +108,10 @@ def test_switch_requires_a_boolean(value):
         dataclasses.replace(CoreConfig(), filter_zero_std_groups=value)
 
 
-@pytest.mark.parametrize("name", ["dev", "small", "medium", "large"])
+@pytest.mark.parametrize("name", ["dev", "node", "three-node"])
 def test_maintained_examples_explain_their_filtering_choice(name):
     path = Path(__file__).resolve().parents[1] / "configs/miles/examples" / f"{name}.toml"
     run = RunSpec.load(path)
-    enabled = name in ("medium", "large")
-    assert run.sections["training"]["filter_zero_std_groups"] is enabled
+    enabled = name in ("node", "three-node")
     assert run.compile().core.filter_zero_std_groups is enabled
     assert ("--dynamic-sampling-filter-path" in run.compile().arguments()) is enabled

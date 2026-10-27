@@ -29,7 +29,7 @@ def test_scaling_engines_scales_producer_but_not_completed_buffer(tmp_path):
     assert big.miles["async_max_concurrent_samples"] == 4096
     assert tp.miles["async_max_concurrent_samples"] == 1024
     for config in (small, big, tp):
-        assert config.plan()["async_capacity"]["completed_buffer_samples"] == 128
+        assert config.plan()["async_capacity"]["completed_buffer_samples"] == 64
         assert "--async-max-concurrent-samples" in config.arguments()
 
 
@@ -38,6 +38,32 @@ def test_explicit_budget_is_preserved_and_warned(tmp_path):
     report = config.plan()["async_capacity"]
     assert report["producer_sample_budget"] == 32
     assert any("below 512" in warning for warning in report["warnings"])
+
+
+@pytest.mark.parametrize("running", [16, 64, 128])
+def test_http_headroom_tracks_engine_limit_without_growing_gpu_batches(tmp_path, running):
+    config = configured(tmp_path, inference={"gpus": 12, "sglang_max_running_requests": running}).compile()
+    report = config.plan()["async_capacity"]
+    assert config.miles["sglang_max_running_requests"] == running
+    assert report["requested_engine_slots"] == 12 * running
+    assert report["global_http_slots"] == report["producer_sample_budget"] == 24 * running
+
+
+@pytest.mark.parametrize(
+    "http,producer,warn", [(32, 768, True), (64, 768, True), (64, 1536, False), (128, 768, True), (128, 1536, False)]
+)
+def test_one_wave_warning_covers_both_end_to_end_limits(tmp_path, http, producer, warn):
+    config = configured(
+        tmp_path,
+        inference={"gpus": 12, "sglang_server_concurrency": http, "sglang_max_running_requests": 64},
+        miles={"async_max_concurrent_samples": producer},
+    ).compile()
+    report = config.plan()["async_capacity"]
+    assert report["global_http_slots"] == 12 * http
+    assert report["producer_sample_budget"] == producer
+    one_wave = [w for w in report["warnings"] if "Producer budget equals one wave" in w]
+    assert bool(one_wave) is warn
+    assert all("sglang_server_concurrency" not in w for w in one_wave)
 
 
 def test_defaults_respect_http_limit_and_round_up_groups(tmp_path):

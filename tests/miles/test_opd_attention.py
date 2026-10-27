@@ -3,12 +3,15 @@
 import math
 from types import SimpleNamespace
 
+import pytest
 import torch
 from miles.backends.megatron_utils import parallel
-from miles.backends.training_utils import cp_utils, data
+from miles.backends.training_utils.data import context_parallel as cp_utils
+from miles.backends.training_utils.data import rollout as data
 from transformer_engine import pytorch as te
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires CUDA attention kernels")
 def test_native_packed_qwen_attention_forward_backward(monkeypatch):
     monkeypatch.setenv("NVTE_FLASH_ATTN", "1")
     monkeypatch.setenv("NVTE_FUSED_ATTN", "0")

@@ -1,0 +1,255 @@
+# H1-sized B300 layout: 4 trainer GPUs (EP4), 19 engines, 1 judge; 3 nodes / 24 GPUs.
+# Before setting up a run, review configuration options and defaults:
+# https://allenai.github.io/open-instruct/miles/configuration/
+# Setup and workload requirements: configs/miles/examples/README.md
+# Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
+schema_version = 1
+name = "three-node"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/checkpoints/policy-hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/three-node"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "8h"
+timeout = "48h"
+auto_resume = true
+gpus_per_replica = 8
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[launch.env]
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+OI_MILES_CODE_FAILURE_POLICY = "zero"
+OI_MILES_JUDGE_FAILURE_POLICY = "zero"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+[launch.secrets]
+BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+
+[data]
+# Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.
+# Source revision: 0fb6466d31ef3a9dd16985ef635e6429e05a6491.
+# Preparation contract: docs/miles/data-and-evaluation.md#three-node-training-mixture
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/train.jsonl"
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/verifiers.json"
+
+[training]
+num_rollouts = 200
+save_interval = 25
+
+[evaluation]
+mode = "background"
+# Full official development/text-safety panel before and after training only.
+# Zero disables periodic evaluation, even when the run is extended.
+interval = 0
+initial = true
+final = true
+# Limited-example execution is validated; measure full-model memory and runtime.
+image = "01M5MQM50J1EEQ8YJGJWSJFPQ5"
+revision = "710b2b5dab6ea09764c02647f3a4e72819b9ee7c"
+gpus = 1
+cluster = "ai2/holmes"
+submit_timeout = 30
+timeout = "3h"
+server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--context-length", "34816"]
+
+[[evaluation.tasks]]
+# Official measurement uses full datasets and pinned upstream sampling settings.
+# Periodic subsets are not enabled; see docs/miles/background-evaluation.md.
+# Seven AIME/HMMT variants preserve pass@32 with a 16K response budget.
+task = "aime_2022:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2023:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2024:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2025:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "aime_2026:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "hmmt_nov_2025:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "hmmt_feb_2026:pass_at_32:16k"
+
+[[evaluation.tasks]]
+task = "gpqa_diamond"
+
+[[evaluation.tasks]]
+task = "gpqa_main:cot"
+
+[[evaluation.tasks]]
+task = "omega_500:hillclimb"
+
+[[evaluation.tasks]]
+task = "omega_500_out"
+
+[[evaluation.tasks]]
+task = "ifeval"
+
+[[evaluation.tasks]]
+task = "ifeval_mt_wildchat_unused_withRewrite"
+
+[[evaluation.tasks]]
+task = "ifeval_mt_ood_wildchat_unused_withRewrite"
+
+[[evaluation.tasks]]
+task = "ifeval_ood"
+
+[[evaluation.tasks]]
+task = "livecodebench:lite"
+harness_preset = "codex_python"
+# Preinstall the sandbox server; the pinned runtime's on-demand fallback fails.
+harness = { "sandboxes.0.inject_swerex" = true }
+
+[[evaluation.tasks]]
+task = "scicode"
+kind = "external"
+arguments = { split = "validation", h5py_host_path = "/weka/oe-adapt-default/YOUR_USERNAME/scicode/test_data.h5" }
+
+# Text safety for reasoning models. olmo-eval manages these evaluation judges
+# on the additional GPU reserved per group, separate from the policy server.
+[[evaluation.tasks]]
+task = "do_anything_now:wg_judge_thinking"
+auxiliary_gpus = 1
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "harmbench:wg_judge_thinking"
+auxiliary_gpus = 1
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "wildguardtest:wg_judge_thinking"
+auxiliary_gpus = 1
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "wildjailbreak:wg_judge_thinking"
+auxiliary_gpus = 1
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "xstest:wg_judge_thinking"
+auxiliary_gpus = 1
+[evaluation.tasks.harness]
+"auxiliary_providers.wg_judge.kind" = "vllm_server"
+"auxiliary_providers.wg_judge.model" = "allenai/wildguard"
+"auxiliary_providers.wg_judge.kwargs.add_bos_token" = true
+
+[[evaluation.tasks]]
+task = "wmdp:mcq"
+
+[[evaluation.tasks]]
+task = "bbq:mcq"
+
+[[evaluation.tasks]]
+task = "strongreject:sr_judge_thinking"
+auxiliary_gpus = 1
+[evaluation.tasks.harness]
+"auxiliary_providers.sr_judge.kind" = "vllm_server"
+# Endpoint serves Gemma-2B with the strongreject adapter enabled as model strongreject.
+"auxiliary_providers.sr_judge.model" = "google/gemma-2b"
+"auxiliary_providers.sr_judge.kwargs.enable_lora" = true
+"auxiliary_providers.sr_judge.kwargs.lora_modules" = ["strongreject=qylu4156/strongreject-15k-v1"]
+"auxiliary_providers.sr_judge.tokenizer" = "qylu4156/strongreject-15k-v1"
+"auxiliary_providers.sr_judge.kwargs.add_bos_token" = true
+
+[trainer]
+gpus = 4
+expert_parallel_size = 4
+sequence_packing = true
+packing_max_tokens = 34816
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 19
+rollout_batch_size = 64
+samples_per_prompt = 4
+max_response_length = 32768
+max_context_length = 34816
+# Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
+# Presets apply whole. To tune their settings, select generic and copy the preset block.
+profile = "olmo35-b300-v1"
+
+[tracking]
+wandb_mode = "offline"
+wandb_team = "ai2-llm"
+wandb_project = "open-instruct-miles"
+wandb_group = "three-node"
+
+[core]
+checkpoint_keep_last = 2
+publication_mode = "refresh"
+engine_drain_timeout = 900.0
+pipeline_observation_interval = 2.0
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+scoring_check_interval = 0
+
+[miles]
+sglang_enable_metrics = true
+use_rollout_routing_replay = true
+
+[async]
+fully_async = true
+# Omitted producer budget scales with resolved engine capacity and fleet size.
+# Review policy-age warnings before scaling; an explicit budget still overrides it.
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+
+[judges.general]
+mode = "managed"
+model = "Qwen/Qwen3-32B"
+revision = "9216db5781bf21249d130ec9da846c4624c16137"
+max_context_length = 131072
+context_extension = "qwen3-yarn-128k"
+prepared_dir = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/checkpoints/qwen3-32b-judge"
+
+[rubrics.quality]
+profile = "open-instruct/general-quality"
+
+[rubrics.reference_quality]
+profile = "open-instruct/general-quality_ref"
+
+[judging.bindings."general-quality"]
+judge = "general"
+rubric = "quality"
+
+[judging.bindings."general-quality_ref"]
+judge = "general"
+rubric = "reference_quality"

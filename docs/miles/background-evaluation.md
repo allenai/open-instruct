@@ -15,10 +15,19 @@ evaluation joins the last collection's batch, merging periodic and final tasks a
 the same update. The worker submits accepted receipts sequentially; it does not
 queue additional collections or wait at shutdown.
 
-The [large example](../../configs/miles/examples/large.toml) opts into background
-evaluation with the published image, separate one-GPU jobs and starter GSM8K,
-GSM8K-Platinum and IFBench tasks. Dev, small and medium retain shared-engine
-evaluation, which also remains the low-level default. The large template is
+The [three-node example](../../configs/miles/examples/three-node.toml) opts into background
+evaluation with a pinned sandbox-enabled image and the 25-entry post-training
+development/text-safety panel. It sets `interval=0`, `initial=true` and `final=true`
+to evaluate the full panel before and after training only, including when the run
+is extended. Zero disables periodic evaluation; it does not disable either endpoint.
+Positive intervals count completed optimizer updates, not rollout collections.
+Omitting `interval` retains the default of 20 updates. Task-level intervals override
+the global value: a task can opt into periodic evaluation under a global zero, or
+set zero to opt out under a positive global interval. The global `initial` and
+`final` flags still apply to every task. With both flags false and all intervals
+zero, no background evaluations or evaluation snapshots are scheduled.
+Dev and node retain shared-engine
+evaluation, which also remains the low-level default. The three-node template is
 provisional; check evaluator compatibility for the full model. Remove explicit
 shared settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
 `n_samples_per_eval_prompt`, `data.eval_prompt_data`, positive task `eval_count`)
@@ -28,7 +37,7 @@ when selecting background mode. Evaluation tasks are independent of training
 ```toml
 [evaluation]
 mode = "background"
-interval = 20                 # Completed optimizer updates, not collections
+interval = 0                  # Initial/final only; positive values enable periodic evaluation
 initial = true
 final = true
 image = "IMMUTABLE_BEAKER_IMAGE_ID" # Replace with a compatible evaluator image
@@ -50,7 +59,7 @@ generation = { temperature = 0.0, max_tokens = 2048, num_samples = 1, stop_seque
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
-task = "ifeval_ood" # IFBench; the pinned revision has no plain "ifeval" task.
+task = "ifeval_ood" # IFBench; distinct from the IFEval task named "ifeval".
 interval = 100
 scoring = { limit = 128 }
 
@@ -71,18 +80,81 @@ not inherit its Beaker token. Outputs and snapshots must be on a WEKA mount
 accessible to both jobs. Inherit the main run's W&B entity, project and actual run
 ID; never configure a separate evaluation run.
 
-`gsm8k:platinum` uses olmo-eval's pinned GSM8K-Platinum dataset variant. The
-large example evaluates it alongside `gsm8k` with the same zero-shot, greedy
-settings and per-task limit. Both retain separate scores and predictions.
+The limited GSM8K tasks above are small mechanics examples. The three-node template
+uses individual task variants from `math:posttrain:dev`, `general:posttrain:dev`,
+`hillclimb:dev` and `safety_thinking`, deduplicated to 25 entries. Individual names
+avoid depending on the unmerged general/hillclimb suite definitions and do not
+create synthetic cross-benchmark aggregate scores. It retains full task sizes
+and sampling defaults from the pinned olmo-eval revision, including AIME/HMMT
+pass@32 with 16K responses. The pinned IFBench defaults differ from newer upstream
+revisions; changing the image/revision can change the benchmark protocol.
+
+Use the full panel at the initial and final checkpoints for official comparisons.
+The example above shows how one task can additionally run every 100 updates; its
+`scoring.limit` applies at every scheduled point, including initial and final.
+The three-node template has no such limits or periodic overrides. Progress subsets are
+not enabled by default: fewer prompts still incur separate-job and judge startup
+costs. If adding a periodic development panel, choose fixed example IDs with a
+documented seed and relevant category coverage, and distinguish its metrics from
+the full-panel scores. A simple `limit` is not a seeded or stratified sample, and
+this configuration does not switch sampling/scoring settings between endpoints
+and periodic points. Keep release held-out evaluation separate from development
+metrics used to select recipes or checkpoints.
 
 Generation overrides map to olmo-eval's flat per-task sampling overrides
 (for example `-o max_tokens=2048`, not a nested `sampling_params` table); scoring maps to
 olmo-eval task overrides (such as `limit`, scorer settings, or formatting).
-Tasks with the same generation settings share a job; distinct settings form
-separate jobs at that update. One HF snapshot serves all groups. A coincident
+Tasks with the same generation overrides, harness preset, harness overrides and
+execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
+defaults; tasks execute separately while sharing the job's inference server.
+The three-node panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
+five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
+each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
+isolates the policy and auxiliary GPU visibility; olmo-eval manages judge startup
+and shutdown. One HF snapshot serves all groups. A coincident
 periodic/final point is submitted only once for each task group. `plan` displays
 the milestones, task groups, resources and snapshot paths. `validate` checks the
 schema; it does not establish image/model/task compatibility.
+
+### Code and safety requirements
+
+`harness_preset` selects an olmo-eval preset (default: `default`). The optional
+task `harness` table passes flat harness overrides before the `--task` argument,
+so auxiliary providers and sandboxes are not mistaken for scoring overrides.
+The frozen checkpoint's `provider` settings cannot be overridden here. Harness
+settings are recorded in receipts and checked when reusing completed tasks.
+
+The three-node template selects `codex_python` for LiveCodeBench and enables
+`sandboxes.0.inject_swerex` to preinstall the sandbox server. The pinned runtime's
+on-demand installation fallback otherwise invokes an unavailable executable.
+Code jobs receive
+Beaker's subcontainer environment flags and need an evaluator image containing
+Podman and the olmo-eval sandbox dependencies. Container startup and reference-data
+access still require qualification on the target cluster.
+
+SciCode uses `kind="external"` and `arguments`, invoking olmo-eval's
+`run-external` command against the same frozen SGLang server. Only SciCode currently
+has a supported external artifact contract. Development runs require
+`arguments.split="validation"` and an accessible `arguments.h5py_host_path`.
+The evaluator checks per-problem predictions and step counts, rejecting
+infrastructure errors even when upstream reports success with numeric zero scores.
+SciCode's sandbox installs its pinned scientific dependencies from the upstream
+lock; account for startup time and registry/package access when qualifying jobs.
+
+Safety tasks configure olmo-eval managed WildGuard and StrongREJECT providers.
+WildGuard serves `allenai/wildguard`; StrongREJECT serves `google/gemma-2b` with
+the `qylu4156/strongreject-15k-v1` adapter and its tokenizer. The sandbox evaluator
+image includes the pinned vLLM extra in an isolated environment selected through
+`VLLM_PYTHON`, preserving the policy serving environment. Model access credentials
+(including gated Gemma access) belong in `evaluation.secrets`. Record resolved
+judge revisions and serving settings with qualification results.
+
+The image and CLI/config checks do not establish full-panel correctness, GPU
+memory fit or completion within the starter three-hour timeout. Run small samples
+of every task, inspect predictions and judge/code failures, then measure a full
+panel before setting production resource bounds. For qualification, verify all
+25 entries completed at both expected checkpoints and were published; training
+completion alone does not establish evaluation completion.
 
 ## Snapshots and receipts
 
@@ -202,15 +274,22 @@ MILES serving image and a pinned olmo-eval revision. It retains the
 Olmo MoE SGLang architecture extension, installs olmo-eval in a separate CPU
 virtual environment, and connects olmo-eval's `vllm_server` API client to its own
 private SGLang server. It does not launch vLLM. The runner checks the olmo-eval
-revision before starting. Build dependencies at image construction, never during
-an evaluation job. Publish the image to Beaker and configure its immutable ID.
+revision before starting. Build evaluator dependencies at image construction.
+External benchmark sandboxes may have their own upstream setup steps. Publish
+the image to Beaker and configure its immutable ID.
 
-The large example sets `image` to the published evaluator image
-`01M45DMWV3FEH7TNAXKZWR2DF2` and `revision` to olmo-eval
+The three-node example sets `image` to the published evaluator image
+`01M5MQM50J1EEQ8YJGJWSJFPQ5` and `revision` to olmo-eval
 `710b2b5dab6ea09764c02647f3a4e72819b9ee7c`, which includes `gsm8k:platinum`
 and the [stop-sequence normalization fix](https://github.com/allenai/olmo-eval/pull/450).
 Keep `revision` matched to the olmo-eval commit installed in the selected image.
 A serving-runtime refresh can change the image ID without changing that revision.
+
+`runtime/miles/Dockerfile.evaluator-sandbox` extends a pinned evaluator with
+Podman and the sandbox extra while preserving its serving environment. The
+published panel image uses the merged template runtime (`fd8b57d34`), with Docker ID
+`sha256:fffe14679ed79e365547e44cfc58f896b4f36e14662d574d360e625710acacfe`.
+Build it with `--build-arg EVALUATOR_IMAGE=LOCAL_PINNED_EVALUATOR_IMAGE`.
 
 Check compatibility for the exported architecture, serving backend, task and
 image; an OpenAI-compatible endpoint alone does not prove loglikelihood or task
