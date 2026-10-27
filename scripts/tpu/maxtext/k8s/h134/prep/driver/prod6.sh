@@ -85,7 +85,7 @@ start_js() { # $1 overlay, $2 jobset, $3 output prefix, $4 expected hash, $5 ini
     lock_take $2 spaced || return 1
     setactive $2 true; log "$2 activated under the lock"
   fi
-  touch $ST/$2.t; put $2.held "${6:-0}"; put $2.deadline $(( $(date +%s) + 600 )); put $2.rs "$($K get jobset $2 -o jsonpath='{.status.restarts}' 2>/dev/null || echo 0)"
+  touch $ST/$2.t; put $2.hash $4; put $2.held "${6:-0}"; put $2.deadline $(( $(date +%s) + 600 )); put $2.rs "$($K get jobset $2 -o jsonpath='{.status.restarts}' 2>/dev/null || echo 0)"
   put $2.run 0; put $2.phase running; return 0; }
 watch_js() { # $1 jobset: one pass over a started JobSet
   local J=$1 st r nr held m why
@@ -125,7 +125,10 @@ while :; do
   for line in "${LINES[@]}"; do
     read -r A S PFH PRH INIT REF <<< "$line"; PJ=h134-pf-$A-c11-s$S; J=h134-$A-c11-s$S
     if [ ! -f arms/$A-s$S.ready ]; then busy=1; continue; fi
-    [ -f "$REF" ] || { log "$A-s$S ready but its HF reference $REF is missing"; busy=1; continue; }
+    [ -f "$REF" ] || { [ -f $ST/$A-s$S.noref ] || log "$A-s$S ready but its HF reference $REF is missing"; touch $ST/$A-s$S.noref; busy=1; ahead=1; continue; }
+    # state is bound to the render it was made with: a changed overlay (e.g. B0's fp32 -> bf16 init) never reuses old state
+    for x in "$PJ $PFH" "$J $PRH"; do set -- $x; if [ -f $ST/$1.hash ] && [ "$(get $1.hash)" != "$2" ]; then
+      [ "$(get $1.phase)" = blocked ] || { log "$1: state was made with render $(get $1.hash), arms.conf says $2; blocked (clear prod/state/$1.* by hand)"; put $1.phase blocked; }; fi; done
     case "$(get $PJ.phase)" in
       ""|inactive) busy=1; [ $h131 = 1 ] && [ $started = 0 ] && start_js pf-$A-c11-s$S $PJ gs://ai2-olmo-dev/post-training/scratch/olmo35-sft-$PJ $PFH $INIT "$(maxstep $PJ)" && started=1;;
       running) busy=1; watch_js $PJ;;
@@ -148,7 +151,8 @@ while :; do
         [ "$(get $J.phase)" = running ] && { out=$($PY pcheck.py $A $S $REF); rc=$?; echo "$(date -u +%FT%TZ) $out" >> prod/status.log
           [ $rc = 11 ] && stop_js $J "INCOMPLETE: $out"; [ $rc = 10 ] && stop_js $J "UNSTABLE: $out"; };;
       terminal:*) [ -f $ST/$J.receipt ] || { log "$J: $($PY pcheck.py $A $S $REF); P5 $(python3 receipt_p5.py $J 16304)"; touch $ST/$J.receipt; };;
-      stopped|blocked) :;;
+      blocked) ahead=1;;   # a passing arm that cannot apply keeps later arms waiting (needs a human)
+      stopped) :;;
     esac
   done
   [ $busy = 0 ] && { log "no arm left to start or watch; driver done"; exit 0; }
