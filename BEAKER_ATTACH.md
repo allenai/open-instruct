@@ -99,3 +99,40 @@ Desktop remote control requires additional setup. Your session already mounts
 `michaeln_CODEX_AUTH` at `/root/.codex/auth.json`. The example's credential-copy,
 installation, and process-restart commands were reference material, not executed
 instructions. Codex remote control was not configured by this inspection.
+
+
+## Interactive Rhea GPU qualification (2026-10-27)
+
+Session `01M5ZB6KJDNFG7KYKWHN8X948W` runs on
+`rhea-cs-aus-473.reviz.ai2.in` with one RTX A6000 48GB, 12 requested CPUs,
+96 GiB requested host memory, and 16 GiB shared memory. It uses the prepared
+SGLang image `01M5ZA7AP531QVWGSAGSC8M5B8`, a 90-minute timeout, normal priority,
+and `min_runtime=0`; workspace `ai2/open-instruct-dev`, budget `ai2/oe-other`.
+Verify it is still running before using this historical ID.
+
+From a real local terminal (remote exec was verified with a PTY):
+
+```bash
+beaker session exec --remote 01M5ZB6KJDNFG7KYKWHN8X948W \
+  --key /home/mnoukhov/.ssh/ai2_id_ed25519 -- tmux attach -t hybrid-tests
+```
+
+The live runtime checkout is
+`/weka/oe-adapt-default/michaeln/miles-olmo-core-hybrid` on
+`codex/hybrid-mainline`; the companion checkout is
+`/weka/oe-adapt-default/michaeln/open-instruct-miles-hybrid`.
+Set `PYTHONPATH` to the runtime checkout before the image's existing path when
+running experiments, so code edits apply without rebuilding:
+
+```bash
+cd /weka/oe-adapt-default/michaeln/miles-olmo-core-hybrid
+export PYTHONPATH="$PWD:$PYTHONPATH"
+python tools/hybrid/qualify_sglang.py --size 275m --output-dir /weka/oe-adapt-default/michaeln/open-instruct-hybrid/qualification/my-test
+# Or: --size all --sizes 450m 810m 1.4b 2.7b
+```
+
+The older local Beaker CLI lacks `session create --min-runtime`. The newer CLI
+in the existing Hammond session supports it. Rhea rejects protected sessions
+without an allocation, so explicitly use `--min-runtime 0` when creating a
+replacement. Weka mounts do not accept `mode=readonly`; the qualification code
+only reads release checkpoints and writes its own report directory.
