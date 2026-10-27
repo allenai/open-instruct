@@ -53,7 +53,9 @@ The current trainer requires both `core.freeze_image_encoder=true` and
 token embeddings. The entire visual stack stays in evaluation mode outside the
 optimizer. Checkpoints include frozen visual tensors and their checksum, while
 rollout publication sends language weights only. Serving caches frozen visual
-features separately from the current language patch-token embedding.
+features separately from the current language patch-token embedding. Publication
+equality checks perturb only language tensors, then compare the complete model,
+including unchanged frozen tensors.
 
 Set `miles.custom_generate_function_path` to
 `open_instruct.miles.datasets.vision_rollout.generate`. Keep document prompts
