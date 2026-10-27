@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Temporary MainlineLadder hybrid port; serving GPU qualification and end-to-end RL validation pending",
+  "status": "Temporary MainlineLadder port: five-scale BF16 HF-backbone serving qualified on Rhea; end-to-end native RL validation pending",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "eb0a510727c34e471f477e1f812eac0cd518ebaa",
+      "revision": "40f27b61aaa8efb09309d17f1edbee7d40344ef7",
       "private": true
     },
     "olmo-sglang": {

@@ -1,4 +1,4 @@
-# Temporary hybrid port; GPU serving matrix and end-to-end RL validation pending.
+# Temporary hybrid port; BF16 HF-backbone serving qualified, native RL validation pending.
 schema_version = 1
 name = "hybrid-275m-gsm8k"
 
@@ -35,6 +35,7 @@ HF_TOKEN = "michaeln_HF_TOKEN"
 
 [launch.env]
 MILES_HYBRID_BRIDGE = "1"
+MILES_HYBRID_REFERENCE_BACKBONE = "1"
 
 [data]
 prompt_data = "/weka/oe-adapt-default/michaeln/open-instruct-hybrid/data/gsm8k-base/train.jsonl"
@@ -92,6 +93,7 @@ wandb_group = "hybrid-275m-gsm8k"
 [core]
 model_config = "/weka/oe-training-default/yashasbls/hybridish-local/olmo-core/v1/275m/midtrain/step0038147/config.json"
 attention_backend = "flash_2"
+fp32_lm_head = false
 compile_model = false
 checkpoint_keep_last = 3
 publication_mode = "barrier"

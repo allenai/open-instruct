@@ -6,20 +6,27 @@ adapter. This checkout pins those runtime sources and adds the GSM8K recipe and
 base-prompt dataset preparation. Both use branch `codex/hybrid-mainline`.
 
 The adapter preserves the release FLA Gated DeltaNet implementation (including
-negative eigenvalues) and uses SGLang full attention with NoPE, QK norms, and its
-attention gate. It is deliberately restricted to BF16, TP=1, PP=1, eager execution,
-no prefix cache, no chunked prefill, and no speculation. GDN states are maintained
-per request slot outside SGLang's memory planner. This is a correctness bridge;
+negative eigenvalues) and offers SGLang RadixAttention with NoPE, QK norms, and its
+attention gate. The qualified temporary recipe instead selects the complete
+release HF/SDPA backbone under SGLang scheduling and sampling, because the faster
+packed/RadixAttention path failed strict numerical checks at some scales. It is deliberately restricted to BF16, TP=1, PP=1, eager execution,
+no prefix cache, no chunked prefill, and no speculation. GDN and full-attention KV states in the fallback are maintained
+per request slot outside SGLang's memory planner; the preallocated SGLang KV pool
+is unused. This is a correctness bridge;
 it does not yet offer a packed GDN serving kernel or optimized state allocation.
 
 ## Current evidence
 
 - Native 275m configuration deserializes in the actual MILES/Core runtime. A meta
   model matches all 192 HF checkpoint tensor names and shapes.
-- Four interchange/native-layout CPU tests pass; reference/old-policy/learner autocast and
+- Nineteen runtime CPU tests pass (interchange, native layout, reference alignment,
+  and serving-worker setup); reference/old-policy/learner autocast and
   resume tests pass on the separate original Open Instruct branch.
-- Rhea GPU qualification is [submitted](https://beaker.org/ex/01M5ZA7ZXSFH1T18AQFMX8P9RQ)
-  for final midtrain 275m, 450m, 810m, 1.4b, and 2.7b. Submission is not a pass.
+- All five final-midtrain sizes PASSED the BF16 HF-backbone fallback on an
+  interactive Rhea A6000: 160 functional requests and 40 dense probes total,
+  before/after reload, with queued requests, slot reuse, and prompts through
+  3071 tokens. Maximum selected logprob error <5e-4; greedy agreement 100%.
+  [Results and provenance](../../experiment.md#completed-bf16-reference-backbone-qualification).
 - End-to-end MILES learner updates, training-time publication, restart recovery,
   and GSM8K learning have not yet been qualified for this hybrid family.
 - The original Saturn 1,000-update rerun remains on Open Instruct/Core/vLLM.
@@ -58,8 +65,12 @@ attempt cap are configured. Actual recovery still needs a GPU restart check.
 The explicit `core.model_config` points to the paired native release descriptor;
 keep this setting because the workflow may copy HF artifacts to a prepared path.
 For another scale, change both the HF source and native descriptor together.
-`MILES_HYBRID_BRIDGE=1` must reach serving workers; the runtime selects the external
-model package and registers the custom HF config in spawned children.
+`MILES_HYBRID_BRIDGE=1` and `MILES_HYBRID_REFERENCE_BACKBONE=1` must reach serving workers; the runtime selects the external
+model package, forwards the backbone selection, and registers the custom HF config in spawned children.
+The recipe explicitly keeps core.fp32_lm_head=false: model computation and logits
+are BF16. FP32-head diagnostics did not fix all faster-path mismatches. HF cached
+versus full-sequence logprobs also differ in BF16 (450m max KL 0.00240536), so a
+learner/rollout importance-ratio check is still required before a long MILES run.
 
 Build/publish on Beaker, following the root AGENTS instructions. The canonical
 runtime Dockerfile installs the pinned release plugin without replacing the
