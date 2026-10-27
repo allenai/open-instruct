@@ -56,7 +56,7 @@ The launcher checks the image ID, not whether its installed sources match
 the lock's FP32 tracked-state snapshot support; planning cannot detect an older
 image missing that support. Verify the image's build records against the current
 lock, or rebuild before submitting.
-`three-node` separately pins its evaluator image.
+`node` and `three-node` separately pin their evaluator images.
 
 ## Inputs and expected outputs
 
@@ -72,12 +72,14 @@ before changing this for a learning run.
 `node` adapts the previous two-node `medium` learning recipe to one B300 node,
 using two EP2 trainer ranks and six TP1 inference engines, with no judge.
 Its prepared workload contains math, instruction-following and code tasks only;
-exclude general-quality and other judge-dependent verifiers from both training
-and held-out files. The paths use a separate `math-ifeval-code` preparation.
-Its training batch, context and shared-engine evaluation cadence are unchanged.
+exclude general-quality and other judge-dependent verifiers from training files. The paths use a separate `math-ifeval-code` preparation.
+Its background GSM8K, GSM8K-Platinum and IFBench panel runs initially, every
+50 optimizer updates, and finally, using a separate one-GPU allocation. Set
+`launch.secrets.BEAKER_TOKEN` to enable submission. These starter benchmarks do
+not cover code quality.
 This topology passes CPU planning checks; sustained throughput and memory fit
-still need GPU validation. Supply an HF policy, immutable prepared training and
-held-out JSONL files, and a verifier registry with a code-execution endpoint;
+still need GPU validation. Supply an HF policy, immutable prepared training
+JSONL files, and a verifier registry with a code-execution endpoint;
 the template does not provision a code service.
 See [datasets and verifiers](../../../docs/miles/data-and-evaluation.md) and
 [managed judges](../../../docs/miles/managed-judges.md).
@@ -100,7 +102,8 @@ overlapping jobs can increase that total. Its 25-entry post-training development
 and text-safety panel runs on the initial/final checkpoints only. With `interval = 0`,
 periodic evaluation remains disabled even when the run is extended. It preserves pinned task sampling
 and full evaluation sizes. olmo-eval launches WildGuard/StrongREJECT judges on an extra GPU
-per safety group. Configure the SciCode reference-data path. Code tasks need the sandbox-enabled
+per safety group. Native SGLang handles policy generation except for SciCode,
+whose upstream adapter requires the HTTP client. Configure its reference-data path. Code tasks need the sandbox-enabled
 evaluator image. The full panel still requires GPU/sandbox qualification and
 measured resource bounds; the starter three-hour evaluator timeout is not a
 measured full-panel budget.

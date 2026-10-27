@@ -83,11 +83,12 @@ def command(receipt, output):
         return args
     args = ["olmo-eval", "run", "--model", checkpoint, "--harness", first.get("harness_preset", "default")]
     for key, value in {
-        "provider.kind": "vllm_server",
-        "provider.base_url": "http://127.0.0.1:30000/v1",
+        "provider.kind": "sglang",
         "provider.tokenizer": checkpoint,
         "provider.trust_remote_code": True,
-        "provider.max_concurrency": 8,
+        "provider.kwargs.model_registration": "olmo_sglang:register",
+        "provider.kwargs.tensor_parallel_size": receipt["evaluation"]["gpus"],
+        **{f"provider.kwargs.{key}": value for key, value in receipt["evaluation"]["provider_kwargs"].items()},
     }.items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     for key, value in first.get("harness", {}).items():
@@ -288,7 +289,10 @@ def resume_identity(receipt):
     config = receipt["evaluation"]
     return {
         **{key: receipt[key] for key in ("checkpoint", "update", "group_id", "tasks")},
-        "evaluator": {key: config.get(key) for key in ("revision", "image", "gpus", "server_args", "worker")},
+        "evaluator": {
+            key: config.get(key)
+            for key in ("revision", "image", "gpus", "provider_kwargs", "external_server_args", "worker")
+        },
     }
 
 
@@ -342,7 +346,7 @@ def saved_task(output, task):
 
 
 def gpu_environments(receipt):
-    """Keep olmo-eval's managed providers off the frozen policy's GPUs."""
+    """Expose the allocation to the native planner; isolate the external SciCode server."""
     policy_count = receipt["evaluation"]["gpus"]
     auxiliary_count = max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"])
     total = policy_count + auxiliary_count
@@ -360,7 +364,9 @@ def gpu_environments(receipt):
     ):
         raise ValueError(f"Evaluation needs {total} visible GPUs for policy and auxiliary providers")
     policy = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[:policy_count])}
-    evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[policy_count:total])}
+    external = receipt["tasks"][0].get("kind") == "external"
+    visible = devices[policy_count:total] if external else devices[:total]
+    evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(visible)}
     # The independent evaluator/judge environments must not import training's source overlays.
     evaluator.pop("PYTHONPATH", None)
     return policy, evaluator
@@ -431,39 +437,41 @@ def run_evaluation_locked(receipt, output):
         for name in ("config.json", "tokenizer_config.json"):
             if not (Path(checkpoint) / name).is_file():
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")
-        env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
-        server_args = [
-            sys.executable,
-            "-m",
-            "sglang.launch_server",
-            "--model-path",
-            checkpoint,
-            "--trust-remote-code",
-            "--tokenizer-path",
-            checkpoint,
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "30000",
-            "--tp-size",
-            str(receipt["evaluation"]["gpus"]),
-            *receipt["evaluation"]["server_args"],
-        ]
-        with (output / "server.log").open("a") as log:
-            server = subprocess.Popen(server_args, env=env, stdout=log, stderr=subprocess.STDOUT)
-        deadline = time.monotonic() + 600
-        while True:
-            if server.poll() is not None:
-                raise RuntimeError("Evaluator SGLang server exited during startup; see server.log")
-            try:
-                with request.urlopen("http://127.0.0.1:30000/health", timeout=2) as response:
-                    if response.status == 200:
-                        break
-            except (urlerror.URLError, TimeoutError):
-                pass
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Evaluator SGLang startup timeout")
-            time.sleep(1)
+        # SciCode currently requires VLLMServerProvider; all regular tasks use the inline engine.
+        if any(task.get("kind") == "external" for task in pending):
+            env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
+            server_args = [
+                sys.executable,
+                "-m",
+                "sglang.launch_server",
+                "--model-path",
+                checkpoint,
+                "--trust-remote-code",
+                "--tokenizer-path",
+                checkpoint,
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "30000",
+                "--tp-size",
+                str(receipt["evaluation"]["gpus"]),
+                *receipt["evaluation"]["external_server_args"],
+            ]
+            with (output / "server.log").open("a") as log:
+                server = subprocess.Popen(server_args, env=env, stdout=log, stderr=subprocess.STDOUT)
+            deadline = time.monotonic() + 600
+            while True:
+                if server.poll() is not None:
+                    raise RuntimeError("Evaluator SGLang server exited during startup; see server.log")
+                try:
+                    with request.urlopen("http://127.0.0.1:30000/health", timeout=2) as response:
+                        if response.status == 200:
+                            break
+                except (urlerror.URLError, TimeoutError):
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Evaluator SGLang startup timeout")
+                time.sleep(1)
         run_tasks(receipt, output)
         aggregate = completed_scores(output, receipt["tasks"])
         write_json(output / "scores.json", aggregate)

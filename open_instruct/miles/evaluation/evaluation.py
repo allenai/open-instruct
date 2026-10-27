@@ -42,8 +42,11 @@ def parse(value, launch):
         "secrets",
         "submit_timeout",
         "timeout",
-        "server_args",
+        "provider_kwargs",
+        "external_server_args",
     }
+    if "server_args" in value:
+        raise InputError("evaluation.server_args was replaced by provider_kwargs; use SGLang Python option names")
     if set(value) - allowed:
         raise InputError(f"Unknown evaluation fields: {sorted(set(value) - allowed)}")
     mode = value.setdefault("mode", "shared")
@@ -56,10 +59,11 @@ def parse(value, launch):
             )
         return value
     defaults = dict(
-        interval=20, initial=True, final=True, gpus=1, submit_timeout=30, timeout="3h", secrets={}, server_args=[]
+        interval=20, initial=True, final=True, gpus=1, submit_timeout=30, timeout="3h", secrets={}, provider_kwargs={}
     )
     for key, default in defaults.items():
         value.setdefault(key, default)
+    value.setdefault("external_server_args", [])
     for key in ("cluster", "workspace", "budget"):
         value.setdefault(key, launch[key])
     if type(value["interval"]) is not int or value["interval"] < 0:
@@ -86,11 +90,37 @@ def parse(value, launch):
     value["secrets"] = {
         key: secret for key, secret in launch["secrets"].items() if key in {"WANDB_API_KEY", "HF_TOKEN"}
     } | secrets
-    if not isinstance(value["server_args"], list) or any(not isinstance(arg, str) for arg in value["server_args"]):
-        raise InputError("evaluation.server_args must be a list of SGLang arguments")
-    reserved = {"--model", "--model-path", "--tokenizer-path", "--port", "--host", "--tp", "--tp-size"}
-    if any(arg.split("=")[0] in reserved for arg in value["server_args"]):
-        raise InputError("evaluation.server_args cannot override snapshot, tokenizer, port or GPU allocation")
+    kwargs = value["provider_kwargs"]
+    if not isinstance(kwargs, dict) or any(not re.fullmatch(r"[a-z][a-z0-9_]*", key) for key in kwargs):
+        raise InputError("evaluation.provider_kwargs must be a table of SGLang Python options")
+    reserved = {
+        "model",
+        "model_name",
+        "model_path",
+        "tokenizer",
+        "tokenizer_path",
+        "revision",
+        "host",
+        "port",
+        "tp_size",
+        "tensor_parallel_size",
+        "dp_size",
+        "nnodes",
+        "node_rank",
+        "base_gpu_id",
+        "gpu_id_step",
+        "model_registration",
+    }
+    if reserved.intersection(kwargs):
+        raise InputError(
+            "evaluation.provider_kwargs cannot override snapshot, tokenizer, model registration or GPU allocation"
+        )
+    server_args = value["external_server_args"]
+    if not isinstance(server_args, list) or any(not isinstance(arg, str) for arg in server_args):
+        raise InputError("evaluation.external_server_args must be a list of SGLang arguments for SciCode")
+    server_reserved = {"--model", "--model-path", "--tokenizer-path", "--port", "--host", "--tp", "--tp-size"}
+    if any(arg.split("=")[0] in server_reserved for arg in server_args):
+        raise InputError("evaluation.external_server_args cannot override snapshot, tokenizer, port or GPU allocation")
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise InputError("evaluation.tasks must be a nonempty list of olmo-eval tasks")
@@ -149,6 +179,8 @@ def parse(value, launch):
             task.setdefault(key, {})
             if not isinstance(task[key], dict):
                 raise InputError(f"evaluation task {key} must be an override table")
+            if any(name == "provider" or name.startswith("provider.") for name in task[key]):
+                raise InputError("Use evaluation.provider_kwargs for provider options, not task overrides")
         # No credential values are accepted in overrides; use evaluator secrets.
         encoded = json.dumps(task).lower()
         if any(word in encoded for word in ("api_key", "password", "access_token", "api-key")):
