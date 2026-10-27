@@ -88,6 +88,15 @@ normal runs; override it with a positive integer in `[judges.NAME]` or, for exam
 `judges.NAME.timeout` value. See the [configuration reference](configuration.md#workflow-fields)
 for all judge fields and their defaults.
 
+Managed judges default to eager execution. Set `cuda_graphs=true` to enable
+decode CUDA graphs, with capture through `max_concurrent_calls`. This trades
+startup time and GPU memory for lower decoding overhead. For a dedicated B300
+serving Qwen/Qwen3-32B, `max_concurrent_calls=64` with graphs enabled is a useful
+starting point for validation. Check sustained grading latency, memory use,
+valid grades and end-to-end training throughput on the intended mixture before
+adopting it. The judge setting is independent of policy inference presets and
+cannot be supplied for externally managed endpoints.
+
 For long policy responses, budget the complete grading request in **judge**
 tokens: question, candidate answer, optional reference, rubric, chat framing and
 the judge's output. A 32K policy response can exceed 40K judge tokens because the

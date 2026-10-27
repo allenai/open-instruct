@@ -58,6 +58,7 @@ def parse(document):
             service.setdefault(key, default)
             validation.integer(service[key], f"judges.{name}.{key}")
         if mode == "managed":
+            validation.boolean(service.get("cuda_graphs", False), f"judges.{name}.cuda_graphs")
             if service.get("context_extension", "none") not in ("none", "qwen3-yarn-128k"):
                 raise InputError("Managed judge context_extension must be none or qwen3-yarn-128k")
             if service.get("context_extension") == "qwen3-yarn-128k" and (
@@ -97,6 +98,7 @@ def parse(document):
                 "chat_template",
                 "backend",
                 "context_extension",
+                "cuda_graphs",
             }:
                 raise InputError("external judge cannot specify managed placement fields")
     for name, rubric in rubrics.items():

@@ -66,6 +66,47 @@ def test_extension_is_validated_by_run_schema(tmp_path):
         "judging": {"bindings": {"general-quality": {"judge": "general", "rubric": "quality"}}},
     }
     assert judging.parse(document)["judges"]["general"]["context_extension"] == "qwen3-yarn-128k"
+    # Omitting the new opt-in must preserve historical resolved run fingerprints.
+    assert "cuda_graphs" not in judging.parse(document)["judges"]["general"]
     value["context_extension"] = "typo"
     with pytest.raises(ValueError, match="context_extension"):
+        judging.parse(document)
+
+
+def test_decode_graph_opt_in_preserves_preparation_guards(tmp_path):
+    value = service(tmp_path)
+    eager = judge_server.command(value, 1234)
+    assert "--disable-cuda-graph" in eager
+    assert "--cuda-graph-max-bs-decode" not in eager
+    value.update(cuda_graphs=True, max_concurrent_calls=64)
+    graph = judge_server.command(value, 1234)
+    assert "--disable-cuda-graph" not in graph
+    assert graph[graph.index("--cuda-graph-max-bs-decode") + 1] == "64"
+    assert graph[graph.index("--max-running-requests") + 1] == "64"
+    (tmp_path / "template.jinja").write_text("changed template")
+    with pytest.raises(ValueError, match="template hash mismatch"):
+        judge_server.command(value, 1234)
+
+
+@pytest.mark.parametrize("graphs", [False, True, "true", 1])
+def test_graph_setting_is_boolean_and_managed_only(tmp_path, graphs):
+    value = service(tmp_path)
+    value.update(mode="managed", cuda_graphs=graphs)
+    document = {
+        "judges": {"general": value},
+        "rubrics": {"quality": {"profile": "open-instruct/general-quality"}},
+        "judging": {"bindings": {"general-quality": {"judge": "general", "rubric": "quality"}}},
+    }
+    if isinstance(graphs, bool):
+        assert judging.parse(document)["judges"]["general"]["cuda_graphs"] is graphs
+    else:
+        with pytest.raises(ValueError, match="cuda_graphs"):
+            judging.parse(document)
+    document["judges"]["general"] = {
+        "mode": "external",
+        "model": "judge",
+        "endpoint": "http://judge:8000",
+        "cuda_graphs": graphs,
+    }
+    with pytest.raises(ValueError, match="external judge cannot"):
         judging.parse(document)

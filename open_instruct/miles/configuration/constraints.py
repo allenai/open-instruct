@@ -328,6 +328,7 @@ STRUCTURED_FIELDS = {
     "records": {"enabled", "responses", "response_sample_rate", "root"},
     "judging": {"bindings"},
     "judges.NAME": {
+        "cuda_graphs",
         "backend",
         "chat_template",
         "context_extension",
