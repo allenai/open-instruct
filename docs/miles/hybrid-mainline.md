@@ -31,7 +31,9 @@ exposed five type errors in unchanged older model files; no unrelated files were
 
 ## Prepare and review a MILES run
 
-Inside the candidate runtime, prepare data once:
+From this checkout in an environment with the release plugin, tokenizer dependencies,
+and Weka mounted, prepare data once. The data helper runs host-side and is not
+copied into the training image:
 
 ```bash
 python scripts/data/miles/prepare_hybrid_gsm8k.py \
