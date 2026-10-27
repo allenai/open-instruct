@@ -78,6 +78,7 @@ def test_decode_graph_opt_in_preserves_preparation_guards(tmp_path):
     eager = judge_server.command(value, 1234)
     assert "--disable-cuda-graph" in eager
     assert "--cuda-graph-max-bs-decode" not in eager
+    assert judge_server.command({**value, "cuda_graphs": False}, 1234) == eager
     value.update(cuda_graphs=True, max_concurrent_calls=64)
     graph = judge_server.command(value, 1234)
     assert "--disable-cuda-graph" not in graph
@@ -108,5 +109,5 @@ def test_graph_setting_is_boolean_and_managed_only(tmp_path, graphs):
         "endpoint": "http://judge:8000",
         "cuda_graphs": graphs,
     }
-    with pytest.raises(ValueError, match="external judge cannot"):
+    with pytest.raises(ValueError, match=r"external judge cannot.*judges.general: cuda_graphs"):
         judging.parse(document)
