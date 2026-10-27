@@ -24,6 +24,8 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
+    freeze_image_encoder: bool = True
+    freeze_connector: bool = True
     reward_zero_truncated: bool = False
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
@@ -156,6 +158,8 @@ class CoreConfig:
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise constraints.error("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
+            "freeze_image_encoder",
+            "freeze_connector",
             "reward_zero_truncated",
             "reward_final_answer_only",
             "filter_zero_std_groups",

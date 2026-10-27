@@ -8,6 +8,8 @@ runtime/miles/sources/
 !scripts/
 !scripts/miles/
 !scripts/miles/**
+!scripts/data/
+!scripts/data/prepare_jigsaw.py
 !scripts/train/
 !scripts/train/debug/
 !scripts/train/debug/**

@@ -1,15 +1,25 @@
 # Keep the qualified binary toolchain, then prepare a reusable source/dependency layer.
 ARG BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks
-FROM ${BASE_IMAGE} AS runtime-base
+ARG SOURCE_MODE=fetch
+FROM ${BASE_IMAGE} AS runtime-deps
 COPY runtime/miles /opt/core-rl/build/runtime/miles
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt
 RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
 ENV OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps
 COPY scripts/miles/prepare_runtime.py /opt/core-rl/build/scripts/miles/prepare_runtime.py
+COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
+
+FROM runtime-deps AS runtime-fetch
 RUN --mount=type=secret,id=github_token,required=true \
     python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources \
     --github-token-file /run/secrets/github_token
-COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
+
+# The builder materializes only the lock's committed trees from local Git caches.
+# Named contexts are used only when SOURCE_MODE=local; the default fetch is unchanged.
+FROM runtime-deps AS runtime-local
+COPY --from=runtime_sources / /opt/core-rl/sources/
+
+FROM runtime-${SOURCE_MODE} AS runtime-base
 
 FROM runtime-base AS application
 # The background evaluator submitter runs in an isolated, deadline-bounded process.
@@ -21,6 +31,7 @@ RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision
 COPY open_instruct /opt/core-rl/open_instruct
 COPY tests/miles /opt/core-rl/tests/miles
 COPY scripts/miles /opt/core-rl/scripts/miles
+COPY scripts/data/prepare_jigsaw.py /opt/core-rl/scripts/data/prepare_jigsaw.py
 COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
 COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles

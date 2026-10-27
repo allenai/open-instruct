@@ -46,17 +46,20 @@ def fetch_environment(token_file):
 def prepare_source(name, source, target, *, cache=None, token_file=None):
     if target.exists():
         raise FileExistsError(f"Refusing to replace existing source tree: {target}")
-    if cache is not None:
-        run("git", "clone", "--no-checkout", "--shared", str(cache), str(target))
-        run("git", "checkout", "--detach", source["revision"], cwd=target)
-        # A runtime image must not depend on the cache's Git alternates file.
-        run("git", "repack", "-a", "-d", cwd=target)
-        (target / ".git/objects/info/alternates").unlink(missing_ok=True)
-    else:
-        run("git", "init", str(target))
-        env = fetch_environment(token_file) if source.get("private") else None
-        run("git", "fetch", "--depth=1", source["repository"], source["revision"], cwd=target, env=env)
-        run("git", "checkout", "--detach", "FETCH_HEAD", cwd=target)
+    run("git", "init", str(target))
+    env = fetch_environment(token_file) if cache is None and source.get("private") else None
+    # Fetch only the pinned commit, including for local caches: never distribute
+    # unrelated branches or pre-flattening history in a development image.
+    run(
+        "git",
+        "fetch",
+        "--depth=1",
+        str(cache) if cache is not None else source["repository"],
+        source["revision"],
+        cwd=target,
+        env=env,
+    )
+    run("git", "checkout", "--detach", "FETCH_HEAD", cwd=target)
     if run("git", "rev-parse", "HEAD", cwd=target) != source["revision"]:
         raise ValueError(f"Source revision mismatch for {name}")
     print(f"Prepared {name} at {source['revision']}")

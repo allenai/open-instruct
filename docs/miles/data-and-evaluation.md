@@ -4,6 +4,58 @@ The structured workflow prepares data in the GPU job where mounts and tokenizer
 are available. It records preparation under the run root; do not place reference
 assistant solutions into training prompts. See [workflow](workflow.md) for paths.
 
+## Experimental frozen-vision jigsaw pilot
+
+The pilot uses generated missing-patch puzzles for training and the 150-example
+BLINK Jigsaw validation split for endpoint evaluation. Its intended model is the
+vision-augmented Olmo KDA MoE checkpoint (`olmo3moe_vision`). The integration is
+under qualification; passing CPU checks does not establish GPU training or
+serving parity.
+
+Prepare an open photo source and puzzles with:
+
+```bash
+python -m scripts.data.prepare_jigsaw --download-pets --with-blink \
+  --cache /shared/jigsaw-cache --output /shared/jigsaw-data \
+  --train-photos 64 --eval-photos 16
+```
+
+Oxford-IIIT Pet images are downloaded from the official archive and checked
+against its published checksum. Attribution and source/license information are
+recorded in the manifest. BLINK is pinned to an immutable dataset revision and
+used only for evaluation. `--image-dir` accepts a local photo directory instead.
+Choose worker-visible absolute paths; image references are immutable after
+preparation. The output directory must be new.
+
+The generator partitions source photos before making crops, removes duplicate
+decoded photos, and produces both candidate orders with balanced A/B labels.
+Distractors come from another source photo or a different crop of the same photo.
+Blank or near-identical choices are rejected. The generator also supports shifted
+patches with inward offsets at image boundaries. The exact-choice verifier accepts
+only A/B answers, optionally parenthesized or prefixed with `Answer:`.
+
+Use `train.jsonl` as `data.prompt_data`, `verifiers.json` as `data.reward_config`,
+and the named evaluation pairs `heldout`/`heldout.jsonl`, `blink`/`blink.jsonl`,
+and optionally `blink-swapped`/`blink-swapped.jsonl` as `data.eval_prompt_data`.
+The swap diagnostic is separate from the original BLINK endpoint score.
+Normal run preparation validates file/pixel hashes, source-level split separation,
+processor code and configuration, crop/pooling layout, and expanded image-token
+counts. Resume rejects changed conditioning instead of silently rebuilding it.
+
+The current trainer requires both `core.freeze_image_encoder=true` and
+`core.freeze_connector=true`. It trains the language model, including its image
+token embeddings. The entire visual stack stays in evaluation mode outside the
+optimizer. Checkpoints include frozen visual tensors and their checksum, while
+rollout publication sends language weights only. Serving caches frozen visual
+features separately from the current language patch-token embedding.
+
+Set `miles.custom_generate_function_path` to
+`open_instruct.miles.datasets.vision_rollout.generate`. Keep document prompts
+without chat-template rendering or generic `multimodal_keys` preprocessing.
+Use barrier publication, one document per microbatch, per-expert publication,
+and no routing/indexer replay. Partial continuations, asynchronous refresh,
+sequence packing and unfrozen visual training are not qualified.
+
 ## Selecting data
 
 Choose exactly one mode under `[data]`:

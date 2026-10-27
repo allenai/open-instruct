@@ -38,6 +38,7 @@ def test_prepare_sources(tmp_path, source_repo, use_cache):
     assert prepare_runtime.run("git", "show", "HEAD:source.txt", cwd=target) == "original"
     assert not (target / ".git/objects/info/alternates").exists()
     assert prepare_runtime.run("git", "status", "--porcelain", cwd=target) == ""
+    assert prepare_runtime.run("git", "rev-list", "--count", "HEAD", cwd=target) == "1"
     with pytest.raises(FileExistsError):
         prepare_runtime.prepare_source("example", source, target)
 
@@ -98,3 +99,28 @@ def test_image_build_passes_token_as_secret(monkeypatch, credential_source):
     assert args[args.index("--secret") + 1] == "id=github_token,env=MILES_BUILD_GITHUB_TOKEN"
     assert "test-token" not in str(args)
     assert kwargs["env"]["MILES_BUILD_GITHUB_TOKEN"] == "test-token"
+
+
+def test_local_image_build_uses_committed_sources_without_github_credentials(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    lock = json.loads((root / "runtime/miles/runtime.lock.json").read_text())
+    arguments = ["build_image.py", "--base-image", "base", "--tag", "result"]
+    for name in lock["sources"]:
+        arguments.extend(["--source-cache", f"{name}=/local/{name}"])
+    monkeypatch.setattr(sys, "argv", arguments)
+
+    def output(args, **kwargs):
+        if args[:3] == ["docker", "image", "inspect"]:
+            return lock["base_image"]["docker_id"]
+        assert args[:2] == ["git", "rev-parse"]
+        return "application-revision"
+
+    calls = []
+    monkeypatch.setattr(build_image.subprocess, "check_output", output)
+    monkeypatch.setattr(build_image.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
+    build_image.main()
+    prepare, build = [args for args, _ in calls]
+    assert prepare[1:3] == ["-m", "scripts.miles.prepare_runtime"]
+    assert prepare.count("--cache") == len(lock["sources"])
+    assert "SOURCE_MODE=local" in build
+    assert "--build-context" in build and "--secret" not in build

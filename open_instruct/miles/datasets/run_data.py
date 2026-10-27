@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 from open_instruct.miles.configuration import validation
+from open_instruct.miles.datasets import vision
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import task_verifiers
 
@@ -205,7 +206,7 @@ def _render(messages, tokenizer, template):
     return tokenizer.apply_chat_template(messages, chat_template=template, tokenize=False, add_generation_prompt=True)
 
 
-def _verify_row(row, tokenizer, limit, known):
+def _verify_row(row, tokenizer, limit, known, *, image_token_ids=None):
     if not isinstance(row.get("input"), str) or not row["input"]:
         raise InputError("Prepared row needs nonempty rendered input")
     metadata = row.get("metadata")
@@ -227,7 +228,7 @@ def _verify_row(row, tokenizer, limit, known):
         weight = spec.get("weight", 1.0)
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
-    ids = tokenizer.encode(row["input"], add_special_tokens=False)
+    ids = image_token_ids if image_token_ids is not None else tokenizer.encode(row["input"], add_special_tokens=False)
     if not 0 < len(ids) <= limit:
         raise InputError(
             f"Prompt has {len(ids)} tokens, outside 1..{limit}; immutable input cannot be truncated. Increase inference.max_context_length/max_prompt_length or prepare shorter prompts."
@@ -500,17 +501,34 @@ def prepare_data(
         raise InputError("Preparation requires nonempty training data")
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
+    train_images, eval_images = set(), set()
+    image_processor = None
     for split, rows in partitions.items():
         for index, row in enumerate(rows, 1):
             try:
-                _verify_row(row, tokenizer, max_prompt_length, known)
+                image_ids = None
+                if vision.image_row(row):
+                    if image_processor is None:
+                        image_processor = vision.load_processor(hf_checkpoint)
+                    image_ids = vision.prepare_row(row, image_processor, inputs)
+                    source_images = row["metadata"].get("source_image_sha256")
+                    if (
+                        not isinstance(source_images, list)
+                        or not source_images
+                        or any(not isinstance(x, str) or not re.fullmatch(r"[a-f0-9]{64}", x) for x in source_images)
+                    ):
+                        raise InputError(
+                            "Image rows require metadata.source_image_sha256 for source-level split validation"
+                        )
+                    (train_images if split == "train" else eval_images).update(source_images)
+                _verify_row(row, tokenizer, max_prompt_length, known, image_token_ids=image_ids)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
-            (train_prompts if split == "train" else eval_prompts).add(row["input"])
+            (train_prompts if split == "train" else eval_prompts).add(vision.prompt_identity(row))
             identity = row["metadata"].get("prepared_sample_id")
             if identity:
                 (train_ids if split == "train" else eval_ids).add(identity)
-    if train_prompts & eval_prompts or train_ids & eval_ids:
+    if train_prompts & eval_prompts or train_ids & eval_ids or train_images & eval_images:
         raise InputError("Training and held-out data overlap by prompt or source identity")
     if registry is None:
         names = {spec["name"] for rows in partitions.values() for row in rows for spec in row["metadata"]["verifiers"]}
