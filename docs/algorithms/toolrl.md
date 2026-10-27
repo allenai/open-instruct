@@ -65,7 +65,7 @@ rl_manifest = "/absolute/path/to/toolrl-data/rl-manifest.json"
 
 [core]
 reward_final_answer_only = false
-reward_zero_truncated = true
+reward_zero_truncated = false
 
 [miles]
 custom_reward_post_process_path = "open_instruct.miles.rewards.truncation.exclude_truncated"
@@ -75,11 +75,28 @@ Remove any existing `data.tasks` or `data.prompt_data` selection: MILES permits
 one data mode at a time. On Beaker, place the files on mounted storage and use
 that mount's absolute path. The truncation postprocessor excludes unfinished
 responses from learning: assigning them zero alone would make truncation more
-rewarding than an incorrect call with negative reward. Follow the [MILES launch guide](../miles/launching.md)
+rewarding than an incorrect call with negative reward. Keep zero-truncation
+disabled because MILES rejects combining it with reward exclusion. Follow the [MILES launch guide](../miles/launching.md)
 for model, topology, runtime, and plan/validation checks. The `toolrl` entries are
 **verifier bindings**, not new `[[data.tasks]]` dataset aliases. Manifest adoption
 uses the standard tokenizer, prompt-length validation, and immutable preparation
 checks; it does not need a published Hugging Face dataset.
+
+Start a mechanics configuration with `cp configs/miles/examples/dev.toml
+runs/toolrl.toml`, apply the data/reward settings above, and set the checkpoint,
+output directory, prompt/response budgets, and launch resources for that model.
+Then inspect the configuration without submitting a job:
+
+```bash
+python -m open_instruct.miles plan runs/toolrl.toml
+python -m open_instruct.miles validate runs/toolrl.toml
+```
+
+After those checks and runtime qualification, `python -m open_instruct.miles run
+runs/toolrl.toml` launches through the committed-image wrapper. The selected
+image must contain this integration; reusing an older image does not upload
+local Python changes. These commands document the run path, not evidence of a
+completed GPU run.
 
 If the model's generation prompt already ends in `<think>`, prepare with:
 
