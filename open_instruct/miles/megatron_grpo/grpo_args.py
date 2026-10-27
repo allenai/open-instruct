@@ -1,5 +1,6 @@
 """CPU-safe native argument mapping for teacher-free Megatron verifier GRPO."""
 
+import json
 from pathlib import Path
 
 from open_instruct.miles.distillation import opd_config, opd_runtime
@@ -29,6 +30,25 @@ def responses_per_rollout(spec):
     """Responses one rollout trains on: the global batch, and one verifier evidence record each."""
     inference = spec.document["inference"]
     return inference["rollout_batch_size"] * inference["samples_per_prompt"]
+
+
+def check_resume_batch(spec):
+    """Reject a resume whose responses per rollout differ from those the previous launch trained on.
+
+    Evidence reconciliation cuts at ``checkpointed_rollouts * responses_per_rollout`` lines, so a
+    changed batch shape would keep the wrong records without any error."""
+    previous = Path(spec.output["root"]) / "native-arguments.json"
+    if not (checkpointed_rollouts(spec) and previous.exists()):
+        return
+    arguments = json.loads(previous.read_text())
+    if "--global-batch-size" not in arguments:
+        return
+    recorded = int(arguments[arguments.index("--global-batch-size") + 1])
+    if recorded != responses_per_rollout(spec):
+        raise InputError(
+            f"Resuming {previous.parent} needs {recorded} responses per rollout, as before; "
+            f"rollout_batch_size * samples_per_prompt is now {responses_per_rollout(spec)}"
+        )
 
 
 def checkpoint_marker(root):

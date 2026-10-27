@@ -63,6 +63,22 @@ def execute(spec):
             state.update(status="complete", finished_unix=time.time())
             workflow.write_json(root / "workflow.json", state)
             return
+        # Reconcile before the runtime tests and conversion: it needs only the output root and the
+        # spec, and must read the previous launch's native-arguments.json before it is rewritten.
+        grpo_args.check_resume_batch(spec)
+        kept = grpo_args.checkpointed_rollouts(spec)
+        set_aside, torn = grpo_hooks.reconcile_evidence(root, kept, grpo_args.responses_per_rollout(spec))
+        if set_aside:
+            logger.info(
+                "Set aside %s verifier records past the checkpoint (rollout >= %s) in %s",
+                set_aside,
+                kept,
+                root / grpo_hooks.REPLAYED,
+            )
+        if torn:
+            logger.warning(
+                "The previous launch stopped mid-write; its partial record is in %s", root / grpo_hooks.TORN
+            )
         native = importlib.util.find_spec("miles")
         if native is None or native.origin is None:
             raise InputError("Use the qualified native Megatron/SGLang image with committed code overlay")
@@ -170,19 +186,6 @@ def execute(spec):
                 stderr=subprocess.STDOUT,
                 check=True,
                 timeout=180,
-            )
-        kept = grpo_args.checkpointed_rollouts(spec)
-        set_aside, torn = grpo_hooks.reconcile_evidence(root, kept, grpo_args.responses_per_rollout(spec))
-        if set_aside:
-            logger.info(
-                "Set aside %s verifier records past the checkpoint (rollout >= %s) in %s",
-                set_aside,
-                kept,
-                root / grpo_hooks.REPLAYED,
-            )
-        if torn:
-            logger.warning(
-                "The previous launch stopped mid-write; its partial record is in %s", root / grpo_hooks.TORN
             )
         process = None
         try:

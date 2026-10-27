@@ -96,7 +96,8 @@ def audit(spec, prepared):
         "teacher": None,
         "optimizer": steps,
         "rollouts": rollouts,
-        # Records grpo_hooks.reconcile_evidence set aside, cumulative over every launch into this root.
+        # Records grpo_hooks.reconcile_evidence set aside, cumulative over every launch into this root
+        # (an upper bound if a launch died mid-reconcile).
         "replayed_records": len(replayed.read_text().splitlines()) if replayed.exists() else 0,
         # Partial final lines of launches that stopped mid-write.
         "torn_fragments": len(torn.read_text().splitlines()) if torn.exists() else 0,

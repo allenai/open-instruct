@@ -202,6 +202,27 @@ def test_resume_restores_checkpoint_without_restepping_the_scheduler(tmp_path):
         grpo_args.checkpointed_rollouts(spec)
 
 
+def test_resume_rejects_a_changed_batch_shape(tmp_path):
+    doc = document()
+    doc["output"]["root"] = str(tmp_path / "root")
+    doc["training"]["resume"] = True
+    spec = specs.from_dict(doc)
+    marker = grpo_args.checkpoint_marker(spec.output["root"])
+    marker.parent.mkdir(parents=True)
+    grpo_args.check_resume_batch(spec)
+    marker.write_text("3")
+    grpo_args.check_resume_batch(spec)
+    arguments = grpo_args.native_arguments(spec, PREPARED, "/converted/native", [])
+    previous = Path(spec.output["root"]) / "native-arguments.json"
+    previous.write_text(json.dumps(arguments))
+    grpo_args.check_resume_batch(spec)
+    doc["inference"]["samples_per_prompt"] *= 2
+    with pytest.raises(InputError, match="responses per rollout"):
+        grpo_args.check_resume_batch(specs.from_dict(doc))
+    doc["training"]["resume"] = False
+    grpo_args.check_resume_batch(specs.from_dict(doc))
+
+
 def test_reconcile_evidence_keeps_checkpointed_rollouts_and_sets_replayed_records_aside(tmp_path):
     evidence, replayed = tmp_path / grpo_hooks.EVIDENCE, tmp_path / grpo_hooks.REPLAYED
     assert grpo_hooks.reconcile_evidence(tmp_path, 0, 2) == (0, False)

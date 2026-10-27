@@ -112,8 +112,10 @@ responses for every async run.
    when not resuming), and a torn final line goes to
    `verifier-rewards.replayed.partial`, so the audit sees exactly one record per
    trained response. `audit.json` reports the cumulative counts as
-   `replayed_records` and `torn_fragments`. Resuming requires an unchanged
-   rollout batch size and samples per prompt. An output root written before this
+   `replayed_records` and `torn_fragments` (upper bounds if a launch died while
+   reconciling). Resuming requires an unchanged rollout batch size times samples
+   per prompt, and the launch checks it against the previous
+   `native-arguments.json`. An output root written before this
    reconciliation existed is reconciled on its next launch;
 6. reloads the export in a fresh SGLang process and probes a training prompt.
 

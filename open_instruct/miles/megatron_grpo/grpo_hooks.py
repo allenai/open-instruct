@@ -64,6 +64,7 @@ def reconcile_evidence(root, rollouts, batch):
                 )
         boundary = stream.tell()
         tail = stream.read()
+        complete, torn = b"", b""
         if tail:
             complete, _, torn = tail.rpartition(b"\n")
             if complete:
@@ -73,7 +74,7 @@ def reconcile_evidence(root, rollouts, batch):
                 with (Path(root) / TORN).open("ab") as partial:
                     partial.write(torn + b"\n")
             stream.truncate(boundary)
-    return tail.count(b"\n"), not tail.endswith(b"\n") and bool(tail)
+    return complete.count(b"\n") + bool(complete), bool(torn)
 
 
 def scoring_args(args=None, environment=None):
