@@ -47,6 +47,8 @@ FACTORIES = {
     "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
     "multiplication": "open_instruct.miles.rewards.task_verifiers.MultiplicationVerifier",
     "r1_format": "open_instruct.miles.rewards.task_verifiers.R1FormatVerifier",
+    "toolrl": "open_instruct.miles.rewards.toolrl.ToolRLVerifier",
+    "toolrl_think_prefix": "open_instruct.miles.rewards.toolrl.ToolRLThinkPrefixVerifier",
 }
 ANSWER_PREFIX = (
     "Solve the following problem step by step. The last line of your response should be the answer to "
@@ -227,6 +229,18 @@ def _verify_row(row, tokenizer, limit, known):
         weight = spec.get("weight", 1.0)
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
+        if spec["name"] in ("toolrl", "toolrl_think_prefix"):
+            expects_prefix = spec["name"] == "toolrl_think_prefix"
+            suffix = re.search(r"<think>\s*$", row["input"])
+            if suffix and suffix[0] != "<think>":
+                raise InputError(
+                    "ToolRL does not support whitespace after a prompt's <think>; use an explicit adapter"
+                )
+            if row["input"].endswith("<think>") != expects_prefix:
+                raise InputError(
+                    "ToolRL verifier disagrees with the rendered generation prefix. "
+                    "Prepare with --think-prefix-in-prompt exactly when the template ends in <think>."
+                )
     ids = tokenizer.encode(row["input"], add_special_tokens=False)
     if not 0 < len(ids) <= limit:
         raise InputError(

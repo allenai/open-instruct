@@ -1,5 +1,37 @@
 # Dataset Transformations
 
+## How sources, preparation, and mixtures fit together
+
+Open Instruct generally selects data by a Hugging Face repository ID or a local
+JSONL/Parquet path; there is no single catalog in which every source must be
+registered. A source can itself already be a mixture.
+
+| Layer | Purpose | Where it appears |
+|---|---|---|
+| Source dataset | Original examples or an already processed collection | Hugging Face or local files |
+| Preparation | Convert fields to the training schema; optionally filter, deduplicate, or extract reward targets | `scripts/data/`, or an upstream dataset's preparation pipeline |
+| Mixture | Choose sources and how many examples or repetitions to use | SFT/RL recipe configs and mixer arguments, or a preassembled dataset |
+| Rendering and caching | Apply the model's chat template, tokenize, filter by length, and save reusable training inputs | `dataset_transformation.py`; MILES has its own prepared-data workflow |
+| RL verifier | Score newly generated responses against each example's targets | Legacy verifier classes or MILES trusted verifier bindings |
+
+Names such as Dolci identify curated dataset releases or families, not loader
+classes. For example, [Dolci-Instruct-SFT](https://huggingface.co/datasets/allenai/Dolci-Instruct-SFT)
+is a published mixture with component-source labels. Always identify the exact
+release, revision, and recipe: a family name alone does not specify the examples.
+
+A dataset already using the expected schema may need only a recipe entry. A new
+RL task may also need a new verifier. Dataset provenance and verifier identity
+are different concepts, even though some legacy RL files use a `dataset` field
+to select their verifier. MILES also offers a small convenience registry of
+named tasks; its manifest/prepared-data modes accept broader sources without
+adding one alias per dataset. See [MILES data selection](../miles/data-and-evaluation.md).
+
+The [ToolRL integration](toolrl.md) is a concrete example: a pinned external
+source is converted into prompt-only messages plus separate reference targets,
+then selected by manifest and graded with an offline tool-call verifier.
+
+## Transformations and caching
+
 Dataset transformations are a key part of the training process. Typically, we are given some text dataset, and we tokenize and filter it to be used for training.
 
 Open Instruct includes a `dataset_transformation.py` utility which
