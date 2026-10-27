@@ -1,0 +1,127 @@
+# Experimental frozen-vision qualification recipe: one trainer + one serving B300.
+# Prepare data with scripts.data.prepare_jigsaw; replace all YOUR_USERNAME paths.
+# Four updates check mechanics; they are not an accuracy experiment.
+schema_version = 1
+name = "jigsaw-rl-pilot"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/checkpoints/olmo3moe-vision-hf"
+format = "hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/jigsaw-rl/pilot"
+export_hf = true
+rollout_sample_rate = 1.0
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "30m"
+timeout = "1h"
+auto_resume = false
+gpus_per_replica = 2
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[data]
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/jigsaw-rl/data-v1/train.jsonl"
+eval_prompt_data = ["heldout", "/weka/oe-training-default/YOUR_USERNAME/jigsaw-rl/data-v1/heldout.jsonl", "blink", "/weka/oe-training-default/YOUR_USERNAME/jigsaw-rl/data-v1/blink.jsonl", "blink-swapped", "/weka/oe-training-default/YOUR_USERNAME/jigsaw-rl/data-v1/blink-swapped.jsonl"]
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/jigsaw-rl/data-v1/verifiers.json"
+seed = 17
+shuffle = true
+
+[training]
+filter_zero_std_groups = false
+num_rollouts = 4
+skip_eval_before_train = false
+eval_interval = 4
+save_checkpoints = true
+save_interval = 2
+
+[trainer]
+gpus = 1
+trainer_num_nodes = 1
+expert_parallel_size = 1
+micro_batch_size = 1
+activation_recompute = true
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_tensor_parallel_size = 1
+rollout_batch_size = 2
+samples_per_prompt = 4
+global_batch_size = 8
+max_response_length = 16
+max_context_length = 2048
+sglang_server_concurrency = 8
+sglang_max_running_requests = 8
+sglang_max_total_tokens = 32768
+sglang_max_mamba_cache_size = 128
+sglang_mem_fraction_static = 0.5
+radix_cache = false
+sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_sampling_backend = "pytorch"
+sglang_attention_backend = "torch_native"
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+learning_rate = 0.00001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.95
+adam_eps = 0.00000001
+clip_grad = 1.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.28
+
+[tracking]
+wandb_mode = "offline"
+wandb_project = "open-instruct-miles"
+wandb_group = "jigsaw-rl-pilot"
+
+[runtime]
+row_specialization = "dynamic"
+
+[core]
+freeze_image_encoder = true
+freeze_connector = true
+publication_mode = "barrier"
+sequence_packing = false
+checkpoint_keep_last = 2
+attention_backend = "torch"
+activation_checkpointing = true
+compile_model = false
+compile_optimizer = true
+scoring_pass_required = true
+diagnostic_interval = 1
+max_train_rollout_logprob_abs_diff = 0.05
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+stream_moe_export = true
+weight_sync_mode = "flattened"
+
+[miles]
+custom_generate_function_path = "open_instruct.miles.datasets.vision_rollout.generate"
+rollout_temperature = 1.0
+rollout_seed = 17
+rollout_max_prompt_len = 1900
+seed = 17
+disable_grpo_std_normalization = true
+apply_chat_template = false
+use_kl_loss = false
+
+[compiler_cache]
+enabled = true
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+restore = true

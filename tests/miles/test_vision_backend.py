@@ -1,5 +1,6 @@
 """Frozen image conditioning, publication scope and immutable checkpoint identity."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -155,3 +156,30 @@ def test_unqualified_config_fails_before_allocation(change):
     )
     with pytest.raises(ValueError):
         vision_models.validate_training_options(args)
+
+
+@pytest.mark.parametrize("indexed", [False, True])
+def test_hf_loader_accepts_workflow_staged_symlinks(tmp_path, indexed):
+    source = tmp_path / "original"
+    staged = tmp_path / "prepared"
+    source.mkdir()
+    staged.mkdir()
+    state = {"language_model.weight": torch.ones(2), "connector.weight": torch.zeros(3)}
+    name = "model-00001-of-00001.safetensors" if indexed else "model.safetensors"
+    safetensors_torch.save_file(state, str(source / name))
+    (staged / name).symlink_to(source / name)
+    if indexed:
+        (staged / "model.safetensors.index.json").write_text(
+            json.dumps({"weight_map": {key: name for key in state}})
+        )
+    restored = vision_models.read_hf_state(staged)
+    for key, expected in state.items():
+        torch.testing.assert_close(restored[key], expected)
+
+
+def test_hf_loader_rejects_index_path_traversal(tmp_path):
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"language_model.weight": "../outside.safetensors"}})
+    )
+    with pytest.raises(ValueError, match="plain filenames"):
+        vision_models.read_hf_state(tmp_path)

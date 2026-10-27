@@ -1,10 +1,11 @@
-# Four MILES starting points
+# MILES starting points
 
 | Config | Purpose |
 |---|---|
 | [dev.toml](dev.toml) | Tiny-model colocation mechanics |
 | [small.toml](small.toml) | Disaggregated GSM8K mechanics; the recommended first run |
 | [medium.toml](medium.toml) | Mixed math, instruction-following, code and general-task MoE training |
+| [jigsaw.toml](jigsaw.toml) | Experimental frozen-vision jigsaw RL with BLINK endpoint evaluation |
 | [large.toml](large.toml) | Provisional multi-node trainer layout with background evaluation; adapt before use |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
@@ -74,3 +75,9 @@ scaling. The [throughput guide](../../../docs/miles/throughput-profiles.md) expl
 how to size memory budgets and engine admission for a model. Follow the
 [completion checks](../../../docs/miles/operations.md) to verify training,
 checkpoint and export outputs.
+
+`jigsaw` uses the vision-augmented Olmo KDA MoE checkpoint with a frozen image
+encoder and full connector, one trainer B300 and one serving B300. Prepare its
+image data using the [jigsaw guide](../../../docs/miles/data-and-evaluation.md#experimental-frozen-vision-jigsaw-pilot).
+It is a bounded integration check with exact-choice rewards; inspect reward
+variance and gradient norms before interpreting completion as learning.

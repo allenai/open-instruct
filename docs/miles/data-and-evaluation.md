@@ -12,7 +12,8 @@ vision-augmented Olmo KDA MoE checkpoint (`olmo3moe_vision`). The integration is
 under qualification; passing CPU checks does not establish GPU training or
 serving parity.
 
-Prepare an open photo source and puzzles with:
+Start from [`jigsaw.toml`](../../configs/miles/examples/jigsaw.toml), replacing
+its checkpoint, data and output paths. Prepare an open photo source and puzzles with:
 
 ```bash
 python -m scripts.data.prepare_jigsaw --download-pets --with-blink \
@@ -41,6 +42,11 @@ The swap diagnostic is separate from the original BLINK endpoint score.
 Normal run preparation validates file/pixel hashes, source-level split separation,
 processor code and configuration, crop/pooling layout, and expanded image-token
 counts. Resume rejects changed conditioning instead of silently rebuilding it.
+
+Freezing both components also has a published RL precedent: [Latent Visual
+Reasoning, §4](https://arxiv.org/html/2509.24251v2#S4) freezes its visual encoder
+and projector during SFT and GRPO, and includes BLINK Jigsaw evaluation. This
+supports the implementation choice, not a claim that freezing is optimal here.
 
 The current trainer requires both `core.freeze_image_encoder=true` and
 `core.freeze_connector=true`. It trains the language model, including its image
