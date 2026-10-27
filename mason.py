@@ -216,7 +216,8 @@ def get_args():
         "--auto_resume",
         action="store_true",
         help="If given, Beaker requeues the job after it is preempted. The command restarts from the beginning and "
-        "continues only if it resumes from its own checkpoints. Requires --min_runtime.",
+        "continues only if it resumes from its own checkpoints. Requires --min_runtime; --preemptible already "
+        "implies it.",
     )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(

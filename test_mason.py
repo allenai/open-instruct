@@ -345,6 +345,12 @@ class TestGetArgsMinRuntime(unittest.TestCase):
         with mock.patch.object(sys, "argv", argv):
             return mason.get_args()
 
+    def test_zero_spelling_reaches_task_context_as_zero(self):
+        args = self._get_args("--min_runtime", "0s", "--auto_resume")
+        self.assertEqual(
+            mason.make_task_context(args).to_json(), {"priority": "normal", "minRuntime": 0, "autoResume": True}
+        )
+
     def _warnings(self, *mason_args):
         with mock.patch.object(mason.console, "log") as log:
             self._get_args(*mason_args)
