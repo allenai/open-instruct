@@ -325,6 +325,7 @@ class TestParseMinRuntime(unittest.TestCase):
             ("below_lower_bound", "4m"),
             ("bare_number", "3600"),
             ("bare_decimal", "1.5"),
+            ("decimal_zero", "0.0"),
             ("negative", "-5m"),
             ("not_a_duration", "soon"),
         ]

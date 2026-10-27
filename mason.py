@@ -105,9 +105,11 @@ MIN_RUNTIME_USUAL_UPPER_BOUND_NS = 8 * 60 * 60 * 1_000_000_000
 def parse_min_runtime(min_runtime_str: str) -> str:
     """Validate a Beaker min runtime duration string such as '30m' or '2h'."""
     # beaker-py reads a bare number as seconds, so '300' meant as minutes would silently protect for 5 minutes.
-    # Like the MILES launcher, require a unit for anything but 0.
-    if re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)", min_runtime_str.strip()) and float(min_runtime_str) != 0:
-        raise argparse.ArgumentTypeError(f"Min runtime needs a unit (e.g., '30m', '2h'), got: {min_runtime_str}")
+    # Like the MILES launcher, require a unit for anything but a plain 0.
+    if re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)", min_runtime_str) and min_runtime_str not in ("0", "+0", "-0"):
+        raise argparse.ArgumentTypeError(
+            f"Min runtime must be a plain 0 or have a unit (e.g., '30m', '2h'), got: {min_runtime_str}"
+        )
     try:
         nanoseconds = beaker.common.to_nanoseconds(min_runtime_str)
     except ValueError as e:
