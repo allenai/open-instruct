@@ -555,8 +555,15 @@ def serving(args, samples, checkpoint):
         random_seed=17,
         skip_server_warmup=True,
         enable_fp32_lm_head=args.fp32_head,
+        disable_overlap_schedule=args.disable_overlap_schedule,
     )
-    report = {"mode": "serving", "attention_backend": args.attention_backend, "records": []}
+    report = {
+        "mode": "serving",
+        "attention_backend": args.attention_backend,
+        "fp32_head": args.fp32_head,
+        "disable_overlap_schedule": args.disable_overlap_schedule,
+        "records": [],
+    }
     try:
         if args.mode == "fresh":
             samples = rebuild_samples(samples, fresh_responses(engine, args, samples))
@@ -605,6 +612,7 @@ def main():
     parser.add_argument("--whole-sequence-first", action="store_true")
     parser.add_argument("--serving-trace", type=Path)
     parser.add_argument("--fp32-head", action="store_true")
+    parser.add_argument("--disable-overlap-schedule", action="store_true")
     parser.add_argument("--publication-roundtrip", action="store_true")
     parser.add_argument("--core-controls", action="store_true")
     parser.add_argument("--lightweight", action="store_true", help="Score without export audits or activation hooks")
