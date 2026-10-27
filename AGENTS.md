@@ -33,12 +33,7 @@ CUDA initialization and a short training run when the image or driver changes.
 Read and follow [CODE_REVIEW.md](CODE_REVIEW.md) when reviewing code.
 
 # Workflow
-- Begin every GitHub comment published by an agent with a GitHub note alert naming the agent (e.g. Codex, Claude Code):
-  ```markdown
-  > [!NOTE]
-  > Drafted by {agent name}.
-  ```
-  If a person reviewed the response before publication, use `Drafted by {agent name} and reviewed by {reviewer's name}.` instead. Only include the review attribution when that person actually reviewed the response; permission to post alone does not count as review.
+- Begin every GitHub comment published by an agent with one plain line naming the agent (e.g. Codex, Claude Code): `Drafted by {agent name}.`, with no alert or other formatting. If a person reviewed the response before publication, use `Drafted by {agent name} and reviewed by {reviewer's name}.` instead. Only include the review attribution when that person actually reviewed the response; permission to post alone does not count as review.
 - When a PR changes anything under `open_instruct/`, add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`). This is what CI enforces; PRs touching only `scripts/`, docs, or config are exempt, though an entry is still welcome for anything user-visible.
   - The entry must contain the PR's own URL, which does not exist until the PR is opened. Add the entry, open the PR, then amend the entry with the URL and push again.
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).
