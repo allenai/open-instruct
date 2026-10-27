@@ -88,6 +88,34 @@ normal runs; override it with a positive integer in `[judges.NAME]` or, for exam
 `judges.NAME.timeout` value. See the [configuration reference](configuration.md#workflow-fields)
 for all judge fields and their defaults.
 
+Managed judges default to eager execution. Set `cuda_graphs=true` to enable
+CUDA graphs for both decode and prefill in the pinned SGLang runtime. Decode
+capture is bounded by `max_concurrent_calls`, which also sets the managed server's
+running-request limit. Prefill uses SGLang's default breakable graph backend and
+its own capture settings; `max_concurrent_calls` does not bound prefill capture.
+Graphs trade additional startup time and GPU memory for lower execution overhead.
+Increasing concurrency also increases the maximum decode capture batch size and
+can increase capture time and memory use. The judge setting is independent of
+policy inference presets. External endpoints reject `cuda_graphs`, even when
+explicitly set to `false`, because their serving configuration is externally owned.
+
+An isolated B300 Qwen/Qwen3-32B [judge replay](https://beaker.org/ex/01M5YNMKAY8RKYH0N654RHPNGT)
+exercised `max_concurrent_calls=64` with graphs enabled,
+`context_extension="qwen3-yarn-128k"`, and `max_context_length=131072`. The managed
+server keeps `--mem-fraction-static 0.85` in both eager and graph modes. This
+explicit fraction bypasses SGLang's automatic static-memory-fraction selection,
+including its graph-headroom adjustment. The replay's configured context limit
+does not establish memory safety at every request length or mixture, and its
+timings do not isolate decode-graph benefits from prefill graphs or concurrency.
+Use this configuration as a starting point for validation: check sustained grading
+latency, memory use, valid grades and end-to-end training throughput on the intended
+mixture before adopting it.
+
+Omitting `cuda_graphs` leaves the field absent from resolved configuration and
+preserves existing run fingerprints. Explicit `cuda_graphs=false` also selects
+eager execution, but retains the field and therefore produces a different
+fingerprint from omission. Preserve the original spelling when resuming a run.
+
 For long policy responses, budget the complete grading request in **judge**
 tokens: question, candidate answer, optional reference, rubric, chat framing and
 the judge's output. A 32K policy response can exceed 40K judge tokens because the

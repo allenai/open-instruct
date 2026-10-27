@@ -331,6 +331,7 @@ STRUCTURED_FIELDS = {
         "backend",
         "chat_template",
         "context_extension",
+        "cuda_graphs",
         "endpoint",
         "gpus",
         "max_concurrent_calls",
