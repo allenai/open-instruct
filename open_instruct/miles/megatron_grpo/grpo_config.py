@@ -21,9 +21,12 @@ POST_PROCESS_HOOK = "open_instruct.miles.megatron_grpo.grpo_hooks.post_process"
 # Responses keep generating across a weight publication at the pinned MILES (the publication
 # never aborts in-flight requests), so the old opt-in switch has no native counterpart.
 KEEP_INFLIGHT = "keep_inflight_requests_on_weight_update"
+# Set for the native driver process when training.eval_only selects the eval-only entry point.
+EVAL_ONLY_ENV = "OI_GRPO_EVAL_ONLY"
 DEFAULTS = {
     "model": {"source": "", "architecture": "qwen3-1.7B", "native_checkpoint": {}},
-    "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo"},
+    # eval_only runs the pre-training eval of the starting model, then stops without training.
+    "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo", "eval_only": False},
     "trainer": dict(opd_config.DEFAULTS["trainer"]),
     "inference": {**opd_config.DEFAULTS["inference"], "max_prompt_length": 2048, "max_context_length": 4096},
     "optimizer": {**opd_config.DEFAULTS["optimizer"], "adam_beta2": 0.95, "adam_eps": 1e-8, "clip_grad": 1.0},
@@ -134,6 +137,7 @@ class MegatronGRPORunSpec:
         training, trainer, inf, opt = (document[k] for k in ("training", "trainer", "inference", "optimizer"))
         validation.choice(training["phase"], "training.phase", ("prepare", "train"))
         validation.boolean(training["resume"], "training.resume")
+        validation.boolean(training["eval_only"], "training.eval_only")
         validation.integer(training["num_rollouts"], "training.num_rollouts")
         validation.integer(training["save_interval"], "training.save_interval")
         validation.integer(training["eval_interval"], "training.eval_interval", minimum=0)
@@ -257,6 +261,10 @@ class MegatronGRPORunSpec:
                 raise InputError("Async Megatron GRPO completed buffer must hold at least one group")
         elif "max_weight_staleness" in native:
             raise InputError("miles.max_weight_staleness applies only with miles.fully_async=true")
+        if training["eval_only"] and not native.get("fully_async", False):
+            raise InputError(
+                "training.eval_only evaluates with the managed async producer; set miles.fully_async=true"
+            )
         document["miles"] = native
         launch = run_spec.RunSpec._launch(
             {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent

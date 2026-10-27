@@ -6,11 +6,42 @@ import runpy
 from pathlib import Path
 
 import ray
+from miles.ray.placement_group import create_rollout_components, create_training_models, update_weights
+from miles.ray.rollout.eval_dispatch import EvalDispatcher
+from miles.ray.wiring import launch_worker_manager
+from miles.utils import object_store
 from miles.utils.arguments import parse_args
-from miles.utils.tracking_utils.tracking import finish_tracking
+from miles.utils.audit_utils.process_identity import MainProcessIdentity
+from miles.utils.logging_utils import configure_logger
+from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 import miles
 from open_instruct.miles.megatron_grpo import grpo_config
+
+
+async def evaluate(args):
+    """Run the native async driver's pre-training eval of the starting model, then release everything.
+
+    Mirrors the setup of the pinned ``train_async.train`` up to its rollout-0 eval, so scores match
+    the in-training eval. The native driver has no async eval-only mode: it starts generating the
+    first training batch even when there is nothing to train.
+    """
+    configure_logger(args, source=MainProcessIdentity())
+    launch_worker_manager(args)
+    object_store.init_instance(args, contribute_segment=False)
+    init_tracking(args)
+    inference_controller, rollout_executor, _ = await create_rollout_components(args)
+    actor_model, critic_model = await create_training_models(args, inference_controller, rollout_executor)
+    await update_weights(actor_model, rollout_executor)
+    eval_dispatcher = EvalDispatcher(args, actor_model, rollout_executor)
+    await inference_controller.prepare_eval()
+    await eval_dispatcher.dispatch(0, hf_dir=args.hf_checkpoint, force=True)
+    await eval_dispatcher.drain()
+    await rollout_executor.dispose.remote()
+    await inference_controller.dispose()
+    await actor_model.dispose()
+    if critic_model is not None:
+        await critic_model.dispose()
 
 
 def main():
@@ -36,6 +67,11 @@ def main():
             # evaluation on that same instance (as opd_train does for async OPD).
             args.rollout_function_path = grpo_config.ASYNC_ROLLOUT
             args.eval_function_path = grpo_config.ASYNC_ROLLOUT
+        if os.environ.get(grpo_config.EVAL_ONLY_ENV) == "1":
+            if not args.fully_async:
+                raise ValueError("Eval-only verifier GRPO requires the fully async producer")
+            asyncio.run(evaluate(args))
+            return
         namespace = runpy.run_path(str(Path(miles.__file__).resolve().parents[1] / driver))
         asyncio.run(namespace["train"](args))
     finally:

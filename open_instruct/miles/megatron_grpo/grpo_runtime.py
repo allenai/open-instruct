@@ -126,6 +126,8 @@ def execute(spec):
         if len(visible) != layout["gpus_per_replica"]:
             raise InputError("Visible GPU count differs from the audited teacher-free allocation")
         environment["OI_GRPO_RAY_GPUS"] = str(layout["ray_gpus"])
+        if training["eval_only"]:
+            environment[grpo_config.EVAL_ONLY_ENV] = "1"
         architecture = opd_runtime.model_args(miles_root, environment, spec.document["model"]["architecture"])
         tp = trainer["tensor_parallel_size"]
         checkpoint = Path(spec.output["assets"]) / (
@@ -188,6 +190,15 @@ def execute(spec):
                 )
                 if process.wait():
                     raise RuntimeError("Native verifier GRPO failed; inspect training.log")
+            if training["eval_only"]:
+                # No update ran, so there is no checkpoint to audit, export or reload.
+                workflow.write_json(
+                    root / "result.json",
+                    {"status": "evaluated", "algorithm": "grpo", "teacher": None, "optimizer_updates": 0},
+                )
+                state.update(status="complete", finished_unix=time.time())
+                workflow.write_json(root / "workflow.json", state)
+                return
             marker = root / "checkpoints/latest_checkpointed_iteration.txt"
             if not marker.exists():
                 raise RuntimeError("Missing recoverable Megatron checkpoint")

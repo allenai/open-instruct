@@ -90,7 +90,9 @@ class OPDAsyncRollout(async_rollout.ManagedFullyAsyncRolloutFn):
         state.args = copy.copy(state.args)
         state.args.custom_rm_path = self.eval_reward_path
         state.args.custom_reward_post_process_path = None
-        final = input.rollout_id >= self.args.num_rollout - 1
+        # With one rollout the pre-training eval is also the last scheduled one, but no producer
+        # exists yet; shutting down then would leave submissions paused for the training rollout.
+        final = input.rollout_id >= self.args.num_rollout - 1 and self._worker is not None
         try:
             output = RolloutFnEvalOutput(data=await run_eval_datasets(state, self._eval_prompt_dataset_cache))
             opd_selection_audit.capture_eval(output.data, input.rollout_id)
