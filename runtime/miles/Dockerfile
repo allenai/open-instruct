@@ -8,8 +8,8 @@ RUN --mount=type=secret,id=github_token \
     python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources \
     --github-token-file /run/secrets/github_token
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
-# Install source package metadata/entrypoints without resolving CUDA dependencies.
-RUN uv pip install --system --no-deps \
+# Install metadata/entrypoints; the existing source overlay does not load optional Rust extensions.
+RUN SGLANG_BUILD_RUST_EXTS=none uv pip install --system --no-deps \
     -e /opt/core-rl/sources/olmo-core -e /opt/core-rl/sources/miles \
     -e /opt/core-rl/sources/olmo-sglang -e /opt/core-rl/sources/sglang/python \
     -e /opt/core-rl/sources/megatron-lm -e /opt/core-rl/sources/megatron-bridge \
