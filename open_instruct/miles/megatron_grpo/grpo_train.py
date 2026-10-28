@@ -27,7 +27,9 @@ async def evaluate(args):
     first training batch even when there is nothing to train.
     """
     configure_logger(args, source=MainProcessIdentity())
-    launch_worker_manager(args)
+    # Hold the handle as train_async does: the named worker manager is not detached, so Ray kills it once the
+    # last handle is dropped, and the rollout servers then fail to look it up.
+    _worker_manager = launch_worker_manager(args)
     object_store.init_instance(args, contribute_segment=False)
     init_tracking(args)
     inference_controller, rollout_executor, _ = await create_rollout_components(args)
