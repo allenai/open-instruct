@@ -218,6 +218,7 @@ NATIVE_VALIDATION_OPTIONS = (
             "actor_num_gpus_per_node",
             "actor_num_nodes",
             "advantage_estimator",
+            "async_unused_samples_handler",
             "balance_data",
             "calculate_per_token_loss",
             "colocate",

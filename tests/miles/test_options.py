@@ -6,9 +6,9 @@ import json
 import sys
 
 import pytest
+
 from miles.backends.fsdp_utils import arguments as fsdp_arguments
 from miles.utils import arguments
-
 from open_instruct.miles.configuration import arguments as core_arguments
 from open_instruct.miles.configuration import options
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
@@ -143,6 +143,36 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
         parsed.custom_async_data_buffer_path
         == "miles.backends.core_utils.rollout.async_buffer.HomogeneousPolicyDataBuffer"
     )
+
+
+@pytest.mark.parametrize("handler", ["retry", "drop"])
+def test_ads_runtime_parser_preserves_retry_requirement(monkeypatch, handler):
+    config = RunConfig(
+        CoreConfig(publication_mode="refresh", max_policy_lag=2, ads_table="/data/ads.jsonl", ads_sha256="a" * 64),
+        {
+            "hf_checkpoint": "model",
+            "rollout_batch_size": 1,
+            "n_samples_per_prompt": 4,
+            "global_batch_size": 4,
+            "fully_async": True,
+            "async_unused_samples_handler": "retry",
+            "use_miles_router": True,
+            "use_tis": True,
+            "use_rollout_logprobs": False,
+            "sglang_cuda_graph_backend_decode": "disabled",
+            "sglang_cuda_graph_backend_prefill": "disabled",
+        },
+    )
+    argv = ["test", *config.arguments()]
+    argv[argv.index("--async-unused-samples-handler") + 1] = handler
+    monkeypatch.setattr(sys, "argv", argv)
+    if handler == "drop":
+        with pytest.raises(ValueError, match="ADS pilot requires retry"):
+            core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
+    else:
+        parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
+        assert parsed.async_unused_samples_handler == "retry"
+        assert parsed.custom_async_data_buffer_path == "open_instruct.miles.rollout.ads_buffer.ADSRefreshBuffer"
 
 
 @pytest.mark.parametrize("enabled", [True, False])
