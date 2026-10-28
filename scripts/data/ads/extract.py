@@ -101,6 +101,7 @@ def main():
     try:
         # Qualify the actual request geometry. Serial extraction checks repeated
         # requests; batched extraction additionally requires batch invariance.
+        qualification_started = time.monotonic()
         check = encoded[:2]
         single = [unpack(generate([entry])[0], *entry) for entry in check]
         repeated = (
@@ -117,6 +118,7 @@ def main():
         qualification = {
             "startup_seconds": startup,
             "mode": "serial_repeat" if args.batch_size == 1 else "batch_invariance",
+            "warmup_and_consistency_seconds": time.monotonic() - qualification_started,
             "consistency": errors,
         }
         (out / "qualification.json").write_text(json.dumps(qualification, indent=2))
