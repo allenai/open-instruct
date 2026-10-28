@@ -65,3 +65,10 @@ variance or establish an efficiency win merely by completing equal updates.
 
 References: [ADS paper](https://arxiv.org/html/2606.22305v2) and
 [released implementation](https://github.com/Richard-zrx/ADS/tree/8a32745d58f7b7f57baae51c2cd69f7b63cecdae).
+
+CPU clustering uses the isolated dependencies in
+`scripts/data/ads/preparation-requirements.txt`; they are not installed into the
+historical training runtime. Run it with `uv run --no-project
+--with-requirements scripts/data/ads/preparation-requirements.txt python
+scripts/data/ads/cluster.py DIRECTORY`. Pin and retain the resulting table digest
+before starting training.
