@@ -49,20 +49,24 @@ The selected base is Beaker `01M5ZYQZVF7DDJ1VR619KRSS42`
 `sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354`.
 Its package versions, CPU imports and source isolation were checked, and a pull
 by immutable ID reproduced the same Docker ID. The
-[single-GPU Core RL smoke](https://beaker.org/ex/01M61SA3GN3AKJA5KDD90J3JJA)
-passed on application image `01M61RPR1SVAACNX7AAVH2ENYJ`: four optimizer updates,
+[single-GPU Core RL smoke](https://beaker.org/ex/01M61Z3VBAD5219PHZX63YGDY7)
+passed on application image `01M61Z2XBQB6EP3SJNAX1YN0HV`: four optimizer updates,
 shared-engine evaluations, checkpoints and HF export on Holmes. This tiny-model
 check uses Torch attention; it does not qualify every FlashAttention backend or
 a Qwen OPD GPU training run with the public Megatron sources.
+The application image (`robertb/miles-main-smoke-5a7be0398`) was built from
+`5a7be0398e8244cd5376983427e57d4deeea2e39`, Docker
+`sha256:83cc907a035f98ba69d3b8b7eaaaaa7477d1c06c6efca39da4414ef174df3c67`,
+and includes the current public source lock and review cleanup.
 
-A subsequent CPU-only `runtime-base` rebuild from commit
+A CPU-only `runtime-base` rebuild from commit
 `3563eb52ac4b02d731786e8f1a4e39a52951f2a2` is published as Beaker image
 `01M61YFEWE1BATA8KQ4VAV2DY8` (`robertb/miles-runtime-base-3563eb52a`), Docker
 `sha256:f97469549508d2af9896161889cc45060c52ece5743ecfcbe937039d3043b784`.
 Its packaged lock matches the current lock, all six source checkouts match their
 pinned revisions without patches, and serving/attention CPU imports passed.
 This records CPU build verification of the runtime sources separately from the
-application-image GPU smoke above.
+application-image GPU smoke above, which subsequently verified the same source lock.
 
 The source layer includes Megatron-LM from the Radix fork, pinned to
 `235952df607b3820716e5e67728a5ab470ca33ae` (the previous runtime's revision,
