@@ -191,8 +191,12 @@ def score_response(prediction: str, reference: dict, *, think_prefix_in_prompt: 
 
     No-call targets grade plain answer format only, never factual correctness.
     Whitespace after reasoning and between calls is not a reward signal.
+    Serving may retain one native end-of-turn/EOS token after the response.
     """
     expected = validate_target(reference)
+    # Strip only the terminal boundary, preserving tokens inside arguments and
+    # malformed tails (including repeated terminators) for the strict parser.
+    prediction = re.sub(r"(?:<\|im_end\|>|<\|endoftext\|>)\s*$", "", prediction, count=1)
     if think_prefix_in_prompt:
         prediction = "<think>" + prediction
     match = re.fullmatch(r"<think>.*?</think>\s*(.*)", prediction, re.DOTALL)

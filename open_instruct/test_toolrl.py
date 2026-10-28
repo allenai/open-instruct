@@ -29,14 +29,15 @@ TOOLS = [
 TEMPLATE = (Path(__file__).parent / "test_data/olmo35_chat_template.jinja").read_text()
 
 
-def completion(calls=None, *, reasoning="plan", response="answer"):
+def completion(calls=None, *, reasoning="plan", response="answer", retain_terminal=False):
     message = {"role": "assistant", "content": response if calls is None else "", "reasoning_content": reasoning}
     if calls is not None:
         message["tool_calls"] = [{"function": {"name": c["name"], "arguments": c["parameters"]}} for c in calls]
     rendered = chat_template_utils._compile_jinja_template(TEMPLATE).render(
-        messages=[message], tools=[], eos_token="", add_generation_prompt=False
+        messages=[message], tools=[], eos_token="<|endoftext|>", add_generation_prompt=False
     )
-    return rendered.split("<|im_start|>assistant\n")[1].removesuffix("<|im_end|>\n")
+    response = rendered.split("<|im_start|>assistant\n")[1]
+    return response if retain_terminal else response.removesuffix("<|im_end|>\n").removesuffix("<|endoftext|>")
 
 
 def target(calls=None, tools=None):
@@ -103,6 +104,27 @@ def test_forced_think_prefix_is_explicit():
     assert toolrl_utils.score_response(suffix, reference).format_score == 0
     assert toolrl_utils.score_response(suffix, reference, think_prefix_in_prompt=True).score == 4
     assert toolrl_utils.score_response(correct, reference, think_prefix_in_prompt=True).format_score == 0
+
+
+@pytest.mark.parametrize("forced_prefix", [False, True])
+@pytest.mark.parametrize("calls", [None, [call("xbox")], [call("xbox"), call("android")]])
+def test_native_template_terminal_tokens_through_grader(calls, forced_prefix):
+    prediction = completion(calls, retain_terminal=True)
+    if forced_prefix:
+        prediction = prediction.removeprefix("<think>")
+    result = toolrl_utils.score_response(prediction, target(calls), think_prefix_in_prompt=forced_prefix)
+    assert result.score == (4 if calls else 1)
+
+
+@pytest.mark.parametrize("terminal", ["<|im_end|>", "<|endoftext|>"])
+def test_terminal_normalization_preserves_arguments_and_rejects_bad_call_tails(terminal):
+    calls = [call("literal " + terminal)]
+    prediction = completion(calls)
+    reference = target(calls)
+    assert toolrl_utils.score_response(prediction + terminal + "\n", reference).score == 4
+    for tail in (terminal + terminal, terminal + "garbage", "garbage" + terminal, "<tool_call>" + terminal):
+        assert toolrl_utils.score_response(prediction + tail, reference).score == -3
+    assert toolrl_utils.score_response("<think></think>" + terminal, target()).score == 0
 
 
 def test_bad_target_raises_instead_of_punishing_model():
@@ -205,9 +227,9 @@ def test_manifest_to_miles_to_reward_and_resume(tmp_path, monkeypatch, prefix):
     )
     sample = SimpleNamespace(
         prompt=row["input"],
-        response=completion(row["label"]["calls"]).removeprefix(prefix)
+        response=completion(row["label"]["calls"], retain_terminal=True).removeprefix(prefix)
         if prefix
-        else completion(row["label"]["calls"]),
+        else completion(row["label"]["calls"], retain_terminal=True),
         metadata=row["metadata"],
         tokens=[],
         response_length=0,

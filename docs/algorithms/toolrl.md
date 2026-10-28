@@ -35,6 +35,11 @@ template renders the native function/parameter syntax. It does not replace the
 checkpoint's template. Old JSON-format manifests/targets must be regenerated;
 the verifier rejects their unversioned string targets.
 
+The verifier removes at most one trailing `<|im_end|>` or `<|endoftext|>`
+boundary token before grading. These may remain in the serving response when
+special-token skipping is disabled. Tokens inside arguments are preserved;
+extra text or repeated boundary tokens after a call still fail strict parsing.
+
 Tool definitions use JSON Schema. The adapter translates Python-like source types
 (`int`, `List[float]`, etc.), treats parameters marked optional or given defaults
 as optional, and represents source callable expressions as strings without

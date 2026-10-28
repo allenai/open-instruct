@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add provisional pinned ToolRL preparation with native Olmo tool formatting, offline MILES verifier bindings, a documented manifest-based run path, and a pinned runtime fix for fully excluded optimizer batches (https://github.com/allenai/open-instruct/pull/2087).
+- Add provisional pinned ToolRL preparation with native Olmo tool formatting, offline MILES verifier bindings that accept native terminal tokens, a documented manifest-based run path, and a pinned runtime fix for fully excluded optimizer batches (https://github.com/allenai/open-instruct/pull/2087).
 - Make Claude review comments explicitly recommend merging, identify critical blockers, or state a specific unresolved question, while always publishing advisory comments rather than GitHub approvals or change requests (https://github.com/allenai/open-instruct/pull/2086).
 - Lower the one-node MILES example budget from 1,536 to 1,024 unfinished samples and explicitly bound the three-node example to 1,536 instead of its 19,456-sample automatic budget (https://github.com/allenai/open-instruct/pull/2086).
 - Add opt-in managed-judge decode and prefill CUDA graphs while keeping eager execution as the default. Omitting `cuda_graphs` preserves existing run fingerprints; explicit `false` selects eager execution but has a distinct fingerprint. External-judge validation errors name unsupported managed fields (https://github.com/allenai/open-instruct/pull/2086).
