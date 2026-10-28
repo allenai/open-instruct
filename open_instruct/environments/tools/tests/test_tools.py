@@ -1,4 +1,4 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, YouSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, SerplySearchTool, YouSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
 
 import asyncio
 import dataclasses
@@ -25,6 +25,8 @@ from open_instruct.environments.tools.tools import (
     S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
+    SerplySearchTool,
+    SerplySearchToolConfig,
     YouSearchTool,
     YouSearchToolConfig,
 )
@@ -907,6 +909,57 @@ class TestSerperSearchToolConfig(unittest.TestCase):
     def test_tool_class_attribute(self):
         """Test tool_class is set to SerperSearchTool."""
         self.assertEqual(SerperSearchToolConfig.tool_class, SerperSearchTool)
+
+
+class TestSerplySearchTool(unittest.TestCase):
+    """Tests for SerplySearchTool."""
+
+    def setUp(self):
+        patcher = patch.dict("os.environ", {"SERPLY_API_KEY": "test_key"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tool = SerplySearchTool(call_name="search", num_results=5)
+
+    def _run(self, api_response, mock_api_request):
+        async def mock_response(*args, **kwargs):
+            return api_response
+
+        mock_api_request.side_effect = mock_response
+        return asyncio.run(self.tool.step(EnvCall(id="", name="search", args={"query": "test query"})))
+
+    def test_registry_and_config(self):
+        self.assertIs(TOOL_REGISTRY["serply_search"], SerplySearchToolConfig)
+        self.assertEqual(SerplySearchToolConfig.tool_class, SerplySearchTool)
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        with self.assertRaisesRegex(ValueError, "Missing SERPLY_API_KEY environment variable"):
+            SerplySearchTool(call_name="search")
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_successful_search(self, mock_api_request):
+        data = {
+            "results": [
+                {"link": "https://example.com/1", "title": "Result 1", "description": "Description 1"},
+                {"link": "https://example.com/2", "title": "Result 2"},
+            ]
+        }
+        result = self._run(APIResponse(data=data), mock_api_request)
+
+        self.assertEqual(result.result, "**Result 1**\nDescription 1\nSource: https://example.com/1")
+        self.assertEqual(result.metadata["error"], "")
+        kwargs = mock_api_request.call_args.kwargs
+        self.assertEqual(kwargs["url"], "https://api.serply.io/v1/search/")
+        self.assertEqual(kwargs["method"], "GET")
+        self.assertEqual(kwargs["params"], {"q": "test query", "num": 5})
+        self.assertEqual(kwargs["headers"], {"X-Api-Key": "test_key", "User-Agent": "open-instruct"})
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_http_error(self, mock_api_request):
+        result = self._run(APIResponse(error="HTTP error: 401 Unauthorized"), mock_api_request)
+
+        self.assertEqual(result.metadata["error"], "HTTP error: 401 Unauthorized")
+        self.assertFalse(result.metadata["timeout"])
 
 
 class TestYouSearchTool(unittest.TestCase):
