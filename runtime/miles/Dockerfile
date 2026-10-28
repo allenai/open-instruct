@@ -14,8 +14,7 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     SGLANG_BUILD_RUST_EXTS=none UV_LINK_MODE=copy uv pip install --system --no-deps \
     -e /opt/core-rl/sources/olmo-core -e /opt/core-rl/sources/miles \
     -e /opt/core-rl/sources/olmo-sglang -e /opt/core-rl/sources/sglang/python \
-    -e /opt/core-rl/sources/megatron-lm -e /opt/core-rl/sources/megatron-bridge \
-    -e /opt/core-rl/sources/olmo-megatron
+    -e /opt/core-rl/sources/megatron-lm -e /opt/core-rl/sources/megatron-bridge
 # The native OPD launcher explicitly prepends this historical Megatron location.
 RUN mkdir -p /src && ln -s /opt/core-rl/sources/megatron-lm /src/Megatron-LM
 
@@ -30,7 +29,7 @@ COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
 COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles
 COPY README.md /opt/core-rl/README.md
-ENV PYTHONPATH=/opt/core-rl/sources/sglang/python:/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles:/opt/core-rl/sources/megatron-lm:/opt/core-rl/sources/megatron-bridge/src:/opt/core-rl/sources/olmo-megatron/src
+ENV PYTHONPATH=/opt/core-rl/sources/sglang/python:/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles:/opt/core-rl/sources/megatron-lm:/opt/core-rl/sources/megatron-bridge/src
 WORKDIR /opt/core-rl
 RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/sources/olmo-core/src/olmo_core /opt/core-rl/sources/miles/miles
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"

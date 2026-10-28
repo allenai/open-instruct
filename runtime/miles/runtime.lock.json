@@ -27,33 +27,8 @@
       "revision": "235952df607b3820716e5e67728a5ab470ca33ae"
     },
     "megatron-bridge": {
-      "repository": "https://github.com/allenai/olmo-megatron-bridge.git",
-      "revision": "db723bae699dae5d29003ec4789c67730a343c32",
-      "private": true
-    },
-    "olmo-megatron": {
-      "repository": "https://github.com/allenai/olmo-megatron.git",
-      "revision": "b84044ffb0d52620ec1599eda19d8f3d1de816b4",
-      "private": true
+      "repository": "https://github.com/radixark/Megatron-Bridge.git",
+      "revision": "8cd3466d14d2337c8492827b3712482c2b3e4866"
     }
-  },
-  "source_patches": [
-    {
-      "target": "megatron-lm",
-      "source": "olmo-megatron",
-      "files": [
-        "patches/megatron-core/0002-fix-dist-opt-handle-empty-and-unowned-buckets-in-dp_.patch",
-        "patches/megatron-core/0003-fix-dist-opt-skip-absent-all-padding-gbuf-state-on-l.patch",
-        "patches/megatron-core/0005-feat-moe-pad-DeepEP-V2-transport-width.patch",
-        "patches/megatron-core/0006-feat-moe-emit-aligned-DeepEP-V2-expert-inputs.patch",
-        "patches/megatron-core/0007-feat-moe-allow-scoped-DeepEP-V2-timeouts.patch",
-        "patches/megatron-core/0008-feat-moe-preserve-fp32-router-parameters.patch",
-        "patches/megatron-core/0010-fix-moe-use-uniform-DeepEP-V2-token-capacity.patch",
-        "patches/megatron-core/0011-fix-checkpoint-tolerate-absent-training-globals.patch"
-      ],
-      "exclude": [
-        "tests/*"
-      ]
-    }
-  ]
+  }
 }

@@ -1,4 +1,4 @@
-"""Materialize the runtime lock's source repositories and explicit patch sets.
+"""Materialize the runtime lock's source repositories at their exact Git commits.
 Image builds use these checkouts to install the selected MILES, Core and serving
 implementations, with optional local Git caches to reuse existing objects. The
 script prepares sources only; it neither installs packages nor modifies the cache
@@ -62,18 +62,6 @@ def prepare_source(name, source, target, *, cache=None, token_file=None):
     print(f"Prepared {name} at {source['revision']}")
 
 
-def apply_source_patches(destination, groups):
-    """Replay the lock's ordered patches without modifying their source checkout."""
-    for group in groups:
-        target = destination / group["target"]
-        excludes = [f"--exclude={pattern}" for pattern in group.get("exclude", [])]
-        for filename in group["files"]:
-            patch = (destination / group["source"] / filename).resolve()
-            run("git", "apply", "--check", *excludes, str(patch), cwd=target)
-            run("git", "apply", *excludes, str(patch), cwd=target)
-            print(f"Applied {group['source']}/{filename} to {group['target']}")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
@@ -88,7 +76,6 @@ def main():
         prepare_source(
             name, source, options.destination / name, cache=caches.get(name), token_file=options.github_token_file
         )
-    apply_source_patches(options.destination, lock.get("source_patches", []))
     (options.destination / "runtime.lock.json").write_text(json.dumps(lock, indent=2) + "\n")
 
 

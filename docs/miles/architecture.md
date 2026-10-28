@@ -50,12 +50,12 @@ Its package versions, CPU imports and source isolation were checked, and a pull
 by immutable ID reproduced the same Docker ID. GPU qualification of this base
 is pending; retain this migration as a draft until GPU lifecycle checks pass.
 
-The source layer now explicitly includes Megatron-LM, Megatron Bridge and
-olmo-megatron at the revisions previously packaged in the old base. The lock's
-ordered Megatron patches reproduce that image's patch set, excluding its test
-files as before. Package metadata and entrypoints are installed with `--no-deps`
-to preserve the binary stack. `/src/Megatron-LM` remains a compatibility symlink
-for the native OPD launcher.
+The source layer includes generic Megatron-LM and the public Radix Megatron
+Bridge revision selected by the pinned MILES Dockerfile, preserving Qwen OPD
+support. It does not install `olmo-megatron`, the private Olmo Bridge fork, or
+Olmo-specific Megatron patches; Olmo training uses the Core backend. Package
+metadata and entrypoints are installed with `--no-deps` to preserve the binary
+stack. `/src/Megatron-LM` remains a compatibility symlink for the OPD launcher.
 
 For ordinary application builds:
 
@@ -63,12 +63,9 @@ For ordinary application builds:
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
 
-The build needs read access to every repository in the runtime lock, including
-the private `allenai/olmo-megatron` and `allenai/olmo-megatron-bridge` repositories.
-`build_image.py` uses `GH_TOKEN`, `GITHUB_TOKEN`, or the active `gh auth login`
-credential, passed through a temporary BuildKit secret. It is not stored in image
-layers or Git URLs. For standalone source preparation, pass
-`--github-token-file PATH` or use `--cache olmo-sglang=/path/to/clone`.
+All repositories in the runtime lock are public; no GitHub credential is needed
+for these source fetches. Standalone source preparation can use
+`--cache olmo-sglang=/path/to/clone`.
 Existing published images retain their original sources; rebuild after changing
 the lock.
 
