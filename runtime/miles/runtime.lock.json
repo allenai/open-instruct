@@ -2,8 +2,8 @@
   "schema_version": 1,
   "status": "Pinned MILES/Core runtime with FP32 KDA cache snapshots and async-refresh validation; see docs/miles/throughput-profiles.md for measured scope",
   "base_image": {
-    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
-    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
+    "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
   },
   "sources": {
     "olmo-core": {
@@ -21,6 +21,39 @@
     "sglang": {
       "repository": "https://github.com/sgl-project/sglang.git",
       "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+    },
+    "megatron-lm": {
+      "repository": "https://github.com/NVIDIA/Megatron-LM.git",
+      "revision": "235952df607b3820716e5e67728a5ab470ca33ae"
+    },
+    "megatron-bridge": {
+      "repository": "https://github.com/allenai/olmo-megatron-bridge.git",
+      "revision": "db723bae699dae5d29003ec4789c67730a343c32",
+      "private": true
+    },
+    "olmo-megatron": {
+      "repository": "https://github.com/allenai/olmo-megatron.git",
+      "revision": "b84044ffb0d52620ec1599eda19d8f3d1de816b4",
+      "private": true
     }
-  }
+  },
+  "source_patches": [
+    {
+      "target": "megatron-lm",
+      "source": "olmo-megatron",
+      "files": [
+        "patches/megatron-core/0002-fix-dist-opt-handle-empty-and-unowned-buckets-in-dp_.patch",
+        "patches/megatron-core/0003-fix-dist-opt-skip-absent-all-padding-gbuf-state-on-l.patch",
+        "patches/megatron-core/0005-feat-moe-pad-DeepEP-V2-transport-width.patch",
+        "patches/megatron-core/0006-feat-moe-emit-aligned-DeepEP-V2-expert-inputs.patch",
+        "patches/megatron-core/0007-feat-moe-allow-scoped-DeepEP-V2-timeouts.patch",
+        "patches/megatron-core/0008-feat-moe-preserve-fp32-router-parameters.patch",
+        "patches/megatron-core/0010-fix-moe-use-uniform-DeepEP-V2-token-capacity.patch",
+        "patches/megatron-core/0011-fix-checkpoint-tolerate-absent-training-globals.patch"
+      ],
+      "exclude": [
+        "tests/*"
+      ]
+    }
+  ]
 }

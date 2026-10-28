@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "compiled_parent": {
+    "beaker": "01M5ZWQAAPWSXPJ8RR8HEYXQCJ",
+    "docker_id": "sha256:75d143ef1424837db51020c9ac806871d81d67ab095372ed906325f5e6a97871"
+  },
+  "flash_attention_builder": {
+    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+  }
+}
