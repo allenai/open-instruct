@@ -842,7 +842,7 @@ MILES integration question remains ACTIVE.
 
 ## GSM8K 500-update comparison of Core/vLLM and MILES
 
-Status: ACTIVE — preparation; GPU allocation pending approval.
+Status: ACTIVE — user approved only the two 450m stacks; 275m deferred; smoke queued.
 
 Do the two stacks show useful learning and acceptable throughput on the275m and
 450m final-midtrain releases? Four fresh runs use500 updates, eval/checkpoint
@@ -853,3 +853,28 @@ throughput, consumed policy age/stale drops, and checkpoint/restart behavior.
 The initial serving matrix qualifies the BF16 HF fallback, not the native RL path.
 
 See [the preparation batch](experiment.md#gsm8k-infrastructure-comparison-275m-and-450m-500-updates-2026-10-27).
+
+
+### 450m-first launch update (2026-10-27, queue refresh 2026-10-28 UTC)
+
+User narrowed the approved comparison to 450m: one two-A6000 MILES smoke,
+then two 500-update jobs, one learner plus one inference A6000 each (four peak),
+only after the smoke succeeds. All GPU jobs use ai2/rhea, normal/preemptible,
+minRuntime 0, budget ai2/oe-other and workspace ai2/open-instruct-dev.
+Main jobs retain auto-resume, three retries, 24h per attempt, BF16,
+max policy lag 1, eval/checkpoint every 100, and PPO clip lower0.2/upper0.272.
+275m configs are prepared but no new275m GPU runs are authorized by this batch.
+
+Smoke attempts:
+- [01M5ZFP2Z9D41ZFW6YW4AJR85C](https://beaker.org/ex/01M5ZFP2Z9D41ZFW6YW4AJR85C): stopped before training; hard-coded256GiB host RAM requested a third slot. Fixed configurable128GiB RAM/32GiB shm; later attempts acquired exactly two GPUs.
+- [01M5ZFZGNFPMQ8F3PPVXG3EACQ](https://beaker.org/ex/01M5ZFZGNFPMQ8F3PPVXG3EACQ): BF16 attention forward/backward passed; failed before training because Ray manager rendered ServerArgs before registering mainline_ladder. Fixed in pushed miles-olmo-core hybrid branch, commit a5ec0c61.
+- [01M5ZGAG9ZB0NSFGN1172QJCNB](https://beaker.org/ex/01M5ZGAG9ZB0NSFGN1172QJCNB): registration passed, but SGLang dtype=auto selected non-BF16; server rejected startup and controller waited until the one-hour timeout. Fixed explicit sglang_dtype=bfloat16 plus a600-second serving-startup deadline in companion commit3f0933565.
+- [01M608040GER8BMAC4E8DRQ7Q7](https://beaker.org/ex/01M608040GER8BMAC4E8DRQ7Q7): corrected BF16 smoke, currently queued because Rhea lacks two free slots. Image01M607Z48PYPNN0KHVZ5PGYJEG.
+
+Native MILES learning remains unvalidated. A one-time Hammond controller,
+`scripts/miles/hybrid_compare_450m.py` in the companion checkout, waits for this
+smoke and checks two completed updates, successful publication/evaluation,
+committed native checkpoints and final HF export before submitting the two main
+runs through build_image_and_launch.sh. It fails closed on missing evidence,
+worker failure or an interrupted submission. Durable controller status and launch
+receipts live in `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/compare-450m-controller-20261028`.
