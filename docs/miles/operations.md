@@ -171,7 +171,27 @@ refresh requests, router control and health requests, readiness, judge transport
 coordination, evaluation submission and cleanup. It does not multiply polling
 intervals, verifier execution budgets or the run duration. SGLang watchdog and
 trainer distributed deadlines remain explicit MILES run options. Longer waits preserve cancellation and hard
-deadlines; idempotent router readiness confirmation alone retries transport errors.
+deadlines.
+
+The Core driver's barrier/refresh publication keeps new or restored workers pending
+until weight transfer, diagnostic checks, and KV onload finish. Admission then
+confirms the router registration before rollouts or evaluation can start. This
+window does not cover the separate engine-drain initializer's diagnostics.
+The SGLang 0.3.2 adapter follows asynchronous registration to a settled AddWorker
+job and a healthy registry entry; HTTP 202 alone is not readiness. Known failed
+jobs and connection failures can be retried, with at most three attempts within
+a 180-second overall deadline (scaled by the infrastructure multiplier). An
+ambiguous/lost POST response is reconciled without submitting a duplicate job.
+
+Registration attempts remain owned until confirmed removal. Cancellation or
+failure triggers cleanup: wait for the submitted job to settle, delete the worker,
+and confirm registry removal. Cleanup has a separate 25-second scaled deadline;
+if its outcome is uncertain, the cell is retained and teardown reports failure
+so reconciliation cannot silently forget it or reuse its URL. Whole-run shutdown
+also terminates the owned routers. Already-serving SGLang workers retain the
+pause/drain path without re-registering. The native MILES router instead receives
+an idempotent readiness confirmation on each publication, after diagnostics.
+Worker replacement during validation rejects admission of the stale publication.
 
 | Symptom | Next check |
 |---|---|

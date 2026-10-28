@@ -458,6 +458,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         wiring=SimpleNamespace(launch_worker_manager=lambda *a, **kw: workers, shutdown_worker_manager=AsyncMock()),
     )
     module("miles.ray.rollout")
+    module("miles.ray.rollout.weight_admission", defer_weight_admission=lambda _: nullcontext())
     shared = Mock(side_effect=AssertionError("shared evaluator must not be constructed"))
     module("miles.ray.rollout.eval_dispatch", EvalDispatcher=shared)
     module("miles.utils", object_store=SimpleNamespace(init_instance=lambda *a, **kw: None))

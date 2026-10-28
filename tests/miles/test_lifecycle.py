@@ -31,8 +31,17 @@ def install_components(monkeypatch, manager):
     monkeypatch.setattr(driver.placement_group, "update_weights", update_weights)
     monkeypatch.setattr(driver.wiring, "shutdown_worker_manager", AsyncMock())
 
+    # Some cleanup-only fixtures intentionally do not record admission events.
+    async def begin_admission():
+        getattr(manager, "admission_events", []).append("admission-pending")
+
+    async def finish_admission(*, admit):
+        getattr(manager, "admission_events", []).append("admitted" if admit else "admission-aborted")
+
     async def create_components(args):
         inference = SimpleNamespace(
+            begin_weight_admission=begin_admission,
+            finish_weight_admission=finish_admission,
             check_weights=manager.check_weights if hasattr(manager, "check_weights") else AsyncMock(),
             prepare_rollout=AsyncMock(),
             dispose=AsyncMock(),
@@ -75,6 +84,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         events.append(name)
 
     manager = SimpleNamespace(
+        admission_events=events,
         check_weights=SimpleNamespace(remote=lambda **kwargs: event(kwargs["action"])),
         generate=SimpleNamespace(remote=lambda rollout_id: event("generated")),
         dispose=SimpleNamespace(remote=lambda: event("engines-disposed")),
@@ -165,7 +175,10 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         if name == "reset_tensors":
             assert events[index - 1 : index + 3] == ["snapshot", "reset_tensors", "published", "compare"]
             if fully_async:
-                assert events[index + 3] == "paused-False"
+                assert events[index + 3 : index + 5] == ["admitted", "paused-False"]
+    assert events.index("compare") < events.index("admitted") < events.index("generated")
+    if "evaluated" in events:
+        assert events.index("admitted") < events.index("evaluated")
     expected = ["close_weight_transport", "engines-disposed", "trainer-disposed"]
     if fully_async:
         expected.insert(0, "paused-True")
@@ -511,3 +524,57 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
     timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
     assert not any(row["stage"] == "checkpoint_drain" for row in timings)
     assert [row["passed"] for row in timings if row["stage"] == "checkpoint"] == [fail_at is None]
+
+
+@pytest.mark.parametrize("failure_stage", ["compare", "onload-kv"])
+def test_failed_publication_aborts_admission_before_async_production(monkeypatch, failure_stage):
+    events = []
+
+    async def event(name):
+        events.append(name)
+        if name == failure_stage:
+            raise ValueError("publication validation failed")
+
+    manager = SimpleNamespace(
+        admission_events=events,
+        check_weights=SimpleNamespace(remote=lambda **kwargs: event(kwargs["action"])),
+        core_publication_boundary=SimpleNamespace(remote=lambda paused: event(f"paused-{paused}")),
+        dispose=SimpleNamespace(remote=AsyncMock()),
+    )
+    install_components(monkeypatch, manager)
+    create_components = driver.placement_group.create_rollout_components
+
+    async def create(args):
+        inference, manager, count = await create_components(args)
+        inference.onload_weights = AsyncMock()
+        inference.onload_kv = lambda: event("onload-kv")
+        return inference, manager, count
+
+    learner = SimpleNamespace(update_weights=AsyncMock(), execute_workers=AsyncMock(), dispose=AsyncMock())
+    monkeypatch.setattr(driver.placement_group, "create_rollout_components", create)
+    monkeypatch.setattr(driver.placement_group, "create_training_models", AsyncMock(return_value=(learner, None)))
+    monkeypatch.setattr(driver.object_store, "init_instance", Mock())
+    monkeypatch.setattr(driver, "init_tracking", Mock())
+    monkeypatch.setattr(driver, "define_step_key_metric_group", Mock())
+    monkeypatch.setattr(driver, "finish_tracking", Mock())
+    monkeypatch.setattr(driver.wandb, "run", None)
+    monkeypatch.setattr(driver.startup_cache, "prepare", Mock())
+    monkeypatch.setattr(driver.startup_cache, "finish", AsyncMock())
+    monkeypatch.setattr(driver.throughput, "report", lambda *args: {"warnings": []})
+    args = SimpleNamespace(
+        olmo_core=CoreConfig(compiler_cache=False),
+        fully_async=True,
+        offload_rollout=True,
+        check_weight_update_equal=True,
+        check_weight_update_allow_quant_error=False,
+        check_weight_update_selector=None,
+        check_weight_update_skip_list=[],
+        start_rollout_id=0,
+        num_rollout=1,
+    )
+    with pytest.raises(ValueError, match="publication validation failed"):
+        asyncio.run(driver.train(args))
+    assert "admission-aborted" in events
+    assert "admitted" not in events
+    assert "paused-False" not in events
+    assert manager.get.await_count == 0
