@@ -34,36 +34,73 @@ The MILES pin includes the v0.1.2 async-consumer compatibility fix from
 Its refresh and engine-drain dequeues accept the native consumer's optional trainer
 identity and preserve Core's explicit rejection of multi-policy training.
 
-Working branches help development, but the lock/image determines a
-run. Source changes require a new application image; dependency/kernel changes may
-require a new, validated binary base. The Dockerfile separates a `runtime-base`
-stage (locked dependency sources and verifier packages) from `application`
-(Open Instruct, tests, scripts, configs and MILES docs). Build the former with
-`build_image.py --target runtime-base` to reuse the prepared layer. Ordinary builds
-select `application` and reuse that layer through Docker caching. The immutable
-binary base in the lock is unchanged; the prepared layer is not interchangeable
-with that pin. Image metadata records the application Git revision. Reusing an image does not apply local source edits.
+The binary base contains the compiled dependencies, including FA2, FA3 and FA4.
+It excludes the MILES, Core, SGLang and Open Instruct source overlays. Application
+builds add locked source repositories as `runtime-base`, then the committed Open
+Instruct checkout as `application`. They do not compile FlashAttention, even
+without a local Docker cache. Source-only lock changes rebuild source layers;
+binary dependency changes require a new base. Editable installs still fetch
+build-system dependencies such as setuptools and pybind11, and Megatron builds
+a small C++ dataset helper. Those build-tool requirements are not fully pinned;
+the source and base pins do not make application builds bit-for-bit reproducible.
 
-The main `runtime/miles/Dockerfile` adds FlashAttention 2 and 3 to the original
-binary base. Its separate `flash-attention-build` stage compiles FA3 from an
-immutable source commit against that base's Torch/CUDA libraries, and downloads
-checksum-verified FA2 and FA4 wheels. The runtime stage installs FA3 and FA2,
-then restores FA4's overlapping files. Source trees, compiler outputs and wheels
-stay in the build stage. A cold build needs network access and CUDA compilation
-time, but no GPU; Docker caches this work independently of application changes.
-FA3 compilation defaults to two jobs (`FLASH_ATTENTION_MAX_JOBS` build argument).
-Build-time imports check that the extensions load; submitted jobs run the GPU
-forward/backward preflight for the selected backend.
+The selected base is Beaker `01M5ZYQZVF7DDJ1VR619KRSS42`
+(`robertb/miles-binary-base-20261027`), Docker
+`sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354`.
+Its package versions, CPU imports and source isolation were checked, and a pull
+by immutable ID reproduced the same Docker ID. The
+[single-GPU Core RL smoke](https://beaker.org/ex/01M61Z3VBAD5219PHZX63YGDY7)
+passed on application image `01M61Z2XBQB6EP3SJNAX1YN0HV`: four optimizer updates,
+shared-engine evaluations, checkpoints and HF export on Holmes. This tiny-model
+check uses Torch attention; it does not qualify every FlashAttention backend or
+a Qwen OPD GPU training run with the public Megatron sources.
+The application image (`robertb/miles-main-smoke-5a7be0398`) was built from
+`5a7be0398e8244cd5376983427e57d4deeea2e39`, Docker
+`sha256:83cc907a035f98ba69d3b8b7eaaaaa7477d1c06c6efca39da4414ef174df3c67`,
+and includes the current public source lock and review cleanup.
+
+A CPU-only `runtime-base` rebuild from commit
+`3563eb52ac4b02d731786e8f1a4e39a52951f2a2` is published as Beaker image
+`01M61YFEWE1BATA8KQ4VAV2DY8` (`robertb/miles-runtime-base-3563eb52a`), Docker
+`sha256:f97469549508d2af9896161889cc45060c52ece5743ecfcbe937039d3043b784`.
+Its packaged lock matches the current lock, all six source checkouts match their
+pinned revisions without patches, and serving/attention CPU imports passed.
+This records CPU build verification of the runtime sources separately from the
+application-image GPU smoke above, which subsequently verified the same source lock.
+
+The source layer includes Megatron-LM from the Radix fork, pinned to
+`235952df607b3820716e5e67728a5ab470ca33ae` (the previous runtime's revision,
+including its Qwen3.5 FP32 optimizer fix), rather than the current `miles-main`
+tip used by the pinned MILES Dockerfile. Megatron Bridge uses the public Radix
+revision selected by that Dockerfile. These dependencies support Qwen OPD.
+The image does not install `olmo-megatron`, the private Olmo Bridge fork, or
+Olmo-specific Megatron patches; Olmo training uses the Core backend. Package
+metadata and entrypoints are installed with `--no-deps` to preserve the binary
+stack. `/src/Megatron-LM` remains a compatibility symlink for the OPD launcher.
+
+EOPD metadata transport is implemented in the pinned MILES source, without a
+local runtime patch. Open Instruct's `opd_hooks` stores teacher top-k values in
+`Sample.train_metadata`;
+[rollout conversion](https://github.com/allenai/miles-olmo-core/blob/296a1e80c9c726bc41a764ce7cfcab2c886da64a/miles/ray/rollout/train_data_conversion.py#L173-L174)
+copies those dictionaries into `train_data["metadata"]`, and the
+[Megatron training step](https://github.com/allenai/miles-olmo-core/blob/296a1e80c9c726bc41a764ce7cfcab2c886da64a/miles/backends/megatron_utils/model.py#L465-L496)
+requests `metadata` from `get_batch` for the custom loss. This training field is
+separate from the input dataset metadata selected by `--metadata-key`.
+
+For ordinary application builds:
 
 ```bash
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
 
-The build needs read access to the private `allenai/miles-olmo-core` and `allenai/olmo-sglang` repositories.
-`build_image.py` uses `GH_TOKEN`, `GITHUB_TOKEN`, or the active `gh auth login`
-credential, passed through a temporary BuildKit secret. It is not stored in image
-layers or Git URLs. For standalone source preparation, pass
-`--github-token-file PATH` or use `--cache olmo-sglang=/path/to/clone`.
+Use `--target runtime-base` to build only the locked dependency sources, without
+adding the Open Instruct application checkout. The default target is `application`.
+The image arguments are local Docker tags loaded on the build host; Beaker names
+and immutable IDs identify the images to pull before invoking the helper.
+
+All repositories in the runtime lock are public; no GitHub credential is needed
+for these source fetches. Standalone source preparation can use
+`--cache olmo-sglang=/path/to/clone`.
 Existing published images retain their original sources; rebuild after changing
 the lock.
 
@@ -72,6 +109,38 @@ arguments can use local clones as fetch sources; they do not select uncommitted
 sibling code. build_image checks the immutable base Docker ID. For actual
 submission use the [committed-image launcher](launching.md), not a one-off Beaker
 command with different mounts or source provenance.
+
+## Rebuilding the binary base
+
+The reproducible maintainer recipe is `runtime/miles/Dockerfile.base`; its two
+immutable inputs are recorded in `runtime/miles/base-build.lock.json`. Pull both
+Beaker images into Docker, then run:
+
+```bash
+python scripts/miles/build_base_image.py \
+  --compiled-parent LOCAL_COMPILED_PARENT \
+  --flash-attention-builder LOCAL_FA3_BUILDER \
+  --tag open-instruct:miles-binary-base
+```
+
+Both Docker IDs are verified, and the parent-image label comes from the same
+lock. The helper passes the compiler image as `FLASH_ATTENTION_BUILDER` and the
+runtime parent as `COMPILED_PARENT`. Only FA wheels are transferred from the compiler
+image to the clean compiled parent. FA2/FA4 wheel downloads are checksum-verified;
+the final stage resets inherited application metadata and entrypoints. This
+preserves the qualified CUDA/PyTorch stack rather than rebuilding all dependencies
+from an upstream CUDA distribution. Build on an amd64 Linux host: FA3 compilation
+defaults to two jobs, with `--max-jobs` available for hosts with sufficient RAM.
+The published base's FA3 build took about 31 minutes with eight jobs.
+
+The final environment list was compared with the locked compiled parent. It
+preserves its runtime settings while dropping legacy `OLMO_MILES_*` cache and
+verifier paths. Recheck this list against the parent image whenever changing the
+parent pin; `FROM scratch` does not inherit environment variables automatically.
+
+Before changing the pin again, verify CPU imports, an application build and GPU
+forward/backward and training on the intended hardware. CPU imports alone do not
+establish GPU correctness.
 
 ## Local development
 

@@ -91,7 +91,8 @@ python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 The builder checks the loaded Docker image ID against the lock, builds the source
-overlay, uploads it to Beaker, then submits. It reuses a matching image when one
+overlay, uploads it to Beaker, then submits. The base already contains FA2, FA3
+and FA4; this path does not compile attention kernels. It reuses a matching image when one
 already exists for the commit. This is not an automatic blessed-image resolver.
 Do not use the general Open Instruct/vLLM auto image for MILES.
 

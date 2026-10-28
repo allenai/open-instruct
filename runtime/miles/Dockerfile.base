@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1
+# Keep the qualified binary toolchain and build kernels before copying application sources.
+ARG FLASH_ATTENTION_BUILDER=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks
+ARG COMPILED_PARENT=olmo-miles-runtime:20260909-torch213-cu130-sglang3145136-gcready
+FROM ${FLASH_ATTENTION_BUILDER} AS flash-attention-build
+# Compile FA3 against the base's Torch/CUDA ABI. No GPU is needed; limit compiler
+# parallelism so a cold build does not exhaust the build host's memory.
+ARG FLASH_ATTENTION_MAX_JOBS=2
+WORKDIR /tmp/flash-attention
+RUN git init . \
+ && git remote add origin https://github.com/Dao-AILab/flash-attention.git \
+ && git fetch --depth=1 origin 1fc0221183e799363001394a12dd9e78e15f5dda \
+ && git checkout --detach FETCH_HEAD \
+ && git submodule update --init csrc/cutlass \
+ && cd hopper \
+ && FLASH_ATTENTION_FORCE_BUILD=TRUE FLASH_ATTENTION_SKIP_CUDA_BUILD=FALSE \
+    FLASH_ATTENTION_DISABLE_FP8=TRUE FLASH_ATTENTION_DISABLE_SM80=TRUE \
+    MAX_JOBS=${FLASH_ATTENTION_MAX_JOBS} NVCC_THREADS=2 \
+    python setup.py bdist_wheel --dist-dir /wheels
+# FA2 is prebuilt for Python 3.12 / Torch 2.13 / CUDA 13.0. FA4 must be
+# reinstalled after FA2, which also ships files under flash_attn/cute.
+ADD --checksum=sha256:ab12a5b17f33f0d3381044f70006fa5891ec18404b412cc3a7517e5f2315534e \
+    https://wheels.astral.sh/artifacts/ab12a5b17f33f0d3381044f70006fa5891ec18404b412cc3a7517e5f2315534e/flash_attn-2.8.3.post1+cu.13.0.torch.2.13-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl /wheels/
+ADD --checksum=sha256:c84fedab172419f87bd1daf019ecd268595f512a5967ff90b74a0a601f578e07 \
+    https://files.pythonhosted.org/packages/73/b3/85de5e9e393f5fc8a83c27258ba21c683c396c5ad79f15713283a801407b/flash_attn_4-4.0.0b27-py3-none-any.whl /wheels/
+
+FROM ${COMPILED_PARENT} AS dependencies
+RUN --mount=type=bind,from=flash-attention-build,source=/wheels,target=/tmp/flash-attention-wheels \
+    uv pip install --system --no-deps /tmp/flash-attention-wheels/flash_attn_3-*.whl \
+ && uv pip install --system --no-deps /tmp/flash-attention-wheels/flash_attn-2.8.3.post1*.whl \
+ && uv pip install --system --no-deps --reinstall /tmp/flash-attention-wheels/flash_attn_4-4.0.0b27-*.whl
+# Importing the extensions catches missing libraries and Torch ABI mismatches
+# without requiring a GPU; each submitted job also checks forward/backward passes.
+RUN python -c "import flash_attn; import flash_attn_2_cuda; import flash_attn_interface; import flash_attn_3; import flash_attn.cute"
+# Serving dependencies for the locked Miles/SGLang revisions.
+# CUDA dependencies are supplied by the digest-pinned base; preserve that stack.
+# The router release reuses version 0.3.2; pin its wheel bytes as well.
+RUN uv pip install --system --no-deps --extra-index-url https://flashinfer.ai/whl \
+    "sglang-kernel==0.4.7" "flashinfer-python[cu13]==0.6.18" "flashinfer-cubin==0.6.18" \
+    "sglang-router @ https://github.com/radixark/miles-wheels/releases/download/cu130-torch213-x86_64/sglang_router-0.3.2-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=28fede513319fcff4a38e5d859589498799c2e2861cc25d78ed371b3aaf3d192"
+COPY runtime/miles/verifier-requirements.txt /opt/core-rl/build/runtime/miles/verifier-requirements.txt
+RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt
+RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
+ENV OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps
+# Megatron OPD conversion uses this immutable mbridge revision.
+RUN uv pip install --system --no-deps \
+    "mbridge @ git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c" \
+    "nvidia-cudnn-cu13==9.23.2.1"
+ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
+ENV CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
+# Align the remaining serving requirements with the pinned SGLang source.
+RUN uv pip install --system --no-deps \
+    "apache-tvm-ffi==0.1.11" "humming-kernels[cu13]==0.1.12" "nvshmem4py-cu13==0.4.1" "Cython==3.3.0" \
+    "sentencepiece==0.2.1" "sgl-deep-ep==0.1.2" "sgl-deep-gemm==0.2.0" \
+    "smg-grpc-servicer==0.9.0" "tilelang==0.1.12" "xgrammar==0.2.7"
+
+RUN uv pip install --system --no-deps beaker-py==2.5.7 \
+ && uv pip uninstall --system sglang \
+ && rm -rf /sgl-workspace/sglang /root/.ssh /root/.cache /root/.config /root/.tilelang /root/.cupy /tmp/* \
+ && python -c "import torch, flash_attn_2_cuda, flash_attn_interface, flash_attn_3, flash_attn.cute; from beaker import Beaker"
+
+# Reset source-specific metadata and entrypoints inherited from the old runtime.
+FROM scratch AS binary-base
+ARG COMPILED_PARENT_DIGEST
+COPY --from=dependencies / /
+RUN test -n "$COMPILED_PARENT_DIGEST"
+# Compared with the locked parent: preserve its runtime variables, excluding
+# legacy OLMO_MILES_COMPILE_CACHE_* and OLMO_MILES_{IFEVAL,MATH}_PYTHON settings.
+# Recheck this list against docker inspect whenever the compiled parent changes.
+ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    CUDA_HOME=/usr/local/cuda \
+    LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/lib/python3.12/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib:/usr/local/cuda/lib64 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    TORCH_CUDA_ARCH_LIST=10.3a \
+    DG_JIT_CPP_STANDARD=20 \
+    CUDA_DEVICE_MAX_CONNECTIONS=1 \
+    UV_BREAK_SYSTEM_PACKAGES=1 \
+    NLTK_DATA=/opt/olmo-miles/nltk-data \
+    OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps \
+    CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn \
+    CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
+LABEL org.opencontainers.image.title="MILES compiled dependency base" \
+    org.opencontainers.image.description="Torch 2.13 CUDA 13; FA2, FA3, FA4; no MILES, Core, SGLang or Open Instruct source overlay" \
+    ai2.miles.base.parent="${COMPILED_PARENT_DIGEST}" \
+    ai2.miles.base.fa3.revision="1fc0221183e799363001394a12dd9e78e15f5dda"
+WORKDIR /opt/core-rl
+CMD ["/bin/bash"]
