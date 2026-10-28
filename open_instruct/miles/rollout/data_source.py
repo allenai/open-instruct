@@ -21,6 +21,9 @@ for dashboard telemetry to drain before the rollout actor shuts down.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import math
 import os
 import tempfile
 import threading
@@ -35,7 +38,7 @@ from miles.utils.types import Sample
 
 from miles.rollout.data_source import RolloutDataSourceWithBuffer
 from open_instruct import logger_utils
-from open_instruct.miles.datasets import record_selection
+from open_instruct.miles.datasets import ads, record_selection
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -64,6 +67,20 @@ class DashboardDrainingRolloutDataSource:
         self._collect_dashboard = bool(getattr(args, "use_miles_dashboard", False))
         core = getattr(args, "olmo_core", None)
         self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
+        self._ads = None
+        if getattr(core, "ads_table", None):
+            raw = Path(core.ads_table).read_bytes()
+            if hashlib.sha256(raw).hexdigest() != core.ads_sha256:
+                raise ValueError("ADS table digest mismatch")
+            table = [json.loads(line) for line in raw.splitlines()]
+            self._ads = ads.Schedule(
+                table, seed=args.rollout_seed, mini_size=core.ads_mini_size, active_clusters=core.ads_active_clusters
+            )
+            self._ads_samples = {self._ads_identity(sample): sample for sample in self._delegate.dataset.samples}
+            if len(self._ads_samples) != len(self._delegate.dataset.samples) or set(self._ads_samples) != set(
+                self._ads.lookup
+            ):
+                raise ValueError("ADS table must cover exactly the unfiltered training pool")
         self._opener_seeds = tuple(getattr(core, "opener_seeds", ()) or ())
         self._opener_seeds_per_group = getattr(core, "opener_seeds_per_group", 0)
 
@@ -74,7 +91,9 @@ class DashboardDrainingRolloutDataSource:
     def get_samples(self, num_samples: int) -> Any:
         """Return samples from the underlying MILES data source."""
         with self._cursor_lock:
-            if self._selection is None:
+            if self._ads is not None:
+                groups = self._take_ads(num_samples)
+            elif self._selection is None:
                 groups = self._delegate.get_samples(num_samples)
             else:
                 # Skipped prompts never enter the restart ledger; the saved cursor moves past
@@ -90,6 +109,48 @@ class DashboardDrainingRolloutDataSource:
                 if identity not in self._pending_groups:
                     self._pending_groups[identity] = copy.deepcopy(group)
             return groups
+
+    @staticmethod
+    def _ads_identity(sample):
+        meta = sample.metadata
+        return f"{meta['prepared_sample_id']}:{meta['prompt_format']}"
+
+    def _take_ads(self, count):
+        delegate = self._delegate
+        groups = delegate._get_samples_from_buffer(count)
+        for _ in range(count - len(groups)):
+            identity, round_id, epoch = self._ads.take()
+            group = []
+            for _ in range(delegate.args.n_samples_per_prompt):
+                sample = copy.deepcopy(self._ads_samples[identity])
+                sample.group_index, sample.index = delegate.sample_group_index, delegate.sample_index
+                sample.metadata = {
+                    **sample.metadata,
+                    "ads": {"round": round_id, "epoch": epoch, "cluster": self._ads.lookup[identity]},
+                }
+                delegate.sample_index += 1
+                group.append(sample)
+            delegate.sample_group_index += 1
+            delegate.sample_offset += 1
+            groups.append(group)
+        delegate.epoch_id = self._ads.epoch
+        return groups
+
+    def observe_ads(self, group):
+        """Consume complete binary reward groups once, including zero-variance groups."""
+        with self._cursor_lock:
+            identity = group[0].group_index
+            pending = self._pending_groups[identity]
+            if pending[0].metadata.get("ads_feedback_seen"):
+                return
+            rewards = [sample.get_reward_value(self._delegate.args) for sample in group]
+            if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r not in (0, 1) for r in rewards):
+                raise ValueError("ADS pilot requires complete binary rewards")
+            self._ads.observe(
+                self._ads_identity(group[0]), group[0].metadata["ads"]["round"], sum(rewards) / len(rewards)
+            )
+            for sample in pending:
+                sample.metadata["ads_feedback_seen"] = True
 
     def _seed_openers(self, groups: Any) -> None:
         """Request opening text for the first samples of each new group.
@@ -219,6 +280,8 @@ class DashboardDrainingRolloutDataSource:
                 key: getattr(delegate, key)
                 for key in ("sample_offset", "epoch_id", "sample_group_index", "sample_index", "metadata")
             }
+            if self._ads is not None:
+                state["ads"] = self._ads.state_dict()
             if not self._fully_async:
                 self._pending_groups = self._sync_buffered_groups()
             key = "olmo_async_pending" if self._fully_async else "olmo_sync_pending"
@@ -258,6 +321,10 @@ class DashboardDrainingRolloutDataSource:
                 return
 
             state = torch.load(path, map_location="cpu", weights_only=True)
+            if self._ads is not None:
+                if "ads" not in state:
+                    raise ValueError("ADS resume checkpoint lacks sampler state")
+                self._ads.load_state_dict(state["ads"])
             key = f"olmo_{mode}_pending"
             if not self._fully_async and key not in state:
                 logger.warning(

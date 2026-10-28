@@ -37,5 +37,7 @@ def load_core_args(extra_args_provider):
             if core.publication_mode == "refresh"
             else "miles.backends.core_utils.rollout.async_buffer.HomogeneousPolicyDataBuffer"
         )
+    if core.ads_table:
+        args.custom_async_data_buffer_path = "open_instruct.miles.rollout.ads_buffer.ADSRefreshBuffer"
     args.data_source_path = "open_instruct.miles.rollout.data_source.DashboardDrainingRolloutDataSource"
     return args

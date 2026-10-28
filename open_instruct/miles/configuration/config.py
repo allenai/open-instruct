@@ -97,6 +97,10 @@ class CoreConfig:
     records_responses: str = "off"
     records_response_sample_rate: float | None = None
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
+    ads_table: str | None = None
+    ads_sha256: str | None = None
+    ads_mini_size: int = 8
+    ads_active_clusters: int = 4
     selection_table: str | None = None
     selection_sha256: str | None = None
     # Opening response text assigned to the first opener_seeds_per_group samples of
@@ -414,6 +418,18 @@ class RunConfig:
             raise constraints.error(
                 "core.records_root (records.enabled) requires fully_async=true; synchronous runs record nothing"
             )
+        if (self.core.ads_table is None) != (self.core.ads_sha256 is None):
+            raise constraints.error("core.ads_table and core.ads_sha256 must be supplied together")
+        if self.core.ads_table:
+            if not Path(self.core.ads_table).is_absolute() or not re.fullmatch(r"[0-9a-f]{64}", self.core.ads_sha256):
+                raise constraints.error("ADS requires an absolute table path and SHA-256")
+            if self.core.selection_table or not options.get("fully_async") or self.core.publication_mode != "refresh":
+                raise constraints.error("ADS pilot requires fully async refresh without a frozen exclusion table")
+            if options.get("async_unused_samples_handler") != "retry":
+                raise constraints.error("ADS pilot requires retry handling for unconsumed groups")
+            for value in (self.core.ads_mini_size, self.core.ads_active_clusters):
+                if type(value) is not int or value < 1:
+                    raise constraints.error("ADS mini size and active cluster count must be positive integers")
         prompt_limit = options.get("rollout_max_prompt_len")
         context_limit = options.get("rollout_max_context_len")
         if prompt_limit is not None and context_limit is not None and prompt_limit >= context_limit:
