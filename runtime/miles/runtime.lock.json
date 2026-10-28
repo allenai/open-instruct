@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "status": "Pinned MILES/Core runtime with FP32 KDA cache snapshots and async-refresh validation; see docs/miles/throughput-profiles.md for measured scope",
+  "base_image": {
+    "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
+    "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
+  },
+  "sources": {
+    "olmo-core": {
+      "repository": "https://github.com/allenai/Olmo-core.git",
+      "revision": "6ceda6530625caa5d23e3be8a455c600f62a7338"
+    },
+    "miles": {
+      "repository": "https://github.com/allenai/miles-olmo-core.git",
+      "revision": "296a1e80c9c726bc41a764ce7cfcab2c886da64a"
+    },
+    "olmo-sglang": {
+      "repository": "https://github.com/allenai/olmo-sglang.git",
+      "revision": "d05d6e2cd5aea5977f32b9cde7becd04652f296d"
+    },
+    "sglang": {
+      "repository": "https://github.com/sgl-project/sglang.git",
+      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+    },
+    "megatron-lm": {
+      "repository": "https://github.com/radixark/Megatron-LM.git",
+      "revision": "235952df607b3820716e5e67728a5ab470ca33ae"
+    },
+    "megatron-bridge": {
+      "repository": "https://github.com/radixark/Megatron-Bridge.git",
+      "revision": "8cd3466d14d2337c8492827b3712482c2b3e4866"
+    }
+  }
+}

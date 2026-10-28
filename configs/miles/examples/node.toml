@@ -1,0 +1,123 @@
+# Single B300 node: 2 trainer GPUs (EP2), 6 inference engines; no judge.
+# Before setting up a run, review configuration options and defaults:
+# https://allenai.github.io/open-instruct/miles/configuration/
+# Setup and workload requirements: configs/miles/examples/README.md
+# Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
+schema_version = 1
+name = "node"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/checkpoints/policy-hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/node"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "4h"
+timeout = "48h"
+auto_resume = true
+gpus_per_replica = 8
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[launch.env]
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+OI_MILES_CODE_FAILURE_POLICY = "zero"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+[launch.secrets]
+BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+
+# Prepared math, instruction-following and code data; no judge-dependent verifiers.
+[data]
+prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/train.jsonl"
+reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
+
+[training]
+num_rollouts = 200
+save_interval = 25
+
+[evaluation]
+mode = "background"
+interval = 50
+initial = true
+final = true
+# Evaluator image with the inline olmo-eval SGLang provider.
+image = "01M5ZGD5K01GNW3ASDPNXXPEJ3"
+revision = "3536fe751e40162cc33d5e647085e986375aadce"
+gpus = 1 # Additional allocation per task group, outside the 8-GPU training layout.
+cluster = "ai2/holmes"
+submit_timeout = 30
+timeout = "3h"
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
+
+[[evaluation.tasks]]
+task = "gsm8k"
+# Independent 8K evaluation budget; training still uses 32K responses.
+# Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "gsm8k:platinum"
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "ifeval_ood" # IFBench; distinct from IFEval.
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128 }
+
+[trainer]
+gpus = 2
+expert_parallel_size = 2
+sequence_packing = true
+packing_max_tokens = 34816
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 6
+rollout_batch_size = 64
+samples_per_prompt = 4
+max_response_length = 32768
+max_context_length = 34816
+# Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
+# Presets apply whole. To tune their settings, select generic and copy the preset block.
+profile = "olmo35-b300-v1"
+
+[tracking]
+wandb_mode = "offline"
+wandb_team = "ai2-llm"
+wandb_project = "open-instruct-miles"
+wandb_group = "node"
+
+[core]
+checkpoint_keep_last = 2
+publication_mode = "refresh"
+engine_drain_timeout = 900.0
+pipeline_observation_interval = 2.0
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+scoring_check_interval = 0
+
+[miles]
+sglang_enable_metrics = true
+use_rollout_routing_replay = true
+
+[async]
+fully_async = true
+# Bound unfinished samples independently of the six engines' reserved capacity.
+# Compare trainer wait and stale-work discards before increasing this budget.
+async_max_concurrent_samples = 1024
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

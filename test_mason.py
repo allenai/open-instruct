@@ -1,6 +1,8 @@
+import argparse
 import io
 import shlex
 import subprocess
+import sys
 import unittest
 from argparse import Namespace
 from unittest import mock
@@ -200,6 +202,8 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "hostname": None,
                     "preemptible": False,
+                    "min_runtime": None,
+                    "auto_resume": False,
                     "mount_docker_socket": False,
                     "extra_weka_buckets": [],
                 },
@@ -225,6 +229,8 @@ class TestExperimentSpec(unittest.TestCase):
                     "shared_memory": "10.24gb",
                     "task_name": "beaker_mason",
                     "preemptible": True,
+                    "min_runtime": None,
+                    "auto_resume": False,
                     "hostname": None,
                     "mount_docker_socket": False,
                     "extra_weka_buckets": [],
@@ -278,6 +284,208 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
+
+
+class TestMakeTaskContext(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("protected_default", False, None, False, {"priority": "normal", "preemptible": False}),
+            ("preemptible", True, None, False, {"priority": "normal", "preemptible": True}),
+            (
+                "allocated",
+                False,
+                "2h",
+                True,
+                {"priority": "normal", "minRuntime": 2 * 60 * 60 * 1_000_000_000, "autoResume": True},
+            ),
+            ("unallocated", False, "0", False, {"priority": "normal", "minRuntime": 0, "autoResume": False}),
+        ]
+    )
+    def test_context_json(self, name, preemptible, min_runtime, auto_resume, expected_json):
+        args = Namespace(priority="normal", preemptible=preemptible, min_runtime=min_runtime, auto_resume=auto_resume)
+        self.assertEqual(mason.make_task_context(args).to_json(), expected_json)
+
+
+class TestParseMinRuntime(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("zero", "0"),
+            ("lower_bound", "5m"),
+            ("hours", "2h30m"),
+            ("usual_upper_bound", "8h"),
+            ("above_usual_upper_bound", "9h"),
+            ("seconds_with_unit", "3600s"),
+        ]
+    )
+    def test_valid(self, name, value):
+        self.assertEqual(mason.parse_min_runtime(value), value)
+
+    @parameterized.parameterized.expand([("plus_zero", "+0"), ("minus_zero", "-0"), ("zero_seconds", "0s")])
+    def test_zero_spellings_normalize(self, name, value):
+        self.assertEqual(mason.parse_min_runtime(value), "0")
+
+    @parameterized.parameterized.expand(
+        [
+            ("below_lower_bound", "4m"),
+            ("bare_number", "3600"),
+            ("bare_decimal", "1.5"),
+            ("decimal_zero", "0.0"),
+            # On the CLI, argparse only hands this to the validator as --min_runtime=-5m (see test_rejects).
+            ("negative", "-5m"),
+            ("not_a_duration", "soon"),
+        ]
+    )
+    def test_invalid(self, name, value):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            mason.parse_min_runtime(value)
+
+
+class TestGetArgsMinRuntime(unittest.TestCase):
+    def _get_args(self, *mason_args, command=("echo", "hello")):
+        argv = ["mason.py", "--cluster", "ai2/jupiter", *mason_args, "--", *command]
+        with mock.patch.object(sys, "argv", argv):
+            return mason.get_args()
+
+    def test_zero_spelling_reaches_task_context_as_zero(self):
+        args, _ = self._get_args("--min_runtime", "0s", "--auto_resume")
+        self.assertEqual(
+            mason.make_task_context(args).to_json(), {"priority": "normal", "minRuntime": 0, "autoResume": True}
+        )
+
+    def _warnings(self, *mason_args, command=("echo", "hello")):
+        with mock.patch.object(mason.console, "log") as log:
+            self._get_args(*mason_args, command=command)
+        return " ".join(str(call.args[0]) for call in log.call_args_list)
+
+    def test_min_runtime_and_auto_resume(self):
+        args, _ = self._get_args("--min_runtime", "30m", "--auto_resume")
+        self.assertEqual(args.min_runtime, "30m")
+        self.assertTrue(args.auto_resume)
+        self.assertFalse(args.preemptible)
+
+    @parameterized.parameterized.expand(
+        [
+            ("min_runtime_with_preemptible", ["--min_runtime", "30m", "--preemptible"]),
+            ("auto_resume_without_min_runtime", ["--auto_resume"]),
+            ("min_runtime_below_lower_bound", ["--min_runtime", "4m"]),
+            ("negative_min_runtime", ["--min_runtime=-5m"]),
+        ]
+    )
+    def test_rejects(self, name, mason_args):
+        with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
+            self._get_args(*mason_args)
+
+    def test_rejects_auto_resume_with_preemptible(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr, self.assertRaises(SystemExit):
+            self._get_args("--preemptible", "--auto_resume")
+        self.assertIn("--preemptible, which already auto-resumes", stderr.getvalue())
+
+    @parameterized.parameterized.expand(
+        [
+            ("above_usual_upper_bound", ["--min_runtime", "9h", "--auto_resume"], "8h maximum"),
+            ("zero_without_auto_resume", ["--min_runtime", "0"], "not requeued"),
+            ("auto_resume_without_resumable_command", ["--min_runtime", "2h", "--auto_resume"], "restarts it"),
+            ("allocated_without_auto_resume", ["--min_runtime", "1h"], "does not requeue"),
+            ("timeout_beyond_min_runtime", ["--min_runtime", "1h", "--timeout", "6h"], "does not requeue"),
+            ("zero_timeout_means_none", ["--min_runtime", "1h", "--timeout", "0"], "does not requeue"),
+        ]
+    )
+    def test_warns(self, name, mason_args, expected):
+        self.assertIn(expected, self._warnings(*mason_args))
+
+    @parameterized.parameterized.expand(
+        [
+            ("allocated", ["--min_runtime", "2h", "--auto_resume"]),
+            ("zero_with_auto_resume", ["--min_runtime", "0", "--auto_resume"]),
+            ("timeout_within_min_runtime", ["--min_runtime", "2h", "--timeout", "1h"]),
+            ("timeout_equal_to_min_runtime", ["--min_runtime", "2h", "--timeout", "2h"]),
+            ("unparsable_timeout_left_to_beaker", ["--min_runtime", "2h", "--timeout", "soon"]),
+        ]
+    )
+    def test_does_not_warn(self, name, mason_args):
+        warnings = self._warnings(*mason_args)
+        self.assertNotIn("8h maximum", warnings)
+        self.assertNotIn("not requeued", warnings)
+        self.assertNotIn("does not requeue", warnings)
+
+    def test_auto_resume_with_non_resumable_flag_warns(self):
+        command = ("python", "open_instruct/grpo_fast.py")
+        warnings = self._warnings("--min_runtime", "2h", "--auto_resume", "--non_resumable", command=command)
+        self.assertIn("restarts it", warnings)
+
+    def test_auto_resume_replaces_generic_non_resumable_log(self):
+        warnings = self._warnings("--min_runtime", "2h", "--auto_resume")
+        self.assertNotIn("OPEN_INSTRUCT_RESUMABLES", warnings)
+
+    def test_auto_resume_with_resumable_command_does_not_warn(self):
+        command = ("python", "open_instruct/grpo_fast.py")
+        warnings = self._warnings("--min_runtime", "2h", "--auto_resume", command=command)
+        self.assertNotIn("restarts it", warnings)
+
+
+MASON_DEFAULT_NAMES = [
+    *mason.DEFAULT_ENV_VARS,
+    "HF_TOKEN",
+    "PATH",
+    "HF_HOME",
+    "HF_DATASETS_CACHE",
+    "HF_HUB_CACHE",
+    "CHECKPOINT_OUTPUT_DIR",
+    "NCCL_SOCKET_IFNAME",
+    "NCCL_IB_HCA",
+    "WANDB_RUN_ID",
+    "WANDB_RESUME",
+]
+
+
+class TestGetEnvVars(unittest.TestCase):
+    def _env(self, env=(), secrets=()):
+        env_vars = mason.get_env_vars(False, ["ai2/jupiter"], ["me_HF_TOKEN"], "me", True, 2, list(env), list(secrets))
+        return [(env_var.name, env_var.value, env_var.secret) for env_var in env_vars]
+
+    def _named(self, env_vars, name):
+        return [env_var for env_var in env_vars if env_var[0] == name]
+
+    def test_mason_defaults_are_set_once_without_overrides(self):
+        env_vars = self._env()
+        for name in MASON_DEFAULT_NAMES:
+            self.assertEqual(len(self._named(env_vars, name)), 1, name)
+
+    @parameterized.parameterized.expand([(name,) for name in MASON_DEFAULT_NAMES])
+    def test_explicit_env_replaces_default(self, name):
+        env_vars = self._env(env=[{"name": name, "value": "/explicit"}])
+        self.assertEqual(self._named(env_vars, name), [(name, "/explicit", None)])
+
+    @parameterized.parameterized.expand([(name,) for name in MASON_DEFAULT_NAMES])
+    def test_explicit_secret_replaces_default(self, name):
+        env_vars = self._env(secrets=[{"name": name, "value": "my_secret"}])
+        self.assertEqual(self._named(env_vars, name), [(name, None, "my_secret")])
+
+    def test_explicit_secret_is_kept_beside_unrelated_env(self):
+        env_vars = self._env(env=[{"name": "FOO", "value": "1"}], secrets=[{"name": "BAR", "value": "bar_secret"}])
+        self.assertEqual(self._named(env_vars, "FOO"), [("FOO", "1", None)])
+        self.assertEqual(self._named(env_vars, "BAR"), [("BAR", None, "bar_secret")])
+
+    @parameterized.parameterized.expand(
+        [
+            ("env_first", ["--env", "HF_TOKEN=plain", "--secret", "HF_TOKEN=x"]),
+            ("secret_first", ["--secret", "HF_TOKEN=x", "--env", "HF_TOKEN=plain"]),
+        ]
+    )
+    def test_same_name_as_env_and_secret_raises(self, _, flags):
+        argv = ["mason.py", "--cluster", "ai2/jupiter", "--image", "img", *flags, "--", "echo", "hi"]
+        with mock.patch("sys.argv", argv):
+            args, _ = mason.get_args()
+        with self.assertRaisesRegex(ValueError, "HF_TOKEN"):
+            self._env(env=args.env, secrets=args.secret)
+
+    def test_repeated_env_name_keeps_both_in_order(self):
+        env_vars = self._env(env=[{"name": "HF_HOME", "value": "/a"}, {"name": "HF_HOME", "value": "/b"}])
+        self.assertEqual(self._named(env_vars, "HF_HOME"), [("HF_HOME", "/a", None), ("HF_HOME", "/b", None)])
+
+    def test_empty_env_value_replaces_default(self):
+        env_vars = self._env(env=[mason.parse_env_var("HF_HOME=")])
+        self.assertEqual(self._named(env_vars, "HF_HOME"), [("HF_HOME", "", None)])
 
 
 class TestGetDatasets(unittest.TestCase):
