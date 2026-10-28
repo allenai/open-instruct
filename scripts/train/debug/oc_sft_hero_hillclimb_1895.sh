@@ -52,8 +52,8 @@ case "$ARM" in
             # H134: Dolci-Think with one set of math rows removed. targeted drops the
             # rows Kimi K3 judges contradictory; random drops an equal-character draw
             # from the same screened pool. Same recipe as olmo35, only the data differs.
-            olmo35-h134-targeted) FULL_MIXER="allenai/Dolci-Think-SFT-H134-Targeted 1.0" ;;
-            olmo35-h134-random) FULL_MIXER="allenai/Dolci-Think-SFT-H134-Random 1.0" ;;
+            olmo35-h134-targeted) FULL_MIXER="allenai/Dolci-Think-SFT-H145-Targeted 1.0" ;;
+            olmo35-h134-random) FULL_MIXER="allenai/Dolci-Think-SFT-H145-Random 1.0" ;;
         esac
         export FULL_MIXER
         export PROBE_MIXER="$FULL_MIXER"
