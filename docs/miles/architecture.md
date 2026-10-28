@@ -24,9 +24,7 @@ path. [Implementation contracts](core.md) describe the detailed lifecycle and
 
 [`runtime/miles/runtime.lock.json`](../../runtime/miles/runtime.lock.json) is the
 source of truth for exact dependency commits and the immutable binary base.
-Builds fetch those commits without moving branch tips. The explicit
-`source_patches` list replays the ordered Megatron patches previously inherited
-from the old image; its patch repository is also pinned. MILES uses the
+Builds fetch those commits without patches or moving branch tips. MILES uses the
 organized adapter hooks; OLMo-core provides the model, objective and checkpoint
 APIs required by this adapter; olmo-sglang supplies compatible serving models.
 The ordinary Open Instruct environment keeps its own dependency versions.
@@ -47,8 +45,11 @@ The selected base is Beaker `01M5ZYQZVF7DDJ1VR619KRSS42`
 (`robertb/miles-binary-base-20261027`), Docker
 `sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354`.
 Its package versions, CPU imports and source isolation were checked, and a pull
-by immutable ID reproduced the same Docker ID. GPU qualification of this base
-is pending; retain this migration as a draft until GPU lifecycle checks pass.
+by immutable ID reproduced the same Docker ID. The [single-GPU Core RL smoke](https://beaker.org/ex/01M61SA3GN3AKJA5KDD90J3JJA)
+passed on application image `01M61RPR1SVAACNX7AAVH2ENYJ`: four optimizer updates,
+shared-engine evaluations, checkpoints and HF export on Holmes. This tiny-model
+check uses Torch attention; it does not qualify every FlashAttention backend or
+a Qwen OPD GPU training run with the public Megatron sources.
 
 The source layer includes generic Megatron-LM and the public Radix Megatron
 Bridge revision selected by the pinned MILES Dockerfile, preserving Qwen OPD
