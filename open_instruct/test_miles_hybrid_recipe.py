@@ -17,6 +17,7 @@ def test_hybrid_recipe_precision_topology_and_checkpointing():
     assert config.miles["global_batch_size"] == 16
     assert config.miles["save_interval"] == 100
     assert config.miles["eval_interval"] == 100
+    assert config.miles["sglang_dtype"] == "bfloat16"
     assert config.miles["sglang_disable_cuda_graph"] is True
     assert config.miles["sglang_chunked_prefill_size"] == -1
     assert config.core.attention_backend == "flash_2"
@@ -28,3 +29,11 @@ def test_hybrid_recipe_precision_topology_and_checkpointing():
     assert plan["launch"]["max_retries"] == 3
     assert plan["launch"]["env"]["MILES_HYBRID_BRIDGE"] == "1"
     assert plan["launch"]["env"]["MILES_HYBRID_REFERENCE_BACKBONE"] == "1"
+
+
+def test_comparison_recipes_explicitly_request_bf16_serving():
+    for size in ("275m", "450m"):
+        path = ROOT / f"configs/miles/benchmarks/hybrid_{size}_gsm8k_compare_500.toml"
+        spec = RunSpec.from_dict(validation.read_document(path), config_path=path)
+        assert spec.compile().miles["sglang_dtype"] == "bfloat16"
+        assert spec.launch["env"]["MILES_SERVING_STARTUP_TIMEOUT_SECONDS"] == "600"

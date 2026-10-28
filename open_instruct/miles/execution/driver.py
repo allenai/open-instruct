@@ -54,7 +54,12 @@ async def train(args, *, export_hf=None):
     refresh = args.olmo_core.publication_mode == "refresh"
     try:
         with stage(args, "serving_startup"):
-            inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
+            startup_timeout = os.environ.get("MILES_SERVING_STARTUP_TIMEOUT_SECONDS")
+            inference, manager, rollouts_per_epoch = await infra_timeouts.wait_for(
+                placement_group.create_rollout_components(args),
+                timeout=float(startup_timeout) if startup_timeout else None,
+                operation="Core serving startup",
+            )
         with stage(args, "trainer_startup"):
             learner, _ = await placement_group.create_training_models(args, inference, manager)
 

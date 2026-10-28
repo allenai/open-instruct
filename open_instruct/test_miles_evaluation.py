@@ -383,6 +383,9 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     spec.loader.exec_module(driver)
     monkeypatch.setattr(driver, "time", SimpleNamespace(monotonic=Mock(side_effect=[0, 2])))
     monkeypatch.setattr(driver, "stage", lambda *a, **kw: nullcontext())
+    monkeypatch.setenv("MILES_SERVING_STARTUP_TIMEOUT_SECONDS", "600")
+    startup_wait = AsyncMock(wraps=driver.infra_timeouts.wait_for)
+    monkeypatch.setattr(driver.infra_timeouts, "wait_for", startup_wait)
     monkeypatch.setattr(driver.throughput, "report", lambda *a: {"warnings": []})
     monkeypatch.setattr(driver.startup_cache, "prepare", lambda *a, **kw: None)
     monkeypatch.setattr(driver.startup_cache, "finish", AsyncMock())
@@ -435,6 +438,7 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
             task["interval"] = interval
     try:
         result = asyncio.run(driver.train(args, export_hf=export_hf))
+        assert startup_wait.await_args_list[0].kwargs == {"timeout": 600.0, "operation": "Core serving startup"}
         assert entered.wait(1)
         assert worker_threads[0].is_alive()  # train returned while submission is still blocked.
         expected = [0, 1] if stop_mode == "complete" else [0]

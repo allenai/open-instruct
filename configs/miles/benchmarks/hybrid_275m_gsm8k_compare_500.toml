@@ -36,6 +36,7 @@ WANDB_API_KEY = "michaeln_WANDB_API_KEY"
 HF_TOKEN = "michaeln_HF_TOKEN"
 
 [launch.env]
+MILES_SERVING_STARTUP_TIMEOUT_SECONDS = "600"
 MILES_HYBRID_BRIDGE = "1"
 MILES_HYBRID_REFERENCE_BACKBONE = "1"
 
@@ -103,6 +104,7 @@ router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
 
 [miles]
+sglang_dtype = "bfloat16"
 sglang_disable_cuda_graph = true
 sglang_cuda_graph_backend_decode = "disabled"
 sglang_cuda_graph_backend_prefill = "disabled"
