@@ -9,7 +9,9 @@ RUN --mount=type=secret,id=github_token \
     --github-token-file /run/secrets/github_token
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 # Install metadata/entrypoints; the existing source overlay does not load optional Rust extensions.
-RUN SGLANG_BUILD_RUST_EXTS=none uv pip install --system --no-deps \
+# Keep isolated-build downloads out of the runtime image.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    SGLANG_BUILD_RUST_EXTS=none UV_LINK_MODE=copy uv pip install --system --no-deps \
     -e /opt/core-rl/sources/olmo-core -e /opt/core-rl/sources/miles \
     -e /opt/core-rl/sources/olmo-sglang -e /opt/core-rl/sources/sglang/python \
     -e /opt/core-rl/sources/megatron-lm -e /opt/core-rl/sources/megatron-bridge \
