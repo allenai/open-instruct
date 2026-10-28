@@ -48,17 +48,28 @@ The selected base is Beaker `01M5ZYQZVF7DDJ1VR619KRSS42`
 (`robertb/miles-binary-base-20261027`), Docker
 `sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354`.
 Its package versions, CPU imports and source isolation were checked, and a pull
-by immutable ID reproduced the same Docker ID. The [single-GPU Core RL smoke](https://beaker.org/ex/01M61SA3GN3AKJA5KDD90J3JJA)
+by immutable ID reproduced the same Docker ID. The
+[single-GPU Core RL smoke](https://beaker.org/ex/01M61SA3GN3AKJA5KDD90J3JJA)
 passed on application image `01M61RPR1SVAACNX7AAVH2ENYJ`: four optimizer updates,
 shared-engine evaluations, checkpoints and HF export on Holmes. This tiny-model
 check uses Torch attention; it does not qualify every FlashAttention backend or
 a Qwen OPD GPU training run with the public Megatron sources.
 
-The source layer includes generic Megatron-LM and the public Radix Megatron
-Bridge revision selected by the pinned MILES Dockerfile, preserving Qwen OPD
-support. Megatron-LM retains the previous runtime's exact revision
-(`235952df607b3820716e5e67728a5ab470ca33ae`), including its Qwen3.5 FP32 optimizer
-fix, rather than tracking the Radix fork's moving `miles-main` branch. It does not install `olmo-megatron`, the private Olmo Bridge fork, or
+A subsequent CPU-only `runtime-base` rebuild from commit
+`3563eb52ac4b02d731786e8f1a4e39a52951f2a2` is published as Beaker image
+`01M61YFEWE1BATA8KQ4VAV2DY8` (`robertb/miles-runtime-base-3563eb52a`), Docker
+`sha256:f97469549508d2af9896161889cc45060c52ece5743ecfcbe937039d3043b784`.
+Its packaged lock matches the current lock, all six source checkouts match their
+pinned revisions without patches, and serving/attention CPU imports passed.
+This records CPU build verification of the runtime sources separately from the
+application-image GPU smoke above.
+
+The source layer includes Megatron-LM from the Radix fork, pinned to
+`235952df607b3820716e5e67728a5ab470ca33ae` (the previous runtime's revision,
+including its Qwen3.5 FP32 optimizer fix), rather than the current `miles-main`
+tip used by the pinned MILES Dockerfile. Megatron Bridge uses the public Radix
+revision selected by that Dockerfile. These dependencies support Qwen OPD.
+The image does not install `olmo-megatron`, the private Olmo Bridge fork, or
 Olmo-specific Megatron patches; Olmo training uses the Core backend. Package
 metadata and entrypoints are installed with `--no-deps` to preserve the binary
 stack. `/src/Megatron-LM` remains a compatibility symlink for the OPD launcher.
