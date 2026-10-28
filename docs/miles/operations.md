@@ -171,7 +171,18 @@ refresh requests, router control and health requests, readiness, judge transport
 coordination, evaluation submission and cleanup. It does not multiply polling
 intervals, verifier execution budgets or the run duration. SGLang watchdog and
 trainer distributed deadlines remain explicit MILES run options. Longer waits preserve cancellation and hard
-deadlines; idempotent router readiness confirmation alone retries transport errors.
+deadlines.
+
+Core publication keeps new or restored workers pending until weight transfer and
+diagnostic checks finish. Admission then confirms the router registration before
+rollouts or evaluation can start. The SGLang 0.3.2 adapter follows the worker ID
+returned by asynchronous registration and checks the actual healthy registry entry;
+HTTP 202 alone is not readiness. Failed registration jobs and transient transport
+errors get at most three submissions within a 180-second overall deadline (scaled
+by the infrastructure multiplier). Lost acceptance responses reconcile through the
+router's URL-deduplicated worker ID. Worker replacement during validation rejects
+admission of the stale publication. Already-serving workers retain the existing
+pause/drain publication path without registering again on each update.
 
 | Symptom | Next check |
 |---|---|

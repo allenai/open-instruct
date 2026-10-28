@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Frozen-vision jigsaw pilot: local source commits, GPU qualification pending; see docs/miles/data-and-evaluation.md",
+  "status": "Frozen-vision pilot with validated router admission; CPU contract and real-router tests pass; GPU resume qualification pending",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "96a6eff5b4a60db84ffba91d3ee1b2470703c8ea",
+      "revision": "21e4258f427b9056da216f7d2e3ba3f1f87f3af1",
       "private": true
     },
     "olmo-sglang": {

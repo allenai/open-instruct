@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 
 import wandb
+
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
@@ -20,7 +21,6 @@ from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
-
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
@@ -63,39 +63,40 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
                 await inference.onload_weights()
-            await infra_timeouts.wait_for(
-                placement_group.update_weights(learner, manager, rollout_id=rollout_id),
-                timeout=args.olmo_core.engine_update_timeout if refresh else None,
-                operation="Core weight publication",
-            )
-            interval = args.olmo_core.diagnostic_interval
-            fresh_initial = rollout_id is None and args.start_rollout_id == 0
-            diagnostic = interval > 0 and (rollout_id is None or (rollout_id + 1) % interval == 0)
-            if args.check_weight_update_equal and (rollout_id is None or diagnostic):
-                if not fresh_initial:
-                    # The startup snapshot is the original HF checkpoint. It
-                    # cannot validate trained/restored weights. Instead measure
-                    # an exact current-state publication round trip, including
-                    # reset so an omitted tensor cannot pass as unchanged.
-                    await inference.check_weights(action="snapshot", selector=args.check_weight_update_selector)
+            async with inference.defer_weight_admission():
+                await infra_timeouts.wait_for(
+                    placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                    timeout=args.olmo_core.engine_update_timeout if refresh else None,
+                    operation="Core weight publication",
+                )
+                interval = args.olmo_core.diagnostic_interval
+                fresh_initial = rollout_id is None and args.start_rollout_id == 0
+                diagnostic = interval > 0 and (rollout_id is None or (rollout_id + 1) % interval == 0)
+                if args.check_weight_update_equal and (rollout_id is None or diagnostic):
+                    if not fresh_initial:
+                        # The startup snapshot is the original HF checkpoint. It
+                        # cannot validate trained/restored weights. Instead measure
+                        # an exact current-state publication round trip, including
+                        # reset so an omitted tensor cannot pass as unchanged.
+                        await inference.check_weights(action="snapshot", selector=args.check_weight_update_selector)
+                        await inference.check_weights(
+                            action="reset_tensors",
+                            selector=args.check_weight_update_selector,
+                            skip_list=args.check_weight_update_skip_list,
+                        )
+                        await infra_timeouts.wait_for(
+                            placement_group.update_weights(learner, manager, rollout_id=rollout_id),
+                            timeout=args.olmo_core.engine_update_timeout if refresh else None,
+                            operation="Core weight publication",
+                        )
                     await inference.check_weights(
-                        action="reset_tensors",
+                        action="compare",
+                        allow_quant_error=args.check_weight_update_allow_quant_error,
                         selector=args.check_weight_update_selector,
                         skip_list=args.check_weight_update_skip_list,
                     )
-                    await infra_timeouts.wait_for(
-                        placement_group.update_weights(learner, manager, rollout_id=rollout_id),
-                        timeout=args.olmo_core.engine_update_timeout if refresh else None,
-                        operation="Core weight publication",
-                    )
-                await inference.check_weights(
-                    action="compare",
-                    allow_quant_error=args.check_weight_update_allow_quant_error,
-                    selector=args.check_weight_update_selector,
-                    skip_list=args.check_weight_update_skip_list,
-                )
-            if args.offload_rollout:
-                await inference.onload_kv()
+                if args.offload_rollout:
+                    await inference.onload_kv()
             if args.fully_async:
                 await manager.core_publication_boundary.remote(False, **({"refresh": True} if refresh else {}))
 

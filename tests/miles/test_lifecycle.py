@@ -6,20 +6,29 @@ caching explicitly instead of depending on the absence of a WEKA mount.
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from miles.backends.core_utils import actor
 from miles.backends.core_utils.publication.engine_drain import Engine, EngineDrain, WeightSnapshot
-
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import driver
 
 
 def install_components(monkeypatch, manager):
+    @asynccontextmanager
+    async def admission():
+        events = getattr(manager, "admission_events", [])
+        events.append("admission-pending")
+        yield
+        events.append("admitted")
+
     async def create_components(args):
         inference = SimpleNamespace(
+            defer_weight_admission=admission,
             check_weights=manager.check_weights.remote if hasattr(manager, "check_weights") else AsyncMock(),
             prepare_rollout=AsyncMock(),
             dispose=AsyncMock(),
@@ -51,6 +60,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         events.append(name)
 
     manager = SimpleNamespace(
+        admission_events=events,
         check_weights=SimpleNamespace(remote=lambda **kwargs: event(kwargs["action"])),
         generate=SimpleNamespace(remote=lambda rollout_id: event("generated")),
         dispose=SimpleNamespace(remote=lambda: event("engines-disposed")),
@@ -135,7 +145,8 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         if name == "reset_tensors":
             assert events[index - 1 : index + 3] == ["snapshot", "reset_tensors", "published", "compare"]
             if fully_async:
-                assert events[index + 3] == "paused-False"
+                assert events[index + 3 : index + 5] == ["admitted", "paused-False"]
+    assert events.index("compare") < events.index("admitted") < events.index("generated")
     expected = ["close_weight_transport", "engines-disposed", "trainer-disposed"]
     if fully_async:
         expected.insert(0, "paused-True")
