@@ -58,7 +58,7 @@ gpus = 1 # Additional allocation per task group, outside the 8-GPU training layo
 cluster = "ai2/holmes"
 submit_timeout = 30
 timeout = "3h"
-provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, context_length = 34816 }
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
 
 [[evaluation.tasks]]
 task = "gsm8k"

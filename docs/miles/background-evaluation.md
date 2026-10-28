@@ -47,7 +47,7 @@ gpus = 1                     # Separate allocation; never training GPUs
 cluster = "ai2/holmes"
 submit_timeout = 30           # Hard wall-clock bound on a submission subprocess
 timeout = "3h"                # Evaluator Beaker task lifetime
-provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true }
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true }
 
 [[evaluation.tasks]]
 task = "gsm8k"
@@ -292,7 +292,11 @@ revisions as though the benchmark protocol were unchanged.
 Replace the old `evaluation.server_args` with typed `evaluation.provider_kwargs`
 using Python option names, for example `context_length = 34816` and
 `disable_cuda_graph = true`. Use `profile = "generic"` when manually tuning
-settings; automatic profiles reject conflicting overrides. For SciCode, retain
+settings; automatic profiles reject conflicting overrides. The examples disable
+radix caching because the pinned SGLang runtime can enter a Mamba-buffer path
+without an allocated buffer for full-attention Olmo MoE models. A one-GPU tiny
+MoE generation check reproduced the failure with caching enabled and passed
+with `disable_radix_cache = true`. For SciCode, retain
 CLI arguments under `external_server_args` as well. The checkpoint, tokenizer,
 model registration and GPU allocation remain owned by MILES. Task overrides
 cannot change the policy provider. Native SGLang supports generation, not tools
@@ -309,8 +313,10 @@ docker build -f runtime/miles/Dockerfile.evaluator-sandbox \
 
 Keep each config's image and revision matched. Changing only the revision does
 not upgrade an existing image. CPU tests check command parsing, GPU planning,
-image dependencies and task resolution; GPU generation and full-panel resource
-bounds still need qualification with these images.
+image dependencies and task resolution. A [one-GPU tiny MoE check](https://beaker.org/ex/01M60JEKHJ9HTN661H5W1HJ67M)
+completed native SGLang generation and scoring for two GSM8K examples on Holmes
+with radix caching disabled. Full-panel resource bounds, sandbox execution and
+judge execution still need qualification with these images.
 
 The provider contract tests use the installed olmo-eval CLI and GPU planner,
 without loading a model or downloading datasets. Run them inside the panel image

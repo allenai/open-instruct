@@ -67,9 +67,9 @@ gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
 timeout = "3h"
-provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, context_length = 34816 }
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
 # SciCode is the only task that still requires an HTTP policy server.
-external_server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--context-length", "34816"]
+external_server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--disable-radix-cache", "--context-length", "34816"]
 
 [[evaluation.tasks]]
 # Official measurement uses full datasets and pinned upstream sampling settings.
