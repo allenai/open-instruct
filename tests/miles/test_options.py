@@ -148,7 +148,16 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
 @pytest.mark.parametrize("handler", ["retry", "drop"])
 def test_ads_runtime_parser_preserves_retry_requirement(monkeypatch, handler):
     config = RunConfig(
-        CoreConfig(publication_mode="refresh", max_policy_lag=2, ads_table="/data/ads.jsonl", ads_sha256="a" * 64),
+        CoreConfig(
+            publication_mode="refresh",
+            max_policy_lag=2,
+            ads_table="/data/ads.jsonl",
+            ads_sha256="a" * 64,
+            sequence_packing=True,
+            attention_backend="flash_4",
+            max_sequence_length=34816,
+            packing_max_tokens=18432,
+        ),
         {
             "hf_checkpoint": "model",
             "rollout_batch_size": 1,
@@ -156,6 +165,9 @@ def test_ads_runtime_parser_preserves_retry_requirement(monkeypatch, handler):
             "global_batch_size": 4,
             "fully_async": True,
             "async_unused_samples_handler": "retry",
+            "rollout_max_prompt_len": 2048,
+            "rollout_max_response_len": 16384,
+            "rollout_max_context_len": 34816,
             "use_miles_router": True,
             "use_tis": True,
             "use_rollout_logprobs": False,
@@ -172,6 +184,8 @@ def test_ads_runtime_parser_preserves_retry_requirement(monkeypatch, handler):
     else:
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
         assert parsed.async_unused_samples_handler == "retry"
+        assert parsed.olmo_core.packing_max_tokens == 18432
+        assert parsed.olmo_core.max_sequence_length == 34816
         assert parsed.custom_async_data_buffer_path == "open_instruct.miles.rollout.ads_buffer.ADSRefreshBuffer"
 
 

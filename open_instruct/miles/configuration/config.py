@@ -404,12 +404,22 @@ class RunConfig:
                 'Select a packing-capable backend (for example core.attention_backend="flash_4" '
                 "on supported hardware), or disable sequence_packing."
             )
+        options = self.resolved_miles()
         if self.core.packing_max_tokens is not None:
             if not self.core.sequence_packing:
                 raise constraints.error("core.packing_max_tokens requires sequence_packing=true")
-            if self.core.packing_max_tokens < self.core.max_sequence_length:
-                raise constraints.error("packing_max_tokens must cover max_sequence_length; samples are never split")
-        options = self.resolved_miles()
+            # Serving may need a longer context for evaluation than training
+            # generation can produce. Keep every training response intact while
+            # allowing smaller packs within that explicitly bounded workload.
+            training_limit = self.core.max_sequence_length
+            prompt_limit = options.get("rollout_max_prompt_len")
+            response_limit = options.get("rollout_max_response_len")
+            if all(type(value) is int and value > 0 for value in (prompt_limit, response_limit)):
+                training_limit = min(training_limit, prompt_limit + response_limit)
+            if self.core.packing_max_tokens < training_limit:
+                raise constraints.error(
+                    "packing_max_tokens must cover the maximum training sequence; samples are never split"
+                )
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)

@@ -49,6 +49,28 @@ packing_max_tokens = 8192
     assert core.sequence_packing and core.packing_max_tokens == 8192
 
 
+@pytest.mark.parametrize("budget", [18431, 18432, 34816])
+def test_training_bound_allows_smaller_packs_than_evaluation_context(budget):
+    config = RunConfig(
+        CoreConfig(
+            sequence_packing=True, attention_backend="flash_4", max_sequence_length=34816, packing_max_tokens=budget
+        ),
+        {
+            "hf_checkpoint": "/hf",
+            "global_batch_size": 4,
+            "rollout_max_prompt_len": 2048,
+            "rollout_max_response_len": 16384,
+            "rollout_max_context_len": 34816,
+        },
+    )
+    if budget < 18432:
+        with pytest.raises(ValueError, match="must cover"):
+            config.validate()
+    else:
+        config.validate()
+        assert config.core.max_sequence_length == 34816
+
+
 @pytest.mark.parametrize("backend", ["flash_2", "flash_3", "flash_4", "te"])
 def test_packing_preserves_other_attention_backend_choices(backend):
     config = RunConfig(

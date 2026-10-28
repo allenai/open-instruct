@@ -8,4 +8,4 @@ COPY tests/miles /opt/core-rl/tests/miles
 COPY scripts/data/ads /opt/core-rl/scripts/data/ads
 COPY docs/miles/ads.md /opt/core-rl/docs/miles/ads.md
 COPY runtime/miles/ads.Dockerfile /opt/core-rl/runtime/miles/ads.Dockerfile
-RUN python -m pytest tests/miles/test_ads.py tests/miles/test_ads_preparation.py tests/miles/test_async.py tests/miles/test_selection_data_source.py tests/miles/test_options.py -q
+RUN python -m pytest tests/miles/test_ads.py tests/miles/test_ads_preparation.py tests/miles/test_async.py tests/miles/test_selection_data_source.py tests/miles/test_options.py tests/miles/test_packing_loss.py open_instruct/test_miles_packing.py -q

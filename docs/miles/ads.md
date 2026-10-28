@@ -63,6 +63,15 @@ Also report generated tokens, group filtering, coverage and GPU time including
 embedding preparation. Historical one-seed comparisons do not measure seed
 variance or establish an efficiency win merely by completing equal updates.
 
+The second training qualification reached rollout and scoring but failed during
+the first backward pass with a CUDA out-of-memory error in FLA kernel autotuning.
+The next qualification reduces the packed training microbatch budget from 34,816
+to 18,432 tokens. This covers the unchanged maximum training prompt (2,048) plus
+response (16,384), while preserving the 34,816-token serving context for evaluation.
+No response is split or truncated by packing; oversized samples still fail.
+Optimizer batches remain 512 responses. Report this execution difference from the
+historical control, including its throughput and numerical-order implications.
+
 References: [ADS paper](https://arxiv.org/html/2606.22305v2) and
 [released implementation](https://github.com/Richard-zrx/ADS/tree/8a32745d58f7b7f57baae51c2cd69f7b63cecdae).
 
