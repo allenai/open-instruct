@@ -99,17 +99,26 @@ def main():
         )
 
     try:
-        # Same prompt alone and in a batch must produce the same representation.
+        # Qualify the actual request geometry. Serial extraction checks repeated
+        # requests; batched extraction additionally requires batch invariance.
         check = encoded[:2]
         single = [unpack(generate([entry])[0], *entry) for entry in check]
-        batched = [unpack(result, *entry) for result, entry in zip(generate(check), check, strict=True)]
+        repeated = (
+            [unpack(generate([entry])[0], *entry) for entry in check]
+            if args.batch_size == 1
+            else [unpack(result, *entry) for result, entry in zip(generate(check), check, strict=True)]
+        )
         errors = []
-        for (a, anll), (b, bnll) in zip(single, batched, strict=True):
+        for (a, anll), (b, bnll) in zip(single, repeated, strict=True):
             cosine = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
             if cosine < 0.999 or abs(anll - bnll) > 0.05:
-                raise ValueError(f"Batch consistency failed: cosine={cosine}, NLL delta={anll - bnll}")
+                raise ValueError(f"Representation consistency failed: cosine={cosine}, NLL delta={anll - bnll}")
             errors.append({"cosine": cosine, "nll_abs_delta": abs(anll - bnll)})
-        qualification = {"startup_seconds": startup, "batch_consistency": errors}
+        qualification = {
+            "startup_seconds": startup,
+            "mode": "serial_repeat" if args.batch_size == 1 else "batch_invariance",
+            "consistency": errors,
+        }
         (out / "qualification.json").write_text(json.dumps(qualification, indent=2))
         print(json.dumps({"qualification": qualification}), flush=True)
         vectors, records = [], []
