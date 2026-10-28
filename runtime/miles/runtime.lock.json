@@ -23,7 +23,7 @@
       "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
     },
     "megatron-lm": {
-      "repository": "https://github.com/NVIDIA/Megatron-LM.git",
+      "repository": "https://github.com/radixark/Megatron-LM.git",
       "revision": "235952df607b3820716e5e67728a5ab470ca33ae"
     },
     "megatron-bridge": {

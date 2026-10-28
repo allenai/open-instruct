@@ -56,7 +56,9 @@ a Qwen OPD GPU training run with the public Megatron sources.
 
 The source layer includes generic Megatron-LM and the public Radix Megatron
 Bridge revision selected by the pinned MILES Dockerfile, preserving Qwen OPD
-support. It does not install `olmo-megatron`, the private Olmo Bridge fork, or
+support. Megatron-LM retains the previous runtime's exact revision
+(`235952df607b3820716e5e67728a5ab470ca33ae`), including its Qwen3.5 FP32 optimizer
+fix, rather than tracking the Radix fork's moving `miles-main` branch. It does not install `olmo-megatron`, the private Olmo Bridge fork, or
 Olmo-specific Megatron patches; Olmo training uses the Core backend. Package
 metadata and entrypoints are installed with `--no-deps` to preserve the binary
 stack. `/src/Megatron-LM` remains a compatibility symlink for the OPD launcher.
