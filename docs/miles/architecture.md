@@ -39,7 +39,10 @@ It excludes the MILES, Core, SGLang and Open Instruct source overlays. Applicati
 builds add locked source repositories as `runtime-base`, then the committed Open
 Instruct checkout as `application`. They do not compile FlashAttention, even
 without a local Docker cache. Source-only lock changes rebuild source layers;
-binary dependency changes require a new base.
+binary dependency changes require a new base. Editable installs still fetch
+build-system dependencies such as setuptools and pybind11, and Megatron builds
+a small C++ dataset helper. Those build-tool requirements are not fully pinned;
+the source and base pins do not make application builds bit-for-bit reproducible.
 
 The selected base is Beaker `01M5ZYQZVF7DDJ1VR619KRSS42`
 (`robertb/miles-binary-base-20261027`), Docker
@@ -63,6 +66,11 @@ For ordinary application builds:
 ```bash
 python scripts/miles/build_image.py --base-image LOCAL_LOADED_BASE_IMAGE --tag open-instruct:miles-core
 ```
+
+Use `--target runtime-base` to build only the locked dependency sources, without
+adding the Open Instruct application checkout. The default target is `application`.
+The image arguments are local Docker tags loaded on the build host; Beaker names
+and immutable IDs identify the images to pull before invoking the helper.
 
 All repositories in the runtime lock are public; no GitHub credential is needed
 for these source fetches. Standalone source preparation can use
@@ -89,13 +97,20 @@ python scripts/miles/build_base_image.py \
   --tag open-instruct:miles-binary-base
 ```
 
-Both Docker IDs are verified. Only FA wheels are transferred from the compiler
+Both Docker IDs are verified, and the parent-image label comes from the same
+lock. The helper passes the compiler image as `FLASH_ATTENTION_BUILDER` and the
+runtime parent as `COMPILED_PARENT`. Only FA wheels are transferred from the compiler
 image to the clean compiled parent. FA2/FA4 wheel downloads are checksum-verified;
 the final stage resets inherited application metadata and entrypoints. This
 preserves the qualified CUDA/PyTorch stack rather than rebuilding all dependencies
 from an upstream CUDA distribution. Build on an amd64 Linux host: FA3 compilation
 defaults to two jobs, with `--max-jobs` available for hosts with sufficient RAM.
 The published base's FA3 build took about 31 minutes with eight jobs.
+
+The final environment list was compared with the locked compiled parent. It
+preserves its runtime settings while dropping legacy `OLMO_MILES_*` cache and
+verifier paths. Recheck this list against the parent image whenever changing the
+parent pin; `FROM scratch` does not inherit environment variables automatically.
 
 Before changing the pin again, verify CPU imports, an application build and GPU
 forward/backward and training on the intended hardware. CPU imports alone do not

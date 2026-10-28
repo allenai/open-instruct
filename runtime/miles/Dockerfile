@@ -4,9 +4,7 @@ ARG BASE_IMAGE=open-instruct-miles-binary-base:20261027
 FROM ${BASE_IMAGE} AS runtime-base
 COPY runtime/miles/runtime.lock.json /opt/core-rl/build/runtime/miles/runtime.lock.json
 COPY scripts/miles/prepare_runtime.py /opt/core-rl/build/scripts/miles/prepare_runtime.py
-RUN --mount=type=secret,id=github_token \
-    python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources \
-    --github-token-file /run/secrets/github_token
+RUN python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 # Install metadata/entrypoints; the existing source overlay does not load optional Rust extensions.
 # Keep isolated-build downloads out of the runtime image.
@@ -16,7 +14,7 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     -e /opt/core-rl/sources/olmo-sglang -e /opt/core-rl/sources/sglang/python \
     -e /opt/core-rl/sources/megatron-lm -e /opt/core-rl/sources/megatron-bridge
 # The native OPD launcher explicitly prepends this historical Megatron location.
-RUN mkdir -p /src && ln -s /opt/core-rl/sources/megatron-lm /src/Megatron-LM
+RUN mkdir -p /src && ln -sT /opt/core-rl/sources/megatron-lm /src/Megatron-LM
 
 FROM runtime-base AS application
 ARG SOURCE_REVISION

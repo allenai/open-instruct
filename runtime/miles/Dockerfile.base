@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 # Keep the qualified binary toolchain and build kernels before copying application sources.
-ARG BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks
+ARG FLASH_ATTENTION_BUILDER=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks
 ARG COMPILED_PARENT=olmo-miles-runtime:20260909-torch213-cu130-sglang3145136-gcready
-FROM ${BASE_IMAGE} AS flash-attention-build
+FROM ${FLASH_ATTENTION_BUILDER} AS flash-attention-build
 # Compile FA3 against the base's Torch/CUDA ABI. No GPU is needed; limit compiler
 # parallelism so a cold build does not exhaust the build host's memory.
 ARG FLASH_ATTENTION_MAX_JOBS=2
@@ -61,7 +61,12 @@ RUN uv pip install --system --no-deps beaker-py==2.5.7 \
 
 # Reset source-specific metadata and entrypoints inherited from the old runtime.
 FROM scratch AS binary-base
+ARG COMPILED_PARENT_DIGEST
 COPY --from=dependencies / /
+RUN test -n "$COMPILED_PARENT_DIGEST"
+# Compared with the locked parent: preserve its runtime variables, excluding
+# legacy OLMO_MILES_COMPILE_CACHE_* and OLMO_MILES_{IFEVAL,MATH}_PYTHON settings.
+# Recheck this list against docker inspect whenever the compiled parent changes.
 ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     CUDA_HOME=/usr/local/cuda \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/lib/python3.12/dist-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib:/usr/local/cuda/lib64 \
@@ -77,7 +82,7 @@ ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bi
     CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 LABEL org.opencontainers.image.title="MILES compiled dependency base" \
     org.opencontainers.image.description="Torch 2.13 CUDA 13; FA2, FA3, FA4; no MILES, Core, SGLang or Open Instruct source overlay" \
-    ai2.miles.base.parent="sha256:75d143ef1424837db51020c9ac806871d81d67ab095372ed906325f5e6a97871" \
+    ai2.miles.base.parent="${COMPILED_PARENT_DIGEST}" \
     ai2.miles.base.fa3.revision="1fc0221183e799363001394a12dd9e78e15f5dda"
 WORKDIR /opt/core-rl
 CMD ["/bin/bash"]

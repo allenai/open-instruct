@@ -46,3 +46,6 @@ def test_base_builder_validates_both_parents_before_build(tmp_path, monkeypatch,
         build_base_image.main()
         assert len(builds) == 1
         assert "runtime/miles/Dockerfile.base" in builds[0]
+        assert "COMPILED_PARENT=compiled_parent" in builds[0]
+        assert "COMPILED_PARENT_DIGEST=compiled-digest" in builds[0]
+        assert "FLASH_ATTENTION_BUILDER=flash_attention_builder" in builds[0]
