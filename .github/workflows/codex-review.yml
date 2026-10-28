@@ -60,7 +60,7 @@ jobs:
                   review.body?.includes('<!-- codex-action-review -->')) {
                 await github.rest.pulls.dismissReview({
                   ...context.repo, pull_number: pr.number, review_id: review.id,
-                  message: '> [!NOTE]\n> Drafted by Codex.\n\nA new Codex review is starting; withdrawing the previous approval.',
+                  message: 'Drafted by Codex.\n\nA new Codex review is starting; withdrawing the previous approval.',
                 });
               }
             }
@@ -262,7 +262,7 @@ jobs:
               pull_number,
               commit_id: process.env.HEAD_SHA,
               event,
-              body: '> [!NOTE]\n> Drafted by Codex.\n\n' +
+              body: 'Drafted by Codex.\n\n' +
                 '<!-- codex-action-review -->\n' +
                 `Reviewed commit \`${process.env.HEAD_SHA}\`.\n\n` +
                 (event !== output.verdict ? '_Draft and fork PRs receive advisory comments only._\n\n' : '') + text,

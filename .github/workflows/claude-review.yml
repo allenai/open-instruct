@@ -359,7 +359,7 @@ jobs:
               pull_number,
               commit_id: process.env.HEAD_SHA,
               event: 'COMMENT',
-              body: '> [!NOTE]\n> Drafted by Claude.\n\n' +
+              body: 'Drafted by Claude.\n\n' +
                 '<!-- claude-action-review -->\n' +
                 `Reviewed commit \`${process.env.HEAD_SHA}\`.\n\n` + text,
             });
