@@ -4,8 +4,10 @@ import copy
 import hashlib
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -19,6 +21,16 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def three_node():
     return RunSpec.load(ROOT / "configs/miles/examples/three-node.toml")
+
+
+def test_node_uses_periodic_native_background_evaluation():
+    node = RunSpec.load(ROOT / "configs/miles/examples/node.toml")
+    assert node.evaluation["mode"] == "background"
+    assert [p["update"] for p in node.plan()["evaluation"]["milestones"]] == [0, 50, 100, 150, 200]
+    assert {t["task"] for t in node.evaluation["tasks"]} == {"gsm8k", "gsm8k:platinum", "ifeval_ood"}
+    assert "eval_prompt_data" not in node.compile().miles
+    assert "eval_interval" not in node.compile().miles
+    assert node.launch["secrets"]["BEAKER_TOKEN"]
 
 
 def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_node):
@@ -146,16 +158,20 @@ def test_invalid_panel_settings_fail_before_launch(three_node, patch, message):
 def test_harness_options_precede_task_overrides(three_node):
     task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "harmbench:wg_judge_thinking")
     task = {**task, "scoring": {"limit": 2}}
-    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
+    args = evaluation_runner.command(
+        {"checkpoint": "/frozen/hf", "tasks": [task], "evaluation": three_node.evaluation}, "/results"
+    )
     index = args.index("--task")
     assert "auxiliary_providers.wg_judge.model=allenai/wildguard" in args[:index]
-    assert "provider.base_url=http://127.0.0.1:30000/v1" in args[:index]
+    assert "provider.kind=sglang" in args[:index]
     assert "limit=2" in args[index:]
 
 
 def test_scicode_uses_external_cli_with_frozen_server(three_node):
     task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
-    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
+    args = evaluation_runner.command(
+        {"checkpoint": "/frozen/hf", "tasks": [task], "evaluation": three_node.evaluation}, "/results"
+    )
     assert args[:2] == ["olmo-eval", "run-external"]
     assert args[args.index("--model") + 1] == "/frozen/hf"
     assert args[args.index("--base-url") + 1] == "http://127.0.0.1:30000/v1"
@@ -244,7 +260,7 @@ def test_mixed_group_requires_predictions_for_every_task(scicode_result, tmp_pat
 
 
 @pytest.mark.parametrize("mask,policy,judge", [("3,7", "3", "7"), (None, "0", "1"), ("GPU-a,GPU-b", "GPU-a", "GPU-b")])
-def test_managed_judges_are_isolated_from_policy(monkeypatch, mask, policy, judge):
+def test_native_planner_sees_policy_and_judge_gpus(monkeypatch, mask, policy, judge):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     monkeypatch.setenv("PYTHONPATH", "/training/sources")
     if mask is not None:
@@ -252,7 +268,7 @@ def test_managed_judges_are_isolated_from_policy(monkeypatch, mask, policy, judg
     receipt = {"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]}
     policy_env, evaluator_env = evaluation_runner.gpu_environments(receipt)
     assert policy_env["CUDA_VISIBLE_DEVICES"] == policy
-    assert evaluator_env["CUDA_VISIBLE_DEVICES"] == judge
+    assert evaluator_env["CUDA_VISIBLE_DEVICES"] == f"{policy},{judge}"
     assert "PYTHONPATH" not in evaluator_env
     assert policy_env["PYTHONPATH"] == "/training/sources"
 
@@ -283,4 +299,38 @@ def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", " MIG-a , MIG-b ")
     policy, judge = evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
     assert policy["CUDA_VISIBLE_DEVICES"] == "MIG-a"
-    assert judge["CUDA_VISIBLE_DEVICES"] == "MIG-b"
+    assert judge["CUDA_VISIBLE_DEVICES"] == "MIG-a,MIG-b"
+
+
+def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch):
+    runner = evaluation_runner
+    task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
+    task = {**task, "arguments": {**task["arguments"], "h5py_host_path": str(tmp_path / "data.h5")}}
+    (tmp_path / "data.h5").touch()
+    checkpoint = tmp_path / "hf"
+    checkpoint.mkdir()
+    for filename in ("config.json", "tokenizer_config.json"):
+        (checkpoint / filename).write_text("{}")
+    receipt = {"tasks": [task], "checkpoint": str(checkpoint), "evaluation": three_node.evaluation}
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,7")
+    policy, evaluator = runner.gpu_environments(receipt)
+    assert policy["CUDA_VISIBLE_DEVICES"] == "3"
+    assert evaluator["CUDA_VISIBLE_DEVICES"] == ""
+    server = Mock()
+    server.poll.return_value = None
+    start = Mock(return_value=server)
+    monkeypatch.setattr(runner.subprocess, "Popen", start)
+    monkeypatch.setattr(runner.subprocess, "check_output", lambda *a, **kw: three_node.evaluation["revision"])
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(runner.shutil, "copytree", Mock())
+    monkeypatch.setattr(runner.request, "urlopen", lambda *a, **kw: nullcontext(Mock(status=200)))
+    monkeypatch.setattr(runner, "run_tasks", Mock())
+    monkeypatch.setattr(runner, "completed_scores", Mock(return_value={"eval/scicode/score": 1.0}))
+    monkeypatch.setattr(runner, "try_publish", Mock())
+    runner.run_evaluation_locked(receipt, tmp_path)
+    args = start.call_args.args[0]
+    assert "sglang.launch_server" in args
+    assert args[args.index("--model-path") + 1] == str(checkpoint)
+    assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
+    assert "--context-length" in args
+    server.terminate.assert_called_once()

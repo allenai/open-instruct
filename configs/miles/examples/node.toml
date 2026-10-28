@@ -34,20 +34,48 @@ SGLANG_TIMEOUT_KEEP_ALIVE = "60"
 NCCL_SOCKET_IFNAME = "ib"
 NCCL_IB_HCA = "^=mlx5_bond_0"
 
+[launch.secrets]
+BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+
 # Prepared math, instruction-following and code data; no judge-dependent verifiers.
 [data]
 prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/train.jsonl"
-eval_prompt_data = [
-  "math", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-math.jsonl",
-  "ifeval", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-ifeval.jsonl",
-  "code", "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/eval-code.jsonl",
-]
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
 
 [training]
 num_rollouts = 200
-eval_interval = 50
 save_interval = 25
+
+[evaluation]
+mode = "background"
+interval = 50
+initial = true
+final = true
+# Evaluator image with the inline olmo-eval SGLang provider.
+image = "01M5ZGD5K01GNW3ASDPNXXPEJ3"
+revision = "3536fe751e40162cc33d5e647085e986375aadce"
+gpus = 1 # Additional allocation per task group, outside the 8-GPU training layout.
+cluster = "ai2/holmes"
+submit_timeout = 30
+timeout = "3h"
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
+
+[[evaluation.tasks]]
+task = "gsm8k"
+# Independent 8K evaluation budget; training still uses 32K responses.
+# Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "gsm8k:platinum"
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128, num_fewshot = 0 }
+
+[[evaluation.tasks]]
+task = "ifeval_ood" # IFBench; distinct from IFEval.
+generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+scoring = { limit = 128 }
 
 [trainer]
 gpus = 2

@@ -26,8 +26,9 @@ the global value: a task can opt into periodic evaluation under a global zero, o
 set zero to opt out under a positive global interval. The global `initial` and
 `final` flags still apply to every task. With both flags false and all intervals
 zero, no background evaluations or evaluation snapshots are scheduled.
-Dev and node retain shared-engine
-evaluation, which also remains the low-level default. The three-node template is
+The [node example](../../configs/miles/examples/node.toml) runs a smaller GSM8K,
+GSM8K-Platinum and IFBench panel initially, every 50 updates, and finally.
+Dev retains shared-engine evaluation, which remains the low-level default. The three-node template is
 provisional; check evaluator compatibility for the full model. Remove explicit
 shared settings (`training.eval_interval`, `miles.eval_*`, `skip_eval_before_train`,
 `n_samples_per_eval_prompt`, `data.eval_prompt_data`, positive task `eval_count`)
@@ -46,7 +47,7 @@ gpus = 1                     # Separate allocation; never training GPUs
 cluster = "ai2/holmes"
 submit_timeout = 30           # Hard wall-clock bound on a submission subprocess
 timeout = "3h"                # Evaluator Beaker task lifetime
-server_args = ["--attention-backend", "triton", "--disable-cuda-graph"]
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true }
 
 [[evaluation.tasks]]
 task = "gsm8k"
@@ -83,8 +84,7 @@ ID; never configure a separate evaluation run.
 The limited GSM8K tasks above are small mechanics examples. The three-node template
 uses individual task variants from `math:posttrain:dev`, `general:posttrain:dev`,
 `hillclimb:dev` and `safety_thinking`, deduplicated to 25 entries. Individual names
-avoid depending on the unmerged general/hillclimb suite definitions and do not
-create synthetic cross-benchmark aggregate scores. It retains full task sizes
+make the panel explicit and do not create synthetic cross-benchmark aggregate scores. It retains full task sizes
 and sampling defaults from the pinned olmo-eval revision, including AIME/HMMT
 pass@32 with 16K responses. The pinned IFBench defaults differ from newer upstream
 revisions; changing the image/revision can change the benchmark protocol.
@@ -106,12 +106,13 @@ Generation overrides map to olmo-eval's flat per-task sampling overrides
 olmo-eval task overrides (such as `limit`, scorer settings, or formatting).
 Tasks with the same generation overrides, harness preset, harness overrides and
 execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
-defaults; tasks execute separately while sharing the job's inference server.
+defaults. Each unfinished task starts its own native SGLang engine; completed
+tasks remain reusable after preemption. Model loading repeats between tasks.
 The three-node panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
 five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
 each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
-isolates the policy and auxiliary GPU visibility; olmo-eval manages judge startup
-and shutdown. One HF snapshot serves all groups. A coincident
+exposes the policy and auxiliary GPUs to olmo-eval, whose planner assigns
+non-overlapping GPU sets and manages judge startup and shutdown. One HF snapshot serves all groups. A coincident
 periodic/final point is submitted only once for each task group. `plan` displays
 the milestones, task groups, resources and snapshot paths. `validate` checks the
 schema; it does not establish image/model/task compatibility.
@@ -133,7 +134,10 @@ Podman and the olmo-eval sandbox dependencies. Container startup and reference-d
 access still require qualification on the target cluster.
 
 SciCode uses `kind="external"` and `arguments`, invoking olmo-eval's
-`run-external` command against the same frozen SGLang server. Only SciCode currently
+`run-external` command against a dedicated frozen SGLang HTTP server. SciCode
+requires `VLLMServerProvider` in the pinned olmo-eval revision and is the explicit
+exception to native `sglang` routing. `evaluation.external_server_args` configures
+only this server; native tasks use `evaluation.provider_kwargs`. Only SciCode currently
 has a supported external artifact contract. Development runs require
 `arguments.split="validation"` and an accessible `arguments.h5py_host_path`.
 The evaluator checks per-problem predictions and step counts, rejecting
@@ -269,31 +273,61 @@ original HF source remaining available.
 
 ## Evaluator image and compatibility
 
-`runtime/miles/Dockerfile.evaluator` builds a separate evaluator image from a
-MILES serving image and a pinned olmo-eval revision. It retains the
-Olmo MoE SGLang architecture extension, installs olmo-eval in a separate CPU
-virtual environment, and connects olmo-eval's `vllm_server` API client to its own
-private SGLang server. It does not launch vLLM. The runner checks the olmo-eval
-revision before starting. Build evaluator dependencies at image construction.
-External benchmark sandboxes may have their own upstream setup steps. Publish
-the image to Beaker and configure its immutable ID.
+`runtime/miles/Dockerfile.evaluator` builds a separate evaluator image on the
+digest-pinned CUDA 13.0.2 / Torch 2.13 compiler-equipped olmo-eval base. It installs
+the pinned `sglang` extra, including the engine and Olmo model plugin. Regular
+background evaluations select `provider.kind=sglang` and
+`provider.kwargs.model_registration=olmo_sglang:register`. SciCode retains its
+explicit HTTP exception described above. The runner checks the installed
+olmo-eval revision against the receipt before evaluating.
 
-The three-node example sets `image` to the published evaluator image
-`01M5MQM50J1EEQ8YJGJWSJFPQ5` and `revision` to olmo-eval
-`710b2b5dab6ea09764c02647f3a4e72819b9ee7c`, which includes `gsm8k:platinum`
-and the [stop-sequence normalization fix](https://github.com/allenai/olmo-eval/pull/450).
-Keep `revision` matched to the olmo-eval commit installed in the selected image.
-A serving-runtime refresh can change the image ID without changing that revision.
+Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
+which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
+The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
+image `01M5ZSWYBJ5GPG1XBARFFC59MZ` with isolated vLLM judges. Both recipes build evaluator dependencies
+at image construction; benchmark sandboxes may have their own upstream setup steps.
+The revision change can also change task defaults; do not compare scores across
+revisions as though the benchmark protocol were unchanged.
 
-`runtime/miles/Dockerfile.evaluator-sandbox` extends a pinned evaluator with
-Podman and the sandbox extra while preserving its serving environment. The
-published panel image uses the merged template runtime (`fd8b57d34`), with Docker ID
-`sha256:fffe14679ed79e365547e44cfc58f896b4f36e14662d574d360e625710acacfe`.
-Build it with `--build-arg EVALUATOR_IMAGE=LOCAL_PINNED_EVALUATOR_IMAGE`.
+Replace the old `evaluation.server_args` with typed `evaluation.provider_kwargs`
+using Python option names, for example `context_length = 34816` and
+`disable_cuda_graph = true`. Use `profile = "generic"` when manually tuning
+settings; automatic profiles reject conflicting overrides. The examples disable
+radix caching because the pinned SGLang runtime can enter a Mamba-buffer path
+without an allocated buffer for full-attention Olmo MoE models. A one-GPU tiny
+MoE generation check reproduced the failure with caching enabled and passed
+with `disable_radix_cache = true`. For SciCode, retain
+CLI arguments under `external_server_args` as well. The checkpoint, tokenizer,
+model registration and GPU allocation remain owned by MILES. Task overrides
+cannot change the policy provider. Native SGLang supports generation, not tools
+or continuation likelihood; code scoring in a sandbox is separate from tool use.
+
+```bash
+docker build -f runtime/miles/Dockerfile.evaluator \
+  --secret id=github_token,env=GH_TOKEN \
+  -t open-instruct-miles-evaluator:sglang runtime/miles
+docker build -f runtime/miles/Dockerfile.evaluator-sandbox \
+  --build-arg EVALUATOR_IMAGE=open-instruct-miles-evaluator:sglang \
+  -t open-instruct-miles-evaluator:sglang-panel runtime/miles
+```
+
+Keep each config's image and revision matched. Changing only the revision does
+not upgrade an existing image. CPU tests check command parsing, GPU planning,
+image dependencies and task resolution. A [one-GPU tiny MoE check](https://beaker.org/ex/01M60JEKHJ9HTN661H5W1HJ67M)
+completed native SGLang generation and scoring for two GSM8K examples on Holmes
+with radix caching disabled. Full-panel resource bounds, sandbox execution and
+judge execution still need qualification with these images.
+
+The provider contract tests use the installed olmo-eval CLI and GPU planner,
+without loading a model or downloading datasets. Run them inside the panel image
+with this checkout mounted and pytest installed:
+
+```bash
+python -m pytest --confcutdir=tests/miles_eval tests/miles_eval/test_background_provider.py
+```
 
 Check compatibility for the exported architecture, serving backend, task and
-image; an OpenAI-compatible endpoint alone does not prove loglikelihood or task
-correctness. Use generation tasks for an initial tiny MoE check. A successful
+image; successful provider initialization alone does not prove task correctness. Use generation tasks for an initial tiny MoE check. A successful
 mechanics check says nothing about model quality. Launch training through the
 normal committed-image MILES wrapper. Use ignored `runs/` configs and fresh
 output paths; leave existing experiments unchanged.

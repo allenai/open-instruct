@@ -60,14 +60,16 @@ mode = "background"
 interval = 0
 initial = true
 final = true
-# Limited-example execution is validated; measure full-model memory and runtime.
-image = "01M5MQM50J1EEQ8YJGJWSJFPQ5"
-revision = "710b2b5dab6ea09764c02647f3a4e72819b9ee7c"
+# Native SGLang plus code sandboxes/judges; GPU/full-panel qualification is pending.
+image = "01M5ZSWYBJ5GPG1XBARFFC59MZ"
+revision = "3536fe751e40162cc33d5e647085e986375aadce"
 gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
 timeout = "3h"
-server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--context-length", "34816"]
+provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
+# SciCode is the only task that still requires an HTTP policy server.
+external_server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--disable-radix-cache", "--context-length", "34816"]
 
 [[evaluation.tasks]]
 # Official measurement uses full datasets and pinned upstream sampling settings.
