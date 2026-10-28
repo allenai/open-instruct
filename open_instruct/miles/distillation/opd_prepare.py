@@ -82,6 +82,8 @@ def eos_token_ids(generation_config, eos_token_id):
 
 EOS_REMAP_ENV = "OI_OPD_TEACHER_EOS_REMAP"
 """Launcher -> rollout hooks: ``"learner_stop_id:teacher_eos_id[,...]"`` (see ``opd_hooks.eos_remap``)."""
+EXCLUDE_TRUNCATED_ENV = "OI_OPD_EXCLUDE_TRUNCATED"
+"""Launcher -> rollout hooks: ``"1"`` when ``distillation.exclude_truncated`` is set."""
 
 
 def teacher_eos_remap(model_path):

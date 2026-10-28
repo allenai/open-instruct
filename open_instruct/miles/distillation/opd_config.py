@@ -172,6 +172,9 @@ DEFAULTS = {
         "policy_loss": "ppo",
         "dppo_divergence_type": "tv",
         "dppo_threshold": 0.1,
+        # Leave length-truncated responses out of the loss (zero loss mask), as the verifier-RL
+        # arm's reward.exclude_truncated does. The teacher still scores them for the logs.
+        "exclude_truncated": False,
     },
     "optimizer": {
         "learning_rate": 1e-6,
@@ -350,6 +353,7 @@ class OPDRunSpec:
         validation.boolean(document["distillation"]["use_rollout_logprobs"], "distillation.use_rollout_logprobs")
         distillation = document["distillation"]
         validation.boolean(distillation["eopd"], "distillation.eopd")
+        validation.boolean(distillation["exclude_truncated"], "distillation.exclude_truncated")
         validation.integer(distillation["eopd_top_k"], "distillation.eopd_top_k")
         validation.number(distillation["eopd_alpha"], "distillation.eopd_alpha", exclusive_min=True)
         validation.number(distillation["eopd_tau"], "distillation.eopd_tau")

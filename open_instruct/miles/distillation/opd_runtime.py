@@ -308,6 +308,7 @@ def execute(spec):
                 "OI_OPD_OUTPUT": str(root),
                 "OI_OPD_REWARD_CONFIG": prepared["data"]["reward_config"],
                 "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
+                opd_prepare.EXCLUDE_TRUNCATED_ENV: "1" if spec.document["distillation"]["exclude_truncated"] else "0",
                 opd_retention.KEEP_ENV: str(spec.document["training"]["keep_checkpoints"]),
                 "CONVERT_KEEP_PP1": "1",
                 **eopd_settings(spec).environment(),

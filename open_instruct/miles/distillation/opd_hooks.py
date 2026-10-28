@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import aiohttp
+from miles.utils.types import Sample
 
 from miles.rollout import on_policy_distillation, sglang_rollout
 from open_instruct.miles.distillation import eopd_math, opd_prepare, opd_timing
@@ -27,6 +28,8 @@ TEACHER_RESPONSE_KEY = "opd_teacher_response"
 # teacher's eos: "stop here" is one event with two spellings.
 EOS_REMAP_ENV = opd_prepare.EOS_REMAP_ENV
 EOS_REMAPPED_KEY = "oi_eos_remapped"
+# ``distillation.exclude_truncated``: length-truncated responses get ``remove_sample`` (a zero loss mask).
+EXCLUDE_TRUNCATED_ENV = opd_prepare.EXCLUDE_TRUNCATED_ENV
 
 
 def eos_remap(environment=None):
@@ -117,6 +120,7 @@ async def reward(args, sample, **kwargs):
 def post_process(args, samples, **kwargs):
     """Upstream ``post_process_rewards`` for the sampled-token path, reading the response stored by ``reward``."""
     settings = _eopd()
+    exclude_truncated = os.environ.get(EXCLUDE_TRUNCATED_ENV, "0") == "1"
     path = Path(os.environ["OI_OPD_OUTPUT"]) / "teacher-scores.jsonl"
     with path.open("a") as stream:
         for sample in samples:
@@ -137,6 +141,9 @@ def post_process(args, samples, **kwargs):
                 "response": sample.response,
                 "eos_remapped": bool(response.get(EOS_REMAPPED_KEY, False)),
             }
+            if exclude_truncated and sample.status == Sample.Status.TRUNCATED:
+                sample.remove_sample = True
+                record["excluded_truncated"] = True
             if settings.enabled:
                 # The top-k rides to the trainer in train_metadata (the batch's `metadata` list);
                 # the score log keeps only the derived gate so it stays small.

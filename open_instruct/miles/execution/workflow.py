@@ -37,6 +37,9 @@ def fingerprint(document):
     if isinstance(document, dict) and document.get("training", {}).get("algorithm") == "opd":
         document = {key: value for key, value in document.items() if not (key == "miles" and value == {})}
         document["training"] = {key: value for key, value in document["training"].items() if key != "keep_checkpoints"}
+        # OPD runs recorded before distillation.exclude_truncated existed must keep their identity.
+        if document.get("distillation", {}).get("exclude_truncated") is False:
+            document["distillation"] = {k: v for k, v in document["distillation"].items() if k != "exclude_truncated"}
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 
