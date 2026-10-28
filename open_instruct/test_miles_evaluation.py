@@ -359,14 +359,49 @@ def test_prediction_validation_requires_nonempty_artifacts(tmp_path):
 
 def test_evaluator_command_keeps_task_overrides(run):
     config = run.evaluation
+    config["gpus"] = 2
+    config["provider_kwargs"] = {"context_length": 34816, "disable_cuda_graph": True, "profile": "generic"}
     tasks = copy.deepcopy(config["tasks"])
     tasks[0]["generation"] = {"max_tokens": 32, "temperature": 0.0}
     tasks[0]["scoring"] = {"limit": 2}
-    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": tasks}, "/output")
+    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": tasks, "evaluation": config}, "/output")
     assert args[args.index("--model") + 1] == "/frozen/hf"
     assert "max_tokens=32" in args
     assert "limit=2" in args
     assert "--save-predictions" in args
+    assert "--save-requests" in args
+    assert "provider.kind=sglang" in args
+    assert "provider.kwargs.model_registration=olmo_sglang:register" in args
+    assert "provider.kwargs.tensor_parallel_size=2" in args
+    assert "provider.kwargs.context_length=34816" in args
+    assert "provider.kwargs.disable_cuda_graph=true" in args
+    assert not any("vllm" in arg or "base_url" in arg for arg in args)
+
+
+@pytest.mark.parametrize(
+    "key", ["model_path", "tokenizer_path", "tp_size", "tensor_parallel_size", "dp_size", "model_registration"]
+)
+def test_evaluator_provider_cannot_override_snapshot_or_allocation(run, key):
+    document = run.to_dict()
+    document["evaluation"]["provider_kwargs"] = {key: "override"}
+    with pytest.raises(InputError, match="cannot override"):
+        RunSpec.from_dict(document)
+
+
+@pytest.mark.parametrize("section", ["generation", "scoring"])
+@pytest.mark.parametrize("key", ["provider.kind", "provider.kwargs.tp_size", "provider"])
+def test_task_overrides_cannot_switch_evaluation_provider(run, section, key):
+    document = run.to_dict()
+    document["evaluation"]["tasks"][0][section] = {key: "override"}
+    with pytest.raises(InputError, match="not task overrides"):
+        RunSpec.from_dict(document)
+
+
+def test_legacy_server_args_require_migration(run):
+    document = run.to_dict()
+    document["evaluation"]["server_args"] = ["--disable-cuda-graph"]
+    with pytest.raises(InputError, match="replaced by provider_kwargs"):
+        RunSpec.from_dict(document)
 
 
 @pytest.mark.parametrize(
