@@ -59,7 +59,9 @@ def post_process(args, samples):
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "toolrl-reward-watch.jsonl").open("a") as stream:
         stream.write(json.dumps(summary, allow_nan=False) + "\n")
-    with (directory / "toolrl-reward-samples.jsonl").open("a") as stream:
+    samples_directory = directory / "toolrl-reward-samples"
+    samples_directory.mkdir(exist_ok=True)
+    with (samples_directory / f"batch_{batches:05d}.jsonl").open("w") as stream:
         for record in records:
             stream.write(json.dumps({"batch": batches, **record}, allow_nan=False) + "\n")
     logger.info("TOOLRL_REWARD_WATCH %s", json.dumps(summary, allow_nan=False))

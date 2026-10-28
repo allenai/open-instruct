@@ -34,7 +34,7 @@ def test_positive_call_rewards_preserve_advantages_and_audit(tmp_path):
     assert result == ([4, -3], [3.5, -3.5])
     summary = json.loads((tmp_path / "toolrl-reward-watch.jsonl").read_text())
     assert summary["positive_call_responses"] == 1
-    rows = [json.loads(x) for x in (tmp_path / "toolrl-reward-samples.jsonl").read_text().splitlines()]
+    rows = [json.loads(x) for x in (tmp_path / "toolrl-reward-samples" / "batch_00000.jsonl").read_text().splitlines()]
     assert rows[0]["response"] == "recorded response"
 
 
