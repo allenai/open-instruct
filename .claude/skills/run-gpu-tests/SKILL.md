@@ -1,0 +1,10 @@
+---
+name: run-gpu-tests
+description: Run the GPU test suite on Beaker and add its GPU_TESTS line to the PR body. Use when asked to run the GPU tests.
+---
+
+Please launch the GPU tests manually on Beaker with:
+
+./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
+
+Monitor the experiment using the monitor-experiment skill. When the test has passed, update the PR body with the update-pr-body skill to add the experiment ID at the very end of the PR body in this format: `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)`.
