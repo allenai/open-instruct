@@ -37,6 +37,9 @@ def fingerprint(document):
     if isinstance(document, dict) and document.get("training", {}).get("algorithm") == "opd":
         document = {key: value for key, value in document.items() if not (key == "miles" and value == {})}
         document["training"] = {key: value for key, value in document["training"].items() if key != "keep_checkpoints"}
+    # Megatron GRPO runs recorded before training.eval_only existed must keep their identity.
+    if isinstance(document, dict) and document.get("training", {}).get("eval_only") is False:
+        document = {**document, "training": {k: v for k, v in document["training"].items() if k != "eval_only"}}
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 

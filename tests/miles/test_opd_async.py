@@ -55,6 +55,37 @@ def test_async_eval_does_not_mutate_inflight_teacher_args(monkeypatch, fails, pr
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("producer_type", [opd_async.OPDAsyncRollout, grpo_async.VerifierAsyncRollout])
+@pytest.mark.parametrize("started", [False, True])
+def test_last_scheduled_eval_stops_only_a_started_producer(monkeypatch, producer_type, started):
+    async def exercise():
+        producer = producer_type.__new__(producer_type)
+        args = SimpleNamespace(custom_rm_path="train", custom_reward_post_process_path="post", num_rollout=1)
+        producer.args = args
+        producer.state = SimpleNamespace(args=args, semaphore=asyncio.Semaphore(1))
+        producer._producer_resumed = asyncio.Event()
+        producer._producer_resumed.set()
+        producer._eval_prompt_dataset_cache = {}
+        producer._worker = object() if started else None
+        stopped = []
+
+        async def evaluate(state, cache):
+            return {"math": {"rewards": [1]}}
+
+        async def shutdown():
+            stopped.append(True)
+
+        monkeypatch.setattr(opd_async, "run_eval_datasets", evaluate)
+        producer.shutdown = shutdown
+        # With one rollout, the pre-training eval at rollout 0 is also the last scheduled eval.
+        await producer._call_eval(RolloutFnEvalInput(rollout_id=0))
+        # Before training no producer exists; submissions must resume for the training rollout.
+        assert stopped == ([True] if started else [])
+        assert producer._producer_resumed.is_set() is not started
+
+    asyncio.run(exercise())
+
+
 def test_async_prefetch_age_uses_consuming_update_and_resets_on_resume(monkeypatch):
     async def exercise():
         producer = opd_async.OPDAsyncRollout.__new__(opd_async.OPDAsyncRollout)
