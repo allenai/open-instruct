@@ -4,7 +4,6 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Confirm MILES router admission only after weight publication and diagnostics complete (https://github.com/allenai/open-instruct/pull/2096).
 - `mason.py --min_runtime` requests a Beaker minimum runtime (0, or a duration with a unit of at least 5m; Ai2 clusters currently allow at most 8h, and mason warns above that), and `--auto_resume` requeues the job after preemption. Under Beaker's allocation-based scheduler, an allocated job (min runtime above 0) queues ahead of backfill and is protected until its min runtime ends, and a shorter min runtime schedules sooner. Before this flag, mason offered only `--preemptible` (min runtime 0) or the legacy default, an 8-hour protected, non-resumable job. Both remain unchanged. Requires beaker-py 2.6.0 (https://github.com/allenai/open-instruct/pull/1985).
 - Make Claude review comments explicitly recommend merging, identify critical blockers, or state a specific unresolved question, while always publishing advisory comments rather than GitHub approvals or change requests (https://github.com/allenai/open-instruct/pull/2086).
 - Lower the one-node MILES example budget from 1,536 to 1,024 unfinished samples and explicitly bound the three-node example to 1,536 instead of its 19,456-sample automatic budget (https://github.com/allenai/open-instruct/pull/2086).
@@ -32,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - Add `--use_cpu_adam` to GRPO to use DeepSpeed's `DeepSpeedCPUAdam` instead of `torch.optim.AdamW`. It requires a DeepSpeed stage and `--deepspeed_offload_optimizer` (the config is rejected otherwise, since `DeepSpeedCPUAdam` only steps CPU parameters), and `--deepspeed_offload_param` now requires `--deepspeed_stage 3` (https://github.com/allenai/open-instruct/pull/1654).
 
 ### Fixed
+- Confirm MILES router admission only after weight publication and diagnostics complete (https://github.com/allenai/open-instruct/pull/2096).
 - `GSM8KVerifier` compares the extracted answer and the label as exact numbers, so a correct `96.00` is no longer scored wrong against the label `96` (thousands separators are ignored on both sides; non-numeric labels keep the old string match). Rewards on existing runs can rise slightly where answers were written with trailing zeros (https://github.com/allenai/open-instruct/pull/1921).
 - Register the hybrid serving backend before SGLang validates cache capabilities, keep MILES learning examples on the disabled prefix-cache default while the pinned Olmo KDA kernel lacks FP32 tracked-state snapshots, and pin the v0.1.2 async dequeue interface fixes (https://github.com/allenai/open-instruct/pull/2043).
 - Fetch pinned public runtime sources for Codex reviews and remove stale private-source flags, with build tests covering both public and private dependencies (https://github.com/allenai/open-instruct/pull/2047).
