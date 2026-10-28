@@ -163,3 +163,16 @@ def test_buffer_observes_all_wrong_group_before_native_filter(monkeypatch):
     item.group[0].status = Sample.Status.ABORTED
     asyncio.run(buffer.put(item))
     assert events == ["native_filter"]
+
+
+def test_missing_reward_retires_round_without_treating_failure_as_zero():
+    schedule = ads.Schedule(rows(), mini_size=2, active_clusters=2)
+    draws = [schedule.take() for _ in range(4)]
+    schedule.observe(draws[0][0], draws[0][1], None)
+    for identity, round_id, _ in draws[1:]:
+        schedule.observe(identity, round_id, 0.5)
+    assert not schedule.rounds
+    assert schedule.discarded_count == 1
+    assert schedule.feedback_count == 3
+    assert all(rate == 0.5 for rate in schedule.rates.values())
+    assert schedule.reward_groups == {"zero": 0, "one": 0, "mixed": 3}

@@ -15,10 +15,11 @@ class ADSRefreshBuffer(async_buffer.RefreshPolicyDataBuffer):
     async def put(self, item):
         # Aborted or missing-reward work follows native retry/filter handling.
         # Its incomplete outcomes must never move the curriculum.
-        if len(item.group) == self._samples and all(
-            sample.status != Sample.Status.ABORTED and sample.reward is not None for sample in item.group
-        ):
-            self._source.observe_ads(item.group)
+        if len(item.group) == self._samples and all(sample.status != Sample.Status.ABORTED for sample in item.group):
+            if any(sample.reward is None for sample in item.group):
+                self._source.observe_ads(item.group, missing=True)
+            else:
+                self._source.observe_ads(item.group)
         return await super().put(item)
 
     def get_metrics(self, trainer_model_id=None):
@@ -26,6 +27,7 @@ class ADSRefreshBuffer(async_buffer.RefreshPolicyDataBuffer):
         return {
             **super().get_metrics(trainer_model_id),
             "ads/feedback_groups": schedule.feedback_count,
+            "ads/missing_reward_groups": schedule.discarded_count,
             "ads/epoch": schedule.epoch,
             "ads/unique_prompts_scored": len(schedule.observed),
             **{f"ads/scored_groups_{key}": count for key, count in schedule.reward_groups.items()},

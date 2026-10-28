@@ -35,6 +35,7 @@ class Schedule:
         self.rng = random.Random(seed)
         self.mini_size, self.active_clusters, self.alpha, self.band = mini_size, active_clusters, alpha, band
         self.reset_rounds = math.ceil(len(rows) / (mini_size * active_clusters))
+        self.discarded_count = 0
         self.observed = {}
         self.reward_groups = {"zero": 0, "one": 0, "mixed": 0}
         self.queue = []
@@ -63,7 +64,7 @@ class Schedule:
         return self.queue.pop(0)
 
     def observe(self, identity, round_id, reward):
-        if not math.isfinite(reward) or not 0 <= reward <= 1:
+        if reward is not None and (not math.isfinite(reward) or not 0 <= reward <= 1):
             raise ValueError("ADS requires finite binary-reward group means")
         batch = self.rounds.get(round_id)
         if batch is None or identity not in batch["ids"]:
@@ -71,9 +72,12 @@ class Schedule:
         if identity in batch["rewards"]:
             raise ValueError("Duplicate ADS feedback")
         batch["rewards"][identity] = reward
-        self.feedback_count += 1
-        self.observed[identity] = self.observed.get(identity, 0) + 1
-        self.reward_groups["zero" if reward == 0 else "one" if reward == 1 else "mixed"] += 1
+        if reward is None:
+            self.discarded_count += 1
+        else:
+            self.feedback_count += 1
+            self.observed[identity] = self.observed.get(identity, 0) + 1
+            self.reward_groups["zero" if reward == 0 else "one" if reward == 1 else "mixed"] += 1
         if len(batch["rewards"]) != len(batch["ids"]):
             return
         del self.rounds[round_id]
@@ -82,10 +86,14 @@ class Schedule:
         by_cluster = defaultdict(list)
         directions = defaultdict(dict)
         for identity, rho in batch["rewards"].items():
+            if rho is None:
+                continue
             cid, pos = self.lookup[identity], self.positions[identity]
             by_cluster[cid].append(rho)
             if pos in self.mini[cid]:
                 directions[cid][pos] = -1 if rho < self.band[0] else 1 if rho > self.band[1] else 0
+        if not by_cluster:
+            return
         for cid, rates in by_cluster.items():
             self.rates[cid] = sum(rates) / len(rates)
             self._move(cid, directions[cid])
@@ -129,6 +137,7 @@ class Schedule:
                         "epoch",
                         "completed_in_epoch",
                         "feedback_count",
+                        "discarded_count",
                         "observed",
                         "reward_groups",
                         "rates",
@@ -155,6 +164,7 @@ class Schedule:
             "epoch",
             "completed_in_epoch",
             "feedback_count",
+            "discarded_count",
             "observed",
             "reward_groups",
             "rates",

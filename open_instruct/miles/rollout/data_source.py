@@ -136,19 +136,20 @@ class DashboardDrainingRolloutDataSource:
         delegate.epoch_id = self._ads.epoch
         return groups
 
-    def observe_ads(self, group):
+    def observe_ads(self, group, *, missing=False):
         """Consume complete binary reward groups once, including zero-variance groups."""
         with self._cursor_lock:
             identity = group[0].group_index
             pending = self._pending_groups[identity]
             if pending[0].metadata.get("ads_feedback_seen"):
                 return
-            rewards = [sample.get_reward_value(self._delegate.args) for sample in group]
-            if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r not in (0, 1) for r in rewards):
-                raise ValueError("ADS pilot requires complete binary rewards")
-            self._ads.observe(
-                self._ads_identity(group[0]), group[0].metadata["ads"]["round"], sum(rewards) / len(rewards)
-            )
+            mean = None
+            if not missing:
+                rewards = [sample.get_reward_value(self._delegate.args) for sample in group]
+                if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r not in (0, 1) for r in rewards):
+                    raise ValueError("ADS pilot requires complete binary rewards")
+                mean = sum(rewards) / len(rewards)
+            self._ads.observe(self._ads_identity(group[0]), group[0].metadata["ads"]["round"], mean)
             for sample in pending:
                 sample.metadata["ads_feedback_seen"] = True
 
