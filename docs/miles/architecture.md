@@ -74,6 +74,15 @@ Olmo-specific Megatron patches; Olmo training uses the Core backend. Package
 metadata and entrypoints are installed with `--no-deps` to preserve the binary
 stack. `/src/Megatron-LM` remains a compatibility symlink for the OPD launcher.
 
+EOPD metadata transport is implemented in the pinned MILES source, without a
+local runtime patch. Open Instruct's `opd_hooks` stores teacher top-k values in
+`Sample.train_metadata`;
+[rollout conversion](https://github.com/allenai/miles-olmo-core/blob/296a1e80c9c726bc41a764ce7cfcab2c886da64a/miles/ray/rollout/train_data_conversion.py#L173-L174)
+copies those dictionaries into `train_data["metadata"]`, and the
+[Megatron training step](https://github.com/allenai/miles-olmo-core/blob/296a1e80c9c726bc41a764ce7cfcab2c886da64a/miles/backends/megatron_utils/model.py#L465-L496)
+requests `metadata` from `get_batch` for the custom loss. This training field is
+separate from the input dataset metadata selected by `--metadata-key`.
+
 For ordinary application builds:
 
 ```bash
