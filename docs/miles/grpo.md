@@ -103,6 +103,13 @@ When zero-variance group filtering is enabled, it also considers only finished
 responses: groups with fewer than two finished responses or no variation in
 their rewards are dropped before occupying training batch slots.
 
+When a batch has no active loss tokens across all training ranks, Core skips its
+scoring and optimizer work and records `train_skips/no_active_token_batches`.
+The rollout cursor advances, but optimizer steps, learning-rate state, and policy
+versions do not. A rank with no active tokens still participates in an update
+when another rank has active tokens. This also permits bounded mechanics runs
+with zero-variance filtering disabled and every generated response truncated.
+
 ## Runtime images
 
 Build an application image from the source revision you intend to run, using the

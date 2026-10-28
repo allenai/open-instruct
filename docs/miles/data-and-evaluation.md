@@ -18,6 +18,12 @@ Choose exactly one mode under `[data]`:
 Current named tasks are `gsm8k`, `gsm8k-less-noise`, `gsm8k_original`, `math`, legacy `ifeval`, and
 generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
 
+For offline function-call training, the [ToolRL preparation script](../algorithms/toolrl.md)
+produces a pinned 4K source manifest and uses the `toolrl` or
+`toolrl_think_prefix` verifier binding. Select it with `rl_manifest`, not a named
+task. Its original JSON call format and reward semantics are documented there;
+this is CPU-tested integration, not a qualified Olmo training recipe.
+
 `gsm8k` uses the established `ai2-adapt-dev/rlvr_gsm8k_zs` train split.
 `gsm8k_original` remains a compatibility alias for the same pinned dataset,
 retaining its historical sampling seed convention.
