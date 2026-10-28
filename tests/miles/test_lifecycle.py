@@ -31,8 +31,16 @@ def install_components(monkeypatch, manager):
     monkeypatch.setattr(driver.placement_group, "update_weights", update_weights)
     monkeypatch.setattr(driver.wiring, "shutdown_worker_manager", AsyncMock())
 
+    async def begin_admission():
+        getattr(manager, "admission_events", []).append("admission-pending")
+
+    async def finish_admission(*, admit):
+        getattr(manager, "admission_events", []).append("admitted" if admit else "admission-aborted")
+
     async def create_components(args):
         inference = SimpleNamespace(
+            begin_weight_admission=begin_admission,
+            finish_weight_admission=finish_admission,
             check_weights=manager.check_weights if hasattr(manager, "check_weights") else AsyncMock(),
             prepare_rollout=AsyncMock(),
             dispose=AsyncMock(),
@@ -75,6 +83,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         events.append(name)
 
     manager = SimpleNamespace(
+        admission_events=events,
         check_weights=SimpleNamespace(remote=lambda **kwargs: event(kwargs["action"])),
         generate=SimpleNamespace(remote=lambda rollout_id: event("generated")),
         dispose=SimpleNamespace(remote=lambda: event("engines-disposed")),
@@ -165,7 +174,10 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         if name == "reset_tensors":
             assert events[index - 1 : index + 3] == ["snapshot", "reset_tensors", "published", "compare"]
             if fully_async:
-                assert events[index + 3] == "paused-False"
+                assert events[index + 3 : index + 5] == ["admitted", "paused-False"]
+    assert events.index("compare") < events.index("admitted") < events.index("generated")
+    if "evaluated" in events:
+        assert events.index("admitted") < events.index("evaluated")
     expected = ["close_weight_transport", "engines-disposed", "trainer-disposed"]
     if fully_async:
         expected.insert(0, "paused-True")

@@ -108,7 +108,11 @@ def test_cleanup_failure_marks_run_failed(monkeypatch):
     monkeypatch.setattr(driver, "finish_tracking", finish)
     monkeypatch.setattr(driver.wiring, "launch_worker_manager", Mock(return_value=None))
     monkeypatch.setattr(driver.object_store, "init_instance", Mock())
-    inference = SimpleNamespace(dispose=AsyncMock(side_effect=RuntimeError("inference cleanup failed")))
+    inference = SimpleNamespace(
+        begin_weight_admission=AsyncMock(),
+        finish_weight_admission=AsyncMock(),
+        dispose=AsyncMock(side_effect=RuntimeError("inference cleanup failed")),
+    )
     manager = SimpleNamespace(dispose=AsyncMock())
     learner = SimpleNamespace(execute_workers=AsyncMock(), dispose=AsyncMock())
     monkeypatch.setattr(
