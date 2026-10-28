@@ -79,6 +79,13 @@ def test_launch_memory_request(tmp_path, settings, memory, shared):
     assert resources == {"gpuCount": 2, "memory": memory, "sharedMemory": shared}
 
 
+@pytest.mark.parametrize("limit", [-1, 0, 3])
+def test_finite_retry_limit_reaches_beaker_spec(tmp_path, limit):
+    run = spec(tmp_path, launch={"max_retries": limit})
+    document = launch.specification(IMAGE_ID, run)
+    assert document.get("retry") == ({"allowedTaskRetries": limit} if limit >= 0 else None)
+
+
 @pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])
 def test_multinode_native_replica_group(tmp_path, monkeypatch, minimum):
     def no_inventory(*args, **kwargs):

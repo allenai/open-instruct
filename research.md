@@ -85,3 +85,5 @@ committed native checkpoints and final HF export before submitting the two main
 runs through build_image_and_launch.sh. It fails closed on missing evidence,
 worker failure or an interrupted submission. Durable controller status and launch
 receipts live in `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/compare-450m-controller-20261028`.
+
+2026-10-28 update: corrected BF16 smoke 01M608040GER8BMAC4E8DRQ7Q7 succeeded on its replacement job 01M609PQ4J14ACC3QY9GWY60M5 (04:33–04:45 UTC); the first attempt failed its node healthcheck before starting. Durable gate verified two updates, publication/eval and committed checkpoints/HF export. Main submission 01M60D8RYBPESB5NCH5PPVQA3C was immediately stopped before scheduling: Beaker retry policy was missing despite launch.max_retries=3. Emit finite retry caps in the Beaker spec alongside the existing native attempt ledger; retry the authorized controller under compare-450m-controller-20261028-retry.

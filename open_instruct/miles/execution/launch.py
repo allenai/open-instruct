@@ -153,9 +153,12 @@ def specification(image, spec, *, hostnames=None):
         # One shared allowlist preserves native replica-group scheduling.
         # Beaker makes cluster and hostname constraints mutually exclusive.
         task["constraints"] = {"hostname": hostnames}
-    return dict(
+    document = dict(
         version="v2", budget=spec.launch["budget"], description=f"MILES/Core researcher run: {spec.name}", tasks=[task]
     )
+    if spec.launch["max_retries"] >= 0:
+        document["retry"] = {"allowedTaskRetries": spec.launch["max_retries"]}
+    return document
 
 
 def collect_results(root, destination):
