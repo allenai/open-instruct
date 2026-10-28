@@ -273,6 +273,14 @@ def test_contradictions(constraints, rule):
     assert f"contradiction:{rule}" in problems("Write a story.", *constraints)
 
 
+def test_punctuation_dot_allows_a_dotless_postscript_marker():
+    constraints = (
+        ("punctuation:punctuation_dot", {}),
+        ("detectable_content:postscript", {"postscript_marker": "Postscript"}),
+    )
+    assert "contradiction:punctuation_dot+required_dot" not in problems("Write a story.", *constraints)
+
+
 def test_copy_with_compatible_constraint_is_not_a_contradiction():
     found = problems(
         "Write a story.",

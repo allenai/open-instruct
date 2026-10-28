@@ -239,6 +239,15 @@ def normalized_query(row):
     return " ".join(re.sub(r"[^\w\s]", " ", row["metadata"]["query"].lower()).split())
 
 
+def split_from_eval(rows, held_out, seed, key=None):
+    """Training rows for a fixed, previously prepared held-out set: the seeded shuffle minus held-out prompts."""
+    key = key or (lambda row: row["input"])
+    keys = {key(row) for row in held_out}
+    shuffled = list(rows)
+    random.Random(seed).shuffle(shuffled)
+    return [row for row in shuffled if key(row) not in keys]
+
+
 def split_domain(rows, eval_count, seed, key=None):
     """Deterministic (eval, train) split; train excludes any prompt that is also held out.
 
@@ -284,6 +293,11 @@ def main():
     parser.add_argument("--tokenizer-revision", default=None, help="Immutable revision for an HF tokenizer id")
     parser.add_argument("--source", required=True, help="HF dataset as repo@40-character-revision")
     parser.add_argument("--eval-per-domain", type=int, default=256, help="Held-out prompts per domain")
+    parser.add_argument(
+        "--eval-from",
+        default=None,
+        help="Prepared directory whose eval_<domain>.jsonl files are reused unchanged (overrides --eval-per-domain)",
+    )
     parser.add_argument("--mix", action="append", default=[], metavar="NAME=DOMAIN:WEIGHT,...")
     parser.add_argument("--max-prompt-tokens", type=int, default=2048, help="Drop longer rendered prompts")
     parser.add_argument("--code-api-url", default=DEFAULT_CODE_API_URL, help="Code execution /test_program URL")
@@ -341,9 +355,16 @@ def main():
 
     files = {}
     train = {}
+    eval_from = {}
     for domain, rows in by_domain.items():
         key = normalized_query if args.reward_fixes else None
-        held_out, train[domain] = split_domain(rows, args.eval_per_domain, args.seed, key)
+        if args.eval_from:
+            raw = (Path(args.eval_from) / f"eval_{domain}.jsonl").read_bytes()
+            held_out = [json.loads(line) for line in raw.decode().splitlines()]
+            eval_from[f"eval_{domain}"] = _sha(raw)
+            train[domain] = split_from_eval(rows, held_out, args.seed, key)
+        else:
+            held_out, train[domain] = split_domain(rows, args.eval_per_domain, args.seed, key)
         files[f"eval_{domain}"] = held_out
         files[f"train_{domain}"] = train[domain]
     mix_counts = {}
@@ -360,6 +381,7 @@ def main():
         "seed": args.seed,
         "max_prompt_tokens": args.max_prompt_tokens,
         "reward_fixes": args.reward_fixes,
+        "eval_from": {"path": args.eval_from, "sha256": eval_from} if args.eval_from else None,
         "dropped": dict(sorted(drops.items())),
         "resolved_duplicate_targets": dict(sorted(resolved_targets.items())),
         "mixes": {name: {"weights": mixes[name], "counts": mix_counts[name]} for name in mixes},

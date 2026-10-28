@@ -312,10 +312,10 @@ def _contradictions(checkers: list[tuple[str, Any]]) -> list[str]:
         flag("start_end+first_last_word")
 
     # Punctuation bans against required literals.
+    # Only literals that contain a dot conflict: "P.S." does, a "Postscript" marker does not.
     end_phrases = [args["end_phrase"] for args in by_id.get("startend:end_checker", [])]
-    if "punctuation:punctuation_dot" in ids and (
-        "detectable_content:postscript" in ids or any("." in phrase for phrase in end_phrases)
-    ):
+    markers = [args["postscript_marker"] for args in by_id.get("detectable_content:postscript", [])]
+    if "punctuation:punctuation_dot" in ids and any("." in literal for literal in end_phrases + markers):
         flag("punctuation_dot+required_dot")
     if "punctuation:no_comma" in ids and any("," in phrase for phrase in end_phrases):
         flag("no_comma+end_checker")

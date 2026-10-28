@@ -171,6 +171,17 @@ def test_split_by_normalized_query_removes_near_duplicate_training_rows():
     assert len(train) == 20 - 2 * len(held)
 
 
+def test_split_from_eval_keeps_the_given_held_out_set_out_of_training():
+    def row(i, text):
+        return {"input": f"<{i}>", "metadata": {"query": text}}
+
+    rows = [row(i, f"Question {i}.") for i in range(10)]
+    held_out = [row(100, "question 3"), row(101, "A new question")]
+    train = dolci.split_from_eval(rows, held_out, seed=0, key=dolci.normalized_query)
+    assert sorted(r["input"] for r in train) == sorted(f"<{i}>" for i in range(10) if i != 3)
+    assert train == dolci.split_from_eval(rows, held_out, seed=0, key=dolci.normalized_query)
+
+
 def test_reward_fixes_drop_unsatisfiable_and_trivial_if_rows():
     lower_and_capital = repr(
         [{"instruction_id": ["change_case:english_lowercase", "change_case:english_capital"], "kwargs": [None, None]}]
