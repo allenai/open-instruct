@@ -123,8 +123,9 @@ reducing it; do not copy that limit into a full trainer job without measurement.
 
 ## Jupiter CUDA compatibility
 
-For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` or `"ai2/saturn"` (both have
-CUDA 12.8 host drivers) automatically sets the compatibility library path inside the Beaker job. The resolved value appears
+For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"`, `"ai2/saturn"`, or
+`"ai2/titan"` automatically sets the compatibility library path inside the Beaker job.
+The resolved value appears
 in `plan`, the submitted configuration and the launch receipt:
 
 ```toml
