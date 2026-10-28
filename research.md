@@ -842,7 +842,7 @@ MILES integration question remains ACTIVE.
 
 ## GSM8K 500-update comparison of Core/vLLM and MILES
 
-Status: ACTIVE — user approved only the two 450m stacks; 275m deferred; smoke queued.
+Status: ACTIVE — 450m smoke passed; both 500-update jobs scheduled; 275m deferred.
 
 Do the two stacks show useful learning and acceptable throughput on the275m and
 450m final-midtrain releases? Four fresh runs use500 updates, eval/checkpoint
@@ -878,3 +878,23 @@ committed native checkpoints and final HF export before submitting the two main
 runs through build_image_and_launch.sh. It fails closed on missing evidence,
 worker failure or an interrupted submission. Durable controller status and launch
 receipts live in `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/compare-450m-controller-20261028`.
+
+
+2026-10-28 05:04 UTC launch update: corrected BF16 smoke completed both learner
+updates with successful publication/evaluation stages, two committed native
+checkpoints and final HF export. The retry-policy guard caught a missing Beaker
+retry field; its first main submission was stopped before allocation. Fix pushed
+in companion commit f22385319 (100 focused tests and lint/type checks passed).
+
+The approved main pair is now submitted and scheduled, each with exactly two
+A6000s on Rhea. Verified autoResume=true, minRuntime=0s, allowedTaskRetries=3,
+500 updates, eval/checkpoint100, BF16, max policy lag1. No275m comparison submitted.
+- MILES: [01M60E822XVYFNHWJ97N6WDBY2](https://beaker.org/ex/01M60E822XVYFNHWJ97N6WDBY2), image01M607Z48PYPNN0KHVZ5PGYJEG.
+- Core/vLLM: [01M60E9H8YVK2VJNWPE4BHBFM0](https://beaker.org/ex/01M60E9H8YVK2VJNWPE4BHBFM0), image01M6087KP6KYPHQ9MMZTEX9SBJ.
+Controller status: both_submitted, under runs/compare-450m-controller-20261028-retry
+on Weka. Main-run optimizer progress and learning quality are not yet verified.
+
+Separate Saturn275m/1k run01M5ZAPEQFTT3YEMK107ZSVFK4 has suffered six scheduler
+preemptions by urgent allocated workloads. Current job01M604JS88XG6RFSGNF2Z0FWB1
+has waited almost three hours; scheduler reports no slots on any of27 eligible
+nodes. Cluster snapshot:216slots, zero available,161queued jobs. Run unchanged.
