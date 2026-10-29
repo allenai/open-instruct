@@ -245,7 +245,10 @@ jobs:
                 else
                   echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
                   echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
-                  echo "${EXP_NAME}" >> "$ERRORED_FILE"
+                  # A preempted or cancelled job has no exit code; treat it like a timeout.
+                  if [[ "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
+                    echo "${EXP_NAME}" >> "$ERRORED_FILE"
+                  fi
                 fi
               else
                 echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout; stopping it"
@@ -274,7 +277,8 @@ jobs:
             done < "$FAILED_FILE"
             echo "failed_experiment_ids=${FAILED_EXP_IDS[*]}" >> $GITHUB_OUTPUT
             echo "failed_experiment_names=${FAILED_EXP_NAMES[*]}" >> $GITHUB_OUTPUT
-            # Experiments that ran and exited non-zero, as opposed to ones that timed out in the queue.
+            # Experiments that finished with a non-zero exit code, as opposed to ones that never finalized
+            # within the await timeout or were preempted.
             echo "errored_experiment_names=$(tr '\n' ' ' < "$ERRORED_FILE")" >> $GITHUB_OUTPUT
             rm -f "$FAILED_FILE" "$ERRORED_FILE"
             exit 1
