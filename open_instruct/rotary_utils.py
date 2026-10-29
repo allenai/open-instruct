@@ -79,9 +79,9 @@ def _call_with_supported_kwargs(fn, *args, **kwargs):
         sig = inspect.signature(fn)
         has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         filtered_kwargs = kwargs if has_varkw else {k: v for k, v in kwargs.items() if k in sig.parameters}
-        return fn(*args, **filtered_kwargs)
     except (ValueError, TypeError):
-        return fn(*args, **kwargs)
+        filtered_kwargs = kwargs
+    return fn(*args, **filtered_kwargs)
 
 
 def recompute_rotary_inv_freq(

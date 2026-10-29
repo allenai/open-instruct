@@ -21,7 +21,12 @@ import torch
 import torch.nn as nn
 from transformers import Olmo2Config, Olmo2ForCausalLM, Olmo3Config, Olmo3ForCausalLM
 
-from open_instruct.rotary_utils import parse_rotary_buffer_name, recompute_rotary_inv_freq, restore_fp32_rotary
+from open_instruct.rotary_utils import (
+    _call_with_supported_kwargs,
+    parse_rotary_buffer_name,
+    recompute_rotary_inv_freq,
+    restore_fp32_rotary,
+)
 
 
 class TestRotaryPrecision(unittest.TestCase):
@@ -429,6 +434,21 @@ class TestRotaryPrecision(unittest.TestCase):
             # Clean up distributed state only if this test created it
             if not was_dist_initialized and torch.distributed.is_initialized():
                 torch.distributed.destroy_process_group()
+
+    def test_12_call_with_supported_kwargs_propagates_exception_without_retry(self):
+        """Acceptance test 12: _call_with_supported_kwargs does not invoke fn twice on ValueError."""
+        call_count = 0
+
+        def failing_fn(device=None, layer_type=None):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Intentional domain failure inside native function")
+
+        with self.assertRaises(ValueError) as ctx:
+            _call_with_supported_kwargs(failing_fn, device="cpu", layer_type="full_attention", extra_unused=123)
+
+        self.assertEqual(str(ctx.exception), "Intentional domain failure inside native function")
+        self.assertEqual(call_count, 1, f"Expected fn to be called exactly once, but was called {call_count} times")
 
 
 if __name__ == "__main__":
