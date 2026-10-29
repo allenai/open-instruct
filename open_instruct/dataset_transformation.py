@@ -84,13 +84,17 @@ def get_commit_hash(
     return commit_hash
 
 
+def get_local_file_sha256(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
 def get_file_hash(
     model_name_or_path: str, revision: str | None, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
     file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
-        with open(file, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
+        return get_local_file_sha256(file)
     elif file is None:
         return f"{filename} not found"
     else:
@@ -101,11 +105,6 @@ def get_files_hash_if_exists(
     model_name_or_path: str, revision: str | None, filenames: list[str], repo_type: str = "model"
 ) -> list[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
-
-
-def get_local_file_sha256(path: str) -> str:
-    with open(path, "rb") as f:
-        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def _preserve_column(column_name: str, dataset, target_columns: list) -> list:
@@ -2278,18 +2277,20 @@ class DatasetConfig:
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
+            # Local files have no commit hash, so key the cache on their content:
+            # otherwise rewriting a file in place silently reuses the stale cache.
+            # Hash before loading, so a concurrent rewrite cannot store the old
+            # rows under the new content's key.
+            self.dataset_commit_hash = get_local_file_sha256(self.dataset_name)
             dataset = load_dataset(
                 "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
-            # Local files have no commit hash, so key the cache on their content:
-            # otherwise rewriting a file in place silently reuses the stale cache.
-            self.dataset_commit_hash = get_local_file_sha256(self.dataset_name)
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
+            self.dataset_commit_hash = get_local_file_sha256(self.dataset_name)
             dataset = load_dataset(
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
-            self.dataset_commit_hash = get_local_file_sha256(self.dataset_name)
         else:
             dataset = load_dataset(
                 self.dataset_name,
