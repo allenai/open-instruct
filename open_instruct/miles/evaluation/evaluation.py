@@ -27,6 +27,8 @@ logger = logger_utils.setup_logger(__name__)
 # Gated downloads used by the maintained safety panel. Keep planning offline;
 # this is a narrow guard for known models, not a claim about arbitrary HF repos.
 GATED_JUDGE_MODELS = {"allenai/wildguard", "google/gemma-2b"}
+# olmo-eval task families whose datasets are gated, keyed by the task name before "_" or ":".
+GATED_TASK_DATASETS = {"gpqa": "Idavidrein/gpqa"}
 
 
 def parse(value, launch):
@@ -194,13 +196,16 @@ def parse(value, launch):
 
 
 def validate_judge_credentials(config):
-    """Reject known gated managed-judge downloads without an evaluator secret."""
+    """Reject known gated managed-judge and dataset downloads without an evaluator secret."""
     if config["secrets"].get("HF_TOKEN", "").strip():
         return
     affected = []
     for task in config["tasks"]:
         if task.get("kind", "task") != "task" or not (config["initial"] or config["final"] or task["interval"] > 0):
             continue
+        dataset = GATED_TASK_DATASETS.get(re.split(r"[_:]", task["task"], maxsplit=1)[0])
+        if dataset:
+            affected.append(f"{task['task']} (dataset={dataset})")
         harness = task.get("harness", {})
         for key, model in harness.items():
             if not re.fullmatch(r"auxiliary_providers\.[^.]+\.(model|tokenizer)", key):
@@ -215,10 +220,10 @@ def validate_judge_credentials(config):
                 affected.append(f"{task['task']} ({key}={model})")
     if affected:
         raise InputError(
-            "Background evaluation requires an HF_TOKEN Beaker secret reference for gated managed judges: "
+            "Background evaluation requires an HF_TOKEN Beaker secret reference for gated judges or datasets: "
             + "; ".join(affected)
             + '. Set evaluation.secrets.HF_TOKEN = "your-beaker-secret-name" or launch.secrets.HF_TOKEN '
-            "(inherited by evaluation). The token's HF account must have accepted each model's access terms. "
+            "(inherited by evaluation). The token's HF account must have accepted each model's or dataset's access terms. "
             "A token in the local environment is not forwarded to evaluator jobs."
         )
 
