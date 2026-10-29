@@ -17,7 +17,7 @@ jobs:
   launch-experiment:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     defaults:
       run:
         shell: bash -euo pipefail {0}
@@ -60,7 +60,6 @@ jobs:
           declare -A CHANGE_PATTERNS=(
             [dpo_changed]="open_instruct/(dpo|dpo_tune_cache|dpo_utils)\.py"
             [finetune_changed]="open_instruct/finetune\.py"
-            [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
 
           for OUTPUT_KEY in "${!CHANGE_PATTERNS[@]}"; do
@@ -68,6 +67,17 @@ jobs:
             MATCHED=$(grep -qE "$PATTERN" <<< "$CHANGED_FILES" && echo true || echo false)
             echo "${OUTPUT_KEY}=${MATCHED}" >> "$GITHUB_OUTPUT"
           done
+
+          # grpo_fast.py shares most of its imports with the other trainers, so instead of listing its
+          # dependencies, run GRPO for any open_instruct/ change outside code it never imports.
+          GRPO_ALWAYS="(^|/)Dockerfile$|^(mason\.py|pyproject\.toml|uv\.lock)$|^configs/beaker_configs/|^scripts/train/debug/grpo_integration_test\.sh$"
+          GRPO_UNRELATED="^open_instruct/(miles/|test_|olmo_core_finetune\.py$|numpy_dataset_conversion\.py$|dpo[a-z_]*\.py$|finetune\.py$)"
+          GRPO_RELATED=$(grep -E "^open_instruct/" <<< "$CHANGED_FILES" | grep -vE "$GRPO_UNRELATED" || true)
+          if grep -qE "$GRPO_ALWAYS" <<< "$CHANGED_FILES" || [ -n "$GRPO_RELATED" ]; then
+            echo "grpo_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "grpo_changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Python environment
         uses: actions/setup-python@v5
@@ -143,7 +153,8 @@ jobs:
           }
 
           EXPERIMENT_DEFINITIONS=(
-            "grpo|scripts/train/debug/grpo_integration_test.sh|always"
+            "oc_sft|scripts/train/debug/oc_sft_integration_test.sh|always"
+            "grpo|scripts/train/debug/grpo_integration_test.sh|${GRPO_CHANGED}"
             "dpo|scripts/train/debug/dpo/single_gpu.sh|${DPO_CHANGED}"
             "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
           )
@@ -222,7 +233,7 @@ jobs:
 
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
-              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
+              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 30m --interval 30s; then
                 EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
                 if [ "$EXIT_CODE" = "0" ]; then
                   echo "  [${EXP_NAME}] ✅ succeeded"
@@ -231,7 +242,8 @@ jobs:
                   echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
                 fi
               else
-                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
+                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout; stopping it"
+                beaker experiment stop "$EXP_ID" || true
                 echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
               fi
             ) &
@@ -264,6 +276,12 @@ jobs:
           echo ""
           echo "✅ All experiments completed successfully!"
 
+      - name: Stop experiments on cancellation
+        if: cancelled() && steps.launch.outputs.experiment_ids != ''
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: beaker experiment stop ${{ steps.launch.outputs.experiment_ids }} || true
+
       - name: Check image
         if: success()
         run: |
@@ -275,7 +293,8 @@ jobs:
           docker run --rm "$IMAGE"
 
       - name: Push CUDA 12 images to Beaker
-        if: success()
+        # A manual dispatch from a branch tests the workflow without replacing the published images.
+        if: success() && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main')
         env:
           SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
         run: |
@@ -390,6 +409,7 @@ jobs:
   publish-cuda13-image:
     name: Publish CUDA 13 image
     needs: launch-experiment
+    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 45
     defaults:

@@ -21,7 +21,20 @@ echo "Waiting for tests to finish on Beaker: $exp_url"
 echo "=========================================="
 echo ""
 
-beaker experiment await "$exp_id" 0 --index finalized --timeout 25m
+# Stop the experiment if we exit before it finishes (timeout or a cancelled run), so it does not
+# take a GPU later for a result nobody reads.
+finalized=false
+stop_unfinished() {
+    if [ "$finalized" != "true" ]; then
+        echo "Stopping unfinished experiment $exp_id"
+        beaker experiment stop "$exp_id" || true
+    fi
+}
+trap stop_unfinished EXIT
+trap 'exit 130' INT TERM
+
+beaker experiment await "$exp_id" 0 --index finalized --timeout 40m
+finalized=true
 status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs[0].status.exitCode')
 if [ "$status" != "0" ]; then
     echo "GPU tests failed with exit code $status"
