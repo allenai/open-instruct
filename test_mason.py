@@ -461,6 +461,12 @@ class TestGetEnvVars(unittest.TestCase):
         env_vars = self._env(secrets=[{"name": name, "value": "my_secret"}])
         self.assertEqual(self._named(env_vars, name), [(name, None, "my_secret")])
 
+    def test_checkpoint_output_dir_is_under_the_user(self):
+        [(_, value, _)] = self._named(self._env(), "CHECKPOINT_OUTPUT_DIR")
+        self.assertEqual(
+            value, f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/me/{mason.global_wandb_id}"
+        )
+
     def test_explicit_secret_is_kept_beside_unrelated_env(self):
         env_vars = self._env(env=[{"name": "FOO", "value": "1"}], secrets=[{"name": "BAR", "value": "bar_secret"}])
         self.assertEqual(self._named(env_vars, "FOO"), [("FOO", "1", None)])
