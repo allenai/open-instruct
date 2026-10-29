@@ -103,6 +103,11 @@ def get_files_hash_if_exists(
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
 
+def get_local_file_sha256(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
 def _preserve_column(column_name: str, dataset, target_columns: list) -> list:
     if column_name in dataset.column_names and column_name not in target_columns:
         target_columns = target_columns + [column_name]
@@ -2276,11 +2281,15 @@ class DatasetConfig:
             dataset = load_dataset(
                 "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
+            # Local files have no commit hash, so key the cache on their content:
+            # otherwise rewriting a file in place silently reuses the stale cache.
+            self.dataset_commit_hash = get_local_file_sha256(self.dataset_name)
         elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
             assert self.dataset_split == "train", "Only train split is supported for local parquet files."
             dataset = load_dataset(
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
+            self.dataset_commit_hash = get_local_file_sha256(self.dataset_name)
         else:
             dataset = load_dataset(
                 self.dataset_name,
