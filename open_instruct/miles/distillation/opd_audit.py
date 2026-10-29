@@ -107,7 +107,9 @@ def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1, *, requir
     Verifier GRPO passes ``require_positive_grad_norm=False``: a batch whose prompt groups all have
     equal rewards has zero advantages, so a zero gradient norm is legitimate there."""
     steps = {}
-    for match in re.finditer(r"step \d+: (\{[^\n]+\})", (root / "training.log").read_text()):
+    # The metrics dict is flat; stopping at its first closing brace ignores another process's output written onto
+    # the same log line.
+    for match in re.finditer(r"step \d+: (\{[^{}\n]*\})", (root / "training.log").read_text()):
         values = ast.literal_eval(match[1])
         if "train/grad_norm" in values:
             steps[int(values["train/step"])] = values

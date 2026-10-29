@@ -119,6 +119,14 @@ def test_optimizer_audit_requires_every_nonzero_update(tmp_path):
         opd_audit.audit_optimizer(tmp_path, 1)
 
 
+def test_optimizer_audit_ignores_output_interleaved_onto_a_metrics_line(tmp_path):
+    (tmp_path / "training.log").write_text(
+        "step 0: {'train/step': 0, 'train/grad_norm': 0.5}"
+        '[main] logger.py:70 - audit op=event cell_outcomes="{\\"0\\":[\\"normal\\"]}\n'
+    )
+    assert opd_audit.audit_optimizer(tmp_path, 1) == [{"train/step": 0, "train/grad_norm": 0.5}]
+
+
 def test_eopd_audit_rederives_the_gate_and_requires_the_loss_metrics(tmp_path):
     folder = tmp_path / "debug/train_data"
     folder.mkdir(parents=True)
