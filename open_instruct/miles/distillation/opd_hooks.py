@@ -12,6 +12,7 @@ import aiohttp
 from miles.rollout import on_policy_distillation, sglang_rollout
 from open_instruct.miles.distillation import eopd_math, opd_prepare, opd_timing
 from open_instruct.miles.distillation import opd_rewards as rewards
+from open_instruct.miles.megatron_grpo import domain_balance
 
 _LIMIT = None
 # The teacher's scoring response rides on the sample here (samples are deep-copied per group);
@@ -150,6 +151,8 @@ def post_process(args, samples, **kwargs):
                 record["eopd_proxy_entropy"] = eopd_math.proxy_entropy(log_probs).tolist()
                 record["eopd_topk_mass"] = eopd_math.topk_mass(log_probs).tolist()
             stream.write(json.dumps(record) + "\n")
+    if domain_balance.enabled():
+        domain_balance.attach(samples)
     # Pure on-policy distillation: the task reward is zero and the signal is the teacher KL.
     rewards = [0.0] * len(samples)
     return rewards, rewards

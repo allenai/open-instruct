@@ -9,12 +9,20 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 from miles.backends.core_utils.rollout import async_rollout
 from miles.backends.training_utils import cp_utils
 from miles.backends.training_utils.loss_hub import logit_processors, losses
 from miles.utils.types import Sample
 
-from open_instruct.miles.megatron_grpo import conversion, dppo_loss, grpo_async, grpo_config, grpo_hooks
+from open_instruct.miles.megatron_grpo import (
+    conversion,
+    domain_balance,
+    dppo_loss,
+    grpo_async,
+    grpo_config,
+    grpo_hooks,
+)
 
 
 def native_converter():
@@ -79,6 +87,38 @@ def test_dppo_loss_matches_the_pinned_custom_loss_contract():
 def test_dppo_loss_reports_opd_reverse_kl_like_the_native_loss():
     assert 'batch.get("opd_reverse_kl")' in inspect.getsource(losses)
     assert 'metrics["opd_reverse_kl"]' in inspect.getsource(dppo_loss.policy_loss)
+
+
+def test_dppo_loss_scales_each_sample_by_its_domain_weight(monkeypatch):
+    # Two samples (3 and 2 tokens) at ratio 1, so the loss is -sum(advantage * weight).
+    log_probs = torch.tensor([-1.0, -2.0, -0.5, -1.5, -0.1], requires_grad=True)
+    monkeypatch.setattr(
+        dppo_loss.logit_processors, "get_log_probs_and_entropy", lambda logits, **_: {"log_probs": [log_probs]}
+    )
+    monkeypatch.setattr(dppo_loss.cp_utils, "get_local_response_loss_masks", lambda *_: [torch.ones(5)])
+    monkeypatch.setenv("OI_DPPO_DIVERGENCE_TYPE", "tv")
+    monkeypatch.setenv("OI_DPPO_THRESHOLD", "0.1")
+    args = SimpleNamespace(
+        use_rollout_logprobs=True, use_tis=False, use_opsm=False, use_kl_loss=False, entropy_coef=0, qkv_format="thd"
+    )
+    batch = {
+        "rollout_log_probs": [log_probs[:3].detach(), log_probs[3:].detach()],
+        "advantages": [torch.full((3,), 1.0), torch.full((2,), -2.0)],
+        "unconcat_tokens": None,
+        "total_lengths": None,
+        "response_lengths": [3, 2],
+        "loss_masks": None,
+        "metadata": [{domain_balance.WEIGHT_KEY: 0.5}, {domain_balance.WEIGHT_KEY: 3.0}],
+    }
+    logits = torch.zeros(1)
+    plain, _ = dppo_loss.policy_loss(args, batch, logits, lambda values: values.sum())
+    assert plain.item() == pytest.approx(-(3 * 1.0 + 2 * -2.0))
+    monkeypatch.setenv(domain_balance.ENV, "1")
+    weighted, _ = dppo_loss.policy_loss(args, batch, logits, lambda values: values.sum())
+    assert weighted.item() == pytest.approx(-(3 * 1.0 * 0.5 + 2 * -2.0 * 3.0))
+    batch["metadata"] = batch["metadata"][:1]
+    with pytest.raises(ValueError, match="do not match"):
+        dppo_loss.policy_loss(args, batch, logits, lambda values: values.sum())
 
 
 def test_async_producer_is_the_managed_native_producer():

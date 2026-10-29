@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.megatron_grpo import domain_balance
 from open_instruct.miles.rewards import rewards
 
 OUTPUT_ENV = "OI_GRPO_OUTPUT"
@@ -147,4 +148,6 @@ def post_process(args, samples, **kwargs):
             denominator = math.sqrt(sum((values[i] - mean) ** 2 for i in graded) / (len(graded) - 1)) + 1e-6
         for i in graded:
             centered[i] = (values[i] - mean) / denominator
+    if domain_balance.enabled():
+        domain_balance.attach(samples)
     return values, centered

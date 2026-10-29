@@ -7,14 +7,15 @@ is taken against the rollout engine's sampled-token log-probabilities, matching 
 Advantages are the batch's ``advantages`` unchanged (centered verifier rewards from the GRPO
 estimator). The per-token loss uses the same ``sum_of_sample_mean`` reducer as upstream, so
 ``--calculate-per-token-loss`` gives Open Instruct's ``loss_denominator=token`` global token mean.
-Settings come from the ``OI_DPPO_*`` environment.
+Settings come from the ``OI_DPPO_*`` environment; ``OI_DPPO_DOMAIN_BALANCE=1`` scales each sample's
+advantages by its ``domain_balance`` weight.
 """
 
 import torch
 from miles.backends.training_utils import cp_utils
 from miles.backends.training_utils.loss_hub import logit_processors
 
-from open_instruct.miles.megatron_grpo import dppo_math
+from open_instruct.miles.megatron_grpo import domain_balance, dppo_math
 
 
 def policy_loss(args, batch, logits, sum_of_sample_mean):
@@ -34,7 +35,14 @@ def policy_loss(args, batch, logits, sum_of_sample_mean):
     )["log_probs"]
     log_probs = torch.cat(log_probs, dim=0)
     behavior = torch.cat([value.detach() for value in batch["rollout_log_probs"]], dim=0).to(log_probs)
-    advantages = torch.cat([value.detach() for value in batch["advantages"]], dim=0).to(log_probs)
+    sample_advantages = [value.detach() for value in batch["advantages"]]
+    if domain_balance.enabled():
+        # Scale each sample's advantages by its domain weight (see domain_balance).
+        weights = domain_balance.batch_weights(batch)
+        if len(weights) != len(sample_advantages):
+            raise ValueError("Domain weights do not match the micro-batch's samples")
+        sample_advantages = [value * weight for value, weight in zip(sample_advantages, weights, strict=True)]
+    advantages = torch.cat(sample_advantages, dim=0).to(log_probs)
     response_mask = torch.cat(
         cp_utils.get_local_response_loss_masks(
             batch["total_lengths"],

@@ -150,7 +150,8 @@ def native_arguments(spec, prepared, checkpoint, architecture):
     ]
     if not doc["objective"]["std_normalization"]:
         args.append("--disable-grpo-std-normalization")
-    if training["loss_aggregation"] == "token":
+    if training["loss_aggregation"] in ("token", "domain"):
+        # "domain" keeps the global token mean; the DPPO loss reweights tokens by domain (domain_balance).
         args.append("--calculate-per-token-loss")
     if objective["use_rollout_logprobs"]:
         args.append("--use-rollout-logprobs")

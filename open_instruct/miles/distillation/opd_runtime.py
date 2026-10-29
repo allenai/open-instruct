@@ -17,7 +17,7 @@ from open_instruct.miles.configuration import options
 from open_instruct.miles.distillation import eopd_math, opd_prepare, opd_retention, opd_selection_audit, opd_timing
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import cluster, workflow
-from open_instruct.miles.megatron_grpo import dppo_settings
+from open_instruct.miles.megatron_grpo import domain_balance, dppo_settings
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -216,7 +216,8 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "--accumulate-allreduce-grads-in-fp32",
         "--attention-softmax-in-fp32",
     ]
-    if training["loss_aggregation"] == "token":
+    if training["loss_aggregation"] in ("token", "domain"):
+        # "domain" also reweights tokens by domain in the DPPO loss (domain_balance).
         # Token-mean over the mini-batch (verl's loss_agg_mode=token-mean) instead of Miles'
         # per-response mean.
         args.append("--calculate-per-token-loss")
@@ -312,6 +313,7 @@ def execute(spec):
                 "CONVERT_KEEP_PP1": "1",
                 **eopd_settings(spec).environment(),
                 **(spec.dppo_settings().environment() if spec.dppo_settings() else {}),
+                **domain_balance.environment(spec.document["training"]["loss_aggregation"]),
                 **(
                     {
                         opd_prepare.EOS_REMAP_ENV: opd_prepare.eos_remap_environment(

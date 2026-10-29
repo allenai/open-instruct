@@ -147,6 +147,8 @@ class MegatronGRPORunSpec:
         if training["optimizer_steps_per_rollout"] != 1 or type(training["optimizer_steps_per_rollout"]) is not int:
             raise InputError("Megatron GRPO requires one optimizer step per rollout")
         validation.choice(training["loss_aggregation"], "training.loss_aggregation", opd_config.LOSS_AGGREGATIONS)
+        if training["loss_aggregation"] == "domain" and document["objective"]["policy_loss"] != "dppo":
+            raise InputError('training.loss_aggregation="domain" requires objective.policy_loss="dppo"')
         for section_name, section, keys in (
             ("trainer", trainer, ("gpus", "tensor_parallel_size")),
             (

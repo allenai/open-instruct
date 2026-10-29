@@ -32,7 +32,7 @@ ARCHITECTURES = {
 }
 LR_DECAY_STYLES = ("constant", "cosine", "linear")
 # Per-response mean (Miles default) or token-mean over the mini-batch (verl default, the EOPD paper).
-LOSS_AGGREGATIONS = ("response", "token")
+LOSS_AGGREGATIONS = ("response", "token", "domain")
 WANDB_MODES = ("offline", "online", "disabled")
 ASYNC_ROLLOUT = "open_instruct.miles.distillation.opd_async.OPDAsyncRollout"
 ASYNC_SOURCE = "open_instruct.miles.distillation.opd_async.OPDAsyncDataSource"
@@ -318,6 +318,8 @@ class OPDRunSpec:
                 document["optimizer"][key], f"optimizer.{key}", minimum=0.0, exclusive_max=True, maximum=1.0
             )
         validation.choice(document["training"]["loss_aggregation"], "training.loss_aggregation", LOSS_AGGREGATIONS)
+        if document["training"]["loss_aggregation"] == "domain" and document["distillation"]["policy_loss"] != "dppo":
+            raise InputError('training.loss_aggregation="domain" requires distillation.policy_loss="dppo"')
         inference = document["inference"]
         collection = inference["rollout_batch_size"] * inference["samples_per_prompt"]
         if collection % document["training"]["optimizer_steps_per_rollout"]:
