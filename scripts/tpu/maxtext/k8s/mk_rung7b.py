@@ -1,4 +1,4 @@
-"""7B rung overlays (H157 e2-7b, H156 sci-7b): H089's overlay (h089/olmo3-7b-s<seed>, open-instruct 2a6be850) with only
+"""7B rung overlays (H157 e2-7b, H156 sci-7b, H155 kimi-7b, H154 kimi-if-7b): H089's overlay (h089/olmo3-7b-s<seed>, open-instruct 2a6be850) with only
 RUN_NAME, TRAIN_FILES and checkpoint_period (300 -> 100, H098's execution note) changed. LR, schedule, NUM_EPOCH=2,
 STEPS = LR_SCHEDULE_STEPS = 11768, mesh, image and batch-hash logging are H089's. Each arm's seed-0 smoke overlay
 (<arm>-smoke-s0) is that overlay with STEPS=30 (the schedule stays 11768 steps), a "-smoke" name and the scratch output.
@@ -8,6 +8,8 @@ k8s = pathlib.Path(sys.argv[1])
 ARMS = {  # (hypothesis dir, arm): (data dir under gs://ai2-olmo-dev/post-training/, hypothesis id)
     ("h157", "e2-7b"): ("data/h072/E2-s{seed}", "H157"),
     ("h156", "sci-7b"): ("data/h083/sci3-s{seed}", "H156"),
+    ("h155", "kimi-7b"): ("data/h155/kimi-s{seed}", "H155"),
+    ("h154", "kimi-if-7b"): ("data/h154/kimi-if-s{seed}", "H154"),
 }
 for (hdir, arm), (data, hid) in ARMS.items():
     for seed, smoke in ((0, False), (1, False), (0, True)):
