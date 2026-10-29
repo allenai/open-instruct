@@ -15,7 +15,7 @@ from unittest import mock
 from olmo_core import data as oc_data
 from parameterized import parameterized
 
-from open_instruct import olmo_core_finetune, olmo_core_utils
+from open_instruct import dataset_transformation, olmo_core_finetune, olmo_core_utils, utils
 
 
 def _touch(path: str) -> None:
@@ -74,7 +74,7 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
 
 
 class DocumentBoundariesFromMetadataTest(unittest.TestCase):
-    def test_default_cache_dir_is_unchanged(self) -> None:
+    def test_legacy_layout_cache_dir_is_unchanged(self) -> None:
         # The Dolci-Think cache that H038 and H045 trained on.
         self.assertEqual(
             olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, False),
@@ -87,7 +87,7 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
         )
 
-    def test_default_adds_no_dataset_config_arguments(self) -> None:
+    def test_eos_scan_adds_no_dataset_config_arguments(self) -> None:
         self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, False), {})
         # The EOS arm of a row-aligned cache reads it exactly as today.
         self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, True), {})
@@ -110,7 +110,42 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
         ):
             olmo_core_finetune._document_boundary_kwargs(True, True)
 
-    def test_default_dataset_config_matches_previous_arguments(self) -> None:
+    def test_defaults_read_boundaries_from_metadata(self) -> None:
+        sft = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,)).parse_args_into_dataclasses([])[0]
+        self.assertTrue(sft.row_aligned_parts)
+        self.assertTrue(sft.document_boundaries_from_metadata)
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, sft.row_aligned_parts),
+            "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
+        )
+        self.assertEqual(
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts),
+            {"use_array_if_local": False},
+        )
+
+    def test_opt_out_reproduces_previous_behaviour(self) -> None:
+        """--no_row_aligned_parts --no_document_boundaries_from_metadata reads the pre-flip cache
+        directory with no extra dataset arguments, so its config and packing caches are unchanged."""
+        parser = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,))
+        sft = parser.parse_args_into_dataclasses(["--no_row_aligned_parts", "--no_document_boundaries_from_metadata"])[
+            0
+        ]
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, sft.row_aligned_parts),
+            "/cache/numpy_sft/1edd51f3e3-6068a350",
+        )
+        self.assertEqual(
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts),
+            {},
+        )
+
+    def test_opting_out_of_row_alignment_alone_fails(self) -> None:
+        parser = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,))
+        sft = parser.parse_args_into_dataclasses(["--no_row_aligned_parts"])[0]
+        with self.assertRaisesRegex(ValueError, "--no_document_boundaries_from_metadata"):
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts)
+
+    def test_eos_scan_dataset_config_matches_previous_arguments(self) -> None:
         tokenizer = oc_data.TokenizerConfig(vocab_size=128, eos_token_id=2, pad_token_id=1)
         config = olmo_core_finetune._numpy_dataset_config(
             "/data", tokenizer, work_dir="/work", sequence_length=64, document_boundary_kwargs={}
@@ -126,6 +161,79 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             sequence_length=64,
         )
         self.assertEqual(config, expected)
+
+
+class MissingCacheCommandTest(unittest.TestCase):
+    """The command printed when the numpy cache is missing must tokenize the cache this job looks for."""
+
+    def _run_main(self, argv: list[str]) -> None:
+        parser = utils.ArgumentParserPlus(
+            (
+                olmo_core_utils.ExperimentConfig,
+                olmo_core_utils.ModelConfig,
+                olmo_core_utils.TrainingConfig,
+                olmo_core_utils.DatasetConfig,
+                olmo_core_utils.LoggingConfig,
+                olmo_core_utils.CheckpointConfig,
+                olmo_core_finetune.SFTConfig,
+                dataset_transformation.TokenizerConfig,
+            )
+        )
+        tracking, model, training, dataset, logging_cfg, checkpoint, sft, tc = parser.parse_args_into_dataclasses(argv)
+        args = olmo_core_finetune.SFTArguments(
+            tracking=tracking,
+            model=model,
+            training=training,
+            dataset=dataset,
+            logging=logging_cfg,
+            checkpoint=checkpoint,
+            sft=sft,
+        )
+        olmo_core_finetune.main(args, tc)
+
+    @parameterized.expand(
+        [
+            ("defaults", [], True),
+            ("eos_scan", ["--no_document_boundaries_from_metadata"], True),
+            ("legacy_layout", ["--no_row_aligned_parts", "--no_document_boundaries_from_metadata"], False),
+        ]
+    )
+    def test_recovery_command_reaches_tokenization(self, _name: str, flags: list[str], row_aligned: bool) -> None:
+        with (
+            tempfile.TemporaryDirectory() as cache_dir,
+            mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=True),
+            mock.patch.object(olmo_core_utils, "setup_tokenizer_and_cache"),
+            mock.patch.object(dataset_transformation, "load_dataset_configs"),
+            mock.patch.object(dataset_transformation, "compute_config_hash", return_value="1edd51f3e3"),
+            mock.patch.object(olmo_core_finetune, "_tokenize_to_numpy_dir") as tokenize,
+        ):
+            argv = [
+                "--model_name_or_path",
+                "Qwen/Qwen3-0.6B",
+                "--tokenizer_name_or_path",
+                "Qwen/Qwen3-0.6B",
+                "--max_seq_length",
+                "1024",
+                "--mixer_list",
+                "ai2-adapt-dev/personas-algebra",
+                "100",
+                "--seed",
+                "123",
+                "--local_cache_dir",
+                cache_dir,
+                *flags,
+            ]
+            with self.assertRaises(FileNotFoundError) as raised:
+                self._run_main(argv)
+            command = str(raised.exception).split("olmo_core_finetune.py", 1)[1].split("\n\nRe-launch", 1)[0]
+            self._run_main(shlex.split(command.replace("\\\n", " ")))
+
+            tokenize.assert_called_once()
+            self.assertEqual(
+                tokenize.call_args.args[0],
+                olmo_core_finetune._numpy_cache_dir(cache_dir, "1edd51f3e3", 123, 1024, row_aligned),
+            )
+            self.assertTrue(tokenize.call_args.args[1].dataset.cache_dataset_only)
 
 
 # EMO routing exists only in newer OLMo-core.

@@ -135,14 +135,17 @@ def _olmo_core_supports_metadata_boundaries() -> bool:
 def _document_boundary_kwargs(document_boundaries_from_metadata: bool, row_aligned_parts: bool) -> dict[str, Any]:
     """Extra `NumpyPackedFSLDatasetConfig` arguments for the requested boundary source.
 
-    Empty by default, so the config, its fingerprint and OLMo-core's packing caches are unchanged.
+    Empty for the EOS scan, so that opt-out's config, fingerprint and OLMo-core packing caches are unchanged.
     """
     if not document_boundaries_from_metadata:
         return {}
     if not row_aligned_parts:
         # A mid-row-cut cache has two metadata lines for each cut row, so with metadata boundaries
         # that row would train as two documents, the second without its prompt.
-        raise ValueError("--document_boundaries_from_metadata requires --row_aligned_parts.")
+        raise ValueError(
+            "--document_boundaries_from_metadata requires --row_aligned_parts; "
+            "pass --no_document_boundaries_from_metadata to scan for EOS instead."
+        )
     if not _olmo_core_supports_metadata_boundaries():
         raise ValueError(
             "--document_boundaries_from_metadata needs an OLMo-core whose NumpyPackedFSLDatasetConfig "
@@ -214,21 +217,22 @@ class SFTConfig:
     tracking_url: str | None = None
     """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
     directory's provenance README so any copy of a checkpoint traces back to it."""
-    row_aligned_parts: bool = False
+    row_aligned_parts: bool = True
     """Cut the numpy cache's 1 GiB part files only between rows, so no row spans two files.
 
-    The default cuts every 1 GiB, mid-row, and OLMo-core's EOS scan never yields the piece of a row
-    before a file's end. Row-aligned caches live in their own directory (suffix `-rowaligned`), so
-    turning this on tokenizes once more. It does not change how training finds document boundaries;
-    that is `document_boundaries_from_metadata`."""
-    document_boundaries_from_metadata: bool = False
+    `--no_row_aligned_parts` restores the legacy layout, which cuts every 1 GiB, mid-row; OLMo-core's
+    EOS scan never yields the piece of a row before a file's end. Row-aligned caches live in their
+    own directory (suffix `-rowaligned`), so legacy caches are not reused. It does not change how
+    training finds document boundaries; that is `document_boundaries_from_metadata`."""
+    document_boundaries_from_metadata: bool = True
     """Take document boundaries from the per-row metadata files instead of scanning for EOS.
 
     The EOS scan splits a multi-turn row at each non-final assistant turn's EOS, and merges a row
     with no trailing EOS (a final tool call, or a row truncated at max_seq_length) into the next.
-    With this set, packing, the attention mask and EMO document pools (if the model routes with
-    EMO) follow the rows exactly. Requires
-    `row_aligned_parts`, and an OLMo-core with `use_array_if_local` (allenai/OLMo-core#843)."""
+    With metadata boundaries, packing, the attention mask and EMO document pools (if the model
+    routes with EMO) follow the rows exactly. Requires `row_aligned_parts`, and an OLMo-core with
+    `use_array_if_local` (allenai/OLMo-core#843). `--no_document_boundaries_from_metadata` opts out
+    to the EOS scan; with `--no_row_aligned_parts` too, training reads caches exactly as before."""
 
 
 @dataclasses.dataclass
@@ -306,8 +310,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             quoted = " ".join(shlex.quote(token) for token in tc.reserved_slot_tokens)
             cache_args.append(f"--reserved_slot_tokens {quoted}")
         # Part of the cache directory name.
-        if args.sft.row_aligned_parts:
-            cache_args.append("--row_aligned_parts")
+        if not args.sft.row_aligned_parts:
+            cache_args.append("--no_row_aligned_parts")
+        # Checked before tokenizing: without it, the legacy layout's cache job would fail at startup.
+        if not args.sft.document_boundaries_from_metadata:
+            cache_args.append("--no_document_boundaries_from_metadata")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
