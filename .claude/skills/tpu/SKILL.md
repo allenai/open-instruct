@@ -29,6 +29,11 @@ Rules an agent follows:
   mesh needs an xprof of one TPU step first (in-loop all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.
+- **Mount only the folders a job reads, never one that holds checkpoints.** gcsfuse's metadata prefetch lists
+  everything under `only-dir` on every host at every pod start, so a mount of `post-training/` lists every run's
+  checkpoints each time. Mount `post-training/data`
+  and `post-training/tokenizers` separately at their old paths (`k8s/narrow_mounts.py`); read and write checkpoints
+  over `gs://`. Jobs launched with a wide mount keep it until relaunched.
 - **Stagger big-slice launches.** Two slices loading at once hit the GCS egress quota.
 - **Keep one slice shape per experiment.** The data order depends on the host count, so arms and their control share
   a shape.

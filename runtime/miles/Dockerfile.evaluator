@@ -10,16 +10,23 @@ RUN git clone https://github.com/allenai/olmo-eval.git /opt/olmo-eval \
 WORKDIR /opt/olmo-eval
 # Export the provider's locked dependencies, retaining the base's CUDA Torch wheels.
 # Supply --secret id=github_token,env=GH_TOKEN when a source dependency needs authentication.
+# Keep olmo-eval editable (-e): at this revision, its wheel omits sandbox .sh
+# resources, including monitor.sh. Do not switch to a wheel install until upstream
+# package data includes these scripts and the resource check below passes.
 RUN --mount=type=secret,id=github_token \
     export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper \
         GIT_CONFIG_VALUE_0='!f() { echo username=x-access-token; printf "password="; cat /run/secrets/github_token; }; f'; \
     python -c "from importlib.metadata import version; from pathlib import Path; Path('/tmp/torch-constraints.txt').write_text(''.join(f'{p}=={version(p)}\\n' for p in ('torch', 'torchvision', 'torchaudio')))" \
     && uv export --frozen --no-default-groups --extra sglang --extra beaker --no-hashes --no-emit-project -o /tmp/evaluator-requirements.txt \
     && uv pip install -c /tmp/torch-constraints.txt -r /tmp/evaluator-requirements.txt \
-    && uv pip install --no-deps . \
+    && uv pip install --no-deps -e . \
     && uv pip install -c /tmp/torch-constraints.txt wandb==0.23.1
 
 ENV SGLANG_RETURN_ORIGINAL_LOGPROB=1
+
+# The pinned wheel omits sandbox shell scripts; retain the checkout via the editable
+# install above and verify resources through the same API used by the sandbox.
+RUN python -c "from olmo_eval.harness.sandbox.scripts import get_script; assert get_script('monitor').strip()"
 
 # CLI dry-run does not import provider dependencies; check the actual adapter.
 RUN python -c "from olmo_eval.inference.providers import sglang; import olmo_sglang; assert callable(olmo_sglang.register)"

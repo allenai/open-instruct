@@ -41,6 +41,8 @@ NCCL_IB_HCA = "^=mlx5_bond_0"
 
 [launch.secrets]
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+# Inherited by background evaluation; the account needs WildGuard and Gemma access.
+HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
 
 [data]
 # Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.
@@ -60,8 +62,8 @@ mode = "background"
 interval = 0
 initial = true
 final = true
-# Native SGLang plus code sandboxes/judges; GPU/full-panel qualification is pending.
-image = "01M5ZSWYBJ5GPG1XBARFFC59MZ"
+# Native SGLang plus code sandboxes/judges; full-panel resource qualification is pending.
+image = "01M632ZP67Y4WMV060J74FSC3R"
 revision = "3536fe751e40162cc33d5e647085e986375aadce"
 gpus = 1
 cluster = "ai2/holmes"

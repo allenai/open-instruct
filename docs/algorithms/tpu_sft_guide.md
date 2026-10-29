@@ -41,7 +41,9 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
   [`tpu` skill](https://github.com/allenai/open-instruct/blob/main/.claude/skills/tpu/SKILL.md). Update it when you change
   a rule here.
 - **Where things live.** Everything is in `us-central2`. Data, tokenizers and checkpoints are in `gs://ai2-olmo-dev/post-training/`,
-  and the nodes mount it at `/mnt/post-training` through gcsfuse. Images are in
+  and the nodes mount its `data/` and `tokenizers/` subfolders, each on its own, under `/mnt/post-training` through
+  gcsfuse. Never mount a folder that holds checkpoints: the metadata prefetch lists all of it on every host at every
+  pod start (`k8s/narrow_mounts.py` narrows an overlay). Images are in
   `us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain`.
 
 ## What the cluster is
