@@ -18,17 +18,23 @@ if ! [[ "$NUM_LEARNERS" =~ ^[1-9][0-9]*$ && "$NUM_INFERENCE_ENGINES" =~ ^[1-9][0
     exit 1
 fi
 NUM_GPUS=$((NUM_LEARNERS + NUM_INFERENCE_ENGINES))
+JOB_TIMEOUT="${JOB_TIMEOUT:-24h}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
+MASON_EXTRA_FLAGS=()
+if [[ "${AUTO_RESUME:-true}" == false ]]; then
+    MASON_EXTRA_FLAGS+=(--no_auto_resume)
+fi
 
 uv run --frozen python mason.py \
     --task_name "$RUN_NAME" \
     --description "Olmo Hybrid release ${MODEL_SIZE:-275m} GSM8K: $TOTAL_EPISODES episodes; native checkpoint/resume every 100 updates" \
     --cluster "$CLUSTER" \
     --workspace ai2/open-instruct-dev --budget ai2/oe-other \
-    --priority normal --preemptible --max_retries 3 --timeout 24h \
+    --priority normal --preemptible --max_retries "$MAX_RETRIES" --timeout "$JOB_TIMEOUT" \
     --pure_docker_mode --image "$BEAKER_IMAGE" --num_nodes 1 --gpus "$NUM_GPUS" \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
-    --no_auto_dataset_cache \
+    --no_auto_dataset_cache "${MASON_EXTRA_FLAGS[@]}" \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --exp_name "$RUN_NAME" --run_name "$RUN_NAME" \
     --output_dir "$OUTPUT_DIR" --checkpoint_state_dir "$OUTPUT_DIR/native" \

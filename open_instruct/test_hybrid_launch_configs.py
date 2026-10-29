@@ -5,9 +5,12 @@ import os
 import shutil
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
+
+import mason
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,3 +80,29 @@ def test_existing_image_only_cannot_fall_through_to_a_local_build(tmp_path):
     assert result.returncode != 0
     assert "build it on Beaker first" in result.stdout
     assert not marker.exists()
+
+
+def test_smoke_can_be_preemptible_without_automatically_restarting():
+    args = Namespace(
+        num_nodes=1,
+        cluster=["ai2/rhea"],
+        hostname=None,
+        task_name="smoke",
+        image="image",
+        beaker_datasets=[],
+        mount_docker_socket=False,
+        priority="normal",
+        preemptible=True,
+        no_auto_resume=True,
+        pure_docker_mode=True,
+        env=[],
+        secret=[],
+        gpus=4,
+        shared_memory="1gb",
+        timeout="1h",
+        no_host_networking=True,
+    )
+    task = mason.make_task_spec(args, "true", 0, [], "michaeln", False)
+    assert task.context.min_runtime == 0
+    assert task.context.auto_resume is False
+    assert task.resources.gpu_count == 4

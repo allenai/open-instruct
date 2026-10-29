@@ -152,6 +152,9 @@ def get_args():
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    parser.add_argument(
+        "--no_auto_resume", action="store_true", help="Disable automatic preemption restarts with zero minimum runtime"
+    )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -581,8 +584,14 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
-        context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+        context=(
+            beaker.BeakerTaskContext(
+                priority=beaker.BeakerJobPriority[args.priority], min_runtime=0, auto_resume=False
+            )
+            if getattr(args, "no_auto_resume", False)
+            else beaker.BeakerTaskContext(
+                priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+            )
         ),
         constraints=constraints,
         env_vars=get_env_vars(
