@@ -25,6 +25,12 @@ def environment(loss_aggregation):
     return {ENV: "1"} if loss_aggregation == "domain" else {}
 
 
+def test_environment(environment):
+    """``environment`` for the runtime preflight tests: the switch is a run setting, and the tests' own
+    samples carry no domain, so they set it themselves when they exercise it."""
+    return {key: value for key, value in environment.items() if key != ENV}
+
+
 def enabled(environment=None):
     return (os.environ if environment is None else environment).get(ENV, "0") == "1"
 

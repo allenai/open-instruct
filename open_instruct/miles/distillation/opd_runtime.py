@@ -387,7 +387,7 @@ def execute(spec):
                         else []
                     ),
                 ],
-                env=opd_selection_audit.preflight_environment(environment),
+                env=domain_balance.test_environment(opd_selection_audit.preflight_environment(environment)),
                 stdout=stream,
                 stderr=subprocess.STDOUT,
                 check=True,

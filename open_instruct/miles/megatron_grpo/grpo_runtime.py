@@ -115,7 +115,7 @@ def execute(spec):
                     *(["/opt/core-rl/open_instruct/test_miles_dppo.py"] if dppo else []),
                     *(["/opt/core-rl/tests/miles/test_opd_async.py"] if fully_async else []),
                 ],
-                env=environment,
+                env=domain_balance.test_environment(environment),
                 stdout=stream,
                 stderr=subprocess.STDOUT,
                 check=True,

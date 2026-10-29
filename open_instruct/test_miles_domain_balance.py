@@ -110,3 +110,9 @@ def test_domain_aggregation_requires_the_dppo_loss():
     doc["objective"]["policy_loss"] = "ppo"
     with pytest.raises(InputError, match="requires objective.policy_loss"):
         specs.from_dict(doc)
+
+
+def test_runtime_preflight_tests_do_not_inherit_the_run_switch():
+    environment = {domain_balance.ENV: "1", "OI_DPPO_THRESHOLD": "0.1"}
+    assert domain_balance.test_environment(environment) == {"OI_DPPO_THRESHOLD": "0.1"}
+    assert environment[domain_balance.ENV] == "1"
