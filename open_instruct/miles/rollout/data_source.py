@@ -32,9 +32,9 @@ import torch
 from miles.dashboard import backend, hooks
 from miles.utils.types import Sample
 
-from miles.rollout.data_source import RolloutDataSourceWithBuffer
 from open_instruct import logger_utils
 from open_instruct.miles.datasets import record_selection
+from open_instruct.miles.rollout import prompt_provider, provider_source
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -52,10 +52,10 @@ class DashboardDrainingRolloutDataSource:
 
     """
 
-    def __init__(self, args: Any) -> None:
+    def __init__(self, args: Any, *, provider: prompt_provider.PromptProvider | None = None) -> None:
         """Initialize the MILES buffered-data-source delegate."""
 
-        self._delegate = RolloutDataSourceWithBuffer(args)
+        self._delegate = provider_source.ProviderRolloutDataSource(args, provider=provider)
         self._cursor_lock = threading.RLock()
         self._pending_groups: dict[int, Any] = {}
         self._recovery_groups: list[Any] | None = None
@@ -67,6 +67,11 @@ class DashboardDrainingRolloutDataSource:
     def __getattr__(self, name: str) -> Any:
         """Delegate attributes not implemented by this lifecycle adapter."""
         return getattr(self._delegate, name)
+
+    def feedback(self, records: list[dict[str, Any]]) -> None:
+        """Provider hook; automatic inference-record delivery is not enabled yet."""
+        with self._cursor_lock:
+            self._delegate.provider.feedback(records)
 
     def get_samples(self, num_samples: int) -> Any:
         """Return samples from the underlying MILES data source."""
@@ -180,6 +185,7 @@ class DashboardDrainingRolloutDataSource:
                 key: getattr(delegate, key)
                 for key in ("sample_offset", "epoch_id", "sample_group_index", "sample_index", "metadata")
             }
+            state["prompt_provider"] = delegate.provider.state_dict()
             if not self._fully_async:
                 self._pending_groups = self._sync_buffered_groups()
             key = "olmo_async_pending" if self._fully_async else "olmo_sync_pending"

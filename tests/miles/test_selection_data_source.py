@@ -9,6 +9,7 @@ from miles.utils.types import Sample
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.datasets import record_selection, recording
+from open_instruct.miles.rollout import prompt_provider
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 
@@ -51,6 +52,7 @@ def make_source(root, table=None, digest=None, *, load=None):
             return len(self.samples)
 
     source._delegate.dataset = Dataset()
+    source._delegate.provider = prompt_provider.ShuffledPromptProvider(source._delegate.dataset, shuffle=False)
     return source
 
 

@@ -10,6 +10,7 @@ from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, Da
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles.distillation import async_buffer, opd_async
+from open_instruct.miles.rollout import prompt_provider
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -132,6 +133,7 @@ def test_prefetched_prompts_survive_checkpoint_before_their_update(tmp_path):
             return len(self.samples)
 
     source._delegate.dataset = Dataset()
+    source._delegate.provider = prompt_provider.ShuffledPromptProvider(source._delegate.dataset, shuffle=False)
     current, prefetched = source.get_samples(2)
     source.consumer_rollout_id = 0
     source.acknowledge_groups([current])
@@ -145,6 +147,7 @@ def test_prefetched_prompts_survive_checkpoint_before_their_update(tmp_path):
     restored = opd_async.OPDAsyncDataSource(restored_args)
     restored_args.rollout_global_dataset = True
     restored._delegate.dataset = Dataset()
+    restored._delegate.provider = prompt_provider.ShuffledPromptProvider(restored._delegate.dataset, shuffle=False)
     restored.load(0)
     assert restored.get_samples(1)[0][0].prompt == prefetched[0].prompt
     source.save(1)

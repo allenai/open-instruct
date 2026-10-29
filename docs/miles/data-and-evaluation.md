@@ -60,6 +60,34 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
+## Prompt provider interface
+
+MILES still requests prompt groups through `get_samples(n)`. Open Instruct's
+`DashboardDrainingRolloutDataSource` delegates to `ProviderRolloutDataSource`,
+which takes buffered retries first and asks `provider.next_samples(n)` for the
+remaining fresh prompts. The adapter makes K independent copies of each prompt
+and assigns the existing group/response IDs. Generation and reward computation
+keep their existing inputs.
+
+The default `ShuffledPromptProvider` walks the same loaded dataset with MILES'
+seeded shuffle and cursor. No configuration or preparation changes are needed.
+It also handles requests crossing multiple complete epochs. A provider implements
+`next_samples`, `feedback`, `state_dict`, and `load_state_dict`; the provider itself
+does not require an epoch or source-mixture abstraction. Alternate implementations
+can be supplied through the data source's Python `provider=` argument. Selecting
+providers from run configuration is future work.
+
+Provider state is saved atomically alongside the existing pending-group ledger.
+The default provider accepts legacy shuffle checkpoints and preserves their
+cursor fields. Provider-aware checkpoints also check dataset size, seed, and
+shuffle mode; prepared artifact identity remains the preparation layer's job.
+Retries and resumed pending groups do not request a new prompt from the provider.
+
+`feedback(records)` is a serialized extension hook. The shuffle provider ignores
+it; automatic delivery from the inference recorder is not connected in this
+interface-only change. There are no adaptive strategies, family preprocessing,
+new storage formats, or new mixture semantics in this implementation.
+
 <!-- Preserve the former section anchor for existing links. -->
 <a id="large-training-mixture"></a>
 

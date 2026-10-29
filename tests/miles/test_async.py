@@ -11,6 +11,7 @@ from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyData
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
+from open_instruct.miles.rollout import prompt_provider
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 
@@ -36,6 +37,7 @@ def make_source(root, *, load=None, fully_async=True):
             return len(self.samples)
 
     source._delegate.dataset = Dataset()
+    source._delegate.provider = prompt_provider.ShuffledPromptProvider(source._delegate.dataset, shuffle=False)
     return source
 
 
