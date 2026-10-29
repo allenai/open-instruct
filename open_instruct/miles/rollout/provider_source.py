@@ -6,11 +6,11 @@ from pathlib import Path
 import torch
 from miles.utils.types import Sample
 
-from miles.rollout import data_source
+from miles.rollout.data_source import RolloutDataSourceWithBuffer, compute_global_dataset_state_path
 from open_instruct.miles.rollout import prompt_provider, remind_provider
 
 
-class ProviderRolloutDataSource(data_source.RolloutDataSourceWithBuffer):
+class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
     """Keep dataset loading and buffering; delegate fresh prompts to a provider.
 
     The outer Open Instruct wrapper owns locking and atomic checkpoints with the
@@ -77,7 +77,7 @@ class ProviderRolloutDataSource(data_source.RolloutDataSourceWithBuffer):
     def load(self, rollout_id=None):
         if not self.args.rollout_global_dataset or not self.args.load:
             return
-        path = Path(data_source.compute_global_dataset_state_path(self.args.load, rollout_id=rollout_id))
+        path = Path(compute_global_dataset_state_path(self.args.load, rollout_id=rollout_id))
         if not path.exists():
             return  # The outer wrapper distinguishes a fresh model from unsafe resume.
         state = torch.load(path, map_location="cpu", weights_only=True)
