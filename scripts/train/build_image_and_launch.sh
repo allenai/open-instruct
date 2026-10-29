@@ -3,8 +3,13 @@ set -euo pipefail
 
 cuda_version=12
 build_only=false
+existing_image_only=false
 while [[ $# -gt 0 ]]; do
 case "$1" in
+--existing-image-only)
+  existing_image_only=true
+  shift
+  ;;
 --build-only)
   build_only=true
   shift
@@ -31,7 +36,7 @@ if [[ "$cuda_version" != "12" && "$cuda_version" != "13" ]]; then
 fi
 
 if [[ $# -eq 0 && "$build_only" == false ]]; then
-  echo "Usage: $0 [--cuda-version 12|13] [--build-only] [SCRIPT [SCRIPT_ARGS...]]"
+  echo "Usage: $0 [--cuda-version 12|13] [--build-only] [--existing-image-only] [SCRIPT [SCRIPT_ARGS...]]"
   exit 1
 fi
 
@@ -64,6 +69,10 @@ existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 
 if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"* ]]; then
   echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
 else
+  if [[ "$existing_image_only" == true ]]; then
+    echo "Error: No existing image matches commit $git_hash; build it on Beaker first."
+    exit 1
+  fi
   echo "Creating CUDA $cuda_version beaker image for commit $git_hash..."
   CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
   # BuildKit exposes this only to the dependency-install RUN, never as an image ENV/ARG.

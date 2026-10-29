@@ -11,6 +11,13 @@ MODEL_PATH="${MODEL_PATH:-/weka/oe-training-default/yashasbls/hybridish-local/hf
 OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/$RUN_NAME}"
 CLUSTER="${CLUSTER:-ai2/saturn}"
 TOTAL_EPISODES="${TOTAL_EPISODES:-16000}"
+NUM_LEARNERS="${NUM_LEARNERS:-1}"
+NUM_INFERENCE_ENGINES="${NUM_INFERENCE_ENGINES:-1}"
+if ! [[ "$NUM_LEARNERS" =~ ^[1-9][0-9]*$ && "$NUM_INFERENCE_ENGINES" =~ ^[1-9][0-9]*$ ]]; then
+    echo "NUM_LEARNERS and NUM_INFERENCE_ENGINES must be positive integers" >&2
+    exit 1
+fi
+NUM_GPUS=$((NUM_LEARNERS + NUM_INFERENCE_ENGINES))
 
 uv run --frozen python mason.py \
     --task_name "$RUN_NAME" \
@@ -18,7 +25,7 @@ uv run --frozen python mason.py \
     --cluster "$CLUSTER" \
     --workspace ai2/open-instruct-dev --budget ai2/oe-other \
     --priority normal --preemptible --max_retries 3 --timeout 24h \
-    --pure_docker_mode --image "$BEAKER_IMAGE" --num_nodes 1 --gpus 2 \
+    --pure_docker_mode --image "$BEAKER_IMAGE" --num_nodes 1 --gpus "$NUM_GPUS" \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --no_auto_dataset_cache \
@@ -38,8 +45,8 @@ uv run --frozen python mason.py \
     --async_steps 1 --inflight_updates False --active_sampling False \
     --filter_zero_std_samples False --advantage_normalization_type centered \
     --max_prompt_token_length 512 --response_length 2048 --pack_length 4096 \
-    --fsdp_shard_degree 1 --fsdp_num_replicas 1 --num_learners_per_node 1 \
-    --vllm_num_engines 1 --vllm_tensor_parallel_size 1 --vllm_enforce_eager \
+    --fsdp_shard_degree "$NUM_LEARNERS" --fsdp_num_replicas 1 --num_learners_per_node "$NUM_LEARNERS" \
+    --vllm_num_engines "$NUM_INFERENCE_ENGINES" --vllm_tensor_parallel_size 1 --vllm_enforce_eager \
     --vllm_attention_backend FLASH_ATTN --vllm_mamba_ssm_cache_dtype float32 \
     --vllm_gpu_memory_utilization 0.6 \
     --apply_verifiable_reward true --non_stop_penalty False --temperature 1.0 \

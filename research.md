@@ -898,3 +898,45 @@ Separate Saturn275m/1k run01M5ZAPEQFTT3YEMK107ZSVFK4 has suffered six scheduler
 preemptions by urgent allocated workloads. Current job01M604JS88XG6RFSGNF2Z0FWB1
 has waited almost three hours; scheduler reports no slots on any of27 eligible
 nodes. Cluster snapshot:216slots, zero available,161queued jobs. Run unchanged.
+
+
+## Fresh 450m Core/vLLM restart on four Rhea GPUs (2026-10-29)
+
+Status: ACTIVE — CPU regression passed; image build and GPU validation pending.
+
+User requested a fresh RL run on four GPUs on Rhea after the previous run
+stalled. Interpret this as the 450m Core/vLLM run under discussion, two learner
+A6000s (FSDP shard degree2) and two independent TP1 vLLM engines. Keep final
+midtrain step0038147, BF16/FA2,500 updates, four prompts x four samples,
+learning rate1e-6, lower/upper PPO clip0.2/0.272, maximum policy lag1,
+eval/native checkpoint/HF save every100, normal/preemptible, minRuntime0,
+auto-resume, three retries, timeout24h per attempt, workspace ai2/open-instruct-dev,
+budget ai2/oe-other. Fresh output root, no old optimizer/checkpoint restoration.
+First validate two updates on the same four-GPU split with a one-hour cap and
+zero retries; start the500-update run only after actual updates and publication.
+
+Stopped old Core/vLLM experiment01M60E9H8YVK2VJNWPE4BHBFM0 to replace it.
+The275m Saturn experiment remains canceled. MILES step200 checkpoint is preserved.
+
+Root cause in the non-inflight publication path: broadcast_weights_to_vllm put
+vLLM's scheduler to sleep, then update_weights waited for active HTTP completions
+to finish. Requests queued before or during that boundary could never finish
+until wake_up, which itself waited for publication. Fix by atomically pausing
+local request admission, draining active completions while the engine remains
+awake, then sleeping and publishing. Reopen admission after wake succeeds;
+raise a clear timeout after600seconds of unsuccessful draining. Preserve the
+existing intentionally-inflight mode. Regression tests cover ordering, bounded
+failure, and a request dequeued concurrently with publication.
+
+Parameterize the existing release launcher for learner/engine counts, preserving
+its one-plus-one defaults. Add --existing-image-only to the standard image
+wrapper so local submission cannot accidentally fall through to a Docker build.
+The replacement image is an overlay of qualified Core/vLLM image
+01M6087KP6KYPHQ9MMZTEX9SBJ and must be built/published on Beaker.
+
+Stall monitoring is now ACTIVE in this chat, every10minutes. It compares actual
+optimizer/generation/eval progress, flags20minutes without progress, and reports
+new failures, stalls, recoveries and completions without repeated unchanged pings.
+It does not stop or allocate jobs. W&B internal_step is not optimizer progress.
+
+See [the launch batch](experiment.md#fresh-450m-corevllm-restart-on-four-rhea-gpus-2026-10-29).

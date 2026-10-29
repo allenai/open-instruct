@@ -92,6 +92,7 @@ MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
+DRAIN_ACTIVE_TASKS_TIMEOUT_S = 600
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
@@ -439,7 +440,14 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
             continue
 
         request = actor.prompt_queue.get()
-        add_request(actor, request)
+        # Queue.get() may return after publication has paused the engine. Keep
+        # admission and the pause atomic so a late request cannot miss draining.
+        while True:
+            with actor._request_admission_lock:
+                if not actor._publication_paused:
+                    add_request(actor, request)
+                    break
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
@@ -621,6 +629,8 @@ class LLMRayActor:
         self.inflight_updates = inflight_updates
         self.request_metadata = {}
         self.active_tasks = {}
+        self._request_admission_lock = threading.Lock()
+        self._publication_paused = False
         self.request_outputs = {}
         self.reward_config = reward_config
         self.train_dataset = train_dataset
@@ -785,18 +795,38 @@ class LLMRayActor:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
+    def _drain_active_requests(self) -> None:
+        if self.inflight_updates:
+            return
+        deadline = time.monotonic() + DRAIN_ACTIVE_TASKS_TIMEOUT_S
+        while self.active_tasks:
+            self.check_background_threads()
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"vLLM publication could not drain {len(self.active_tasks)} active requests "
+                    f"within {DRAIN_ACTIVE_TASKS_TIMEOUT_S}s"
+                )
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+
     def sleep(self) -> None:
+        with self._request_admission_lock:
+            self._publication_paused = True
+        logger.info("Quiescing vLLM before weight publication: %s active requests", len(self.active_tasks))
+        # Active completions need the scheduler to remain awake while draining.
+        self._drain_active_requests()
+        logger.info("vLLM request drain complete; pausing scheduler for weight publication")
         return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
 
     def wake_up(self) -> None:
-        return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
+        result = self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
+        with self._request_admission_lock:
+            self._publication_paused = False
+        return result
 
     def update_weights(self, update_info: WeightUpdateRPCArgs, model_step: int | None = None) -> None:
         # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
         # `dict(update_info=...)` and no model_step; NCCL callers pass model_step explicitly.
-        while not self.inflight_updates and len(self.active_tasks) > 0:
-            self.check_background_threads()
-            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        self._drain_active_requests()
         self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
         if model_step is not None:
             self.current_model_step = model_step
@@ -815,7 +845,7 @@ class LLMRayActor:
             self._prefetch_future.result()
         if self._process_future.done():
             self._process_future.result()
-        for task in self.active_tasks.values():
+        for task in list(self.active_tasks.values()):
             if task.done():
                 task.result()
         if not self.loop_thread.is_alive():
