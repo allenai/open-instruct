@@ -33,7 +33,8 @@ CORE_FIELDS = {field.name for field in dataclasses.fields(CoreConfig)}
 BEAKER_MIN_RUNTIME_LIMIT_SECONDS = 8 * 3600
 JUPITER_CLUSTER = "ai2/jupiter"
 SATURN_CLUSTER = "ai2/saturn"
-COMPAT_DRIVER_CLUSTERS = (JUPITER_CLUSTER, SATURN_CLUSTER)
+TITAN_CLUSTER = "ai2/titan"
+COMPAT_DRIVER_CLUSTERS = (JUPITER_CLUSTER, SATURN_CLUSTER, TITAN_CLUSTER)
 JUPITER_LD_LIBRARY_PATH = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
 # Names that change when the trainer is replaced, rather than native switches.
 FIELD_MAP = {
@@ -400,7 +401,7 @@ class RunSpec:
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         if launch["cluster"] in COMPAT_DRIVER_CLUSTERS and "LD_LIBRARY_PATH" not in launch["secrets"]:
             # The pinned CUDA runtime needs forward-compatibility libraries on
-            # Jupiter's and Saturn's older host drivers. Explicit environment values win.
+            # Jupiter's, Saturn's and Titan's older host drivers. Explicit environment values win.
             launch["env"].setdefault("LD_LIBRARY_PATH", JUPITER_LD_LIBRARY_PATH)
         reserved = {
             "OI_MILES_REPLICA_RANK",
