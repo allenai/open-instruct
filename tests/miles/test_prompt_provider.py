@@ -123,6 +123,8 @@ def test_resume_preserves_cursor_and_pristine_pending_groups(args, fully_async, 
 class ReverseProvider:
     """A deliberately different selector with feedback and no epoch interface."""
 
+    requires_feedback = False
+
     def __init__(self):
         self.cursor = 10
         self.outcomes = 0

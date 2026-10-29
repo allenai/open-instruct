@@ -7,7 +7,7 @@ import torch
 from miles.utils.types import Sample
 
 from miles.rollout import data_source
-from open_instruct.miles.rollout import prompt_provider
+from open_instruct.miles.rollout import prompt_provider, remind_provider
 
 
 class ProviderRolloutDataSource(data_source.RolloutDataSourceWithBuffer):
@@ -20,13 +20,21 @@ class ProviderRolloutDataSource(data_source.RolloutDataSourceWithBuffer):
 
     def __init__(self, args, *, provider: prompt_provider.PromptProvider | None = None):
         super().__init__(args)
-        self.provider = (
-            provider
-            if provider is not None
-            else prompt_provider.ShuffledPromptProvider(
+        core = getattr(args, "olmo_core", None)
+        if provider is not None:
+            self.provider = provider
+        elif getattr(core, "prompt_provider", "shuffle") == "remind":
+            self.provider = remind_provider.ReMindPromptProvider(
+                self.dataset,
+                shuffle=bool(args.rollout_shuffle),
+                seed=args.rollout_seed,
+                review_fraction=core.remind_review_fraction,
+                enqueue_probability=core.remind_enqueue_probability,
+            )
+        else:
+            self.provider = prompt_provider.ShuffledPromptProvider(
                 self.dataset, shuffle=bool(getattr(args, "rollout_shuffle", False))
             )
-        )
 
     def get_samples(self, num_samples: int) -> list[list[Sample]]:
         if type(num_samples) is not int or num_samples < 0:

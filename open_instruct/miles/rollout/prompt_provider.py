@@ -4,15 +4,20 @@ from typing import Any, Protocol
 
 from miles.utils.types import Sample
 
+SELECTION_ID = "prompt_provider_selection_id"
+REVIEW = "prompt_provider_review"
+
 
 class PromptProvider(Protocol):
-    """Select N fresh prompts; buffering and response-group IDs belong to the caller.
+    """Select N prompt templates; buffering and response-group IDs belong to the caller.
 
     Callers serialize selection, feedback, and checkpoints. Providers must return
     exactly N prompts (zero is a no-op), and include all selection state in their
     checkpoint. Returned prompts are templates: the adapter deep-copies them.
-    Feedback uses inference records; delivery from the recorder is future work.
+    Feedback uses inference records, including groups dropped by the online filter.
     """
+
+    requires_feedback: bool
 
     def next_samples(self, n: int) -> list[Sample]: ...
     def feedback(self, records: list[dict[str, Any]]) -> None: ...
@@ -22,6 +27,8 @@ class PromptProvider(Protocol):
 
 class ShuffledPromptProvider:
     """The existing MILES in-memory dataset, seeded shuffle, and epoch cursor."""
+
+    requires_feedback = False
 
     def __init__(self, dataset, *, shuffle: bool):
         self.dataset = dataset
