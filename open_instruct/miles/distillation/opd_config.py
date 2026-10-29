@@ -74,7 +74,7 @@ OWNED_NATIVE_OPTIONS = {
     "eval_max_response_len": "inference.eval_max_response_length",
     "eval_temperature": "inference.eval_temperature",
     "eval_top_p": "inference.eval_top_p",
-    "sglang_router_request_timeout_secs": "teacher.request_timeout",
+    "sglang_router_request_timeout_secs": "teacher.request_timeout (teacher_pool.request_timeout)",
     "prompt_data": "data.prompt_data / data.tasks",
     "input_key": "the prepared prompt layout (data)",
     "label_key": "the prepared prompt layout (data)",
@@ -91,6 +91,8 @@ OWNED_NATIVE_OPTIONS = {
     "loss_type": "distillation.eopd and distillation.policy_loss",
     "custom_loss_function_path": "distillation.eopd and distillation.policy_loss",
     "rm_url": "the OPD teacher hooks",
+    "opd_teacher_urls": "[teachers.<name>] (one managed SGLang server per teacher)",
+    "opd_teacher_key": "teacher_pool.route_key",
     "custom_rm_path": "the OPD teacher hooks",
     "custom_reward_post_process_path": "the OPD teacher hooks",
     "eval_function_path": "the OPD teacher hooks",
@@ -187,6 +189,31 @@ DEFAULTS = {
     "output": {"root": "", "assets": ""},
     "tracking": {"wandb_mode": "offline", "wandb_project": "open-instruct-opd", "wandb_entity": ""},
 }
+# Multi-teacher OPD: ``[teachers.<name>]`` tables replace ``[teacher]``, and Miles routes each
+# sample to the teacher named by ``sample.metadata[teacher_pool.route_key]`` (``--opd-teacher-urls``
+# / ``--opd-teacher-key``). These sections exist only in multi-teacher documents, so a single-teacher
+# run file keeps its run identity. ``devices`` index the teacher GPU block that follows the trainer
+# and inference GPUs; teachers listing the same devices share them, which needs an explicit
+# ``mem_fraction_static`` for each (SGLang sizes its KV pool from the memory free at its own startup,
+# and the servers start one after another in table order).
+TEACHER_POOL_DEFAULTS = {
+    "route_key": "domain",
+    "request_timeout": 180,
+    "startup_timeout": 900,
+    # Miles sends samples whose route value is missing or unknown to a teacher named "default";
+    # a run must opt in to that fallback instead of getting it from a table name.
+    "allow_default_teacher": False,
+}
+ROUTED_TEACHER_DEFAULTS = {
+    "source": "",
+    "revision": "",
+    "devices": [0],
+    "concurrency": 4,
+    "mem_fraction_static": 0.6,
+    "enable_fp32_lm_head": False,
+    "enable_deterministic_inference": False,
+}
+DEFAULT_TEACHER_NAME = "default"
 
 
 def is_local(source):
@@ -212,6 +239,82 @@ def _resolve_source(values, role, base):
     values["revision"] = revision
 
 
+def _routed_teachers(document, base):
+    """Validate and normalize ``[teacher_pool]`` and ``[teachers.<name>]`` in place."""
+    if "teacher" in document:
+        raise InputError("Use either [teacher] or [teachers.<name>] tables, not both")
+    pool = document.get("teacher_pool", {})
+    validation.fields(pool, "teacher_pool", set(TEACHER_POOL_DEFAULTS))
+    document["teacher_pool"] = pool = TEACHER_POOL_DEFAULTS | pool
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", validation.text(pool["route_key"], "teacher_pool.route_key")):
+        raise InputError("teacher_pool.route_key must name a prompt metadata field (letters, digits, '.', '_', '-')")
+    for key in ("request_timeout", "startup_timeout"):
+        validation.integer(pool[key], f"teacher_pool.{key}")
+    validation.boolean(pool["allow_default_teacher"], "teacher_pool.allow_default_teacher")
+    teachers = validation.mapping(document["teachers"], "teachers")
+    if len(teachers) < 2:
+        raise InputError("[teachers] needs at least two teachers; use the [teacher] table for one")
+    folded = {}
+    for name in teachers:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise InputError(f"teachers.{name}: names may contain only letters, digits, '_' and '-'")
+        if name.lower() in folded:
+            raise InputError(f"teachers.{folded[name.lower()]} and teachers.{name} differ only by case")
+        folded[name.lower()] = name
+    if DEFAULT_TEACHER_NAME in teachers and not pool["allow_default_teacher"]:
+        raise InputError(
+            f"teachers.{DEFAULT_TEACHER_NAME} is Miles' fallback for samples whose metadata[{pool['route_key']!r}] "
+            "is missing or names no teacher; set teacher_pool.allow_default_teacher=true if that is intended"
+        )
+    groups, explicit_fraction = {}, set()
+    for name, incoming in teachers.items():
+        role = f"teachers.{name}"
+        validation.fields(incoming, role, set(ROUTED_TEACHER_DEFAULTS))
+        if "mem_fraction_static" in incoming:
+            explicit_fraction.add(name)
+        values = teachers[name] = ROUTED_TEACHER_DEFAULTS | incoming
+        validation.text(values["source"], f"{role}.source")
+        _resolve_source(values, role, base)
+        devices = values["devices"]
+        if not isinstance(devices, list) or not devices:
+            raise InputError(f"{role}.devices must be a nonempty list of teacher GPU indices")
+        for device in devices:
+            validation.integer(device, f"{role}.devices[]", minimum=0)
+        if len(set(devices)) != len(devices):
+            raise InputError(f"{role}.devices repeats a GPU")
+        values["devices"] = sorted(devices)
+        validation.integer(values["concurrency"], f"{role}.concurrency")
+        validation.number(
+            values["mem_fraction_static"], f"{role}.mem_fraction_static", exclusive_min=True, maximum=0.95
+        )
+        for key in ("enable_fp32_lm_head", "enable_deterministic_inference"):
+            validation.boolean(values[key], f"{role}.{key}")
+        groups.setdefault(tuple(values["devices"]), []).append(name)
+    used = set()
+    for devices, names in groups.items():
+        if used & set(devices):
+            raise InputError(
+                "Teachers that share a GPU must list identical teachers.<name>.devices; "
+                f"{', '.join(names)} overlap another teacher's devices"
+            )
+        used.update(devices)
+        unset = [name for name in names if name not in explicit_fraction]
+        if len(names) > 1 and unset:
+            raise InputError(
+                f"Teachers {', '.join(names)} share GPU(s) {list(devices)}; set mem_fraction_static for "
+                f"{', '.join(f'teachers.{name}' for name in unset)} (SGLang sizes each server from the memory free "
+                "when it starts, and they start in table order)"
+            )
+    if used != set(range(len(used))):
+        raise InputError(f"teachers.<name>.devices must cover teacher GPUs 0..{len(used) - 1} without gaps")
+
+
+def _teacher_gpus(document):
+    if "teachers" not in document:
+        return document["teacher"]["gpus"]
+    return len({device for teacher in document["teachers"].values() for device in teacher["devices"]})
+
+
 @dataclasses.dataclass
 class OPDRunSpec:
     document: dict
@@ -221,14 +324,27 @@ class OPDRunSpec:
     def from_dict(cls, document, *, config_path=None, overrides=None):
         document = copy.deepcopy(document)
         run_spec._apply_overrides(document, overrides)
-        validation.fields(document, "run", set(DEFAULTS) | {"schema_version", "name", "data", "launch", "miles"})
+        validation.fields(
+            document,
+            "run",
+            set(DEFAULTS) | {"schema_version", "name", "data", "launch", "miles", "teachers", "teacher_pool"},
+        )
         if document.get("schema_version") != 1:
             raise InputError("OPD requires schema_version=1")
         name = validation.text(document.get("name"), "name")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
             raise InputError("name must contain only letters, digits, '.', '_' and '-'")
         base = Path(config_path or "run.toml").resolve()
+        routed = "teachers" in document
+        if routed:
+            _routed_teachers(document, base.parent)
+        elif "teacher_pool" in document:
+            raise InputError(
+                "teacher_pool configures [teachers.<name>] tables; the single [teacher] table has its own"
+            )
         for section, defaults in DEFAULTS.items():
+            if routed and section == "teacher":
+                continue
             incoming = document.get(section, {})
             validation.mapping(incoming, section)
             validation.fields(incoming, section, set(defaults))
@@ -269,7 +385,7 @@ class OPDRunSpec:
             validation.number(factor, "miles.async_data_buffer_capacity_factor", exclusive_min=True)
             if int(factor * document["inference"]["rollout_batch_size"]) < 1:
                 raise InputError("Async OPD completed buffer must hold at least one group")
-        for role in ("model", "teacher"):
+        for role in ("model",) if routed else ("model", "teacher"):
             _resolve_source(document[role], role, base.parent)
         model = document["model"]
         architecture = model["architecture"] or ARCHITECTURES.get(model["source"], "")
@@ -284,7 +400,7 @@ class OPDRunSpec:
         if root == assets or root in assets.parents or assets in root.parents:
             raise InputError("output.root and output.assets must be separate, non-nested directories")
         for section, keys in {
-            "teacher": ("gpus", "concurrency", "request_timeout", "startup_timeout"),
+            **({} if routed else {"teacher": ("gpus", "concurrency", "request_timeout", "startup_timeout")}),
             "trainer": ("gpus", "tensor_parallel_size"),
             "training": ("num_rollouts", "save_interval", "optimizer_steps_per_rollout"),
             "inference": (
@@ -344,10 +460,11 @@ class OPDRunSpec:
                 raise InputError(f"{section}.gpus must be a multiple of {section}.tensor_parallel_size")
         validation.choice(document["training"]["phase"], "training.phase", ("prepare", "train"))
         validation.boolean(document["training"]["resume"], "training.resume")
-        validation.boolean(document["teacher"]["enable_fp32_lm_head"], "teacher.enable_fp32_lm_head")
-        validation.boolean(
-            document["teacher"]["enable_deterministic_inference"], "teacher.enable_deterministic_inference"
-        )
+        if not routed:
+            validation.boolean(document["teacher"]["enable_fp32_lm_head"], "teacher.enable_fp32_lm_head")
+            validation.boolean(
+                document["teacher"]["enable_deterministic_inference"], "teacher.enable_deterministic_inference"
+            )
         validation.boolean(document["model"]["align_eos_with_teacher"], "model.align_eos_with_teacher")
         validation.boolean(document["distillation"]["use_rollout_logprobs"], "distillation.use_rollout_logprobs")
         distillation = document["distillation"]
@@ -408,14 +525,17 @@ class OPDRunSpec:
         preparing = document["training"]["phase"] == "prepare"
         if preparing and document["launch"]["cluster"] not in ("ai2/saturn", "ai2/jupiter"):
             raise InputError("CPU-only OPD preparation with WEKA must run on ai2/saturn or ai2/jupiter")
-        total = sum(document[section]["gpus"] for section in ("trainer", "inference", "teacher"))
+        teacher_gpus = "the teachers' devices" if routed else "teacher.gpus"
+        total = document["trainer"]["gpus"] + document["inference"]["gpus"] + _teacher_gpus(document)
         if not preparing and document["launch"].get("gpus_per_replica", total) != total:
             raise InputError(
-                f"OPD training allocates trainer.gpus + inference.gpus + teacher.gpus = {total} GPUs in one task; "
+                f"OPD training allocates trainer.gpus + inference.gpus + {teacher_gpus} = {total} GPUs in one task; "
                 f"launch.gpus_per_replica disagrees"
             )
         if total > 8:
-            raise InputError("Miles OPD runs in one node; trainer.gpus + inference.gpus + teacher.gpus must be <= 8")
+            raise InputError(
+                f"Miles OPD runs in one node; trainer.gpus + inference.gpus + {teacher_gpus} = {total} must be <= 8"
+            )
         if tracking["wandb_mode"] == "online" and "WANDB_API_KEY" not in document["launch"]["secrets"]:
             raise InputError('tracking.wandb_mode="online" requires launch.secrets.WANDB_API_KEY')
         return cls(document, base)
@@ -432,6 +552,34 @@ class OPDRunSpec:
         return self.document["name"]
 
     @property
+    def routed(self):
+        """True for multi-teacher OPD (``[teachers.<name>]``), routed per sample by Miles."""
+        return "teachers" in self.document
+
+    def teachers(self):
+        """Serving settings per teacher, in startup order: ``{name: settings}``.
+
+        The single ``[teacher]`` table is the teacher named ``"teacher"`` on every teacher GPU;
+        ``gpus`` are the absolute device indices from ``allocation``."""
+        doc = self.document
+        start = doc["trainer"]["gpus"] + doc["inference"]["gpus"]
+        if not self.routed:
+            teacher = doc["teacher"]
+            return {
+                "teacher": {**teacher, "gpus": list(range(start, start + teacher["gpus"])), "mem_fraction_static": 0.6}
+            }
+        pool = doc["teacher_pool"]
+        return {
+            name: {
+                **{key: value for key, value in teacher.items() if key != "devices"},
+                "gpus": [start + device for device in teacher["devices"]],
+                "request_timeout": pool["request_timeout"],
+                "startup_timeout": pool["startup_timeout"],
+            }
+            for name, teacher in doc["teachers"].items()
+        }
+
+    @property
     def output(self):
         return self.document["output"]
 
@@ -445,8 +593,9 @@ class OPDRunSpec:
     def allocation(self):
         if self.document["training"]["phase"] == "prepare":
             return {"replicas": 1, "gpus_per_replica": 0, "ray_gpus": 0, "roles": {}}
-        trainer, student, teacher = (self.document[section]["gpus"] for section in ("trainer", "inference", "teacher"))
-        return {
+        trainer, student = (self.document[section]["gpus"] for section in ("trainer", "inference"))
+        teacher = _teacher_gpus(self.document)
+        allocation = {
             "replicas": 1,
             "gpus_per_replica": trainer + student + teacher,
             "ray_gpus": trainer + student,
@@ -456,12 +605,21 @@ class OPDRunSpec:
                 "teacher": list(range(trainer + student, trainer + student + teacher)),
             },
         }
+        if self.routed:
+            allocation["teachers"] = {name: settings["gpus"] for name, settings in self.teachers().items()}
+        return allocation
 
     def plan(self):
         exercised = self.allocation()["roles"] == {"trainer": [0, 1], "student": [2], "teacher": [3]}
         warnings = ["Experimental sampled-token OPD; runtime qualification required."]
         if not exercised:
             warnings.append("Only the 2 trainer / 1 student / 1 teacher GPU topology has been exercised.")
+        if self.routed:
+            warnings.append(
+                "Multi-teacher OPD routes by metadata["
+                + repr(self.document["teacher_pool"]["route_key"])
+                + "] and has not been exercised on GPUs."
+            )
         if self.document["miles"]:
             warnings.append(
                 "[miles] passes native options through unqualified: " + ", ".join(sorted(self.document["miles"]))

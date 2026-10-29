@@ -1,5 +1,6 @@
 """Managed teacher and native Megatron execution for the initial OPD exercise."""
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -91,7 +92,18 @@ def eopd_settings(spec):
     return eopd_math.Settings.from_distillation(spec.document["distillation"])
 
 
+def teacher_concurrency_environment(spec):
+    """Per-teacher admission limits for ``opd_hooks.reward``: one ``OI_OPD_TEACHER_CONCURRENCY`` for
+    the single teacher, ``OI_OPD_TEACHER_CONCURRENCIES="math:32,ifeval:32"`` for routed teachers."""
+    teachers = spec.teachers()
+    if not spec.routed:
+        return {"OI_OPD_TEACHER_CONCURRENCY": str(teachers["teacher"]["concurrency"])}
+    value = ",".join(f"{name}:{settings['concurrency']}" for name, settings in teachers.items())
+    return {opd_prepare.TEACHER_CONCURRENCIES_ENV: value}
+
+
 def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
+    """``teacher_url`` is the single teacher's scoring URL, or ``{name: url}`` for routed teachers."""
     doc, root = spec.document, Path(spec.output["root"])
     inf, training, trainer, tracking = doc["inference"], doc["training"], doc["trainer"], doc["tracking"]
     batch = inf["rollout_batch_size"] * inf["samples_per_prompt"]
@@ -135,14 +147,15 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "sglang-max-total-tokens": inf["max_context_length"] * inf["max_running_requests"],
         "sglang-attention-backend": "triton",
         "sglang-sampling-backend": "pytorch",
-        "sglang-router-request-timeout-secs": doc["teacher"]["request_timeout"],
+        "sglang-router-request-timeout-secs": (doc["teacher_pool"] if spec.routed else doc["teacher"])[
+            "request_timeout"
+        ],
         "advantage-estimator": "grpo",
         "opd-type": "sglang",
         "opd-kl-coef": doc["distillation"]["kl_coef"],
         "opd-log-prob-top-k": 0,
         "custom-rm-path": "open_instruct.miles.distillation.opd_hooks.reward",
         "custom-reward-post-process-path": "open_instruct.miles.distillation.opd_hooks.post_process",
-        "rm-url": teacher_url,
         "eval-interval": training["eval_interval"] or training["num_rollouts"],
         "n-samples-per-eval-prompt": inf["eval_samples_per_prompt"],
         "eval-max-response-len": inf["eval_max_response_length"] or inf["max_response_length"],
@@ -170,6 +183,8 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         "wandb-group": spec.name,
         "wandb-dir": str(root / "wandb"),
     }
+    if not spec.routed:
+        values["rm-url"] = teacher_url
     if not doc["miles"].get("fully_async", False):
         values["eval-function-path"] = "open_instruct.miles.distillation.opd_hooks.evaluate"
     if optimizer["lr_decay_style"] != "constant":
@@ -242,45 +257,73 @@ def native_arguments(spec, prepared, checkpoint, teacher_url, architecture):
         args += ["--use-wandb", "--wandb-mode", tracking["wandb_mode"]]
         if tracking["wandb_entity"]:
             args += ["--wandb-team", tracking["wandb_entity"]]
+    if spec.routed:
+        # Miles scores each sample with the teacher named by metadata[route_key] and leaves --rm-url
+        # unused, so it is not set; an unknown name fails the rollout unless a "default" teacher exists.
+        args += ["--opd-teacher-urls", *(f"{name}={url}" for name, url in teacher_url.items())]
+        args += ["--opd-teacher-key", doc["teacher_pool"]["route_key"]]
     args += ["--eval-prompt-data", *prepared["data"]["eval_prompt_data"]]
     return with_native_overrides(args, doc["miles"])
 
 
-def teacher_command(spec, prepared, teacher_port):
+def teacher_command(spec, prepared, teacher_port, name="teacher"):
     """Build teacher and export-reload serving arguments independently of student flags."""
+    settings = spec.teachers()[name]
+    context = spec.document["inference"]["max_context_length"]
     command = [
         sys.executable,
         "-m",
         "sglang.launch_server",
         "--model-path",
-        prepared["teacher"],
+        opd_prepare.teacher_paths(prepared)[name],
         "--host",
         "127.0.0.1",
         "--port",
         str(teacher_port),
         "--tp",
-        str(spec.document["teacher"]["gpus"]),
+        str(len(settings["gpus"])),
         "--mem-fraction-static",
-        "0.6",
+        str(settings["mem_fraction_static"]),
         "--context-length",
-        str(spec.document["inference"]["max_context_length"]),
+        str(context),
         "--max-running-requests",
-        str(spec.document["teacher"]["concurrency"]),
+        str(settings["concurrency"]),
         "--attention-backend",
         "triton",
         "--sampling-backend",
         "pytorch",
         "--max-total-tokens",
-        str(spec.document["inference"]["max_context_length"] * spec.document["teacher"]["concurrency"]),
+        str(context * settings["concurrency"]),
         "--disable-flashinfer-autotune",
         "--disable-cuda-graph",
         "--disable-radix-cache",
     ]
-    if spec.document["teacher"]["enable_fp32_lm_head"]:
+    if settings["enable_fp32_lm_head"]:
         command.append("--enable-fp32-lm-head")
-    if spec.document["teacher"]["enable_deterministic_inference"]:
+    if settings["enable_deterministic_inference"]:
         command.append("--enable-deterministic-inference")
     return command
+
+
+def wait_for_server(process, url, model_path, timeout, failure):
+    """Poll ``/get_model_info`` until the server reports ``model_path``; returns that info."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if process.poll() is not None:
+            raise RuntimeError(failure)
+        try:
+            info = request(url + "/get_model_info")
+            if info.get("model_path") != model_path:
+                raise RuntimeError(f"Server at {url} loaded an unexpected model: {info}")
+            return info
+        except (urllib.error.URLError, TimeoutError):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Readiness deadline exceeded for {url}") from None
+            time.sleep(2)
+
+
+def teacher_log_name(spec, name):
+    return f"teacher-{name}.log" if spec.routed else "teacher.log"
 
 
 def execute(spec):
@@ -308,7 +351,7 @@ def execute(spec):
                 "WANDB_MODE": spec.document["tracking"]["wandb_mode"],
                 "OI_OPD_OUTPUT": str(root),
                 "OI_OPD_REWARD_CONFIG": prepared["data"]["reward_config"],
-                "OI_OPD_TEACHER_CONCURRENCY": str(spec.document["teacher"]["concurrency"]),
+                **teacher_concurrency_environment(spec),
                 opd_retention.KEEP_ENV: str(spec.document["training"]["keep_checkpoints"]),
                 "CONVERT_KEEP_PP1": "1",
                 **eopd_settings(spec).environment(),
@@ -337,6 +380,7 @@ def execute(spec):
                     "/opt/core-rl/tests/miles/test_opd_hooks.py",
                     "/opt/core-rl/tests/miles/test_opd_audit.py",
                     "/opt/core-rl/tests/miles/test_opd_attention.py",
+                    *(["/opt/core-rl/tests/miles/test_opd_multi_teacher_hooks.py"] if spec.routed else []),
                     *(
                         ["/opt/core-rl/tests/miles/test_opd_async.py"]
                         if spec.document["miles"].get("fully_async")
@@ -382,11 +426,23 @@ def execute(spec):
             logger.info("Converting the learner to Megatron")
             with (root / "conversion.log").open("w") as stream:
                 run_group(command, env=conversion_env, stdout=stream, stderr=subprocess.STDOUT, timeout=1800)
-        teacher_port = port()
-        url = f"http://127.0.0.1:{teacher_port}"
-        teacher_env = environment | {"CUDA_VISIBLE_DEVICES": devices["teacher"]}
-        command = teacher_command(spec, prepared, teacher_port)
-        arguments = native_arguments(spec, prepared, checkpoint, url + "/generate", architecture)
+        teachers = spec.teachers()
+        paths = opd_prepare.teacher_paths(prepared)
+        ports = {}
+        for name in teachers:
+            ports[name] = port()
+            while ports[name] in list(ports.values())[:-1]:
+                ports[name] = port()
+        urls = {name: f"http://127.0.0.1:{number}" for name, number in ports.items()}
+        commands = {name: teacher_command(spec, prepared, number, name) for name, number in ports.items()}
+        teacher_envs = {
+            name: environment | {"CUDA_VISIBLE_DEVICES": ",".join(visible[index] for index in settings["gpus"])}
+            for name, settings in teachers.items()
+        }
+        scoring = {name: url + "/generate" for name, url in urls.items()}
+        arguments = native_arguments(
+            spec, prepared, checkpoint, scoring if spec.routed else scoring["teacher"], architecture
+        )
         with (root / "native-preflight.log").open("w") as stream:
             subprocess.run(
                 [
@@ -403,7 +459,8 @@ def execute(spec):
                 check=True,
                 timeout=180,
             )
-        teacher = learner = monitor = None
+        servers = {}
+        learner = monitor = None
         try:
             if opd_timing.enabled():
                 monitor = subprocess.Popen(
@@ -419,35 +476,42 @@ def execute(spec):
                     env=environment,
                     start_new_session=True,
                 )
-            with (root / "teacher.log").open("w") as teacher_log, (root / "training.log").open("a") as train_log:
-                teacher = subprocess.Popen(
-                    command, env=teacher_env, stdout=teacher_log, stderr=subprocess.STDOUT, start_new_session=True
+            with contextlib.ExitStack() as logs:
+                train_log = logs.enter_context((root / "training.log").open("a"))
+                preflight = {}
+                # One server at a time: teachers sharing a GPU size their memory pools from what the
+                # previous ones left free, so each must finish loading before the next starts.
+                for name, settings in teachers.items():
+                    log_name = teacher_log_name(spec, name)
+                    teacher_log = logs.enter_context((root / log_name).open("w"))
+                    servers[name] = subprocess.Popen(
+                        commands[name],
+                        env=teacher_envs[name],
+                        stdout=teacher_log,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                    info = wait_for_server(
+                        servers[name],
+                        urls[name],
+                        paths[name],
+                        settings["startup_timeout"],
+                        f"Teacher {name} exited during startup; see {log_name}",
+                    )
+                    probe = request(
+                        urls[name] + "/generate",
+                        {
+                            "input_ids": [1, 2, 3, 4],
+                            "sampling_params": {"max_new_tokens": 0},
+                            "return_logprob": True,
+                            "logprob_start_len": 0,
+                        },
+                        timeout=180,
+                    )
+                    preflight[name] = {"identity": info, "score_probe": probe}
+                workflow.write_json(
+                    root / "teacher-preflight.json", preflight if spec.routed else preflight["teacher"]
                 )
-                deadline = time.monotonic() + spec.document["teacher"]["startup_timeout"]
-                while True:
-                    if teacher.poll() is not None:
-                        raise RuntimeError("Teacher exited during startup; see teacher.log")
-                    try:
-                        info = request(url + "/get_model_info")
-                        if info.get("model_path") != prepared["teacher"]:
-                            raise RuntimeError(f"Teacher identity differs: {info}")
-                        break
-                    except (urllib.error.URLError, TimeoutError):
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("Teacher readiness deadline exceeded") from None
-                        time.sleep(2)
-                probe = request(
-                    url + "/generate",
-                    {
-                        "input_ids": [1, 2, 3, 4],
-                        "sampling_params": {"max_new_tokens": 0},
-                        "return_logprob": True,
-                        "logprob_start_len": 0,
-                    },
-                    timeout=180,
-                )
-                workflow.write_json(root / "teacher-preflight.json", {"identity": info, "score_probe": probe})
-                arguments = native_arguments(spec, prepared, checkpoint, url + "/generate", architecture)
                 workflow.write_json(root / "native-arguments.json", arguments)
                 learner_env = environment | {
                     "CUDA_VISIBLE_DEVICES": devices["trainer"] + "," + devices["student"],
@@ -461,16 +525,17 @@ def execute(spec):
                     start_new_session=True,
                 )
                 while learner.poll() is None:
-                    if teacher.poll() is not None:
-                        raise RuntimeError("Teacher failed during training")
+                    failed = [name for name, server in servers.items() if server.poll() is not None]
+                    if failed:
+                        raise RuntimeError(f"Teacher {', '.join(failed)} failed during training")
                     time.sleep(2)
                 if learner.returncode:
                     raise RuntimeError(f"Native Miles failed ({learner.returncode}); see training.log")
             marker = root / "checkpoints/latest_checkpointed_iteration.txt"
             if not marker.exists() or not (root / "teacher-scores.jsonl").exists():
                 raise RuntimeError("Training exited without checkpoint or teacher-score evidence")
-            cluster.terminate(teacher)
-            teacher = None
+            for name in list(servers):
+                cluster.terminate(servers.pop(name))
             subprocess.run(
                 [sys.executable, "-m", "open_instruct.miles.distillation.opd_audit", str(root)],
                 env=environment,
@@ -479,29 +544,26 @@ def execute(spec):
             )
             audit = json.loads((root / "audit.json").read_text())
             export_path = audit["export"]["path"]
+            # The export reloads on the first teacher's GPUs and serving settings.
+            reload = next(iter(teachers))
+            command = commands[reload]
             command[command.index("--model-path") + 1] = export_path
             with (root / "export-reload.log").open("w") as stream:
-                teacher = subprocess.Popen(
-                    command, env=teacher_env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True
+                servers["export"] = subprocess.Popen(
+                    command, env=teacher_envs[reload], stdout=stream, stderr=subprocess.STDOUT, start_new_session=True
                 )
-                deadline = time.monotonic() + spec.document["teacher"]["startup_timeout"]
-                while True:
-                    if teacher.poll() is not None:
-                        raise RuntimeError("Export reload failed; see export-reload.log")
-                    try:
-                        info = request(url + "/get_model_info")
-                        if info.get("model_path") != export_path:
-                            raise RuntimeError("Export server loaded an unexpected model")
-                        break
-                    except (urllib.error.URLError, TimeoutError):
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("Export reload deadline exceeded") from None
-                        time.sleep(2)
-                first = json.loads((root / "teacher-scores.jsonl").read_text().splitlines()[0])
+                info = wait_for_server(
+                    servers["export"],
+                    urls[reload],
+                    export_path,
+                    teachers[reload]["startup_timeout"],
+                    "Export reload failed; see export-reload.log",
+                )
+                record = json.loads((root / "teacher-scores.jsonl").read_text().splitlines()[0])
                 probe = request(
-                    url + "/generate",
+                    urls[reload] + "/generate",
                     {
-                        "input_ids": first["tokens"][: -first["response_length"]],
+                        "input_ids": record["tokens"][: -record["response_length"]],
                         "sampling_params": {"max_new_tokens": 32, "temperature": 0},
                         "return_logprob": True,
                     },
@@ -514,7 +576,11 @@ def execute(spec):
                     "status": "trained",
                     "checkpoint_iteration": marker.read_text().strip(),
                     "learner": prepared["identities"]["model"],
-                    "teacher": prepared["identities"]["teacher"],
+                    **(
+                        {"teachers": prepared["identities"]["teachers"]}
+                        if spec.routed
+                        else {"teacher": prepared["identities"]["teacher"]}
+                    ),
                     "note": "Tiny OPD mechanics and export reload passed; no learning-quality claim.",
                 },
             )
@@ -522,5 +588,6 @@ def execute(spec):
             workflow.write_json(root / "workflow.json", state)
         finally:
             cluster.terminate(learner)
-            cluster.terminate(teacher)
+            for server in servers.values():
+                cluster.terminate(server)
             cluster.terminate(monitor)

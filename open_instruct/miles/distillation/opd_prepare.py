@@ -82,6 +82,8 @@ def eos_token_ids(generation_config, eos_token_id):
 
 EOS_REMAP_ENV = "OI_OPD_TEACHER_EOS_REMAP"
 """Launcher -> rollout hooks: ``"learner_stop_id:teacher_eos_id[,...]"`` (see ``opd_hooks.eos_remap``)."""
+TEACHER_CONCURRENCIES_ENV = "OI_OPD_TEACHER_CONCURRENCIES"
+"""Launcher -> rollout hooks: ``"name:limit[,...]"``, one admission limit per routed teacher."""
 
 
 def teacher_eos_remap(model_path):
@@ -125,84 +127,158 @@ def local_fingerprint(original, rewrite):
     )[:12]
 
 
+def _stage(assets, role, item, align_eos_token, prefix=""):
+    """Stage one model under ``assets``; returns ``(identity, path)``."""
+    original = None
+    if opd_config.is_local(item["source"]):
+        original = Path(item["source"])
+        if not (original / "config.json").is_file():
+            raise InputError(f"{role}.source {original} is not a Hugging Face checkpoint directory")
+        rewrite = needs_text_key_rewrite(original)
+        stamp = local_fingerprint(original, rewrite)
+        identity = {"source": str(original), "revision": "", "thinking": False, "local_fingerprint": stamp}
+        target = assets / f"{prefix}{original.name}-local-{stamp}"
+    else:
+        rewrite = False
+        identity = {"source": item["source"], "revision": item["revision"], "thinking": False}
+        target = assets / f"{prefix}{item['source'].split('/')[-1]}-{item['revision'][:12]}"
+    if align_eos_token is not None:
+        identity["eos_token"] = align_eos_token
+        target = target.with_name(target.name + "-eos")
+    marker = target / "opd-source.json"
+    if marker.exists():
+        if json.loads(marker.read_text()) != identity:
+            raise InputError("Prepared model identity differs")
+    else:
+        if original is None:
+            original = Path(
+                snapshot_download(
+                    item["source"],
+                    revision=item["revision"],
+                    local_dir=assets / "downloads" / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}",
+                    allow_patterns=["*.json", "*.jinja", "*.safetensors", "*.txt", "*.model"],
+                )
+            )
+        target.mkdir(exist_ok=True)
+        for source in original.iterdir():
+            if not source.is_file():
+                continue
+            dest = target / source.name
+            if dest.exists() or (rewrite and source.name == _INDEX_NAME):
+                continue
+            if source.suffix == ".safetensors":
+                if not rewrite:
+                    dest.symlink_to(source.resolve())
+            else:
+                shutil.copy2(source, dest)
+        if rewrite:
+            rewrite_text_keys(original, target)
+        tokenizer = AutoTokenizer.from_pretrained(target)
+        template = tokenizer.get_chat_template()
+        tokenizer.chat_template = "{% set enable_thinking = false %}\n" + template
+        tokenizer.save_pretrained(target)
+        if align_eos_token is not None:
+            align_eos(target, align_eos_token)
+        workflow.write_json(marker, identity)
+    tokenizer = AutoTokenizer.from_pretrained(target)
+    identity = {
+        **identity,
+        "vocab_sha256": hashlib.sha256(json.dumps(tokenizer.get_vocab(), sort_keys=True).encode()).hexdigest(),
+        "special_tokens": tokenizer.special_tokens_map,
+        "template_sha256": hashlib.sha256(tokenizer.get_chat_template().encode()).hexdigest(),
+    }
+    return identity, str(target)
+
+
+def teacher_paths(prepared):
+    """``{name: prepared path}`` in ``OPDRunSpec.teachers`` order; the single teacher is ``"teacher"``."""
+    return dict(prepared["teachers"]) if "teachers" in prepared else {"teacher": prepared["teacher"]}
+
+
+def teacher_identities(prepared):
+    identities = prepared["identities"]
+    return dict(identities["teachers"]) if "teachers" in identities else {"teacher": identities["teacher"]}
+
+
+def check_teachers(model, teachers):
+    """Every teacher must score the learner's token ids: same vocabulary and special tokens."""
+    for name, identity in teachers.items():
+        label = "Teacher" if name == "teacher" else f"Teacher {name!r}"
+        if model["vocab_sha256"] != identity["vocab_sha256"]:
+            raise InputError(f"{label} and learner token IDs differ")
+        if model["special_tokens"] != identity["special_tokens"]:
+            raise InputError(f"{label} and learner special tokens differ")
+
+
+def shared_eos_token(eos_tokens):
+    """The one end-of-turn token every teacher agrees on, for ``model.align_eos_with_teacher``.
+
+    The learner gets a single eos and the hooks one remap, so teachers that end turns with
+    different tokens cannot share a learner."""
+    if len(set(eos_tokens.values())) != 1:
+        raise InputError(
+            f"model.align_eos_with_teacher needs every teacher to end turns with the same token; got {eos_tokens}"
+        )
+    return next(iter(eos_tokens.values()))
+
+
+def check_routes(prompt_data, route_key, teachers):
+    """Fail before any GPU starts if a training prompt would reach no teacher, or a teacher no prompt.
+
+    Mirrors Miles' ``_teacher_url_for_sample``: the prompt's ``metadata[route_key]`` names its
+    teacher, and a missing or unknown name falls back to the ``default`` teacher when there is one."""
+    counts = dict.fromkeys(teachers, 0)
+    unrouted = {}
+    with Path(prompt_data).open() as stream:
+        for line in stream:
+            metadata = json.loads(line).get("metadata") or {}
+            name = metadata.get(route_key)
+            name = None if name is None else str(name)
+            if name not in counts:
+                if opd_config.DEFAULT_TEACHER_NAME not in counts:
+                    unrouted[name] = unrouted.get(name, 0) + 1
+                    continue
+                name = opd_config.DEFAULT_TEACHER_NAME
+            counts[name] += 1
+    if unrouted:
+        raise InputError(
+            f"Training prompts with metadata[{route_key!r}] values {unrouted} match no teacher ({sorted(teachers)})"
+        )
+    unused = sorted(name for name, count in counts.items() if not count)
+    if unused:
+        raise InputError(f"No training prompt routes to teachers {unused} by metadata[{route_key!r}]")
+    return counts
+
+
 def prepare(spec):
     assets = Path(spec.output["assets"])
     assets.mkdir(parents=True, exist_ok=True)
     with (assets / ".prepare.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        identities = {}
-        paths = {}
-        # The teacher goes first so the learner can adopt its eos token.
-        for role in ("teacher", "model"):
-            item = spec.document[role]
-            original = None
-            align_eos_token = None
-            if role == "model" and spec.document["model"]["align_eos_with_teacher"]:
-                align_eos_token = AutoTokenizer.from_pretrained(paths["teacher"]).eos_token
-            if opd_config.is_local(item["source"]):
-                original = Path(item["source"])
-                if not (original / "config.json").is_file():
-                    raise InputError(f"{role}.source {original} is not a Hugging Face checkpoint directory")
-                rewrite = needs_text_key_rewrite(original)
-                stamp = local_fingerprint(original, rewrite)
-                identity = {"source": str(original), "revision": "", "thinking": False, "local_fingerprint": stamp}
-                target = assets / f"{original.name}-local-{stamp}"
-            else:
-                rewrite = False
-                identity = {"source": item["source"], "revision": item["revision"], "thinking": False}
-                target = assets / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}"
-            if align_eos_token is not None:
-                identity["eos_token"] = align_eos_token
-                target = target.with_name(target.name + "-eos")
-            marker = target / "opd-source.json"
-            if marker.exists():
-                if json.loads(marker.read_text()) != identity:
-                    raise InputError("Prepared model identity differs")
-            else:
-                if original is None:
-                    original = Path(
-                        snapshot_download(
-                            item["source"],
-                            revision=item["revision"],
-                            local_dir=assets
-                            / "downloads"
-                            / f"{item['source'].split('/')[-1]}-{item['revision'][:12]}",
-                            allow_patterns=["*.json", "*.jinja", "*.safetensors", "*.txt", "*.model"],
-                        )
-                    )
-                target.mkdir(exist_ok=True)
-                for source in original.iterdir():
-                    if not source.is_file():
-                        continue
-                    dest = target / source.name
-                    if dest.exists() or (rewrite and source.name == _INDEX_NAME):
-                        continue
-                    if source.suffix == ".safetensors":
-                        if not rewrite:
-                            dest.symlink_to(source.resolve())
-                    else:
-                        shutil.copy2(source, dest)
-                if rewrite:
-                    rewrite_text_keys(original, target)
-                tokenizer = AutoTokenizer.from_pretrained(target)
-                template = tokenizer.get_chat_template()
-                tokenizer.chat_template = "{% set enable_thinking = false %}\n" + template
-                tokenizer.save_pretrained(target)
-                if align_eos_token is not None:
-                    align_eos(target, align_eos_token)
-                workflow.write_json(marker, identity)
-            tokenizer = AutoTokenizer.from_pretrained(target)
-            identities[role] = {
-                **identity,
-                "vocab_sha256": hashlib.sha256(json.dumps(tokenizer.get_vocab(), sort_keys=True).encode()).hexdigest(),
-                "special_tokens": tokenizer.special_tokens_map,
-                "template_sha256": hashlib.sha256(tokenizer.get_chat_template().encode()).hexdigest(),
-            }
-            paths[role] = str(target)
-        if identities["model"]["vocab_sha256"] != identities["teacher"]["vocab_sha256"]:
-            raise InputError("Teacher and learner token IDs differ")
-        if identities["model"]["special_tokens"] != identities["teacher"]["special_tokens"]:
-            raise InputError("Teacher and learner special tokens differ")
+        staged_identities, staged_paths = {}, {}
+        # The teachers go first so the learner can adopt their eos token.
+        if spec.routed:
+            for name, item in spec.document["teachers"].items():
+                staged_identities[name], staged_paths[name] = _stage(
+                    assets, f"teachers.{name}", item, None, prefix=f"teacher-{name}-"
+                )
+        else:
+            staged_identities["teacher"], staged_paths["teacher"] = _stage(
+                assets, "teacher", spec.document["teacher"], None
+            )
+        align_eos_token = None
+        if spec.document["model"]["align_eos_with_teacher"]:
+            align_eos_token = shared_eos_token(
+                {name: AutoTokenizer.from_pretrained(path).eos_token for name, path in staged_paths.items()}
+            )
+        model_identity, model_path = _stage(assets, "model", spec.document["model"], align_eos_token)
+        check_teachers(model_identity, staged_identities)
+        if spec.routed:
+            paths = {"teachers": staged_paths}
+            identities = {"teachers": staged_identities, "model": model_identity}
+        else:
+            paths = {"teacher": staged_paths["teacher"]}
+            identities = {"teacher": staged_identities["teacher"], "model": model_identity}
         inf = spec.document["inference"]
         data_key = workflow.fingerprint(
             {
@@ -213,11 +289,13 @@ def prepare(spec):
         )[:16]
         data = run_data.prepare_data(
             spec.document["data"],
-            Path(paths["model"]),
+            Path(model_path),
             assets / f"data-{data_key}",
             max_prompt_length=inf["max_context_length"] - inf["max_response_length"],
             seed=spec.document["data"]["seed"],
         )
-        result = {**paths, "identities": identities, "data": data}
+        if spec.routed:
+            check_routes(data["prompt_data"], spec.document["teacher_pool"]["route_key"], spec.document["teachers"])
+        result = {**paths, "model": model_path, "identities": identities, "data": data}
         workflow.write_json(assets / "prepared.json", result)
         return result

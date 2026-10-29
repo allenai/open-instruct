@@ -14,7 +14,8 @@ from open_instruct.miles.distillation import eopd_math, opd_prepare, opd_timing
 from open_instruct.miles.distillation import opd_rewards as rewards
 from open_instruct.miles.megatron_grpo import domain_balance
 
-_LIMIT = None
+# One admission semaphore per teacher name (``None`` is the single teacher at --rm-url).
+_LIMITS = {}
 # The teacher's scoring response rides on the sample here (samples are deep-copied per group);
 # `sample.reward` stays the numeric task reward (0.0 under pure OPD) because Miles's rollout
 # metrics round and group by it. `post_process` turns the response into teacher_log_probs.
@@ -28,6 +29,43 @@ TEACHER_RESPONSE_KEY = "opd_teacher_response"
 # teacher's eos: "stop here" is one event with two spellings.
 EOS_REMAP_ENV = opd_prepare.EOS_REMAP_ENV
 EOS_REMAPPED_KEY = "oi_eos_remapped"
+TEACHER_NAME_KEY = "oi_opd_teacher"
+
+
+def teacher_name(args, sample):
+    """The teacher Miles scores ``sample`` with, or ``None`` for the single teacher at ``--rm-url``.
+
+    Mirrors ``on_policy_distillation._teacher_url_for_sample`` (called first, so an unroutable
+    sample raises Miles' own error): ``sample.metadata[--opd-teacher-key]`` names the teacher, and a
+    missing or unknown name falls back to the reserved ``default`` teacher."""
+    names = on_policy_distillation.parse_teacher_urls(getattr(args, "opd_teacher_urls", None))
+    if not names:
+        return None
+    on_policy_distillation._teacher_url_for_sample(args, sample)
+    metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
+    name = metadata.get(getattr(args, "opd_teacher_key", "opd_teacher"))
+    if name is not None and str(name) in names:
+        return str(name)
+    return on_policy_distillation.DEFAULT_TEACHER_NAME
+
+
+def teacher_concurrency(name, environment=None):
+    """Admission limit for ``name``: ``OI_OPD_TEACHER_CONCURRENCIES`` (``"math:32,ifeval:16"``) for a
+    routed teacher, else ``OI_OPD_TEACHER_CONCURRENCY`` (default 4)."""
+    environment = os.environ if environment is None else environment
+    limits = {}
+    for item in filter(None, environment.get(opd_prepare.TEACHER_CONCURRENCIES_ENV, "").split(",")):
+        key, value = item.rsplit(":", 1)
+        limits[key] = int(value)
+    if name is not None and name in limits:
+        return limits[name]
+    return int(environment.get("OI_OPD_TEACHER_CONCURRENCY", "4"))
+
+
+def _limit(name):
+    if name not in _LIMITS:
+        _LIMITS[name] = asyncio.Semaphore(teacher_concurrency(name))
+    return _LIMITS[name]
 
 
 def eos_remap(environment=None):
@@ -83,11 +121,9 @@ def _top_k(result, sample, settings):
 
 
 async def reward(args, sample, **kwargs):
-    global _LIMIT
-    if _LIMIT is None:
-        _LIMIT = asyncio.Semaphore(int(os.environ.get("OI_OPD_TEACHER_CONCURRENCY", "4")))
+    name = teacher_name(args, sample)
     settings = _eopd()
-    async with opd_timing.teacher_slot(_LIMIT, sample):
+    async with opd_timing.teacher_slot(_limit(name), sample):
         for attempt in range(3):
             try:
                 with opd_timing.stage(
@@ -102,6 +138,7 @@ async def reward(args, sample, **kwargs):
                 if [entry[1] for entry in entries] != scored_tokens[-sample.response_length :]:
                     raise ValueError("Teacher scored different token positions or IDs")
                 result[EOS_REMAPPED_KEY] = remapped
+                result[TEACHER_NAME_KEY] = name
                 scores = on_policy_distillation._teacher_sampled_log_probs(result, sample.response_length)
                 if len(scores) != sample.response_length or not all(math.isfinite(x) for x in scores.tolist()):
                     raise ValueError("Teacher scores are missing, misaligned or nonfinite")
@@ -138,6 +175,17 @@ def post_process(args, samples, **kwargs):
                 "response": sample.response,
                 "eos_remapped": bool(response.get(EOS_REMAPPED_KEY, False)),
             }
+            metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
+            if response.get(TEACHER_NAME_KEY) is not None:
+                record["teacher"] = response[TEACHER_NAME_KEY]
+                record["route"] = metadata.get(getattr(args, "opd_teacher_key", "opd_teacher"))
+            if domain_balance.DOMAIN_KEY in metadata:
+                record["domain"] = metadata[domain_balance.DOMAIN_KEY]
+            student = getattr(sample, "rollout_log_probs", None)
+            if student is not None and len(student) == len(values):
+                # Sampled-token reverse-KL estimate against the rollout policy (the student side
+                # under distillation.use_rollout_logprobs); opd_audit summarizes it per teacher.
+                record["reverse_kl"] = sum(s - t for s, t in zip(student, values)) / len(values)
             if settings.enabled:
                 # The top-k rides to the trainer in train_metadata (the batch's `metadata` list);
                 # the score log keeps only the derived gate so it stays small.

@@ -1,0 +1,121 @@
+# Multi-teacher OPD (MOPD), 100 updates: one Qwen3.5-9B base student distills from the v4 math
+# and IFEval specialist teachers at once. Miles routes each prompt by its metadata.domain
+# ("math" or "ifeval", written by scripts/miles/prepare_dolci_rl_prompts.py) to the teacher of the
+# same name. Everything else copies the DPPO TV 0.03 OPD template
+# (dppoval-opd-qwen35-9b-math-dppo-tv003-100u), with the domain-balanced token mean.
+#
+# GPUs: trainer 4 (TP 2) + student inference 3 + 1 GPU shared by both teacher servers. The
+# servers start in table order and SGLang sizes each from the memory free at its own startup, so
+# the second fraction applies to what the first left free. For one GPU per teacher, set
+# inference.gpus = 2, ifeval devices = [1], and drop the mem_fraction_static overrides.
+schema_version = 1
+name = "mopd-qwen35-9b-math-ifeval-100u"
+
+[model]
+source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets-pr1924/Qwen3.5-9B-c20223623576"
+architecture = "qwen3.5-9B"
+
+[teacher_pool]
+route_key = "domain"
+request_timeout = 900
+startup_timeout = 1800
+
+[teachers.math]
+source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/teacher-qwen35-9b-math-v4-100u/hf-99"
+devices = [0]
+concurrency = 32
+mem_fraction_static = 0.4
+
+[teachers.ifeval]
+source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/teacher-qwen35-9b-ifeval-v4-100u/hf-99"
+devices = [0]
+concurrency = 32
+mem_fraction_static = 0.6
+
+[training]
+algorithm = "opd"
+resume = true
+num_rollouts = 100
+save_interval = 10
+eval_interval = 10
+optimizer_steps_per_rollout = 1
+loss_aggregation = "domain"
+keep_checkpoints = 1
+
+[trainer]
+backend = "megatron"
+gpus = 4
+tensor_parallel_size = 2
+
+[inference]
+gpus = 3
+tensor_parallel_size = 1
+rollout_batch_size = 64
+samples_per_prompt = 8
+max_response_length = 16384
+max_context_length = 18432
+max_running_requests = 128
+temperature = 1.0
+top_p = 1.0
+eval_temperature = 1.0
+eval_top_p = 1.0
+eval_samples_per_prompt = 1
+
+[distillation]
+kl_coef = 1.0
+use_rollout_logprobs = true
+policy_loss = "dppo"
+dppo_divergence_type = "tv"
+dppo_threshold = 0.03
+
+[optimizer]
+learning_rate = 1e-6
+lr_decay_style = "constant"
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+
+[output]
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/mopd-qwen35-9b-math-ifeval-100u"
+assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/assets/mopd-qwen35-9b-math-ifeval-v4-100u"
+
+[data]
+seed = 42
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/mix_math_ifeval.jsonl"
+eval_prompt_data = [
+  "eval_math", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_math.jsonl",
+  "eval_ifeval", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_ifeval.jsonl",
+]
+reward_config = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/verifiers.json"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "miles-mopd-phase1"
+wandb_entity = "allenai-team1"
+
+[launch]
+workspace = "ai2/olmo-instruct"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "4h"
+timeout = "16h"
+auto_resume = true
+gpus_per_replica = 8
+weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
+
+[launch.secrets]
+WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
+
+[miles]
+fully_async = true
+max_weight_staleness = 5
+async_max_concurrent_samples = 1024
+async_data_buffer_capacity_factor = 2.0
+async_unused_samples_handler = "drop"
+rollout_submission_granularity = "group"
+pause_generation_mode = "retract"
+sglang_disable_cuda_graph = false
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_cuda_graph_max_bs_decode = 128

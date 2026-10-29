@@ -123,6 +123,48 @@ def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1, *, requir
     return list(steps.values())
 
 
+def audit_teachers(path, teachers, default_name="default"):
+    """Check that every routed teacher scored the samples Miles routes to it, and summarize each.
+
+    ``teacher-scores.jsonl`` records the teacher (``opd_hooks.TEACHER_NAME_KEY``) and the route value
+    that selected it; a value naming no teacher must have gone to ``default_name``. The hooks
+    already check each teacher's token ids and scores per sample, so this adds the routing and a
+    per-teacher and per-domain mean of the sampled-token reverse-KL estimate."""
+    by_teacher = {name: {"samples": 0, "tokens": 0, "teacher_log_prob_sum": 0.0} for name in teachers}
+    by_domain = {}
+    with Path(path).open() as stream:
+        for line in stream:
+            record = json.loads(line)
+            name = record.get("teacher")
+            if name not in by_teacher:
+                raise ValueError(f"Sample {record['sample_index']} was scored by unknown teacher {name!r}")
+            route = record.get("route")
+            expected = str(route) if route is not None and str(route) in by_teacher else default_name
+            if name != expected:
+                raise ValueError(f"Sample {record['sample_index']} with route {route!r} was scored by {name!r}")
+            summary = by_teacher[name]
+            summary["samples"] += 1
+            summary["tokens"] += record["response_length"]
+            summary["teacher_log_prob_sum"] += sum(record["teacher_log_probs"])
+            if "reverse_kl" in record:
+                summary["reverse_kl_sum"] = summary.get("reverse_kl_sum", 0.0) + record["reverse_kl"]
+                domain = by_domain.setdefault(str(record.get("domain")), {"samples": 0, "reverse_kl_sum": 0.0})
+                domain["samples"] += 1
+                domain["reverse_kl_sum"] += record["reverse_kl"]
+    unused = sorted(name for name, summary in by_teacher.items() if not summary["samples"] and name != default_name)
+    if unused:
+        raise ValueError(f"Teachers {unused} scored no sample; check the route values in the prompt metadata")
+    for summaries in (by_teacher, by_domain):
+        for summary in summaries.values():
+            if "teacher_log_prob_sum" in summary:
+                total = summary.pop("teacher_log_prob_sum")
+                summary["mean_teacher_log_prob"] = total / summary["tokens"] if summary["tokens"] else None
+            if "reverse_kl_sum" in summary:
+                total = summary.pop("reverse_kl_sum")
+                summary["mean_reverse_kl"] = total / summary["samples"] if summary["samples"] else None
+    return {"teachers": by_teacher, "domains": by_domain}
+
+
 def _weight_map(directory):
     """Tensor name -> shard file from the HF index, or from the shards of a single-file checkpoint."""
     index_path = directory / _INDEX_NAME
@@ -223,6 +265,8 @@ def main():
     count = spec["training"]["num_rollouts"]
     optimizer = audit_optimizer(args.root, count, spec["training"].get("optimizer_steps_per_rollout", 1))
     result = {"optimizer": optimizer, "updates": audit_training(args.root, count, spec["distillation"]["kl_coef"])}
+    if "teachers" in spec:
+        result["routing"] = audit_teachers(args.root / "teacher-scores.jsonl", spec["teachers"])
     settings = eopd_math.Settings.from_distillation(spec["distillation"])
     if settings.enabled:
         result["eopd"] = audit_eopd(args.root, count, settings, optimizer)

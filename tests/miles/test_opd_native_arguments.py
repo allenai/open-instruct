@@ -6,17 +6,19 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import torch
 from megatron.training import arguments as megatron_arguments
 from miles.backends.megatron_utils import parallel
 from miles.utils import arguments
 from transformers import Qwen3_5Config
 
-from open_instruct.miles.configuration import specs
+from open_instruct.miles.configuration import specs, validation
 from open_instruct.miles.distillation import opd_runtime
 
 
-def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
+@pytest.mark.parametrize("routed", [False, True])
+def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path, routed):
     root = Path(__file__).resolve().parents[2]
     config = Qwen3_5Config(
         text_config={
@@ -34,9 +36,17 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
     )
     model = tmp_path / "model"
     config.save_pretrained(model)
-    spec = specs.load(
-        root / "tests/miles/fixtures/opd/qwen35-4b-tiny.toml",
-        [
+    fixture = root / "tests/miles/fixtures/opd/qwen35-4b-tiny.toml"
+    document = validation.read_document(fixture)
+    if routed:
+        # Two teachers sharing the teacher GPU, routed by metadata["domain"].
+        document["teachers"] = {
+            name: {"source": str(tmp_path / name), "mem_fraction_static": 0.4} for name in ("math", "ifeval")
+        }
+    spec = specs.from_dict(
+        document,
+        config_path=fixture,
+        overrides=[
             'model.source="Qwen/Qwen3.5-2B"',
             'model.revision=""',
             'model.architecture="qwen3.5-2B"',
@@ -54,8 +64,13 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
             "eval_prompt_data": ["math", str(tmp_path / "eval.jsonl")],
         },
     }
+    urls = (
+        {"math": "http://localhost:1/generate", "ifeval": "http://localhost:2/generate"}
+        if routed
+        else "http://localhost:1/generate"
+    )
     argv = opd_runtime.native_arguments(
-        spec, prepared, tmp_path / "checkpoint", "http://localhost:1/generate", shlex.split(module.model_args())
+        spec, prepared, tmp_path / "checkpoint", urls, shlex.split(module.model_args())
     )
     monkeypatch.setattr(sys, "argv", ["train", *argv])
     # CPU validation supplies only the device generation queried by Megatron;
@@ -68,6 +83,12 @@ def test_native_megatron_parser_accepts_opd_profile(monkeypatch, tmp_path):
     assert parsed.world_size == 4
     assert parsed.lr == 1e-6
     assert parsed.use_opd and parsed.opd_kl_coef == 1.0
+    if routed:
+        assert parsed.opd_teacher_urls == ["math=http://localhost:1/generate", "ifeval=http://localhost:2/generate"]
+        assert parsed.opd_teacher_key == "domain"
+        assert parsed.rm_url is None
+    else:
+        assert parsed.opd_teacher_urls is None and parsed.rm_url == "http://localhost:1/generate"
 
 
 def test_opd_packed_attention_declares_separate_padding_sequence():

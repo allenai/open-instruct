@@ -63,6 +63,8 @@ OWNED = {
     "opd_type": _TEACHER_FREE,
     "opd_log_prob_top_k": _TEACHER_FREE,
     "opd_kl_coef": _TEACHER_FREE,
+    "opd_teacher_urls": _TEACHER_FREE,
+    "opd_teacher_key": _TEACHER_FREE,
     "rm_url": "the registered verifier hooks",
     "custom_rm_path": "the registered verifier hooks",
     "custom_reward_post_process_path": "the registered verifier hooks (group centering)",

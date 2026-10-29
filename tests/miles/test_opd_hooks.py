@@ -58,7 +58,7 @@ def test_teacher_token_ids_must_match(monkeypatch):
 
     monkeypatch.delenv("OI_OPD_EOPD_TOP_K", raising=False)
     monkeypatch.setattr(opd_hooks.on_policy_distillation, "reward_func", wrong_scores)
-    monkeypatch.setattr(opd_hooks, "_LIMIT", None)
+    monkeypatch.setattr(opd_hooks, "_LIMITS", {})
     with pytest.raises(ValueError, match="positions or IDs"):
         asyncio.run(
             opd_hooks.reward(SimpleNamespace(), SimpleNamespace(tokens=[1, 2, 3], response_length=2, metadata={}))
@@ -74,7 +74,7 @@ def test_reward_is_numeric_and_post_process_extracts_the_teacher_scores(monkeypa
     monkeypatch.delenv("OI_OPD_EOPD_TOP_K", raising=False)
     monkeypatch.setenv("OI_OPD_OUTPUT", str(tmp_path))
     monkeypatch.setattr(opd_hooks.on_policy_distillation, "reward_func", scores)
-    monkeypatch.setattr(opd_hooks, "_LIMIT", None)
+    monkeypatch.setattr(opd_hooks, "_LIMITS", {})
     sample = Sample(index=1, tokens=[1, 2, 3], response_length=2, response="ab")
     sample.reward = asyncio.run(opd_hooks.reward(SimpleNamespace(), sample))
     assert sample.reward == 0.0 and round(sample.reward, 1) == 0.0
@@ -119,7 +119,7 @@ def test_reward_scores_the_terminal_learner_eos_as_the_teacher_eos(monkeypatch, 
     monkeypatch.setenv(opd_hooks.EOS_REMAP_ENV, "3:9")
     monkeypatch.setenv("OI_OPD_OUTPUT", str(tmp_path))
     monkeypatch.setattr(opd_hooks.on_policy_distillation, "reward_func", scores)
-    monkeypatch.setattr(opd_hooks, "_LIMIT", None)
+    monkeypatch.setattr(opd_hooks, "_LIMITS", {})
     sample = Sample(index=1, tokens=[1, 2, 3], response_length=2, response="a<|endoftext|>")
     assert asyncio.run(opd_hooks.reward(SimpleNamespace(), sample)) == 0.0
     assert seen["tokens"] == [1, 2, 9] and sample.tokens == [1, 2, 3]
@@ -170,7 +170,7 @@ def _eopd_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("OI_OPD_EOPD_TOP_K", "2")
     monkeypatch.setenv("OI_OPD_EOPD_TAU", "0.5")
     monkeypatch.setenv("OI_OPD_OUTPUT", str(tmp_path))
-    monkeypatch.setattr(opd_hooks, "_LIMIT", None)
+    monkeypatch.setattr(opd_hooks, "_LIMITS", {})
 
 
 def test_eopd_reward_requests_and_checks_the_teacher_top_k(monkeypatch, tmp_path):
