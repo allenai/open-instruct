@@ -294,7 +294,7 @@ olmo-eval revision against the receipt before evaluating.
 Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
 which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
 The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
-image `01M5ZSWYBJ5GPG1XBARFFC59MZ` with isolated vLLM judges. Both recipes build evaluator dependencies
+image `01M632ZP67Y4WMV060J74FSC3R` with isolated vLLM judges. Both recipes build evaluator dependencies
 at image construction; benchmark sandboxes may have their own upstream setup steps.
 The revision change can also change task defaults; do not compare scores across
 revisions as though the benchmark protocol were unchanged.

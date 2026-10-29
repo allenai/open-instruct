@@ -63,7 +63,7 @@ interval = 0
 initial = true
 final = true
 # Native SGLang plus code sandboxes/judges; GPU/full-panel qualification is pending.
-image = "01M5ZSWYBJ5GPG1XBARFFC59MZ"
+image = "01M632ZP67Y4WMV060J74FSC3R"
 revision = "3536fe751e40162cc33d5e647085e986375aadce"
 gpus = 1
 cluster = "ai2/holmes"
