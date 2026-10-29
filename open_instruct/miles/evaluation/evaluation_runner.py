@@ -372,6 +372,18 @@ def gpu_environments(receipt):
     return policy, evaluator
 
 
+def print_failure_log(path):
+    """Expose bounded evaluator diagnostics in Beaker without masking the failure."""
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 16384))
+            tail = "\n".join(stream.read().decode("utf-8", errors="replace").splitlines()[-80:])
+        print(f"olmo-eval failed; log tail from {path}:\n{tail}", file=sys.stderr, flush=True)
+    except OSError as error:
+        print(f"Could not read evaluator log {path}: {error}", file=sys.stderr, flush=True)
+
+
 def run_tasks(receipt, output):
     completed = []
     for task in receipt["tasks"]:
@@ -383,10 +395,15 @@ def run_tasks(receipt, output):
             attempt.mkdir(parents=True)
             args = command({**receipt, "tasks": [task]}, attempt)
             write_json(attempt / "command.json", args)
-            with (attempt / "olmo-eval.log").open("w") as log:
-                subprocess.run(
-                    args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
-                )
+            log_path = attempt / "olmo-eval.log"
+            try:
+                with log_path.open("w") as log:
+                    subprocess.run(
+                        args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
+                    )
+            except subprocess.CalledProcessError:
+                print_failure_log(log_path)
+                raise
             values = completed_scores(attempt, [task])
             write_json(
                 directory / "complete.json",

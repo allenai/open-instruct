@@ -24,6 +24,10 @@ from open_instruct.miles.infrastructure import infra_timeouts
 
 logger = logger_utils.setup_logger(__name__)
 
+# Gated downloads used by the maintained safety panel. Keep planning offline;
+# this is a narrow guard for known models, not a claim about arbitrary HF repos.
+GATED_JUDGE_MODELS = {"allenai/wildguard", "google/gemma-2b"}
+
 
 def parse(value, launch):
     value = dict(value)
@@ -185,7 +189,38 @@ def parse(value, launch):
         encoded = json.dumps(task).lower()
         if any(word in encoded for word in ("api_key", "password", "access_token", "api-key")):
             raise InputError("Use evaluation.secrets for credentials, not task overrides")
+    validate_judge_credentials(value)
     return value
+
+
+def validate_judge_credentials(config):
+    """Reject known gated managed-judge downloads without an evaluator secret."""
+    if config["secrets"].get("HF_TOKEN", "").strip():
+        return
+    affected = []
+    for task in config["tasks"]:
+        if task.get("kind", "task") != "task" or not (config["initial"] or config["final"] or task["interval"] > 0):
+            continue
+        harness = task.get("harness", {})
+        for key, model in harness.items():
+            if not re.fullmatch(r"auxiliary_providers\.[^.]+\.(model|tokenizer)", key):
+                continue
+            provider = key.rsplit(".", 1)[0]
+            if (
+                isinstance(model, str)
+                and model in GATED_JUDGE_MODELS
+                and harness.get(f"{provider}.kind") == "vllm_server"
+                and not harness.get(f"{provider}.base_url")
+            ):
+                affected.append(f"{task['task']} ({key}={model})")
+    if affected:
+        raise InputError(
+            "Background evaluation requires an HF_TOKEN Beaker secret reference for gated managed judges: "
+            + "; ".join(affected)
+            + '. Set evaluation.secrets.HF_TOKEN = "your-beaker-secret-name" or launch.secrets.HF_TOKEN '
+            "(inherited by evaluation). The token's HF account must have accepted each model's access terms. "
+            "A token in the local environment is not forwarded to evaluator jobs."
+        )
 
 
 def groups(config, update, total):

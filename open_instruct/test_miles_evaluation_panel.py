@@ -131,6 +131,91 @@ def test_panel_groups_keep_execution_requirements_separate(three_node):
             assert task.get("kind", "task") == group[0].get("kind", "task")
 
 
+def without_hf_token(three_node):
+    document = three_node.to_dict()
+    for section in ("launch", "evaluation"):
+        document[section]["secrets"].pop("HF_TOKEN", None)
+    return document
+
+
+def test_gated_panel_requires_job_secret_even_with_local_token(three_node, monkeypatch):
+    document = without_hf_token(three_node)
+    monkeypatch.setenv("HF_TOKEN", "local-token-is-not-forwarded")
+    with pytest.raises(InputError) as error:
+        RunSpec.from_dict(document).plan()
+    message = str(error.value)
+    for task in document["evaluation"]["tasks"]:
+        if task.get("auxiliary_gpus"):
+            assert task["task"] in message
+    assert "allenai/wildguard" in message and "google/gemma-2b" in message
+    assert "evaluation.secrets.HF_TOKEN" in message and "launch.secrets.HF_TOKEN" in message
+    assert "local-token-is-not-forwarded" not in message
+
+
+@pytest.mark.parametrize("model", ["allenai/wildguard", "google/gemma-2b"])
+@pytest.mark.parametrize("field", ["model", "tokenizer"])
+def test_gated_judge_guard_uses_model_not_task_or_provider_name(three_node, model, field):
+    document = without_hf_token(three_node)
+    document["evaluation"]["tasks"] = [
+        {
+            "task": "custom-task",
+            "harness": {
+                "auxiliary_providers.custom.kind": "vllm_server",
+                f"auxiliary_providers.custom.{field}": model,
+            },
+        }
+    ]
+    with pytest.raises(InputError, match="custom-task"):
+        RunSpec.from_dict(document).plan()
+
+
+@pytest.mark.parametrize("source", ["launch", "evaluation", "both"])
+def test_gated_judge_secret_inheritance_and_override_reach_job(three_node, source):
+    document = without_hf_token(three_node)
+    if source in ("launch", "both"):
+        document["launch"]["secrets"]["HF_TOKEN"] = "training-hf"
+    if source in ("evaluation", "both"):
+        document["evaluation"]["secrets"]["HF_TOKEN"] = "evaluation-hf"
+    spec = RunSpec.from_dict(document)
+    planned = spec.plan()["evaluation"]
+    expected = "training-hf" if source == "launch" else "evaluation-hf"
+    assert planned["secrets"]["HF_TOKEN"] == expected
+    for group in evaluation.groups(spec.evaluation, 0, 200):
+        receipt = {
+            "evaluation": evaluation.runtime(spec, spec.compile().miles),
+            "training": {"name": spec.name},
+            "tasks": group,
+            "update": 0,
+            "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+        }
+        job = evaluation.specification(receipt)["tasks"][0]
+        assert {"name": "HF_TOKEN", "secret": expected} in job["envVars"]
+
+
+@pytest.mark.parametrize("case", ["local", "public", "remote", "disabled", "no-judges"])
+def test_gated_judge_guard_allows_evaluations_without_gated_downloads(three_node, case):
+    document = without_hf_token(three_node)
+    config = document["evaluation"]
+    for task in config["tasks"]:
+        harness = task.get("harness", {})
+        for key in list(harness):
+            if not key.endswith(".model"):
+                continue
+            if case == "local":
+                harness[key] = "/weka/judges/downloaded-model"
+            elif case == "public":
+                harness[key] = "Qwen/Qwen3-8B"
+            elif case == "remote":
+                harness[key.removesuffix(".model") + ".base_url"] = "http://judge:8000/v1"
+    if case == "disabled":
+        config.update(initial=False, final=False, interval=0)
+        for task in config["tasks"]:
+            task["interval"] = 0
+    elif case == "no-judges":
+        config["tasks"] = [task for task in config["tasks"] if not task.get("auxiliary_gpus")]
+    assert "HF_TOKEN" not in RunSpec.from_dict(document).plan()["evaluation"]["secrets"]
+
+
 @pytest.mark.parametrize(
     "patch, message",
     [

@@ -41,6 +41,8 @@ NCCL_IB_HCA = "^=mlx5_bond_0"
 
 [launch.secrets]
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+# Inherited by background evaluation; the account needs WildGuard and Gemma access.
+HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
 
 [data]
 # Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.

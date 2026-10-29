@@ -153,6 +153,16 @@ image includes the pinned vLLM extra in an isolated environment selected through
 (including gated Gemma access) belong in `evaluation.secrets`. Record resolved
 judge revisions and serving settings with qualification results.
 
+Planning rejects the maintained managed `vllm_server` judges that download
+`allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless
+`evaluation.secrets.HF_TOKEN` is configured or inherited from `launch.secrets`.
+Set the value to a Beaker secret name, not the token itself. The token's account
+must have accepted access terms for both models. A local shell token is not
+forwarded to evaluator jobs. This offline check verifies the secret reference,
+not its contents or model permissions; it covers these explicit model/tokenizer
+overrides, not arbitrary upstream presets. Local model paths, existing server
+endpoints and tasks with all evaluation milestones disabled are exempt.
+
 The image and CLI/config checks do not establish full-panel correctness, GPU
 memory fit or completion within the starter three-hour timeout. Run small samples
 of every task, inspect predictions and judge/code failures, then measure a full
