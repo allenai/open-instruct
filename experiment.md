@@ -1023,7 +1023,7 @@ nodes. Cluster snapshot:216slots, zero available,161queued jobs. Run unchanged.
 
 ## Fresh 450m Core/vLLM restart on four Rhea GPUs (2026-10-29)
 
-Status: PREPARED; CPU regression passed, image build and GPU validation pending.
+Status: SMOKE QUEUED; cluster image built; GPU learning validation interrupted by preemption.
 
 User requested a fresh RL run on four GPUs on Rhea after the previous run
 stalled. Interpret this as the 450m Core/vLLM run under discussion, two learner
@@ -1059,3 +1059,43 @@ Stall monitoring is now ACTIVE in this chat, every10minutes. It compares actual
 optimizer/generation/eval progress, flags20minutes without progress, and reports
 new failures, stalls, recoveries and completions without repeated unchanged pings.
 It does not stop or allocate jobs. W&B internal_step is not optimizer progress.
+
+
+2026-10-29 19:07 UTC launch update:
+- User explicitly confirmed Core/vLLM alone, two learner plus two inference GPUs.
+- Source fix: `652c880ebc1ae13206e642629c3f1226037b7452` on pushed
+  `hybrid-small-suite`; 22 focused CPU tests and `make quality` passed.
+- Built on Beaker Rhea (one slot, released before the smoke):
+  [builder](https://beaker.org/ex/01M64F9F8NRCCJVAWWE14ZCP9F), exit0;
+  immutable image `01M64G5M526S9HNF960NP3QRVB`, overlaying qualified image
+  `01M6087KP6KYPHQ9MMZTEX9SBJ`. No laptop Docker build.
+- [First four-GPU smoke](https://beaker.org/ex/01M64G7EY7YN20B455DW3QDWJK)
+  started18:56 UTC, then was scheduler-preempted19:05:28 UTC by an urgent
+  allocated workload. Both learners loaded weights; both inference engines
+  completed initial weight sync; startup backward kernel compilation completed.
+  No optimizer update verified. This is an interrupted smoke, not a pass.
+- [Replacement smoke](https://beaker.org/ex/01M64GW3PMAGVNFRQ74GX7WFQ2)
+  submitted19:06 UTC, queued for four Rhea slots as of19:07 UTC. Run name
+  `hybrid-450m-core-vllm-rhea4-smoke2-20261029`, Weka output under
+  `/weka/oe-adapt-default/michaeln/open-instruct-hybrid/runs/`.
+  Two updates; eval eight examples and native/HF checkpoints every update;
+  timeout1h/attempt, zero application failure retries, autoResume=true,
+  minRuntime0. Auto-resume was enabled after the scheduler eviction.
+- Main500-step run is NOT submitted yet. A one-time local controller waits for
+  smoke exit0 plus actual step2 checkpoint, publication, and final cleanup before
+  submitting `hybrid-450m-core-vllm-rhea4-20261029` using the standard wrapper:
+  `MODEL_SIZE=450m NUM_LEARNERS=2 NUM_INFERENCE_ENGINES=2 CLUSTER=ai2/rhea
+  RUN_NAME=hybrid-450m-core-vllm-rhea4-20261029 AUTO_RESUME=true MAX_RETRIES=3
+  JOB_TIMEOUT=24h ./scripts/train/build_image_and_launch.sh --existing-image-only
+  scripts/train/olmo-hybrid-small/gsm8k_infra_compare_500.sh`.
+  Main settings remain BF16,500 updates, max policy age1, eval/save/native
+  checkpoint100, normal/preemptible, minRuntime0, autoResume, three failure
+  retries,24h/attempt. No old RL optimizer state is loaded.
+- Controller `/tmp/hybrid-rhea4-resume.py` runs from an isolated clean source
+  snapshot at `/tmp/hybrid-rhea4-launch-652c880eb` so recording launch receipts
+  cannot invalidate the source/image guard. State: `/tmp/hybrid-rhea4-state.json`;
+  log: `/tmp/hybrid-rhea4-resume.log`. It is local and depends on this host staying
+  alive. Reconcile state/Beaker before manually restarting to avoid duplicates.
+- Heartbeat `hybrid-training-progress-and-stalls` checks every10minutes and flags
+  twenty minutes without actual optimizer/generation/eval progress; it also
+  reports controller failure. Monitoring is observational; it cannot resubmit.
