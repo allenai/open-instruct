@@ -325,8 +325,17 @@ Keep each config's image and revision matched. Changing only the revision does
 not upgrade an existing image. CPU tests check command parsing, GPU planning,
 image dependencies and task resolution. A [one-GPU tiny MoE check](https://beaker.org/ex/01M60JEKHJ9HTN661H5W1HJ67M)
 completed native SGLang generation and scoring for two GSM8K examples on Holmes
-with radix caching disabled. Full-panel resource bounds, sandbox execution and
-judge execution still need qualification with these images.
+with radix caching disabled. The repaired sandbox image passed a
+[two-example LiveCodeBench check](https://beaker.org/ex/01M6342ER9755JAC5QJMEKQ5SP)
+with a frozen Qwen2.5-Coder-0.5B-Instruct policy: all four sandbox monitors started,
+both predictions were nonempty, and both examples were scored with zero
+infrastructure failures. The same policy passed execution checks for
+[all five WildGuard tasks](https://beaker.org/ex/01M634E26Q3D11MK8TN76TXJKB)
+and [StrongREJECT](https://beaker.org/ex/01M6357DNAZV1R9VH1JQ3QEFFV), each with
+two scored examples and zero failed instances. These checks used the repaired
+image on Holmes in `ai2/open-instruct-dev`, with one B300 for LiveCodeBench and
+two B300s for each judge group. They verify execution; model quality and full-panel
+resource bounds still need separate qualification.
 
 The provider contract tests use the installed olmo-eval CLI and GPU planner,
 without loading a model or downloading datasets. Run them inside the panel image
