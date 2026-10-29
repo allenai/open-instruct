@@ -121,3 +121,13 @@ jobs:
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: ./scripts/test/run_gpu_tests_on_beaker.sh "${{ github.sha }}"
+
+      - name: Stop GPU test experiment on cancellation
+        # The script's own trap covers its timeout, but a cancelled run kills it before the trap fires.
+        if: cancelled() && env.RUN_GPU_TESTS == 'true'
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          if [ -s "$RUNNER_TEMP/gpu_test_experiment_id" ]; then
+            beaker experiment stop "$(cat "$RUNNER_TEMP/gpu_test_experiment_id")" || true
+          fi

@@ -69,7 +69,8 @@ jobs:
           done
 
           # grpo_fast.py shares most of its imports with the other trainers, so instead of listing its
-          # dependencies, run GRPO for any open_instruct/ change outside code it never imports.
+          # dependencies, run the grpo_fast integration test for any open_instruct/ change outside files
+          # grpo_fast.py never imports (grpo.py does import dpo_utils, but this test does not run it).
           GRPO_ALWAYS="(^|/)Dockerfile$|^(mason\.py|pyproject\.toml|uv\.lock)$|^configs/beaker_configs/|^scripts/train/debug/grpo_integration_test\.sh$"
           GRPO_UNRELATED="^open_instruct/(miles/|test_|olmo_core_finetune\.py$|numpy_dataset_conversion\.py$|dpo[a-z_]*\.py$|finetune\.py$)"
           GRPO_RELATED=$(grep -E "^open_instruct/" <<< "$CHANGED_FILES" | grep -vE "$GRPO_UNRELATED" || true)
@@ -148,6 +149,9 @@ jobs:
             fi
 
             EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+            # Recorded as each launches, so the cleanup step can stop it if a later launch fails or the
+            # run is cancelled before the IDs reach the step outputs.
+            echo "$EXPERIMENT_ID" >> "$RUNNER_TEMP/beaker_experiment_ids"
             EXPERIMENT_NAMES+=("$EXPERIMENT_NAME")
             echo "Launched ${EXPERIMENT_NAME} experiment: $EXPERIMENT_ID"
           }
@@ -225,6 +229,7 @@ jobs:
           fi
 
           FAILED_FILE=$(mktemp)
+          ERRORED_FILE=$(mktemp)
           declare -A PIDS
 
           for i in "${!EXPERIMENT_IDS[@]}"; do
@@ -240,6 +245,7 @@ jobs:
                 else
                   echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
                   echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+                  echo "${EXP_NAME}" >> "$ERRORED_FILE"
                 fi
               else
                 echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout; stopping it"
@@ -268,19 +274,25 @@ jobs:
             done < "$FAILED_FILE"
             echo "failed_experiment_ids=${FAILED_EXP_IDS[*]}" >> $GITHUB_OUTPUT
             echo "failed_experiment_names=${FAILED_EXP_NAMES[*]}" >> $GITHUB_OUTPUT
-            rm -f "$FAILED_FILE"
+            # Experiments that ran and exited non-zero, as opposed to ones that timed out in the queue.
+            echo "errored_experiment_names=$(tr '\n' ' ' < "$ERRORED_FILE")" >> $GITHUB_OUTPUT
+            rm -f "$FAILED_FILE" "$ERRORED_FILE"
             exit 1
           fi
 
-          rm -f "$FAILED_FILE"
+          rm -f "$FAILED_FILE" "$ERRORED_FILE"
           echo ""
           echo "✅ All experiments completed successfully!"
 
-      - name: Stop experiments on cancellation
-        if: cancelled() && steps.launch.outputs.experiment_ids != ''
+      - name: Stop experiments on cancellation or failure
+        # Stopping an experiment that has already finished is a no-op.
+        if: cancelled() || failure()
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
-        run: beaker experiment stop ${{ steps.launch.outputs.experiment_ids }} || true
+        run: |
+          if [ -s "$RUNNER_TEMP/beaker_experiment_ids" ]; then
+            beaker experiment stop $(cat "$RUNNER_TEMP/beaker_experiment_ids") || true
+          fi
 
       - name: Check image
         if: success()
@@ -293,6 +305,7 @@ jobs:
           docker run --rm "$IMAGE"
 
       - name: Push CUDA 12 images to Beaker
+        id: push-cuda12
         # A manual dispatch from a branch tests the workflow without replacing the published images.
         if: success() && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main')
         env:
@@ -349,8 +362,10 @@ jobs:
           done
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ]; then
+          if [ "${{ job.status }}" = "success" ] && [ "${{ steps.push-cuda12.outcome }}" = "success" ]; then
             echo "✅ **Status:** All experiments completed successfully and CUDA 12 images pushed!" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **Status:** All experiments completed successfully (images not pushed: only merge_group and main publish)" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi
@@ -360,9 +375,13 @@ jobs:
         if: failure()
         run: |
           FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
+          ERRORED_EXPERIMENTS="${{ steps.wait.outputs.errored_experiment_names }}"
 
           # Skip Slack notification for timeouts (when experiments didn't finalize in time)
-          if [ -n "$FAILED_EXPERIMENTS" ]; then
+          if [ -n "${ERRORED_EXPERIMENTS// /}" ]; then
+            echo "reason=Experiment failed: ${ERRORED_EXPERIMENTS}" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+          elif [ -n "$FAILED_EXPERIMENTS" ]; then
             echo "is_timeout=true" >> $GITHUB_OUTPUT
             echo "Skipping Slack notification - experiments timed out: ${FAILED_EXPERIMENTS}"
           elif [ "${{ steps.launch.outcome }}" = "failure" ]; then
