@@ -41,7 +41,7 @@ NCCL_IB_HCA = "^=mlx5_bond_0"
 
 [launch.secrets]
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
-# Inherited by background evaluation; the account needs WildGuard and Gemma access.
+# Inherited by background evaluation; the account needs WildGuard, Gemma and GPQA access.
 HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
 
 [data]

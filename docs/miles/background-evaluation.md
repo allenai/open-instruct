@@ -156,8 +156,10 @@ judge revisions and serving settings with qualification results.
 Planning rejects the maintained managed `vllm_server` judges that download
 `allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless
 `evaluation.secrets.HF_TOKEN` is configured or inherited from `launch.secrets`.
+It also rejects GPQA tasks (`gpqa_diamond`, `gpqa_main:cot`), whose
+`Idavidrein/gpqa` dataset is gated, without that secret.
 Set the value to a Beaker secret name, not the token itself. The token's account
-must have accepted access terms for both models. A local shell token is not
+must have accepted access terms for both models and the GPQA dataset. A local shell token is not
 forwarded to evaluator jobs. This offline check verifies the secret reference,
 not its contents or model permissions; it covers these explicit model/tokenizer
 overrides, not arbitrary upstream presets. Local model paths, existing server
@@ -169,6 +171,18 @@ of every task, inspect predictions and judge/code failures, then measure a full
 panel before setting production resource bounds. For qualification, verify all
 25 entries completed at both expected checkpoints and were published; training
 completion alone does not establish evaluation completion.
+
+With the generic SGLang profile, which the examples select and which olmo-eval
+uses for every model shape except Olmo 3.5 12.5B, olmo-eval keeps
+`batching.chunk_size` at 64 examples and runs the batches one after another; each
+batch waits for its longest response. On a 7B thinking policy (one B300, 34,816
+token context, CUDA graphs disabled) each 64-example safety batch took about
+21–26 minutes, so StrongREJECT (2,294 prompts including jailbreak variants) needs
+about 16 hours, WildJailbreak about 12 and WildGuardTest about 10, well beyond the
+three-hour default. An interrupted task restarts from its beginning. A task can
+raise the batch size with a harness override such as `"batching.chunk_size" = 256`;
+this changes request scheduling, not sampling, but its throughput and memory on
+these tasks have not been measured.
 
 ## Snapshots and receipts
 

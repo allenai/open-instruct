@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Apply the existing MILES Jupiter/Saturn CUDA compatibility library-path default to Titan, preserving explicit environment and secret overrides and leaving Holmes unchanged (https://github.com/allenai/open-instruct/pull/2095).
 - `mason.py --min_runtime` requests a Beaker minimum runtime (0, or a duration with a unit of at least 5m; Ai2 clusters currently allow at most 8h, and mason warns above that), and `--auto_resume` requeues the job after preemption. Under Beaker's allocation-based scheduler, an allocated job (min runtime above 0) queues ahead of backfill and is protected until its min runtime ends, and a shorter min runtime schedules sooner. Before this flag, mason offered only `--preemptible` (min runtime 0) or the legacy default, an 8-hour protected, non-resumable job. Both remain unchanged. Requires beaker-py 2.6.0 (https://github.com/allenai/open-instruct/pull/1985).
 - Use a compiled MILES dependency base containing FA2, FA3 and FA4, and pin public Megatron sources for Qwen OPD without the Olmo-specific forks or patches, so application builds avoid recompiling attention kernels (https://github.com/allenai/open-instruct/pull/2093).
 - Make Claude review comments explicitly recommend merging, identify critical blockers, or state a specific unresolved question, while always publishing advisory comments rather than GitHub approvals or change requests (https://github.com/allenai/open-instruct/pull/2086).
@@ -32,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Add `--use_cpu_adam` to GRPO to use DeepSpeed's `DeepSpeedCPUAdam` instead of `torch.optim.AdamW`. It requires a DeepSpeed stage and `--deepspeed_offload_optimizer` (the config is rejected otherwise, since `DeepSpeedCPUAdam` only steps CPU parameters), and `--deepspeed_offload_param` now requires `--deepspeed_stage 3` (https://github.com/allenai/open-instruct/pull/1654).
 
 ### Fixed
+- Reject MILES background evaluation configurations with GPQA tasks, whose `Idavidrein/gpqa` dataset is gated, without an HF_TOKEN secret reference, and document the generic SGLang profile's 64-example serial batches for long safety evaluations (https://github.com/allenai/open-instruct/pull/2111).
 - Preserve sandbox shell resources in the MILES evaluator image and print a bounded olmo-eval log tail when background evaluation fails (https://github.com/allenai/open-instruct/pull/2101).
 - Reject MILES background evaluation configurations that download known gated WildGuard or Gemma judges without an HF_TOKEN secret reference, and include that reference in the full-panel example (https://github.com/allenai/open-instruct/pull/2101).
 - `GSM8KVerifier` compares the extracted answer and the label as exact numbers, so a correct `96.00` is no longer scored wrong against the label `96` (thousands separators are ignored on both sides; non-numeric labels keep the old string match). Rewards on existing runs can rise slightly where answers were written with trailing zeros (https://github.com/allenai/open-instruct/pull/1921).
