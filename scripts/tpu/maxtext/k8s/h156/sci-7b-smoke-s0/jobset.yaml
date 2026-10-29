@@ -69,8 +69,11 @@ spec:
               - name: launcher
                 mountPath: /launcher
                 readOnly: true
-              - name: post-training
-                mountPath: /mnt/post-training
+              - name: post-training-data
+                mountPath: /mnt/post-training/data
+                readOnly: true
+              - name: post-training-tokenizers
+                mountPath: /mnt/post-training/tokenizers
                 readOnly: true
               resources:
                 limits:
@@ -79,13 +82,24 @@ spec:
             - name: launcher
               configMap:
                 name: h156-sci-7b-smoke-s0-launcher
-            # The post-training folder of the project bucket, read-only: SFT parquet files and tokenizers.
-            - name: post-training
+            # Only the data/ and tokenizers/ subfolders of the project bucket's post-training folder, read-only, each at
+            # its old path: the metadata prefetch lists everything under only-dir on every pod start, and the
+            # whole folder also holds every run's checkpoints (narrow_mounts.py).
+            - name: post-training-data
               csi:
                 driver: gcsfuse.csi.storage.gke.io
                 readOnly: true
                 volumeAttributes:
                   bucketName: ai2-olmo-dev
-                  mountOptions: only-dir=post-training,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
+                  mountOptions: only-dir=post-training/data,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
+                  gcsfuseMetadataPrefetchOnMount: "true"
+                  hostNetworkPodKSA: "true" # Authenticate the mount as serviceAccountName despite hostNetwork.
+            - name: post-training-tokenizers
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                readOnly: true
+                volumeAttributes:
+                  bucketName: ai2-olmo-dev
+                  mountOptions: only-dir=post-training/tokenizers,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
                   gcsfuseMetadataPrefetchOnMount: "true"
                   hostNetworkPodKSA: "true" # Authenticate the mount as serviceAccountName despite hostNetwork.
