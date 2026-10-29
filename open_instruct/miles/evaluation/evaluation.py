@@ -121,6 +121,9 @@ def parse(value, launch):
         raise InputError(
             "evaluation.provider_kwargs cannot override snapshot, tokenizer, model registration or GPU allocation"
         )
+    # Resolve against the checkpoint and assigned GPU inside the evaluator, not
+    # the training cluster. Explicit generic remains available for unqualified models.
+    value["provider_kwargs"] = kwargs = {"profile": "auto", **kwargs}
     server_args = value["external_server_args"]
     if not isinstance(server_args, list) or any(not isinstance(arg, str) for arg in server_args):
         raise InputError("evaluation.external_server_args must be a list of SGLang arguments for SciCode")
@@ -157,6 +160,11 @@ def parse(value, launch):
         if kind not in ("task", "external"):
             raise InputError("evaluation task kind must be task or external")
         if kind == "external":
+            if server_args and kwargs["profile"] != "generic":
+                raise InputError(
+                    "Profiled SciCode evaluation uses evaluation.provider_kwargs for serving settings. "
+                    "Remove external_server_args, or select profile=generic for a manually configured server."
+                )
             if name != "scicode":
                 raise InputError("Only scicode external evaluation has a supported artifact validation contract")
             if any(task.get(key) for key in ("generation", "scoring", "harness", "harness_preset")):

@@ -69,9 +69,10 @@ gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
 timeout = "3h"
-provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
-# SciCode is the only task that still requires an HTTP policy server.
-external_server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--disable-radix-cache", "--context-length", "34816"]
+# Select the qualified H100/B300 settings on the evaluator GPU; fail if unsupported.
+# Automatic harness batches use the engine's sequence capacity, including pass@k expansion.
+provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
+# SciCode's HTTP policy server resolves the same profile and provider_kwargs.
 
 [[evaluation.tasks]]
 # Official measurement uses full datasets and pinned upstream sampling settings.
