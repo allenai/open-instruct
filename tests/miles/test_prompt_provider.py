@@ -93,6 +93,65 @@ def test_invalid_request_does_not_consume_buffer_or_cursor(args, n):
     assert len(source.buffer) == 1
 
 
+@pytest.mark.parametrize("custom_filter", [False, True])
+@pytest.mark.parametrize("advance_before_failure", [False, True])
+def test_provider_failure_preserves_retry_buffer_and_ids(args, monkeypatch, custom_filter, advance_before_failure):
+    source = ProviderRolloutDataSource(args)
+    source.get_samples(7)  # A successful fresh draw would cross the epoch boundary.
+    buffered = source.get_samples(3)
+    source.add_samples(buffered)
+    if custom_filter:
+
+        def select_last(args, rollout_id, buffer, count):
+            return [buffer.pop()]
+
+        source.buffer_filter = select_last
+    before = copy.deepcopy(source.provider.state_dict())
+    counters = source.sample_group_index, source.sample_index
+    select = source.provider.next_samples
+
+    def fail(count):
+        assert count > 0
+        if advance_before_failure:
+            select(count)
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(source.provider, "next_samples", fail)
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        source.get_samples(5)
+    assert all(a is b for a, b in zip(source.buffer, buffered, strict=True))
+    assert source.provider.state_dict() == before
+    assert (source.sample_group_index, source.sample_index) == counters
+    monkeypatch.setattr(source.provider, "next_samples", select)
+    source.buffer_filter = miles_data_source.pop_first
+    assert payload(source.get_samples(3)) == payload(buffered)
+    assert source.provider.state_dict() == before
+
+
+def test_buffer_only_request_does_not_call_provider(args, monkeypatch):
+    source = ProviderRolloutDataSource(args)
+    buffered = source.get_samples(2)
+    source.add_samples(buffered)
+
+    def fail(count):
+        pytest.fail("A buffer-only request must not call the provider")
+
+    monkeypatch.setattr(source.provider, "next_samples", fail)
+    assert source.get_samples(0) == []
+    assert payload(source.get_samples(2)) == payload(buffered)
+
+
+def test_wrong_provider_count_rolls_back_selection(args, monkeypatch):
+    source = ProviderRolloutDataSource(args)
+    select = source.provider.next_samples
+    before = copy.deepcopy(source.provider.state_dict())
+    monkeypatch.setattr(source.provider, "next_samples", lambda n: select(n + 1))
+    with pytest.raises(ValueError, match="exactly the requested number"):
+        source.get_samples(2)
+    assert source.provider.state_dict() == before
+    assert (source.sample_group_index, source.sample_index) == (0, 0)
+
+
 @pytest.mark.parametrize("fully_async", [False, True])
 @pytest.mark.parametrize("legacy", [False, True])
 def test_resume_preserves_cursor_and_pristine_pending_groups(args, fully_async, legacy):

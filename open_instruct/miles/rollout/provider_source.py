@@ -39,17 +39,35 @@ class ProviderRolloutDataSource(data_source.RolloutDataSourceWithBuffer):
     def get_samples(self, num_samples: int) -> list[list[Sample]]:
         if type(num_samples) is not int or num_samples < 0:
             raise ValueError("num_samples must be a nonnegative integer")
-        groups = self._get_samples_from_buffer(num_samples)
-        for prompt in self.provider.next_samples(num_samples - len(groups)):
-            group = []
-            for _ in range(self.args.n_samples_per_prompt):
-                sample = copy.deepcopy(prompt)
-                sample.group_index = self.sample_group_index
-                sample.index = self.sample_index
-                self.sample_index += 1
-                group.append(sample)
-            self.sample_group_index += 1
-            groups.append(group)
+        buffered = self.buffer.copy()
+        counters = self.sample_group_index, self.sample_index
+        provider_state = None
+        try:
+            groups = self._get_samples_from_buffer(num_samples)
+            if len(groups) == num_samples:
+                return groups
+            provider_state = copy.deepcopy(self.provider.state_dict())
+            prompts = self.provider.next_samples(num_samples - len(groups))
+            if len(prompts) != num_samples - len(groups):
+                raise ValueError("Prompt provider must return exactly the requested number of prompts")
+            for prompt in prompts:
+                group = []
+                for _ in range(self.args.n_samples_per_prompt):
+                    sample = copy.deepcopy(prompt)
+                    sample.group_index = self.sample_group_index
+                    sample.index = self.sample_index
+                    self.sample_index += 1
+                    group.append(sample)
+                self.sample_group_index += 1
+                groups.append(group)
+        except Exception:
+            # A delivery is all-or-nothing, including buffered retries, provider
+            # selection state, and IDs assigned during response-group expansion.
+            self.buffer[:] = buffered
+            self.sample_group_index, self.sample_index = counters
+            if provider_state is not None:
+                self.provider.load_state_dict(provider_state)
+            raise
         if isinstance(self.provider, prompt_provider.ShuffledPromptProvider):
             # Preserve the legacy cursor fields for existing checkpoint readers.
             self.epoch_id = self.provider.epoch_id

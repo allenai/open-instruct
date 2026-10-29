@@ -13,7 +13,9 @@ class PromptProvider(Protocol):
 
     Callers serialize selection, feedback, and checkpoints. Providers must return
     exactly N prompts (zero is a no-op), and include all selection state in their
-    checkpoint. Returned prompts are templates: the adapter deep-copies them.
+    checkpoint; the adapter restores it if delivery fails. State snapshots must
+    be side-effect-free and sufficient to undo a partially completed selection.
+    Returned prompts are templates: the adapter deep-copies them.
     Feedback uses inference records, including groups dropped by the online filter.
     """
 

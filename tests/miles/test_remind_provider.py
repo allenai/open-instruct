@@ -122,6 +122,48 @@ def test_state_restores_rng_queue_pending_and_fractional_schedule(args):
         provider(args).load_state_dict(state)
 
 
+@pytest.mark.parametrize("failure", ["selection", "expansion"])
+def test_failed_delivery_restores_review_queue_pending_cursor_and_ids(args, monkeypatch, failure):
+    args.n_samples_per_prompt = 2
+    p = provider(args, review_fraction=0.5, enqueue_probability=1)
+    source = ProviderRolloutDataSource(args, provider=p)
+    first = source.get_samples(1)[0]
+    p.feedback([feedback(first[0])])
+    source.add_samples([first])
+    saved = copy.deepcopy(p.state_dict())
+    counters = source.sample_group_index, source.sample_index
+    select, deepcopy = p.next_samples, copy.deepcopy
+    copies = 0
+
+    def fail_selection(count):
+        select(count)
+        raise RuntimeError("selection failed after advancing")
+
+    def fail_expansion(value, *a, **kw):
+        nonlocal copies
+        if isinstance(value, Sample):
+            copies += 1
+            if copies == 2:
+                raise RuntimeError("expansion failed after assigning an ID")
+        return deepcopy(value, *a, **kw)
+
+    with monkeypatch.context() as patch:
+        if failure == "selection":
+            patch.setattr(p, "next_samples", fail_selection)
+        else:
+            patch.setattr(copy, "deepcopy", fail_expansion)
+        with pytest.raises(RuntimeError, match="failed after"):
+            source.get_samples(4)
+    assert p.state_dict() == saved
+    assert source.buffer == [first]
+    assert (source.sample_group_index, source.sample_index) == counters
+    retry, review = source.get_samples(2)
+    assert retry is first
+    assert review[0].prompt == first[0].prompt
+    assert review[0].metadata["prompt_provider_review"] is True
+    assert (review[0].group_index, review[0].index) == counters
+
+
 def setup_remind(args, tmp_path):
     checkpoint = tmp_path / "policy"
     checkpoint.mkdir()
