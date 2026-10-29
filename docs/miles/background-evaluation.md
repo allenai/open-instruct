@@ -153,6 +153,16 @@ image includes the pinned vLLM extra in an isolated environment selected through
 (including gated Gemma access) belong in `evaluation.secrets`. Record resolved
 judge revisions and serving settings with qualification results.
 
+Planning rejects the maintained managed `vllm_server` judges that download
+`allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless
+`evaluation.secrets.HF_TOKEN` is configured or inherited from `launch.secrets`.
+Set the value to a Beaker secret name, not the token itself. The token's account
+must have accepted access terms for both models. A local shell token is not
+forwarded to evaluator jobs. This offline check verifies the secret reference,
+not its contents or model permissions; it covers these explicit model/tokenizer
+overrides, not arbitrary upstream presets. Local model paths, existing server
+endpoints and tasks with all evaluation milestones disabled are exempt.
+
 The image and CLI/config checks do not establish full-panel correctness, GPU
 memory fit or completion within the starter three-hour timeout. Run small samples
 of every task, inspect predictions and judge/code failures, then measure a full
@@ -284,7 +294,7 @@ olmo-eval revision against the receipt before evaluating.
 Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
 which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
 The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
-image `01M5ZSWYBJ5GPG1XBARFFC59MZ` with isolated vLLM judges. Both recipes build evaluator dependencies
+image `01M632ZP67Y4WMV060J74FSC3R` with isolated vLLM judges. Both recipes build evaluator dependencies
 at image construction; benchmark sandboxes may have their own upstream setup steps.
 The revision change can also change task defaults; do not compare scores across
 revisions as though the benchmark protocol were unchanged.
@@ -315,8 +325,17 @@ Keep each config's image and revision matched. Changing only the revision does
 not upgrade an existing image. CPU tests check command parsing, GPU planning,
 image dependencies and task resolution. A [one-GPU tiny MoE check](https://beaker.org/ex/01M60JEKHJ9HTN661H5W1HJ67M)
 completed native SGLang generation and scoring for two GSM8K examples on Holmes
-with radix caching disabled. Full-panel resource bounds, sandbox execution and
-judge execution still need qualification with these images.
+with radix caching disabled. The repaired sandbox image passed a
+[two-example LiveCodeBench check](https://beaker.org/ex/01M6342ER9755JAC5QJMEKQ5SP)
+with a frozen Qwen2.5-Coder-0.5B-Instruct policy: all four sandbox monitors started,
+both predictions were nonempty, and both examples were scored with zero
+infrastructure failures. The same policy passed execution checks for
+[all five WildGuard tasks](https://beaker.org/ex/01M634E26Q3D11MK8TN76TXJKB)
+and [StrongREJECT](https://beaker.org/ex/01M6357DNAZV1R9VH1JQ3QEFFV), each with
+two scored examples and zero failed instances. These checks used the repaired
+image on Holmes in `ai2/open-instruct-dev`, with one B300 for LiveCodeBench and
+two B300s for each judge group. They verify execution; model quality and full-panel
+resource bounds still need separate qualification.
 
 The provider contract tests use the installed olmo-eval CLI and GPU planner,
 without loading a model or downloading datasets. Run them inside the panel image
