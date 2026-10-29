@@ -431,7 +431,7 @@ def get_env_vars(
                 beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
                 beaker.BeakerEnvVar(
                     name="CHECKPOINT_OUTPUT_DIR",
-                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{whoami}/{global_wandb_id}",
                 ),
             ]
         )
