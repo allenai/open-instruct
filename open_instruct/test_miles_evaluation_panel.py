@@ -148,6 +148,7 @@ def test_gated_panel_requires_job_secret_even_with_local_token(three_node, monke
         if task.get("auxiliary_gpus"):
             assert task["task"] in message
     assert "allenai/wildguard" in message and "google/gemma-2b" in message
+    assert "gpqa_diamond" in message and "gpqa_main:cot" in message and "Idavidrein/gpqa" in message
     assert "evaluation.secrets.HF_TOKEN" in message and "launch.secrets.HF_TOKEN" in message
     assert "local-token-is-not-forwarded" not in message
 
@@ -166,6 +167,14 @@ def test_gated_judge_guard_uses_model_not_task_or_provider_name(three_node, mode
         }
     ]
     with pytest.raises(InputError, match="custom-task"):
+        RunSpec.from_dict(document).plan()
+
+
+@pytest.mark.parametrize("task", ["gpqa_diamond", "gpqa_main:cot"])
+def test_gated_dataset_guard_rejects_gpqa_without_secret(three_node, task):
+    document = without_hf_token(three_node)
+    document["evaluation"]["tasks"] = [{"task": task}]
+    with pytest.raises(InputError, match="Idavidrein/gpqa"):
         RunSpec.from_dict(document).plan()
 
 
@@ -213,6 +222,8 @@ def test_gated_judge_guard_allows_evaluations_without_gated_downloads(three_node
             task["interval"] = 0
     elif case == "no-judges":
         config["tasks"] = [task for task in config["tasks"] if not task.get("auxiliary_gpus")]
+    if case != "disabled":
+        config["tasks"] = [task for task in config["tasks"] if not task["task"].startswith("gpqa")]
     assert "HF_TOKEN" not in RunSpec.from_dict(document).plan()["evaluation"]["secrets"]
 
 
