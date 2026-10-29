@@ -312,6 +312,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # Part of the cache directory name.
         if not args.sft.row_aligned_parts:
             cache_args.append("--no_row_aligned_parts")
+        # Checked before tokenizing: without it, the legacy layout's cache job would fail at startup.
+        if not args.sft.document_boundaries_from_metadata:
+            cache_args.append("--no_document_boundaries_from_metadata")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
