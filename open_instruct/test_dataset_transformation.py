@@ -148,6 +148,31 @@ class TestConfigHash(unittest.TestCase):
         self.assertEqual(calls, ["load_dataset", "get_commit_hash"])
         self.assertEqual(dc.dataset_commit_hash, "abc123")
 
+    @parameterized.expand([("jsonl",), ("parquet",)])
+    def test_config_hash_changes_when_local_file_rewritten(self, extension):
+        # Local files have no commit hash, so the cache key must cover their
+        # content: rewriting a file in place must not reuse the stale cache.
+        tc = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, f"data.{extension}")
+
+            def write_and_hash(content):
+                dataset = datasets.Dataset.from_dict({"messages": [[{"role": "user", "content": content}]]})
+                if extension == "jsonl":
+                    dataset.to_json(path)
+                else:
+                    dataset.to_parquet(path)
+                dc = open_instruct.dataset_transformation.DatasetConfig(
+                    dataset_name=path, dataset_split="train", dataset_revision="main"
+                )
+                return open_instruct.dataset_transformation.compute_config_hash([dc], tc)
+
+            original_hash = write_and_hash("original")
+            self.assertEqual(write_and_hash("original"), original_hash)
+            self.assertNotEqual(write_and_hash("rewritten"), original_hash)
+
 
 class TestCachedDataset(unittest.TestCase):
     def setUp(self):
