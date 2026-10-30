@@ -1,0 +1,100 @@
+"""Prompt selection before MILES expands each prompt into a response group."""
+
+from collections.abc import Callable
+from typing import Any, Protocol
+
+from miles.utils.types import Sample
+
+SELECTION_ID = "prompt_provider_selection_id"
+REVIEW = "prompt_provider_review"
+
+
+class PromptProvider(Protocol):
+    """Select N prompt templates; buffering and response-group IDs belong to the caller.
+
+    Callers serialize selection, feedback, and checkpoints. Providers must return
+    exactly N prompts (zero is a no-op), and include all selection state in their
+    checkpoint; the adapter restores it if delivery fails. State snapshots must
+    be side-effect-free and sufficient to undo a partially completed selection.
+    Returned prompts are templates: the adapter deep-copies them.
+    Feedback uses inference records, including groups dropped by the online filter.
+    """
+
+    requires_feedback: bool
+
+    def next_samples(self, n: int) -> list[Sample]: ...
+    def feedback(self, records: list[dict[str, Any]]) -> None: ...
+    def state_dict(self) -> dict[str, Any]: ...
+    def load_state_dict(self, state: dict[str, Any]) -> None: ...
+
+
+class ShuffledPromptProvider:
+    """Seeded shuffle and epoch cursor over the source's current in-memory dataset.
+
+    Replacing the source's dataset preserves the cursor, as in the legacy loader.
+    """
+
+    requires_feedback = False
+
+    def __init__(self, get_dataset: Callable[[], Any], *, shuffle: bool):
+        self._get_dataset = get_dataset
+        self.shuffle = shuffle
+        self.epoch_id = 0
+        self.sample_offset = 0
+        # MILES' data-source constructor has already shuffled epoch zero.
+
+    @property
+    def dataset(self):
+        """The source owns the dataset; do not retain a second reference."""
+        return self._get_dataset()
+
+    def next_samples(self, n: int) -> list[Sample]:
+        if type(n) is not int or n < 0:
+            raise ValueError("n must be a nonnegative integer")
+        if self.dataset is None:
+            return [Sample() for _ in range(n)]
+        if n and not len(self.dataset):
+            raise ValueError("Cannot select prompts from an empty dataset")
+        if self.sample_offset > len(self.dataset):
+            raise ValueError("Prompt provider cursor exceeds the current dataset size")
+        prompts = []
+        while n:
+            if self.sample_offset == len(self.dataset):
+                self.epoch_id += 1
+                if self.shuffle:
+                    self.dataset.shuffle(self.epoch_id)
+                self.sample_offset = 0
+            take = min(n, len(self.dataset) - self.sample_offset)
+            prompts.extend(self.dataset.samples[self.sample_offset : self.sample_offset + take])
+            self.sample_offset += take
+            n -= take
+        return prompts
+
+    def feedback(self, records: list[dict[str, Any]]) -> None:
+        """The shuffle baseline ignores outcomes."""
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "shuffle",
+            "dataset_size": len(self.dataset) if self.dataset is not None else None,
+            "seed": getattr(self.dataset, "seed", None),
+            "shuffle": self.shuffle,
+            "epoch_id": self.epoch_id,
+            "sample_offset": self.sample_offset,
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        expected = self.state_dict()
+        for field in ("kind", "dataset_size", "seed", "shuffle"):
+            if state.get(field) != expected[field]:
+                raise RuntimeError(
+                    f"Prompt provider checkpoint configuration mismatch for {field}: "
+                    f"checkpoint={state.get(field)!r}, current={expected[field]!r}"
+                )
+        epoch, offset = state.get("epoch_id"), state.get("sample_offset")
+        size = len(self.dataset) if self.dataset is not None else 0
+        if type(epoch) is not int or epoch < 0 or type(offset) is not int or not 0 <= offset <= size:
+            raise ValueError("Invalid prompt provider cursor")
+        if self.dataset is not None and self.shuffle:
+            self.dataset.shuffle(epoch)
+        self.epoch_id, self.sample_offset = epoch, offset

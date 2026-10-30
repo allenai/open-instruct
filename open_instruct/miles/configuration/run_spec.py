@@ -21,7 +21,7 @@ from open_instruct.miles.configuration import (
     validation,
 )
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
-from open_instruct.miles.datasets import run_data
+from open_instruct.miles.datasets import mixture, run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import gpu_hardware
@@ -291,6 +291,7 @@ class RunSpec:
                     "compiler_cache_root",
                     "records_root",
                     "selection_table",
+                    "prompt_mixture",
                 }:
                     payload[section][key] = _path(value, self.config_path.parent, f"{section}.{key}")
         return payload
@@ -312,15 +313,29 @@ class RunSpec:
         allowed = constraints.STRUCTURED_FIELDS["data"]
         if unknown := set(data) - allowed:
             raise InputError(f"Unknown [data] fields: {sorted(unknown)}")
-        selectors = [key for key in ("tasks", "recipe", "rl_manifest", "prompt_data") if key in data]
+        selectors = [key for key in ("tasks", "sources", "recipe", "rl_manifest", "prompt_data") if key in data]
         if len(selectors) != 1:
             raise InputError(
-                f"data must select exactly one of tasks, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
+                f"data must select exactly one of tasks, sources, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
             )
         data.setdefault("seed", 17)
         if type(data["seed"]) is not int or data["seed"] < 0:
             raise InputError("data.seed must be a nonnegative integer")
         data["shuffle"] = _boolean(data.get("shuffle", True), "data.shuffle")
+        if "sources" in data:
+            run_data.validate_data(data)
+            data["sources"] = [
+                {
+                    "name": source["name"],
+                    "fraction": source["fraction"],
+                    **{
+                        key: value
+                        for key, value in RunSpec._data(mixture.source_data(source, data), base).items()
+                        if key not in ("seed", "shuffle")
+                    },
+                }
+                for source in data["sources"]
+            ]
         for key in ("rl_manifest", "prompt_data", "reward_config"):
             if key in data:
                 data[key] = _path(data[key], base, f"data.{key}")
@@ -450,6 +465,8 @@ class RunSpec:
             "eval_prompt_data",
             "reward_config",
             "manifest",
+            "prompt_mixture",
+            "train_sources",
         }:
             raise InputError(f"Unknown prepared fields: {sorted(unknown)}")
         root = Path(self.output["root"])
@@ -472,7 +489,7 @@ class RunSpec:
                     section, key = "core", "max_policy_lag"
                     target = "core.max_policy_lag"
             if (section == "miles" and key in PATH_OPTIONS) or (
-                section == "core" and key in ("model_config", "reward_config", "compiler_cache_root")
+                section == "core" and key in ("model_config", "reward_config", "compiler_cache_root", "prompt_mixture")
             ):
                 value = _path(value, base, target)
             try:
@@ -530,7 +547,14 @@ class RunSpec:
                 else:
                     put(f"miles.{key}", value, origin)
         for key, value in self.core.items():
-            if key in ("model_config", "reward_config", "compiler_cache_root", "records_root", "selection_table"):
+            if key in (
+                "model_config",
+                "reward_config",
+                "compiler_cache_root",
+                "records_root",
+                "selection_table",
+                "prompt_mixture",
+            ):
                 value = _path(value, base, f"core.{key}")
             put(f"core.{key}", value, f"core.{key}")
         for key, value in options.normalize_options(self.miles).items():
@@ -746,9 +770,24 @@ class RunSpec:
             miles.setdefault("save_interval", miles["num_rollout"])
         elif "miles.save_interval" in origins:
             raise InputError("save_checkpoints=false conflicts with an explicit save_interval")
+        if "sources" in self.data:
+            put("core.prompt_provider", "mixture", "data.sources")
+            put(
+                "core.prompt_mixture",
+                prepared.get("prompt_mixture", str(root / "prepared" / "data" / "mixture.json")),
+                "data.sources",
+            )
         generated = {
             "hf_checkpoint": self.conversion["hf_output"],
-            "prompt_data": self.data.get("prompt_data", str(root / "prepared" / "data" / "train.jsonl")),
+            "prompt_data": self.data.get(
+                "prompt_data",
+                str(
+                    root
+                    / "prepared"
+                    / "data"
+                    / (f"source-{self.data['sources'][0]['name']}.jsonl" if "sources" in self.data else "train.jsonl")
+                ),
+            ),
             "reward_config": self.data.get("reward_config", str(root / "prepared" / "data" / "verifiers.json")),
         }
         for key in generated:
@@ -757,6 +796,14 @@ class RunSpec:
             if target in origins and values[target.split(".")[0]][key] != value:
                 raise InputError(f"{target} conflicts with workflow preparation; set model/data fields instead")
             values[target.split(".")[0]][key] = value
+        mixture_evals = []
+        for source in self.data.get("sources", []):
+            labels = source.get("eval_prompt_data", [])[::2]
+            if source.get("rl_manifest") or any(task.get("eval_count") for task in source.get("tasks", [])):
+                labels = ["eval"]
+            for label in labels:
+                name = f"eval-{source['name']}-{label}"
+                mixture_evals.extend([name, str(root / "prepared" / "data" / f"{name}.jsonl")])
         if self.evaluation["mode"] == "background":
             conflicts = [
                 key
@@ -766,6 +813,7 @@ class RunSpec:
             ]
             if (
                 conflicts
+                or mixture_evals
                 or self.data.get("eval_prompt_data")
                 or any(task.get("eval_count") for task in self.data.get("tasks", []))
             ):
@@ -776,7 +824,9 @@ class RunSpec:
             miles.pop("eval_interval", None)
             miles["skip_eval_before_train"] = True
         else:
-            eval_data = prepared.get("eval_prompt_data", self.data.get("eval_prompt_data"))
+            eval_data = prepared.get(
+                "eval_prompt_data", mixture_evals if "sources" in self.data else self.data.get("eval_prompt_data")
+            )
             if eval_data is None and (
                 "tasks" not in self.data or any(task.get("eval_count") for task in self.data["tasks"])
             ):

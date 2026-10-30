@@ -6,13 +6,70 @@ inventory rather than a hash of every weight tensor.
 """
 
 import json
+import weakref
 from pathlib import Path
 
 from miles.utils import inference_records
 
+from open_instruct import logger_utils
 from open_instruct.miles.execution import workflow
 
+logger = logger_utils.setup_logger(__name__)
+
 MARKER = "workflow-model.json"
+# Runtime argument copies are shallow; source and recorder share CoreConfig.
+# Keep this process-local: never put locks or callbacks into serialized args.
+_FEEDBACK_SOURCES = weakref.WeakValueDictionary()
+
+
+def bind_feedback(core, source):
+    if id(core) in _FEEDBACK_SOURCES:
+        raise ValueError("A prompt feedback source is already bound to this configuration")
+    _FEEDBACK_SOURCES[id(core)] = source
+
+
+def unbind_feedback(core, source):
+    if _FEEDBACK_SOURCES.get(id(core)) is source:
+        del _FEEDBACK_SOURCES[id(core)]
+
+
+class FeedbackRecorder(inference_records.Recorder):
+    """Deliver scored groups before enqueueing; only feedback-dependent providers fail closed."""
+
+    def __init__(self, args, source):
+        self._source = weakref.ref(source)
+        self._requires_feedback = source.provider.requires_feedback
+        self._reward_key = getattr(args, "reward_key", None)
+        self._zero_truncated = args.olmo_core.reward_zero_truncated
+        super().__init__(args, lineage_factory=lineage_identity)
+        if self._requires_feedback and self.unavailable:
+            raise RuntimeError("Prompt feedback requires an available inference recorder")
+
+    def record_group(self, samples, *, decision, reason=None):
+        if self._requires_feedback and self.unavailable:
+            raise RuntimeError("Prompt feedback recorder became unavailable")
+        failures = self.counts["failed"]
+        super().record_group(samples, decision=decision, reason=reason)
+        if self._requires_feedback and self.counts["failed"] != failures:
+            raise RuntimeError("Could not construct prompt feedback record")
+
+    def _enqueue(self, row):
+        if row.get("kind") == "group":
+            try:
+                source = self._source()
+                if source is None:
+                    raise RuntimeError("Prompt feedback source is no longer available")
+                row = row | {"reward_key": self._reward_key, "reward_zero_truncated": self._zero_truncated}
+                source.feedback([row])
+            except Exception:
+                if self._requires_feedback:
+                    raise
+                # Fixed mixtures only annotate the audit row. Preserve ordinary
+                # best-effort recording without silently losing required feedback.
+                self._count("failed")
+                logger.exception("Inference record attribution unavailable for group %s", row.get("group_index"))
+                return
+        super()._enqueue(row)
 
 
 def lineage_identity(checkpoint):
@@ -39,4 +96,9 @@ def lineage_identity(checkpoint):
 
 
 def create_recorder(args):
+    source = _FEEDBACK_SOURCES.get(id(args.olmo_core))
+    if source is not None:
+        return FeedbackRecorder(args, source)
+    if getattr(args.olmo_core, "prompt_provider", "shuffle") == "remind":
+        raise RuntimeError("ReMind recorder has no bound prompt feedback source")
     return inference_records.Recorder(args, lineage_factory=lineage_identity)
