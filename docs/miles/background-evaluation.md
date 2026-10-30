@@ -172,17 +172,20 @@ panel before setting production resource bounds. For qualification, verify all
 25 entries completed at both expected checkpoints and were published; training
 completion alone does not establish evaluation completion.
 
-With the generic SGLang profile, which the examples select and which olmo-eval
-uses for every model shape except Olmo 3.5 12.5B, olmo-eval keeps
-`batching.chunk_size` at 64 examples and runs the batches one after another; each
-batch waits for its longest response. On a 7B thinking policy (one B300, 34,816
-token context, CUDA graphs disabled) each 64-example safety batch took about
-21–26 minutes, so StrongREJECT (2,294 prompts including jailbreak variants) needs
-about 16 hours, WildJailbreak about 12 and WildGuardTest about 10, well beyond the
-three-hour default. An interrupted task restarts from its beginning. A task can
-raise the batch size with a harness override such as `"batching.chunk_size" = 256`;
-this changes request scheduling, not sampling, but its throughput and memory on
-these tasks have not been measured.
+The examples select the generic SGLang profile with CUDA graphs and radix caching
+disabled. Under that profile olmo-eval keeps `batching.chunk_size` at 64 examples
+and runs the batches one after another; each batch waits for its longest response.
+For the C10 SFT checkpoint (Olmo 3.5 12.5B, one B300, 34,816-token context) each
+64-example safety batch took about 21–26 minutes, so StrongREJECT (2,294 prompts
+including jailbreak variants) took about 16 hours, WildJailbreak needs about 15
+and WildGuardTest about 4, well beyond the three-hour default. An interrupted task
+restarts from its beginning. That checkpoint matches olmo-eval's qualified
+`olmo3.5-12.5b-sglang-b300-v1` profile, which `profile = "auto"` selects on a
+dedicated TP1 B300: it admits 512 sequences, sizes batches to that admission and
+captures decode CUDA graphs, and it rejects the example's `disable_cuda_graph` and
+`disable_radix_cache` overrides. Its throughput and memory on this panel have not
+been measured here. A task can also raise the batch size with a harness override
+such as `"batching.chunk_size" = 256`; this changes request scheduling, not sampling.
 
 ## Snapshots and receipts
 
