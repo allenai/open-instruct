@@ -64,11 +64,13 @@ class DashboardDrainingRolloutDataSource:
         core = getattr(args, "olmo_core", None)
         self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
         self._feedback_core = None
-        if self._delegate.provider.requires_feedback:
-            if not self._fully_async or not getattr(core, "records_root", None) or self._selection is not None:
-                raise ValueError(
-                    "Feedback providers require fully async inference records and no frozen exclusion table"
-                )
+        if self._delegate.provider.requires_feedback and (
+            not self._fully_async or not getattr(core, "records_root", None) or self._selection is not None
+        ):
+            raise ValueError("Feedback providers require fully async inference records and no frozen exclusion table")
+        if self._delegate.provider.requires_feedback or (
+            getattr(core, "prompt_provider", "shuffle") == "mixture" and getattr(core, "records_root", None)
+        ):
             recording.bind_feedback(core, self)
             self._feedback_core = core
 
@@ -86,7 +88,16 @@ class DashboardDrainingRolloutDataSource:
                     metadata = group[0].metadata or {}
                     # Also persist these fields in the recorder's audit row.
                     record.update(
-                        {key: metadata.get(key) for key in (prompt_provider.SELECTION_ID, prompt_provider.REVIEW)}
+                        {
+                            key: metadata[key]
+                            for key in (
+                                prompt_provider.SELECTION_ID,
+                                prompt_provider.REVIEW,
+                                "mixture_source",
+                                "mixture_source_epoch",
+                            )
+                            if key in metadata
+                        }
                     )
                     record["expected_group_size"] = len(group)
             self._delegate.provider.feedback(records)

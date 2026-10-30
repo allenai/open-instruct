@@ -10,13 +10,14 @@ Choose exactly one mode under `[data]`:
 
 | Mode | Contract |
 |---|---|
+| `[[data.sources]]` | Separate source datasets with explicit allocation fractions summing to 1 (Core GRPO) |
 | `[[data.tasks]]` | Named tasks with train/eval counts and optional prompt wrapper |
 | `rl_manifest` | Adopt an immutable prepared manifest and supported verifier bindings |
 | `prompt_data` | Prepared JSONL; supply reward_config and optional alternating dataset-name/eval-path entries |
 | `recipe` | Rejected: named recipes are not supported |
 
 Current named tasks are `gsm8k`, `gsm8k-less-noise`, `gsm8k_original`, `math`, legacy `ifeval`, and
-generated `multiplication`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
+generated `multiplication`, and `synlogic-sudoku`. Dataset IDs/revisions live in `open_instruct/miles/datasets/run_data.py`.
 
 `gsm8k` uses the established `ai2-adapt-dev/rlvr_gsm8k_zs` train split.
 `gsm8k_original` remains a compatibility alias for the same pinned dataset,
@@ -60,6 +61,92 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
+## Fixed allocation from separate source datasets
+
+Replace the run's existing `[data]` section with this example to allocate 90% of
+fresh draws to a prepared Dolci Think dataset and 10% to Sudoku:
+
+```toml
+[data]
+seed = 17
+shuffle = true
+
+[[data.sources]]
+name = "dolci"
+fraction = 0.90
+prompt_data = "/weka/your-path/dolci/train.jsonl"
+reward_config = "/weka/your-path/dolci/verifiers.json"
+
+[[data.sources]]
+name = "sudoku"
+fraction = 0.10
+tasks = [{ task = "synlogic-sudoku", train_count = 800, eval_count = 90 }]
+```
+
+Dolci stays intact as one source. The paths must refer to existing rendered data
+and a trusted verifier registry, with the same named judge bindings and code
+services the original run needs. This example does not provision those services.
+The Sudoku source itself requires neither. Remove `eval_count` if using the
+background evaluation path; shared-engine held-out evaluation and background
+evaluation are mutually exclusive.
+
+Each source accepts one existing preparation mode: named `tasks`, prepared
+`prompt_data` with `reward_config`, or `rl_manifest`. Arbitrary raw Hugging Face
+schemas still need an adapter to render prompts and bind verifier targets.
+Source names are unique, fractions are positive and must sum to 1 (roundoff
+tolerance 1e-9), and seed/shuffle are shared at the outer data level. Nested
+mixtures and per-source seed/shuffle overrides are rejected. Changing the mix
+requires a new run root, as with other immutable preparation changes.
+
+Preparation writes separate `prepared/data/source-<name>.jsonl` files, a merged
+`verifiers.json`, and `mixture.json` containing source fractions, row counts and
+SHA-256 hashes. It checks prompt limits and train/held-out overlap across **all**
+sources and rejects conflicting verifier definitions. It does not deduplicate
+training sources against each other. The runtime retains a loaded dataset per
+source; it does not create an interleaved training file or stream file cursors.
+
+For every fresh prompt, the provider draws a source from the configured fractions
+and walks that source's seeded shuffled order without replacement. When a source
+is exhausted it independently reshuffles and cycles. Small sources can therefore
+repeat many times during a run. Fractions describe allocation in expectation,
+not exact batch quotas; reward filtering and backfill can change the accepted
+training mix. Buffered retries do not make a new draw. A one-source mixture at
+fraction 1 preserves the shuffle provider's sequence, with added attribution.
+
+The source RNG and every source cursor are checkpointed with pending groups;
+resume validates the manifest identity. Metadata preserves original provenance
+and adds `mixture_source` and `mixture_source_epoch`. When inference records are
+enabled, those fields also appear on scored group records. This fixed provider
+ignores outcome feedback; combining mixtures with ReMind is not implemented.
+Existing configurations without `data.sources` keep the default shuffle path.
+
+### SynLogic Sudoku
+
+`task = "synlogic-sudoku"` selects the 890 Sudoku rows of
+[`MiniMaxAI/SynLogic`](https://huggingface.co/datasets/MiniMaxAI/SynLogic),
+configuration `hard`, split `train`, pinned to
+`bb4297b82b9c28ef39249f48386cefd5e856618a`. The
+[pinned dataset card](https://huggingface.co/datasets/MiniMaxAI/SynLogic/blob/bb4297b82b9c28ef39249f48386cefd5e856618a/README.md)
+declares MIT. `datasets.load_dataset` downloads through the normal Hugging Face
+cache (`HF_DATASETS_CACHE` / `HF_HOME`, or the user's default cache); run-specific
+rendered artifacts live under `output.root/prepared/data`. The initial download
+is the full hard training split, roughly 53 MB, before filtering to Sudoku.
+
+This is an explicit rendering adaptation: the original instructions are replaced
+with English Sudoku rules, unchanged givens, and a request for a JSON 9×9 integer
+grid inside one `<answer>...</answer>` block. No reference solution enters the
+prompt or verifier target. Preparation checks every source reference against the
+rules and givens, preserves the original row, UUID, difficulty and revision, and
+records `prompt_rendering = "synlogic-sudoku-english-v1"`. The 800/90 example
+partitions these 890 training rows deterministically; it does **not** use or
+claim the upstream validation split.
+
+`SudokuVerifier` gives 1 for a complete grid satisfying all givens, rows, columns,
+and 3×3 boxes, and 0 otherwise. It accepts any valid completion, not only the
+published reference, and never executes generated code. Missing/multiple answer
+blocks, invalid JSON, booleans/floats, partial grids and rule violations score 0.
+It is an independent rule checker, not a port of SynLogic's upstream scorer.
+
 ## Prompt provider interface
 
 MILES still requests prompt groups through `get_samples(n)`. Open Instruct's
@@ -76,7 +163,8 @@ It also handles requests crossing multiple complete epochs. A provider implement
 `requires_feedback`; the provider itself
 does not require an epoch or source-mixture abstraction. Alternate implementations
 can be supplied through the data source's Python `provider=` argument. The built-in
-choices are `core.prompt_provider = "shuffle"` (default) and `"remind"`.
+choices are `core.prompt_provider = "shuffle"` (default), `"remind"`, and `"mixture"`.
+Structured `data.sources` selects `"mixture"` automatically.
 
 Provider state is saved atomically alongside the existing pending-group ledger.
 The default provider accepts legacy shuffle checkpoints and preserves their

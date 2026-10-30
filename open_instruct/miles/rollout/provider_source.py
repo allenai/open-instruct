@@ -7,7 +7,7 @@ import torch
 from miles.utils.types import Sample
 
 from miles.rollout.data_source import RolloutDataSourceWithBuffer, compute_global_dataset_state_path
-from open_instruct.miles.rollout import prompt_provider, remind_provider
+from open_instruct.miles.rollout import mixture_provider, prompt_provider, remind_provider
 
 
 class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
@@ -23,6 +23,8 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
         core = getattr(args, "olmo_core", None)
         if provider is not None:
             self.provider = provider
+        elif getattr(core, "prompt_provider", "shuffle") == "mixture":
+            self.provider, self.dataset = mixture_provider.load(args, self.dataset)
         elif getattr(core, "prompt_provider", "shuffle") == "remind":
             self.provider = remind_provider.ReMindPromptProvider(
                 lambda: self.dataset,

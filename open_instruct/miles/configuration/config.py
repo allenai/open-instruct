@@ -98,6 +98,7 @@ class CoreConfig:
     records_response_sample_rate: float | None = None
     # Prompt selection; ReMind uses scored outcomes from inference records.
     prompt_provider: str = "shuffle"
+    prompt_mixture: str | None = None
     remind_review_fraction: float = 0.02
     remind_enqueue_probability: float = 0.25
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
@@ -105,7 +106,7 @@ class CoreConfig:
     selection_sha256: str | None = None
 
     def __post_init__(self):
-        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind"))
+        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture"))
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
@@ -391,6 +392,10 @@ class RunConfig:
             raise constraints.error(
                 "core.records_root (records.enabled) requires fully_async=true; synchronous runs record nothing"
             )
+        if (self.core.prompt_provider == "mixture") != (self.core.prompt_mixture is not None):
+            raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture")
+        if self.core.prompt_provider == "mixture" and not options.get("rollout_global_dataset", True):
+            raise constraints.error("Mixtures require rollout_global_dataset=true")
         if self.core.prompt_provider == "remind":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("ReMind requires fully_async=true and inference records (core.records_root)")
