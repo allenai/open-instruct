@@ -151,7 +151,7 @@ task = {
                  ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
-    "context": {"priority": "${PRIORITY:-high}", "preemptible": False, "minRuntime": "$MIN_RUNTIME"},
+    "context": {"priority": "${PRIORITY:-high}", "minRuntime": "$MIN_RUNTIME"},
     "constraints": {"cluster": ["ai2/holmes"]},
     "replicas": 2,
     "leaderSelection": True,
