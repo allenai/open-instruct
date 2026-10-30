@@ -186,11 +186,11 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
     def request() -> Any:
         try:
             response = post()
-            for sleep in HTTP_500_RETRY_SLEEPS:
+            for retry, sleep in enumerate(HTTP_500_RETRY_SLEEPS, start=1):
                 if response.status_code != 500:
                     break
                 time.sleep(sleep)
-                diagnostics["http_500_retries"] += 1
+                diagnostics["http_500_retries"] = retry
                 response = post()
             response.raise_for_status()
             return response.json()
