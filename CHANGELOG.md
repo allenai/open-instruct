@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add offline ToolRL preparation and native function-call rewards, with opt-in scored reasoning-opener exploration in MILES (https://github.com/allenai/open-instruct/pull/2120).
 - Add MILES Core GRPO source mixtures with explicit fractions, independent checkpointed source cursors, best-effort record attribution, and an MIT SynLogic Sudoku adapter with a local rule verifier (https://github.com/allenai/open-instruct/pull/2116).
 - Apply the existing MILES Jupiter/Saturn CUDA compatibility library-path default to Titan, preserving explicit environment and secret overrides and leaving Holmes unchanged (https://github.com/allenai/open-instruct/pull/2095).
 - Add a replaceable MILES prompt provider interface with `ProviderRolloutDataSource`, preserving the existing shuffled dataset, retry groups, and checkpoint recovery, with rollback on failed deliveries; include an opt-in ReMind-style FIFO review provider with outcome feedback and resumable review state (https://github.com/allenai/open-instruct/pull/2105).
