@@ -1139,3 +1139,30 @@ exit0. Its one preemption restored nativecheckpoint100 and data cursor correctly
 Reference: https://beaker.org/ex/01M64J9FRG4PYSB6E7WJ739A7F.
 Previous MILES run reached durable200updates and10.670% eval before exhausting
 its restart ledger; this new run targets a complete500-update result.
+
+
+2026-10-30 topology correction before training: the user explicitly requested
+four GPUs instead of the initially submitted two. Two-GPU experiment
+[01M66ZQ1RS50CNX639M62CT61E](https://beaker.org/ex/01M66ZQ1RS50CNX639M62CT61E)
+was manually canceled18:12:37UTC while queued; no GPU start or training.
+Replace it with `hybrid-450m-miles-mnoukhov-rhea4-20261030`, a fresh output root
+under the usual Weka runs directory. Exact split:2 OLMo-core learner A6000s and
+2 independent TP1 SGLang inference A6000s on one Rhea node. Producer concurrency
+increases4->8 to match two inference engines with4 slots each. Global batch16,
+4 prompts x4 samples and all objective/hyperparameter/checkpoint settings remain.
+Personal W&B entity `mnoukhov`, project `open_instruct_internal`, group matching
+new run name.500 updates, eval/checkpoint100, BF16, maxlag1; autoResume,
+three retries,24h/attempt, normal/minRuntime0,128GiB host RAM/32GiB shared RAM.
+
+Config: `/home/mnoukhov/open-instruct-miles-hybrid/runs/hybrid-450m-miles-mnoukhov-rhea4-20261030.toml`.
+Rendered topology asserts four GPUs split2+2 and TP1; CPU schema/plan validation
+passed.96 focused recipe/launch tests and Ruff passed on the unchanged companion
+checkout. Broad type checking in the shared local environment reports five
+pre-existing diagnostics (four optional num_labels types and one OLMo-core API
+signature mismatch); no Python source changed for this launch. Reuse qualified
+image `01M607Z48PYPNN0KHVZ5PGYJEG`, same runtime as prior MILES run.
+Launch via `MILES_EXISTING_IMAGE=01M607Z48PYPNN0KHVZ5PGYJEG
+./scripts/train/build_image_and_launch.sh --miles
+runs/hybrid-450m-miles-mnoukhov-rhea4-20261030.toml` in companion checkout.
+Four-GPU GPU execution is not yet verified; inspect native distributed setup and
+weight publication after scheduling.

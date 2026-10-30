@@ -996,3 +996,11 @@ identity and tracking entity/group. New checkpoints begin from the original
 450m final-midtrain weights, with a fresh optimizer and data cursor.
 
 See [launch configuration and receipts](experiment.md#fresh-450m-miles-run-in-personal-wb-project-2026-10-30).
+
+
+2026-10-30 correction: user selected four GPUs, split2 learners+2 inference.
+The initial two-GPU submission was canceled while queued, with no training.
+The replacement retains the same objective and personal W&B namespace, increases
+producer concurrency4->8 to fill two inference engines, and uses a fresh run/output
+identity. Status ACTIVE — prepared for the four-GPU submission; see the launch
+batch above for the old canceled experiment and validation limits.
