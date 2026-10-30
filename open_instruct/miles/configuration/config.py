@@ -104,11 +104,38 @@ class CoreConfig:
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
     selection_table: str | None = None
     selection_sha256: str | None = None
+    # Opening response text assigned to the first opener_seeds_per_group samples of
+    # every prompt group, rotating through opener_seeds across groups. Seeded tokens
+    # are scored by the serving policy and trained as response tokens. Refresh only.
+    opener_seeds: tuple[str, ...] = ()
+    opener_seeds_per_group: int = 0
+    # First-token exploration: before each prompt group, read the serving policy's
+    # opener_pool most likely openers (whitespace plus first word) for the prompt,
+    # draw opener_branches of them uniformly, and split the group evenly across
+    # them as response seeds. Refresh only; 0 disables.
+    opener_branches: int = 0
+    opener_pool: int = 20
+    # Literal next-token ranking includes whitespace; visible mode expands it.
+    opener_mode: str = "visible"
+    opener_anchor_top1: bool = False
 
     def __post_init__(self):
         validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture"))
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
+        if isinstance(self.opener_seeds, list):
+            object.__setattr__(self, "opener_seeds", tuple(self.opener_seeds))
+        if not isinstance(self.opener_seeds, tuple) or not all(
+            isinstance(text, str) and text for text in self.opener_seeds
+        ):
+            raise constraints.error("core.opener_seeds must be a list of nonempty strings")
+        if len(set(self.opener_seeds)) != len(self.opener_seeds):
+            raise constraints.error("core.opener_seeds must not repeat an opener")
+        validation.integer(self.opener_seeds_per_group, "core.opener_seeds_per_group", minimum=0)
+        validation.integer(self.opener_branches, "core.opener_branches", minimum=0)
+        validation.integer(self.opener_pool, "core.opener_pool", minimum=1)
+        validation.choice(self.opener_mode, "core.opener_mode", ("visible", "first_token"))
+        validation.boolean(self.opener_anchor_top1, "core.opener_anchor_top1")
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
@@ -367,6 +394,10 @@ class RunConfig:
         cli_options.encode_options(self.miles)
         if (self.core.selection_table is None) != (self.core.selection_sha256 is None):
             raise constraints.error("core.selection_table and core.selection_sha256 must be set together")
+        if bool(self.core.opener_seeds) != (self.core.opener_seeds_per_group > 0):
+            raise constraints.error(
+                "core.opener_seeds and a positive core.opener_seeds_per_group must be set together"
+            )
         if (self.core.records_responses == "sample") != (self.core.records_response_sample_rate is not None):
             raise constraints.error(
                 'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
@@ -529,6 +560,27 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         if self.core.publication_mode == "refresh":
             self._validate_refresh(options, collection, samples)
+        if self.core.opener_seeds:
+            if self.core.publication_mode != "refresh":
+                raise constraints.error(
+                    'core.opener_seeds requires core.publication_mode="refresh"', constraints.Category.NOT_IMPLEMENTED
+                )
+            if self.core.opener_seeds_per_group >= options.get("n_samples_per_prompt", 1):
+                raise constraints.error(
+                    "core.opener_seeds_per_group must leave at least one unseeded sample per prompt group"
+                )
+        if self.core.opener_branches:
+            if self.core.publication_mode != "refresh":
+                raise constraints.error(
+                    'core.opener_branches requires core.publication_mode="refresh"',
+                    constraints.Category.NOT_IMPLEMENTED,
+                )
+            if self.core.opener_seeds:
+                raise constraints.error("core.opener_branches and core.opener_seeds cannot be combined")
+            if self.core.opener_pool < self.core.opener_branches:
+                raise constraints.error("core.opener_pool must be at least core.opener_branches")
+            if options.get("n_samples_per_prompt", 1) % self.core.opener_branches:
+                raise constraints.error("n_samples_per_prompt must be a multiple of core.opener_branches")
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
 
@@ -657,6 +709,15 @@ class RunConfig:
             core.pop("expert_balance_layer_stride")
             core.pop("expert_balance_search_proposals")
             core.pop("expert_balance_search_seconds")
+        if not self.core.opener_seeds:
+            # Preserve the pre-feature native argv when opener seeding is disabled.
+            core.pop("opener_seeds")
+            core.pop("opener_seeds_per_group")
+        if not self.core.opener_branches:
+            core.pop("opener_branches")
+            core.pop("opener_pool")
+            core.pop("opener_mode")
+            core.pop("opener_anchor_top1")
         options = {
             "train_backend": "olmo_core",
             "actor_num_nodes": 1,
