@@ -19,7 +19,8 @@
 # Env: IMAGE (default the H111 image, built from open-instruct@37a119ffd, whose open_instruct/ is identical to
 # 97ac1b53a, the commit that built the C12 cache), PRIORITY (high), MIN_RUNTIME, TIMEOUT, SAVE_EVERY,
 # RESUME_FROM=<output dir>/stepNNNN for a manual relaunch after preemption (no autoResume: a requeued command would
-# restart at step 0), DRY_RUN=1.
+# restart at step 0), WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
+# exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1.
 #
 # Before the first launch, the cache must resolve inside a Beaker job: setup_tokenizer_and_cache forces
 # --local_cache_dir to the oe-adapt deletable cache when BEAKER_JOB_ID is set, so that dir holds a symlink
@@ -78,6 +79,10 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
 
+BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
+WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
+[ -f $BASE_RECEIPT ] || { echo H161-NO-BASE $BASE_RECEIPT; exit 3; }
+sha256sum $BASE_RECEIPT"
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
 --master_port=29400 --nproc_per_node=8 $ENTRY $ARGS"
 if [[ "$MODE" == smoke ]]; then
@@ -90,6 +95,8 @@ printf %s '$WRAP' | base64 -d | gunzip > /tmp/h161_smoke_wrap.py
 printf %s '$REFCE' | base64 -d | gunzip > /tmp/h161_refce.py
 sha256sum /tmp/h161_smoke_wrap.py /tmp/h161_refce.py
 echo H161-JOB-START \$(date -u +%FT%TZ)
+$WAIT
+echo H161-BASE-READY \$(date -u +%FT%TZ)
 $TORCHRUN; RC=\$?
 echo H161-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
 if [ \"\$BEAKER_REPLICA_RANK\" = 0 ]; then
@@ -112,7 +119,8 @@ fi
 exit \$RC"
     EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},'
 else
-    CMD="$TORCHRUN"
+    CMD="$WAIT
+$TORCHRUN"
     EXTRA_ENV=""
 fi
 
