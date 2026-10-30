@@ -187,6 +187,12 @@ can be rebuilt at a successful publication boundary; an unknown existing worker
 identity is refused rather than adopted. This does not enable Core fault tolerance
 or automatic controller takeover, which remain outside refresh's supported scope.
 
-The rollout producer continues to own response decoding, judging, complete-group
-assembly, policy-lag checks and trainer-buffer insertion. Rust replaces response
-transport; it does not change these buffer or training contracts.
+With `use_distributed_post=true`, native HTTP actors receive and parse response
+JSON before returning it to the producer. Their observation reports include body
+size, body-ready time, and JSON decode wall/thread-CPU time. The producer records
+parsed-result receipt and sample conversion separately. Without distributed POST,
+the HTTP client and JSON parsing remain local to the producer.
+
+The rollout producer still owns replay-array conversion, reward coordination,
+complete-group assembly, policy-lag checks and trainer-buffer insertion. Rust
+replaces response transport; it does not change these buffer or training contracts.
