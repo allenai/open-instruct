@@ -920,9 +920,11 @@ class ParagraphFirstWordCheck(Instruction):
         if self._num_paragraphs is None or self._num_paragraphs < 0:
             self._num_paragraphs = random.randint(1, _NUM_PARAGRAPHS)
 
+        # A given nth_paragraph is kept even when it exceeds num_paragraphs: the prompt then asks for the
+        # impossible and every answer fails. Redrawing it here made the reward random per call.
         self._nth_paragraph = nth_paragraph
-        if self._nth_paragraph is None or self._nth_paragraph <= 0 or self._nth_paragraph > self._num_paragraphs:
-            self._nth_paragraph = random.randint(1, self._num_paragraphs + 1)
+        if self._nth_paragraph is None or self._nth_paragraph <= 0:
+            self._nth_paragraph = random.randint(1, max(self._num_paragraphs, 1))
 
         self._first_word = first_word
         if self._first_word is None:
@@ -2308,9 +2310,14 @@ class LowercaseCountingChecker(Instruction):
         return ["N"]
 
     def check_following(self, value):
-        """Checks that the response does not contain lowercase words more than N times."""
-        lowercase_words = re.findall(r"\b[a-z]+\b", value)
-        return len(lowercase_words) <= self._N
+        """Checks that no lowercase word appears more than N times.
+
+        The instruction caps how often each lowercase word repeats. Counting all lowercase words together
+        capped the whole answer at N (2-3) lowercase words, which only an empty, all-caps or non-Latin answer
+        could meet.
+        """
+        counts = collections.Counter(re.findall(r"\b[a-z]+\b", value))
+        return max(counts.values(), default=0) <= self._N
 
 
 class LetterCountingChecker(Instruction):
@@ -2344,8 +2351,11 @@ class LetterCountingChecker(Instruction):
         return ["N", "relation"]
 
     def check_following(self, value):
-        """Checks that the response does not contain lowercase words more than N times."""
-        letters = re.findall(r"[a-zA-Z]", value)
+        """Checks the number of letters in the response against N.
+
+        Letters of every script count, so a non-Latin answer cannot meet "less than N letters" for free.
+        """
+        letters = [c for c in value if c.isalpha()]
         if self._relation == "at least":
             return len(letters) >= self._N
         elif self._relation == "less than":
