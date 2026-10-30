@@ -82,6 +82,23 @@ def test_request_can_cross_multiple_epochs_and_copies_are_isolated(args):
     assert all("changed" not in s.metadata["nested"] for s in large.dataset.origin_samples)
 
 
+def test_shuffle_reads_replacement_dataset_from_source(args):
+    args.rollout_shuffle = False
+    source = ProviderRolloutDataSource(args)
+    source.get_samples(2)
+    original = source.dataset
+    source.dataset = copy.deepcopy(original)
+    for sample in source.dataset.samples:
+        sample.prompt = "replacement-" + sample.prompt
+    assert source.provider.dataset is source.dataset
+    assert [g[0].prompt for g in source.get_samples(2)] == ["replacement-prompt-2", "replacement-prompt-3"]
+    assert original.samples[2].prompt == "prompt-2"
+    # A replacement shorter than the cursor must fail instead of looping forever.
+    source.dataset.samples = source.dataset.samples[:1]
+    with pytest.raises(ValueError, match="cursor exceeds"):
+        source.provider.next_samples(1)
+
+
 @pytest.mark.parametrize("n", [-1, True, 1.5])
 def test_invalid_request_does_not_consume_buffer_or_cursor(args, n):
     source = ProviderRolloutDataSource(args)
@@ -267,7 +284,7 @@ def test_blank_prompt_mode_and_empty_dataset(args):
     assert payload(ProviderRolloutDataSource(args).get_samples(2)) == payload(
         miles_data_source.RolloutDataSourceWithBuffer(args).get_samples(2)
     )
-    provider = prompt_provider.ShuffledPromptProvider([], shuffle=False)
+    provider = prompt_provider.ShuffledPromptProvider(lambda: [], shuffle=False)
     assert provider.next_samples(0) == []
     with pytest.raises(ValueError, match="empty dataset"):
         provider.next_samples(1)

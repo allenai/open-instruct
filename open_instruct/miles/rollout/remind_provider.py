@@ -16,17 +16,21 @@ class ReMindPromptProvider:
     ordinary shuffled stream. Selection is independent of request chunk size.
     Feedback uses native inference records enriched with the selection ID carried
     by each prompt. The caller serializes selection, feedback, and checkpoints.
+    The dataset must remain fixed because review history refers to its row IDs.
     """
 
     requires_feedback = True
 
-    def __init__(self, dataset, *, shuffle, seed, review_fraction=0.02, enqueue_probability=0.25):
+    def __init__(self, get_dataset, *, shuffle, seed, review_fraction=0.02, enqueue_probability=0.25):
+        dataset = get_dataset()
         if dataset is None or not len(dataset):
             raise ValueError("ReMind requires a nonempty global prompt dataset")
         validation.number(review_fraction, "review_fraction", maximum=1, exclusive_min=True)
         validation.number(enqueue_probability, "enqueue_probability", maximum=1)
         validation.integer(seed, "seed", minimum=0)
-        self.base = ShuffledPromptProvider(dataset, shuffle=shuffle)
+        self._get_dataset = get_dataset
+        self._dataset = dataset
+        self.base = ShuffledPromptProvider(self._review_dataset, shuffle=shuffle)
         self.samples = dataset.origin_samples
         self.row_ids = {id(sample): i for i, sample in enumerate(self.samples)}
         self.config = dict(seed=seed, review_fraction=review_fraction, enqueue_probability=enqueue_probability)
@@ -37,9 +41,16 @@ class ReMindPromptProvider:
         self.tracked = set()  # Queued or currently being reviewed; never enqueue twice.
         self.pending = {}  # Selection ID -> (dataset row, review).
 
+    def _review_dataset(self):
+        dataset = self._get_dataset()
+        if dataset is not self._dataset or dataset.origin_samples is not self.samples:
+            raise ValueError("ReMind dataset cannot be replaced; construct a new provider for the new dataset")
+        return dataset
+
     def next_samples(self, n):
         if type(n) is not int or n < 0:
             raise ValueError("n must be a nonnegative integer")
+        self._review_dataset()
         result = []
         numerator, denominator = self.fraction.numerator, self.fraction.denominator
         for _ in range(n):
@@ -54,6 +65,7 @@ class ReMindPromptProvider:
         return result
 
     def feedback(self, records):
+        self._review_dataset()
         for record in records:
             if record.get("kind") == "disposition" and record.get("disposition") == "acknowledged":
                 # The runtime can discard a group before recording (e.g. mixed-policy
@@ -106,6 +118,7 @@ class ReMindPromptProvider:
         }
 
     def load_state_dict(self, state):
+        self._review_dataset()
         if state.get("kind") != "remind" or state.get("config") != self.config:
             raise ValueError("Prompt provider checkpoint does not match this ReMind configuration")
         draws, queue, pending = state["draws"], state["queue"], state["pending"]

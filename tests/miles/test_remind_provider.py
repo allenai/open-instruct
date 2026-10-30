@@ -25,7 +25,7 @@ args = test_prompt_provider.args
 
 def provider(args, **kwargs):
     dataset = ProviderRolloutDataSource(args).dataset
-    return ReMindPromptProvider(dataset, shuffle=True, seed=17, **kwargs)
+    return ReMindPromptProvider(lambda: dataset, shuffle=True, seed=17, **kwargs)
 
 
 def feedback(sample, rewards=(1, 1), *, valid=True, **extra):
@@ -233,6 +233,29 @@ def test_legacy_cursor_tracks_fresh_draws_and_repairs_old_checkpoint(args, tmp_p
         assert test_prompt_provider.payload(restored.get_samples(1)) == test_prompt_provider.payload(review)
     finally:
         restored.close()
+
+
+def test_replacing_remind_dataset_cannot_silently_reuse_review_history(args, tmp_path):
+    setup_remind(args, tmp_path)
+    source = ProviderRolloutDataSource(args)
+    fresh = source.get_samples(1)
+    source.provider.feedback([feedback(fresh[0][0])])
+    source.add_samples(fresh)
+    state = copy.deepcopy(source.provider.state_dict())
+    original = source.dataset
+    source.dataset = copy.deepcopy(original)
+    for action in (
+        lambda: source.get_samples(2),  # Pop a buffered group, then try a review.
+        lambda: source.provider.feedback([]),
+        source.provider.state_dict,
+        lambda: source.provider.load_state_dict(state),
+    ):
+        with pytest.raises(ValueError, match="ReMind dataset cannot be replaced"):
+            action()
+    assert source.buffer == fresh and source.sample_group_index == 1
+    source.dataset = original
+    assert source.provider.state_dict() == state
+    assert source.get_samples(2)[1][0].prompt == fresh[0][0].prompt
 
 
 def test_real_filtered_feedback_and_pending_resume(args, tmp_path):

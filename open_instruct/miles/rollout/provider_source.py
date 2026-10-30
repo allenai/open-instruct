@@ -25,7 +25,7 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = provider
         elif getattr(core, "prompt_provider", "shuffle") == "remind":
             self.provider = remind_provider.ReMindPromptProvider(
-                self.dataset,
+                lambda: self.dataset,
                 shuffle=bool(args.rollout_shuffle),
                 seed=args.rollout_seed,
                 review_fraction=core.remind_review_fraction,
@@ -33,7 +33,7 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             )
         else:
             self.provider = prompt_provider.ShuffledPromptProvider(
-                self.dataset, shuffle=bool(getattr(args, "rollout_shuffle", False))
+                lambda: self.dataset, shuffle=bool(getattr(args, "rollout_shuffle", False))
             )
         self._sync_legacy_cursor()
 
