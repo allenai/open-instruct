@@ -483,3 +483,130 @@ def test_manifest_missing_judge_fails_with_binding_guidance(environment, tmp_pat
             {"rl_manifest": str(path)}, hf, output, max_prompt_length=2000, seed=17, registry_overrides={}
         )
     assert not output.exists()
+
+
+def if_prepared_data(tmp_path, target, *, name="ifeval", factory=None):
+    prompt = tmp_path / "if-input.jsonl"
+    row = {
+        "input": "Explain photosynthesis.",
+        "label": target,
+        "metadata": {"prepared_sample_id": "if-row", "verifiers": [{"name": name, "target": target}]},
+    }
+    prompt.write_text(json.dumps(row) + "\n")
+    registry = tmp_path / "if-registry.json"
+    registry.write_text(json.dumps({name: {"factory": factory or run_data.FACTORIES["ifeval"]}}))
+    return {"prompt_data": str(prompt), "reward_config": str(registry)}
+
+
+@pytest.mark.parametrize(
+    "target,reason",
+    [
+        ({"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 3}]}, "lowercase_counting_tiny_n"),
+        (
+            {"instruction_id": ["letters:letter_counting"], "kwargs": [{"N": 2, "relation": "less than"}]},
+            "letter_counting_tiny_less_than",
+        ),
+        (
+            {
+                "instruction_id": ["length_constraints:nth_paragraph_first_word"],
+                "kwargs": [{"num_paragraphs": 3, "nth_paragraph": 4, "first_word": "hello"}],
+            },
+            "nth_paragraph_first_word_nth_exceeds_num_paragraphs",
+        ),
+        ({"instruction_id": ["count:lowercase_counting"], "kwargs": []}, "malformed_target"),
+    ],
+)
+def test_preparation_rejects_unsafe_if_training_targets(environment, tmp_path, target, reason):
+    data = if_prepared_data(tmp_path, repr([json.dumps(target)]))
+    before = Path(data["prompt_data"]).read_bytes()
+    with pytest.raises(InputError, match=f"train row 1:.*if-row.*{reason}.*filter_ifeval_constraints"):
+        prepare(environment, data)
+    assert not environment[1].exists()
+    assert Path(data["prompt_data"]).read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        "open_instruct.ground_truth_utils.IFEvalVerifier",
+        "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
+        "open_instruct.miles.datasets.run_data.ManifestIFVerifier",
+        "open_instruct.miles.run_data.ManifestIFVerifier",
+    ],
+)
+def test_if_screen_follows_registered_factory_not_verifier_name(environment, tmp_path, factory):
+    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 2}]}
+    data = if_prepared_data(tmp_path, target, name="constraints", factory=factory)
+    with pytest.raises(InputError, match=r"if-row \(constraints\).*lowercase_counting_tiny_n"):
+        prepare(environment, data)
+
+
+def test_if_screen_preserves_legacy_verifier_named_ifeval(environment, tmp_path):
+    data = if_prepared_data(
+        tmp_path, {"func_name": "validate_json_format"}, factory="open_instruct.ground_truth_utils.IFEvalVerifierOld"
+    )
+    result = prepare(environment, data)
+    assert prepare(environment, data) == result
+
+
+def test_if_screen_allows_valid_composition_and_explicit_non_english_targets(environment, tmp_path):
+    target = {
+        "instruction_id": ["count:counting_composition", "language:response_language"],
+        "kwargs": [{"n_sent": 2, "n_words": 2}, {"language": "zh"}],
+    }
+    data = if_prepared_data(tmp_path, target)
+    result = prepare(environment, data)
+    assert json.loads(Path(result["prompt_data"]).read_text())["label"] == target
+    assert prepare(environment, data) == result
+
+
+def test_if_screen_preserves_heldout_rows(environment, tmp_path):
+    target = {"instruction_id": ["detectable_format:json_format"], "kwargs": [None]}
+    data = if_prepared_data(tmp_path, target)
+    evaluation = tmp_path / "eval-if.jsonl"
+    row = json.loads(Path(data["prompt_data"]).read_text())
+    row["input"] = "A held-out prompt"
+    row["metadata"]["prepared_sample_id"] = "heldout-if"
+    row["metadata"]["verifiers"][0]["target"] = {
+        "instruction_id": ["letters:letter_counting"],
+        "kwargs": [{"N": 2, "relation": "less than"}],
+    }
+    evaluation.write_text(json.dumps(row) + "\n")
+    data["eval_prompt_data"] = ["if-eval", str(evaluation)]
+    result = prepare(environment, data)
+    assert (
+        json.loads(Path(result["eval_prompt_data"][1]).read_text())["metadata"]["verifiers"]
+        == row["metadata"]["verifiers"]
+    )
+    assert prepare(environment, data) == result
+
+
+@pytest.mark.parametrize("mixture", [False, True])
+def test_resume_rechecks_if_targets_without_rewriting_artifacts(environment, tmp_path, monkeypatch, mixture):
+    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 2}]}
+    data = if_prepared_data(tmp_path, target)
+    if mixture:
+        data = {"sources": [{"name": "constraints", "fraction": 1.0, **data}]}
+    with monkeypatch.context() as historical:
+        historical.setattr(run_data, "_verify_if_training_row", lambda row, names: None)
+        result = prepare(environment, data)
+    before = {path: path.read_bytes() for path in environment[1].iterdir() if path.is_file()}
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: pytest.fail("Resume must not retokenize"))
+    with pytest.raises(InputError, match="training row 1:.*lowercase_counting_tiny_n"):
+        prepare(environment, data)
+    assert all(path.read_bytes() == raw for path, raw in before.items())
+    assert Path(result["prompt_data"]).exists()
+
+
+def test_mixture_preparation_screens_each_training_source(environment, tmp_path):
+    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 2}]}
+    source = if_prepared_data(tmp_path, target)
+    data = {
+        "sources": [
+            {"name": "arithmetic", "fraction": 0.5, "tasks": [{"task": "multiplication", "train_count": 1}]},
+            {"name": "constraints", "fraction": 0.5, **source},
+        ]
+    }
+    with pytest.raises(InputError, match="source-constraints row 1:.*lowercase_counting_tiny_n"):
+        prepare(environment, data)
+    assert not environment[1].exists()
