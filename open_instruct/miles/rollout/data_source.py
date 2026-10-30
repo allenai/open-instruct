@@ -32,9 +32,9 @@ import torch
 from miles.dashboard import backend, hooks
 from miles.utils.types import Sample
 
-from miles.rollout.data_source import RolloutDataSourceWithBuffer
 from open_instruct import logger_utils
-from open_instruct.miles.datasets import record_selection
+from open_instruct.miles.datasets import record_selection, recording
+from open_instruct.miles.rollout import prompt_provider, provider_source
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -52,10 +52,10 @@ class DashboardDrainingRolloutDataSource:
 
     """
 
-    def __init__(self, args: Any) -> None:
+    def __init__(self, args: Any, *, provider: prompt_provider.PromptProvider | None = None) -> None:
         """Initialize the MILES buffered-data-source delegate."""
 
-        self._delegate = RolloutDataSourceWithBuffer(args)
+        self._delegate = provider_source.ProviderRolloutDataSource(args, provider=provider)
         self._cursor_lock = threading.RLock()
         self._pending_groups: dict[int, Any] = {}
         self._recovery_groups: list[Any] | None = None
@@ -63,10 +63,33 @@ class DashboardDrainingRolloutDataSource:
         self._collect_dashboard = bool(getattr(args, "use_miles_dashboard", False))
         core = getattr(args, "olmo_core", None)
         self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
+        self._feedback_core = None
+        if self._delegate.provider.requires_feedback:
+            if not self._fully_async or not getattr(core, "records_root", None) or self._selection is not None:
+                raise ValueError(
+                    "Feedback providers require fully async inference records and no frozen exclusion table"
+                )
+            recording.bind_feedback(core, self)
+            self._feedback_core = core
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attributes not implemented by this lifecycle adapter."""
         return getattr(self._delegate, name)
+
+    def feedback(self, records: list[dict[str, Any]]) -> None:
+        """Deliver native records with selection identity from the pristine ledger."""
+        with self._cursor_lock:
+            for record in records:
+                identity = record.get("group_index")
+                group = self._pending_groups.get(identity) if isinstance(identity, int) else None
+                if group:
+                    metadata = group[0].metadata or {}
+                    # Also persist these fields in the recorder's audit row.
+                    record.update(
+                        {key: metadata.get(key) for key in (prompt_provider.SELECTION_ID, prompt_provider.REVIEW)}
+                    )
+                    record["expected_group_size"] = len(group)
+            self._delegate.provider.feedback(records)
 
     def get_samples(self, num_samples: int) -> Any:
         """Return samples from the underlying MILES data source."""
@@ -149,6 +172,10 @@ class DashboardDrainingRolloutDataSource:
                     identity = group[0].group_index
                     if identity not in self._pending_groups:
                         raise RuntimeError(f"async prompt group {identity} was not outstanding")
+                    if self._delegate.provider.requires_feedback:
+                        self.feedback(
+                            [{"kind": "disposition", "disposition": "acknowledged", "group_index": identity}]
+                        )
                     del self._pending_groups[identity]
 
     def requeue_pending_groups(self, identities: list[int]) -> int:
@@ -180,6 +207,7 @@ class DashboardDrainingRolloutDataSource:
                 key: getattr(delegate, key)
                 for key in ("sample_offset", "epoch_id", "sample_group_index", "sample_index", "metadata")
             }
+            state["prompt_provider"] = delegate.provider.state_dict()
             if not self._fully_async:
                 self._pending_groups = self._sync_buffered_groups()
             key = "olmo_async_pending" if self._fully_async else "olmo_sync_pending"
@@ -252,6 +280,8 @@ class DashboardDrainingRolloutDataSource:
 
     def close(self) -> None:
         """Flush rollout telemetry and wait until the collector persists it."""
+        if getattr(self, "_feedback_core", None) is not None:
+            recording.unbind_feedback(self._feedback_core, self)
         if (close := getattr(self._delegate, "close", None)) is not None:
             close()
         if not self._collect_dashboard:

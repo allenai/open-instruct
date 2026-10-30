@@ -60,6 +60,88 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
+## Prompt provider interface
+
+MILES still requests prompt groups through `get_samples(n)`. Open Instruct's
+`DashboardDrainingRolloutDataSource` delegates to `ProviderRolloutDataSource`,
+which takes buffered retries first and asks `provider.next_samples(n)` for the
+remaining fresh prompts. The adapter makes K independent copies of each prompt
+and assigns the existing group/response IDs. Generation and reward computation
+keep their existing inputs.
+
+The default `ShuffledPromptProvider` walks the same loaded dataset with MILES'
+seeded shuffle and cursor. No configuration or preparation changes are needed.
+It also handles requests crossing multiple complete epochs. A provider implements
+`next_samples`, `feedback`, `state_dict`, and `load_state_dict`, and declares
+`requires_feedback`; the provider itself
+does not require an epoch or source-mixture abstraction. Alternate implementations
+can be supplied through the data source's Python `provider=` argument. The built-in
+choices are `core.prompt_provider = "shuffle"` (default) and `"remind"`.
+
+Provider state is saved atomically alongside the existing pending-group ledger.
+The default provider accepts legacy shuffle checkpoints and preserves their
+cursor fields. Provider-aware checkpoints also check dataset size, seed, and
+shuffle mode; prepared artifact identity remains the preparation layer's job.
+Retries and resumed pending groups do not request a new prompt from the provider.
+
+`feedback(records)` receives inference records under the same lock as selection
+and checkpoints. The shuffle provider ignores feedback. With ReMind enabled, the
+recorder delivers every scored group before its best-effort disk queue, including
+all-1 and all-0 groups dropped by the unchanged reward filter. A lost disk row does
+not lose feedback; an unavailable recorder fails the run rather than silently
+turning off adaptation.
+
+### ReMind review provider
+
+The second implementation illustrates outcome-dependent selection without
+changing dataset preparation, generation, rewards, or training. It wraps the
+shuffled stream with a FIFO review queue, following the prompt-review mechanism in
+[ReMind](https://arxiv.org/html/2606.03087v1#S3.SS3). Enable it in a fully async Core
+run with inference records:
+
+```toml
+[core]
+prompt_provider = "remind"
+remind_review_fraction = 0.02
+remind_enqueue_probability = 0.25
+
+[records]
+enabled = true
+root = "/weka/your-workspace/inference-records"
+```
+
+| Event | Provider action |
+|---|---|
+| Fresh group is verified all-1 | Enqueue its dataset row with probability 0.25, unless already queued or under review. |
+| Review slot | Pop the oldest queued row and generate fresh responses. An empty queue falls back to the shuffled stream. |
+| Review is verified all-1 | Remove the row from review tracking. |
+| Review regresses, including all-0 | Return the row to the queue tail. |
+| Review outcome is unknown or invalid | Keep it eligible for another review; do not infer mastery or regression. |
+
+This example uses a **continuous allocation budget**, one review slot per 50 new
+prompt admissions at the default fraction. It is independent of how requests are
+chunked into `get_samples(n)` calls. It does **not** reproduce the paper's default
+10%-every-fifth-update bursts, or guarantee 2% of accepted training groups, tokens,
+or wall-clock time. Async backfill and policy lag still apply. Unused review slots
+are not accumulated. Ordinary prompts retain shuffled traversal; review deliberately
+repeats a prompt before the next epoch.
+
+Only complete groups with verified binary rewards establish mastery. Graded or
+unknown rewards cannot add prompts to the queue. Intentional truncation-to-zero
+counts as a failure when that reward policy is enabled. Aborted groups retain their
+selection identity for retries. A group acknowledged without a recorded outcome
+releases its pending selection and returns an unfinished review to the queue. Reviewed rows and their targets come from the same
+loaded dataset; no response trajectories are replayed.
+
+The checkpoint contains the base cursor, review queue, pending selections, random
+state, and allocation counter, alongside pristine pending rollout groups. Duplicate
+feedback is ignored after the first terminal observation. Feedback takes effect on
+subsequent selections in completion order; identical seeds do not remove async
+arrival-order differences. Records include selection IDs and a review flag for
+measuring the realized allocation. Frozen exclusion tables are currently rejected
+with ReMind to avoid silently consuming queued reviews without outcomes. This is a
+CPU-tested interface example, not a GPU-validated reproduction of ReMind's results.
+
 <!-- Preserve the former section anchor for existing links. -->
 <a id="large-training-mixture"></a>
 
