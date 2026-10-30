@@ -207,9 +207,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             self.train_module.model, self.model_name_or_path, work_dir=self.grpo_config.output_dir
         )
 
-        if self.grpo_config.single_gpu_mode:
-            logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
-            self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
+        logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype}")
+        self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
