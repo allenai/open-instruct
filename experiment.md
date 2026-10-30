@@ -1166,3 +1166,17 @@ Launch via `MILES_EXISTING_IMAGE=01M607Z48PYPNN0KHVZ5PGYJEG
 runs/hybrid-450m-miles-mnoukhov-rhea4-20261030.toml` in companion checkout.
 Four-GPU GPU execution is not yet verified; inspect native distributed setup and
 weight publication after scheduling.
+
+
+2026-10-30 18:13UTC submission: four-GPU replacement
+[01M67081AXN33GBZJASMPYM1N8](https://beaker.org/ex/01M67081AXN33GBZJASMPYM1N8),
+initial job `01M67081JV21KEY8VYG04PCNG6`. Actual submitted payload verified:
+2learner+2TP1inference GPUs, BF16,500updates, maxlag1, eval/native checkpoints100,
+producer concurrency8, `mnoukhov/open_instruct_internal`, fresh output/run identity,
+immutable image `01M607Z48PYPNN0KHVZ5PGYJEG`, autoResume/minRuntime0/retries3/24h.
+Queued as of18:13UTC; scheduler: all4eligible Rhea nodes lack sufficient slots.
+No GPU runtime/optimizer progress or W&B run URL verified yet.
+Receipt: `/home/mnoukhov/.cache/open-instruct/miles/launches/hybrid-450m-miles-mnoukhov-rhea4-20261030-b624c0d2dcea171e.json`.
+Monitoring resumed via heartbeat `miles-four-gpu-training-progress-and-stalls`,
+every10minutes,20minute stall threshold, read-only; runtime topology and tracking
+checks included. Prior2GPU submission stays canceled.

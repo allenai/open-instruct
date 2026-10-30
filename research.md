@@ -1004,3 +1004,11 @@ The replacement retains the same objective and personal W&B namespace, increases
 producer concurrency4->8 to fill two inference engines, and uses a fresh run/output
 identity. Status ACTIVE — prepared for the four-GPU submission; see the launch
 batch above for the old canceled experiment and validation limits.
+
+
+Four-GPU replacement submitted:
+[01M67081AXN33GBZJASMPYM1N8](https://beaker.org/ex/01M67081AXN33GBZJASMPYM1N8).
+Status ACTIVE — queued for4Rhea slots as of2026-10-30 18:13UTC. Actual submitted
+entity is `mnoukhov`, topology2learners+2inference,500updates/checkpoint+eval100.
+No new GPU training verified yet. Stall monitoring is active; prior two-GPU
+submission is canceled.
