@@ -114,6 +114,14 @@ RETRY_WORST_CASE_SECONDS = (RETRY.total + 1) * 30.0 + sum(
 )
 
 
+# HTTP 500 is not in the session retry list because this harness can also return it
+# for a program error, which no retry fixes. In RL runs, though, 4.0-4.9% of calls
+# returned 500 and 8 of 8 replayed programs then returned 200: most are transient
+# service faults that scored a correct sample zero. Repeat a 500 a few times, with
+# these sleeps between attempts, and reject the sample only if every attempt fails.
+HTTP_500_RETRY_SLEEPS = (1.0, 2.0)
+
+
 def _get_session() -> Any:
     return service.http_session(pool_size=100, retries=RETRY)
 
@@ -156,31 +164,43 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
     diagnostics = {
         "status": "ok",
         "http_status": None,
+        "http_500_retries": 0,
         "program_chars": len(program),
         "tests": len(target) if isinstance(target, list) else -1,
         "stdio": stdio,
         "failure_policy": config.failure_policy,
     }
 
+    def post() -> Any:
+        response = infra_timeouts.request(
+            _get_session(),
+            "post",
+            config.api_url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        diagnostics["http_status"] = response.status_code
+        return response
+
     def request() -> Any:
         try:
-            response = infra_timeouts.request(
-                _get_session(),
-                "post",
-                config.api_url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=timeout,
-            )
-            diagnostics["http_status"] = response.status_code
+            response = post()
+            for sleep in HTTP_500_RETRY_SLEEPS:
+                if response.status_code != 500:
+                    break
+                time.sleep(sleep)
+                diagnostics["http_500_retries"] += 1
+                response = post()
             response.raise_for_status()
             return response.json()
         except requests.HTTPError as error:
             status = getattr(error.response, "status_code", None)
             if status is not None and (400 <= status < 500 and status != 429 or status == 500):
                 # Preserve the existing rejection category for client errors
-                # and HTTP 500 (which this harness can emit for program errors).
-                # HTTP status alone does not establish the underlying cause.
+                # and an HTTP 500 that persisted through HTTP_500_RETRY_SLEEPS
+                # (this harness can emit 500 for program errors). HTTP status
+                # alone does not establish the underlying cause.
                 # Gateway and transport failures use the
                 # configured failure policy after the HTTP retries finish.
                 logger.warning(
