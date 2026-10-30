@@ -101,6 +101,8 @@ wandb_project = "open-instruct-miles"
 wandb_group = "node"
 
 [core]
+# A response cut off at max_response_length scores 0 (capped = wrong).
+reward_zero_truncated = true
 checkpoint_keep_last = 2
 publication_mode = "refresh"
 engine_drain_timeout = 900.0
