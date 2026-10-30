@@ -55,7 +55,7 @@ from open_instruct.dataset_transformation import (
     sft_tokenize_fn_args,
     visualize_token,
 )
-from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
+from open_instruct.model_utils import push_folder_to_hub, restore_fp32_rotary, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -731,6 +731,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    restore_fp32_rotary(model)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -769,6 +770,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
         accelerator.load_state(last_checkpoint_path)
+        restore_fp32_rotary(model)
         # Extract `epoch_{i}` or `step_{i}`
         last_checkpoint_path = os.path.basename(last_checkpoint_path)
         training_difference = os.path.splitext(last_checkpoint_path)[0]
