@@ -94,11 +94,12 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert capacity["producer_sample_budget"] == producer_budget
     assert producer_budget < capacity["global_http_slots"]
     assert any("Producer budget alone" in warning for warning in capacity["warnings"]) == (profile == "three-node")
-    assert config.miles["global_batch_size"] == 256
+    assert config.miles["global_batch_size"] == (512 if profile == "three-node" else 256)
     assert config.core.max_policy_lag == 6
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
-    assert capacity["completed_buffer_samples"] == capacity["samples_per_collection"]
+    buffer_factor = 4 if profile == "three-node" else 1
+    assert capacity["completed_buffer_samples"] == buffer_factor * capacity["samples_per_collection"]
     assert "--check-weight-update-equal" not in config.arguments()
     assert plan["scoring_pass"]["standalone"] is False
     assert plan["scoring_pass"]["check_interval"] == 0

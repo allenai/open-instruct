@@ -61,3 +61,9 @@ def test_three_node_template_keeps_admission_and_selects_rust():
     assert options["use_miles_router"] is False
     assert options["router_policy"] == "round_robin"
     assert options["router_disable_retries"] is True
+    assert options["use_distributed_post"] is True
+    assert options["http_post_actors_per_node"] == 16
+    assert options["http_post_num_cpus"] == 1.0
+    assert options["rollout_executor_num_cpus"] == 2.0
+    assert options["async_data_buffer_capacity_factor"] == 4.0
+    assert options["rollout_batch_size"] * options["n_samples_per_prompt"] == options["global_batch_size"] == 512

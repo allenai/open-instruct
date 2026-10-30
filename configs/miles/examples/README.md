@@ -122,6 +122,22 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
+The three-node throughput candidate uses 64 prompts × 8 samples per collection
+and one 512-sample optimizer batch. It admits 4,864 unfinished samples, keeps up
+to 256 completed prompt groups (2,048 samples), and runs 16 HTTP actors per node
+with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
+advertises 64 logical Ray CPUs. These reservations permit actor placement; they
+do not make the Python producer event loop parallel. Distributed HTTP actors
+parse JSON before producer receipt. The single managed Qwen3-32B judge uses CUDA
+graphs and a maximum of 32 concurrent calls.
+
+These are a bundled candidate, not a measured optimum. Increasing the buffer
+retains more host memory and older work; keep policy lag bounded and watch stale
+group discards. The one-node validation has a different layout (2 trainers,
+5 engines and 1 judge) from the judge-free `node.toml` example. It does not
+qualify three-node throughput. Keep cold compilation, periodic scoring,
+evaluation and checkpoint cost separate from steady-state measurements.
+
 Background evaluation independently sets `evaluation.provider_kwargs.profile` to
 `"olmo3.5-12.5b"`. It resolves the optimized settings on the assigned evaluator GPU
 (including H100 80GB and B300), enables full decode graphs, and sizes native
@@ -182,7 +198,8 @@ explicit limits would give 6,144 for node and 19,456 for three-node. Generic
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Batch 256 and lag 6 are unchanged. The three-node budget represents 19 batches,
+The node example keeps batch 256; three-node uses batch 512. Both retain lag 6.
+The three-node admission budget represents 9.5 batches,
 so the planner warns that it exceeds the policy-lag window. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.
