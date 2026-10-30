@@ -31,12 +31,12 @@ from open_instruct.miles.rewards import judge_registry, judge_server, judging
 
 def ray_cpu_count(env):
     """Advertise an explicit logical CPU budget without exceeding the job allocation."""
-    value = env.get("OI_MILES_RAY_CPUS", "32")
+    available = int(env.get("BEAKER_ASSIGNED_CPU_COUNT") or os.cpu_count() or 1)
+    value = env.get("OI_MILES_RAY_CPUS", str(min(32, available)))
     try:
         count = int(value)
     except (TypeError, ValueError) as error:
         raise ValueError("OI_MILES_RAY_CPUS must be a positive integer") from error
-    available = int(env.get("BEAKER_ASSIGNED_CPU_COUNT") or os.cpu_count() or 1)
     if count < 1 or count > available:
         raise ValueError(f"OI_MILES_RAY_CPUS={count} must be between 1 and the assigned CPU count {available}")
     return count

@@ -14,3 +14,7 @@ def test_invalid_cpu_budget(count):
 def test_explicit_and_default_cpu_budget():
     assert cluster.ray_cpu_count({"OI_MILES_RAY_CPUS": "64", "BEAKER_ASSIGNED_CPU_COUNT": "244"}) == 64
     assert cluster.ray_cpu_count({"BEAKER_ASSIGNED_CPU_COUNT": "244"}) == 32
+
+
+def test_default_cpu_budget_fits_small_allocation():
+    assert cluster.ray_cpu_count({"BEAKER_ASSIGNED_CPU_COUNT": "16"}) == 16
