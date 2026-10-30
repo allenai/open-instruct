@@ -122,6 +122,14 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
+Background evaluation independently sets `evaluation.provider_kwargs.profile` to
+`"olmo3.5-12.5b"`. It resolves the optimized settings on the assigned evaluator GPU
+(including H100 80GB and B300), enables full decode graphs, and sizes native
+harness batches by engine sequence capacity, counting pass@k expansion. SciCode's
+HTTP server uses the same profile. See the
+[evaluation guide](../../../docs/miles/background-evaluation.md) for compatibility,
+batch-boundary limits and full-panel qualification still required.
+
 The learning examples pin `inference.profile = "olmo35-b300-v1"` on Holmes.
 The preset sets **512 running requests, 512 HTTP permits and decode graphs through
 batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
