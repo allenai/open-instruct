@@ -78,7 +78,8 @@ class ReMindPromptProvider:
                 continue  # Aborted groups keep their selection ID when retried.
             selection = self.pending.pop(record.get(SELECTION_ID), None)
             if selection is None:
-                continue  # Duplicate delivery (including regenerated pending groups).
+                # First scored generation counts; regeneration after staleness is a duplicate.
+                continue
             row, review = selection
             responses = record.get("responses") or []
             rewards = []
