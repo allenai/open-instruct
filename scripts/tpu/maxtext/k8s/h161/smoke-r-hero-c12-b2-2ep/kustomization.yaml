@@ -20,7 +20,7 @@ configMapGenerator:
   - train_sft.sh # a copy of ../olmo3-sft/train_sft.sh (kustomize loads no files from outside this directory); keep them identical
 - name: h161-hero-smoke-r-env
   literals:
-  - RUN_NAME=olmo35-sft-hero-c12-b2-2ep-smoke
+  - RUN_NAME=olmo35-sft-hero-c12-b2-2ep-g2smoke
   - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/scratch
   # B2's masters with the two promoted rows seeded (fp32 upcast of the bf16 mean), converted with o35/convert_olmocore_to_maxtext.py.
   - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-mm-ckpt2-256k-amt/h149-step22240-c12seed/0/items
