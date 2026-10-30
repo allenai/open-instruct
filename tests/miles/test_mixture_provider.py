@@ -16,7 +16,9 @@ import test_remind_provider
 import torch
 from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyDataBuffer
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput
+from miles.utils import inference_records
 
+from open_instruct.miles.datasets import recording
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 from open_instruct.miles.rollout.provider_source import ProviderRolloutDataSource
 
@@ -197,6 +199,103 @@ def test_real_async_recorder_persists_source_on_kept_and_filtered_groups(args, t
         assert {row["filter_decision"] for row in records} == {"passed", "filtered"}
         assert {row["mixture_source"] for row in records} == {"a", "b"}
         assert [row["mixture_source"] for row in records] == [group[0].metadata["mixture_source"] for group in groups]
+    finally:
+        recorder.close()
+        source.close()
+
+
+@pytest.fixture(params=["mixture", "remind"])
+def recorded_source(args, tmp_path, request):
+    test_remind_provider.setup_remind(args, tmp_path)
+    if request.param == "mixture":
+        core = args.olmo_core
+        setup(args)
+        args.olmo_core = dataclasses.replace(
+            core, prompt_provider="mixture", prompt_mixture=args.olmo_core.prompt_mixture
+        )
+    source = DashboardDrainingRolloutDataSource(args)
+    try:
+        yield args, source
+    finally:
+        source.close()
+
+
+def test_recording_unavailable_at_start_is_fatal_only_when_feedback_is_required(recorded_source, monkeypatch):
+    args, source = recorded_source
+
+    def unavailable(_):
+        raise OSError("injected unavailable lineage")
+
+    monkeypatch.setattr(recording, "lineage_identity", unavailable)
+    if source.provider.requires_feedback:
+        with pytest.raises(RuntimeError, match="requires an available"):
+            recording.create_recorder(args)
+    else:
+        recorder = recording.create_recorder(args)
+        try:
+            assert recorder.unavailable
+            recorder.record_group(source.get_samples(1)[0], decision="passed")
+            assert recorder.counts["dropped"] == 1
+            assert len(source.get_samples(1)) == 1
+        finally:
+            recorder.close()
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "build", "attribution"])
+def test_recording_failures_are_nonfatal_for_fixed_mixtures_only(recorded_source, monkeypatch, failure):
+    args, source = recorded_source
+    recorder = recording.create_recorder(args)
+    try:
+        group = source.get_samples(1)[0]
+        test_remind_provider.scored(group, [1, 0])
+        state = copy.deepcopy(source.provider.state_dict())
+
+        def broken(*a, **kw):
+            raise RuntimeError("injected recording failure")
+
+        with monkeypatch.context() as patch:
+            if failure == "unavailable":
+                patch.setattr(recorder, "unavailable", True)
+            elif failure == "build":
+                patch.setattr(inference_records, "response_record", broken)
+            else:
+                patch.setattr(source, "feedback", broken)
+            if source.provider.requires_feedback:
+                with pytest.raises(RuntimeError):
+                    recorder.record_group(group, decision="passed")
+            else:
+                recorder.record_group(group, decision="passed")
+                assert recorder.counts["dropped" if failure == "unavailable" else "failed"] == 1
+        assert source.provider.state_dict() == state
+        # Once recording recovers, attribution/feedback still work and draws continue.
+        recorder.record_group(group, decision="passed")
+        assert recorder.counts["queued"] == 1
+        assert len(source.get_samples(1)) == 1
+    finally:
+        recorder.close()
+
+
+def test_mixture_continues_when_record_store_is_unwritable(args, tmp_path):
+    test_remind_provider.setup_remind(args, tmp_path)
+    core = args.olmo_core
+    setup(args)
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("Cannot create record directories below this file")
+    args.olmo_core = dataclasses.replace(
+        core, prompt_provider="mixture", prompt_mixture=args.olmo_core.prompt_mixture, records_root=str(blocked)
+    )
+    source = DashboardDrainingRolloutDataSource(args)
+    recorder = recording.create_recorder(args)
+    try:
+        group = source.get_samples(1)[0]
+        test_remind_provider.scored(group, [1, 0])
+        recorder.record_group(group, decision="passed")
+        recorder.close()  # Join the real writer so its filesystem failure is deterministic.
+        assert recorder.unavailable
+        assert recorder.counts["failed"] == 1
+        dropped = recorder.counts["dropped"]
+        recorder.record_group(source.get_samples(1)[0], decision="passed")
+        assert recorder.counts["dropped"] == dropped + 1
     finally:
         recorder.close()
         source.close()

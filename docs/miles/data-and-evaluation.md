@@ -117,7 +117,10 @@ The source RNG and every source cursor are checkpointed with pending groups;
 resume validates the manifest identity. Metadata preserves original provenance
 and adds `mixture_source` and `mixture_source_epoch`. When inference records are
 enabled, those fields also appear on scored group records. This fixed provider
-ignores outcome feedback; combining mixtures with ReMind is not implemented.
+ignores outcome feedback. Recording remains best effort, as with shuffle: an
+unavailable store or a failed record/attribution build is logged and counted,
+without stopping sampling or training. ReMind retains its strict feedback checks
+because its selections depend on outcomes. Combining mixtures with ReMind is not implemented.
 Existing configurations without `data.sources` keep the default shuffle path.
 
 ### SynLogic Sudoku

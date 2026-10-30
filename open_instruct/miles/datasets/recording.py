@@ -11,7 +11,10 @@ from pathlib import Path
 
 from miles.utils import inference_records
 
+from open_instruct import logger_utils
 from open_instruct.miles.execution import workflow
+
+logger = logger_utils.setup_logger(__name__)
 
 MARKER = "workflow-model.json"
 # Runtime argument copies are shallow; source and recorder share CoreConfig.
@@ -31,31 +34,41 @@ def unbind_feedback(core, source):
 
 
 class FeedbackRecorder(inference_records.Recorder):
-    """Deliver scored groups before the best-effort disk queue, including drops."""
+    """Deliver scored groups before enqueueing; only feedback-dependent providers fail closed."""
 
     def __init__(self, args, source):
         self._source = weakref.ref(source)
+        self._requires_feedback = source.provider.requires_feedback
         self._reward_key = getattr(args, "reward_key", None)
         self._zero_truncated = args.olmo_core.reward_zero_truncated
         super().__init__(args, lineage_factory=lineage_identity)
-        if self.unavailable:
+        if self._requires_feedback and self.unavailable:
             raise RuntimeError("Prompt feedback requires an available inference recorder")
 
     def record_group(self, samples, *, decision, reason=None):
-        if self.unavailable:
+        if self._requires_feedback and self.unavailable:
             raise RuntimeError("Prompt feedback recorder became unavailable")
         failures = self.counts["failed"]
         super().record_group(samples, decision=decision, reason=reason)
-        if self.counts["failed"] != failures:
+        if self._requires_feedback and self.counts["failed"] != failures:
             raise RuntimeError("Could not construct prompt feedback record")
 
     def _enqueue(self, row):
         if row.get("kind") == "group":
-            source = self._source()
-            if source is None:
-                raise RuntimeError("Prompt feedback source is no longer available")
-            row = row | {"reward_key": self._reward_key, "reward_zero_truncated": self._zero_truncated}
-            source.feedback([row])
+            try:
+                source = self._source()
+                if source is None:
+                    raise RuntimeError("Prompt feedback source is no longer available")
+                row = row | {"reward_key": self._reward_key, "reward_zero_truncated": self._zero_truncated}
+                source.feedback([row])
+            except Exception:
+                if self._requires_feedback:
+                    raise
+                # Fixed mixtures only annotate the audit row. Preserve ordinary
+                # best-effort recording without silently losing required feedback.
+                self._count("failed")
+                logger.exception("Inference record attribution unavailable for group %s", row.get("group_index"))
+                return
         super()._enqueue(row)
 
 
