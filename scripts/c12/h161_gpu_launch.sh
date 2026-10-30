@@ -3,7 +3,7 @@
 # c12-b2 recipe as far as the GPU path can express it. Writes a raw Beaker spec (2 replicas x 8 GPUs, H111's c11 spec
 # with the C12 values) and submits it; DRY_RUN=1 prints the spec instead.
 #
-#   scripts/c12/h161_gpu_launch.sh <hero|ctrl> <34521|34522> <smoke|train>
+#   scripts/c12/h161_gpu_launch.sh <hero|ctrl> <34521|34522> <smoke|resume|train>
 #
 #   hero   two full passes over the C12 cache: 2 x floor(I_C12 / 16) = 2 x 28,092 = 56,184 steps, --num_epochs 2.
 #          OLMo-core's loader drops each epoch's partial last batch (449,487 = 16 x 28,092 + 15), so step 56,185
@@ -13,13 +13,26 @@
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
 #          CE of that batch through H149's seeded B2 export (gate (1)). Timeout 1 h.
+#   resume the auto-resume gate (G3): the smoke's 30-step schedule with autoResume, every rank logging a hash of every
+#          batch (H161-BH), an ephemeral checkpoint at step 10, and a hold after step 19 (H161-HOLD) during which the
+#          operator runs `beaker job preempt <either job>`. Beaker requeues both replicas; the same command finds
+#          step10 in OUTPUT_DIR and continues at step 11, replaying steps 11-19. No step-1 dump, no HF reference.
+#          MAX_RETRIES defaults to 1 here, so a hold that expires unpreempted (exit 3) still exercises the resume
+#          path, through Beaker's retry instead of its preemption requeue. Timeout 2 h.
 #   train  the run. Permanent checkpoint at the end of epoch 1 (hero) or half way (ctrl), plus the final one;
 #          ephemeral every SAVE_EVERY steps (default 1000: ~30 min at H111's 1.80 s/step; set from the smoke's mean).
 #
+# Resuming: olmo_core_finetune.py calls trainer.maybe_load_checkpoint(OUTPUT_DIR) before anything else, so the same
+# command run again continues from the latest complete stepNNNN in OUTPUT_DIR (weights, optimizer, step counter, LR
+# position, data-loader epoch/batches_processed/seed, RNG); the base weights are loaded only when OUTPUT_DIR holds no
+# checkpoint. OUTPUT_DIR has no timestamp, so a requeued or retried job lands in the same place.
+#
 # Env: IMAGE (default the H111 image, built from open-instruct@37a119ffd, whose open_instruct/ is identical to
 # 97ac1b53a, the commit that built the C12 cache), PRIORITY (high), MIN_RUNTIME, TIMEOUT, SAVE_EVERY,
-# RESUME_FROM=<output dir>/stepNNNN for a manual relaunch after preemption (no autoResume: a requeued command would
-# restart at step 0), WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
+# AUTO_RESUME (default 1 for resume and train, 0 for smoke: Beaker requeues the task after a preemption),
+# MAX_RETRIES (default 0, 1 for resume: Beaker reruns a task that failed, which then resumes the same way),
+# RESUME_FROM=<other dir>/stepNNNN to start from a checkpoint outside OUTPUT_DIR (ignored once OUTPUT_DIR holds one),
+# WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
 # exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1.
 #
 # Before the first launch, the cache must resolve inside a Beaker job: setup_tokenizer_and_cache forces
@@ -58,8 +71,11 @@ SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
-           MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py ;;
-    train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; ENTRY=open_instruct/olmo_core_finetune.py ;;
+           MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
+    resume) STEPS=30; CKPT=1000000; SAVE_EVERY=10; HOLD_AT=19; HOURS=2; RUN_NAME="${RUN_NAME}-resume"
+           MIN_RUNTIME="${MIN_RUNTIME:-5m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-1}"
+           MAX_RETRIES="${MAX_RETRIES:-1}" ;;
+    train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
@@ -85,7 +101,20 @@ WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; 
 sha256sum $BASE_RECEIPT"
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
 --master_port=29400 --nproc_per_node=8 $ENTRY $ARGS"
-if [[ "$MODE" == smoke ]]; then
+if [[ "$MODE" == resume ]]; then
+    WRAP=$(gzip -9c "$HERE/h161_smoke_wrap.py" | base64 | tr -d '\n')
+    CMD="set -uo pipefail
+printf %s '$WRAP' | base64 -d | gunzip > /tmp/h161_smoke_wrap.py
+sha256sum /tmp/h161_smoke_wrap.py
+echo H161-JOB-START \$(date -u +%FT%TZ) job \$BEAKER_JOB_ID replica \$BEAKER_REPLICA_RANK
+ls -d $OUTPUT_DIR/step* 2>/dev/null
+$WAIT
+$TORCHRUN; RC=\$?
+echo H161-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
+exit \$RC"
+    EXTRA_ENV='{"name": "H161_BATCH_HASH", "value": "1"}, {"name": "H161_HOLD_AT_STEP", "value": "'"$HOLD_AT"'"},
+    {"name": "H161_NO_FINAL_SAVE", "value": "1"},'
+elif [[ "$MODE" == smoke ]]; then
     WRAP=$(gzip -9c "$HERE/h161_smoke_wrap.py" | base64 | tr -d '\n')
     REFCE=$(gzip -9c "$HERE/h161_refce.py" | base64 | tr -d '\n')
     # Replica 0 runs the HF reference after training exits, on GPU 0, as H134's run_gpu.sh does on B300
@@ -151,7 +180,7 @@ task = {
                  ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
-    "context": {"priority": "${PRIORITY:-high}", "minRuntime": "$MIN_RUNTIME"},
+    "context": {"priority": "${PRIORITY:-high}", "minRuntime": "$MIN_RUNTIME", "autoResume": "$AUTO_RESUME" == "1"},
     "constraints": {"cluster": ["ai2/holmes"]},
     "replicas": 2,
     "leaderSelection": True,
@@ -164,6 +193,8 @@ task = {
 spec = {"version": "v2", "budget": "ai2/oe-other",
         "description": "ledger H161 GPU companion (draft): $RUN_NAME, $STEPS steps, 2x8 B300, seq 65536, lr 5e-5",
         "tasks": [task]}
+if int("${MAX_RETRIES:-0}"):
+    spec["retry"] = {"allowedTaskRetries": int("${MAX_RETRIES:-0}")}
 json.dump(spec, open(sys.argv[1], "w"), indent=1)
 EOF
 if [[ "${DRY_RUN:-0}" == 1 ]]; then cat "$SPEC"; exit 0; fi
