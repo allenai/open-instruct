@@ -44,6 +44,8 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
         provider_state = None
         try:
             groups = self._get_samples_from_buffer(num_samples)
+            if len(groups) > num_samples:
+                raise ValueError(f"buffer_filter_path returned {len(groups)} groups; requested {num_samples}")
             if len(groups) == num_samples:
                 return groups
             provider_state = copy.deepcopy(self.provider.state_dict())

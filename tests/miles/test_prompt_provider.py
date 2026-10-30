@@ -141,6 +141,32 @@ def test_buffer_only_request_does_not_call_provider(args, monkeypatch):
     assert payload(source.get_samples(2)) == payload(buffered)
 
 
+def test_oversized_buffer_filter_result_names_option_and_restores_retries(args, monkeypatch):
+    source = ProviderRolloutDataSource(args)
+    buffered = source.get_samples(3)
+    source.add_samples(buffered)
+    before = copy.deepcopy(source.provider.state_dict())
+    counters = source.sample_group_index, source.sample_index
+
+    def pop_all(args, rollout_id, buffer, count):
+        groups = buffer[:]
+        buffer.clear()
+        return groups
+
+    def fail(count):
+        pytest.fail("An oversized buffer result must be rejected before calling the provider")
+
+    source.buffer_filter = pop_all
+    monkeypatch.setattr(source.provider, "next_samples", fail)
+    with pytest.raises(ValueError, match="buffer_filter_path returned 3 groups; requested 2"):
+        source.get_samples(2)
+    assert all(a is b for a, b in zip(source.buffer, buffered, strict=True))
+    assert source.provider.state_dict() == before
+    assert (source.sample_group_index, source.sample_index) == counters
+    source.buffer_filter = miles_data_source.pop_first
+    assert payload(source.get_samples(3)) == payload(buffered)
+
+
 def test_wrong_provider_count_rolls_back_selection(args, monkeypatch):
     source = ProviderRolloutDataSource(args)
     select = source.provider.next_samples
