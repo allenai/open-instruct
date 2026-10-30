@@ -1,0 +1,56 @@
+name: Decon adapter
+
+on:
+  pull_request:
+    paths:
+      - scripts/data/decontam/report.py
+      - scripts/data/decontam/test_report.py
+      - scripts/data/decontam/README.md
+      - .github/workflows/decon-adapter.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/data/decontam/report.py
+      - scripts/data/decontam/test_report.py
+      - scripts/data/decontam/README.md
+      - .github/workflows/decon-adapter.yml
+
+permissions:
+  contents: read
+
+jobs:
+  real-matcher-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out this change
+        uses: actions/checkout@v4
+        with:
+          path: open-instruct
+          persist-credentials: false
+      - name: Check out pinned public matcher
+        uses: actions/checkout@v4
+        with:
+          repository: allenai/decon
+          ref: 4cdcc5696ed047bf7d0d48b8d86a274f5a06c0a6
+          path: decon
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Rust and record build tools
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          python --version
+          rustc +1.99.0 --version
+          cargo +1.99.0 --version
+      - name: Build pinned matcher with lockfile
+        working-directory: decon
+        run: cargo +1.99.0 build --release --locked
+      - name: Run adapter tests with the real matcher
+        working-directory: open-instruct
+        env:
+          DECON_REAL_BINARY: ${{ github.workspace }}/decon/target/release/decon
+          DECON_REAL_CONFIG: ${{ github.workspace }}/decon/config/default.yaml
+          DECON_REAL_COMMIT: 4cdcc5696ed047bf7d0d48b8d86a274f5a06c0a6
+        run: python -m unittest discover -s scripts/data/decontam -p 'test_*.py'
