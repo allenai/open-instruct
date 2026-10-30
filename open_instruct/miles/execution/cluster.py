@@ -29,6 +29,19 @@ from open_instruct.miles.infrastructure import gpu_hardware, infra_timeouts
 from open_instruct.miles.rewards import judge_registry, judge_server, judging
 
 
+def ray_cpu_count(env):
+    """Advertise an explicit logical CPU budget without exceeding the job allocation."""
+    value = env.get("OI_MILES_RAY_CPUS", "32")
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("OI_MILES_RAY_CPUS must be a positive integer") from error
+    available = int(env.get("BEAKER_ASSIGNED_CPU_COUNT") or os.cpu_count() or 1)
+    if count < 1 or count > available:
+        raise ValueError(f"OI_MILES_RAY_CPUS={count} must be between 1 and the assigned CPU count {available}")
+    return count
+
+
 def write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
@@ -325,7 +338,7 @@ def run(path):
             "--num-gpus",
             str(node["ray_gpus"]),
             "--num-cpus",
-            "32",
+            str(ray_cpu_count(env)),
             "--disable-usage-stats",
         ]
         ray_command += [
