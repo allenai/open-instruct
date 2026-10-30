@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct import test_miles_run_data, test_miles_run_spec
-from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.datasets import run_data, synlogic
 from open_instruct.miles.errors import InputError
@@ -111,6 +111,20 @@ def test_relative_paths_no_eval_and_provider_conflict(tmp_path):
     assert "eval_prompt_data" not in spec.compile().miles
     with pytest.raises(InputError, match="Conflicting settings"):
         test_miles_run_spec.spec(tmp_path, data=data, core={"prompt_provider": "remind"}).compile()
+
+
+def test_mixture_rejects_global_exclusions_during_planning_and_low_level_validation(tmp_path):
+    selection = {"table": "exclusions.json", "sha256": "0" * 64}
+    with pytest.raises(InputError, match="Mixtures cannot yet be combined with a frozen prompt-exclusion table"):
+        test_miles_run_spec.spec(tmp_path, data=data_config(), selection=selection).compile()
+    core = CoreConfig(
+        prompt_provider="mixture",
+        prompt_mixture="/mixture.json",
+        selection_table="/exclusions.json",
+        selection_sha256="0" * 64,
+    )
+    with pytest.raises(InputError, match="Mixtures cannot yet be combined with a frozen prompt-exclusion table"):
+        RunConfig(core, {"hf_checkpoint": "/model"}).validate()
 
 
 def test_cross_source_heldout_overlap_is_rejected(environment, source_rows, tmp_path):

@@ -175,6 +175,14 @@ def test_feedback_records_source_attribution_from_pending_ledger(args):
     assert [row["mixture_source"] for row in records] == [group[0].metadata["mixture_source"] for group in groups]
 
 
+def test_mixture_runtime_rejects_global_exclusions_before_loading_files(args):
+    args.olmo_core = SimpleNamespace(
+        prompt_provider="mixture", prompt_mixture="/missing-mixture.json", selection_table="/missing-exclusions.json"
+    )
+    with pytest.raises(ValueError, match="Mixtures cannot yet be combined with a frozen prompt-exclusion table"):
+        DashboardDrainingRolloutDataSource(args)
+
+
 def test_real_async_recorder_persists_source_on_kept_and_filtered_groups(args, tmp_path):
     test_remind_provider.setup_remind(args, tmp_path)
     core = args.olmo_core

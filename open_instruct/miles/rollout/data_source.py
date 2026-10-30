@@ -55,13 +55,21 @@ class DashboardDrainingRolloutDataSource:
     def __init__(self, args: Any, *, provider: prompt_provider.PromptProvider | None = None) -> None:
         """Initialize the MILES buffered-data-source delegate."""
 
+        core = getattr(args, "olmo_core", None)
+        if (
+            getattr(core, "prompt_provider", "shuffle") == "mixture"
+            and getattr(core, "selection_table", None) is not None
+        ):
+            raise ValueError(
+                "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
+                "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
+            )
         self._delegate = provider_source.ProviderRolloutDataSource(args, provider=provider)
         self._cursor_lock = threading.RLock()
         self._pending_groups: dict[int, Any] = {}
         self._recovery_groups: list[Any] | None = None
         self._fully_async = bool(getattr(args, "fully_async", False))
         self._collect_dashboard = bool(getattr(args, "use_miles_dashboard", False))
-        core = getattr(args, "olmo_core", None)
         self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
         self._feedback_core = None
         if self._delegate.provider.requires_feedback and (

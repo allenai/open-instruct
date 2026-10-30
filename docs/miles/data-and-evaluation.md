@@ -113,6 +113,11 @@ not exact batch quotas; reward filtering and backfill can change the accepted
 training mix. Buffered retries do not make a new draw. A one-source mixture at
 fraction 1 preserves the shuffle provider's sequence, with added attribution.
 
+Mixtures reject the global frozen exclusion table (`[selection]` /
+`core.selection_table`): replacing excluded prompts with draws from the whole
+mixture would change the admitted source fractions. Per-source exclusion files
+that restrict each source's eligible pool are not implemented yet.
+
 The source RNG and every source cursor are checkpointed with pending groups;
 resume validates the manifest identity. Metadata preserves original provenance
 and adds `mixture_source` and `mixture_source_epoch`. When inference records are
