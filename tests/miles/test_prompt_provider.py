@@ -262,7 +262,7 @@ def test_alternate_provider_feedback_and_state_share_pending_checkpoint(args):
     assert payload([replay]) == payload([b])
     assert fresh[0].prompt == "custom-8"
     # Switching implementations cannot silently consume a saved cursor.
-    with pytest.raises(ValueError, match="configuration"):
+    with pytest.raises(RuntimeError, match="configuration"):
         DashboardDrainingRolloutDataSource(args).load(0)
 
 
@@ -275,8 +275,22 @@ def test_shuffle_feedback_is_noop_and_changed_config_rejects_resume(args):
     source.save(0)
     args.load = args.save
     args.rollout_shuffle = False
-    with pytest.raises(ValueError, match="configuration"):
+    with pytest.raises(RuntimeError, match="configuration"):
         DashboardDrainingRolloutDataSource(args).load(0)
+
+
+@pytest.mark.parametrize("field,value", [("kind", "remind"), ("dataset_size", 12), ("seed", 99), ("shuffle", False)])
+def test_resume_mismatch_names_field_and_checkpoint_and_current_values(args, field, value):
+    provider = ProviderRolloutDataSource(args).provider
+    provider.next_samples(3)
+    before = provider.state_dict()
+    with pytest.raises(RuntimeError) as error:
+        provider.load_state_dict(before | {field: value})
+    message = str(error.value)
+    assert f"mismatch for {field}:" in message
+    assert f"checkpoint={value!r}" in message
+    assert f"current={before[field]!r}" in message
+    assert provider.state_dict() == before
 
 
 def test_blank_prompt_mode_and_empty_dataset(args):

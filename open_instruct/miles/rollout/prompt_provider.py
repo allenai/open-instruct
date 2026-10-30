@@ -85,8 +85,12 @@ class ShuffledPromptProvider:
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         expected = self.state_dict()
-        if any(state.get(k) != expected[k] for k in ("kind", "dataset_size", "seed", "shuffle")):
-            raise ValueError("Prompt provider checkpoint does not match this shuffle configuration")
+        for field in ("kind", "dataset_size", "seed", "shuffle"):
+            if state.get(field) != expected[field]:
+                raise RuntimeError(
+                    f"Prompt provider checkpoint configuration mismatch for {field}: "
+                    f"checkpoint={state.get(field)!r}, current={expected[field]!r}"
+                )
         epoch, offset = state.get("epoch_id"), state.get("sample_offset")
         size = len(self.dataset) if self.dataset is not None else 0
         if type(epoch) is not int or epoch < 0 or type(offset) is not int or not 0 <= offset <= size:
