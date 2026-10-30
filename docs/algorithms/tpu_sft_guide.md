@@ -114,8 +114,9 @@ us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e
 
 This tag is r2's image (`51f8cc4b-p907d86f3`, built from `image-olmo35/`) plus `image-olmo35-rf/`. That patch adds a
 fix for resuming from a checkpoint (without it, restore runs out of HBM) and batch-hash logging. Training numerics are
-unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. Use it for every new run. The
-Olmo 3 image is built by `image/build.sh <maxtext commit>`.
+unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. This is the default image for the
+recipe above. The optional [pooled resume image](#6-checkpoints-preemption-and-resume) includes additional patches;
+its parity checks compare against its own base image. The Olmo 3 image is built by `image/build.sh <maxtext commit>`.
 
 To build a new image, run `build.sh` from any host with `gcloud` (a Beaker session works). Cloud Build carries the context base64-encoded inside the build
 config. Builds use Cloud Build's default service account. Set `BUILD_SERVICE_ACCOUNT` to a full
@@ -214,11 +215,36 @@ if a rule needs every step's value, stream that pod with `kubectl logs -f` from 
   GCS; ask the run's owner.
 - After a preemption, JobSet restarts the run from the last checkpoint, on the same overlay. A resume replays the data
   pipeline to the restored step at ~1.4 s per skipped batch, which is hours late in a run. Resume only on the
-  restore-fix image (step 1).
-- `image-olmo35-fs/` adds a spawned worker pool for the SFT chat-template map, on with
-  `MAXTEXT_SFT_TEMPLATE_WORKERS=32` (unset, the pipeline is unchanged). It produces the same batches: 10,000 rows
-  identical on CPU, across an epoch boundary too, and on TPU 2,144 of 2,144 batch hashes and steps 61-66 CE equal a
-  serial resume. The map runs ~10x faster on CPU; the pool costs ~4-6 min to start in each run.
+  restore-fix image (step 1), or a derivative that includes that fix, such as the pooled image below.
+
+`scripts/tpu/maxtext/image-olmo35-fs/` adds an optional spawned worker pool for the SFT chat-template map. The
+published image is:
+
+```text
+us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea-fse2555fa0
+```
+
+It includes the restore fix and these MaxText fork changes:
+
+| Image layer | Fork revisions | Changes |
+|---|---|---|
+| `bs3ec936c3` | [c469d980 → 736b296c](https://github.com/abhishekraok/maxtext/compare/c469d980f94f7d3571e5c0731f7af9bdb9d59cd2...736b296c50a2bfbcc9a44e9b4ad9abf37993ffed) | Big-slice mesh support, KDA sharding constraints, and optional r2 data-order emulation. |
+| `dc88c6c7ea` | [736b296c → 1e612a76](https://github.com/abhishekraok/maxtext/compare/736b296c50a2bfbcc9a44e9b4ad9abf37993ffed...1e612a76e2e50e0ce86ef7b7280353248c3e0520) | Optional MoE dropped-token logging, including the dropless fallback correction. |
+| `fse2555fa0` | [1e612a76 → e0e1c2a9](https://github.com/abhishekraok/maxtext/compare/1e612a76e2e50e0ce86ef7b7280353248c3e0520...e0e1c2a98c2700a1f606227d275950ac4060763a) | Pooled chat-template map; unset or zero workers keeps the serial map. |
+
+The `bs` and `dc` build recipes are not included here; `build.sh` depends on the published `...-dc88c6c7ea` base.
+For a late `4x4x8` resume of a run already using that base, set `images[].newTag` to the part after `:` above and
+add `MAXTEXT_SFT_TEMPLATE_WORKERS=32` to your recipe's environment ConfigMap (`configMapGenerator[].literals` in
+your copied `kustomization.yaml`, named `olmo35-sft-env` in the `4x4x8` example). Here 32 is the tested worker count
+per data-loading process, not a tuned optimum. The pool stays active during training as well as replay; leave it unset for fresh starts and short resumes unless measured
+input-pipeline savings justify its ~4-6 min startup cost. Steady-state TPU training gains have not been measured.
+
+Validation against the same `...-dc88c6c7ea` base: 10,000 rows identical on CPU, including file and epoch
+boundaries; on TPU, 2,144 of 2,144 batch hashes and steps 61-66 CE equal the serial resume. The CPU map was ~10x
+faster, but the 60-step TPU replay took 366 s pooled versus 63 s serial because of startup. Long-resume TPU
+throughput is still unmeasured. The checked-in examples use older images (`...-rfb46e215e` or `...-bs3ec936c3`);
+these checks do not establish parity when migrating them, since that also adds the layers above. Validate batches
+and CE against the run's current image before migrating those runs.
 
 ## 7. Export to HF and evaluate
 
