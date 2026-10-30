@@ -75,9 +75,9 @@ def test_invalid_n(n, instruction_id, prefix):
     ]
 
 
-@pytest.mark.parametrize("n", [1, 2, 3])
-def test_tiny_lowercase_n(n):
-    assert ifeval_constraints.if_training_issues(bundle(N=n)) == ["lowercase_counting_tiny_n"]
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 100])
+def test_positive_lowercase_repetition_caps_are_kept(n):
+    assert ifeval_constraints.if_training_issues(bundle(N=n)) == []
 
 
 @pytest.mark.parametrize("n", [1, 2, 3])
@@ -101,8 +101,8 @@ def test_missing_count_args_and_deduplication():
         "letter_counting_invalid_n",
         "letter_counting_invalid_relation",
     ]
-    target = {"instruction_id": ["count:lowercase_counting"] * 2, "kwargs": [{"N": 2}, {"N": 3}]}
-    assert ifeval_constraints.if_training_issues(target) == ["lowercase_counting_tiny_n"]
+    target = {"instruction_id": ["count:lowercase_counting"] * 2, "kwargs": [{"N": 0}, {}]}
+    assert ifeval_constraints.if_training_issues(target) == ["lowercase_counting_invalid_n"]
 
 
 @pytest.mark.parametrize("n", [4, 5, 100])

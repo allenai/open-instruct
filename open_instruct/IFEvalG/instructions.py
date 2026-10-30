@@ -917,14 +917,12 @@ class ParagraphFirstWordCheck(Instruction):
           A string representing the instruction description.
         """
         self._num_paragraphs = num_paragraphs
-        if self._num_paragraphs is None:
+        if self._num_paragraphs is None or self._num_paragraphs < 0:
             self._num_paragraphs = random.randint(1, _NUM_PARAGRAPHS)
 
-        # Preserve explicit invalid arguments so an impossible constraint fails
-        # deterministically instead of changing its meaning on each verification.
         self._nth_paragraph = nth_paragraph
-        if self._nth_paragraph is None:
-            self._nth_paragraph = random.randint(1, self._num_paragraphs) if self._num_paragraphs > 0 else 1
+        if self._nth_paragraph is None or self._nth_paragraph <= 0 or self._nth_paragraph > self._num_paragraphs:
+            self._nth_paragraph = random.randint(1, self._num_paragraphs + 1)
 
         self._first_word = first_word
         if self._first_word is None:
@@ -967,14 +965,20 @@ class ParagraphFirstWordCheck(Instruction):
           word of the specified paragraph is the same as required. Otherwise, false.
         """
 
-        if self._num_paragraphs <= 0 or not 1 <= self._nth_paragraph <= self._num_paragraphs:
-            return False
-
-        paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\n", value) if paragraph.strip()]
+        paragraphs = re.split(r"\n\n", value)
         num_paragraphs = len(paragraphs)
-        if num_paragraphs != self._num_paragraphs:
+
+        for paragraph in paragraphs:
+            if not paragraph.strip():
+                num_paragraphs -= 1
+
+        # check that index doesn't go out of bounds
+        if self._nth_paragraph <= num_paragraphs:
+            paragraph = paragraphs[self._nth_paragraph - 1].strip()
+            if not paragraph:
+                return False
+        else:
             return False
-        paragraph = paragraphs[self._nth_paragraph - 1]
 
         first_word = ""
         punctuation = {".", ",", "?", "!", "'", '"'}

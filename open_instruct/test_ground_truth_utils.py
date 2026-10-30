@@ -5,7 +5,6 @@ Test script for verifier functionality in Python
 
 import asyncio
 import json
-import random
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -282,83 +281,6 @@ class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
         self.assertEqual(verifier([], response, {"func_name": "validate_json_format"}).score, 0.0)
         self.assertEqual(verifier([], '{"a": [1, 2]}', {"func_name": "validate_json_format"}).score, 1.0)
         self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
-
-
-class TestIFEvalGParagraphFirstWord(unittest.TestCase):
-    def setUp(self):
-        self.checker = instructions_registry.INSTRUCTION_DICT["length_constraints:nth_paragraph_first_word"](
-            "length_constraints:nth_paragraph_first_word"
-        )
-        random_state = random.getstate()
-        self.addCleanup(random.setstate, random_state)
-
-    def test_invalid_explicit_arguments_are_preserved_and_fail_for_every_seed(self):
-        for seed in range(20):
-            for num_paragraphs, nth_paragraph in ((2, 3), (2, 0), (2, -1), (0, 1), (-1, 1)):
-                with self.subTest(seed=seed, num_paragraphs=num_paragraphs, nth_paragraph=nth_paragraph):
-                    random.seed(seed)
-                    self.checker.build_description(
-                        num_paragraphs=num_paragraphs, nth_paragraph=nth_paragraph, first_word="hello"
-                    )
-                    self.assertEqual(
-                        self.checker.get_instruction_args(),
-                        {"num_paragraphs": num_paragraphs, "nth_paragraph": nth_paragraph, "first_word": "hello"},
-                    )
-                    self.assertFalse(self.checker.check_following("hello one\n\nhello two"))
-
-    def test_omitted_nth_paragraph_stays_in_range(self):
-        for seed in range(20):
-            for num_paragraphs in (None, 1, 2):
-                with self.subTest(seed=seed, num_paragraphs=num_paragraphs):
-                    random.seed(seed)
-                    self.checker.build_description(num_paragraphs=num_paragraphs, first_word="hello")
-                    args = self.checker.get_instruction_args()
-                    self.assertGreaterEqual(args["nth_paragraph"], 1)
-                    self.assertLessEqual(args["nth_paragraph"], args["num_paragraphs"])
-                    response = "\n\n".join(["hello world"] * args["num_paragraphs"])
-                    self.assertTrue(self.checker.check_following(response))
-
-    def test_invalid_count_with_omitted_nth_fails_without_raising(self):
-        for num_paragraphs in (0, -1):
-            with self.subTest(num_paragraphs=num_paragraphs):
-                self.checker.build_description(num_paragraphs=num_paragraphs, first_word="hello")
-                self.assertEqual(self.checker.get_instruction_args()["num_paragraphs"], num_paragraphs)
-                self.assertFalse(self.checker.check_following("hello world"))
-
-    def test_first_and_last_paragraph_ignore_empty_segments(self):
-        for nth_paragraph in (1, 2):
-            self.checker.build_description(num_paragraphs=2, nth_paragraph=nth_paragraph, first_word="hello")
-            paragraphs = ["other words", "other words"]
-            paragraphs[nth_paragraph - 1] = '"Hello," world'
-            for response in ("\n\n".join(paragraphs), "\n\n" + "\n\n\n\n".join(paragraphs) + "\n\n"):
-                with self.subTest(nth_paragraph=nth_paragraph, response=response):
-                    self.assertTrue(self.checker.check_following(response))
-            self.assertFalse(self.checker.check_following("other words\n\nother words"))
-
-    def test_requires_exact_number_of_nonempty_paragraphs(self):
-        self.checker.build_description(num_paragraphs=2, nth_paragraph=1, first_word="hello")
-        for response in ("", "\n\n", "hello world", "hello one\n\nhello two\n\nhello three"):
-            with self.subTest(response=response):
-                self.assertFalse(self.checker.check_following(response))
-
-    def test_invalid_nth_paragraph_via_ifeval_verifier(self):
-        verifier = ground_truth_utils.IFEvalVerifier()
-        for seed in range(10):
-            for nth_paragraph, expected_score in ((3, 0.0), (1, 1.0), (2, 1.0)):
-                with self.subTest(seed=seed, nth_paragraph=nth_paragraph):
-                    random.seed(seed)
-                    label = str(
-                        [
-                            {
-                                "instruction_id": ["length_constraints:nth_paragraph_first_word"],
-                                "kwargs": [
-                                    {"num_paragraphs": 2, "nth_paragraph": nth_paragraph, "first_word": "hello"}
-                                ],
-                            }
-                        ]
-                    )
-                    result = verifier([], "hello one\n\nhello two", label)
-                    self.assertEqual(result.score, expected_score)
 
 
 class TestIFEvalGWordCounting(unittest.TestCase):

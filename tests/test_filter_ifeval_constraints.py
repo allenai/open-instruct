@@ -9,7 +9,7 @@ from scripts.data import filter_ifeval_constraints as filtering
 
 
 def bundle(n=2):
-    return {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": n}]}
+    return {"instruction_id": ["letters:letter_counting"], "kwargs": [{"N": n, "relation": "less than"}]}
 
 
 def miles(target=None, name="ifeval", **extra):
@@ -38,10 +38,22 @@ def test_filter_preserves_bytes_order_input_and_hashes(tmp_path):
     assert summary["if_rows"] == 2
     assert summary["kept_rows"] == 2
     assert summary["dropped_rows"] == 1
-    assert result["reason_counts"] == {"lowercase_counting_tiny_n": 1}
+    assert result["reason_counts"] == {"letter_counting_tiny_less_than": 1}
     assert result["dropped"] == [
-        {"row_index": 1, "line_number": 3, "id": "drop", "reasons": ["lowercase_counting_tiny_n"]}
+        {"row_index": 1, "line_number": 3, "id": "drop", "reasons": ["letter_counting_tiny_less_than"]}
     ]
+
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_cli_keeps_lowercase_repetition_caps(tmp_path, capsys, n):
+    source, report, output = (tmp_path / name for name in ("input.jsonl", "report.json", "output.jsonl"))
+    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": n}]}
+    raw = jsonl(miles(target))
+    source.write_bytes(raw)
+    assert filtering.main(["--input", str(source), "--report", str(report), "--output", str(output)]) == 0
+    assert json.loads(capsys.readouterr().out)["dropped_rows"] == 0
+    assert output.read_bytes() == source.read_bytes() == raw
+    assert json.loads(report.read_text())["reason_counts"] == {}
 
 
 def test_audit_is_default_cli_and_does_not_create_output(tmp_path):
@@ -100,12 +112,15 @@ def test_repeated_cli_aliases(tmp_path, capsys):
 
 def test_multiconstraint_and_verifier_reason_counts_deduplicate(tmp_path):
     source, report = tmp_path / "in.jsonl", tmp_path / "report.json"
-    target = {"instruction_id": ["count:lowercase_counting"] * 2, "kwargs": [{"N": 1}, {"N": 2}]}
+    target = {
+        "instruction_id": ["letters:letter_counting"] * 2,
+        "kwargs": [{"N": 1, "relation": "less than"}, {"N": 2, "relation": "less than"}],
+    }
     row = miles(target)
     row["metadata"]["verifiers"].append({"name": "ifeval", "target": bundle()})
     source.write_bytes(jsonl(row))
     result = filtering.audit(source, report)
-    assert result["reason_counts"] == {"lowercase_counting_tiny_n": 1}
+    assert result["reason_counts"] == {"letter_counting_tiny_less_than": 1}
 
 
 def test_malformed_target_dropped_with_id_fallback(tmp_path):

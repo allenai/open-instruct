@@ -501,7 +501,7 @@ def if_prepared_data(tmp_path, target, *, name="ifeval", factory=None):
 @pytest.mark.parametrize(
     "target,reason",
     [
-        ({"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 3}]}, "lowercase_counting_tiny_n"),
+        ({"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 0}]}, "lowercase_counting_invalid_n"),
         (
             {"instruction_id": ["letters:letter_counting"], "kwargs": [{"N": 2, "relation": "less than"}]},
             "letter_counting_tiny_less_than",
@@ -535,10 +535,28 @@ def test_preparation_rejects_unsafe_if_training_targets(environment, tmp_path, t
     ],
 )
 def test_if_screen_follows_registered_factory_not_verifier_name(environment, tmp_path, factory):
-    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 2}]}
+    target = {"instruction_id": ["letters:letter_counting"], "kwargs": [{"N": 2, "relation": "less than"}]}
     data = if_prepared_data(tmp_path, target, name="constraints", factory=factory)
-    with pytest.raises(InputError, match=r"if-row \(constraints\).*lowercase_counting_tiny_n"):
+    with pytest.raises(InputError, match=r"if-row \(constraints\).*letter_counting_tiny_less_than"):
         prepare(environment, data)
+
+
+@pytest.mark.parametrize("n", [2, 3])
+@pytest.mark.parametrize("mixture", [False, True])
+def test_if_screen_keeps_lowercase_repetition_caps_on_fresh_prepare_and_resume(
+    environment, tmp_path, monkeypatch, n, mixture
+):
+    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": n}]}
+    data = if_prepared_data(tmp_path, target)
+    if mixture:
+        data = {"sources": [{"name": "constraints", "fraction": 1.0, **data}]}
+    result = prepare(environment, data)
+    rows = [json.loads(line) for line in Path(result["prompt_data"]).read_text().splitlines()]
+    assert rows[0]["metadata"]["verifiers"][0]["target"] == target
+    before = {path: path.read_bytes() for path in environment[1].iterdir() if path.is_file()}
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: pytest.fail("Resume must not retokenize"))
+    assert prepare(environment, data) == result
+    assert all(path.read_bytes() == raw for path, raw in before.items())
 
 
 def test_if_screen_preserves_legacy_verifier_named_ifeval(environment, tmp_path):
@@ -583,7 +601,7 @@ def test_if_screen_preserves_heldout_rows(environment, tmp_path):
 
 @pytest.mark.parametrize("mixture", [False, True])
 def test_resume_rechecks_if_targets_without_rewriting_artifacts(environment, tmp_path, monkeypatch, mixture):
-    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 2}]}
+    target = {"instruction_id": ["letters:letter_counting"], "kwargs": [{"N": 2, "relation": "less than"}]}
     data = if_prepared_data(tmp_path, target)
     if mixture:
         data = {"sources": [{"name": "constraints", "fraction": 1.0, **data}]}
@@ -592,14 +610,14 @@ def test_resume_rechecks_if_targets_without_rewriting_artifacts(environment, tmp
         result = prepare(environment, data)
     before = {path: path.read_bytes() for path in environment[1].iterdir() if path.is_file()}
     monkeypatch.setattr(run_data, "_tokenizer", lambda path: pytest.fail("Resume must not retokenize"))
-    with pytest.raises(InputError, match="training row 1:.*lowercase_counting_tiny_n"):
+    with pytest.raises(InputError, match="training row 1:.*letter_counting_tiny_less_than"):
         prepare(environment, data)
     assert all(path.read_bytes() == raw for path, raw in before.items())
     assert Path(result["prompt_data"]).exists()
 
 
 def test_mixture_preparation_screens_each_training_source(environment, tmp_path):
-    target = {"instruction_id": ["count:lowercase_counting"], "kwargs": [{"N": 2}]}
+    target = {"instruction_id": ["letters:letter_counting"], "kwargs": [{"N": 2, "relation": "less than"}]}
     source = if_prepared_data(tmp_path, target)
     data = {
         "sources": [
@@ -607,6 +625,6 @@ def test_mixture_preparation_screens_each_training_source(environment, tmp_path)
             {"name": "constraints", "fraction": 0.5, **source},
         ]
     }
-    with pytest.raises(InputError, match="source-constraints row 1:.*lowercase_counting_tiny_n"):
+    with pytest.raises(InputError, match="source-constraints row 1:.*letter_counting_tiny_less_than"):
         prepare(environment, data)
     assert not environment[1].exists()

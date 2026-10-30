@@ -70,19 +70,20 @@ immutable prepared data on resume. It does not remove rows automatically or
 change held-out datasets. A rejected historical preparation needs an explicitly
 cleaned input and a new run root.
 
-The screen rejects lowercase-word caps of three or fewer, letter-count limits
-of fewer than two or three letters (also fewer than one), and missing or invalid
-arguments for these checks. Such tiny caps reward uppercase, numeric, or
-non-Latin answers without establishing whether they answer the request. It also
-rejects missing or invalid paragraph counts/indices and first words, including
-indices beyond the declared paragraph count. The paragraph checker itself now
-fails explicit invalid ranges deterministically rather than drawing a new index.
-It also ignores empty segments consistently when counting and indexing paragraphs;
-leading or repeated blank lines can therefore change scores for valid targets,
-including held-out IFEvalG scoring.
-These are targeted training-data rules, not a complete quality or relevance
-check; admitting a row does not certify it. Larger count limits keep their
-existing semantics. Explicit response-language constraints remain supported.
+These training-data safeguards complement the checker corrections in
+[fix-ifevalg-checkers (#2124)](https://github.com/allenai/open-instruct/pull/2124) and depend on its
+lowercase-counting semantics: `N` caps repetitions of each lowercase word, so
+positive limits, including two and three, are admitted.
+
+The screen rejects malformed constraint bundles; missing, noninteger or
+nonpositive `N` for lowercase and total-letter counting; invalid total-letter
+relations; and total-letter `less than` limits with `N <= 3`. Such tiny total-letter
+limits encourage answers with almost no letters. It also rejects missing or
+invalid paragraph counts/indices and first words, including indices beyond the
+declared paragraph count. These rules apply only to training admission and do
+not change checkers, held-out data or scoring. They are not a complete quality or
+relevance check; admitting a row does not certify it. Explicit response-language
+constraints remain supported.
 
 Audit a prepared JSONL file before changing the training mixture:
 

@@ -1,9 +1,9 @@
 """Parse IFEval targets and screen known unsuitable IF training constraints.
 
 This training admission policy leaves evaluation scoring and other constraint
-families, including explicit multilingual constraints, alone. The N<=3 cutoff is
-the audited tiny-limit training policy; admitting larger limits or other constraint
-families does not establish that their targets or grading are correct.
+families, including explicit multilingual constraints, alone. The N<=3 cutoff
+applies only to total-letter "less than" limits; positive lowercase per-word
+repetition caps are admitted. Admission does not certify target or grading quality.
 """
 
 import ast
@@ -73,8 +73,6 @@ def if_training_issues(target) -> list[str]:
         if instruction_id == "count:lowercase_counting":
             if not _positive_integer(args.get("N")):
                 issues.append("lowercase_counting_invalid_n")
-            elif args["N"] <= 3:
-                issues.append("lowercase_counting_tiny_n")
         elif instruction_id == "letters:letter_counting":
             if not _positive_integer(args.get("N")):
                 issues.append("letter_counting_invalid_n")
