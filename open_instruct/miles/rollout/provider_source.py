@@ -35,6 +35,16 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = prompt_provider.ShuffledPromptProvider(
                 self.dataset, shuffle=bool(getattr(args, "rollout_shuffle", False))
             )
+        self._sync_legacy_cursor()
+
+    def _sync_legacy_cursor(self):
+        # These compatibility fields describe fresh-data traversal, not reviews.
+        provider = (
+            self.provider.base if isinstance(self.provider, remind_provider.ReMindPromptProvider) else self.provider
+        )
+        if isinstance(provider, prompt_provider.ShuffledPromptProvider):
+            self.epoch_id = provider.epoch_id
+            self.sample_offset = provider.sample_offset
 
     def get_samples(self, num_samples: int) -> list[list[Sample]]:
         if type(num_samples) is not int or num_samples < 0:
@@ -70,10 +80,7 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             if provider_state is not None:
                 self.provider.load_state_dict(provider_state)
             raise
-        if isinstance(self.provider, prompt_provider.ShuffledPromptProvider):
-            # Preserve the legacy cursor fields for existing checkpoint readers.
-            self.epoch_id = self.provider.epoch_id
-            self.sample_offset = self.provider.sample_offset
+        self._sync_legacy_cursor()
         return groups
 
     def load(self, rollout_id=None):
@@ -95,3 +102,6 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
         for key in ("epoch_id", "sample_offset", "sample_group_index", "sample_index", "metadata"):
             if key in state:
                 setattr(self, key, state[key])
+        # Provider state is authoritative, including in older ReMind checkpoints
+        # whose top-level cursor fields were left at zero.
+        self._sync_legacy_cursor()

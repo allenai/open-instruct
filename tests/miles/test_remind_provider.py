@@ -7,6 +7,7 @@ import json
 
 import pytest
 import test_prompt_provider
+import torch
 from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyDataBuffer
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
@@ -192,6 +193,46 @@ def scored(group, rewards):
         sample.metadata.update(verifiers=[{"name": "math"}], verifier_diagnostics={"math": {"status": "ok"}})
         sample.weight_versions = [WeightVersionsPerCall([WeightVersionSpan("1", 1, 2)])]
     return DataBufferInput(prompt_group=group, group=group)
+
+
+def test_legacy_cursor_tracks_fresh_draws_and_repairs_old_checkpoint(args, tmp_path):
+    setup_remind(args, tmp_path)
+    source = DashboardDrainingRolloutDataSource(args)
+    try:
+        fresh = source.get_samples(12)  # Cross the 11-row dataset boundary.
+        source.feedback([feedback(fresh[0][0]) | {"group_index": fresh[0][0].group_index}])
+        source.acknowledge_groups(fresh)
+        delegate = source._delegate
+        assert (delegate.epoch_id, delegate.sample_offset) == (1, 1)
+        review = source.get_samples(1)
+        assert review[0][0].prompt == fresh[0][0].prompt
+        assert (delegate.epoch_id, delegate.sample_offset) == (1, 1)
+        source.add_samples(review)
+        assert test_prompt_provider.payload(source.get_samples(1)) == test_prompt_provider.payload(review)
+        assert (delegate.epoch_id, delegate.sample_offset) == (1, 1)
+        source.save(0)
+        path = tmp_path / "rollout" / "global_dataset_state_dict_0.pt"
+        state = torch.load(path, weights_only=True)
+        assert (state["epoch_id"], state["sample_offset"]) == (1, 1)
+        base = state["prompt_provider"]["base"]
+        assert (state["epoch_id"], state["sample_offset"]) == (base["epoch_id"], base["sample_offset"])
+        state.update(epoch_id=0, sample_offset=0)  # Older ReMind checkpoint mirrors.
+        torch.save(state, path)
+    finally:
+        source.close()
+
+    args.load, args.start_rollout_id = args.save, 1
+    restored = DashboardDrainingRolloutDataSource(args)
+    try:
+        restored.load(0)
+        assert restored._delegate.provider.state_dict() == state["prompt_provider"]
+        assert (restored._delegate.epoch_id, restored._delegate.sample_offset) == (1, 1)
+        restored.save(1)  # Correct even before any new draws.
+        saved = torch.load(tmp_path / "rollout" / "global_dataset_state_dict_1.pt", weights_only=True)
+        assert (saved["epoch_id"], saved["sample_offset"]) == (1, 1)
+        assert test_prompt_provider.payload(restored.get_samples(1)) == test_prompt_provider.payload(review)
+    finally:
+        restored.close()
 
 
 def test_real_filtered_feedback_and_pending_resume(args, tmp_path):
