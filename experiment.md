@@ -1099,3 +1099,43 @@ It does not stop or allocate jobs. W&B internal_step is not optimizer progress.
 - Heartbeat `hybrid-training-progress-and-stalls` checks every10minutes and flags
   twenty minutes without actual optimizer/generation/eval progress; it also
   reports controller failure. Monitoring is observational; it cannot resubmit.
+
+
+## Fresh 450m MILES run in personal W&B project (2026-10-30)
+
+Status: PREPARED (not submitted yet).
+
+User requested a new MILES run from scratch logging to `mnoukhov`.
+Reuse qualified image `01M607Z48PYPNN0KHVZ5PGYJEG` and the previous450m
+MILES recipe. Change only run/output identity and W&B entity/group:
+`hybrid-450m-miles-mnoukhov-20261030`,
+`mnoukhov/open_instruct_internal`, group matching the new run name.
+No old RL checkpoint/optimizer or attempt ledger is reused. Model initialization
+remains final450m midtrain `step0038147`.
+
+Resource/recipe: two A6000s on ai2/rhea (one native OLMo-core learner, one SGLang
+inference), BF16/FA2,500 updates,4 prompts x4 samples, lr1e-6, PPO clip0.2/0.272,
+max policy lag1/TIS, eval/native checkpoint100, final HF export. Normal/preemptible,
+minRuntime0, autoResume=true, three retries,24h per attempt,128GiB host RAM,
+32GiB shared memory, workspace ai2/open-instruct-dev, budget ai2/oe-other.
+Preemption can consume the MILES restart ledger even after productive attempts;
+preserve the existing three-retry bound. W&B entity is corrected; existing runtime
+still creates separate W&B runs on restart. No resume-identity source change.
+
+Config: `/home/mnoukhov/open-instruct-miles-hybrid/runs/hybrid-450m-miles-mnoukhov-20261030.toml`
+(ignored individual run file, frozen into submitted Beaker payload/receipt).
+SHA256: `166e7b7eee31781ac1c93df4fe8272a80d45ec8fb93b68d27482330d4c947667`.
+Submission source: companion branch `codex/hybrid-mainline`, commit `07ad70fd3`.
+Runtime image source `3f0933565`; only later runtime-path difference is the local
+launcher retry-field fix, used when rendering this submission. Training code and
+runtime are unchanged. Plan/validate passed;96 focused recipe/launch tests passed.
+
+Launch through the committed wrapper in the companion checkout:
+`MILES_EXISTING_IMAGE=01M607Z48PYPNN0KHVZ5PGYJEG ./scripts/train/build_image_and_launch.sh --miles runs/hybrid-450m-miles-mnoukhov-20261030.toml`.
+
+The prior four-GPU Core/vLLM reference completed500 updates with17.287% final
+GSM8K Platinum accuracy vs3.970% initially, checkpoint500 and final export saved,
+exit0. Its one preemption restored nativecheckpoint100 and data cursor correctly.
+Reference: https://beaker.org/ex/01M64J9FRG4PYSB6E7WJ739A7F.
+Previous MILES run reached durable200updates and10.670% eval before exhausting
+its restart ledger; this new run targets a complete500-update result.

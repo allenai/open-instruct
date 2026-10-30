@@ -980,3 +980,19 @@ See [the launch batch](experiment.md#fresh-450m-corevllm-restart-on-four-rhea-gp
 - Heartbeat `hybrid-training-progress-and-stalls` checks every10minutes and flags
   twenty minutes without actual optimizer/generation/eval progress; it also
   reports controller failure. Monitoring is observational; it cannot resubmit.
+
+
+## Fresh 450m MILES run in personal W&B project (2026-10-30)
+
+Status: ACTIVE — prepared for a fresh500-update run.
+
+The earlier comparison used different W&B entities: Core/vLLM logged to
+`mnoukhov/open_instruct_internal`, MILES to `ai2-llm/open_instruct_internal`.
+The Core/vLLM reference is now complete at500updates/17.287% accuracy; previous
+MILES reached durable200updates/10.670% before its restart cap. User requested
+fresh MILES with the same training recipe and personal W&B entity. Keep all
+training/resource parameters and qualified runtime; change only fresh run/output
+identity and tracking entity/group. New checkpoints begin from the original
+450m final-midtrain weights, with a fresh optimizer and data cursor.
+
+See [launch configuration and receipts](experiment.md#fresh-450m-miles-run-in-personal-wb-project-2026-10-30).
