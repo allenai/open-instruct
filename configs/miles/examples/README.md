@@ -42,7 +42,9 @@ Do not launch a template unchanged: model, data, output and judge paths are
 placeholders. Give each run a fresh output directory and keep personal variants
 in ignored `runs/`.
 
-The examples select high priority and Holmes for their B300 profiles. Review
+The examples select Holmes for their B300 profiles. `dev` and `node` use high
+priority; `three-node` uses urgent allocated work in `ai2/olmo-instruct`, where
+the Holmes allocation is available. Review
 cluster access, mounts, GPU allocation, minimum runtime and timeout before
 submission. W&B defaults to offline; set online mode and an API-key secret when
 needed. See the [launch guide](../../../docs/miles/launching.md).
@@ -165,21 +167,27 @@ useful throughput and stale-work discards before increasing the budget.
 The unfinished-sample budget, when omitted, is
 `max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
 rounded to complete prompt groups. The three-node example explicitly uses
-**1,536** unfinished samples as a conservative starting budget. Removing the
+**4,864** unfinished samples (256 per engine) as a candidate throughput budget. Removing the
 explicit limits would give 6,144 for node and 19,456 for three-node. Generic
 64-admission configurations with omitted budgets give
 768 and 2,432 for those topologies. Explicit
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Batch 256 and lag 6 are unchanged. The three-node setting is a bounded starting
-point, not a measured optimum or a guarantee of steady throughput. Full-recipe
+Batch 256 and lag 6 are unchanged. The three-node budget represents 19 batches,
+so the planner warns that it exceeds the policy-lag window. It is headroom, not
+a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.
 Batch-equivalents do not predict actual policy age or drain duration.
 Measure trainer wait, useful throughput, oldest-token age and stale-work discards;
 reduce the producer budget or fleet when production outruns useful consumption.
 Per-engine settings do not qualify a whole fleet's routing, refresh latency or
 learning behavior. See [qualification limits](../../../docs/miles/throughput-profiles.md#qualification-limits).
+
+The three-node candidate also enables CUDA graphs for its single Qwen3-32B judge
+and raises judge concurrency from the default 16 to 32. Qualification is pending:
+check graph startup, long-input memory use, judge errors and grading latency
+alongside useful training throughput and the template's batch-256 policy age.
 
 These templates inherit the disabled optional startup weight snapshot/reset audit
 (`check_weight_update_equal = false`) and explicitly disable periodic score-reuse

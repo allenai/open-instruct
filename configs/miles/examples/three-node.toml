@@ -14,10 +14,10 @@ root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/three-node"
 export_hf = true
 
 [launch]
-workspace = "ai2/open-instruct-dev"
+workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
-priority = "high"
+priority = "urgent"
 min_runtime = "8h"
 timeout = "48h"
 auto_resume = true
@@ -230,9 +230,9 @@ use_rollout_routing_replay = true
 
 [async]
 fully_async = true
-# Bound unfinished work independently of the fleet's reserved serving slots.
-# Tune against useful throughput, trainer wait and stale-work discards.
-async_max_concurrent_samples = 1536
+# Candidate budget: 256 unfinished samples per engine across 19 engines.
+# Qualification pending: monitor trainer wait, policy age and stale-work discards.
+async_max_concurrent_samples = 4864
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
@@ -243,6 +243,8 @@ model = "Qwen/Qwen3-32B"
 revision = "9216db5781bf21249d130ec9da846c4624c16137"
 max_context_length = 131072
 context_extension = "qwen3-yarn-128k"
+cuda_graphs = true
+max_concurrent_calls = 32
 prepared_dir = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/checkpoints/qwen3-32b-judge"
 
 [rubrics.quality]
