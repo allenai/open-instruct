@@ -61,6 +61,62 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
+## Screening instruction-following training data
+
+MILES preparation rejects known unsuitable targets assigned to the built-in
+`IFEvalVerifier` or `ManifestIFVerifier`, including custom registry names for
+those factories. The screen applies to every training source and rechecks
+immutable prepared data on resume. It does not remove rows automatically or
+change held-out datasets. A rejected historical preparation needs an explicitly
+cleaned input and a new run root.
+
+These training-data safeguards complement the checker corrections in
+[fix-ifevalg-checkers (#2124)](https://github.com/allenai/open-instruct/pull/2124) and depend on its
+lowercase-counting semantics: `N` caps repetitions of each lowercase word, so
+positive limits, including two and three, are admitted.
+
+The screen rejects malformed constraint bundles; missing, noninteger or
+nonpositive `N` for lowercase and total-letter counting; invalid total-letter
+relations; and total-letter `less than` limits with `N <= 3`. Such tiny total-letter
+limits encourage answers with almost no letters. It also rejects missing or
+invalid paragraph counts/indices and first words, including indices beyond the
+declared paragraph count. These rules apply only to training admission and do
+not change checkers, held-out data or scoring. They are not a complete quality or
+relevance check; admitting a row does not certify it. Explicit response-language
+constraints remain supported.
+
+Audit a prepared JSONL file before changing the training mixture:
+
+```bash
+python scripts/data/filter_ifeval_constraints.py \
+  --input /path/to/train.jsonl --report /path/to/if-audit.json
+```
+
+To create a cleaned copy, use fresh report/output paths:
+
+```bash
+python scripts/data/filter_ifeval_constraints.py \
+  --input /path/to/train.jsonl --output /path/to/train-clean.jsonl \
+  --report /path/to/if-filter-report.json
+```
+
+The tool supports MILES `metadata.verifiers` and legacy `dataset`/`ground_truth`
+rows, preserves each retained row's bytes and order, and records hashes, reason
+counts and dropped row identities. For custom IF registry names, supply
+`--verifier-name NAME` for each trusted IF name, including `ifeval` if both occur.
+Legacy verifier names are matched case-insensitively, as in their reward router;
+MILES names are matched exactly. Existing files are never overwritten.
+Legacy Core/vLLM and DeepSpeed/vLLM data
+preparation can use the same tool before tokenization; their launchers do not
+apply this MILES admission screen automatically.
+
+The composition checker (`count:counting_composition`) already accepts the
+instructed `* * *` dividers and ignores punctuation-only word tokens; its rows
+are retained by this screen. English-request filtering alone does not remove
+these constraint problems, and neither this screen nor constraint scoring checks
+semantic relevance. Record changed dataset hashes and mixture counts when
+adopting cleaned inputs for a new experiment; keep historical run inputs intact.
+
 ## Fixed allocation from separate source datasets
 
 Replace the run's existing `[data]` section with this example to allocate 90% of

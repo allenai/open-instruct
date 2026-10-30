@@ -35,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Add `--use_cpu_adam` to GRPO to use DeepSpeed's `DeepSpeedCPUAdam` instead of `torch.optim.AdamW`. It requires a DeepSpeed stage and `--deepspeed_offload_optimizer` (the config is rejected otherwise, since `DeepSpeedCPUAdam` only steps CPU parameters), and `--deepspeed_offload_param` now requires `--deepspeed_stage 3` (https://github.com/allenai/open-instruct/pull/1654).
 
 ### Fixed
+- Reject malformed or unsuitable IF training targets during MILES preparation/resume, and add a byte-preserving JSONL audit/filter tool for tiny total-letter limits and invalid paragraph targets (https://github.com/allenai/open-instruct/pull/2126).
 - Reject MILES background evaluation configurations with GPQA tasks, whose `Idavidrein/gpqa` dataset is gated, without an HF_TOKEN secret reference, and document the generic SGLang profile's 64-example serial batches for long safety evaluations (https://github.com/allenai/open-instruct/pull/2111).
 - Preserve sandbox shell resources in the MILES evaluator image and print a bounded olmo-eval log tail when background evaluation fails (https://github.com/allenai/open-instruct/pull/2101).
 - Reject MILES background evaluation configurations that download known gated WildGuard or Gemma judges without an HF_TOKEN secret reference, and include that reference in the full-panel example (https://github.com/allenai/open-instruct/pull/2101).

@@ -17,6 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from open_instruct import ifeval_constraints
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import mixture, synlogic
 from open_instruct.miles.errors import InputError
@@ -256,6 +257,56 @@ def _verify_row(row, tokenizer, limit, known):
         raise InputError("Prepared prompt token IDs differ under this tokenizer/template")
     metadata["run_prompt_tokens"] = len(ids)
     metadata["run_prompt_token_ids_sha256"] = _sha(_encoded(ids))
+
+
+# Identify the implementation, not the user-chosen registry name. Legacy
+# ifeval_old targets use a different schema and are outside this screen.
+_IF_FACTORIES = frozenset(
+    {
+        "open_instruct.ground_truth_utils.IFEvalVerifier",
+        "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
+        "open_instruct.miles.datasets.run_data.ManifestIFVerifier",
+        "open_instruct.miles.run_data.ManifestIFVerifier",
+    }
+)
+
+
+def _if_verifier_names(known):
+    return {
+        name
+        for name, spec in known.items()
+        if (spec.get("factory") if isinstance(spec, dict) else spec) in _IF_FACTORIES
+    }
+
+
+def _verify_if_training_row(row, names):
+    for verifier in row["metadata"]["verifiers"]:
+        if verifier["name"] not in names:
+            continue
+        issues = ifeval_constraints.if_training_issues(verifier["target"])
+        if issues:
+            identity = row["metadata"].get("prepared_sample_id", "unknown sample")
+            raise InputError(
+                f"Unsafe IF training target for {identity} ({verifier['name']}): {', '.join(issues)}. "
+                "Audit/filter with scripts/data/filter_ifeval_constraints.py, then use the cleaned file "
+                "in a new run root; existing training data is never filtered in place."
+            )
+
+
+def _verify_resumed_if_training_data(result):
+    registry = _read_json_object(result["reward_config"], {})
+    names = _if_verifier_names(registry)
+    if not names:
+        return
+    for path in result.get("train_sources", [result["prompt_data"]]):
+        with Path(path).open() as stream:
+            for index, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
+                try:
+                    _verify_if_training_row(json.loads(line), names)
+                except InputError as error:
+                    raise InputError(f"{path}: training row {index}: {error}") from error
 
 
 def _adopt(data, tokenizer, template, inputs):
@@ -537,11 +588,15 @@ def prepare_data(
         for filename, digest in validation.mapping(manifest["outputs"], f"{manifest_path}: outputs").items():
             if _sha(_read(output / filename, {})) != digest:
                 raise InputError(f"Prepared artifact changed: {filename}")
-        return _required_mapping(
+        result = _required_mapping(
             manifest["result"],
             f"{manifest_path}: result",
             ("prompt_data", "eval_prompt_data", "reward_config", "manifest"),
         )
+        # Older preparations may predate the constraint screen. Keep their bytes
+        # immutable, but do not silently bypass validation on resume.
+        _verify_resumed_if_training_data(result)
+        return result
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template
     training = ["train"]
@@ -554,6 +609,7 @@ def prepare_data(
             {name: {"factory": factory} for name, factory in FACTORIES.items()} if registry is None else registry
         ) | registry_overrides
     known = registry if registry is not None else FACTORIES
+    if_verifiers = _if_verifier_names(known)
     if not all(partitions.get(split) for split in training):
         raise InputError("Preparation requires nonempty training data")
     train_prompts, eval_prompts = set(), set()
@@ -569,6 +625,8 @@ def prepare_data(
                             if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
                                 judging.require_binding(name, registry_overrides, known.get(name))
                 _verify_row(row, tokenizer, max_prompt_length, known)
+                if split in training:
+                    _verify_if_training_row(row, if_verifiers)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
             (train_prompts if split in training else eval_prompts).add(row["input"])
