@@ -119,6 +119,7 @@ elif [[ "$MODE" == smoke ]]; then
     REFCE=$(gzip -9c "$HERE/h161_refce.py" | base64 | tr -d '\n')
     # Replica 0 runs the HF reference after training exits, on GPU 0, as H134's run_gpu.sh does on B300
     # (cu130 torch, a CUDA 13 ptxas for triton). A failed training still gets its reference if every rank dumped.
+    # Exit: training's code if it failed; else 4 if the reference failed, 5 if a rank dump is missing.
     CMD="set -uo pipefail
 printf %s '$WRAP' | base64 -d | gunzip > /tmp/h161_smoke_wrap.py
 printf %s '$REFCE' | base64 -d | gunzip > /tmp/h161_refce.py
@@ -142,7 +143,10 @@ if [ \"\$BEAKER_REPLICA_RANK\" = 0 ]; then
       echo PTXAS \$PX; export TRITON_PTXAS_PATH=\$PX
     fi
     cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index \$IDX --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==4.57.6 --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json
-    echo H161-REFCE-EXIT \$?
+    RR=\$?; echo H161-REFCE-EXIT \$RR
+    [ \"\$RC\" = 0 ] && [ \"\$RR\" != 0 ] && RC=4
+  else
+    [ \"\$RC\" = 0 ] && RC=5
   fi
 fi
 exit \$RC"
