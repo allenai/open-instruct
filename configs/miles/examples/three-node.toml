@@ -225,6 +225,12 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
+# Rust response transport; Core owns request retries and weight-ready membership.
+use_miles_router = false
+router_policy = "round_robin"
+router_disable_retries = true
+router_disable_health_check = true
+router_disable_circuit_breaker = true
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 

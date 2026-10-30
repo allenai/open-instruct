@@ -38,7 +38,6 @@ def test_refresh_is_explicit_and_compiles_into_core_config():
         ({"fully_async": False}, "fully_async"),
         ({"use_tis": False}, "use_tis"),
         ({"use_rollout_logprobs": True}, "use_rollout_logprobs"),
-        ({"use_miles_router": False}, "use_miles_router"),
         ({"rollout_num_gpus_per_engine": 2}, "TP1"),
         ({"use_fault_tolerance": True}, "use_fault_tolerance"),
         ({"rollout_temperature": 0.7}, "temperature"),

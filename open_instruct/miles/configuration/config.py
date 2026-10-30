@@ -279,6 +279,15 @@ class RunConfig:
     def resolved_miles(self) -> dict[str, Any]:
         """Resolve the default group filter for plans, native argv and direct CLI callers."""
         options = cli_options.normalize_options(self.miles)
+        if not options.get("use_miles_router", False):
+            # Core owns request retries and weight-ready membership. Refuse
+            # conflicting overrides rather than silently restoring serving defaults.
+            for name in ("router_disable_retries", "router_disable_health_check", "router_disable_circuit_breaker"):
+                if options.get(name) is False:
+                    raise constraints.error(f"Core Rust routing requires miles.{name}=true")
+                options[name] = True
+            if not options.get("sglang_router_policy"):
+                options.setdefault("router_policy", "round_robin")
         if self.core.fp32_lm_head:
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
@@ -490,11 +499,9 @@ class RunConfig:
                 raise constraints.error(
                     f"Core RL has no implementation for miles.{name}", constraints.Category.NOT_IMPLEMENTED
                 )
-        if options.get("use_rollout_routing_replay", False) and not options.get("use_miles_router", False):
-            raise constraints.NATIVE_CONSTRAINTS["use_rollout_routing_replay"].error()
         if self.core.replay_diagnostics and not options.get("use_rollout_routing_replay", False):
             raise constraints.error(
-                "core.replay_diagnostics requires rollout routing replay; set miles.use_rollout_routing_replay=true and miles.use_miles_router=true, or disable replay_diagnostics."
+                "core.replay_diagnostics requires rollout routing replay; set miles.use_rollout_routing_replay=true, or disable replay_diagnostics."
             )
         if options.get("fully_async", False):
             if options.get("colocate", False) or options.get("offload_rollout", False):
@@ -587,8 +594,6 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
-        if not options.get("use_miles_router", False):
-            raise constraints.error("refresh requires miles.use_miles_router=true to retain policy-span metadata")
         if not options.get("use_tis", False) or options.get("use_rollout_logprobs", False):
             raise constraints.error("refresh requires miles.use_tis=true and miles.use_rollout_logprobs=false")
         if options.get("advantage_estimator", "grpo") != "grpo":

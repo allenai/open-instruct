@@ -61,7 +61,8 @@ It is not a sum of independently balanced response losses.
 
 ## Router replay and parallelism
 
-Enable both `use_rollout_routing_replay=true` and `use_miles_router=true`. The
+Enable `use_rollout_routing_replay=true`. Core uses the standard Rust router by
+default; the pinned router preserves expert IDs and policy-version spans. The
 captured IDs travel with each sample through DP distribution and packing. The
 adapter aligns replay by document/token/layer and retains it across backward
 recomputation. Each sample's final unscored token has an explicit synthetic tail;
