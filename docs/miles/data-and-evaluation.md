@@ -97,6 +97,8 @@ Source names are unique, fractions are positive and must sum to 1 (roundoff
 tolerance 1e-9), and seed/shuffle are shared at the outer data level. Nested
 mixtures and per-source seed/shuffle overrides are rejected. Changing the mix
 requires a new run root, as with other immutable preparation changes.
+The mixture loader requires pre-rendered text: runtime `apply_chat_template`
+must be false and `multimodal_keys` must be unset for consistent source loading.
 
 Preparation writes separate `prepared/data/source-<name>.jsonl` files, a merged
 `verifiers.json`, and `mixture.json` containing source fractions, row counts and

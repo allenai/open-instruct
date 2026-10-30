@@ -86,6 +86,10 @@ class MixturePromptProvider:
 
 def load(args, first_dataset):
     """Read prepared source files independently and pin checkpoint identity to the manifest."""
+    if args.apply_chat_template or args.multimodal_keys is not None:
+        raise ValueError(
+            "Mixture sources require pre-rendered text: apply_chat_template must be false and multimodal_keys must be None"
+        )
     path = Path(args.olmo_core.prompt_mixture)
     raw = path.read_bytes()
     manifest = json.loads(raw)

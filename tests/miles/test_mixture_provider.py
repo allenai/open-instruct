@@ -19,6 +19,7 @@ from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput
 from miles.utils import inference_records
 
 from open_instruct.miles.datasets import recording
+from open_instruct.miles.rollout import mixture_provider
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 from open_instruct.miles.rollout.provider_source import ProviderRolloutDataSource
 
@@ -63,6 +64,14 @@ def setup(args, fractions=(0.8, 0.2)):
 
 def selected(source, n):
     return [group[0].to_dict() for group in source.get_samples(n)]
+
+
+@pytest.mark.parametrize("template, multimodal", [(True, None), (False, {"image": "images"}), (False, {})])
+def test_loader_rejects_runtime_prompt_transforms_before_reading_sources(args, template, multimodal):
+    args.apply_chat_template = template
+    args.multimodal_keys = multimodal
+    with pytest.raises(ValueError, match="Mixture sources require pre-rendered text"):
+        mixture_provider.load(args, first_dataset=None)
 
 
 def test_proportions_chunking_and_per_source_without_replacement(args):
