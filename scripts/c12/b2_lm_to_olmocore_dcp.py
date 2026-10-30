@@ -91,8 +91,9 @@ def main():
 
     # Re-read from the written DCP and compare bit-for-bit with the source tensors.
     numel_total = int(sum(v.numel() for v in sd.values()))
-    back = {k: torch.empty_like(v) for k, v in sd.items()}
-    del sd
+    shapes_dtypes = {k: (v.shape, v.dtype) for k, v in sd.items()}
+    del sd  # free before allocating the re-read buffers: peak one fp32 copy (~50 GB), not two
+    back = {k: torch.empty(s, dtype=d) for k, (s, d) in shapes_dtypes.items()}
     dcp.load(back, storage_reader=dcp.FileSystemReader(dcp_dir), no_dist=True)
     with safe_open(st_path, framework="pt") as f:
         bad = [n for n, k in kept.items()
