@@ -215,6 +215,10 @@ if a rule needs every step's value, stream that pod with `kubectl logs -f` from 
 - After a preemption, JobSet restarts the run from the last checkpoint, on the same overlay. A resume replays the data
   pipeline to the restored step at ~1.4 s per skipped batch, which is hours late in a run. Resume only on the
   restore-fix image (step 1).
+- `image-olmo35-fs/` adds a spawned worker pool for the SFT chat-template map, on with
+  `MAXTEXT_SFT_TEMPLATE_WORKERS=32` (unset, the pipeline is unchanged). It produces the same batches: 10,000 rows
+  identical on CPU, across an epoch boundary too, and on TPU 2,144 of 2,144 batch hashes and steps 61-66 CE equal a
+  serial resume. The map runs ~10x faster on CPU; the pool costs ~4-6 min to start in each run.
 
 ## 7. Export to HF and evaluate
 
