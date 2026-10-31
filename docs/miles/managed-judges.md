@@ -184,3 +184,12 @@ Quarantine remains sticky until explicit worker registration; HTTP recovery alon
 cannot prove an engine has current policy weights. Registration epochs reject
 late probe results from retired incarnations. Engine replacement is untested,
 and this does not enable fault tolerance.
+
+Core-owned Rust membership tracks every `engine@rank` identity when inference DP
+attention is enabled, requires all expected ranks to be healthy, and removes
+them through the parent registration ID before allowing replacement. This
+control-plane path is tested on CPU against the pinned Rust binary at DP1 and
+DP2; it is not a GPU qualification of DP attention. If the DP registration
+acknowledgement is lost, the pinned API cannot recover the parent ID from its
+rank list. Registration and disposal fail closed with an explicit router-restart
+error rather than reposting registration or deleting unverified identities.

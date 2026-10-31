@@ -482,7 +482,7 @@ behavior-policy drift measurements. Use the separate `train/behavior/*` metrics:
 | `rollout/fully_async/completed_queue/*` | Delivered/dropped samples and tokens, with discard fractions by response length and oldest group age. |
 | `rollout/fully_async/*staleness*`, `*generation_version_span*` | Oldest/newest version ages, token-weighted lag and generation version spans. These are policy-update ages, not wall-clock durations. |
 | `train/allocator/rank_*/*` | Allocated, reserved, peak-reserved and inactive-split bytes, plus allocation-retry and OOM counter deltas for each update. Global maxima and counter sums are also logged. |
-| `train/run_consumed_response_tokens` | Cumulative active response tokens observed by this trainer process; resets on trainer restart. Use alongside wall time when comparing batch sizes. |
+| `train/run_consumed_response_tokens` | Cumulative active response tokens, persisted with native checkpoints and restored on resume. Legacy checkpoints without this count warn and omit the metric because their prior total is unknown. Use alongside wall time when comparing batch sizes. |
 
 Behavior ESS measures dispersion of token weights, not independent trajectory
 count. Empty buckets report zero tokens; do not interpret their zero-valued

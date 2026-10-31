@@ -397,7 +397,12 @@ def test_transport_failure_logs_request_identity_without_resampling(monkeypatch,
         assert caught.value is failure
         assert len(calls) == 1
         _, payload, kwargs = calls[0]
-        assert kwargs == {"max_retries": 1, "headers": {"x-miles-request-id": payload["rid"]}}
+        assert kwargs == {
+            "max_retries": 1,
+            "headers": {"x-miles-request-id": payload["rid"]},
+            "decode_routed_experts": False,
+            "compact_token_logprobs": True,
+        }
         assert value.rollout_log_probs == original_scores
         assert f"request={payload['rid']} group=0 sample=17" in caplog.text
         assert "delivery=unknown" in caplog.text
