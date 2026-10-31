@@ -422,3 +422,46 @@ mathematical answer; include the timeout rate when interpreting benchmark scores
 For best-effort external olmo-eval jobs and checkpoint-axis W&B curves, see
 [background evaluation](background-evaluation.md). Selecting this mode replaces
 shared-engine evaluation; failed or skipped jobs leave gaps without blocking training.
+
+## Qualified local source catalogs
+
+`python -m open_instruct.miles.datasets.source_catalog` resolves reviewed source
+names to ordinary `[[data.sources]]` blocks. It checks the prepared prompt and
+verifier-registry SHA-256 digests, rejects unqualified names, and requires the
+requested fractions to sum to one. The catalog and reward registries are trusted
+configuration, just like a run file; do not accept them from unreviewed datasets.
+
+```bash
+python -m open_instruct.miles.datasets.source_catalog /path/to/qualified/catalog.json \
+  --source c094-deepmath-103k-math=1.0 --output /tmp/deepmath-data.toml
+```
+
+Use the resulting `[data]` section in a run file, or combine its named source
+blocks with existing prepared sources and set the final fractions. Moving the
+whole catalog directory preserves its relative bundle paths. This does not
+change mixture sampling or introduce another run-file data mode.
+
+A qualified **slice** is not a claim that every row or subtask of its parent
+Hugging Face dataset is ready. Read the catalog's row counts, strata, exclusions,
+and `gpu_exercised` field. The local qualification tools in
+`scripts/data/rl_readiness/` check positive, wrong, empty, and capped responses
+through the real reward registry, then exercise native data preparation, source
+attribution, cursor restoration, and mixed/all-zero group filtering. Their input
+export must come from a reviewed adapter with immutable source provenance and
+existing hygiene receipts.
+
+The optional `candidate_verifiers` factories cover explicit MCQA answer lines,
+formatting-only checks, Countdown arithmetic, named knight/knave assignments,
+structural numeric answers, exact text, and typed JSON answers. MCQA uses a
+prepared `Answer: LETTER` contract; it must not silently replace a source's
+original extraction rules. The JSON-schema factory grades schema conformance,
+not factual content. ReasoningGym uses the pinned optional dependency listed in
+`scripts/data/rl_readiness/requirements.txt`, with explicit family coverage.
+No factory executes code supplied in a dataset or fetches external schema URLs.
+
+The local GPU coverage tool uses one actual prompt per qualified named source,
+four short completions, and a tiny model. It disables zero-variance filtering
+because the random model generally earns zero; the separate controls test the
+real filter. Router auxiliary losses can produce optimizer updates even with
+zero task rewards. This is a training-machinery check, not evidence of learning,
+endpoint transfer, or a recommendation to use four samples in a real run.
