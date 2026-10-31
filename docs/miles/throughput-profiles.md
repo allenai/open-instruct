@@ -466,3 +466,42 @@ and explicit GPU allocation. Minimum runtimes vary by tier; see
 separate CPU scheduling policy. Multi-node auto-resume covers the ordinary
 restart path; forced preemption, and restarts of runs carrying a managed judge,
 are not yet supported paths.
+
+
+## Monitoring lag and batch-size trials
+
+Refresh-mode PPO clipping and PPO ESS compare against the trainer's pre-update
+policy. When that anchor comes from the same training forward, they are not
+behavior-policy drift measurements. Use the separate `train/behavior/*` metrics:
+
+| Metric family | Meaning |
+|---|---|
+| `train/behavior/{all,age/*,length/*}/*` | Globally token-weighted trainer-versus-generating-policy log ratios, absolute-error tails, TIS clipping fractions and unclamped behavior-ratio ESS. Age-zero values include numerical serving/training mismatch. |
+| `train/behavior/length/*/{historical_prefix,latest_forward}/*` | The same diagnostics separately for prefixes generated before the final replay version and the final-version suffix, within each response-length bucket. |
+| `train/collection_score/length_*/mean_abs` | Existing score-difference length buckets, now published to tracking as well as JSON. |
+| `rollout/fully_async/completed_queue/*` | Delivered/dropped samples and tokens, with discard fractions by response length and oldest group age. |
+| `rollout/fully_async/*staleness*`, `*generation_version_span*` | Oldest/newest version ages, token-weighted lag and generation version spans. These are policy-update ages, not wall-clock durations. |
+| `train/allocator/rank_*/*` | Allocated, reserved, peak-reserved and inactive-split bytes, plus allocation-retry and OOM counter deltas for each update. Global maxima and counter sums are also logged. |
+| `train/run_consumed_response_tokens` | Cumulative active response tokens observed by this trainer process; resets on trainer restart. Use alongside wall time when comparing batch sizes. |
+
+Behavior ESS measures dispersion of token weights, not independent trajectory
+count. Empty buckets report zero tokens; do not interpret their zero-valued
+summaries as drift. Absolute-error quantiles are histogram upper bounds, with
+an explicit overflow flag. TIS clamps weights rather than dropping clipped
+tokens. None of these diagnostics modifies the loss or admission rules.
+
+For online trial dashboards, set `tracking.wandb_mode = "online"` and bind
+`launch.secrets.WANDB_API_KEY` to your existing workspace secret. Confirm the
+run URL and uploaded metrics after startup; offline mode only stores local data.
+For the allocator trial, use
+`miles.train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }`.
+This is applied to trainer workers before CUDA initialization, rather than to
+all engines through `launch.env`.
+
+A trial combining lag 12, batch 1,024 (128 prompts × 8 responses), four completed
+batches and the existing 3,840 unfinished-sample budget tests length survival
+and drift jointly. Four batches retain the previous 4,096-response capacity.
+Capacity divided by batch size is planning headroom, not a hard bound on age:
+sample backfill can retain additional finished siblings and generation latency
+varies. Budget compilation separately and inspect steady-state length survival;
+this combined trial cannot attribute a change to batch size versus lag alone.

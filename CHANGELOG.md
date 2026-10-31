@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Publish refresh behavior-policy drift by token age and response length, plus per-rank allocator observations, through MILES tracking (https://github.com/allenai/open-instruct/pull/2121).
 - Ship Core refresh per-token logprob records from distributed HTTP workers as flat arrays instead of one Python list per token, and give the three-node template a full trainer node (8 GPUs, EP8) with 15 engines (https://github.com/allenai/open-instruct/pull/2121).
 - Decode Core refresh routing replay in distributed HTTP workers, retaining producer validation and separate decode timings; increase the three-node completed buffer to eight batches (https://github.com/allenai/open-instruct/pull/2121).
 - Remove producer admission handshakes from MILES Core refresh publication, retaining engine synchronization and explicitly cancelling outstanding generation on run failure (https://github.com/allenai/open-instruct/pull/2121).
