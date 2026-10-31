@@ -233,6 +233,6 @@ def test_cache_fingerprints_packaged_application_root(tmp_path):
     if not lock_path.exists():
         lock_path = root / "runtime/miles/runtime.lock.json"
     assert args.olmo_core_startup_cache["runtime_lock"] == json.loads(lock_path.read_text())
-    assert args.olmo_core_startup_cache["sources"]["open-instruct"] == startup_cache.cache.source_identity(
+    assert args.olmo_core_startup_cache["sources"]["open-instruct"] == startup_cache.cache.core_application_source(
         root / "open_instruct"
     )

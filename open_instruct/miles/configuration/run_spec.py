@@ -412,6 +412,7 @@ class RunSpec:
             validation.mapping(launch[key], f"launch.{key}")
             if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in launch[key]):
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
+        validation.ray_cpus(launch["env"])
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         if launch["cluster"] in COMPAT_DRIVER_CLUSTERS and "LD_LIBRARY_PATH" not in launch["secrets"]:
@@ -735,8 +736,6 @@ class RunSpec:
         )
         miles.setdefault("global_batch_size", miles["rollout_batch_size"] * miles["n_samples_per_prompt"])
         miles.setdefault("sglang_max_total_tokens", max(524288, miles["sglang_max_running_requests"] * length))
-        if miles.get("use_rollout_routing_replay"):
-            miles.setdefault("use_miles_router", True)
         if controls.get("policy_drift_action", ("fail", ""))[0] != "fail":
             raise InputError("policy_drift_action=warn is not implemented by Core; select fail")
         correction = controls.get("off_policy_correction", ("tis", ""))[0]

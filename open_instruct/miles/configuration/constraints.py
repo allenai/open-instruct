@@ -113,9 +113,6 @@ NATIVE_CONSTRAINTS = {
         "Async Core training requires resident disaggregated rollout engines; set miles.colocate=false and miles.offload_rollout=false.",
         Category.NOT_IMPLEMENTED,
     ),
-    "use_rollout_routing_replay": Constraint(
-        "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
-    ),
 }
 
 # Structured migration errors are distinct from native backend restrictions.

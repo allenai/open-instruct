@@ -43,6 +43,7 @@ def _actor(root, ep):
     worker.model_config = SimpleNamespace(as_config_dict=lambda: {"test": "unchanged"})
     worker.hf_config = SimpleNamespace(to_dict=lambda: {})
     worker.clock = PolicyClock()
+    worker._observed_response_tokens = 0
     worker.train_module = object()
     worker.lr_scheduler = SimpleNamespace(load_state_dict=mock.Mock(), state_dict=lambda: {"last_epoch": 0})
     return worker

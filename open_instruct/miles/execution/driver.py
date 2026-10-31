@@ -69,8 +69,11 @@ async def train(args, *, export_hf=None):
             learner, _ = await placement_group.create_training_models(args, manager)
 
         async def publish(rollout_id=None):
-            if args.fully_async:
-                await manager.core_publication_boundary(True, **({"refresh": True} if refresh else {}))
+            # Refresh safety belongs to the engine pause/update/resume boundary.
+            # Producer admission acknowledgments can queue behind response work;
+            # existing requests already cross publication without this group gate.
+            if args.fully_async and not refresh:
+                await manager.core_publication_boundary(True)
             if args.offload_rollout:
                 await inference.onload_weights()
             await infra_timeouts.wait_for(
@@ -106,8 +109,8 @@ async def train(args, *, export_hf=None):
                 )
             if args.offload_rollout:
                 await inference.onload_kv()
-            if args.fully_async:
-                await manager.core_publication_boundary(False, **({"refresh": True} if refresh else {}))
+            if args.fully_async and not refresh:
+                await manager.core_publication_boundary(False)
 
         with stage(args, "initial_publication"):
             await publish()
@@ -264,7 +267,11 @@ async def train(args, *, export_hf=None):
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
-                lambda: manager.core_publication_boundary(True),
+                # A failed refresh can leave engines paused or partly updated.
+                # Cancel owned work instead of waiting for it to generate more.
+                lambda: manager.core_publication_boundary(
+                    True, **({"abort": True} if refresh and failure is not None else {})
+                ),
                 (
                     args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
                     if rolling or refresh
