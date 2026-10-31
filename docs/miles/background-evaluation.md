@@ -196,7 +196,9 @@ Native tasks use `batching.chunk_size = "auto"`. For a qualified profile,
 olmo-eval derives a sequence budget from the running engine's capacity (requested
 512, reduced if the engine reports a lower limit). This counts expanded samples:
 pass@32 uses at most 16 prompts for a 512-sequence budget, rather than 512 prompts.
-Explicit task harness overrides still win. Inspect the resolved settings in
+With `profile = "generic"`, automatic batching falls back to 64 examples unless
+a batch-sequence budget is explicitly supplied. Qualified profiles use their
+capacity recommendation instead. Explicit task harness overrides still win. Inspect the resolved settings in
 `runtime/sglang-profile-*.json` in each task attempt.
 
 This removes the generic fallback's 64-example default, but the pinned native
@@ -354,7 +356,14 @@ The pinned runtime can enter a Mamba-buffer path without an allocated buffer for
 those models: a tiny full-attention MoE check failed with caching enabled and
 passed with `disable_radix_cache = true`. Keep that workaround when manually
 configuring those models; it is not a reason to disable the hybrid model's profile.
-For SciCode, remove `external_server_args` to use the same typed profile settings.
+For SciCode, existing configs with `external_server_args` must either remove
+them to use the same typed profile settings, or explicitly select
+`provider_kwargs.profile = "generic"` to retain the manual CLI server. Omitting
+the profile now fails planning when those CLI arguments are present. The typed
+SciCode path accepts serving options and the `max_model_len`/`max_concurrency`
+aliases; native-provider-only options `add_bos_token`, `prompt_format` and
+`force_download` are rejected at planning time. Use a separate native-only
+evaluation configuration if those provider features are required.
 The checkpoint, tokenizer,
 model registration and GPU allocation remain owned by MILES. Task overrides
 cannot change the policy provider. Native SGLang supports generation, not tools

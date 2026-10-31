@@ -77,7 +77,7 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    Both producer and HTTP capacity need headroom: raising only one leaves the
    other as a bottleneck. Two waves are a starting point, not a measured guarantee
    of full occupancy; monitor response latency, host memory and stale work.
-   The examples explicitly limit unfinished samples to 1,024 for node and 1,536
+   The examples explicitly limit unfinished samples to 1,024 for node and 3,840
    for three-node. These bounded starting points do not guarantee full engine
    occupancy or steady throughput. Explicit budgets win.
    Larger fleets can produce much more work than the
@@ -258,10 +258,11 @@ supplies the trainer fast enough; the advisory alone is not a reason to raise it
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to
 whole groups (or one collection, whichever is larger). The examples explicitly
-use 1,024 unfinished samples for node and 1,536 for three-node. Without those
-limits their presets would resolve to 6,144 and 19,456 respectively.
-Generic configurations with omitted budgets give 768/2,432 for those topologies.
-Explicit budgets win. Batch 256 and lag 6 are unchanged. One full wave across six
+use 1,024 unfinished samples for node and 3,840 for three-node. Without those
+limits their presets would resolve to 6,144 and 15,360 respectively.
+Generic configurations with omitted budgets give 768/1,920 for those topologies.
+Explicit budgets win. Node uses batch 256; three-node uses batch 512. Both use
+lag 6. One full wave across six
 512-slot engines represents 12 batches, but keeping those slots occupied is a
 different objective from keeping the trainer supplied. Neither batch-equivalents
 nor a static lag limit predicts drain time or actual policy age.

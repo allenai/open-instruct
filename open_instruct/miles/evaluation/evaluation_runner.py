@@ -106,14 +106,28 @@ def command(receipt, output):
     return [*args, "--output-dir", str(output), "--save-predictions", "--save-requests"]
 
 
-def serve(receipt, output):
-    """Give SciCode's HTTP policy server the native evaluator's GPU/model profile."""
-    options = dict(receipt["evaluation"]["provider_kwargs"])
-    selector = options.pop("profile", "auto")
-    # Match the native provider's public aliases before passing SGLang options.
+def scicode_server_options(provider_kwargs):
+    """Translate serving aliases and reject options owned by the inline provider."""
+    options = dict(provider_kwargs)
+    unsupported = {"add_bos_token", "prompt_format", "force_download"}.intersection(options)
+    if unsupported:
+        raise ValueError(
+            "SciCode's HTTP server does not accept native-provider-only options: "
+            f"{', '.join(sorted(unsupported))}. Remove them from evaluation.provider_kwargs, "
+            "or use a separate native-only evaluation configuration."
+        )
     for alias, key in (("max_model_len", "context_length"), ("max_concurrency", "max_running_requests")):
         if alias in options:
+            if key in options and options[key] != options[alias]:
+                raise ValueError(f"SciCode serving options {alias} and {key} must agree")
             options[key] = options.pop(alias)
+    return options
+
+
+def serve(receipt, output):
+    """Give SciCode's HTTP policy server the native evaluator's GPU/model profile."""
+    options = scicode_server_options(receipt["evaluation"]["provider_kwargs"])
+    selector = options.pop("profile", "auto")
     options.update(
         model_path=receipt["checkpoint"],
         tokenizer_path=receipt["checkpoint"],
@@ -491,27 +505,28 @@ def run_evaluation_locked(receipt, output):
         # SciCode currently requires VLLMServerProvider; all regular tasks use the inline engine.
         if any(task.get("kind") == "external" for task in pending):
             env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
-            server_args = [
-                sys.executable,
-                "-m",
-                "sglang.launch_server",
-                "--model-path",
-                checkpoint,
-                "--trust-remote-code",
-                "--tokenizer-path",
-                checkpoint,
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "30000",
-                "--tp-size",
-                str(receipt["evaluation"]["gpus"]),
-                *receipt["evaluation"]["external_server_args"],
-            ]
             if not receipt["evaluation"]["external_server_args"]:
                 server_receipt = output / "server-receipt.json"
                 write_json(server_receipt, receipt)
                 server_args = [sys.executable, __file__, "serve", str(server_receipt), "--results", str(output)]
+            else:
+                server_args = [
+                    sys.executable,
+                    "-m",
+                    "sglang.launch_server",
+                    "--model-path",
+                    checkpoint,
+                    "--trust-remote-code",
+                    "--tokenizer-path",
+                    checkpoint,
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "30000",
+                    "--tp-size",
+                    str(receipt["evaluation"]["gpus"]),
+                    *receipt["evaluation"]["external_server_args"],
+                ]
             with (output / "server.log").open("a") as log:
                 server = subprocess.Popen(server_args, env=env, stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 600

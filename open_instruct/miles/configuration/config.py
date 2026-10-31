@@ -285,9 +285,10 @@ class RunConfig:
     inference_profile: dict[str, Any] | None = None
 
     def resolved_miles(self) -> dict[str, Any]:
-        """Resolve the default group filter for plans, native argv and direct CLI callers."""
+        """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
         if not options.get("use_miles_router", False):
+            # Mirror the pinned MILES Core invariant during offline planning.
             # Core owns request retries and weight-ready membership. Refuse
             # conflicting overrides rather than silently restoring serving defaults.
             for name in ("router_disable_retries", "router_disable_health_check", "router_disable_circuit_breaker"):

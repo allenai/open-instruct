@@ -19,6 +19,7 @@ from pathlib import Path
 
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.evaluation import evaluation_runner
 from open_instruct.miles.infrastructure import artifacts as state
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -165,6 +166,11 @@ def parse(value, launch):
                     "Profiled SciCode evaluation uses evaluation.provider_kwargs for serving settings. "
                     "Remove external_server_args, or select profile=generic for a manually configured server."
                 )
+            if not server_args:
+                try:
+                    evaluation_runner.scicode_server_options(kwargs)
+                except ValueError as error:
+                    raise InputError(str(error)) from error
             if name != "scicode":
                 raise InputError("Only scicode external evaluation has a supported artifact validation contract")
             if any(task.get(key) for key in ("generation", "scoring", "harness", "harness_preset")):

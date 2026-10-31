@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 from urllib import request
 
-from open_instruct.miles.configuration import inference_profiles, topology
+from open_instruct.miles.configuration import inference_profiles, topology, validation
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.execution import rendezvous
 from open_instruct.miles.infrastructure import gpu_hardware, infra_timeouts
@@ -226,6 +226,7 @@ class Supervisor:
 
 def run(path):
     spec = RunSpec.load(path)
+    ray_cpus = validation.ray_cpus(os.environ)
     compiled = spec.compile()
     layout = topology.plan(spec, compiled)
     if (Path(spec.output["root"]) / "workflow.json").exists() and not spec.launch["auto_resume"]:
@@ -275,7 +276,14 @@ def run(path):
         ports = iter(free_ports(len(judges) + (6 if address == head else 3)))
         write(
             root / f"placement-{rank}.json",
-            {"address": address, "head": head, "ray_devices": ray_devices, "judge_devices": judges, "layout": layout},
+            {
+                "address": address,
+                "head": head,
+                "ray_devices": ray_devices,
+                "judge_devices": judges,
+                "layout": layout,
+                "ray_cpus": ray_cpus,
+            },
         )
         env = dict(os.environ)
         registry = judging.registry(spec.judges)
@@ -325,7 +333,7 @@ def run(path):
             "--num-gpus",
             str(node["ray_gpus"]),
             "--num-cpus",
-            "32",
+            str(ray_cpus),
             "--disable-usage-stats",
         ]
         ray_command += [

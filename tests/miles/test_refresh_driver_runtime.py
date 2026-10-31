@@ -98,7 +98,8 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure):
     else:
         assert boundaries[0] == ("boundary", True, {})
         assert boundaries[-1] == ("boundary", True, {})
-        assert len(boundaries) == (2 if failure == "initial" else 3 if failure == "training" else 4 if failure else 5)
+        expected_boundaries = {"initial": 2, "training": 3, "update": 4, "timeout": 4, None: 5}
+        assert len(boundaries) == expected_boundaries[failure]
     assert learner.train.await_count == (0 if failure == "initial" else 1)
     assert manager.get.await_count == learner.train.await_count
     for component in (manager, learner, inference):

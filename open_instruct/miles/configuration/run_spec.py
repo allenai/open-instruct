@@ -412,6 +412,7 @@ class RunSpec:
             validation.mapping(launch[key], f"launch.{key}")
             if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in launch[key]):
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
+        validation.ray_cpus(launch["env"])
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         if launch["cluster"] in COMPAT_DRIVER_CLUSTERS and "LD_LIBRARY_PATH" not in launch["secrets"]:

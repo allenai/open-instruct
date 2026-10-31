@@ -129,7 +129,9 @@ enables it. These are recipe choices, not universal runtime defaults.
 Replay is independent: `use_rollout_routing_replay=true` works with the default
 Rust router. Core disables router retries, health recovery, and circuit breakers;
 the controller owns weight-ready membership and the producer owns whole-group
-retries. `use_miles_router=true` remains an explicit Python-router override.
+retries. `use_miles_router=true` remains an explicit Python-router override. Existing replay configs
+that omitted `use_miles_router` now select Rust instead of the former implicit
+Python router. Set `miles.use_miles_router=true` to preserve the previous choice.
 The Megatron `use_routing_replay` option is not the Core switch.
 
 For conditional constraints see [run controls](run-controls.md), [packing](sequence-packing.md),

@@ -102,3 +102,36 @@ def test_scicode_resolves_profile_before_starting_server_and_records_it(tmp_path
         assert saved["selected"] == report["selected"]
         assert saved["effective_options"] == effective
         cleanup.assert_called_once()
+
+
+@pytest.mark.parametrize("key,value", [("add_bos_token", False), ("prompt_format", "chat"), ("force_download", True)])
+def test_scicode_rejects_provider_only_options_but_native_tasks_accept_them(document, key, value):
+    document["evaluation"]["provider_kwargs"][key] = value
+    with pytest.raises(InputError, match="native-provider-only"):
+        RunSpec.from_dict(document)
+    document["evaluation"]["tasks"] = [document["evaluation"]["tasks"][0]]
+    assert RunSpec.from_dict(document).evaluation["provider_kwargs"][key] == value
+
+
+@pytest.mark.parametrize(
+    "alias,key", [("max_model_len", "context_length"), ("max_concurrency", "max_running_requests")]
+)
+def test_scicode_alias_conflicts_fail_planning_and_matching_values_are_accepted(document, alias, key):
+    document["evaluation"]["provider_kwargs"].update({alias: 1024, key: 2048})
+    with pytest.raises(InputError, match="must agree"):
+        RunSpec.from_dict(document)
+    document["evaluation"]["provider_kwargs"][key] = 1024
+    config = RunSpec.from_dict(document).evaluation
+    supplied = dict(config["provider_kwargs"])
+    normalized = evaluation_runner.scicode_server_options(supplied)
+    assert normalized[key] == 1024 and alias not in normalized
+    assert supplied == config["provider_kwargs"]
+
+
+def test_legacy_scicode_cli_requires_explicit_generic_profile(document):
+    document["evaluation"]["provider_kwargs"] = {}
+    document["evaluation"]["external_server_args"] = ["--disable-cuda-graph"]
+    with pytest.raises(InputError, match="Remove external_server_args, or select profile=generic"):
+        RunSpec.from_dict(document)
+    document["evaluation"]["provider_kwargs"] = {"profile": "generic"}
+    assert RunSpec.from_dict(document).evaluation["external_server_args"] == ["--disable-cuda-graph"]

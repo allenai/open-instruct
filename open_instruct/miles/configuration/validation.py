@@ -29,6 +29,14 @@ def integer(value, name, *, minimum=1):
     return value
 
 
+def ray_cpus(env):
+    """Validate Ray's advertised per-node scheduling capacity, not thread count."""
+    value = env.get("OI_MILES_RAY_CPUS", "32")
+    if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]*", value):
+        raise InputError("OI_MILES_RAY_CPUS must be a positive integer string, for example '64'")
+    return int(value)
+
+
 def number(value, name, *, minimum=0, maximum=None, exclusive_min=False, exclusive_max=False):
     try:
         finite = type(value) in (int, float) and math.isfinite(value)

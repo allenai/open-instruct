@@ -174,7 +174,7 @@ Core defaults to the pinned standard SGLang Rust router. It resolves
 `router_disable_retries=true`, `router_disable_health_check=true`, and
 `router_disable_circuit_breaker=true`; conflicting explicit values are rejected.
 The default policy is `round_robin`, and explicit routing-policy settings are
-preserved. The three-node template keeps 4,864 unfinished-sample admission; the
+preserved. The three-node template keeps 3,840 unfinished-sample admission; the
 router migration does not raise GPU batch/cache limits.
 
 The controller registers an engine only after successful weight publication,

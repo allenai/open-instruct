@@ -17,10 +17,11 @@ root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/three-node"
 export_hf = true
 
 [launch]
-workspace = "ai2/olmo-instruct"
+# Select a workspace with an allocation on the chosen cluster before submitting.
+workspace = "ai2/open-instruct-dev"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
-priority = "urgent"
+priority = "high"
 min_runtime = "8h"
 timeout = "48h"
 auto_resume = true
