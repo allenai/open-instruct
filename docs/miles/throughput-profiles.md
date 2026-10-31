@@ -378,6 +378,15 @@ compilation can occur.
 
 ## How the limits interact
 
+Core refresh routing replay is decoded in distributed HTTP workers before Ray
+returns the numeric arrays to the producer. Worker logs separate replay decode
+wall time, thread CPU time, and decoded bytes from JSON parsing. The producer
+still validates replay shape and policy metadata. Decoding remains synchronous
+within each HTTP actor; it does not remove Ray object reconstruction or batch
+preparation from the coordinator. The three-node template's completed buffer
+holds eight optimizer batches (512 groups / 4,096 samples); the policy-lag
+limit remains six, so capacity does not guarantee all queued work stays usable.
+
 | Control | What it limits | External constraint and tuning signal |
 |---|---|---|
 | Trainer GPUs / EP | Model and optimizer distribution, training time | Expert divisibility, model memory, collective bandwidth; compare training time at the same optimization batch. |
