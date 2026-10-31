@@ -17,7 +17,7 @@ jobs:
   launch-experiment:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     defaults:
       run:
         shell: bash -euo pipefail {0}
@@ -60,7 +60,6 @@ jobs:
           declare -A CHANGE_PATTERNS=(
             [dpo_changed]="open_instruct/(dpo|dpo_tune_cache|dpo_utils)\.py"
             [finetune_changed]="open_instruct/finetune\.py"
-            [grpo_changed]="(^|/)Dockerfile$|(^|/)mason\.py$|^open_instruct/"
           )
 
           for OUTPUT_KEY in "${!CHANGE_PATTERNS[@]}"; do
@@ -68,6 +67,18 @@ jobs:
             MATCHED=$(grep -qE "$PATTERN" <<< "$CHANGED_FILES" && echo true || echo false)
             echo "${OUTPUT_KEY}=${MATCHED}" >> "$GITHUB_OUTPUT"
           done
+
+          # grpo_fast.py shares most of its imports with the other trainers, so instead of listing its
+          # dependencies, run the grpo_fast integration test for any open_instruct/ change outside files
+          # grpo_fast.py never imports (grpo.py does import dpo_utils, but this test does not run it).
+          GRPO_ALWAYS="(^|/)Dockerfile$|^(mason\.py|pyproject\.toml|uv\.lock)$|^configs/beaker_configs/|^scripts/train/debug/grpo_integration_test\.sh$"
+          GRPO_UNRELATED="^open_instruct/(miles/|test_|olmo_core_finetune\.py$|numpy_dataset_conversion\.py$|dpo[a-z_]*\.py$|finetune\.py$)"
+          GRPO_RELATED=$(grep -E "^open_instruct/" <<< "$CHANGED_FILES" | grep -vE "$GRPO_UNRELATED" || true)
+          if grep -qE "$GRPO_ALWAYS" <<< "$CHANGED_FILES" || [ -n "$GRPO_RELATED" ]; then
+            echo "grpo_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "grpo_changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Python environment
         uses: actions/setup-python@v5
@@ -138,12 +149,16 @@ jobs:
             fi
 
             EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+            # Recorded as each launches, so the cleanup step can stop it if a later launch fails or the
+            # run is cancelled before the IDs reach the step outputs.
+            echo "$EXPERIMENT_ID" >> "$RUNNER_TEMP/beaker_experiment_ids"
             EXPERIMENT_NAMES+=("$EXPERIMENT_NAME")
             echo "Launched ${EXPERIMENT_NAME} experiment: $EXPERIMENT_ID"
           }
 
           EXPERIMENT_DEFINITIONS=(
-            "grpo|scripts/train/debug/grpo_integration_test.sh|always"
+            "oc_sft|scripts/train/debug/oc_sft_integration_test.sh|always"
+            "grpo|scripts/train/debug/grpo_integration_test.sh|${GRPO_CHANGED}"
             "dpo|scripts/train/debug/dpo/single_gpu.sh|${DPO_CHANGED}"
             "sft|scripts/train/debug/sft_integration_test.sh|${FINETUNE_CHANGED}"
           )
@@ -214,6 +229,7 @@ jobs:
           fi
 
           FAILED_FILE=$(mktemp)
+          ERRORED_FILE=$(mktemp)
           declare -A PIDS
 
           for i in "${!EXPERIMENT_IDS[@]}"; do
@@ -222,16 +238,21 @@ jobs:
 
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
-              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 20m --interval 30s; then
+              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 30m --interval 30s; then
                 EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
                 if [ "$EXIT_CODE" = "0" ]; then
                   echo "  [${EXP_NAME}] ✅ succeeded"
                 else
                   echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
                   echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+                  # A preempted or cancelled job has no exit code; treat it like a timeout.
+                  if [[ "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
+                    echo "${EXP_NAME}" >> "$ERRORED_FILE"
+                  fi
                 fi
               else
-                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout"
+                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout; stopping it"
+                beaker experiment stop "$EXP_ID" || true
                 echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
               fi
             ) &
@@ -256,13 +277,26 @@ jobs:
             done < "$FAILED_FILE"
             echo "failed_experiment_ids=${FAILED_EXP_IDS[*]}" >> $GITHUB_OUTPUT
             echo "failed_experiment_names=${FAILED_EXP_NAMES[*]}" >> $GITHUB_OUTPUT
-            rm -f "$FAILED_FILE"
+            # Experiments that finished with a non-zero exit code, as opposed to ones that never finalized
+            # within the await timeout or were preempted.
+            echo "errored_experiment_names=$(tr '\n' ' ' < "$ERRORED_FILE")" >> $GITHUB_OUTPUT
+            rm -f "$FAILED_FILE" "$ERRORED_FILE"
             exit 1
           fi
 
-          rm -f "$FAILED_FILE"
+          rm -f "$FAILED_FILE" "$ERRORED_FILE"
           echo ""
           echo "✅ All experiments completed successfully!"
+
+      - name: Stop experiments on cancellation or failure
+        # Stopping an experiment that has already finished is a no-op.
+        if: cancelled() || failure()
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          if [ -s "$RUNNER_TEMP/beaker_experiment_ids" ]; then
+            beaker experiment stop $(cat "$RUNNER_TEMP/beaker_experiment_ids") || true
+          fi
 
       - name: Check image
         if: success()
@@ -275,7 +309,9 @@ jobs:
           docker run --rm "$IMAGE"
 
       - name: Push CUDA 12 images to Beaker
-        if: success()
+        id: push-cuda12
+        # A manual dispatch from a branch tests the workflow without replacing the published images.
+        if: success() && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main')
         env:
           SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
         run: |
@@ -330,8 +366,10 @@ jobs:
           done
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ]; then
+          if [ "${{ job.status }}" = "success" ] && [ "${{ steps.push-cuda12.outcome }}" = "success" ]; then
             echo "✅ **Status:** All experiments completed successfully and CUDA 12 images pushed!" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **Status:** All experiments completed successfully (images not pushed: only merge_group and main publish)" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Status:** Experiments failed or timed out (image not pushed)" >> $GITHUB_STEP_SUMMARY
           fi
@@ -341,9 +379,13 @@ jobs:
         if: failure()
         run: |
           FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
+          ERRORED_EXPERIMENTS="${{ steps.wait.outputs.errored_experiment_names }}"
 
           # Skip Slack notification for timeouts (when experiments didn't finalize in time)
-          if [ -n "$FAILED_EXPERIMENTS" ]; then
+          if [ -n "${ERRORED_EXPERIMENTS// /}" ]; then
+            echo "reason=Experiment failed: ${ERRORED_EXPERIMENTS}" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+          elif [ -n "$FAILED_EXPERIMENTS" ]; then
             echo "is_timeout=true" >> $GITHUB_OUTPUT
             echo "Skipping Slack notification - experiments timed out: ${FAILED_EXPERIMENTS}"
           elif [ "${{ steps.launch.outcome }}" = "failure" ]; then
@@ -390,6 +432,7 @@ jobs:
   publish-cuda13-image:
     name: Publish CUDA 13 image
     needs: launch-experiment
+    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 45
     defaults:
