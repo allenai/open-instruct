@@ -396,12 +396,21 @@ policy-lag limit remains six, so capacity does not guarantee all queued work
 stays usable.
 
 The three-node template gives the trainer a full node (8 GPUs, EP8) and runs
-15 engines plus one judge on the other two. With orchestration stalls removed,
-a 4-GPU trainer became the cycle's limiter while the completed buffer stayed
-full and every engine idled, so GPUs moved from inference to training raise
-the ceiling and GPUs left on inference do not. Watch trainer wait and
-stale-group discards after changing the split; the producer budget is 256
-unfinished samples per engine.
+15 engines plus one judge on the other two. This candidate split was validated
+together with compact token/logprob transport. The
+[preceding EP4 run](https://beaker.org/ex/01M68BB0VMHXJE0SZXK6FYMGF1) and
+[combined EP8 run](https://beaker.org/ex/01M68M0GR6GJXYNEMYG6BSQZ2T) both completed
+32 updates. HTTP-worker-to-producer delivery fell from 41.34 s mean / 164.60 s
+p95 to 0.152 s / 0.218 s with similar response sizes. Across updates 22–32,
+accepted response throughput rose from 26,327 to 33,109 tokens/s; counting all
+32 updates, including early compilation, the gain was about 4%.
+
+The runs changed both transport and placement, and accepted response lengths
+differed. Late-run optimizer time per million model tokens was nearly unchanged
+(16.89 s with EP4 versus 16.64 s with EP8), so this comparison does not establish
+an independent training-efficiency benefit from EP8 or an optimal GPU split.
+Watch trainer wait and stale-group discards after changing the split; the
+producer budget is 256 unfinished samples per engine.
 
 | Control | What it limits | External constraint and tuning signal |
 |---|---|---|

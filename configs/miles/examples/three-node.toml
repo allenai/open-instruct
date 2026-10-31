@@ -1,7 +1,7 @@
 # H1-sized B300 layout: 8 trainer GPUs (EP8, one full node), 15 engines, 1 judge; 3 nodes / 24 GPUs.
-# The trainer bounded the 4-GPU layout once orchestration stalls were removed: the
-# eight-batch buffer stayed full and every engine sat idle. A full trainer node
-# raises that ceiling; 15 engines still outrun it.
+# Candidate split validated together with compact HTTP-worker transport.
+# The combined run improved late-run throughput; the independent benefit of
+# EP8 over EP4 is not established. See docs/miles/throughput-profiles.md.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
 # Setup and workload requirements: configs/miles/examples/README.md
