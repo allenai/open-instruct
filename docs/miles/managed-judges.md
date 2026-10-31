@@ -156,8 +156,19 @@ Core optimizer/publication/replay contracts and retained rollout metadata.
 `driver-RANK.log` and `judge-NAME-RANK.log` stay on WEKA. A successful tiny run must
 include finite optimizer steps, policy refresh and actual judge replies; process
 exit alone is insufficient. Startup controls do not establish judge calibration
-or throughput for a production mixture. The full judged `three-node` combination, 32K
-judged responses and sustained multi-node performance are untested.
+or throughput for a production mixture. The consolidated transport/publication
+configuration completed bounded 32-update judged
+[one-node](https://beaker.org/ex/01M697SGNQ7KH7XCQXJFZ0TB8V) and
+[three-node](https://beaker.org/ex/01M68M0GR6GJXYNEMYG6BSQZ2T) runs on B300;
+these do not establish convergence or sustained long-run performance.
+
+The [H100 judge qualification](https://beaker.org/ex/01M69MF9WRVSQ4WP62FK2YH5GM)
+used two H100 80GB GPUs (TP2), CUDA graphs, concurrency 32 and the 128K YaRN
+context. Both native quality rubrics passed good/bad canaries. All 64 mixed-length
+requests and a roughly 93K-token rendered grading request completed without
+errors or retries. The synthetic requests reuse prefixes, so their latency is
+not representative production throughput. This qualifies the TP2 configuration,
+not a single-H100 placement or judge calibration on the training mixture.
 
 ## Policy-engine health
 

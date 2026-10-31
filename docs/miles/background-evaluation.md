@@ -185,6 +185,13 @@ silently selecting generic settings. Other background configurations default to
 the reason when it falls back. Profiles are model-specific; an H100 or B300 alone
 does not qualify an arbitrary model.
 
+Bounded [H100](https://beaker.org/ex/01M69MF9992VK4H0W02T1QK2HQ) and
+[B300](https://beaker.org/ex/01M6757SA45FQYHX8S7N81N2PN) GPU checks each completed
+64 GSM8K prompts with eight samples per prompt (512 expanded samples), selected
+the corresponding optimized profile with decode CUDA graphs, and recorded no
+failed requests. These checks qualify profile execution; they are not a matched
+cross-hardware throughput comparison or full-panel validation.
+
 Native tasks use `batching.chunk_size = "auto"`. For a qualified profile,
 olmo-eval derives a sequence budget from the running engine's capacity (requested
 512, reduced if the engine reports a lower limit). This counts expanded samples:
