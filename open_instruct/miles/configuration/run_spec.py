@@ -735,8 +735,6 @@ class RunSpec:
         )
         miles.setdefault("global_batch_size", miles["rollout_batch_size"] * miles["n_samples_per_prompt"])
         miles.setdefault("sglang_max_total_tokens", max(524288, miles["sglang_max_running_requests"] * length))
-        if miles.get("use_rollout_routing_replay"):
-            miles.setdefault("use_miles_router", True)
         if controls.get("policy_drift_action", ("fail", ""))[0] != "fail":
             raise InputError("policy_drift_action=warn is not implemented by Core; select fail")
         correction = controls.get("off_policy_correction", ("tis", ""))[0]

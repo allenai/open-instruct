@@ -14,10 +14,10 @@ root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/three-node"
 export_hf = true
 
 [launch]
-workspace = "ai2/open-instruct-dev"
+workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
-priority = "high"
+priority = "urgent"
 min_runtime = "8h"
 timeout = "48h"
 auto_resume = true
@@ -32,6 +32,8 @@ weka = "oe-adapt-default"
 mount_path = "/weka/oe-adapt-default"
 
 [launch.env]
+# Ray logical capacity per node; the actor reservations below are not thread counts.
+OI_MILES_RAY_CPUS = "64"
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 OI_MILES_CODE_FAILURE_POLICY = "zero"
 OI_MILES_JUDGE_FAILURE_POLICY = "zero"
@@ -69,9 +71,10 @@ gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
 timeout = "3h"
-provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true, context_length = 34816 }
-# SciCode is the only task that still requires an HTTP policy server.
-external_server_args = ["--attention-backend", "triton", "--disable-cuda-graph", "--disable-radix-cache", "--context-length", "34816"]
+# Select the qualified H100/B300 settings on the evaluator GPU; fail if unsupported.
+# Automatic harness batches use the engine's sequence capacity, including pass@k expansion.
+provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
+# SciCode's HTTP policy server resolves the same profile and provider_kwargs.
 
 [[evaluation.tasks]]
 # Official measurement uses full datasets and pinned upstream sampling settings.
@@ -202,7 +205,8 @@ packing_max_tokens = 34816
 placement_mode = "disaggregated"
 gpus = 19
 rollout_batch_size = 64
-samples_per_prompt = 4
+samples_per_prompt = 8
+global_batch_size = 512
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
@@ -227,14 +231,26 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
+# Rust response transport; Core owns request retries and weight-ready membership.
+use_miles_router = false
+router_policy = "round_robin"
+router_disable_retries = true
+router_disable_health_check = true
+router_disable_circuit_breaker = true
+use_distributed_post = true
+http_post_actors_per_node = 16
+http_post_num_cpus = 1.0
+rollout_executor_num_cpus = 2.0
+# Eight collections: 512 complete prompt groups / 4,096 samples.
+async_data_buffer_capacity_factor = 8.0
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 
 [async]
 fully_async = true
-# Bound unfinished work independently of the fleet's reserved serving slots.
-# Tune against useful throughput, trainer wait and stale-work discards.
-async_max_concurrent_samples = 1536
+# Candidate budget: 256 unfinished samples per engine across 19 engines.
+# Qualification pending: monitor trainer wait, policy age and stale-work discards.
+async_max_concurrent_samples = 4864
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
@@ -245,6 +261,8 @@ model = "Qwen/Qwen3-32B"
 revision = "9216db5781bf21249d130ec9da846c4624c16137"
 max_context_length = 131072
 context_extension = "qwen3-yarn-128k"
+cuda_graphs = true
+max_concurrent_calls = 32
 prepared_dir = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/checkpoints/qwen3-32b-judge"
 
 [rubrics.quality]

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+
 from miles.backends.core_utils import actor
 from miles.backends.core_utils.publication import policy_versions
 from miles.backends.core_utils.publication.engine_drain import WeightSnapshot
@@ -20,7 +21,6 @@ from miles.utils.compiler_cache import startup_cache
 from miles.utils.ft_utils.health_checker import ActivenessTracker
 from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
 from miles.utils.workers.worker_spec import CommandWorkerSpec, SchedulingSpec, WorkerLaunchContext
-
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import serving
 
@@ -233,6 +233,6 @@ def test_cache_fingerprints_packaged_application_root(tmp_path):
     if not lock_path.exists():
         lock_path = root / "runtime/miles/runtime.lock.json"
     assert args.olmo_core_startup_cache["runtime_lock"] == json.loads(lock_path.read_text())
-    assert args.olmo_core_startup_cache["sources"]["open-instruct"] == startup_cache.cache.source_identity(
+    assert args.olmo_core_startup_cache["sources"]["open-instruct"] == startup_cache.cache.core_application_source(
         root / "open_instruct"
     )

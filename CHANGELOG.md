@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Decode Core refresh routing replay in distributed HTTP workers, retaining producer validation and separate decode timings; increase the three-node completed buffer to eight batches (https://github.com/allenai/open-instruct/pull/2121).
+- Remove producer admission handshakes from MILES Core refresh publication, retaining engine synchronization and explicitly cancelling outstanding generation on run failure (https://github.com/allenai/open-instruct/pull/2121).
+- Default Core rollouts to the pinned Rust router with controller-owned weight-ready membership and producer-owned retries; restore HTTP-worker JSON decoding, reduce compiler-cache false misses, use qualified evaluation profiles with capacity-aware batches, and check in the three-node producer/admission/judge candidate (https://github.com/allenai/open-instruct/pull/2121).
 - Add MILES Core GRPO source mixtures with explicit fractions, independent checkpointed source cursors, best-effort record attribution, and an MIT SynLogic Sudoku adapter with a local rule verifier (https://github.com/allenai/open-instruct/pull/2116).
 - Apply the existing MILES Jupiter/Saturn CUDA compatibility library-path default to Titan, preserving explicit environment and secret overrides and leaving Holmes unchanged (https://github.com/allenai/open-instruct/pull/2095).
 - Add a replaceable MILES prompt provider interface with `ProviderRolloutDataSource`, preserving the existing shuffled dataset, retry groups, and checkpoint recovery, with rollback on failed deliveries; include an opt-in ReMind-style FIFO review provider with outcome feedback and resumable review state (https://github.com/allenai/open-instruct/pull/2105).
