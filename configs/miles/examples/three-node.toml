@@ -1,4 +1,7 @@
-# H1-sized B300 layout: 4 trainer GPUs (EP4), 19 engines, 1 judge; 3 nodes / 24 GPUs.
+# H1-sized B300 layout: 8 trainer GPUs (EP8, one full node), 15 engines, 1 judge; 3 nodes / 24 GPUs.
+# The trainer bounded the 4-GPU layout once orchestration stalls were removed: the
+# eight-batch buffer stayed full and every engine sat idle. A full trainer node
+# raises that ceiling; 15 engines still outrun it.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
 # Setup and workload requirements: configs/miles/examples/README.md
@@ -196,14 +199,14 @@ auxiliary_gpus = 1
 "auxiliary_providers.sr_judge.kwargs.add_bos_token" = true
 
 [trainer]
-gpus = 4
-expert_parallel_size = 4
+gpus = 8
+expert_parallel_size = 8
 sequence_packing = true
 packing_max_tokens = 34816
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 19
+gpus = 15
 rollout_batch_size = 64
 samples_per_prompt = 8
 global_batch_size = 512
@@ -246,9 +249,9 @@ use_rollout_routing_replay = true
 
 [async]
 fully_async = true
-# Candidate budget: 256 unfinished samples per engine across 19 engines.
+# Candidate budget: 256 unfinished samples per engine across 15 engines.
 # Qualification pending: monitor trainer wait, policy age and stale-work discards.
-async_max_concurrent_samples = 4864
+async_max_concurrent_samples = 3840
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

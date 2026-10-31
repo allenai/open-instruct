@@ -62,7 +62,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
 
 @pytest.mark.parametrize(
     "profile,gpus,replicas,trainer_gpus,rollout_gpus,judge_gpus",
-    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 4, 19, 1)],
+    [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 8, 15, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
     spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
@@ -78,7 +78,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
 
 
-@pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 4864)])
+@pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 3840)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()
@@ -98,7 +98,7 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert config.core.max_policy_lag == 6
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
-    buffer_factor = 4 if profile == "three-node" else 1
+    buffer_factor = 8 if profile == "three-node" else 1
     assert capacity["completed_buffer_samples"] == buffer_factor * capacity["samples_per_collection"]
     assert "--check-weight-update-equal" not in config.arguments()
     assert plan["scoring_pass"]["standalone"] is False

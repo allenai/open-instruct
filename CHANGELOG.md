@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Ship Core refresh per-token logprob records from distributed HTTP workers as flat arrays instead of one Python list per token, and give the three-node template a full trainer node (8 GPUs, EP8) with 15 engines (https://github.com/allenai/open-instruct/pull/2121).
 - Decode Core refresh routing replay in distributed HTTP workers, retaining producer validation and separate decode timings; increase the three-node completed buffer to eight batches (https://github.com/allenai/open-instruct/pull/2121).
 - Remove producer admission handshakes from MILES Core refresh publication, retaining engine synchronization and explicitly cancelling outstanding generation on run failure (https://github.com/allenai/open-instruct/pull/2121).
 - Default Core rollouts to the pinned Rust router with controller-owned weight-ready membership and producer-owned retries; restore HTTP-worker JSON decoding, reduce compiler-cache false misses, use qualified evaluation profiles with capacity-aware batches, and check in the three-node producer/admission/judge candidate (https://github.com/allenai/open-instruct/pull/2121).

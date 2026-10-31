@@ -379,13 +379,29 @@ compilation can occur.
 ## How the limits interact
 
 Core refresh routing replay is decoded in distributed HTTP workers before Ray
-returns the numeric arrays to the producer. Worker logs separate replay decode
-wall time, thread CPU time, and decoded bytes from JSON parsing. The producer
-still validates replay shape and policy metadata. Decoding remains synchronous
-within each HTTP actor; it does not remove Ray object reconstruction or batch
-preparation from the coordinator. The three-node template's completed buffer
-holds eight optimizer batches (512 groups / 4,096 samples); the policy-lag
-limit remains six, so capacity does not guarantee all queued work stays usable.
+returns the numeric arrays to the producer. The same workers also turn the
+engine's per-token logprob records, one small list per generated token, into
+two flat arrays, so Ray moves buffers into the producer instead of rebuilding
+several Python objects per token there. Python's garbage collector schedules
+full collections by counting container allocations, and each full collection
+walks every live container the producer holds, so bursts of nested per-token
+records were the main trigger for producer event-loop pauses. Worker logs
+separate replay decode and record compaction wall time, thread CPU time, and
+sizes from JSON parsing. The producer still validates replay shape and policy
+metadata. Decoding remains synchronous within each HTTP actor; it does not
+remove batch preparation from the coordinator, and converted samples still
+hold their token, mask and logprob lists. The three-node template's completed
+buffer holds eight optimizer batches (512 groups / 4,096 samples); the
+policy-lag limit remains six, so capacity does not guarantee all queued work
+stays usable.
+
+The three-node template gives the trainer a full node (8 GPUs, EP8) and runs
+15 engines plus one judge on the other two. With orchestration stalls removed,
+a 4-GPU trainer became the cycle's limiter while the completed buffer stayed
+full and every engine idled, so GPUs moved from inference to training raise
+the ceiling and GPUs left on inference do not. Watch trainer wait and
+stale-group discards after changing the split; the producer budget is 256
+unfinished samples per engine.
 
 | Control | What it limits | External constraint and tuning signal |
 |---|---|---|

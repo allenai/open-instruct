@@ -57,7 +57,7 @@ def test_three_node_template_keeps_admission_and_selects_rust():
     path = Path(__file__).resolve().parents[1] / "configs/miles/examples/three-node.toml"
     config = RunSpec.load(path).compile()
     options = config.resolved_miles()
-    assert options["async_max_concurrent_samples"] == 4864
+    assert options["async_max_concurrent_samples"] == 3840
     assert options["use_miles_router"] is False
     assert options["router_policy"] == "round_robin"
     assert options["router_disable_retries"] is True
@@ -65,5 +65,5 @@ def test_three_node_template_keeps_admission_and_selects_rust():
     assert options["http_post_actors_per_node"] == 16
     assert options["http_post_num_cpus"] == 1.0
     assert options["rollout_executor_num_cpus"] == 2.0
-    assert options["async_data_buffer_capacity_factor"] == 4.0
+    assert options["async_data_buffer_capacity_factor"] == 8.0
     assert options["rollout_batch_size"] * options["n_samples_per_prompt"] == options["global_batch_size"] == 512
