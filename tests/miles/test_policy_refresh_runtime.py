@@ -8,8 +8,6 @@ import httpx
 import numpy as np
 import pytest
 import torch
-from sglang.srt.observability import req_time_stats
-
 from miles.backends.core_utils.publication import policy_refresh
 from miles.backends.core_utils.rollout import refreshing_rollout
 from miles.backends.core_utils.rollout.async_buffer import RefreshPolicyDataBuffer
@@ -20,6 +18,7 @@ from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.rollout.inference_rollout import inference_rollout_common
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
+from sglang.srt.observability import req_time_stats
 
 
 def sample(group=0, versions=(0, 1)):
