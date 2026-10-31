@@ -33,6 +33,7 @@ class CoreConfig:
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
+    layer_profile_interval: int = 0
     pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
     stream_moe_export: bool = True
@@ -152,7 +153,7 @@ class CoreConfig:
             raise constraints.error("core.row_specialization must be static or dynamic")
         if self.expert_publication not in ("per_expert", "fused"):
             raise constraints.error("core.expert_publication must be per_expert or fused")
-        for name in ("diagnostic_interval", "scoring_check_interval"):
+        for name in ("diagnostic_interval", "scoring_check_interval", "layer_profile_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
         if self.pipeline_observation_interval < 0:
