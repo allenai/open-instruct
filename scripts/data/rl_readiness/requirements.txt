@@ -1,0 +1,4 @@
+# Optional dependencies for the local candidate qualification image.
+reasoning-gym==0.1.25
+rdkit==2025.9.3
+openapi-schema-validator==0.6.3
