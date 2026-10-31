@@ -239,8 +239,8 @@ use_distributed_post = true
 http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
-# Four collections: 256 complete prompt groups / 2,048 samples.
-async_data_buffer_capacity_factor = 4.0
+# Eight collections: 512 complete prompt groups / 4,096 samples.
+async_data_buffer_capacity_factor = 8.0
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 
