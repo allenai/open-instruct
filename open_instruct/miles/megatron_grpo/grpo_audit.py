@@ -16,18 +16,32 @@ from open_instruct.miles.megatron_grpo import grpo_hooks
 from open_instruct.miles.rewards import rewards
 
 
-def expected_advantages(rows, fanout, std_normalization):
-    """``({sample_index: centered reward}, mixed group count)`` for one rollout's evidence rows."""
+def expected_advantages(rows, fanout, std_normalization, exclude_truncated=False):
+    """``({sample_index: centered reward}, mixed group count)`` for one rollout's evidence rows.
+
+    Mirrors ``grpo_hooks.post_process``: samples a verifier could not grade, and truncated samples
+    when ``exclude_truncated`` is set, get a zero advantage and no part in their group's baseline.
+    """
     expected, mixed = {}, 0
     for offset in range(0, len(rows), fanout):
         group = rows[offset : offset + fanout]
-        values = [row["reward"] for row in group]
-        mean = sum(values) / fanout
+        graded = [
+            row
+            for row in group
+            if not (exclude_truncated and row["status"] == "truncated")
+            and not (row.get("metadata") or {}).get(rewards.EXCLUDED_KEY)
+        ]
+        for row in group:
+            expected[row["sample_index"]] = 0.0
+        if not graded:
+            continue
+        values = [row["reward"] for row in graded]
+        mean = sum(values) / len(values)
         mixed += int(min(values) != max(values))
         denominator = 1.0
-        if std_normalization:
-            denominator = math.sqrt(sum((value - mean) ** 2 for value in values) / (fanout - 1)) + 1e-6
-        for row in group:
+        if std_normalization and len(values) > 1:
+            denominator = math.sqrt(sum((value - mean) ** 2 for value in values) / (len(values) - 1)) + 1e-6
+        for row in graded:
             expected[row["sample_index"]] = (row["reward"] - mean) / denominator
     return expected, mixed
 
@@ -92,7 +106,12 @@ def audit(spec, prepared):
     rollouts = []
     for rollout_id in range(count):
         rows = records[rollout_id * batch : (rollout_id + 1) * batch]
-        expected, mixed = expected_advantages(rows, fanout, spec.document["objective"]["std_normalization"])
+        expected, mixed = expected_advantages(
+            rows,
+            fanout,
+            spec.document["objective"]["std_normalization"],
+            exclude_truncated=bool(spec.document["reward"].get("exclude_truncated")),
+        )
         seen = set()
         for path in sorted((root / "debug/train_data").glob(f"{rollout_id}_*.pt")):
             data = torch.load(path, map_location="cpu", weights_only=False)["rollout_data"]
