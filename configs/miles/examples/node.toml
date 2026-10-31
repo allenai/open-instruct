@@ -89,7 +89,8 @@ packing_max_tokens = 34816
 placement_mode = "disaggregated"
 gpus = 6
 rollout_batch_size = 64
-samples_per_prompt = 4
+samples_per_prompt = 8
+global_batch_size = 512
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.

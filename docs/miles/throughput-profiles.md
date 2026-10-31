@@ -261,9 +261,9 @@ whole groups (or one collection, whichever is larger). The examples explicitly
 use 1,024 unfinished samples for node and 3,840 for three-node. Without those
 limits their presets would resolve to 6,144 and 15,360 respectively.
 Generic configurations with omitted budgets give 768/1,920 for those topologies.
-Explicit budgets win. Node uses batch 256; three-node uses batch 512. Both use
-lag 6. One full wave across six
-512-slot engines represents 12 batches, but keeping those slots occupied is a
+Explicit budgets win. Both learning examples use 64 prompts × 8 responses,
+for batch 512, and lag 6. One full wave across six
+512-slot engines represents six batches, but keeping those slots occupied is a
 different objective from keeping the trainer supplied. Neither batch-equivalents
 nor a static lag limit predicts drain time or actual policy age.
 Measure useful consumption, queue age/discards and publication latency in the

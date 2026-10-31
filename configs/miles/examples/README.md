@@ -91,9 +91,9 @@ and `node` for disaggregated learning. A single-GPU run with the full policy nee
 its combined trainer/inference memory footprint checked before replacing the
 `dev` checkpoint; single-GPU inference alone does not establish that fit.
 
-`three-node` matches H1's three-node, 24-GPU footprint, replacing one of H1's 20 inference
-GPUs with a judge. The nodes contain 4 training + 4 inference GPUs, 8 inference
-GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs are unused.
+`three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
+GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs
+are unused.
 Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
 including general-quality tasks, prepared according to the
 [source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture). It requires
@@ -201,7 +201,7 @@ explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-The node example keeps batch 256; three-node uses batch 512. Both retain lag 6.
+Both learning examples use 64 prompts × 8 responses and batch 512. Both retain lag 6.
 The three-node admission budget represents 7.5 batches,
 so the planner warns that it exceeds the policy-lag window. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe
