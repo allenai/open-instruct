@@ -1,0 +1,2946 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/miles/background-evaluation/">
+      
+      
+        <link rel="prev" href="../managed-judges/">
+      
+      
+        <link rel="next" href="../inference-records/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Background evaluation - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#best-effort-background-olmo-eval" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Background evaluation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tpu_sft_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#code-and-safety-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code and safety requirements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snapshots-and-receipts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshots and receipts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshots and receipts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recovery-after-preemption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery after preemption
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wb-publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W&amp;B publication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-resubmission-and-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual resubmission and cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evaluator-image-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluator image and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development-gold-labels-and-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development gold labels and scoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-serving-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#code-and-safety-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code and safety requirements
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snapshots-and-receipts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshots and receipts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshots and receipts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recovery-after-preemption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery after preemption
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wb-publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W&amp;B publication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-resubmission-and-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual resubmission and cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evaluator-image-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluator image and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development-gold-labels-and-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development gold labels and scoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="best-effort-background-olmo-eval">Best-effort background olmo-eval</h1>
+<p>Opt in with <code>evaluation.mode="background"</code>. Training captures frozen HF weights,
+then one driver submits independent Beaker jobs in a daemon worker. Evaluation
+never borrows, drains or pauses rollout engines, and shutdown never joins the
+submitter or waits for evaluator jobs. Missing points are expected: a busy
+submitter drops milestones from the next collection, submission failures are not retried, and preemption can
+interrupt submission. Submitted evaluator jobs automatically restart after
+preemption. Snapshot export is a synchronous trainer collective;
+checkpoint/collective failures still fail training.</p>
+<p>Ready milestones from one collection are submitted as one batch, so they do not
+compete with each other for the submission worker. A wall-clock-stop final
+evaluation joins the last collection's batch, merging periodic and final tasks at
+the same update. The worker submits accepted receipts sequentially; it does not
+queue additional collections or wait at shutdown.</p>
+<p>The <a href="https://github.com/allenai/open-instruct/blob/main/configs/miles/examples/three-node.toml">three-node example</a> opts into background
+evaluation with a pinned sandbox-enabled image and the 25-entry post-training
+development/text-safety panel. It sets <code>interval=0</code>, <code>initial=true</code> and <code>final=true</code>
+to evaluate the full panel before and after training only, including when the run
+is extended. Zero disables periodic evaluation; it does not disable either endpoint.
+Positive intervals count completed optimizer updates, not rollout collections.
+Omitting <code>interval</code> retains the default of 20 updates. Task-level intervals override
+the global value: a task can opt into periodic evaluation under a global zero, or
+set zero to opt out under a positive global interval. The global <code>initial</code> and
+<code>final</code> flags still apply to every task. With both flags false and all intervals
+zero, no background evaluations or evaluation snapshots are scheduled.
+The <a href="https://github.com/allenai/open-instruct/blob/main/configs/miles/examples/node.toml">node example</a> runs a smaller GSM8K,
+GSM8K-Platinum and IFBench panel initially, every 50 updates, and finally.
+Dev retains shared-engine evaluation, which remains the low-level default. The three-node template is
+provisional; check evaluator compatibility for the full model. Remove explicit
+shared settings (<code>training.eval_interval</code>, <code>miles.eval_*</code>, <code>skip_eval_before_train</code>,
+<code>n_samples_per_eval_prompt</code>, <code>data.eval_prompt_data</code>, positive task <code>eval_count</code>)
+when selecting background mode. Evaluation tasks are independent of training
+<code>data.tasks</code>; no evaluation-only dataset needs to be added to the training mix.</p>
+<div class="highlight"><pre><span></span><code><span class="k">[evaluation]</span>
+<span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;background&quot;</span>
+<span class="n">interval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w">                  </span><span class="c1"># Initial/final only; positive values enable periodic evaluation</span>
+<span class="n">initial</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">final</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">image</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;IMMUTABLE_BEAKER_IMAGE_ID&quot;</span><span class="w"> </span><span class="c1"># Replace with a compatible evaluator image</span>
+<span class="n">revision</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;FULL_40_CHARACTER_OLMO_EVAL_COMMIT&quot;</span>
+<span class="n">gpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w">                     </span><span class="c1"># Separate allocation; never training GPUs</span>
+<span class="n">cluster</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;ai2/holmes&quot;</span>
+<span class="n">submit_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span><span class="w">           </span><span class="c1"># Hard wall-clock bound on a submission subprocess</span>
+<span class="n">timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;3h&quot;</span><span class="w">                </span><span class="c1"># Evaluator Beaker task lifetime</span>
+<span class="n">provider_kwargs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">profile</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;generic&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">attention_backend</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;triton&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">disable_cuda_graph</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="n">disable_radix_cache</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">}</span>
+
+<span class="k">[[evaluation.tasks]]</span>
+<span class="n">task</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;gsm8k&quot;</span>
+<span class="n">generation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">temperature</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">max_tokens</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">num_samples</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">stop_sequences</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span>
+<span class="n">scoring</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">limit</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="n">num_fewshot</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">}</span>
+
+<span class="k">[[evaluation.tasks]]</span>
+<span class="n">task</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;gsm8k:platinum&quot;</span>
+<span class="n">generation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">temperature</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">max_tokens</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">num_samples</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">stop_sequences</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">}</span>
+<span class="n">scoring</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">limit</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="n">num_fewshot</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">}</span>
+
+<span class="k">[[evaluation.tasks]]</span>
+<span class="n">task</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;ifeval_ood&quot;</span><span class="w"> </span><span class="c1"># IFBench; distinct from the IFEval task named &quot;ifeval&quot;.</span>
+<span class="n">interval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
+<span class="n">scoring</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">limit</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">128</span><span class="w"> </span><span class="p">}</span>
+
+<span class="k">[launch.secrets]</span>
+<span class="n">BEAKER_TOKEN</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;your-beaker-token-secret&quot;</span>
+<span class="n">WANDB_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;your-wandb-secret&quot;</span>
+
+<span class="c1"># Optional task-specific credentials. These are secret references, never tokens.</span>
+<span class="k">[evaluation.secrets]</span>
+<span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;your-judge-secret&quot;</span>
+</code></pre></div>
+<p>Workspace and budget default to <code>launch.workspace</code> and <code>launch.budget</code>. Evaluator
+jobs inherit <code>launch.weka_mounts</code>, <code>WANDB_API_KEY</code> and <code>HF_TOKEN</code> secret references.
+<code>evaluation.secrets</code> can override these or supply task-specific credentials. The
+submitter needs Beaker credentials in the trainer allocation; evaluator jobs do
+not inherit its Beaker token. Outputs and snapshots must be on a WEKA mount
+accessible to both jobs. Inherit the main run's W&amp;B entity, project and actual run
+ID; never configure a separate evaluation run.</p>
+<p>The limited GSM8K tasks above are small mechanics examples. The three-node template
+uses individual task variants from <code>math:posttrain:dev</code>, <code>general:posttrain:dev</code>,
+<code>hillclimb:dev</code> and <code>safety_thinking</code>, deduplicated to 25 entries. Individual names
+make the panel explicit and do not create synthetic cross-benchmark aggregate scores. It retains full task sizes
+and sampling defaults from the pinned olmo-eval revision, including AIME/HMMT
+pass@32 with 16K responses. The pinned IFBench defaults differ from newer upstream
+revisions; changing the image/revision can change the benchmark protocol.</p>
+<p>Use the full panel at the initial and final checkpoints for official comparisons.
+The example above shows how one task can additionally run every 100 updates; its
+<code>scoring.limit</code> applies at every scheduled point, including initial and final.
+The three-node template has no such limits or periodic overrides. Progress subsets are
+not enabled by default: fewer prompts still incur separate-job and judge startup
+costs. If adding a periodic development panel, choose fixed example IDs with a
+documented seed and relevant category coverage, and distinguish its metrics from
+the full-panel scores. A simple <code>limit</code> is not a seeded or stratified sample, and
+this configuration does not switch sampling/scoring settings between endpoints
+and periodic points. Keep release held-out evaluation separate from development
+metrics used to select recipes or checkpoints.</p>
+<p>Generation overrides map to olmo-eval's flat per-task sampling overrides
+(for example <code>-o max_tokens=2048</code>, not a nested <code>sampling_params</code> table); scoring maps to
+olmo-eval task overrides (such as <code>limit</code>, scorer settings, or formatting).
+Tasks with the same generation overrides, harness preset, harness overrides and
+execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
+defaults. Each unfinished task starts its own native SGLang engine; completed
+tasks remain reusable after preemption. Model loading repeats between tasks.
+The three-node panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
+five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
+each judge group also reserves one GPU with task <code>auxiliary_gpus=1</code>. The worker
+exposes the policy and auxiliary GPUs to olmo-eval, whose planner assigns
+non-overlapping GPU sets and manages judge startup and shutdown. One HF snapshot serves all groups. A coincident
+periodic/final point is submitted only once for each task group. <code>plan</code> displays
+the milestones, task groups, resources and snapshot paths. <code>validate</code> checks the
+schema; it does not establish image/model/task compatibility.</p>
+<h3 id="code-and-safety-requirements">Code and safety requirements</h3>
+<p><code>harness_preset</code> selects an olmo-eval preset (default: <code>default</code>). The optional
+task <code>harness</code> table passes flat harness overrides before the <code>--task</code> argument,
+so auxiliary providers and sandboxes are not mistaken for scoring overrides.
+The frozen checkpoint's <code>provider</code> settings cannot be overridden here. Harness
+settings are recorded in receipts and checked when reusing completed tasks.</p>
+<p>The three-node template selects <code>codex_python</code> for LiveCodeBench and enables
+<code>sandboxes.0.inject_swerex</code> to preinstall the sandbox server. The pinned runtime's
+on-demand installation fallback otherwise invokes an unavailable executable.
+Code jobs receive
+Beaker's subcontainer environment flags and need an evaluator image containing
+Podman and the olmo-eval sandbox dependencies. Container startup and reference-data
+access still require qualification on the target cluster.</p>
+<p>SciCode uses <code>kind="external"</code> and <code>arguments</code>, invoking olmo-eval's
+<code>run-external</code> command against a dedicated frozen SGLang HTTP server. SciCode
+requires <code>VLLMServerProvider</code> in the pinned olmo-eval revision and is the explicit
+exception to native <code>sglang</code> routing. <code>evaluation.external_server_args</code> configures
+only this server; native tasks use <code>evaluation.provider_kwargs</code>. Only SciCode currently
+has a supported external artifact contract. Development runs require
+<code>arguments.split="validation"</code> and an accessible <code>arguments.h5py_host_path</code>.
+The evaluator checks per-problem predictions and step counts, rejecting
+infrastructure errors even when upstream reports success with numeric zero scores.
+SciCode's sandbox installs its pinned scientific dependencies from the upstream
+lock; account for startup time and registry/package access when qualifying jobs.</p>
+<p>Safety tasks configure olmo-eval managed WildGuard and StrongREJECT providers.
+WildGuard serves <code>allenai/wildguard</code>; StrongREJECT serves <code>google/gemma-2b</code> with
+the <code>qylu4156/strongreject-15k-v1</code> adapter and its tokenizer. The sandbox evaluator
+image includes the pinned vLLM extra in an isolated environment selected through
+<code>VLLM_PYTHON</code>, preserving the policy serving environment. Model access credentials
+(including gated Gemma access) belong in <code>evaluation.secrets</code>. Record resolved
+judge revisions and serving settings with qualification results.</p>
+<p>Planning rejects the maintained managed <code>vllm_server</code> judges that download
+<code>allenai/wildguard</code> (five tasks) or <code>google/gemma-2b</code> (StrongREJECT) unless
+<code>evaluation.secrets.HF_TOKEN</code> is configured or inherited from <code>launch.secrets</code>.
+It also rejects GPQA tasks (<code>gpqa_diamond</code>, <code>gpqa_main:cot</code>), whose
+<code>Idavidrein/gpqa</code> dataset is gated, without that secret.
+Set the value to a Beaker secret name, not the token itself. The token's account
+must have accepted access terms for both models and the GPQA dataset. A local shell token is not
+forwarded to evaluator jobs. This offline check verifies the secret reference,
+not its contents or model permissions; it covers these explicit model/tokenizer
+overrides, not arbitrary upstream presets. Local model paths, existing server
+endpoints and tasks with all evaluation milestones disabled are exempt.</p>
+<p>The image and CLI/config checks do not establish full-panel correctness, GPU
+memory fit or completion within the starter three-hour timeout. Run small samples
+of every task, inspect predictions and judge/code failures, then measure a full
+panel before setting production resource bounds. For qualification, verify all
+25 entries completed at both expected checkpoints and were published; training
+completion alone does not establish evaluation completion.</p>
+<p>With the generic SGLang profile, which the examples select and which olmo-eval
+uses for every model shape except Olmo 3.5 12.5B, olmo-eval keeps
+<code>batching.chunk_size</code> at 64 examples and runs the batches one after another; each
+batch waits for its longest response. On a 7B thinking policy (one B300, 34,816
+token context, CUDA graphs disabled) each 64-example safety batch took about
+21–26 minutes, so StrongREJECT (2,294 prompts including jailbreak variants) needs
+about 16 hours, WildJailbreak about 12 and WildGuardTest about 10, well beyond the
+three-hour default. An interrupted task restarts from its beginning. A task can
+raise the batch size with a harness override such as <code>"batching.chunk_size" = 256</code>;
+this changes request scheduling, not sampling, but its throughput and memory on
+these tasks have not been measured.</p>
+<h2 id="snapshots-and-receipts">Snapshots and receipts</h2>
+<p>Snapshots live at <code>OUTPUT/eval-snapshots/update-NNNNNNNN/hf</code>, including model
+configuration, tokenizer and chat template. A <code>.complete</code> marker gates submission.
+Update zero reuses the prepared initial HF checkpoint and records a reference
+under <code>eval-snapshots/update-00000000/reference.json</code>; retain its source weights
+as well. Snapshot paths are exclusive and never overwritten. An incomplete
+snapshot from an interrupted export is retained and skipped on resume.</p>
+<p><code>OUTPUT/evaluation/update-UPDATE-GROUP.json</code> records checkpoint/update, task
+configuration, evaluator image/revision, runner hash, training identity, and the
+Beaker experiment ID or diagnostic. All recorded attempts suppress automatic
+resubmission, including ambiguous timeouts and interrupted <code>pending</code> receipts.
+No backlog or polling service runs in training. Submission failures produce
+<code>BACKGROUND EVALUATION GAP</code> warnings. Evaluator failures appear in their Beaker
+job and result directory and leave a gap in the dashboard.</p>
+<p>Results are retained in <code>OUTPUT/evaluation/results/update-UPDATE-GROUP/</code> and
+copied to the evaluator's Beaker results: aggregate <code>scores.json</code>, olmo-eval
+<code>metrics.json</code>, predictions/requests, logs, command/configuration and provenance.
+A failed W&amp;B upload writes <code>publication.json</code> and preserves these files.</p>
+<h3 id="recovery-after-preemption">Recovery after preemption</h3>
+<p>Evaluator jobs use high priority, unallocated scheduling, and Beaker auto-resume.
+On restart, the runner checks the existing output provenance against the
+checkpoint, update, tasks/sampling/scoring, evaluator revision/image and server
+configuration. It refuses incompatible results rather than overwriting them.
+A process-owned filesystem lock prevents two evaluators from writing the same
+group and is released when its holder dies.</p>
+<p>Tasks execute separately while sharing one inference server. Each successful
+task receives an atomic completion record after predictions and scores validate.
+A restart skips those completed tasks. An unfinished task runs in a new attempt
+directory; its previous partial files remain intact. Native olmo-eval response
+resumption is not assumed, so an interrupted individual task is regenerated.
+<code>task-results.json</code> selects only successful attempt directories for validation
+and publication; abandoned attempts cannot introduce duplicate scores.</p>
+<p>A fully completed group validates and reuses its results without loading the
+model. A restart after the last task but before the group completion record also
+finishes without loading the model. Publication may be retried, so duplicate
+W&amp;B points remain possible. Existing flat, completed result directories are
+accepted only after the same artifact/coverage checks. The runner is embedded in
+each Beaker spec, so retrying a spec runs the runner it was submitted with.</p>
+<p>The runner rejects missing prediction files and empty <code>model_output</code> lists before
+declaring evaluation complete. Some evaluator provider failures can otherwise
+appear as zero scores with no failed-instance count. A returned EOS-only completion
+is distinct from a missing provider response and remains a valid scored output.</p>
+<h2 id="wb-publication">W&amp;B publication</h2>
+<p>The publisher attaches to the exact main training run using W&amp;B's documented
+<a href="https://docs.wandb.ai/models/track/log/distributed-training">shared-mode secondary writer</a>
+with <code>x_primary=False</code> and <code>x_update_finish_state=False</code>. Late uploads may change
+the dashboard status from <code>finished</code> to <code>running</code>; this accepted status change
+does not restart training. The evaluator flushes its writer without declaring
+an active training run finished. It does not restore or rewrite lifecycle state.</p>
+<p>All MILES writers in background mode and every evaluator declare the same metric
+schema: native training/rollout axes are retained, and <code>eval/*</code> uses the explicit
+<code>eval/checkpoint_update</code> axis. This matters because W&amp;B replaces metric-definition
+metadata per writer. A common wildcard covers different task groups without
+one evaluator erasing another group's axes. No internal W&amp;B <code>step</code> is supplied,
+so results can arrive out of checkpoint order. The publisher sends no training
+configuration, name or group updates.</p>
+<p>After a successful upload, <code>publication.json</code> records the destination and checkpoint
+update. Resume skips an upload already confirmed for that same destination and
+update; failed or deferred uploads can be retried. A crash after W&amp;B accepts the
+upload but before the local receipt is written can still cause a duplicate.</p>
+<p>For offline training, sync the training run first, then publish to that existing
+run with the manual command. The same command repairs a failed online upload:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>open_instruct.miles.evaluation.evaluation_runner<span class="w"> </span>publish<span class="w"> </span>RECEIPT.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--results<span class="w"> </span>/path/to/evaluation/results/update-UPDATE-GROUP<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--wandb-run<span class="w"> </span>ENTITY/PROJECT/RUN_ID
+</code></pre></div>
+<p>Uploads can change the dashboard status as described above. Failed uploads leave
+<code>publication.json</code> and retain scores, predictions, requests, configuration and
+provenance. Repeating publication can append duplicate points; inspect
+<code>publication.json</code> first.</p>
+<h2 id="manual-resubmission-and-cleanup">Manual resubmission and cleanup</h2>
+<p>Inspect the receipt and Beaker experiments before resubmitting: a timeout may
+mean the API accepted the job but the trainer missed its response. Check the
+latest job attempt; if queued, inspect <code>beaker job events JOB_ID</code>.</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>open_instruct.miles.evaluation.evaluation<span class="w"> </span>resubmit<span class="w"> </span>RECEIPT.json
+</code></pre></div>
+<p>This creates a new receipt and results group, retaining the original diagnostic.
+It requires the committed runner source matching <code>runner_sha256</code>, the recorded
+image, secrets, mounts and completed snapshot. Submission/application failures
+are not automatically resubmitted; Beaker auto-resume handles preemption within
+an already submitted experiment.</p>
+<p>Snapshots are excluded from ordinary checkpoint retention and result collection.
+There are no pins, leases, automatic deletion or retention controller. Manually
+remove selected <code>eval-snapshots/update-NNNNNNNN</code> directories only after verifying
+that <strong>all</strong> jobs referencing them have stopped (including manual resubmissions).
+Do not delete snapshots while jobs are pending or running. Keep small receipts
+and results as provenance. Initial checkpoint reuse additionally depends on the
+original HF source remaining available.</p>
+<h2 id="evaluator-image-and-compatibility">Evaluator image and compatibility</h2>
+<p><code>runtime/miles/Dockerfile.evaluator</code> builds a separate evaluator image on the
+digest-pinned CUDA 13.0.2 / Torch 2.13 compiler-equipped olmo-eval base. It installs
+the pinned <code>sglang</code> extra, including the engine and Olmo model plugin. Regular
+background evaluations select <code>provider.kind=sglang</code> and
+<code>provider.kwargs.model_registration=olmo_sglang:register</code>. SciCode retains its
+explicit HTTP exception described above. The runner checks the installed
+olmo-eval revision against the receipt before evaluating.</p>
+<p>Both examples pin olmo-eval revision <code>3536fe751e40162cc33d5e647085e986375aadce</code>,
+which includes the <a href="https://github.com/allenai/olmo-eval/pull/506">native SGLang provider</a>.
+The node image is <code>01M5ZGD5K01GNW3ASDPNXXPEJ3</code>. Three-node uses sandbox-enabled
+image <code>01M632ZP67Y4WMV060J74FSC3R</code> with isolated vLLM judges. Both recipes build evaluator dependencies
+at image construction; benchmark sandboxes may have their own upstream setup steps.
+The revision change can also change task defaults; do not compare scores across
+revisions as though the benchmark protocol were unchanged.</p>
+<p>Replace the old <code>evaluation.server_args</code> with typed <code>evaluation.provider_kwargs</code>
+using Python option names, for example <code>context_length = 34816</code> and
+<code>disable_cuda_graph = true</code>. Use <code>profile = "generic"</code> when manually tuning
+settings; automatic profiles reject conflicting overrides. The examples disable
+radix caching because the pinned SGLang runtime can enter a Mamba-buffer path
+without an allocated buffer for full-attention Olmo MoE models. A one-GPU tiny
+MoE generation check reproduced the failure with caching enabled and passed
+with <code>disable_radix_cache = true</code>. For SciCode, retain
+CLI arguments under <code>external_server_args</code> as well. The checkpoint, tokenizer,
+model registration and GPU allocation remain owned by MILES. Task overrides
+cannot change the policy provider. Native SGLang supports generation, not tools
+or continuation likelihood; code scoring in a sandbox is separate from tool use.</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>runtime/miles/Dockerfile.evaluator<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--secret<span class="w"> </span><span class="nv">id</span><span class="o">=</span>github_token,env<span class="o">=</span>GH_TOKEN<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-t<span class="w"> </span>open-instruct-miles-evaluator:sglang<span class="w"> </span>runtime/miles
+docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>runtime/miles/Dockerfile.evaluator-sandbox<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--build-arg<span class="w"> </span><span class="nv">EVALUATOR_IMAGE</span><span class="o">=</span>open-instruct-miles-evaluator:sglang<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-t<span class="w"> </span>open-instruct-miles-evaluator:sglang-panel<span class="w"> </span>runtime/miles
+</code></pre></div>
+<p>Keep each config's image and revision matched. Changing only the revision does
+not upgrade an existing image. CPU tests check command parsing, GPU planning,
+image dependencies and task resolution. A <a href="https://beaker.org/ex/01M60JEKHJ9HTN661H5W1HJ67M">one-GPU tiny MoE check</a>
+completed native SGLang generation and scoring for two GSM8K examples on Holmes
+with radix caching disabled. The repaired sandbox image passed a
+<a href="https://beaker.org/ex/01M6342ER9755JAC5QJMEKQ5SP">two-example LiveCodeBench check</a>
+with a frozen Qwen2.5-Coder-0.5B-Instruct policy: all four sandbox monitors started,
+both predictions were nonempty, and both examples were scored with zero
+infrastructure failures. The same policy passed execution checks for
+<a href="https://beaker.org/ex/01M634E26Q3D11MK8TN76TXJKB">all five WildGuard tasks</a>
+and <a href="https://beaker.org/ex/01M6357DNAZV1R9VH1JQ3QEFFV">StrongREJECT</a>, each with
+two scored examples and zero failed instances. These checks used the repaired
+image on Holmes in <code>ai2/open-instruct-dev</code>, with one B300 for LiveCodeBench and
+two B300s for each judge group. They verify execution; model quality and full-panel
+resource bounds still need separate qualification.</p>
+<p>The provider contract tests use the installed olmo-eval CLI and GPU planner,
+without loading a model or downloading datasets. Run them inside the panel image
+with this checkout mounted and pytest installed:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>--confcutdir<span class="o">=</span>tests/miles_eval<span class="w"> </span>tests/miles_eval/test_background_provider.py
+</code></pre></div>
+<p>Check compatibility for the exported architecture, serving backend, task and
+image; successful provider initialization alone does not prove task correctness. Use generation tasks for an initial tiny MoE check. A successful
+mechanics check says nothing about model quality. Launch training through the
+normal committed-image MILES wrapper. Use ignored <code>runs/</code> configs and fresh
+output paths; leave existing experiments unchanged.</p>
+<h2 id="development-gold-labels-and-scoring">Development gold labels and scoring</h2>
+<p>Use <code>scripts/miles/development_eval.py</code> for custom math/GSM8K development
+scoring. Prepared math labels can be lists of acceptable strings. Preserve that
+flat list rather than wrapping it again: <code>['42']</code> must not become <code>[['42']]</code>.
+The scorer rejects malformed labels instead of silently recording zero.
+GSM8K uses the training reward's exact decimal comparison, so <code>18.00</code>, <code>+18</code>
+and <code>18</code> are equivalent. Its parity tests run in the normal CPU suite without
+olmo-eval; math scoring still requires the olmo-eval environment.
+Regression tests cover scalar/list/multiple gold answers and completion gates:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run inside the pinned olmo-eval environment; no GPU is needed.</span>
+python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>--confcutdir<span class="o">=</span>tests/miles_eval<span class="w"> </span>-o<span class="w"> </span><span class="nv">pythonpath</span><span class="o">=</span>scripts/miles<span class="w"> </span>tests/miles_eval
+</code></pre></div>
+<p>These tests are separate from the MILES trainer suite because they use the
+evaluator environment. <code>pythonpath</code> mirrors the standalone module layout in
+custom evaluator bundles; a missing scoring module fails collection when
+olmo-eval is installed. Without olmo-eval, ordinary CPU collection skips them.</p>
+<p>Include this module in the custom worker's content manifest and import its
+<code>score_one(row, item)</code> for development tasks. Check the actual panel's label
+schema, not just synthetic scalar-label canaries. Version corrected bundles;
+never modify a running experiment's immutable dataset in place.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
