@@ -694,6 +694,7 @@ class RunSpec:
             "rollout_shuffle": self.data["shuffle"],
             "loss_type": "policy_loss",
             "advantage_estimator": "grpo",
+            "calculate_per_token_loss": False,
             "use_rollout_logprobs": False,
             "grpo_std_normalization": False,
             "eps_clip": 0.2,

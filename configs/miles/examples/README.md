@@ -10,6 +10,13 @@ The [generated recipe tables](../../../docs/miles/configuration.md#example-recip
 show current GPU allocations, batch sizes and publication settings directly from
 these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused GPUs.
 
+**The demo configs are the baseline for configuration options unless otherwise
+stated.** Start a validation run from the applicable demo and record intentional
+differences. In particular, keep per-response loss weighting
+(`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
+(`core.reward_zero_truncated=true`). A throughput experiment must not silently
+change either learning-policy setting.
+
 The examples keep inputs, topology, resource limits and recipe-specific overrides.
 Launch settings, mounts and input/output paths remain explicit. The examples
 rely on the structured loader's defaults for optimizer settings, seeds,
@@ -122,13 +129,13 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-The three-node throughput candidate uses 64 prompts × 8 samples per collection
-and one 512-sample optimizer batch. It admits 3,840 unfinished samples, keeps up
+The three-node throughput candidate uses 128 prompts × 8 samples per collection
+and one 1,024-sample optimizer batch with policy lag 12. It admits 3,840 unfinished samples, keeps up
 to 512 completed prompt groups (4,096 samples), and runs 16 HTTP actors per node
 with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
 advertises 64 logical Ray CPUs through `launch.env.OI_MILES_RAY_CPUS` (default
-32 when omitted). The recorded validation image ignored that variable and
-advertised 32; the 64-CPU setting is newly wired, not a measured speedup.
+32 when omitted). The node example uses the same worker counts and reservations.
+Both learning examples set `expandable_segments:True` only on trainer ranks.
 These reservations permit actor placement; they
 do not make the Python producer event loop parallel. Distributed HTTP actors
 parse JSON before producer receipt. The single managed Qwen3-32B judge uses CUDA
@@ -201,9 +208,11 @@ explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Both learning examples use 64 prompts × 8 responses and batch 512. Both retain lag 6.
-The three-node admission budget represents 7.5 batches,
-so the planner warns that it exceeds the policy-lag window. It is headroom, not
+The node example uses 64 prompts × 8 responses, batch 512 and lag 6.
+Three-node uses 128 prompts × 8 responses, batch 1,024 and lag 12, with four
+completed batches buffered. Its unfinished-sample budget represents 3.75 batches;
+adding the completed buffer gives 7.75 nominal batches. Sample backfill can retain
+additional finished siblings, so this arithmetic is not an age guarantee. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.
 Batch-equivalents do not predict actual policy age or drain duration.
@@ -217,7 +226,7 @@ and raises judge concurrency from the default 16 to 32. Bounded B300 training
 runs and H100 TP2 serving checks passed; see the
 [judge qualification](../../../docs/miles/managed-judges.md#lifecycle-and-audit-artifacts).
 Continue measuring judge errors and grading latency alongside useful training
-throughput and the template's batch-512 policy age. These checks do not establish
+throughput and the template's policy age. These checks do not establish
 production-mixture calibration or long-run learning behavior.
 
 These templates inherit the disabled optional startup weight snapshot/reset audit

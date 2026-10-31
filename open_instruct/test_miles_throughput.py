@@ -75,7 +75,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
     assert layout["judge_gpus"] == judge_gpus
     assert layout["unused_gpus"] == 0
     assert spec.plan()["runtime"]["throughput"]["publication_mode"] in ("barrier", "refresh")
-    assert spec.compile().core.max_policy_lag == (6 if profile in ("node", "three-node") else 0)
+    assert spec.compile().core.max_policy_lag == ({"node": 6, "three-node": 12}.get(profile, 0))
 
 
 @pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 3840)])
@@ -93,13 +93,13 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     # Both learning examples bound supply independently of reserved engine slots.
     assert capacity["producer_sample_budget"] == producer_budget
     assert producer_budget < capacity["global_http_slots"]
-    assert any("Producer budget alone" in warning for warning in capacity["warnings"]) == (profile == "three-node")
+    assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["n_samples_per_prompt"] == 8
-    assert config.miles["global_batch_size"] == 512
-    assert config.core.max_policy_lag == 6
+    assert config.miles["global_batch_size"] == (1024 if profile == "three-node" else 512)
+    assert config.core.max_policy_lag == (12 if profile == "three-node" else 6)
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
-    buffer_factor = 8 if profile == "three-node" else 1
+    buffer_factor = 4 if profile == "three-node" else 1
     assert capacity["completed_buffer_samples"] == buffer_factor * capacity["samples_per_collection"]
     assert "--check-weight-update-equal" not in config.arguments()
     assert plan["scoring_pass"]["standalone"] is False

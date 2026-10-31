@@ -28,6 +28,7 @@ weka = "oe-training-default"
 mount_path = "/weka/oe-training-default"
 
 [launch.env]
+OI_MILES_RAY_CPUS = "64"
 OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 OI_MILES_CODE_FAILURE_POLICY = "zero"
 SGLANG_TIMEOUT_KEEP_ALIVE = "60"
@@ -115,6 +116,15 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
+# HTTP workers decode replies before handing them to the producer.
+use_distributed_post = true
+http_post_actors_per_node = 16
+http_post_num_cpus = 1.0
+rollout_executor_num_cpus = 2.0
+# Keep response weighting independent of generation length.
+calculate_per_token_loss = false
+# Trainer ranks only; do not change the serving allocator.
+train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 

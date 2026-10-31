@@ -384,7 +384,7 @@ def test_all_researcher_examples_compile_to_native_arguments():
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
             assert config.core.publication_mode == "refresh"
-            assert config.core.max_policy_lag == 6
+            assert config.core.max_policy_lag == (12 if path.stem == "three-node" else 6)
         else:
             assert config.core.publication_mode == "barrier"
             assert config.core.filter_zero_std_groups is False

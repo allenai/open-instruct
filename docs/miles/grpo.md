@@ -87,24 +87,31 @@ batch semantics and the opt-out.
 
 ## Truncated responses
 
-Unless configured otherwise, a response that reaches `max_response_length` is scored
-like any other: the verifier reads the unfinished text, and an answer mentioned
-mid-reasoning can earn reward (a chat judge rewarded 241 of 242 truncated responses in
-one audit). The example configs therefore score truncated responses 0:
+The demo configs are the baseline for configuration choices unless a run explicitly
+states otherwise. GRPO uses **per-response loss weighting** and **zero reward for
+length-truncated responses**. The Core reward default also scores truncations zero,
+so omitting the field does not silently change the objective. The examples make
+these choices explicit:
 
 ```toml
 [core]
 reward_zero_truncated = true
+
+[miles]
+calculate_per_token_loss = false
 ```
 
 This works with every verifier, managed judges included; only
 `reward_final_answer_only` is restricted to text verifiers. It cannot be combined
 with a `custom_reward_post_process_path`.
 
-To leave truncated responses out of training instead (overlong filtering), drop
-`reward_zero_truncated` and set:
+For an explicitly documented overlong-filtering experiment that excludes truncated
+responses from training instead, override the baseline with:
 
 ```toml
+[core]
+reward_zero_truncated = false
+
 [miles]
 custom_reward_post_process_path = "open_instruct.miles.rewards.truncation.exclude_truncated"
 ```
