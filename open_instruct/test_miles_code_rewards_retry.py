@@ -49,6 +49,7 @@ class _Session:
 
 
 def _score(monkeypatch, status, failure_policy=None):
+    monkeypatch.setattr(code_rewards, "HTTP_500_RETRY_SLEEPS", (0.0, 0.0))
     monkeypatch.setattr(code_rewards, "_get_session", lambda: _Session(status))
     args = SimpleNamespace(
         code_api_url="https://svc/test_program",
@@ -62,6 +63,47 @@ def test_client_errors_score_the_sample_zero(monkeypatch):
     assert _score(monkeypatch, 413) == 0.0
     assert _score(monkeypatch, 400) == 0.0
     assert _score(monkeypatch, 500) == 0.0  # the harness raised while running this program
+
+
+class _Statuses:
+    """A session whose successive POSTs return the given HTTP statuses."""
+
+    def __init__(self, *statuses):
+        self.statuses, self.calls = list(statuses), 0
+
+    def post(self, *args, **kwargs):
+        status = self.statuses[min(self.calls, len(self.statuses) - 1)]
+        self.calls += 1
+        if status == 200:
+            return SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: {"results": [1]})
+        return _Response(status)
+
+
+def _execute(monkeypatch, session):
+    monkeypatch.setattr(code_rewards, "HTTP_500_RETRY_SLEEPS", (0.0, 0.0))
+    monkeypatch.setattr(code_rewards, "_get_session", lambda: session)
+    return asyncio.run(code_rewards.execute(SimpleNamespace(), "pass", ["assert True"]))
+
+
+def test_transient_http_500_is_retried(monkeypatch):
+    session = _Statuses(500, 200)
+    score, diagnostics = _execute(monkeypatch, session)
+    assert score == 1.0 and diagnostics["status"] == "ok"
+    assert session.calls == 2 and diagnostics["http_500_retries"] == 1 and diagnostics["http_status"] == 200
+
+
+def test_persistent_http_500_is_rejected_after_retries(monkeypatch):
+    session = _Statuses(500)
+    score, diagnostics = _execute(monkeypatch, session)
+    assert score == 0.0 and diagnostics["status"] == "rejected"
+    assert session.calls == 3 and diagnostics["http_500_retries"] == 2 and diagnostics["http_status"] == 500
+
+
+def test_other_rejections_are_not_retried(monkeypatch):
+    session = _Statuses(413, 200)
+    score, diagnostics = _execute(monkeypatch, session)
+    assert score == 0.0 and diagnostics["status"] == "rejected"
+    assert session.calls == 1 and diagnostics["http_500_retries"] == 0
 
 
 def test_service_errors_only_fail_in_strict_mode(monkeypatch):

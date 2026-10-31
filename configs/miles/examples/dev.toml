@@ -63,6 +63,8 @@ wandb_project = "open-instruct-miles"
 wandb_group = "core-workflow-basic"
 
 [core]
+# A response cut off at max_response_length scores 0 (capped = wrong).
+reward_zero_truncated = true
 checkpoint_keep_last = 2
 attention_backend = "torch"
 max_train_rollout_logprob_abs_diff = 0.05

@@ -85,11 +85,24 @@ example explicitly disables filtering to permit all-zero-reward checks. See
 [data and evaluation](data-and-evaluation.md#online-group-filtering) for metrics,
 batch semantics and the opt-out.
 
-## Excluding truncated responses
+## Truncated responses
 
-By default a response that reaches `max_response_length` is scored like any other:
-the verifier reads the unfinished text, and an answer mentioned mid-reasoning can earn
-reward. To leave truncated responses out of training (overlong filtering), set:
+Unless configured otherwise, a response that reaches `max_response_length` is scored
+like any other: the verifier reads the unfinished text, and an answer mentioned
+mid-reasoning can earn reward (a chat judge rewarded 241 of 242 truncated responses in
+one audit). The example configs therefore score truncated responses 0:
+
+```toml
+[core]
+reward_zero_truncated = true
+```
+
+This works with every verifier, managed judges included; only
+`reward_final_answer_only` is restricted to text verifiers. It cannot be combined
+with a `custom_reward_post_process_path`.
+
+To leave truncated responses out of training instead (overlong filtering), drop
+`reward_zero_truncated` and set:
 
 ```toml
 [miles]
