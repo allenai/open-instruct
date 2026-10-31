@@ -74,6 +74,13 @@ would have selected without replay.
 
 ## Checkpoints and publication
 
+Refresh publication pauses and resumes inference at the engines without waiting
+for producer admission acknowledgments. The driver still waits for publication
+and the rollout executor's weight-version update before consuming the next batch.
+On a failed refresh run, cleanup cancels outstanding producer work instead of
+draining requests that may be waiting on paused engines. Shared-engine evaluation
+and successful shutdown retain their separate generation-drain boundaries.
+
 SGLang starts from HF config/tokenizer/weights. Core imports those weights into
 its native training representation. Updated policies are streamed directly as
 serving tensors; no HF directory or Megatron conversion is written per update.

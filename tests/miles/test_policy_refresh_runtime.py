@@ -8,6 +8,8 @@ import httpx
 import numpy as np
 import pytest
 import torch
+from sglang.srt.observability import req_time_stats
+
 from miles.backends.core_utils.publication import policy_refresh
 from miles.backends.core_utils.rollout import refreshing_rollout
 from miles.backends.core_utils.rollout.async_buffer import RefreshPolicyDataBuffer
@@ -18,7 +20,6 @@ from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.rollout.inference_rollout import inference_rollout_common
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
-from sglang.srt.observability import req_time_stats
 
 
 def sample(group=0, versions=(0, 1)):
@@ -204,6 +205,41 @@ def test_failed_publication_never_reopens_and_shutdown_cancels_owned_work():
             await p.shutdown()
         assert p._worker.cancelled()
         assert not p._producer_resumed.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_failed_run_aborts_without_refresh_gate_or_generation_progress(monkeypatch):
+    async def scenario():
+        p = producer()
+        entered = asyncio.Event()
+        child_done = asyncio.Event()
+
+        async def request():
+            entered.set()
+            try:
+                await asyncio.Event().wait()  # An engine that never resumes.
+            finally:
+                child_done.set()
+
+        async def worker():
+            await asyncio.gather(request())
+
+        async def forbidden_drain():
+            pytest.fail("Failed refresh must cancel, not drain paused engines")
+
+        monkeypatch.setattr(p, "prepare_publication", forbidden_drain)
+        p._worker = asyncio.create_task(worker())
+        await entered.wait()
+        assert not p._refreshing and p._producer_resumed.is_set()
+        await asyncio.wait_for(p.shutdown(abort=True), 1)
+        assert child_done.is_set() and p._worker.cancelled()
+        assert p._shutdown_complete and p._stopping and p._generation_admission.paused
+        assert not p._producer_resumed.is_set()
+        await p.shutdown()  # Executor disposal must not try to drain again.
+        assert not p._producer_resumed.is_set()
+        with pytest.raises(RuntimeError, match="Cannot resume"):
+            await p.finish_publication()
 
     asyncio.run(scenario())
 
