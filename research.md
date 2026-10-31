@@ -1012,3 +1012,45 @@ Status ACTIVE — queued for4Rhea slots as of2026-10-30 18:13UTC. Actual submitt
 entity is `mnoukhov`, topology2learners+2inference,500updates/checkpoint+eval100.
 No new GPU training verified yet. Stall monitoring is active; prior two-GPU
 submission is canceled.
+
+
+## Native SGLang Olmicro implementation and vLLM compatibility (2026-10-30)
+
+Status: ACTIVE — native serving implemented and tested; strict vLLM parity remains unqualified.
+
+The current reference-backbone adapter executes one HF model forward per request
+and keeps state outside SGLang's allocator. Its initial evaluation took49m17s;
+this is not evidence of native SGLang inference performance. User requests a
+native implementation and cross-backend compatibility tests. Reuse SGLang's
+batched GDN/state-pool and paged attention infrastructure, preserving Olmicro
+peri norms, NoPE, gates, embedding scaling, beta range[0,2], and checkpoint names.
+Do not switch running training or claim parity before native GPU tests pass.
+
+User approved one interactive L40S on Neptune; session01M675BCQ9F5G11AP6DEAAMAAW
+has2h timeout. See [implementation and qualification batch](experiment.md#native-sglang-olmicro-implementation-and-vllm-compatibility-2026-10-30).
+
+Finding so far: all five final-midtrain sizes passed genuinely native BF16/TP1
+generation at lengths1–3071,19 queued requests against16 slots, slot reuse and
+same-checkpoint reload. Packed-GDN beta2, FP32 state-slot isolation and changed
+convolution-weight repacking have independent GPU tests. The shared implementation
+is bundled with its tests and reports in
+[`allenai/miles-olmo-core`, branch `codex/hybrid-mainline`](https://github.com/allenai/miles-olmo-core/tree/codex/hybrid-mainline/patches/sglang-olmicro-native).
+The source checkout is `/home/mnoukhov/olmicro/sglang`; it does not call the HF
+model forward. Eager/no-prefix-cache scope and cross-process RL weight
+publication remain explicit limits. Existing training recipes retain the old
+bridge until a separate native training qualification.
+
+Findings: native BF16/TP1 functional checks passed at all five final-midtrain
+sizes on one L40S. All 35 focused regressions passed. Fixed plain RMSNorm and
+SwiGLU BF16 rounding, doubled-beta FP32 gating, beta*K Gram-product order,
+triangular merge precision, and gated-norm multiplication grouping. SGLang's
+native FA3 backend matched traced full-attention outputs more closely than its
+Triton or FlashInfer alternatives on this GPU.
+
+Full-vocabulary KL passed at 275m (0.000857), 450m (0.000788), 1.4b (0.000995)
+and 2.7b (0.000759); 810m failed the unchanged 0.001 gate at 0.001380. The stricter
+selected-token gate failed at 275m/450m/1.4b and was blocked by vLLM's own exact
+greedy queue/reuse failures at 810m/2.7b. These results do not establish exact
+cross-backend equivalence. Remaining numerical differences and cross-process
+native RL publication/optimizer/resume checks remain open. See the shared
+qualification report for all per-size gates and the precise checkpoint IDs.

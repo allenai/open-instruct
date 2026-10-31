@@ -1180,3 +1180,266 @@ Receipt: `/home/mnoukhov/.cache/open-instruct/miles/launches/hybrid-450m-miles-m
 Monitoring resumed via heartbeat `miles-four-gpu-training-progress-and-stalls`,
 every10minutes,20minute stall threshold, read-only; runtime topology and tracking
 checks included. Prior2GPU submission stays canceled.
+
+
+## Native SGLang Olmicro implementation and vLLM compatibility (2026-10-30)
+
+Status: ACTIVE — native implementation under GPU qualification; no native
+compatibility pass claimed. User explicitly requested native SGLang after the
+HF reference-backbone fallback took49m17s for1209-example initial evaluation.
+Current MILES run still uses the older reference adapter; do not mislabel it native.
+
+Workspace consolidated under `/home/mnoukhov/olmicro`: `open-instruct`,
+`miles-olmo-core`, and SGLang pinned source `sglang` on `codex/olmicro-native`.
+SGLang starting revision3145136dcd1238754e0ea2b2ffd546532119c71c.
+Native model has batched projections, SGLang managed conv/recurrent state pools,
+GDN kernels and paged full attention; no HF model forward or per-request cache.
+Adds Olmicro beta=2*sigmoid(b) to native Triton decode and prefill paths while
+preserving defaultbeta1 for existing models. Checkpoint parameter names remain
+release names; separate convolution filters are packed only at weight load.
+Initial scope is BF16,FP32 recurrent state,TP1/PP1,no quantization, eager decode,
+no prefix cache/speculation. These restrictions are explicit until GPU qualified.
+
+User authorized an interactive GPU on Neptune/L40S. Created session
+`01M675BCQ9F5G11AP6DEAAMAAW`:
+https://beaker.org/job/01M675BCQ9F5G11AP6DEAAMAAW
+One L40S,8 requestedCPU,64GiB requestedRAM,16GiB shared memory,2h timeout,
+normal priority,ai2/neptune,workspace ai2/open-instruct-dev,budget ai2/oe-other.
+Qualified MILES runtime image01M607Z48PYPNN0KHVZ5PGYJEG; no local Docker build.
+Assigned node neptune-cs-aus-261.reviz.ai2.in; pulling image at19:47UTC.
+Source and tests staged separately; existing Rhea training is not modified.
+
+Six CPU comparator tests passed; targeted Ruff passed. GPU tests will check
+beta2 recurrence against independent Torch math, state-slot isolation, mixed
+prefill/decode, queue/slot reuse, same-checkpoint reload, and selected-token
+probability compatibility with vLLM on identical fixed inputs. Greedy branching
+is reported separately. Baseline scales are275m,450m,810m,1.4b,2.7b finalmidtrain.
+PlannedGPU outcomes and throughput must be recorded after actual execution.
+
+Native qualification progress (2026-10-30, Neptune L40S): session started
+19:47:36UTC. CUDA13 image initially failed against host driver12080 before
+any kernels; fixed inside this session with bundled `/usr/local/cuda/compat`
+first on `LD_LIBRARY_PATH`. No host driver changes. Four independent GPU
+packed-GDN recurrence tests passed (beta scales1/2, equal/grouped head counts,
+FP32 state, BF16 output, unused-slot isolation),21.85s. A Transformers config
+serialization error was fixed using `has_no_defaults_at_init=True`; its four
+regression cases passed on the cluster. The 275m short-prompt native smoke
+passed generation,19 queued requests against16 slots, reordered reuse and
+same-checkpoint reload. This does not yet establish full-length or vLLM parity.
+Eight local comparator tests pass. Full-length native probes and the pinned
+Core/vLLM comparison image pull are in progress. Docker image download runs
+on Neptune through a scoped SSH Docker socket; no local image build.
+
+All five final-midtrain models passed the native SGLang probe on one L40S:
+275m/450m step0038147,810m step0023842,1.4b/2.7b step0011921. Each used BF16,
+TP1, FP32 recurrent state, no CUDA graphs/radix prefix cache, seven lengths
+1/3/31/127/511/2047/3071,32 greedy tokens,16 slots with19 queued requests,
+reordered slot reuse and successful same-checkpoint reload. Small-batch output
+rates (224 tokens per batch, including prompt scoring):348.5,268.0,234.0,184.0,
+127.1 tok/s respectively. These are not end-to-end GSM8K eval measurements.
+Raw JSONs: `/weka/oe-adapt-default/michaeln/olmicro/native-sglang-20261030/sglang-SIZE.json`.
+An additional GPU test passed release-name convolution updates with changed
+weights and packed-filter refresh. The complete unit test count is17 passing
+(8 comparator,4 config,4 recurrent kernel,1 weight loading). vLLM numerical
+comparison remains pending. vLLM image01M64G5M526S9HNF960NP3QRVB was pulled to
+Neptune; use only the interactive session's assigned GPU UUID for its sequential
+containers. Weka bind sources on this node are `/net/weka/oe-training/oe-training-default`
+and `/net/weka/oe-adapt/oe-adapt-default`, not the container's `/weka/...` paths.
+
+vLLM runtime setup: a separate comparison Docker container was killed externally
+withSIGKILL after52s (Docker events show`kill signal=9`, noOOM event), before
+model load. No extra GPU allocation was made. Instead copied `/stage` and
+`/opt/python` from the immutable qualified vLLM image into the allocated
+interactive session, preserving its Python environment. Verified there:
+Torch2.10.0+cu128, CUDA available, vLLM0.19.1. The native SGLang runtime remains
+system Torch2.13.0+cu130 with its source overlay. All comparison processes now
+execute inside the session's own container and use its one assigned GPU.
+
+Numerical gate caught a real qualification gap: the first275m SGLang/vLLM
+selected-token comparison failed0.08 tolerance (maximum0.26784;6/7 greedy
+continuations exact). This is not a parity pass. Two implementation changes
+are being retested: doubled-beta decode now retains FP32 gating, consistent
+with SGLang prefill and vLLM (stock scale1 rounding unchanged; all4 GPU recurrence
+tests pass again), and FFN uses native fusedSiluAndMul rather than rounding
+SiLU to BF16 before multiplication. Full-vocabulary distribution/KL probes
+were added to distinguish low-probability log-score sensitivity from meaningful
+probability-mass differences without hiding the strict selected-token result.
+Their4 CPU checks pass;12 comparator/distribution checks total. Final native
+scale and numerical reruns remain required after these changes.
+
+The revised unpacked native implementation passed all five functional probes
+again after FP32 doubled-beta decode and fusedSiluAndMul. It still missed the
+strict selected-token gate at275m/450m. Full-vocabulary probes collected50
+identical prefixes per backend/size, covering every fixed continuation position
+and the repeated-question boundary. The first275m comparison measured maximum
+KL(SGLang||vLLM)=0.00178028, reverseKL=0.00175767, TV=0.0245067; this misses the
+1e-3 KL gate. Exact greedy agreement improved to7/7 at275m. vLLM itself failed
+strict greedy stability at810m after request reordering and at2.7b under queueing;
+its275m/450m/1.4b probes passed. These failures remain recorded, not waived.
+
+Next source change packs QKV and FFN gate/up projection weights once per load,
+matching vLLM GEMM shapes while retaining individual release parameter names.
+Changed/partial projection updates and untouched packed rows pass the GPU weight
+loading regression. Full native serving/numerical checks must rerun for this
+packed version. Initial and unpacked raw reports are retained separately.
+
+First session was scheduler-preempted at2026-10-30 20:48:06UTC by an urgent
+allocated workload (exit143), after its default one-hour session minimum runtime.
+All five vLLM full-vocabulary files completed by20:37:31UTC on Weka before eviction.
+No packed full-model qualification had run yet. On2026-10-31 04:17UTC submitted
+replacement interactive session01M682TSK1EBFADEBFQB9XWGSG:
+https://beaker.org/job/01M682TSK1EBFADEBFQB9XWGSG
+Same one-L40S Neptune/8CPU/64GiB/16GiBshm/2h/normal resource plan, workspace
+ai2/open-instruct-dev, budgetai2/oe-other, same immutable image. This uses the
+user's standing authorization for interactive Neptune GPU experiments. Old GPU
+session is terminal; peak concurrent allocation remains one GPU. Pending as of
+04:17UTC. Existing Rhea training is unchanged.
+
+Replacement session started2026-10-31 04:18:05UTC on
+neptune-cs-aus-259.reviz.ai2.in; confirmed NVIDIA L40S. Avoided a slow full source
+upload by verifying the image's installed SGLang tree against all4369 tracked
+files at the pinned upstream commit: only
+`srt/mem_cache/cpp_radix_tree/.clang-format` differed, with no runtime differences.
+Copied that installed source inside the session and applied the small changed-file
+overlay. An early extraction attempt on an incomplete upload failed and ran no
+tests; it is not a test result. The verified overlay supersedes that attempt.
+The complete21-test suite and packed full-model reruns follow.
+
+2026-10-31 precision debugging: source-matched model activation traces on a
+seven-token prefix showed bit-identical embedding, embedding norm, first input
+norm, gating projections and convolution output. Selected
+`cast_x_before_out_mul=True` for plain RMSNorm to match vLLM's actual CUDA
+behavior; traces confirm identical norm outputs, not just a Python-reference
+inference. The first mismatch was GDN beta: SGLang's prefill gating allocated
+an FP32 output tensor but explicitly cast sigmoid values to BF16 before storing.
+The new Olmicro doubled-beta path keeps sigmoid and scaling in FP32 in both
+prefill and decode; default scale1 rounding is unchanged for existing models.
+Independent GPU prefill-gating tests cover this hidden-cast regression.
+
+After the fix, first-layer beta matched vLLM bit-for-bit, first-token GDN output
+matched exactly, and maximum seven-token GDN output error fell from0.00048828125
+to0.0000038146973. Remaining small differences may come from the native fused
+chunk solve; no gate was relaxed. Debug activation hooks live only in a temporary
+`/opt/olmicro-debug` directory and are absent from production PYTHONPATH and final
+qualification processes. No HF model forward is used in native serving.
+26 focused tests passed together on the replacement L40S,20.26s (12 comparator/
+distribution,4 config,6 recurrence/prefill-gating,3 RMSNorm,1 partial weight-load).
+The RMSNorm kernel unit test covers supported JIT widths128/1024/2048;640 uses
+the framework's batched GPU path and remains covered by complete275m probes.
+An initial direct call of the JIT-only kernel at640 failed its declared shape
+check; it did not represent a model/server failure.
+Final all-size functional and50-prefix full-vocabulary numerical matrix is
+running against the saved vLLM results. All earlier initial/unpacked/pre-fix
+reports remain available alongside the final outputs on Weka.
+
+2026-10-31 further parity fixes: Olmicro opts into a GDN prefill path that
+rounds beta*K to BF16 before the Gram product, matching the qualified vLLM
+backend. The triangular block merge uses IEEE dot precision on this opt-in
+path; existing models retain the original path and default arithmetic.
+Independent small dense triangular solves cover both paths. All29 focused
+tests passed together on the replacement L40S in40.44s.
+
+With that fix, the seven-token trace matched vLLM exactly through the first
+GDN output, gated output norm, output projection and post-attention norm.
+The next mismatch was the MLP: identical packed projection inputs, but the
+vLLM reference rounded SiLU to BF16 before multiplying by the up projection.
+Native serving now uses SGLang's fused activation-with-rounding kernel. This
+preserves the BF16 intermediate without an HF model forward or request loop.
+Three independent GPU activation tests passed in25.58s, checking against eager
+BF16 arithmetic and distinguishing it from unrounded FP32 SwiGLU. The complete
+five-size generation/distribution matrix is rerunning with this final change.
+
+2026-10-31 final kernel selection: nine-token trace on an actual failing
+teacher-forced prefix matched all four first recurrent blocks and MLPs exactly.
+The first difference was full attention (SGLang Triton versus vLLM FlashAttention).
+FlashInfer was tested and gave larger differences; SGLang's native `fa3` backend
+on the L40S matched that full-attention block exactly. This backend is supported
+on SM8.x by the pinned sgl-kernel build; the name does not require Hopper here.
+`SGLANG_USE_SGL_FA3_KERNEL=1` selects the image's existing pinned kernels.
+The next isolated difference was gated RMSNorm: identical inputs and weights,
+but a different FP32 multiplication grouping. Switching to SGLang's existing
+`fla.layernorm_gated.RMSNorm` matched the saved vLLM outputs exactly on the
+isolated layers0/5/7/8 test. All35 focused tests passed together on the L40S
+in16.06s, including independent gated norm and changed MLP-weight publication
+checks. No external backend operator is imported into production serving.
+
+Final five-size FA3 probes and50-prefix full-vocabulary comparisons use a new,
+unambiguous output directory:
+`/weka/oe-adapt-default/michaeln/olmicro/native-sglang-20261030/native-fa3-final/`.
+Earlier candidates remain in the parent directory. Numerical and exact greedy
+checks remain unchanged; the wrapper logs each individual exit code and its
+own exit status must not be treated as an aggregate pass.
+
+All five final FA3 native functional probes passed, including19 queued requests
+against16 slots, reordered reuse and same-checkpoint reload. All five final
+50-prefix GPU distribution probes completed and saved atomic `.pt` outputs.
+The replacement Neptune session was preempted at2026-10-31 05:18:15UTC by an
+urgent job, after its default one-hour minimum runtime. The final2.7b CPU KL
+comparison was killed(exit137); it is not a GPU inference failure. The planned
+extra length63 inverse unit case did not run and was reverted; the validated
+focused suite remains35 tests. The earlier three inverse cases are unchanged.
+
+For report retrieval/completion only, opened a2CPU/4GiB/noGPU/20-minute Hammond
+session01M686BXSV2VBYWQ6M2XYBFJ1S, same workspace/budget, using
+ai2/cuda12.8-dev-ubuntu22.04-notorch and read-only access to the saved report files:
+https://beaker.org/job/01M686BXSV2VBYWQ6M2XYBFJ1S
+No additional GPU allocation and no running training changes.
+
+Hammond CPU report session01M686BXSV2VBYWQ6M2XYBFJ1S stayed queued: one node
+matched placement but had no free job slots. Canceled it before start. Replaced
+it with CPU-only Neptune session01M686E9WQE1DJNP6K48ASN3T1, identical2CPU/4GiB/
+zeroGPU/20-minute plan and image/mounts, solely to export the saved reports:
+https://beaker.org/job/01M686E9WQE1DJNP6K48ASN3T1
+
+Neptune CPU-only report session also queued:11 of12 eligible nodes had no free
+slots and the remaining nodes were behind higher-priority work. Canceled that
+pending session before start. `beaker cluster free-slots` showed free Saturn
+slots; the report retrieval uses zero GPUs on saturn-cs-aus-252 instead. This is
+unrelated to the explicitly canceled275m training experiment, which stays canceled.
+
+The session CLI's implicit one-hour minimum runtime was rejected by Saturn's
+unallocated-workspace policy; no Saturn session was created. Submitted a tiny
+CPU-only batch export instead with explicit minRuntime0, no auto-resume/retries,
+2CPU/4GiB/zeroGPU/20-minute cap, same workspace/budget and Weka report mount:
+https://beaker.org/ex/01M686KRCMDDRZRNETGQJSPCHS
+Image01M5ZADF1XJWCE9G21S7PGPCPS (ai2/cuda12.8-dev-ubuntu22.04-notorch).
+The batch command only archives existing saved reports into its Beaker result
+dataset; numerical comparison then runs locally on CPU. No training is launched.
+
+Final result retrieval: the pending CPU export experiment was stopped before it
+ran. Used a read-only tar stream through an existing user-owned Weka mount on
+Holmes; no GPU operation, training-file modification, or job configuration change.
+The report bundle is now saved locally under
+`/home/mnoukhov/olmicro/reports/native-sglang-20261030/final-export/`.
+The2.7b KL comparison completed locally on CPU from the saved atomic vectors.
+Its full per-prefix report is also included in the shared MILES report bundle.
+All report-retrieval sessions/experiments are canceled/terminal; no additional
+GPU allocation was made after the Neptune preemption.
+
+Final BF16/TP1 native functional probes: PASSED for275m,450m,810m,1.4b,2.7b.
+35 focused regressions passed together. Full-vocabulary maximum bidirectional KL
+versus the saved vLLM reference (unchanged threshold0.001,50 fixed prefixes each):
+275m0.0008568323 PASS;450m0.0007880039 PASS;810m0.0013801406 FAIL;
+1.4b0.0009953578 PASS;2.7b0.0007593905 PASS.
+Selected-token absolute-logprob threshold0.08:275m FAIL(max0.1250019),450m
+FAIL(max0.1562119),1.4b FAIL(max0.0955875).810m/2.7b selected comparisons are
+BLOCKED by the reference's own exact-greedy reuse/queue failures. Cross-backend
+greedy continuations are not uniformly identical. No threshold was relaxed.
+The native source is commit986877f4cd38b090ce2338e685f914cd65c18e8c atop upstream
+3145136dcd1238754e0ea2b2ffd546532119c71c. The reproducible patch,35-test suite,
+qualification.json and per-prefix numerical reports are bundled in the pushed
+`allenai/miles-olmo-core` branch `codex/hybrid-mainline`, under
+`patches/sglang-olmicro-native/`. Patch application was verified against clean
+pinned upstream files and reproduced all21 changed files exactly. Native model
+and configuration SHA256 matched the actual GPU overlay. No complete native RL
+optimizer/publication/checkpoint-resume run is claimed; existing training is unchanged.
+
+Published source patch, reproduction guide and full per-prefix comparison reports:
+https://github.com/allenai/miles-olmo-core/tree/10a8f07a3284d5c30597dbf8d731049757ca54fd/patches/sglang-olmicro-native
+Remote `codex/hybrid-mainline` was verified at commit
+10a8f07a3284d5c30597dbf8d731049757ca54fd. Source patch SHA256:
+845f980958e89e2987158c78437ebe0de7b37fb15e6aa998152b80683ee4346c.
+Focused Ruff/format checks and compile checks passed; the source patch's clean
+application reproduces the committed SGLang changes. The packaged unified diff
+is marked as patch data in a scoped .gitattributes entry so intentional context
+blank-line spaces are preserved. Temporary Docker SSH tunnels were closed.
