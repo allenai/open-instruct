@@ -2,7 +2,7 @@
 # The evaluator owns its inline SGLang runtime independently of the training image.
 ARG BASE_IMAGE=gcr.io/ai2-beaker-core/public/dbfeg0vbnsoc73aeq7d0@sha256:387ffbeba26a151142f7c30cd4ea9b5e5a741d54b57e6b43bd3ec3b117e85952
 FROM ${BASE_IMAGE}
-ARG OLMO_EVAL_REVISION=3536fe751e40162cc33d5e647085e986375aadce
+ARG OLMO_EVAL_REVISION=ede61eb914c0cae312c9c8112389afbe524fb096
 LABEL ai2.olmo.eval.revision=${OLMO_EVAL_REVISION}
 RUN git clone https://github.com/allenai/olmo-eval.git /opt/olmo-eval \
     && git -C /opt/olmo-eval checkout --detach ${OLMO_EVAL_REVISION} \
