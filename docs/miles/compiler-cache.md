@@ -166,3 +166,11 @@ optimizer state and final parameters exactly. The warm phase must restore an
 archive and perform no Triton compilation. This uses the fixture's Torch
 attention backend; the separate kernel probe covers FA4. Neither probe downloads
 model weights or reads the production cache.
+
+The pinned Core KDA setup also removes FLA 0.5.2's unused `NB` convolution
+compiler specialization. `NB` still selects the autotuning bucket and all
+candidate launch configurations remain available; changing the bucket alone
+no longer compiles identical candidates again. A guarded source adapter requires
+NB to remain unused in both kernel bodies. The runtime's
+`tools/probe_fla_conv_cache.py` checks numerical identity and restored reuse
+across sequence lengths and convolution options.
