@@ -69,11 +69,7 @@ def test_heldout_audit_counts_truncation_as_failure_and_keeps_scores(tmp_path):
         }
     assert toolrl_reward_watch.log_eval(0, args(tmp_path), {"toolrl": {"samples": [good, capped]}}, {}) is False
     summary = json.loads((tmp_path / "toolrl-heldout/metrics.jsonl").read_text())
-    assert summary["buckets"]["one_call"] == {
-        "responses": 2,
-        "full_successes": 1,
-        "full_success_rate": 0.5,
-    }
+    assert summary["buckets"]["one_call"] == {"responses": 2, "full_successes": 1, "full_success_rate": 0.5}
     rows = [json.loads(x) for x in (tmp_path / "toolrl-heldout/step_00000.jsonl").read_text().splitlines()]
     assert rows[1]["partial_score"] == 4
     assert rows[1]["full_success"] is False
