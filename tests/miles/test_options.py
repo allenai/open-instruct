@@ -145,6 +145,24 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
     )
 
 
+def test_native_routing_replay_allows_replay_diagnostics(monkeypatch):
+    config = RunConfig(
+        CoreConfig(replay_diagnostics=True),
+        {
+            "hf_checkpoint": "model",
+            "rollout_batch_size": 1,
+            "n_samples_per_prompt": 4,
+            "global_batch_size": 4,
+            "use_rollout_routing_replay": True,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["test", *config.arguments()])
+    with contextlib.redirect_stderr(io.StringIO()):
+        parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
+    assert parsed.use_rollout_routing_replay is True
+    assert parsed.olmo_core.replay_diagnostics is True
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled):
     # Omit the compiled native filter flag to exercise direct native CLI callers.

@@ -262,6 +262,7 @@ NATIVE_VALIDATION_OPTIONS = (
             "use_miles_router",
             "use_rollout_indexer_replay",
             "use_rollout_logprobs",
+            "use_rollout_routing_replay",
             "use_tis",
         )
     )

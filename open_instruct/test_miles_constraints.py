@@ -70,6 +70,19 @@ def test_native_collection_preserves_explicit_only_options_and_false_values():
         RunConfig(CoreConfig(), fields).validate()
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_native_validation_preserves_routing_replay_for_diagnostics(enabled):
+    args = SimpleNamespace(hf_checkpoint="fixture", global_batch_size=8, use_rollout_routing_replay=enabled)
+    fields = constraints.native_values(args, {"--use-rollout-routing-replay"} if enabled else set())
+    assert fields["use_rollout_routing_replay"] is enabled
+    config = RunConfig(CoreConfig(replay_diagnostics=True), fields)
+    if enabled:
+        config.validate()
+    else:
+        with pytest.raises(InputError, match="replay_diagnostics requires rollout routing replay"):
+            config.validate()
+
+
 @pytest.mark.parametrize(
     "override,category",
     [
