@@ -10,7 +10,7 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 | Path | What |
 |---|---|
 | `image/` | The training image: upstream MaxText at a pinned commit, plus our MaxText patch, Tunix and the post-training dependencies. `build.sh <maxtext commit>` builds it with Cloud Build. |
-| `image-delretry/` | Layer on any published image: Orbax's retention delete of an old checkpoint step retries 5 times with backoff, then logs `ORBAX-DELETE-LEAKED` and continues, so a transient GCS error costs storage, not the run. `build.sh <base tag>` builds `<base tag>-dlr<hash>`; the build runs the patch's check against the image's own Orbax. |
+| `image-delretry/` | Layer on any published image: Orbax's delete of an old checkpoint step retries 5 times with backoff. If only the HNS folder cleanup still fails once every object is gone, it logs `ORBAX-DELETE-LEAKED-FOLDERS` and continues, so a transient GCS error costs storage, not the run; objects still left raise as before. The parallel deleter (`num_threads`, local paths) and the rename/todelete options bypass it. `build.sh <base tag>` builds `<base tag>-dlr<hash>`; the build runs the patch's check against the image's own Orbax. |
 | `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. Historical smoke base on a `2x2x4` slice (16 chips), which is no longer available; use the `4x4x8` overlay. |
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
 | `k8s/olmo35-sft-4x4x8/` | Overlay: the Olmo 3.5 hero-small SFT recipe (16 rows of 65,536 tokens, 11,768 steps) on one `4x4x8` slice. Start here: it is the cheapest per chip-hour. |
