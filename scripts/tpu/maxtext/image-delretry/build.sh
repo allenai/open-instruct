@@ -2,11 +2,11 @@
 # Build the Olmo post-training MaxText image with Cloud Build. To avoid requiring access to uploaded source,
 # the Dockerfile and patches/ travel inside the build config as a base64 tarball, split into
 # steps of < 10,000 characters (Cloud Build's per-argument limit) that append to one file in the shared workspace.
-#   ./build.sh <published base tag>   (adds the Orbax retention-delete retry to that image; tag <base>-dr<hash>)
+#   ./build.sh <published base tag>   (adds the Orbax retention-delete retry to that image; tag <base>-dlr<hash>, since -dr is H149's docrole layer)
 set -euo pipefail
 cd "$(dirname "$0")"
 BASE_TAG=${1:?usage: build.sh <published maxtext-posttrain tag>}
-TAG="$BASE_TAG-dr$(cat Dockerfile *.py | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:8])')"
+TAG="$BASE_TAG-dlr$(cat Dockerfile *.py | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:8])')"
 IMAGE=us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
 CTX=$(tar czf - Dockerfile *.py | base64 | tr -d '\n')
 cfg=$(mktemp "${TMPDIR:-/tmp}/maxtext-build.XXXXXX")
