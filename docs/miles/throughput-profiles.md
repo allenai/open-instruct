@@ -260,10 +260,10 @@ Omitted producer budgets still use two waves of resolved capacity, rounded to
 whole groups (or one collection, whichever is larger). The examples explicitly
 use 1,024 unfinished samples for node and 3,840 for three-node. Without those
 limits their presets would resolve to 6,144 and 15,360 respectively.
-Generic configurations with omitted budgets give 768/1,920 for those topologies.
-Explicit budgets win. Node uses 64 prompts × 8 responses, batch 512 and lag 6;
-three-node uses 128 prompts × 8 responses, batch 1,024 and lag 12. One full wave across six
-512-slot engines represents six batches, but keeping those slots occupied is a
+Generic configurations with omitted budgets give 1,024/1,920 for those topologies.
+Explicit budgets win. Both learning examples use 128 prompts × 8 responses,
+batch 1,024 and lag 12. One full wave across six
+512-slot engines represents three batches, but keeping those slots occupied is a
 different objective from keeping the trainer supplied. Neither batch-equivalents
 nor a static lag limit predicts drain time or actual policy age.
 Measure useful consumption, queue age/discards and publication latency in the
@@ -391,10 +391,11 @@ separate replay decode and record compaction wall time, thread CPU time, and
 sizes from JSON parsing. The producer still validates replay shape and policy
 metadata. Decoding remains synchronous within each HTTP actor; it does not
 remove batch preparation from the coordinator, and converted samples still
-hold their token, mask and logprob lists. The three-node template's completed
-buffer holds eight optimizer batches (512 groups / 4,096 samples); the
-policy-lag limit remains six, so capacity does not guarantee all queued work
-stays usable.
+hold their token, mask and logprob lists. The earlier transport runs used a completed
+buffer of eight optimizer batches (512 groups / 4,096 samples) with a
+policy-lag limit of six. The current three-node template uses the same group
+capacity, now four batches of 1,024 samples, with lag 12. Capacity alone does
+not guarantee all queued work stays usable.
 
 The three-node template gives the trainer a full node (8 GPUs, EP8) and runs
 15 engines plus one judge on the other two. This candidate split was validated

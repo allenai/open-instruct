@@ -89,9 +89,9 @@ packing_max_tokens = 34816
 [inference]
 placement_mode = "disaggregated"
 gpus = 6
-rollout_batch_size = 64
+rollout_batch_size = 128
 samples_per_prompt = 8
-global_batch_size = 512
+global_batch_size = 1024
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
@@ -105,6 +105,7 @@ wandb_project = "open-instruct-miles"
 wandb_group = "node"
 
 [core]
+max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true
 checkpoint_keep_last = 2

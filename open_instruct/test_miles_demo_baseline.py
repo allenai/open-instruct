@@ -3,12 +3,13 @@
 from pathlib import Path
 
 import pytest
+import tomllib
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
 
-@pytest.mark.parametrize("name,batch,lag,buffer", [("node", 512, 6, 1), ("three-node", 1024, 12, 4)])
+@pytest.mark.parametrize("name,batch,lag,buffer", [("node", 1024, 12, 1), ("three-node", 1024, 12, 4)])
 def test_learning_baseline_and_worker_controls(name, batch, lag, buffer):
     config = RunSpec.load(f"configs/miles/examples/{name}.toml").compile()
     options = config.resolved_miles()
@@ -24,6 +25,18 @@ def test_learning_baseline_and_worker_controls(name, batch, lag, buffer):
     assert options["http_post_num_cpus"] == 1
     assert options["rollout_executor_num_cpus"] == 2
     assert options["train_env_vars"]["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
+
+
+@pytest.mark.parametrize(
+    "section,topology_fields",
+    [("training", set()), ("core", set()), ("inference", {"gpus"}), ("trainer", {"gpus", "expert_parallel_size"})],
+)
+def test_learning_demos_share_training_parameters(section, topology_fields):
+    # Dataset, judge and evaluation workloads intentionally differ. Changing GPU
+    # topology must not silently change the learning recipe.
+    runs = [tomllib.loads(Path(f"configs/miles/examples/{name}.toml").read_text()) for name in ("node", "three-node")]
+    parameters = [{k: v for k, v in run[section].items() if k not in topology_fields} for run in runs]
+    assert parameters[0] == parameters[1]
 
 
 def test_omitted_settings_cannot_revert_the_objective(tmp_path):

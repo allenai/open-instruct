@@ -15,7 +15,9 @@ stated.** Start a validation run from the applicable demo and record intentional
 differences. In particular, keep per-response loss weighting
 (`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
 (`core.reward_zero_truncated=true`). A throughput experiment must not silently
-change either learning-policy setting.
+change either learning-policy setting. The one-node and three-node demos share
+training hyperparameters, including batch size and policy lag; their datasets,
+judges, evaluation panels and topology-specific performance budgets differ.
 
 The examples keep inputs, topology, resource limits and recipe-specific overrides.
 Launch settings, mounts and input/output paths remain explicit. The examples
@@ -204,13 +206,13 @@ rounded to complete prompt groups. The three-node example explicitly uses
 **3,840** unfinished samples (256 per engine) as a candidate throughput budget. Removing the
 explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 64-admission configurations with omitted budgets give
-768 and 1,920 for those topologies. Explicit
+1,024 and 1,920 for those topologies. Explicit
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-The node example uses 64 prompts × 8 responses, batch 512 and lag 6.
-Three-node uses 128 prompts × 8 responses, batch 1,024 and lag 12, with four
-completed batches buffered. Its unfinished-sample budget represents 3.75 batches;
+Both learning examples use 128 prompts × 8 responses, batch 1,024 and lag 12.
+Node buffers one completed batch; three-node buffers four. The three-node
+unfinished-sample budget represents 3.75 batches;
 adding the completed buffer gives 7.75 nominal batches. Sample backfill can retain
 additional finished siblings, so this arithmetic is not an age guarantee. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe

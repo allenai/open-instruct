@@ -10,12 +10,12 @@ stated; document deviations in each experiment, including objective changes.
 
 ## Objective and data
 
-- **Policy lag** (6 in `node`, 12 in `three-node`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
+- **Policy lag** (12 in both `node` and `three-node`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
 - **Loss weighting** (per response, `miles.calculate_per_token_loss = false`): keep the demo objective in throughput trials; token-weighted loss is an explicit learning-policy experiment.
 - **Off-policy correction** (TIS on, `use_rollout_logprobs = false`): TIS reweights samples toward the current policy; turning it off assumes inference and training probabilities agree closely.
 - **Group filtering** (`training.filter_zero_std_groups = true`): groups where every response gets the same reward carry no policy gradient, so dropping them saves training work at the cost of extra generation; disable it for tiny checks that cannot produce mixed rewards.
 - **Router auxiliary losses** (coefficients zero in the examples): the balancing and z-losses keep expert load even during pretraining; whether RL needs them is open, so watch the `train/moe/` load metrics if you leave them off.
-- **Truncated responses** (scored normally): excluding them avoids rewarding unfinished reasoning but removes long responses from the batch; worth considering when many responses hit the length cap.
+- **Truncated responses** (zero reward, `core.reward_zero_truncated = true`): responses that hit the length cap receive zero reward; this does not itself remove them from the training batch. Scoring them normally requires an explicit experiment override.
 
 ## Publication and capacity
 
