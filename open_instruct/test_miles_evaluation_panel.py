@@ -38,8 +38,8 @@ def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_nod
     assert len(tasks) == len({task["task"] for task in tasks}) == 25
     assert all(not task["scoring"] for task in tasks)
     assert {t["task"]: t["generation"] for t in tasks if t["generation"]} == {
-        "gpqa_diamond:cot": {"max_tokens": 32768},
-        "gpqa_main:cot": {"max_tokens": 32768},
+        "omega_500:hillclimb": {"max_tokens": "null"},
+        "omega_500_out": {"max_tokens": "null"},
     }
     milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
@@ -445,6 +445,6 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
         assert frozen["checkpoint"] != str(checkpoint)
         assert frozen["served_model_name"] == str(checkpoint)
         assert json.loads((Path(frozen["checkpoint"]) / "generation_config.json").read_text())["top_k"] == -1
-        assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 65536}
+        assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
     assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
     server.terminate.assert_called_once()
