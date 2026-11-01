@@ -1,5 +1,7 @@
 # Changelog
 
+- Add qualified candidate dataset catalogs and verifier controls (https://github.com/allenai/open-instruct/pull/2141).
+
 All notable changes to this project will be documented in this file.
 
 
