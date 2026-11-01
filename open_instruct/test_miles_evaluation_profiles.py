@@ -22,7 +22,10 @@ def document():
 @pytest.mark.parametrize("example", ["node", "three-node"])
 def test_examples_require_qualified_profile_and_capacity_batches(example):
     config = RunSpec.load(ROOT / f"configs/miles/examples/{example}.toml").evaluation
-    assert config["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
+    assert config["provider_kwargs"] == {
+        "profile": "olmo3.5-12.5b",
+        "context_length": 65536 if example == "three-node" else 34816,
+    }
     assert config["external_server_args"] == []
     for task in config["tasks"]:
         args = evaluation_runner.command({"checkpoint": "/hf", "evaluation": config, "tasks": [task]}, "/out")
