@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Separate MILES Triton cache compatibility from Python provenance, explain cache misses and record compiler timings; add opt-in TileLang persistence with verified private restores (PR pending).
 - Pin Olmo-SGLang to merged main commit `069dc0a`, retaining the FP32 KDA snapshot fix and aligning declared compatibility with the pinned SGLang runtime (https://github.com/allenai/open-instruct/pull/2132).
 - Pin the MILES ready-batch draining, asynchronous diagnostics, one-time packing and sampled layer/expert profiling runtime; ensure diagnostic flush failures still run rollout cleanup; align learning demos to eight responses, distributed HTTP workers, trainer allocator settings and a shared 1,024-sample batch and policy-lag-12 baseline. Default Core rewards (including OPD verifier evaluation) to zero for truncated responses and make per-response loss explicit; custom reward postprocessors now require an explicit truncation-policy opt-out (https://github.com/allenai/open-instruct/pull/2132).
 - Consolidate MILES Rust routing, worker-side replay/compact-token transport, publication and compiler-cache fixes, checkpointed token totals and age/length/allocator diagnostics; add the three-node throughput candidate and configurable Ray CPU capacity (https://github.com/allenai/open-instruct/pull/2121).

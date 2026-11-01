@@ -48,6 +48,7 @@ class CoreConfig:
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
+    compiler_cache_tilelang: bool = False
     compiler_cache_max_storage_bytes: int = 8 * 1024**3
     compiler_cache_publish_interval_seconds: float = 600.0
     checkpoint_profile: bool = False
@@ -174,6 +175,7 @@ class CoreConfig:
             "compiler_cache",
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
+            "compiler_cache_tilelang",
             "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",

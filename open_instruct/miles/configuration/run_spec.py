@@ -231,7 +231,7 @@ class RunSpec:
             validation.number(
                 cache["publish_interval_seconds"], "compiler_cache.publish_interval_seconds", exclusive_min=True
             )
-        for key in ("enabled", "restore", "diagnostics"):
+        for key in ("enabled", "restore", "diagnostics", "tilelang"):
             if key in cache:
                 _boolean(cache[key], f"compiler_cache.{key}")
         if "shared_root" in cache:
@@ -565,6 +565,7 @@ class RunSpec:
             "shared_root": "compiler_cache_root",
             "restore": "compiler_cache_restore",
             "diagnostics": "compiler_cache_diagnostics",
+            "tilelang": "compiler_cache_tilelang",
             "max_storage_bytes": "compiler_cache_max_storage_bytes",
             "publish_interval_seconds": "compiler_cache_publish_interval_seconds",
         }.items():
