@@ -62,6 +62,12 @@ automatically adopted. The first v3 run can be cold; later compatible Python
 revisions reuse its artifacts. Rebuilding an application image alone does not
 invalidate the cache: the pinned binary base and compatibility inputs matter.
 
+Triton publication saves independently completed kernel groups while skipping
+incomplete or concurrently changing groups. Receipts report `skipped_live_groups`;
+those groups can be saved on a later interval. A busy compiler therefore need
+not invalidate the whole snapshot. Manifest, archive and checksum validation
+remain required.
+
 ## Experimental TileLang persistence
 
 `compiler_cache.tilelang = true` additionally persists TileLang in a separate
