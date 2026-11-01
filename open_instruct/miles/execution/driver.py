@@ -13,6 +13,7 @@ from pathlib import Path
 import ray
 import wandb
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
+from miles.backends.core_utils.rollout import prepared_batch
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
@@ -50,6 +51,9 @@ async def train(args, *, export_hf=None):
     completed = []
     rolling = None
     refresh = args.olmo_core.publication_mode == "refresh"
+    overlap = prepared_batch.enabled(args)
+    prefetched = False
+    logger.info("Prepared-batch overlap enabled: %s", overlap)
     try:
         # Start local Ray before W&B creates WANDB_SERVICE. Otherwise raylet
         # inherits the driver's service connection, and offline worker writers
@@ -156,15 +160,32 @@ async def train(args, *, export_hf=None):
             with evaluation_stage(args, args.start_rollout_id, initial=True):
                 await evaluation.dispatch(args.start_rollout_id, hf_dir=args.hf_checkpoint)
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
-            # In async mode the managed producer fills the bounded queue while
-            # learning runs; dequeue happens only after the preceding publication.
+            # A prefetched batch was filtered for this publication's version.
+            # Its prompts remain outstanding until the executor accepts consumption.
             with stage(args, "generation_wait", rollout_id):
                 if rolling is None:
                     await inference.prepare_rollout(rollout_id)
-                batch = await manager.get(rollout_id)
+                if prefetched:
+                    batch = await manager.core_get_prepared(rollout_id)
+                    prefetched = False
+                else:
+                    batch = await manager.get(rollout_id)
             if args.offload_rollout:
                 await inference.offload()
             try:
+                has_next = rollout_id + 1 < args.num_rollout
+                debug_stop = args.debug_exit_after_rollout
+                has_next = has_next and (debug_stop is None or rollout_id - args.start_rollout_id + 1 < debug_stop)
+                # Shared-engine evaluation temporarily changes buffer capacity
+                # while it drains generation. Keep that boundary sequential.
+                inline_eval_due = evaluation is not None and should_run_periodic_action(
+                    rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout
+                )
+                if overlap and has_next and not inline_eval_due:
+                    # Starts one owned executor task and returns immediately. The
+                    # reservation occupies existing completed-buffer capacity.
+                    await manager.core_prefetch(rollout_id + 1)
+                    prefetched = True
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
@@ -226,6 +247,9 @@ async def train(args, *, export_hf=None):
                 and rollout_id - args.start_rollout_id + 1 >= args.debug_exit_after_rollout
             ):
                 break
+        if prefetched:
+            await manager.core_cancel_prepared()
+            prefetched = False
         if evaluation is not None:
             await evaluation.drain()
         # A deliberate debug stop leaves a resumable workflow, not a final export.
@@ -263,6 +287,9 @@ async def train(args, *, export_hf=None):
                 cleanup_error = error
                 logger.exception("Engine drain cleanup failed")
         for component, operation, timeout, cleanup_stage in (
+            # Join collection before stopping its producer; prepared-but-unused
+            # prompts are still in the checkpoint ledger and regenerate on resume.
+            (manager if overlap else None, lambda: manager.core_cancel_prepared(), 60, "prepared_batch_dispose"),
             # Async generation must stop, but the servers must remain alive while
             # both sides collectively destroy the weight-update NCCL group.
             (

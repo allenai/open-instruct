@@ -393,7 +393,11 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
         offload_rollout=False,
         check_weight_update_equal=False,
         olmo_core=CoreConfig(
-            compiler_cache=False, publication_mode="refresh", engine_drain_timeout=900, engine_update_timeout=180
+            compiler_cache=False,
+            publication_mode="refresh",
+            prepared_batch_overlap=False,
+            engine_drain_timeout=900,
+            engine_update_timeout=180,
         ),
         eval_interval=None,
         start_rollout_id=0,
@@ -483,7 +487,7 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
         fully_async=True,
         offload_rollout=False,
         check_weight_update_equal=False,
-        olmo_core=CoreConfig(compiler_cache=False, publication_mode="refresh"),
+        olmo_core=CoreConfig(compiler_cache=False, publication_mode="refresh", prepared_batch_overlap=False),
         save_trigger_sentinel=None,
         save_interval=1,
         update_weights_interval=1,
