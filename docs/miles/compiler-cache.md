@@ -156,3 +156,13 @@ The runtime's `tools/probe_triton_cache.py` runs a bounded single-GPU cold/warm
 probe in fresh processes, including numerical checks, changed kernel/dependency
 and shape cases, KDA training kernels, SGLang expert inference and experimental
 FA4 persistence. It does not download a model or qualify distributed training.
+
+For a small end-to-end trainer qualification inside the pinned image, add
+`tests/miles` to `PYTHONPATH` and run
+`python tests/miles/cache_startup_probe.py --output /output/trainer-cache-probe`.
+It creates a tiny random hybrid-MoE fixture, runs one production Core optimizer
+step in each of two fresh EP1 processes, and compares scores, gradients,
+optimizer state and final parameters exactly. The warm phase must restore an
+archive and perform no Triton compilation. This uses the fixture's Torch
+attention backend; the separate kernel probe covers FA4. Neither probe downloads
+model weights or reads the production cache.
