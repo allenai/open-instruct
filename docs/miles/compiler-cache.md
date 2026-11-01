@@ -71,7 +71,8 @@ remain required.
 ## Experimental TileLang persistence
 
 `compiler_cache.tilelang = true` additionally persists TileLang in a separate
-`core-tilelang-v1` envelope. This is opt-in pending GPU qualification. The pinned
+`core-tilelang-v1` envelope. This remains opt-in; qualify reuse on the intended
+model, hardware and topology. The pinned
 FLA KDA backward path uses TileLang, so a Triton hit alone cannot eliminate that
 compilation. The key includes the installed TileLang Python compiler, bundled
 TVM and native libraries as well as the device/toolchain and compile settings.
