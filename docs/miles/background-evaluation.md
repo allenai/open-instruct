@@ -335,10 +335,13 @@ background evaluations select `provider.kind=sglang` and
 explicit HTTP exception described above. The runner checks the installed
 olmo-eval revision against the receipt before evaluating.
 
-Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
-which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
-The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
-image `01M632ZP67Y4WMV060J74FSC3R` with isolated vLLM judges. Both recipes build evaluator dependencies
+The node example pins olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`
+and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node pins
+`ede61eb914c0cae312c9c8112389afbe524fb096` and sandbox-enabled image
+`01M6C79N2DVBVQ79MDBV4S2BZ1` with isolated vLLM judges. The latter backports
+only the null-override parser fix from [olmo-eval PR 517](https://github.com/allenai/olmo-eval/pull/517)
+onto the original revision, with adapted regression tests. Both include the
+[native SGLang provider](https://github.com/allenai/olmo-eval/pull/506). Both recipes build evaluator dependencies
 at image construction; benchmark sandboxes may have their own upstream setup steps.
 The revision change can also change task defaults; do not compare scores across
 revisions as though the benchmark protocol were unchanged.
