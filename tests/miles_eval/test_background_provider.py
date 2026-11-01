@@ -52,7 +52,10 @@ def test_real_cli_preserves_provider_tasks_and_gpu_allocation(name, task, gpus, 
     assert provider.kwargs["tensor_parallel_size"] == gpus
     for key, value in CONFIGS[name]["provider_kwargs"].items():
         assert provider.kwargs[key] == value
-    assert config.task_overrides.get(task["task"], {}) == task["generation"] | task["scoring"]
+    expected = {
+        key: None if value == "null" else value for key, value in (task["generation"] | task["scoring"]).items()
+    }
+    assert config.task_overrides.get(task["task"], {}) == expected
     total = gpus + task.get("auxiliary_gpus", 0)
     plan = planner.GPUPlanner.from_harness_config(config.harness_config, total).plan()
     planner.validate_gpu_plan(plan, total)
