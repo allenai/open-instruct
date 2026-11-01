@@ -47,7 +47,7 @@ gpus = 1                     # Separate allocation; never training GPUs
 cluster = "ai2/holmes"
 submit_timeout = 30           # Hard wall-clock bound on a submission subprocess
 timeout = "3h"                # Evaluator Beaker task lifetime
-provider_kwargs = { profile = "generic", attention_backend = "triton", disable_cuda_graph = true, disable_radix_cache = true }
+provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 
 [[evaluation.tasks]]
 task = "gsm8k"
@@ -136,8 +136,12 @@ access still require qualification on the target cluster.
 SciCode uses `kind="external"` and `arguments`, invoking olmo-eval's
 `run-external` command against a dedicated frozen SGLang HTTP server. SciCode
 requires `VLLMServerProvider` in the pinned olmo-eval revision and is the explicit
-exception to native `sglang` routing. `evaluation.external_server_args` configures
-only this server; native tasks use `evaluation.provider_kwargs`. Only SciCode currently
+exception to native `sglang` routing. Its server resolves the same
+`evaluation.provider_kwargs` profile against its assigned policy GPU, recording
+`sglang-external-profile.json` beside the server log. A manually configured server
+can still use `evaluation.external_server_args` with `profile = "generic"`;
+those CLI arguments replace the typed serving settings for SciCode only.
+Only SciCode currently
 has a supported external artifact contract. Development runs require
 `arguments.split="validation"` and an accessible `arguments.h5py_host_path`.
 The evaluator checks per-problem predictions and step counts, rejecting
@@ -172,17 +176,43 @@ panel before setting production resource bounds. For qualification, verify all
 25 entries completed at both expected checkpoints and were published; training
 completion alone does not establish evaluation completion.
 
-With the generic SGLang profile, which the examples select and which olmo-eval
-uses for every model shape except Olmo 3.5 12.5B, olmo-eval keeps
-`batching.chunk_size` at 64 examples and runs the batches one after another; each
-batch waits for its longest response. On a 7B thinking policy (one B300, 34,816
-token context, CUDA graphs disabled) each 64-example safety batch took about
-21–26 minutes, so StrongREJECT (2,294 prompts including jailbreak variants) needs
-about 16 hours, WildJailbreak about 12 and WildGuardTest about 10, well beyond the
-three-hour default. An interrupted task restarts from its beginning. A task can
-raise the batch size with a harness override such as `"batching.chunk_size" = 256`;
-this changes request scheduling, not sampling, but its throughput and memory on
-these tasks have not been measured.
+The examples require `profile = "olmo3.5-12.5b"`. The evaluator selects the
+qualified settings for the actual GPU, including H100 80GB and B300: full decode
+CUDA graphs, prefill graphs disabled, and hardware-specific cache and memory
+budgets. An incompatible checkpoint, GPU, topology or context fails instead of
+silently selecting generic settings. Other background configurations default to
+`profile = "auto"`, which selects a qualified profile when available and records
+the reason when it falls back. Profiles are model-specific; an H100 or B300 alone
+does not qualify an arbitrary model.
+
+Bounded [H100](https://beaker.org/ex/01M69MF9992VK4H0W02T1QK2HQ) and
+[B300](https://beaker.org/ex/01M6757SA45FQYHX8S7N81N2PN) GPU checks each completed
+64 GSM8K prompts with eight samples per prompt (512 expanded samples), selected
+the corresponding optimized profile with decode CUDA graphs, and recorded no
+failed requests. These checks qualify profile execution; they are not a matched
+cross-hardware throughput comparison or full-panel validation.
+
+Native tasks use `batching.chunk_size = "auto"`. For a qualified profile,
+olmo-eval derives a sequence budget from the running engine's capacity (requested
+512, reduced if the engine reports a lower limit). This counts expanded samples:
+pass@32 uses at most 16 prompts for a 512-sequence budget, rather than 512 prompts.
+With `profile = "generic"`, automatic batching falls back to 64 examples unless
+a batch-sequence budget is explicitly supplied. Qualified profiles use their
+capacity recommendation instead. Explicit task harness overrides still win. Inspect the resolved settings in
+`runtime/sglang-profile-*.json` in each task attempt.
+
+This removes the generic fallback's 64-example default, but the pinned native
+SGLang provider still processes batches sequentially and waits for each batch's
+longest response. It does **not** support `batching.strategy = "streaming"`.
+Continuous admission across batch boundaries requires an upstream provider change.
+The full safety panel's throughput and memory with these settings still need
+measurement on each GPU family; keep this separate from profile qualification.
+
+The earlier generic, graphs-disabled configuration took about 21–26 minutes per
+64-example safety batch on a B300. Its estimated 10–16 hour safety tasks did not
+fit the three-hour default. Do not assume the optimized profile makes that timeout
+sufficient: measure the full tasks and set `evaluation.timeout` accordingly.
+An interrupted task restarts from its beginning; completed tasks are reusable.
 
 ## Snapshots and receipts
 
@@ -314,14 +344,27 @@ The revision change can also change task defaults; do not compare scores across
 revisions as though the benchmark protocol were unchanged.
 
 Replace the old `evaluation.server_args` with typed `evaluation.provider_kwargs`
-using Python option names, for example `context_length = 34816` and
-`disable_cuda_graph = true`. Use `profile = "generic"` when manually tuning
-settings; automatic profiles reject conflicting overrides. The examples disable
-radix caching because the pinned SGLang runtime can enter a Mamba-buffer path
-without an allocated buffer for full-attention Olmo MoE models. A one-GPU tiny
-MoE generation check reproduced the failure with caching enabled and passed
-with `disable_radix_cache = true`. For SciCode, retain
-CLI arguments under `external_server_args` as well. The checkpoint, tokenizer,
+using Python option names, for example `context_length = 34816`. Let the selected
+profile own graph, radix-cache and memory settings; remove the old explicit
+`disable_cuda_graph` and `disable_radix_cache` overrides when migrating the
+examples. B300 enables the qualified hybrid-model radix path, while H100 disables
+radix caching. Use `profile = "generic"` for deliberate manual tuning or an
+unqualified model; profile-conflicting overrides are rejected.
+
+Full-attention Olmo MoE models are distinct from the qualified hybrid geometry.
+The pinned runtime can enter a Mamba-buffer path without an allocated buffer for
+those models: a tiny full-attention MoE check failed with caching enabled and
+passed with `disable_radix_cache = true`. Keep that workaround when manually
+configuring those models; it is not a reason to disable the hybrid model's profile.
+For SciCode, existing configs with `external_server_args` must either remove
+them to use the same typed profile settings, or explicitly select
+`provider_kwargs.profile = "generic"` to retain the manual CLI server. Omitting
+the profile now fails planning when those CLI arguments are present. The typed
+SciCode path accepts serving options and the `max_model_len`/`max_concurrency`
+aliases; native-provider-only options `add_bos_token`, `prompt_format` and
+`force_download` are rejected at planning time. Use a separate native-only
+evaluation configuration if those provider features are required.
+The checkpoint, tokenizer,
 model registration and GPU allocation remain owned by MILES. Task overrides
 cannot change the policy provider. Native SGLang supports generation, not tools
 or continuation likelihood; code scoring in a sandbox is separate from tool use.

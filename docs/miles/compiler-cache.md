@@ -42,9 +42,14 @@ other compiler families (FA4/CuTe DSL, TileLang, TorchInductor, FlashInfer,
 DeepEP/DeepGEMM) are not persisted by the training lifecycle.
 
 Keys include runtime/source identity, relevant model architecture and compile
-settings, the logical worker slot, the actual device/toolchain and
+settings, trainer rank/parallel geometry (TP1 serving slots share a role), the actual device/toolchain and
 compile-affecting environment. Settings that affect only orchestration, I/O or
-diagnostics are excluded; unknown settings stay in the key. A different source
+diagnostics are excluded; unknown settings stay in the key. The Core Triton
+compatibility key also excludes collection/global batch size, samples per prompt,
+serving admission/concurrency, policy lag and run duration. It excludes standalone
+Open Instruct evaluation/distillation/tests from application hashing and unused
+Megatron pins; Miles and OLMo-core source identity remain strict. Identical visible
+GPUs and TP1 serving worker indices no longer create separate serving keys. A different source
 tree, image, architecture or compile setting therefore misses, and a new runtime
 image should not expect older caches to be reused. Triton still checks each
 kernel's own key when loading from the restored directory.

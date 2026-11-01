@@ -4,7 +4,7 @@
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
-| [three-node.toml](three-node.toml) | Three-node learning: 4 trainer GPUs (EP4), 19 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [three-node.toml](three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -42,9 +42,11 @@ Do not launch a template unchanged: model, data, output and judge paths are
 placeholders. Give each run a fresh output directory and keep personal variants
 in ignored `runs/`.
 
-The examples select high priority and Holmes for their B300 profiles. Review
-cluster access, mounts, GPU allocation, minimum runtime and timeout before
-submission. W&B defaults to offline; set online mode and an API-key secret when
+The examples select Holmes for their B300 profiles, high priority and the
+`ai2/open-instruct-dev` development workspace. These defaults do not imply an
+available allocation: select a workspace and cluster with capacity before
+submitting. Keep personal allocation and priority overrides in ignored run files.
+Review mounts, GPU allocation, minimum runtime and timeout before submission. W&B defaults to offline; set online mode and an API-key secret when
 needed. See the [launch guide](../../../docs/miles/launching.md).
 
 Trainer images are built separately from the TOMLs. Follow the
@@ -120,6 +122,33 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
+The three-node throughput candidate uses 64 prompts × 8 samples per collection
+and one 512-sample optimizer batch. It admits 3,840 unfinished samples, keeps up
+to 512 completed prompt groups (4,096 samples), and runs 16 HTTP actors per node
+with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
+advertises 64 logical Ray CPUs through `launch.env.OI_MILES_RAY_CPUS` (default
+32 when omitted). The recorded validation image ignored that variable and
+advertised 32; the 64-CPU setting is newly wired, not a measured speedup.
+These reservations permit actor placement; they
+do not make the Python producer event loop parallel. Distributed HTTP actors
+parse JSON before producer receipt. The single managed Qwen3-32B judge uses CUDA
+graphs and a maximum of 32 concurrent calls.
+
+These are a bundled candidate, not a measured optimum. Increasing the buffer
+retains more host memory and older work; keep policy lag bounded and watch stale
+group discards. The one-node validation has a different layout (2 trainers,
+5 engines and 1 judge) from the judge-free `node.toml` example. It does not
+qualify three-node throughput. Keep cold compilation, periodic scoring,
+evaluation and checkpoint cost separate from steady-state measurements.
+
+Background evaluation independently sets `evaluation.provider_kwargs.profile` to
+`"olmo3.5-12.5b"`. It resolves the optimized settings on the assigned evaluator GPU
+(including H100 80GB and B300), enables full decode graphs, and sizes native
+harness batches by engine sequence capacity, counting pass@k expansion. SciCode's
+HTTP server uses the same profile. See the
+[evaluation guide](../../../docs/miles/background-evaluation.md) for compatibility,
+batch-boundary limits and full-panel qualification still required.
+
 The learning examples pin `inference.profile = "olmo35-b300-v1"` on Holmes.
 The preset sets **512 running requests, 512 HTTP permits and decode graphs through
 batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
@@ -165,21 +194,31 @@ useful throughput and stale-work discards before increasing the budget.
 The unfinished-sample budget, when omitted, is
 `max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
 rounded to complete prompt groups. The three-node example explicitly uses
-**1,536** unfinished samples as a conservative starting budget. Removing the
-explicit limits would give 6,144 for node and 19,456 for three-node. Generic
+**3,840** unfinished samples (256 per engine) as a candidate throughput budget. Removing the
+explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 64-admission configurations with omitted budgets give
-768 and 2,432 for those topologies. Explicit
+768 and 1,920 for those topologies. Explicit
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Batch 256 and lag 6 are unchanged. The three-node setting is a bounded starting
-point, not a measured optimum or a guarantee of steady throughput. Full-recipe
+The node example keeps batch 256; three-node uses batch 512. Both retain lag 6.
+The three-node admission budget represents 7.5 batches,
+so the planner warns that it exceeds the policy-lag window. It is headroom, not
+a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.
 Batch-equivalents do not predict actual policy age or drain duration.
 Measure trainer wait, useful throughput, oldest-token age and stale-work discards;
 reduce the producer budget or fleet when production outruns useful consumption.
 Per-engine settings do not qualify a whole fleet's routing, refresh latency or
 learning behavior. See [qualification limits](../../../docs/miles/throughput-profiles.md#qualification-limits).
+
+The three-node candidate also enables CUDA graphs for its single Qwen3-32B judge
+and raises judge concurrency from the default 16 to 32. Bounded B300 training
+runs and H100 TP2 serving checks passed; see the
+[judge qualification](../../../docs/miles/managed-judges.md#lifecycle-and-audit-artifacts).
+Continue measuring judge errors and grading latency alongside useful training
+throughput and the template's batch-512 policy age. These checks do not establish
+production-mixture calibration or long-run learning behavior.
 
 These templates inherit the disabled optional startup weight snapshot/reset audit
 (`check_weight_update_equal = false`) and explicitly disable periodic score-reuse

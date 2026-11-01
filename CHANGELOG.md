@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Consolidate MILES Rust routing, worker-side replay/compact-token transport, publication and compiler-cache fixes, checkpointed token totals and age/length/allocator diagnostics; add the three-node throughput candidate and configurable Ray CPU capacity (https://github.com/allenai/open-instruct/pull/2121).
+- Use qualified H100/B300 evaluation profiles with capacity-aware batching and configurable judge graphs/concurrency. Existing replay configs now default to Rust (`miles.use_miles_router=true` preserves Python); SciCode configs with `external_server_args` must remove them or explicitly select `profile="generic"` (https://github.com/allenai/open-instruct/pull/2121).
 - Add MILES Core GRPO source mixtures with explicit fractions, independent checkpointed source cursors, best-effort record attribution, and an MIT SynLogic Sudoku adapter with a local rule verifier (https://github.com/allenai/open-instruct/pull/2116).
 - Apply the existing MILES Jupiter/Saturn CUDA compatibility library-path default to Titan, preserving explicit environment and secret overrides and leaving Holmes unchanged (https://github.com/allenai/open-instruct/pull/2095).
 - Add a replaceable MILES prompt provider interface with `ProviderRolloutDataSource`, preserving the existing shuffled dataset, retry groups, and checkpoint recovery, with rollback on failed deliveries; include an opt-in ReMind-style FIFO review provider with outcome feedback and resumable review state (https://github.com/allenai/open-instruct/pull/2105).

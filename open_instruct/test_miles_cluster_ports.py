@@ -35,9 +35,14 @@ def test_free_ports_hold_entire_batch_and_close_on_exit(monkeypatch, count, fail
     assert all(stream.fileno() == -1 for stream in streams)
 
 
+@pytest.mark.parametrize("ray_cpus", [None, "64"])
 @pytest.mark.parametrize("rank", [0, 1])
 @pytest.mark.parametrize("judge_count", [0, 2])
-def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkeypatch, rank, judge_count):
+def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkeypatch, rank, judge_count, ray_cpus):
+    if ray_cpus is None:
+        monkeypatch.delenv("OI_MILES_RAY_CPUS", raising=False)
+    else:
+        monkeypatch.setenv("OI_MILES_RAY_CPUS", ray_cpus)
     addresses = ["10.0.0.1", "10.0.0.2"]
     judges = {f"judge-{i}": [str(i + 1)] for i in range(judge_count)}
     spec = SimpleNamespace(
@@ -109,6 +114,9 @@ def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkey
     with pytest.raises(StartedRay):
         cluster.run("unused.toml")
 
+    ray_command = commands["ray"]
+    assert ray_command[ray_command.index("--num-cpus") + 1] == (ray_cpus or "32")
+    assert cluster.read(tmp_path / f"placement-{rank}.json")["ray_cpus"] == int(ray_cpus or "32")
     assert len(batches) == 1
     selected = []
     for command in commands.values():
