@@ -20,6 +20,7 @@ from open_instruct.ground_truth_utils import (
     LMJudgeVerifier,
     LMJudgeVerifierConfig,
     PuzzleMatcherVerifier,
+    RewardConfig,
     cleanup_all_llm_judge_clients,
 )
 from open_instruct.IFEvalG import instructions_registry
@@ -190,6 +191,68 @@ class TestGSM8KVerifier(unittest.TestCase):
     def test_numeric_equivalence(self, _name, prediction, label, expected_score):
         result = self.verifier([], prediction, label)
         self.assertEqual(result.score, expected_score)
+
+
+class TestR1StyleFormatRewardGate(unittest.TestCase):
+    """Regression tests for the non-additive R1-style format gate in RewardConfig.build().
+
+    The gate used to compare format_scores[i] to the literal 1, so any
+    r1_style_format_reward other than the default 1.0 zeroed the verifiable
+    reward for every response, formatted or not."""
+
+    FORMATTED_CORRECT = "<think>let me work it out</think> <answer>42</answer>"
+    UNFORMATTED_CORRECT = "The answer is 42"
+    FORMATTED_WRONG = "<think>let me work it out</think> <answer>41</answer>"
+
+    def _run_reward_fn(self, scale: float, responses: list[str], additive: bool = False) -> list[float]:
+        config = RewardConfig(
+            apply_r1_style_format_reward=True,
+            r1_style_format_reward=scale,
+            apply_verifiable_reward=True,
+            verification_reward=10.0,
+            additive_format_reward=additive,
+            verifier_functions={"gsm8k": GSM8KVerifier()},
+        )
+        reward_fn = config.build()
+        infos = SimpleNamespace(
+            timeouts=[False] * len(responses),
+            tool_errors=[""] * len(responses),
+            tool_outputs=[""] * len(responses),
+            tool_calleds=[False] * len(responses),
+            rollout_states=[{} for _ in responses],
+        )
+        scores, _metrics = asyncio.run(
+            reward_fn(
+                responses=[[] for _ in responses],
+                decoded_responses=responses,
+                ground_truths=["42"] * len(responses),
+                datasets=["gsm8k"] * len(responses),
+                finish_reasons=["stop"] * len(responses),
+                infos=infos,
+            )
+        )
+        return scores
+
+    @parameterized.expand([("default_scale", 1.0), ("half_scale", 0.5), ("double_scale", 2.0)])
+    def test_formatted_correct_answer_keeps_verifiable_reward(self, _name, scale):
+        scores = self._run_reward_fn(scale, [self.FORMATTED_CORRECT])
+        self.assertEqual(scores, [10.0])
+
+    def test_unformatted_correct_answer_is_gated_to_zero_with_non_default_scale(self):
+        scores = self._run_reward_fn(0.5, [self.UNFORMATTED_CORRECT])
+        self.assertEqual(scores, [0.0])
+
+    def test_formatted_wrong_answer_scores_zero_with_non_default_scale(self):
+        scores = self._run_reward_fn(0.5, [self.FORMATTED_WRONG])
+        self.assertEqual(scores, [0.0])
+
+    def test_mixed_batch_with_non_default_scale(self):
+        scores = self._run_reward_fn(0.5, [self.FORMATTED_CORRECT, self.UNFORMATTED_CORRECT, self.FORMATTED_WRONG])
+        self.assertEqual(scores, [10.0, 0.0, 0.0])
+
+    def test_additive_format_reward_with_non_default_scale(self):
+        scores = self._run_reward_fn(0.5, [self.FORMATTED_CORRECT], additive=True)
+        self.assertEqual(scores, [10.5])
 
 
 def _make_litellm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5):
