@@ -83,6 +83,7 @@ def test_single_response_requires_explicit_opt_out():
 @pytest.mark.parametrize("enabled", [True, False])
 def test_truncation_exclusion_selects_matching_group_filter(mode, enabled):
     config = configured(mode, enabled, custom_reward_post_process_path=EXCLUDE_TRUNCATED)
+    config = dataclasses.replace(config, core=dataclasses.replace(config.core, reward_zero_truncated=False))
     plan = config.plan()
     assert plan["miles"].get("dynamic_sampling_filter_path") == (FINISHED_STD_FILTER if enabled else None)
     if enabled:

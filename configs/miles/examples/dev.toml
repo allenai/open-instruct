@@ -71,5 +71,8 @@ max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
 
+[miles]
+calculate_per_token_loss = false
+
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

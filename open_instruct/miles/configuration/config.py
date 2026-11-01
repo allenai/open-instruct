@@ -27,12 +27,13 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
-    reward_zero_truncated: bool = False
+    reward_zero_truncated: bool = True
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
+    layer_profile_interval: int = 0
     pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
     stream_moe_export: bool = True
@@ -152,7 +153,7 @@ class CoreConfig:
             raise constraints.error("core.row_specialization must be static or dynamic")
         if self.expert_publication not in ("per_expert", "fused"):
             raise constraints.error("core.expert_publication must be per_expert or fused")
-        for name in ("diagnostic_interval", "scoring_check_interval"):
+        for name in ("diagnostic_interval", "scoring_check_interval", "layer_profile_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
         if self.pipeline_observation_interval < 0:
@@ -287,6 +288,7 @@ class RunConfig:
     def resolved_miles(self) -> dict[str, Any]:
         """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
+        options.setdefault("calculate_per_token_loss", False)
         if not options.get("use_miles_router", False):
             # Mirror the pinned MILES Core invariant during offline planning.
             # Core owns request retries and weight-ready membership. Refuse

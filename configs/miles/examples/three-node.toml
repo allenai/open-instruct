@@ -208,9 +208,9 @@ packing_max_tokens = 34816
 [inference]
 placement_mode = "disaggregated"
 gpus = 15
-rollout_batch_size = 64
+rollout_batch_size = 128
 samples_per_prompt = 8
-global_batch_size = 512
+global_batch_size = 1024
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
@@ -224,6 +224,7 @@ wandb_project = "open-instruct-miles"
 wandb_group = "three-node"
 
 [core]
+max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true
 checkpoint_keep_last = 2
@@ -235,6 +236,10 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
+# Keep response weighting independent of generation length.
+calculate_per_token_loss = false
+# Trainer ranks only; do not change the serving allocator.
+train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
 # Rust response transport; Core owns request retries and weight-ready membership.
 use_miles_router = false
 router_policy = "round_robin"
@@ -245,8 +250,8 @@ use_distributed_post = true
 http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
-# Eight collections: 512 complete prompt groups / 4,096 samples.
-async_data_buffer_capacity_factor = 8.0
+# Four collections: 512 complete prompt groups / 4,096 samples.
+async_data_buffer_capacity_factor = 4.0
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
 

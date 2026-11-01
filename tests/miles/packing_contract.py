@@ -100,7 +100,7 @@ def make_worker(root, world, packed, auxiliary, checkpointing, **router_options)
             prompt_data=str(root / "prompts.jsonl"),
             lr=1e-4,
             clip_grad=1e9,
-            calculate_per_token_loss=True,
+            calculate_per_token_loss=False,
             use_rollout_routing_replay=True,
             use_miles_router=True,
             use_tis=True,

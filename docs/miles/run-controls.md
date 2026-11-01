@@ -13,6 +13,9 @@ field help, use the [configuration reference](configuration.md). Native parser
 acceptance does not establish backend support.
 
 Start with a [maintained example](../../configs/miles/examples/README.md).
+The demo configs are the baseline for configuration options unless otherwise
+stated. Keep their per-response loss weighting and zero reward for truncated
+responses in throughput trials; record intentional objective changes explicitly.
 Use the [generated recipe tables](configuration.md#example-recipes) for its current
 settings, [admission sizing](throughput-profiles.md#size-engine-admission-from-memory)
 for serving budgets, and [async defaults](async-pipeline.md#structured-defaults-and-overrides)
@@ -98,7 +101,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Task catalog / recipe / manifest | Structured `data.tasks` and supported `data.rl_manifest` invoke explicit preparation/adoption with immutable manifests. Named `data.recipe` selection is rejected. Named tasks include GSM8K, math, IF, generated multiplication and SynLogic Sudoku; `data.sources` selects fixed allocation over separate source datasets; see the workflow guide for limits. Raw `miles.prompt_data` expects prepared JSONL, not a manifest. |
 | Held-out in-loop eval | `eval_prompt_data=[name,path,...]`, `eval_interval`, `skip_eval_before_train=false`, `n_samples_per_eval_prompt`; explicit `eval_temperature`, `eval_top_p`, `eval_top_k`, `eval_max_response_len`, `eval_max_prompt_len`. Retain source indices and dataset hashes for comparisons. |
 | Learning rate / Adam | `lr`, `lr_decay_style`, `lr_decay_iters`, `lr_warmup_iters` or `lr_warmup_fraction`, `min_lr`, `weight_decay`, `adam_beta1`, `adam_beta2`, `adam_eps`, `clip_grad`. Core uses AdamW; changing `optimizer` to another family is rejected. |
-| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. Structured run files default to std normalization off and upper clipping 0.28 (separate choices); raw MILES parser defaults differ. |
+| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. The demo baseline is per-response loss (`calculate_per_token_loss=false`) and `core.reward_zero_truncated=true`, retaining truncated responses' policy loss masks. Structured run files default to std normalization off and upper clipping 0.28 (separate choices); raw MILES parser defaults differ. |
 | Reference KL | Enable `use_kl_loss`, set `kl_loss_coef`, and provide the reference initialization through `ref_load` as required by MILES. This creates a frozen reference and adds scoring. In raw files a coefficient alone is not the enable switch; the structured compiler enables reference KL for a positive coefficient and initializes the reference from the prepared starting HF model. |
 | Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (no ICEPOP helper is bundled); explicitly choose the policy-ratio anchor. Structured async defaults to trainer-scored old logprobs with TIS; these are algorithm changes, not just async throughput controls. |
 | Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` works with the default Rust router; `use_miles_router=true` selects the Python router explicitly. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. `core.replay_diagnostics=true` opts into per-layer returned-route and recomputation checks (adds synchronization overhead). |

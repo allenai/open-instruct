@@ -5,14 +5,17 @@ a starting point and what to weigh when changing it. Unless an entry says
 otherwise, a default is **not established as optimal, or even good**, for any
 particular model, scale or task; it is simply where to begin. Where the
 maintained example TOMLs encode a choice, the example is authoritative.
+The demo configs are the baseline for configuration options unless otherwise
+stated; document deviations in each experiment, including objective changes.
 
 ## Objective and data
 
-- **Policy lag** (`async.max_weight_staleness = 6`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
+- **Policy lag** (12 in both `node` and `three-node`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
+- **Loss weighting** (per response, `miles.calculate_per_token_loss = false`): keep the demo objective in throughput trials; token-weighted loss is an explicit learning-policy experiment.
 - **Off-policy correction** (TIS on, `use_rollout_logprobs = false`): TIS reweights samples toward the current policy; turning it off assumes inference and training probabilities agree closely.
 - **Group filtering** (`training.filter_zero_std_groups = true`): groups where every response gets the same reward carry no policy gradient, so dropping them saves training work at the cost of extra generation; disable it for tiny checks that cannot produce mixed rewards.
 - **Router auxiliary losses** (coefficients zero in the examples): the balancing and z-losses keep expert load even during pretraining; whether RL needs them is open, so watch the `train/moe/` load metrics if you leave them off.
-- **Truncated responses** (scored normally): excluding them avoids rewarding unfinished reasoning but removes long responses from the batch; worth considering when many responses hit the length cap.
+- **Truncated responses** (zero reward, `core.reward_zero_truncated = true`): responses that hit the length cap receive zero reward; this does not itself remove them from the training batch. Scoring them normally requires an explicit experiment override.
 
 ## Publication and capacity
 
@@ -20,7 +23,7 @@ maintained example TOMLs encode a choice, the example is authoritative.
 - **Engine admission** (generic default 64; the named `olmo35-b300-v1` preset uses 512): size it from GPU memory, with `sglang_max_total_tokens = admission × context`; higher values add throughput only while memory and the router keep up. See the [example settings and limits](../../configs/miles/examples/README.md#capacity-and-qualification-settings) before transferring 512 to another model or GPU.
 - **HTTP admission** (generic async default twice running admission; the named `olmo35-b300-v1` preset uses 512/512): permits cover transit and response processing as well as generation. Additional permits can refill GPU slots or just add queueing; measure occupancy and residence time before increasing them.
 - **Producer budget** (automatic when `async_max_concurrent_samples` is unset): the automatic value scales with the engine fleet; a larger budget fills engines more reliably but leaves more work to age out. The node example explicitly limits unfinished samples to 1,024. The three-node example explicitly limits unfinished samples to 3,840. These budgets are starting points for useful consumption, not targets for filling every reserved engine slot. The full three-node recipe can remain limited by collection and judging; validate sustained throughput and policy age before scaling the budget.
-- **Completed buffer** (one collection): separate from unfinished-request headroom; enlarging it retains more completed work without fixing response transport.
+- **Completed buffer** (one collection by default and in `node`; four collections in `three-node`): separate from unfinished-request headroom; enlarging it retains more completed work without fixing response transport.
 - **Submission granularity** (`"sample"`): engines refill as individual responses finish rather than waiting for whole groups.
 - **Activation recomputation** (on for long contexts): trades extra compute for memory; turning it off is reasonable for short contexts once memory fit is checked.
 - **Radix caching** (set by named presets: on for B300, off for H100; off for generic/colocated setups): the realistic-prompt comparison favored cached 512 on B300 and uncached 512 on H100. Presets are applied whole; use `inference.profile="generic"` and explicit settings to change cache mode. Cached hybrid serving needs the pinned FP32 tracked-state implementation; rebuild images after changing runtime pins. Recheck this choice for different prompt reuse and lengths.
