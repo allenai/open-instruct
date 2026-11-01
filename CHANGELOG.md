@@ -1,6 +1,6 @@
 # Changelog
 
-- Add immutable named MILES source catalogs and explicitly scoped candidate-verifier contracts with local qualification tools (PR link pending).
+- Add immutable named MILES source catalogs and explicitly scoped candidate-verifier contracts with local qualification tools (https://github.com/allenai/open-instruct/pull/2141).
 All notable changes to this project will be documented in this file.
 
 
