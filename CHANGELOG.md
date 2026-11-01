@@ -1,5 +1,6 @@
 # Changelog
 
+- Add immutable named MILES source catalogs and explicitly scoped candidate-verifier contracts with local qualification tools (PR link pending).
 All notable changes to this project will be documented in this file.
 
 
