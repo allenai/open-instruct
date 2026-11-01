@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Pin the merged Olmo-SGLang FP32 snapshot implementation and MILES main; refresh native option provenance (PR link pending).
 - Consolidate MILES Rust routing, worker-side replay/compact-token transport, publication and compiler-cache fixes, checkpointed token totals and age/length/allocator diagnostics; add the three-node throughput candidate and configurable Ray CPU capacity (https://github.com/allenai/open-instruct/pull/2121).
 - Use qualified H100/B300 evaluation profiles with capacity-aware batching and configurable judge graphs/concurrency. Existing replay configs now default to Rust (`miles.use_miles_router=true` preserves Python); SciCode configs with `external_server_args` must remove them or explicitly select `profile="generic"` (https://github.com/allenai/open-instruct/pull/2121).
 - Add MILES Core GRPO source mixtures with explicit fractions, independent checkpointed source cursors, best-effort record attribution, and an MIT SynLogic Sudoku adapter with a local rule verifier (https://github.com/allenai/open-instruct/pull/2116).
