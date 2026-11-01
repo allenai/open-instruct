@@ -36,11 +36,15 @@ def test_node_uses_periodic_native_background_evaluation():
 def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_node):
     tasks = three_node.evaluation["tasks"]
     assert len(tasks) == len({task["task"] for task in tasks}) == 25
-    assert all(not task["generation"] and not task["scoring"] for task in tasks)
+    assert all(not task["scoring"] for task in tasks)
+    assert {t["task"]: t["generation"] for t in tasks if t["generation"]} == {
+        "gpqa_diamond:cot": {"max_tokens": 32768},
+        "gpqa_main:cot": {"max_tokens": 32768},
+    }
     milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
     assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
-    assert len(milestones[0]["groups"]) == 5
+    assert len(milestones[0]["groups"]) == 6
     # Extending the run never introduces periodic full-panel evaluations.
     document = three_node.to_dict()
     document["training"]["num_rollouts"] = 2500
@@ -76,27 +80,27 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
     manager.dispatch(0, initial)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 5
+    assert len(calls) == 6
     for update in (1, 999, 1000, 2000, 2499):
         assert evaluation.training_snapshot(args, update) is None
         manager.dispatch(update, "unused-checkpoint")
-    assert len(calls) == 5
+    assert len(calls) == 6
     final = Path(evaluation.training_snapshot(args, 2500))
     final.mkdir(parents=True)
     (final / ".complete").touch()
     manager.dispatch(2500, final)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 10
+    assert len(calls) == 12
 
     receipts = [
         json.loads(path.read_text())
         for path in (Path(run.output["root"]) / "evaluation").glob("update-*.json")
         if not path.name.endswith(".beaker.json")
     ]
-    assert len(receipts) == 10
+    assert len(receipts) == 12
     assert {r["status"] for r in receipts} == {"submitted"}
-    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 11)}
+    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 13)}
     assert {r["update"] for r in receipts} == {0, 2500}
     for update, checkpoint in ((0, initial), (2500, final)):
         endpoint = [r for r in receipts if r["update"] == update]
@@ -106,8 +110,8 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
             run.evaluation["tasks"], key=lambda task: task["task"]
         )
         assert all(r["training"] == training and r["evaluation"]["revision"] == config["revision"] for r in endpoint)
-    for specs in (calls[:5], calls[5:]):
-        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 2, 2]
+    for specs in (calls[:6], calls[6:]):
+        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 1, 2, 2]
         for spec in specs:
             job = spec["tasks"][0]
             assert job["image"] == {"beaker": config["image"]}
@@ -118,12 +122,12 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
     resumed.dispatch(0, initial)
     resumed.dispatch(2500, final)
     assert resumed.worker is None
-    assert len(calls) == 10
+    assert len(calls) == 12
 
 
 def test_panel_groups_keep_execution_requirements_separate(three_node):
     groups = evaluation.groups(three_node.evaluation, 0, 200)
-    assert sorted(map(len, groups)) == [1, 1, 1, 5, 17]
+    assert sorted(map(len, groups)) == [1, 1, 1, 2, 5, 15]
     for group in groups:
         for task in group:
             assert task.get("harness", {}) == group[0].get("harness", {})
@@ -406,6 +410,7 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     (tmp_path / "data.h5").touch()
     checkpoint = tmp_path / "hf"
     checkpoint.mkdir()
+    (checkpoint / "generation_config.json").write_text('{"top_k": 0, "temperature": 0.6}')
     for filename in ("config.json", "tokenizer_config.json"):
         (checkpoint / filename).write_text("{}")
     if manual:
@@ -431,12 +436,15 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     args = start.call_args.args[0]
     if manual:
         assert "sglang.launch_server" in args
-        assert args[args.index("--model-path") + 1] == str(checkpoint)
+        assert Path(args[args.index("--model-path") + 1]) != checkpoint
+        assert args[args.index("--served-model-name") + 1] == str(checkpoint)
         assert "--disable-cuda-graph" in args
     else:
         assert args[2] == "serve"
         frozen = json.loads(Path(args[3]).read_text())
-        assert frozen["checkpoint"] == str(checkpoint)
-        assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
+        assert frozen["checkpoint"] != str(checkpoint)
+        assert frozen["served_model_name"] == str(checkpoint)
+        assert json.loads((Path(frozen["checkpoint"]) / "generation_config.json").read_text())["top_k"] == -1
+        assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 65536}
     assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
     server.terminate.assert_called_once()

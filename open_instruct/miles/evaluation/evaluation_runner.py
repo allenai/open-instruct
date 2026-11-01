@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -124,12 +125,45 @@ def scicode_server_options(provider_kwargs):
     return options
 
 
+def scicode_checkpoint(checkpoint, output):
+    """Normalize HF's disabled top-k sentinel for SGLang without changing the snapshot."""
+    source = Path(checkpoint).resolve()
+    config = source / "generation_config.json"
+    if not config.is_file():
+        return str(source)
+    original = json.loads(config.read_text())
+    if original.get("top_k") != 0:
+        return str(source)
+    # Keep weight symlinks outside the result tree: artifact collection copies
+    # that tree with symlink dereferencing enabled.
+    view = Path(tempfile.mkdtemp(prefix="miles-scicode-checkpoint-"))
+    for path in source.iterdir():
+        if path.name == "generation_config.json":
+            continue
+        target = view / path.name
+        if target.is_symlink() and target.resolve() == path.resolve():
+            continue
+        target.symlink_to(path.resolve(), target_is_directory=path.is_dir())
+    write_json(view / "generation_config.json", {**original, "top_k": -1})
+    write_json(
+        Path(output) / "scicode-sampling-normalization.json",
+        {
+            "checkpoint": str(source),
+            "generation_config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+            "original_top_k": 0,
+            "normalized_top_k": -1,
+        },
+    )
+    return str(view)
+
+
 def serve(receipt, output):
     """Give SciCode's HTTP policy server the native evaluator's GPU/model profile."""
     options = scicode_server_options(receipt["evaluation"]["provider_kwargs"])
     selector = options.pop("profile", "auto")
     options.update(
         model_path=receipt["checkpoint"],
+        served_model_name=receipt.get("served_model_name", receipt["checkpoint"]),
         tokenizer_path=receipt["checkpoint"],
         trust_remote_code=True,
         tp_size=receipt["evaluation"]["gpus"],
@@ -434,6 +468,7 @@ def print_failure_log(path):
 
 def run_tasks(receipt, output):
     completed = []
+    failures = []
     for task in receipt["tasks"]:
         directory, attempt = saved_task(output, task)
         if attempt is None:
@@ -449,10 +484,11 @@ def run_tasks(receipt, output):
                     subprocess.run(
                         args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
                     )
-            except subprocess.CalledProcessError:
+                values = completed_scores(attempt, [task])
+            except (subprocess.CalledProcessError, ValueError) as error:
                 print_failure_log(log_path)
-                raise
-            values = completed_scores(attempt, [task])
+                failures.append((task["task"], error))
+                continue
             write_json(
                 directory / "complete.json",
                 {"task": task, "attempt": str(attempt.relative_to(directory)), "scores": values},
@@ -461,6 +497,9 @@ def run_tasks(receipt, output):
             print(f"Reusing completed evaluation task: {task['task']}", flush=True)
         completed.append(str(attempt.relative_to(output)))
     write_json(output / "task-results.json", completed)
+    write_json(output / "task-failures.json", [{"task": task, "error": str(error)} for task, error in failures])
+    if failures:
+        raise failures[0][1]
 
 
 def run_evaluation(receipt):
@@ -504,10 +543,13 @@ def run_evaluation_locked(receipt, output):
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")
         # SciCode currently requires VLLMServerProvider; all regular tasks use the inline engine.
         if any(task.get("kind") == "external" for task in pending):
+            checkpoint = scicode_checkpoint(checkpoint, output)
             env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
             if not receipt["evaluation"]["external_server_args"]:
                 server_receipt = output / "server-receipt.json"
-                write_json(server_receipt, receipt)
+                write_json(
+                    server_receipt, {**receipt, "checkpoint": checkpoint, "served_model_name": receipt["checkpoint"]}
+                )
                 server_args = [sys.executable, __file__, "serve", str(server_receipt), "--results", str(output)]
             else:
                 server_args = [
@@ -516,6 +558,8 @@ def run_evaluation_locked(receipt, output):
                     "sglang.launch_server",
                     "--model-path",
                     checkpoint,
+                    "--served-model-name",
+                    receipt["checkpoint"],
                     "--trust-remote-code",
                     "--tokenizer-path",
                     checkpoint,
