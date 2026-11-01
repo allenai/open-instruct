@@ -69,12 +69,12 @@ interval = 0
 initial = true
 final = true
 # Native SGLang plus code sandboxes/judges; full-panel resource qualification is pending.
-image = "01M632ZP67Y4WMV060J74FSC3R"
-revision = "3536fe751e40162cc33d5e647085e986375aadce"
+image = "01M6C79N2DVBVQ79MDBV4S2BZ1"
+revision = "ede61eb914c0cae312c9c8112389afbe524fb096"
 gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
-timeout = "3h"
+timeout = "12h"
 # Select the qualified H100/B300 settings on the evaluator GPU; fail if unsupported.
 # Automatic harness batches use the engine's sequence capacity, including pass@k expansion.
 provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
@@ -105,16 +105,19 @@ task = "hmmt_nov_2025:pass_at_32:16k"
 task = "hmmt_feb_2026:pass_at_32:16k"
 
 [[evaluation.tasks]]
-task = "gpqa_diamond"
+task = "gpqa_diamond:cot"
 
 [[evaluation.tasks]]
 task = "gpqa_main:cot"
 
 [[evaluation.tasks]]
 task = "omega_500:hillclimb"
+# CLI null means generate within the remaining context, including the full prompt.
+generation = { max_tokens = "null" }
 
 [[evaluation.tasks]]
 task = "omega_500_out"
+generation = { max_tokens = "null" }
 
 [[evaluation.tasks]]
 task = "ifeval"
