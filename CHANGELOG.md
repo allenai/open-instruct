@@ -1,3 +1,4 @@
+- Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
 # Changelog
 
 - Add qualified candidate dataset catalogs and verifier controls (https://github.com/allenai/open-instruct/pull/2141).
