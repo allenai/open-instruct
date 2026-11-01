@@ -69,8 +69,8 @@ interval = 0
 initial = true
 final = true
 # Native SGLang plus code sandboxes/judges; full-panel resource qualification is pending.
-image = "01M632ZP67Y4WMV060J74FSC3R"
-revision = "3536fe751e40162cc33d5e647085e986375aadce"
+image = "01M6C79N2DVBVQ79MDBV4S2BZ1"
+revision = "ede61eb914c0cae312c9c8112389afbe524fb096"
 gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
