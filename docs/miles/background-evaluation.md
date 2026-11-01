@@ -170,7 +170,7 @@ overrides, not arbitrary upstream presets. Local model paths, existing server
 endpoints and tasks with all evaluation milestones disabled are exempt.
 
 The image and CLI/config checks do not establish full-panel correctness, GPU
-memory fit or completion within the starter three-hour timeout. Run small samples
+memory fit or completion within the configured timeout. Run small samples
 of every task, inspect predictions and judge/code failures, then measure a full
 panel before setting production resource bounds. For qualification, verify all
 25 entries completed at both expected checkpoints and were published; training
@@ -459,5 +459,3 @@ Beaker artifacts.
 A failed task is recorded in `task-failures.json`; subsequent independent tasks
 still execute. The collection remains failed until every task validates. Retrying
 reuses successful task attempts and reruns the failures.
-
-The repaired three-node panel pins evaluator `ede61eb914c0cae312c9c8112389afbe524fb096` and image `01M6C79N2DVBVQ79MDBV4S2BZ1`. This backports only the null-override parser fix from olmo-eval PR 517 onto `3536fe7`, with regression tests adapted to that revision. The node template retains its prior pin.
