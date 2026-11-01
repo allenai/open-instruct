@@ -436,14 +436,18 @@ never modify a running experiment's immutable dataset in place.
 
 ## Reasoning-panel response budgets
 
-The three-node panel uses `gpqa_diamond:cot` and `gpqa_main:cot`, each with
-32,768 response tokens. The plain `gpqa_diamond` task is a short-answer protocol
-with a 1,024-token default; it can truncate almost every response from a reasoning
-policy. These are different protocols: do not compare their scores as interchangeable.
-Evaluation serves a 65,536-token context independently of training's context limit,
-leaving room for OMEGA's 32,768-token response budget plus its prompt. Verify that
-the evaluated checkpoint supports this context. The full panel allows 12 hours
-per job, with completed-task reuse after preemption.
+The three-node panel uses `gpqa_diamond:cot` and `gpqa_main:cot`. The plain
+`gpqa_diamond` task is a short-answer protocol with a 1,024-token default; it can
+truncate almost every response from a reasoning policy. These are different
+protocols: do not compare their scores as interchangeable.
+
+OMEGA sets `generation = { max_tokens = "null" }`: the CLI parses this as no
+fixed response cap, so SGLang generates within the remaining model context.
+This follows the existing GPQA CoT and IF protocols and retains the qualified
+34,816-token serving profile. A fixed 32,768-token response request would instead
+be rejected whenever the prompt exceeds 2,048 tokens. Requests and predictions
+retain prompt/completion lengths and finish reasons. The full panel allows
+12 hours per job, with completed-task reuse after preemption.
 
 SciCode's HTTP server translates Hugging Face's `top_k=0` (disabled) into SGLang's
 `top_k=-1` in a local symlink view of the checkpoint. The original weights and
