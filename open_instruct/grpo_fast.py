@@ -105,6 +105,7 @@ from open_instruct.model_utils import (
     load_ref_policy,
     print_rich_single_line_metrics,
     push_folder_to_hub,
+    restore_fp32_rotary,
     uses_olmo3_generation_config,
 )
 from open_instruct.rl_utils import Timer, masked_mean
@@ -390,6 +391,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
+        restore_fp32_rotary(self.model)
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
@@ -412,6 +414,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model.mpu = old_mpu
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                restore_fp32_rotary(self.model)
                 checkpoint_state = states
                 optimization_steps_done = states["training_step"]
 

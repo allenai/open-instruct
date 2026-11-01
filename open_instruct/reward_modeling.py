@@ -37,6 +37,7 @@ from open_instruct.model_utils import (
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
+    restore_fp32_rotary,
     save_with_accelerate,
 )
 from open_instruct.reward_modeling_eval import evaluate
@@ -327,6 +328,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # see https://gist.github.com/vwxyzjn/2581bff1e48e185e0b85b6dfe1def79c
     torch.manual_seed(args.seed)
     model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
+    restore_fp32_rotary(model)
     if eval_dataloader is not None:
         eval_dataloader = accelerator.prepare(eval_dataloader)
     torch.manual_seed(local_seed)
