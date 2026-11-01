@@ -1,0 +1,6 @@
+{
+  "toolrl_think_prefix": {
+    "factory": "open_instruct.miles.rewards.toolrl.ToolRLThinkPrefixVerifier",
+    "config": {"all_calls_required": false}
+  }
+}
