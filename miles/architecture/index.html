@@ -1,0 +1,2945 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/miles/architecture/">
+      
+      
+        <link rel="prev" href="../compiler-cache/">
+      
+      
+        <link rel="next" href="../core/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Architecture - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture-and-development" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tpu_sft_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../background-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-sources-and-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime sources and images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rebuilding-the-binary-base" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rebuilding the binary base
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local development
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation checks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#type-checking-the-moved-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type checking the moved adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adapter-package-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter package layout
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adapter package layout">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#application-callbacks-and-cpu-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Application callbacks and CPU tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#core-runtime-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core runtime compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-serving-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-sources-and-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime sources and images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rebuilding-the-binary-base" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rebuilding the binary base
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local development
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation checks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#type-checking-the-moved-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type checking the moved adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adapter-package-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter package layout
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adapter package layout">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#application-callbacks-and-cpu-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Application callbacks and CPU tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#core-runtime-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core runtime compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="architecture-and-development">Architecture and development</h1>
+<p>The public entrypoint is <code>python -m open_instruct.miles</code>. Its structured RunSpec
+compiles into a RunConfig containing CoreConfig and native MILES options.
+The Python API is available for integrations; use the structured workflow when
+preparation, placement and submission should come from one file.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Owns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Open Instruct wrapper</td>
+<td>Config validation, preparation, verifiers, launch/receipts, run artifacts</td>
+</tr>
+<tr>
+<td>MILES runtime</td>
+<td>Rollout actors, SGLang engines, sample/advantage/loss machinery, shared transport helpers</td>
+</tr>
+<tr>
+<td>Core adapter (in MILES)</td>
+<td>Model construction, document/replay alignment, scoring/training forward, gradient synchronization, optimizer/checkpoints and tensor export</td>
+</tr>
+<tr>
+<td>OLMo-core</td>
+<td>Model and distributed-training primitives, attention/expert execution</td>
+</tr>
+<tr>
+<td>olmo-sglang</td>
+<td>Serving architecture registration and model-specific execution</td>
+</tr>
+</tbody>
+</table>
+<p>The Core actor at <code>miles.backends.core_utils.actor.OLMoCoreTrainRayActor</code> implements
+the MILES trainer boundary. Its model/checkpoint code and publication machinery
+live in the pinned MILES fork. The driver coordinates collections, optimization and versioned weight
+publication. Dense standard-model support is isolated from the specialized MoE
+path. <a href="../core/">Implementation contracts</a> describe the detailed lifecycle and
+<a href="../sequence-packing/">packing</a> describes document/routing alignment.</p>
+<h2 id="runtime-sources-and-images">Runtime sources and images</h2>
+<p><a href="https://github.com/allenai/open-instruct/blob/main/runtime/miles/runtime.lock.json"><code>runtime/miles/runtime.lock.json</code></a> is the
+source of truth for exact dependency commits and the immutable binary base.
+Builds fetch those commits without patches or moving branch tips. MILES uses the
+organized adapter hooks; OLMo-core provides the model, objective and checkpoint
+APIs required by this adapter; olmo-sglang supplies compatible serving models.
+The ordinary Open Instruct environment keeps its own dependency versions.</p>
+<p>The MILES pin includes the v0.1.2 async-consumer compatibility fix from
+<a href="https://github.com/allenai/miles-olmo-core/pull/10">miles-olmo-core PR #10</a>.
+Its refresh and engine-drain dequeues accept the native consumer's optional trainer
+identity and preserve Core's explicit rejection of multi-policy training.</p>
+<p>The binary base contains the compiled dependencies, including FA2, FA3 and FA4.
+It excludes the MILES, Core, SGLang and Open Instruct source overlays. Application
+builds add locked source repositories as <code>runtime-base</code>, then the committed Open
+Instruct checkout as <code>application</code>. They do not compile FlashAttention, even
+without a local Docker cache. Source-only lock changes rebuild source layers;
+binary dependency changes require a new base. Editable installs still fetch
+build-system dependencies such as setuptools and pybind11, and Megatron builds
+a small C++ dataset helper. Those build-tool requirements are not fully pinned;
+the source and base pins do not make application builds bit-for-bit reproducible.</p>
+<p>The selected base is Beaker <code>01M5ZYQZVF7DDJ1VR619KRSS42</code>
+(<code>robertb/miles-binary-base-20261027</code>), Docker
+<code>sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354</code>.
+Its package versions, CPU imports and source isolation were checked, and a pull
+by immutable ID reproduced the same Docker ID. The
+<a href="https://beaker.org/ex/01M61Z3VBAD5219PHZX63YGDY7">single-GPU Core RL smoke</a>
+passed on application image <code>01M61Z2XBQB6EP3SJNAX1YN0HV</code>: four optimizer updates,
+shared-engine evaluations, checkpoints and HF export on Holmes. This tiny-model
+check uses Torch attention; it does not qualify every FlashAttention backend or
+a Qwen OPD GPU training run with the public Megatron sources.
+The application image (<code>robertb/miles-main-smoke-5a7be0398</code>) was built from
+<code>5a7be0398e8244cd5376983427e57d4deeea2e39</code>, Docker
+<code>sha256:83cc907a035f98ba69d3b8b7eaaaaa7477d1c06c6efca39da4414ef174df3c67</code>,
+and includes the current public source lock and review cleanup.</p>
+<p>A CPU-only <code>runtime-base</code> rebuild from commit
+<code>3563eb52ac4b02d731786e8f1a4e39a52951f2a2</code> is published as Beaker image
+<code>01M61YFEWE1BATA8KQ4VAV2DY8</code> (<code>robertb/miles-runtime-base-3563eb52a</code>), Docker
+<code>sha256:f97469549508d2af9896161889cc45060c52ece5743ecfcbe937039d3043b784</code>.
+Its packaged lock matches the current lock, all six source checkouts match their
+pinned revisions without patches, and serving/attention CPU imports passed.
+This records CPU build verification of the runtime sources separately from the
+application-image GPU smoke above, which subsequently verified the same source lock.</p>
+<p>The source layer includes Megatron-LM from the Radix fork, pinned to
+<code>235952df607b3820716e5e67728a5ab470ca33ae</code> (the previous runtime's revision,
+including its Qwen3.5 FP32 optimizer fix), rather than the current <code>miles-main</code>
+tip used by the pinned MILES Dockerfile. Megatron Bridge uses the public Radix
+revision selected by that Dockerfile. These dependencies support Qwen OPD.
+The image does not install <code>olmo-megatron</code>, the private Olmo Bridge fork, or
+Olmo-specific Megatron patches; Olmo training uses the Core backend. Package
+metadata and entrypoints are installed with <code>--no-deps</code> to preserve the binary
+stack. <code>/src/Megatron-LM</code> remains a compatibility symlink for the OPD launcher.</p>
+<p>EOPD metadata transport is implemented in the pinned MILES source, without a
+local runtime patch. Open Instruct's <code>opd_hooks</code> stores teacher top-k values in
+<code>Sample.train_metadata</code>;
+<a href="https://github.com/allenai/miles-olmo-core/blob/296a1e80c9c726bc41a764ce7cfcab2c886da64a/miles/ray/rollout/train_data_conversion.py#L173-L174">rollout conversion</a>
+copies those dictionaries into <code>train_data["metadata"]</code>, and the
+<a href="https://github.com/allenai/miles-olmo-core/blob/296a1e80c9c726bc41a764ce7cfcab2c886da64a/miles/backends/megatron_utils/model.py#L465-L496">Megatron training step</a>
+requests <code>metadata</code> from <code>get_batch</code> for the custom loss. This training field is
+separate from the input dataset metadata selected by <code>--metadata-key</code>.</p>
+<p>For ordinary application builds:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/miles/build_image.py<span class="w"> </span>--base-image<span class="w"> </span>LOCAL_LOADED_BASE_IMAGE<span class="w"> </span>--tag<span class="w"> </span>open-instruct:miles-core
+</code></pre></div>
+<p>Use <code>--target runtime-base</code> to build only the locked dependency sources, without
+adding the Open Instruct application checkout. The default target is <code>application</code>.
+The image arguments are local Docker tags loaded on the build host; Beaker names
+and immutable IDs identify the images to pull before invoking the helper.</p>
+<p>All repositories in the runtime lock are public; no GitHub credential is needed
+for these source fetches. Standalone source preparation can use
+<code>--cache olmo-sglang=/path/to/clone</code>.
+Existing published images retain their original sources; rebuild after changing
+the lock.</p>
+<p>prepare_runtime refuses to replace existing source directories. Its --cache
+arguments can use local clones as fetch sources; they do not select uncommitted
+sibling code. build_image checks the immutable base Docker ID. For actual
+submission use the <a href="../launching/">committed-image launcher</a>, not a one-off Beaker
+command with different mounts or source provenance.</p>
+<h2 id="rebuilding-the-binary-base">Rebuilding the binary base</h2>
+<p>The reproducible maintainer recipe is <code>runtime/miles/Dockerfile.base</code>; its two
+immutable inputs are recorded in <code>runtime/miles/base-build.lock.json</code>. Pull both
+Beaker images into Docker, then run:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/miles/build_base_image.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--compiled-parent<span class="w"> </span>LOCAL_COMPILED_PARENT<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--flash-attention-builder<span class="w"> </span>LOCAL_FA3_BUILDER<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>open-instruct:miles-binary-base
+</code></pre></div>
+<p>Both Docker IDs are verified, and the parent-image label comes from the same
+lock. The helper passes the compiler image as <code>FLASH_ATTENTION_BUILDER</code> and the
+runtime parent as <code>COMPILED_PARENT</code>. Only FA wheels are transferred from the compiler
+image to the clean compiled parent. FA2/FA4 wheel downloads are checksum-verified;
+the final stage resets inherited application metadata and entrypoints. This
+preserves the qualified CUDA/PyTorch stack rather than rebuilding all dependencies
+from an upstream CUDA distribution. Build on an amd64 Linux host: FA3 compilation
+defaults to two jobs, with <code>--max-jobs</code> available for hosts with sufficient RAM.
+The published base's FA3 build took about 31 minutes with eight jobs.</p>
+<p>The final environment list was compared with the locked compiled parent. It
+preserves its runtime settings while dropping legacy <code>OLMO_MILES_*</code> cache and
+verifier paths. Recheck this list against the parent image whenever changing the
+parent pin; <code>FROM scratch</code> does not inherit environment variables automatically.</p>
+<p>Before changing the pin again, verify CPU imports, an application build and GPU
+forward/backward and training on the intended hardware. CPU imports alone do not
+establish GPU correctness.</p>
+<h2 id="local-development">Local development</h2>
+<p>The ordinary CPU suite covers configuration, planning, launch specifications,
+rewards, data preparation, rendezvous, heartbeat, recovery and topology contracts
+without installing MILES or
+SGLang. The <code>MILES contracts</code> workflow also checks the maintained scripts and
+checks application types without requiring the private runtime.
+Recording and summary implementation tests live with their MILES implementation;
+Open Instruct keeps record configuration tests and runtime selection/buffer integration tests.
+The moved adapter is checked against that Core API in the dedicated runtime
+environment; Open Instruct's ordinary type check covers the application integration.
+The MoE numerical tests deliberately require the Core revision in the runtime
+lock. The ordinary <code>uv.lock</code> Core version is for existing SFT/DPO paths and is
+not upgraded to make those runtime-only tests importable.</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>open_instruct/test_miles*.py
+</code></pre></div>
+<p>The dedicated runtime suite uses the separate application image. From its
+<code>/opt/core-rl</code> working directory, run:</p>
+<div class="highlight"><pre><span></span><code>bash<span class="w"> </span>scripts/miles/test_runtime.sh<span class="w"> </span>-q
+</code></pre></div>
+<p>This command fails if runtime dependencies are missing. Without the explicit
+runtime flag, ordinary CPU collection omits <code>tests/miles/</code> when MILES or SGLang
+is absent. CUDA numerical cases skip when no GPU is visible. A passing CPU run
+therefore does not check GPU kernels, distributed gradients or publication.
+The ordinary Open Instruct GPU CI image does not include the private MILES
+runtime; dedicated runtime checks are a separate maintainer validation step.</p>
+<p>For a training lifecycle check, copy <a href="https://github.com/allenai/open-instruct/blob/main/configs/miles/examples/dev.toml">dev.toml</a>
+to <code>runs/</code>, select a compatible tiny checkpoint, and follow the
+<a href="../launching/">committed-image launcher</a>. Verify the rendered replica group and
+retain image, config and completion artifacts. Test refresh separately when
+changing publication behavior; a tiny mechanics check does not establish learning
+quality.</p>
+<h2 id="documentation-checks">Documentation checks</h2>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>scripts.miles.generate_docs<span class="w"> </span>--check
+uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>open_instruct/test_miles_documentation.py
+uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build
+make<span class="w"> </span>style-check
+make<span class="w"> </span>quality-check
+</code></pre></div>
+<p>MkDocs generates the four reference pages in memory from configuration sources,
+the compact pinned parser schema and reviewed <code>reference-help.json</code> descriptions.
+Neither the pages nor native help are tracked. Ordinary documentation builds and
+local <code>plan</code>/<code>validate</code> commands need no MILES installation. Without a native help
+capture, option tables show names, types, choices, restrictions and reviewed
+supplements; other help and value defaults are explicitly marked unavailable.</p>
+<p>When runtime pins change, regenerate the compact schema inside the matching
+runtime and review its diff:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>scripts.miles.snapshot_options<span class="w"> </span>open_instruct/miles/configuration/options.json
+</code></pre></div>
+<p>For full upstream help and parser defaults, capture an artifact in the pinned
+runtime using a writable checkout, then supply it to the documentation build:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>scripts.miles.capture_option_help<span class="w"> </span>--image<span class="w"> </span>IMMUTABLE_IMAGE_ID<span class="w"> </span>--output<span class="w"> </span>runs/native-help.json
+<span class="nv">MILES_NATIVE_HELP</span><span class="o">=</span>runs/native-help.json<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build
+</code></pre></div>
+<p>The capture checks the installed parser against the expanded compact schema;
+the docs build rejects stale hashes or missing actions. Parser defaults are not
+model-dependent resolved defaults. To inspect Markdown separately, run
+<code>python -m scripts.miles.generate_docs --output-dir runs/miles-docs</code> (optionally
+with <code>--native-help runs/native-help.json</code>). <code>--check</code> validates the reference
+inputs without writing files. Edit source definitions and reviewed descriptions,
+not generated output. Change maintained examples only as a deliberate recipe
+change; see <a href="../development-defaults/">development defaults</a>.</p>
+<h3 id="type-checking-the-moved-adapter">Type checking the moved adapter</h3>
+<p>In a development environment with the pinned MILES and Core sources, run:</p>
+<div class="highlight"><pre><span></span><code>ty<span class="w"> </span>check<span class="w"> </span>/path/to/miles/miles/backends/core_utils<span class="w"> </span>--extra-search-path<span class="w"> </span>/path/to/OLMo-core/src
+</code></pre></div>
+<p>Open Instruct's CPU checks do not fetch the private MILES repository. The committed
+application image and runtime tests check both repositories together.</p>
+<h2 id="adapter-package-layout">Adapter package layout</h2>
+<p><code>open_instruct/miles/</code> groups code by responsibility. The public CLI remains
+<code>python -m open_instruct.miles</code>; package initializers do not load the GPU runtime.</p>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>configuration</code></td>
+<td>RunSpec/CoreConfig, native options, validation, topology and capacity planning</td>
+</tr>
+<tr>
+<td><code>execution</code></td>
+<td>Preparation, Beaker submission, cluster bootstrap and training coordination</td>
+</tr>
+<tr>
+<td>MILES <code>backends/core_utils</code></td>
+<td>Core actor, model backends, packing, optimizer scheduling, checkpoints and trainer diagnostics</td>
+</tr>
+<tr>
+<td><code>rollout</code></td>
+<td>Application data-source selection and rollout metrics; managed generation, admission and completed queues live in MILES <code>backends/core_utils/rollout</code></td>
+</tr>
+<tr>
+<td>MILES <code>backends/core_utils/publication</code></td>
+<td>Weight delivery, engine drain, policy versions and durable policy state</td>
+</tr>
+<tr>
+<td><code>rewards</code></td>
+<td>Verifiers, reward routing and managed judges</td>
+</tr>
+<tr>
+<td><code>datasets</code></td>
+<td>Dataset preparation, mixtures, inference records and prompt selection</td>
+</tr>
+<tr>
+<td><code>evaluation</code></td>
+<td>Background evaluation submission, workers and result publication</td>
+</tr>
+<tr>
+<td><code>infrastructure</code></td>
+<td>Application artifact publication and bounded infrastructure waits; compiler/HF cache lifecycle lives in MILES</td>
+</tr>
+</tbody>
+</table>
+<p>Keep diagnostics next to the component they observe. Keep configuration imports
+CPU-only, model backends loaded on demand, and package initializers minimal.
+MILES <code>backends/core_utils/data.py</code> adapts samples to the trainer; <code>rollout/data_source.py</code> owns
+runtime data-source behavior; <code>datasets/run_data.py</code> prepares researcher inputs.</p>
+<p>Python integration imports use these package paths, for example
+<code>from open_instruct.miles.configuration.run_spec import RunSpec</code>. The pinned
+AllenAI MILES fork must use the matching trainer and rollout hook paths. Rebuild
+the application image when updating this layout and its runtime pin together;
+existing images retain their original code. Custom verifier factories and saved
+native options must reference these package paths.</p>
+<p>The CPU CLI checks in <code>open_instruct/test_miles_package_layout.py</code> run without
+site-packages. <code>tests/miles/test_package_layout.py</code> resolves hooks supplied by
+both repositories inside the pinned runtime.</p>
+<h3 id="application-callbacks-and-cpu-tools">Application callbacks and CPU tools</h3>
+<p>The backend trainer and managed rollout modules do not import Open Instruct.
+Open Instruct supplies <code>core_records_factory</code> for per-question recording and
+<code>core_evaluation_snapshot</code> for requested post-update HF exports. Those callbacks
+preserve the existing recording and evaluation schedules. Dataset preparation,
+reward callbacks, data-source selection, Beaker launch and evaluation submission
+remain application-owned. The native <code>olmo_core</code> argument loader still resolves
+Open Instruct's run configuration; that is an explicit configuration integration.</p>
+<p>Small CPU planning and artifact-reader helpers remain local so <code>plan</code>, <code>validate</code>
+and offline analysis work without the private runtime. Runtime integration tests
+compare their algorithms with the MILES counterparts: scoring policy, capacity
+reporting, timeout diagnostics, atomic JSON publication, input validation and
+throughput arithmetic.</p>
+<h2 id="core-runtime-compatibility">Core runtime compatibility</h2>
+<p>The <code>olmo-core</code> revision in
+<a href="https://github.com/allenai/open-instruct/blob/main/runtime/miles/runtime.lock.json"><code>runtime.lock.json</code></a> is the Core source used
+by the runtime. The adapter interfaces it relies on were merged in
+<a href="https://github.com/allenai/OLMo-core/pull/888">OLMo-core PR #888</a>. The runtime pins
+merge commit <code>6ceda6530625caa5d23e3be8a455c600f62a7338</code>, including the reviewed
+RoPE import fixes, alongside the MILES v0.1.2 integration.</p>
+<p>Core's routed-expert <code>match_eager_rounding</code> defaults to false. The pinned MILES
+adapter explicitly enables it for policy scoring and accepts legacy MILES
+checkpoint manifests with equivalent scoring semantics. Other Core users keep
+the default behavior.</p>
+<p>Core's PR checks and application validation cover different boundaries.
+Rebuild runtime/application images from the lock and validate the intended
+training topology; an existing image retains its original source revisions.
+Record application validation with the exact image and source pins. The compact
+options snapshot must be regenerated whenever runtime source pins change.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
