@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Exclude MILES compiler-cache settings from the recovery check, so a resumed run can move or disable its compiler cache (for example when the shared root is full) without choosing a new `output.root`; every other recorded field must still match (https://github.com/allenai/open-instruct/pull/TBD).
 - Separate MILES Triton cache compatibility from Python provenance, explain cache misses and record compiler timings; add opt-in TileLang persistence with verified private restores and avoid redundant FLA convolution specialization (https://github.com/allenai/open-instruct/pull/2140).
 - Overlap one future-version MILES refresh batch with training while retaining checkpoint recovery and the existing queue budget (https://github.com/allenai/open-instruct/pull/2138).
 - Pin Olmo-SGLang to merged main commit `069dc0a`, retaining the FP32 KDA snapshot fix and aligning declared compatibility with the pinned SGLang runtime (https://github.com/allenai/open-instruct/pull/2132).
