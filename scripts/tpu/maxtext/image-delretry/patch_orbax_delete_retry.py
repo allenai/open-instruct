@@ -35,8 +35,12 @@ OLD = '''  def _rmtree(self, path: epath.Path):
 
 NEW = '''  def _rmtree(self, path: epath.Path):
     """Recursively deletes a path, retrying (patched, open-instruct image-delretry; see its README)."""
-    tries = max(1, int(os.environ.get('ORBAX_DELETE_RETRY_TRIES', '5')))
-    base = float(os.environ.get('ORBAX_DELETE_RETRY_BASE_SECS', '4'))
+    try:
+      tries = max(1, int(os.environ.get('ORBAX_DELETE_RETRY_TRIES', '5')))
+      base = float(os.environ.get('ORBAX_DELETE_RETRY_BASE_SECS', '4'))
+    except ValueError:
+      logging.warning('ORBAX-DELETE-RETRY unparsable ORBAX_DELETE_RETRY_* env; using tries=5 base=4s')
+      tries, base = 5, 4.0
     for attempt in range(1, tries + 1):
       try:
         if not gcs_utils.is_gcs_path(path):

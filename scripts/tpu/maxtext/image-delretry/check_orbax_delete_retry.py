@@ -69,6 +69,10 @@ for args, want in cases.items():
     got = run(*args)
     assert got == want, (args, got, want)
 
+os.environ["ORBAX_DELETE_RETRY_TRIES"] = "foo"  # a bad value falls back to the defaults instead of raising
+assert run() == ("ok", 1, 1)
+del os.environ["ORBAX_DELETE_RETRY_TRIES"]
+
 d = pathlib.Path(tempfile.mkdtemp()) / "100"
 (d / "items").mkdir(parents=True)
 (d / "items" / "x").write_text("x")
