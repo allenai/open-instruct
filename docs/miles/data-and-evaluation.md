@@ -462,14 +462,41 @@ not factual content. ReasoningGym uses the pinned optional dependency listed in
 `scripts/data/rl_readiness/requirements.txt`, with explicit family coverage.
 No factory executes code supplied in a dataset or fetches external schema URLs.
 
+H169's explicit `mcqa_final_choice` target kind also accepts a bare choice letter,
+an `Answer: LETTER` final answer or a boxed letter. Multiple explicit answers and
+trailing contradictory text score zero. Preparation must select this contract
+explicitly; existing `mcqa` targets retain their answer-line extraction.
+
+Run the readiness tools as modules from the repository root, with their optional
+dependencies installed in the pinned MILES environment:
+
+```bash
+python -m scripts.data.rl_readiness.qualify --export /path/to/export.jsonl --output /path/to/new-catalog --hf /path/to/model
+python -m scripts.data.rl_readiness.local_coverage --catalog /path/to/new-catalog --fixture /path/to/toy-model --output /path/to/coverage
+python -m scripts.data.rl_readiness.audit --catalog /path/to/new-catalog --run /path/to/coverage
+```
+
+Direct file-path invocation is not the supported entry point. To package these
+tools, build the readiness image with the **repository root** as its context:
+
+```bash
+docker build -f scripts/data/rl_readiness/Dockerfile --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE -t rl-readiness .
+```
+
+The image copies the readiness package under `/opt/core-rl/scripts/data/` and
+checks all three module entry points with `--help` during the build.
+
 Formatting regex searches retain a 100 ms per-search budget. A timeout defaults
 to fallback zero with `verifier_diagnostics.status="timeout"`, the original error,
 and elapsed time. It is an ungraded response, not evidence of an incorrect answer.
 `OI_MILES_FORMAT_TIMEOUT_POLICY=raise` stops on the error; `zero` continues. When
 unset, this inherits `OI_MILES_MATH_TIMEOUT_POLICY` (default `zero`). Invalid
-targets still raise in either mode. The first registered-call failure or format
-timeout per worker/save directory is recorded with full prompt, response, scored
-response and target under `<save>/verifier_failures/`, including in zero mode.
+targets still raise in either mode. Failure capture reserves two slots per
+worker/save directory: one for a raised registered-call exception and one for a
+returned `status="timeout"` diagnostic from any verifier, including math and
+formatting. Each records the full prompt, response, scored response and target
+under `<save>/verifier_failures/`. A fallback timeout cannot consume the exception
+slot, and absent error text is recorded with a descriptive placeholder.
 Minimum-line rules return success as soon as enough lines match; irrelevant
 trailing lines cannot invalidate that predicate. Qualification rejects timeouts
 even when the runtime policy permits fallback zero.
@@ -478,7 +505,8 @@ ReasoningGym families inheriting its default substring scorer use stripped exact
 matching instead. At the pinned version these are `base_conversion`, `leg_counting`
 and `simple_equations`; gold-containing wrong answers are qualification controls.
 Task-specific scorers retain their semantics, and multiple explicit final answers
-are rejected. Diagnostics identify the corrected protocol as `exact_default_v2`;
+are rejected. A single boxed answer nested inside answer tags is one answer.
+Diagnostics identify the corrected protocol as `exact_default_v2`;
 earlier screen rewards using the default substring scorer need rescoring before
 comparison with this protocol.
 

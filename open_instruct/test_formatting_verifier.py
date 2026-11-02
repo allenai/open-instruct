@@ -225,3 +225,39 @@ def test_default_timeout_policy_is_zero(monkeypatch):
     target = {"kind": "format", "value": {"type": "regex", "verify_regex": ["x"]}}
     result = asyncio.run(cv.CandidateVerifier().async_call([], "x", target))
     assert result.score == 0.0 and result.diagnostics["status"] == "timeout"
+
+
+@pytest.mark.parametrize("diagnostics", [{"kind": "math", "status": "timeout"}, {"status": "timeout", "error": None}])
+def test_returned_timeout_cannot_consume_exception_capture_slot(tmp_path, monkeypatch, diagnostics):
+    class Verifier:
+        async def async_call(self, tokens, prediction, label, **kwargs):
+            if prediction == "timeout response":
+                return cv.Result(0.0, diagnostics=diagnostics)
+            raise ValueError("later fatal verifier error")
+
+    monkeypatch.setattr(rewards, "_FAILURE_CAPTURED", set())
+    monkeypatch.setattr(rewards, "_registry", lambda path: {"test": Verifier()})
+    args = SimpleNamespace(
+        save=str(tmp_path),
+        olmo_core=SimpleNamespace(reward_config="unused", reward_zero_truncated=True, reward_final_answer_only=False),
+    )
+    sample = SimpleNamespace(
+        metadata={"verifiers": [{"name": "test", "target": {}}]},
+        response="timeout response",
+        prompt="question",
+        tokens=[],
+        response_length=0,
+    )
+    for _ in range(2):
+        assert asyncio.run(rewards.registered_reward(args, sample)) == 0.0
+    sample.response = "fatal response"
+    for _ in range(2):
+        with pytest.raises(ValueError, match="later fatal verifier error"):
+            asyncio.run(rewards.registered_reward(args, sample))
+    records = [json.loads(path.read_text()) for path in (tmp_path / "verifier_failures").glob("*.json")]
+    assert len(records) == 2  # One bounded slot for each purpose.
+    by_kind = {record["capture_kind"]: record for record in records}
+    assert by_kind["timeout"]["response"] == "timeout response"
+    assert "without an error message" in by_kind["timeout"]["error"]
+    assert by_kind["exception"]["response"] == "fatal response"
+    assert "later fatal verifier error" in by_kind["exception"]["error"]

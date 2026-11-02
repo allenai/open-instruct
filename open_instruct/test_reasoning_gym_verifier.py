@@ -29,9 +29,21 @@ def test_default_scorers_require_exact_answers_on_real_entries(task):
             result = asyncio.run(verifier.async_call([], answer, entry))
             assert result.score == 0, (task, gold, answer)
             assert result.diagnostics["scoring_protocol"] == "exact_default_v2"
-        for answer in [gold, f"  {gold}  ", f"<answer>{gold}</answer>", f"\\boxed{{{gold}}}"]:
+        for answer in [
+            gold,
+            f"  {gold}  ",
+            f"<answer>{gold}</answer>",
+            f"\\boxed{{{gold}}}",
+            f"<answer> \\boxed{{ {gold} }} </answer>",
+        ]:
             assert asyncio.run(verifier.async_call([], answer, entry)).score == 1
-        for answer in [f"<answer>wrong</answer><answer>{gold}</answer>", f"\\boxed{{wrong}} \\boxed{{{gold}}}"]:
+        for answer in [
+            f"<answer>wrong</answer><answer>{gold}</answer>",
+            f"\\boxed{{wrong}} \\boxed{{{gold}}}",
+            "<answer>\\boxed{wrong}</answer>",
+            f"<answer>wrong</answer> \\boxed{{{gold}}}",
+            f"<answer>\\boxed{{{gold}}}</answer> \\boxed{{wrong}}",
+        ]:
             assert asyncio.run(verifier.async_call([], answer, entry)).score == 0
 
 

@@ -46,9 +46,13 @@ class ReasoningGymVerifier:
         boxes = re.findall(r"\\boxed\{([^{}]+)\}", final)
         # Multiple explicit answers cannot be resolved by picking the last one.
         ambiguous = len(tagged) > 1 or len(boxes) > 1
-        if tagged and boxes and tagged[0].strip() != boxes[0].strip():
-            ambiguous = True
         answer = tagged[-1].strip() if tagged else boxes[-1].strip() if boxes else final
+        if tagged and boxes:
+            # One answer may use both wrappers: <answer>\boxed{12}</answer>.
+            nested_box = re.fullmatch(r"\\boxed\{([^{}]+)\}", answer)
+            answer = nested_box[1].strip() if nested_box else answer
+            if answer != boxes[0].strip():
+                ambiguous = True
         if task in {"arc_agi", "rearc"}:
             grid = entry["metadata"]["output"]
             if (

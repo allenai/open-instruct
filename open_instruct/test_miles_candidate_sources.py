@@ -124,3 +124,21 @@ def test_catalog_rejects_path_escape(tmp_path):
     path.write_text(json.dumps(value))
     with pytest.raises(InputError, match="stay within"):
         source_catalog.resolve(path, {"deepmath": 1.0})
+
+
+@pytest.mark.parametrize("text", ["B", "Answer: B", "Explanation.\n\\boxed{B}", "<think>A</think>Answer: B."])
+def test_opt_in_mcqa_final_choice_positive(text):
+    assert cv.score(text, {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}) == 1
+
+
+@pytest.mark.parametrize(
+    "text", ["A", "", "Answer: A\nAnswer: B", "\\boxed{A} \\boxed{B}", "B or A", "Answer: B\nActually A"]
+)
+def test_opt_in_mcqa_final_choice_rejects_conflicting_answers(text):
+    assert cv.score(text, {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}) == 0
+
+
+def test_mcqa_final_choice_is_opt_in_and_validates_target():
+    assert cv.score("B", {"kind": "mcqa", "value": "B", "choices": ["A", "B"]}) == 0
+    with pytest.raises(ValueError, match="correct letter"):
+        cv.score("B", {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "C"]})
