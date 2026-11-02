@@ -24,6 +24,9 @@ printf %s '$TCHK' | base64 -d | gunzip > /tmp/tokenizer_check.py
 sha256sum /tmp/c12_pack.py /tmp/tokenizer_check.py $SCI
 mkdir -p $H/cache $H/hf-tok $H/pack-work
 PYTHONPATH=. python /tmp/tokenizer_check.py config
+# A preemption during save_to_disk leaves a transformed-dataset dir without dataset_statistics.json (written last),
+# which the next run would try to load (ArrowInvalid, 2026-11-02). Move such dirs aside; never delete.
+for d in $H/cache/*/; do [ -d \$d ] || continue; n=\$(basename \$d); [ \"\$n\" = numpy_sft ] && continue; [ -f \$d/dataset_statistics.json ] || { echo H174-PARTIAL-MOVED \$d; mv \$d $H/cache-partial-\$n-\$(date +%s); }; done
 env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$H/hf-tok PYTHONUNBUFFERED=1 python open_instruct/olmo_core_finetune.py \
   --model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
   --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
@@ -46,7 +49,7 @@ task = {"name": "h174-cache", "image": {"beaker": "$IMAGE"}, "command": ["/bin/b
         "datasets": [{"mountPath": f"/weka/{b}", "source": {"weka": b}} for b in
                      ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
         "result": {"path": "/output"}, "resources": {"cpuCount": 64, "memory": "400GiB"},
-        "context": {"priority": "high", "minRuntime": "4h"},
+        "context": {"priority": "high", "minRuntime": "8h"},
         "constraints": {"cluster": ["ai2/neptune", "ai2/saturn"]},
         "timeout": "16h"}
 json.dump({"version": "v2", "budget": "ai2/oe-other", "description": "ledger H174: arm cache build + packed-instance count",
