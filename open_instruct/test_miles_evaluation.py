@@ -477,6 +477,10 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
         finish_tracking=lambda: None,
         init_tracking=lambda args: None,
     )
+    module(
+        "miles.backends.core_utils.rollout",
+        prepared_batch=SimpleNamespace(enabled=lambda args: False, disabled_reason=lambda args: "disabled for test"),
+    )
     module("miles.backends.core_utils.publication.rolling_publication", RollingPublication=Mock())
     # Load under a private module name so monkeypatch cleanup leaves no stale driver.
     spec = importlib.util.spec_from_file_location(
