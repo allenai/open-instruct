@@ -1443,3 +1443,91 @@ Focused Ruff/format checks and compile checks passed; the source patch's clean
 application reproduces the committed SGLang changes. The packaged unified diff
 is marked as patch data in a scoped .gitattributes entry so intentional context
 blank-line spaces are preserved. Temporary Docker SSH tunnels were closed.
+
+
+## Native SGLang 450m GSM8K end-to-end plan (2026-11-01)
+
+Status: PLANNED — documentation only; no new compute submitted.
+
+The [migration and run plan](docs/algorithms/olmicro_native_sglang.md) distinguishes
+native serving from the previous HF bridge and uses the existing completed
+Core/vLLM experiment01M64J9FRG4PYSB6E7WJ739A7F as the baseline. That run completed
+500 updates, saved checkpoint500/finalHF export, and reached17.287% GSM8K Platinum
+accuracy versus3.970% initially. No repeat baseline training is planned.
+
+Planned native work: N1 two-update four-GPU lifecycle smoke; N1R continuation
+from its committed native checkpoint to verify optimizer/data-cursor restoration;
+then N2 fresh450m final-midtrain step0038147,500updates, eval/checkpoint100,
+BF16,2learners+2TP1native engines, maxlag1, lr1e-6 and PPO clip0.2/0.272.
+User selected the same hardware as the baseline:4Rhea A6000 GPUs,2learners+2
+TP1inference engines, workspace ai2/scaling-ladders, budget ai2/oe-other and
+two-hour minimum runtime. N1 must qualify A6000 native kernel/full-attention
+support; existing L40S FA3 results do not establish SM86 support. Immutable native
+image, publication integration and resume qualification remain pending. No job
+was submitted by this documentation change; native RL is not yet qualified.
+
+Correction to the older personal-run status above: experiment01M67081AXN33GBZJASMPYM1N8
+is terminal. Its HF-bridge attempts reached a maximum91updates; the last productive
+attempt reached51at2026-10-31 06:47:28UTC. After five scheduler preemptions,
+subsequent starts failed `launch.max_retries=3 after 4 starts`; final exit2was
+at10:43:52UTC. No checkpoint100was committed. Monitoring was deleted after the
+terminal report. Native serving benchmarks do not change that experiment's backend.
+
+
+## Native SGLang 450m GSM8K launch preparation (2026-11-02)
+
+Status: BUILD SUBMITTED; GPU launch blocked on workspace write permission.
+
+User authorized the full native launch sequence. Preserve4Rhea A6000s,2Core
+learners+2TP1native engines, workspace ai2/scaling-ladders, budget ai2/oe-other,
+normal priority/minRuntime2h. Main recipe remains500updates, BF16, maxlag1/TIS,
+lr1e-6, PPO clip0.2/0.272, eval/checkpoint100 and personal W&B namespace.
+Use native Triton full/linear attention for initial A6000 qualification; L40S
+FA3 results do not establish SM86 support. Known cross-backend logprob differences
+remain reported; the run is an exploratory whole-stack comparison.
+
+Implementation pushed:
+- MILES `codex/hybrid-mainline` commit525732e5: explicit MILES_HYBRID_NATIVE
+  selection, no external registry/HF backbone in native workers, native model-class
+  receipt and config registration before manager argument rendering.14focused
+  startup tests passed; Ruff passed.
+- Open-Instruct companion `codex/hybrid-mainline` commit04f283df8: native main
+  TOML, native lifecycle smoke entrypoint, overlay Dockerfile and runtime identity.
+  Managed Beaker jobs now delegate failed-task retry limits to Beaker instead of
+  exhausting a second all-start ledger on scheduler preemption. Standalone runs
+  retain the local cap.117focused workflow/launcher/manifest tests and Ruff passed.
+- Native SGLang source986877f4, pinned upstream3145136d, published patch unchanged.
+
+Main config:
+`/home/mnoukhov/olmicro/open-instruct/configs/miles/benchmarks/hybrid_450m_gsm8k_native_500.toml`.
+Smoke config (ignored, captured in submission payload):
+`/home/mnoukhov/olmicro/open-instruct/runs/hybrid-450m-native-smoke-20261102.toml`.
+Smoke uses3totalupdates,8held-out eval examples, saves/evals everyupdate and a
+debug stop after2. A separate second training process must restore checkpoint2,
+optimizer/scheduler and committed cursor, then complete update3. It validates the
+cursor SHA and world size2, and emits native-smoke-complete.json. Publication
+diagnostics run every smoke update. Main uses a separate fresh output root.
+Smoke cap2h/zero failure retries; main cap24h/three failure retries; both min2h.
+
+Artifact upload to ai2/scaling-ladders was rejected with `insufficient permission
+to modify`; `beaker workspace permissions get` confirms requesterAuth=read for
+michaeln. User was asked to arrange write permission. No GPU job submitted and
+no alternative training workspace selected. Artifact staging/build uses the
+existing ai2/open-instruct-dev workspace, same ai2/oe-other budget, zero GPUs.
+
+Build context dataset01M6DBR76S9K2AKWXQZX6Z2QPV, qualified parent image
+01M607Z48PYPNN0KHVZ5PGYJEG, target alias
+`michaeln/olmicro-native-450m-04f283df82`.
+CPU build [01M6DBW1JGQK8YKYFKDW1A1F0T](https://beaker.org/ex/01M6DBW1JGQK8YKYFKDW1A1F0T)
+requests4CPU/16GiB, timeout2h, zero retries on Hammond. The first Phobos build
+01M6DBRRPG8MQZQ448114D0JGN was canceled before start after a scheduler capacity
+failure; no image was built there. No local Docker build was run.
+
+One-time launch controller `/tmp/olmicro-native-controller.py` waits for image
+completion and workspace write permission, submits the smoke through the clean
+committed image wrapper, checks its native/resume receipt and only then submits
+the500-update main job. State/identifiers are in
+`/home/mnoukhov/.codex/monitor-state/olmicro-native-450m-20261102.json`;
+log `/tmp/olmicro-native-controller-20261102.log`. Unknown submission outcomes
+fail closed rather than being retried automatically. Record actual GPU experiment
+IDs here after submission; prepared specs are not runtime qualification.

@@ -1054,3 +1054,37 @@ greedy queue/reuse failures at 810m/2.7b. These results do not establish exact
 cross-backend equivalence. Remaining numerical differences and cross-process
 native RL publication/optimizer/resume checks remain open. See the shared
 qualification report for all per-size gates and the precise checkpoint IDs.
+
+
+## Native SGLang 450m GSM8K end-to-end comparison (2026-11-01)
+
+Status: ACTIVE — run plan documented; native RL has not launched.
+
+Question: does native SGLang remove the HF bridge's rollout/evaluation bottleneck
+while preserving a useful 450m GSM8K learning result with the OLMo-core learner?
+
+Use the existing completed four-GPU Core/vLLM500-update run as the baseline,
+not a new baseline training run. It achieved17.287% final Platinum accuracy,
+saved checkpoint500and verified checkpoint100/data-cursor restoration. The later
+personal four-GPU MILES run used the HF bridge, exhausted retries after repeated
+preemption and never reached its first checkpoint; it is terminal, superseding
+the earlier ACTIVE/queued status in this file.
+
+Plan native lifecycle smoke, checkpoint continuation and fresh500-update450m
+training with eval/checkpoint100. User selected4Rhea A6000s (2learners+2inference), matching the completed
+baseline, and workspace ai2/scaling-ladders under ai2/oe-other with a2h minimum
+runtime. A6000 native kernel support plus native RL publication/restart
+correctness remain to be qualified before the main run. Existing
+selected-token numerical failures remain visible; do not claim strict parity.
+
+See the [migration document](docs/algorithms/olmicro_native_sglang.md) and
+[planned experiment batch](experiment.md#native-sglang-450m-gsm8k-end-to-end-plan-2026-11-01).
+
+2026-11-02: user authorized implementation and launch. Explicit native worker
+selection and managed retry ownership are implemented/pushed;117Open-Instruct
+tests and14MILES startup tests passed. CPU image build submitted on Hammond.
+GPU smoke/main remain blocked on actual Beaker workspace access: michaeln has
+read-only permission in ai2/scaling-ladders. The one-time controller will gate
+main submission on image publication, write permission and a native3-update
+smoke that restores checkpoint2in a separate training process. See
+[launch preparation](experiment.md#native-sglang-450m-gsm8k-launch-preparation-2026-11-02).
