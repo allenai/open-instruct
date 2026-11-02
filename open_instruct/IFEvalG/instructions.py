@@ -1604,11 +1604,11 @@ class CopySpanIdxChecker(Instruction):
             raise ValueError("prompt_to_repeat must be set.")
         else:
             self._prompt_to_repeat = prompt_to_repeat
-        if not n_start:
+        if n_start is None:
             self._n_start = random.randint(0, len(self._prompt_to_repeat) - 2)
         else:
             self._n_start = n_start
-        if not n_end:
+        if n_end is None:
             self._n_end = random.randint(self._n_start + 1, len(self._prompt_to_repeat) - 1)
         else:
             self._n_end = n_end
@@ -1627,7 +1627,7 @@ class CopySpanIdxChecker(Instruction):
 
     def check_following(self, value):
         """Checks if the response contains the expected number of phrases with the correct modifications."""
-        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end].strip().lower()
+        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end + 1].strip().lower()
 
 
 class SentenceHyphenChecker(Instruction):

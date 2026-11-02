@@ -9,6 +9,7 @@ import unittest
 from parameterized import parameterized
 
 from open_instruct import if_functions
+from open_instruct.IFEvalG import instructions
 
 
 class TestValidateChoice(unittest.TestCase):
@@ -37,6 +38,25 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
     )
     def test_validate_frequency_capital_words(self, _name, text, n, quantifier, expected):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
+
+
+class TestCopySpanIdxChecker(unittest.TestCase):
+    PROMPT = "The quick brown fox jumps over the lazy dog"
+
+    def _checker(self, n_start, n_end):
+        checker = instructions.CopySpanIdxChecker("new:copy_span_idx")
+        checker.build_description(prompt_to_repeat=self.PROMPT, n_start=n_start, n_end=n_end)
+        return checker
+
+    def test_span_includes_end_index(self):
+        checker = self._checker(4, 8)
+        self.assertTrue(checker.check_following("quick"))
+        self.assertFalse(checker.check_following("quic"))
+
+    def test_zero_start_is_kept(self):
+        checker = self._checker(0, 2)
+        self.assertEqual(checker.get_instruction_args()["n_start"], 0)
+        self.assertTrue(checker.check_following("The"))
 
 
 if __name__ == "__main__":
