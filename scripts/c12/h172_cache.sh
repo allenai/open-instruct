@@ -19,9 +19,12 @@ MIXER="$P/dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 $P/nem
 OUT=/weka/olmo-3p5-post-checkpoints/chrisg/h172/cache
 DEL=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft
 PACK=$(gzip -9c "$LEDGER/experiments/c12/c12_pack.py" | base64 | tr -d '\n')
+# The image (built at 37a119ffd) has open_instruct/ as at 97ac1b53a but not scripts/c12/; ship the check from here.
+TCHK=$(gzip -9c "$HERE/tokenizer_check.py" | base64 | tr -d '\n')
 CMD="set -euo pipefail
 printf %s '$PACK' | base64 -d | gunzip > /tmp/c12_pack.py
-sha256sum /tmp/c12_pack.py
+printf %s '$TCHK' | base64 -d | gunzip > /tmp/tokenizer_check.py
+sha256sum /tmp/c12_pack.py /tmp/tokenizer_check.py
 echo H172-CACHE-START \$(date -u +%FT%TZ) \$(nproc) CPUs
 cat > /tmp/inputs.sha256 <<EOF
 9707a865feae1ef7796861ef4b78d0c758b46a497541f3d54f72689c03a36c4f  $P/dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet
@@ -31,7 +34,7 @@ be9ec34a0ecb3140ddddabfe4bafd448ca2e224422d5c8bbd6c16e7c21e510c0  $P/nemotron-to
 $H172_PARQUET_SHA  $H172_PARQUET
 EOF
 sha256sum -c /tmp/inputs.sha256
-python scripts/c12/tokenizer_check.py config
+PYTHONPATH=. python /tmp/tokenizer_check.py config
 mkdir -p $OUT/tokscratch
 if ! ls $OUT/numpy_sft/*/dataset_statistics.json >/dev/null 2>&1; then
 env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$OUT/tokscratch RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONUNBUFFERED=1 python open_instruct/olmo_core_finetune.py \
@@ -43,7 +46,7 @@ env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$OUT/tokscratch RAYON_NUM_THREADS=1 OMP_N
 fi
 NAME=\$(ls $OUT/numpy_sft/); [ \$(echo \"\$NAME\" | wc -l) -eq 1 ] || { echo \"expected one cache dir: \$NAME\"; exit 3; }
 echo H172-CACHE \$NAME
-python scripts/c12/tokenizer_check.py dir $OUT/numpy_sft/\$NAME/tokenizer
+PYTHONPATH=. python /tmp/tokenizer_check.py dir $OUT/numpy_sft/\$NAME/tokenizer
 cat $OUT/numpy_sft/\$NAME/dataset_statistics.json | head -c 20000
 PYTHONPATH=. python /tmp/c12_pack.py $OUT/packwork $OUT/numpy_sft/\$NAME
 if [ -e $DEL/\$NAME ]; then ls -la $DEL/\$NAME; else ln -s $OUT/numpy_sft/\$NAME $DEL/\$NAME && ls -la $DEL/\$NAME; fi
