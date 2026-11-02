@@ -531,6 +531,18 @@ an `Answer: LETTER` final answer or a boxed letter. Multiple explicit answers an
 trailing contradictory text score zero. Preparation must select this contract
 explicitly; existing `mcqa` targets retain their answer-line extraction.
 
+For prepared Python-function tasks, the optional
+`candidate_code.CompleteCodeVerifier` sends all 1–256 supplied tests to the
+configured external execution service in batches of at most 16. It returns one
+only when every test passes, and zero for valid failed tests. It retries HTTP 500
+responses twice (after 1 and 2 seconds), in addition to the shared gateway retry
+policy. Exhausted HTTP/transport errors and incomplete or nonbinary service
+results raise; this strict adapter does not use `OI_MILES_CODE_FAILURE_POLICY`
+to turn unknown outcomes into zero rewards. Successful diagnostics include the
+full test count, passed count and HTTP-500 retry count. The registered reward
+wrapper captures raised failures with their original input. This adapter must
+only be pointed at a provisioned sandbox service; it never executes code locally.
+
 Run the readiness tools as modules from the repository root, with their optional
 dependencies installed in the pinned MILES environment:
 
