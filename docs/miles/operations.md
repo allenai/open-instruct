@@ -316,3 +316,11 @@ final HF export. Background evaluation with `final=true` requests evaluation at
 the actual final update, including off-cadence stops. Submission remains
 best-effort: inspect receipts and explicitly resubmit a failed or skipped final
 evaluation. Debug exits retain their separate resumable, non-final semantics.
+
+Set `core.max_run_resumable = true` beside `core.max_run_seconds` to make the
+stop resumable instead of final, for runs longer than one job's time limit. The
+stop still forces a native checkpoint (checkpoint saving is required), but it
+skips the final HF export and final background evaluation, and `workflow.json`
+records `stopped` rather than `complete`. Resubmit the same specification with
+`launch.auto_resume = true` under the same `output.root` to continue; the final
+export and evaluation run when the run reaches `num_rollout`.

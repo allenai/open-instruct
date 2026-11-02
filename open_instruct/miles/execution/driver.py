@@ -38,7 +38,12 @@ async def train(args, *, export_hf=None):
         raise ValueError("Core currently requires the Ray cluster backend")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
-    stopped_for_time = False
+    # A resumable time stop saves and leaves the run open, like a debug exit: no
+    # final export or final evaluation at the stopped update.
+    resumable = bool(getattr(args.olmo_core, "max_run_resumable", False))
+    if resumable and not getattr(args, "save", None):
+        raise ValueError("core.max_run_resumable requires checkpoint saving")
+    stopped_for_time = final_stop = False
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
@@ -241,7 +246,8 @@ async def train(args, *, export_hf=None):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
-            if coordinator is not None and background is not None and not (stopped_for_time and background["final"]):
+            final_stop = stopped_for_time and not resumable
+            if coordinator is not None and background is not None and not (final_stop and background["final"]):
                 coordinator.dispatch_batch(collection_snapshots)
                 collection_snapshots = []
             if stopped_for_time:
@@ -260,12 +266,12 @@ async def train(args, *, export_hf=None):
         # Otherwise the first process creates the final directory and the resumed
         # process cannot export its newer weights there (the exporter is exclusive).
         reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
-        if export_hf is not None and (reached_end or stopped_for_time):
+        if export_hf is not None and (reached_end or final_stop):
             if args.fully_async:
                 await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
-        if stopped_for_time and coordinator is not None and background is not None and background["final"]:
+        if final_stop and coordinator is not None and background is not None and background["final"]:
             last = completed[-1]
             update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
             target = export_hf or str(background_eval.snapshot(background["root"], update))
@@ -344,4 +350,5 @@ async def train(args, *, export_hf=None):
         "start_rollout_id": args.start_rollout_id,
         "export_hf": export_hf,
         "stopped_for_time": stopped_for_time,
+        "time_stop_resumable": resumable,
     }

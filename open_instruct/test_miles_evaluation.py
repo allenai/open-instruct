@@ -601,6 +601,12 @@ def test_wall_clock_budget_must_be_finite_and_positive(value):
         CoreConfig(max_run_seconds=value)
 
 
+def test_resumable_time_stop_needs_a_wall_clock_budget():
+    with pytest.raises(InputError, match="requires core.max_run_seconds"):
+        CoreConfig(max_run_resumable=True)
+    assert CoreConfig(max_run_seconds=60, max_run_resumable=True).max_run_resumable
+
+
 def test_incomplete_snapshot_never_submitted(run, monkeypatch):
     network = Mock()
     monkeypatch.setattr(evaluation.subprocess, "run", network)
