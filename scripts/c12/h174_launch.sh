@@ -67,8 +67,8 @@ $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
 $SCI 1.0"
 # H174: the arm's own cache (built by scripts/c12/h174_cache.sh) and its packed-instance count.
-CACHE=__CACHE__
-I_ARM=__I_ARM__
+CACHE=e55fb4bb90-6068a350-rowaligned   # h174_cache.sh, Beaker 01M6F0279ABY0DW8T63RD6CQFP
+I_ARM=460499   # c12_pack.py on that cache; S = round(16303/28092 x 28781) = 16703
 EPOCH_STEPS=$((I_ARM / 16))
 # S = round(phi x floor(I / 16)), phi = 16,303 / 28,092 (H167's ctrl S over its batches per pass).
 S_ARM=$(python3 -c "print(round(16303 / 28092 * $EPOCH_STEPS))")
@@ -107,9 +107,14 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
+# H174: the deletable-cache link (H167's way), made idempotently by every job; the real cache stays in h174/cache.
+LINK="D=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft; mkdir -p \$D
+[ -e \$D/$CACHE ] || ln -s /weka/olmo-3p5-post-checkpoints/chrisg/h174/cache/numpy_sft/$CACHE \$D/$CACHE
+ls -l \$D/$CACHE; [ -f \$D/$CACHE/dataset_statistics.json ] || { echo H174-NO-CACHE; exit 3; }"
 WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
 [ -f $BASE_RECEIPT ] || { echo H161-NO-BASE $BASE_RECEIPT; exit 3; }
-sha256sum $BASE_RECEIPT"
+sha256sum $BASE_RECEIPT
+$LINK"
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
 --master_port=29400 --nproc_per_node=8 $ENTRY $ARGS"
 if [[ "$MODE" == resume ]]; then
