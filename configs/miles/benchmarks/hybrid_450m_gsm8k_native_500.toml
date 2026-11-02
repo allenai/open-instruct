@@ -13,11 +13,11 @@ export_hf = true
 [launch]
 memory = "128 GiB"
 shared_memory = "32 GiB"
-workspace = "ai2/open-instruct-dev"
+workspace = "ai2/scaling-ladders"
 budget = "ai2/oe-other"
 cluster = "ai2/rhea"
 priority = "normal"
-min_runtime = "0s"
+min_runtime = "2h"
 timeout = "24h"
 auto_resume = true
 max_retries = 3
