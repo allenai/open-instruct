@@ -422,3 +422,114 @@ mathematical answer; include the timeout rate when interpreting benchmark scores
 For best-effort external olmo-eval jobs and checkpoint-axis W&B curves, see
 [background evaluation](background-evaluation.md). Selecting this mode replaces
 shared-engine evaluation; failed or skipped jobs leave gaps without blocking training.
+
+## Qualified local source catalogs
+
+`python -m open_instruct.miles.datasets.source_catalog` resolves reviewed source
+names to ordinary `[[data.sources]]` blocks. It checks the prepared prompt and
+verifier-registry SHA-256 digests, rejects unqualified names, and requires the
+requested fractions to sum to one. The catalog and reward registries are trusted
+configuration, just like a run file; do not accept them from unreviewed datasets.
+
+```bash
+python -m open_instruct.miles.datasets.source_catalog /path/to/qualified/catalog.json \
+  --source c094-deepmath-103k-math=1.0 --output /tmp/deepmath-data.toml
+```
+
+Use the resulting `[data]` section in a run file, or combine its named source
+blocks with existing prepared sources and set the final fractions. Moving the
+whole catalog directory preserves its relative bundle paths. This does not
+change mixture sampling or introduce another run-file data mode.
+
+A qualified **slice** is not a claim that every row or subtask of its parent
+Hugging Face dataset is ready. Read the catalog's row counts, strata, exclusions,
+and qualification receipts. The preparation catalog initializes `gpu_exercised`
+to false; the later GPU audit writes `source-gpu-receipts.json` under the coverage
+run directory without modifying that immutable catalog. Use those separate
+receipts for completed GPU coverage. The local qualification tools in
+`scripts/data/rl_readiness/` check positive, wrong, empty, and capped responses
+through the real reward registry. CPU qualification exercises native data
+preparation, mixture-provider source attribution, cursor restoration, and
+mixed/all-zero group filtering. Their input
+export must come from a reviewed adapter with immutable source provenance and
+existing hygiene receipts.
+
+The optional `candidate_verifiers` factories cover explicit MCQA answer lines,
+formatting-only checks, Countdown arithmetic, named knight/knave assignments,
+structural numeric answers, exact text, and typed JSON answers. MCQA uses a
+prepared `Answer: LETTER` contract; it must not silently replace a source's
+original extraction rules. The JSON-schema factory grades schema conformance,
+not factual content. ReasoningGym uses the pinned optional dependency listed in
+`scripts/data/rl_readiness/requirements.txt`, with explicit family coverage.
+No factory executes code supplied in a dataset or fetches external schema URLs.
+The schema subset rejects `pattern` and `patternProperties` because the schema
+library uses unbounded Python regex matching. This conservative recursive check
+also rejects those names inside property maps or instance literals. Such schemas
+must be deferred during preparation, not silently have constraints removed.
+
+H169's explicit `mcqa_final_choice` target kind also accepts a bare choice letter,
+an `Answer: LETTER` final answer or a boxed letter. Multiple explicit answers and
+trailing contradictory text score zero. Preparation must select this contract
+explicitly; existing `mcqa` targets retain their answer-line extraction.
+
+Run the readiness tools as modules from the repository root, with their optional
+dependencies installed in the pinned MILES environment:
+
+```bash
+python -m scripts.data.rl_readiness.qualify --export /path/to/export.jsonl --output /path/to/new-catalog --hf /path/to/model
+python -m scripts.data.rl_readiness.local_coverage --catalog /path/to/new-catalog --fixture /path/to/toy-model --output /path/to/coverage
+python -m scripts.data.rl_readiness.audit --catalog /path/to/new-catalog --run /path/to/coverage
+```
+
+Direct file-path invocation is not the supported entry point. To package these
+tools, build the readiness image with the **repository root** as its context:
+
+```bash
+docker build -f scripts/data/rl_readiness/Dockerfile --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE -t rl-readiness .
+```
+
+The image copies the readiness package under `/opt/core-rl/scripts/data/` and
+checks all three module entry points with `--help` during the build.
+
+Formatting matching shares a one-second monotonic deadline across the response,
+with each regex call additionally capped at 100 ms or the remaining time,
+whichever is shorter. The deadline is checked between lines, markers, matches and
+patterns, including the quoted-pair fast path. These are in-process checks, not
+process isolation: linear string operations and target validation are not
+forcibly interrupted. A timeout defaults
+to fallback zero with `verifier_diagnostics.status="timeout"`, the original error,
+and elapsed time. It is an ungraded response, not evidence of an incorrect answer.
+`OI_MILES_FORMAT_TIMEOUT_POLICY=raise` stops on the error; `zero` continues. When
+unset, this inherits `OI_MILES_MATH_TIMEOUT_POLICY` (default `zero`). Invalid
+targets still raise in either mode. Failure capture reserves two slots per
+worker/save directory: one for a raised registered-call exception and one for a
+returned `status="timeout"` diagnostic from any verifier, including math and
+formatting. Each records the full prompt, response, scored response and target
+under `<save>/verifier_failures/`. A fallback timeout cannot consume the exception
+slot, and absent error text is recorded with a descriptive placeholder.
+Minimum-line rules return success as soon as enough lines match; irrelevant
+trailing lines cannot invalidate that predicate. Qualification rejects timeouts
+even when the runtime policy permits fallback zero.
+
+ReasoningGym families inheriting its default substring scorer use stripped exact
+matching instead. At the pinned version these are `base_conversion`, `leg_counting`
+and `simple_equations`; gold-containing wrong answers are qualification controls.
+Task-specific scorers retain their semantics, and multiple explicit final answers
+are rejected. A single boxed answer nested inside answer tags is one answer.
+Diagnostics identify the corrected protocol as `exact_default_v2`;
+earlier screen rewards using the default substring scorer need rescoring before
+comparison with this protocol.
+
+The catalog CLI emits seed 17 and shuffling enabled. The bounded qualification
+pass uses shuffling disabled to check source order and cursor restoration; it is
+not evidence for a particular shuffled training sequence.
+
+The local GPU coverage tool uses one actual prompt per qualified named source,
+four short completions, and a tiny model. It loads plain prompt data and verifies
+that each row's existing sample/source labels survive rollout; it does not exercise
+mixture-provider runtime attribution on GPU. That provider attribution is checked
+separately during CPU qualification. It disables zero-variance filtering
+because the random model generally earns zero; the separate controls test the
+real filter. Router auxiliary losses can produce optimizer updates even with
+zero task rewards. This is a training-machinery check, not evidence of learning,
+endpoint transfer, or a recommendation to use four samples in a real run.
