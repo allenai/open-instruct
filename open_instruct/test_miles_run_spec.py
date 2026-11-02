@@ -272,6 +272,24 @@ def test_repeatable_toml_overrides_before_compilation(tmp_path):
         RunSpec.load(path, ["model.source=unquoted"])
 
 
+@pytest.mark.parametrize("value", ["false", "true", '"false"'])
+def test_prepared_batch_overlap_toml_round_trip_and_type(tmp_path, value):
+    path = tmp_path / "run.toml"
+    path.write_text(
+        'schema_version=1\nname="test"\n[model]\nsource="model"\n[output]\nroot="run"\n'
+        '[[data.tasks]]\ntask="gsm8k"\ntrain_count=8\neval_count=4\n'
+        f"[core]\nprepared_batch_overlap={value}\n"
+    )
+    if value == '"false"':
+        with pytest.raises(ValueError, match="prepared_batch_overlap"):
+            RunSpec.load(path).compile()
+        return
+    run = RunSpec.load(path)
+    restored = RunSpec.from_dict(run.to_dict(), config_path=path)
+    assert run.compile().core.prepared_batch_overlap is (value == "true")
+    assert restored.compile().core.prepared_batch_overlap is (value == "true")
+
+
 @pytest.mark.parametrize(
     "override,match",
     [

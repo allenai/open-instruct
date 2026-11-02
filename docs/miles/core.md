@@ -312,6 +312,7 @@ measure training memory and step cost for the chosen token/vocabulary sizes. See
 disaggregated refresh runs with one optimizer update per collection, publication
 every update, and completed-buffer capacity of at least one collection. Other
 schedules retain sequential acquisition; set the option to `false` to disable it.
+Startup logs report the first unmet eligibility condition when overlap is disabled.
 
 While update N trains, the executor reserves and prepares one batch for the
 currently published policy version plus one. It runs the existing sample

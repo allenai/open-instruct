@@ -53,7 +53,11 @@ async def train(args, *, export_hf=None):
     refresh = args.olmo_core.publication_mode == "refresh"
     overlap = prepared_batch.enabled(args)
     prefetched = False
-    logger.info("Prepared-batch overlap enabled: %s", overlap)
+    logger.info(
+        "Prepared-batch overlap enabled: %s; %s",
+        overlap,
+        "eligible" if overlap else prepared_batch.disabled_reason(args),
+    )
     try:
         # Start local Ray before W&B creates WANDB_SERVICE. Otherwise raylet
         # inherits the driver's service connection, and offline worker writers
