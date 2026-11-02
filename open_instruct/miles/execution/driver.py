@@ -39,11 +39,10 @@ async def train(args, *, export_hf=None):
         raise ValueError("Core currently requires the Ray cluster backend")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
-    # A resumable time stop saves and leaves the run open, like a debug exit: no
-    # final export or final evaluation at the stopped update.
-    resumable = bool(getattr(args.olmo_core, "max_run_resumable", False))
-    if resumable and not getattr(args, "save", None):
-        raise ValueError("core.max_run_resumable requires checkpoint saving")
+    # A time stop saves and leaves the run open, like a debug exit: no final export
+    # or final evaluation at the stopped update. max_run_final, or no save path,
+    # makes it final.
+    resumable = not getattr(args.olmo_core, "max_run_final", False) and bool(getattr(args, "save", None))
     stopped_for_time = final_stop = False
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
@@ -395,5 +394,5 @@ async def train(args, *, export_hf=None):
         "start_rollout_id": args.start_rollout_id,
         "export_hf": export_hf,
         "stopped_for_time": stopped_for_time,
-        "time_stop_resumable": resumable,
+        "time_stop_resumable": stopped_for_time and resumable,
     }

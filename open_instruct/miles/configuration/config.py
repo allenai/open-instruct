@@ -30,7 +30,7 @@ class CoreConfig:
     reward_zero_truncated: bool = True
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
-    max_run_resumable: bool = False
+    max_run_final: bool = False
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
@@ -116,9 +116,7 @@ class CoreConfig:
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
-        validation.boolean(self.max_run_resumable, "core.max_run_resumable")
-        if self.max_run_resumable and self.max_run_seconds is None:
-            raise constraints.error("core.max_run_resumable requires core.max_run_seconds")
+        validation.boolean(self.max_run_final, "core.max_run_final")
         validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
@@ -386,6 +384,8 @@ class RunConfig:
             if key in self.miles:
                 raise constraints.error(f"miles.{key} is managed by the Core backend")
         cli_options.encode_options(self.miles)
+        if self.core.max_run_final and self.core.max_run_seconds is None:
+            raise constraints.error("core.max_run_final requires core.max_run_seconds")
         if (self.core.selection_table is None) != (self.core.selection_sha256 is None):
             raise constraints.error("core.selection_table and core.selection_sha256 must be set together")
         if (self.core.records_responses == "sample") != (self.core.records_response_sample_rate is not None):

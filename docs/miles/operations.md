@@ -307,20 +307,21 @@ being checked. Use `--help` on the CLI tools for their remaining options.
 
 ## Bounded wall-clock runs
 
-Set `core.max_run_seconds` to a positive number to finish at a completed collection
-after that many driver wall-clock seconds, including driver startup. This is a
-soft deadline: a running collection, checkpoint, export, and teardown can extend
-past it. Leave headroom in `launch.timeout`. With checkpoint saving enabled, the
-deadline forces a native checkpoint; `output.export_hf=true` also produces the
-final HF export. Background evaluation with `final=true` requests evaluation at
-the actual final update, including off-cadence stops. Submission remains
-best-effort: inspect receipts and explicitly resubmit a failed or skipped final
-evaluation. Debug exits retain their separate resumable, non-final semantics.
-
-Set `core.max_run_resumable = true` beside `core.max_run_seconds` to make the
-stop resumable instead of final, for runs longer than one job's time limit. The
-stop still forces a native checkpoint (checkpoint saving is required), but it
-skips the final HF export and final background evaluation, and `workflow.json`
-records `stopped` rather than `complete`. Resubmit the same specification with
+A `core.max_run_seconds` stop is resumable, for runs longer than one job's time
+limit. Set it to a positive number of driver wall-clock seconds, including driver
+startup; the run stops at the next completed collection after that, forces a
+native checkpoint, and records `stopped` in `workflow.json`, with no final HF
+export or final background evaluation. Resubmit the same specification with
 `launch.auto_resume = true` under the same `output.root` to continue; the final
-export and evaluation run when the run reaches `num_rollout`.
+export and evaluation run when the run reaches `num_rollout`. This is a soft
+deadline: a running collection, checkpoint and teardown can extend past it, so
+leave headroom in `launch.timeout`.
+
+Set `core.max_run_final = true` to make the stop final instead: it saves when
+checkpoint saving is enabled, `output.export_hf=true` produces the final HF
+export, background evaluation with `final=true` is requested at the stopped
+update (submission is best-effort: inspect receipts and resubmit a failed or
+skipped final evaluation), and `workflow.json` records `complete`. With
+`training.save_checkpoints = false` there is nothing to resume from, so the stop
+is final regardless, and `validate` warns. Debug exits keep their separate
+resumable, non-final semantics.
