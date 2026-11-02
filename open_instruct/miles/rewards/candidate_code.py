@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from open_instruct.miles.infrastructure import infra_timeouts
 from open_instruct.miles.rewards import candidate_verifiers, code_rewards
 
+# Leave room for process startup and transport below the 30-second HTTP timeout.
+_MAX_BATCH_EXECUTION_SECONDS = 16.0
+
 
 def validate_target(tests):
     if not isinstance(tests, list) or not 1 <= len(tests) <= 256:
@@ -28,8 +31,10 @@ class CompleteCodeVerifier:
     def __init__(self, verifier_config):
         if not isinstance(verifier_config.api_url, str) or not verifier_config.api_url.strip():
             raise ValueError("Complete-code verifier requires an API URL")
-        if not math.isfinite(verifier_config.max_execution_time) or verifier_config.max_execution_time <= 0:
-            raise ValueError("Complete-code execution time must be finite and positive")
+        if not math.isfinite(verifier_config.max_execution_time) or not (
+            0 < verifier_config.max_execution_time <= _MAX_BATCH_EXECUTION_SECONDS
+        ):
+            raise ValueError("Complete-code execution time must be finite and in (0, 16] seconds")
         self.config = verifier_config
 
     async def async_call(self, tokens, prediction, label, **kwargs):
@@ -40,8 +45,9 @@ class CompleteCodeVerifier:
             values = []
             retries = 0
             started = time.monotonic()
-            for start in range(0, len(label), 16):
-                tests = label[start : start + 16]
+            batch_size = min(16, max(1, int(_MAX_BATCH_EXECUTION_SECONDS / self.config.max_execution_time)))
+            for start in range(0, len(label), batch_size):
+                tests = label[start : start + batch_size]
                 payload = {"program": program, "tests": tests, "max_execution_time": self.config.max_execution_time}
                 for attempt in range(len(code_rewards.HTTP_500_RETRY_SLEEPS) + 1):
                     response = infra_timeouts.request(

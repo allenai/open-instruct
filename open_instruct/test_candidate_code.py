@@ -45,7 +45,7 @@ def test_transient_500_retries_identical_payload_and_keeps_full_tests(monkeypatc
     assert result.diagnostics["tests"] == 33
     assert session.payloads[0] == session.payloads[1]
     assert session.payloads[2] == session.payloads[3] == session.payloads[4]
-    assert [len(p["tests"]) for p in session.payloads] == [16, 16, 16, 16, 16, 1]
+    assert [len(p["tests"]) for p in session.payloads] == [8, 8, 8, 8, 8, 8, 8, 1]
     assert session.payloads[0]["program"] == "def f(): return 1"
 
 
@@ -80,14 +80,14 @@ def test_all_256_tests_are_executed_including_a_failure_in_the_last_batch(monkey
 
     def post(*args, **kwargs):
         response = original(*args, **kwargs)
-        if len(session.payloads) == 16:
-            response.json = lambda: {"results": [1] * 15 + [0]}
+        if len(session.payloads) == 32:
+            response.json = lambda: {"results": [1] * 7 + [0]}
         return response
 
     session.post = post
     result = score(monkeypatch, session, [f"assert f() == {i}" for i in range(256)])
     assert result.score == 0.0 and result.diagnostics["passed"] == 255
-    assert len(session.payloads) == 16
+    assert len(session.payloads) == 32
 
 
 def test_transport_error_propagates(monkeypatch):
@@ -102,3 +102,24 @@ def test_transport_error_propagates(monkeypatch):
 def test_invalid_targets_fail_before_request(tests):
     with pytest.raises(ValueError):
         candidate_code.validate_target(tests)
+
+
+@pytest.mark.parametrize("seconds,batch_size", [(0.5, 16), (1, 16), (2, 8), (4, 4), (16, 1)])
+def test_batch_execution_budget(monkeypatch, seconds, batch_size):
+    session = Session()
+    monkeypatch.setattr(code_rewards, "_get_session", lambda: session)
+    verifier = candidate_code.CompleteCodeVerifier(
+        candidate_code.Config(api_url="https://svc/test_program", max_execution_time=seconds)
+    )
+    result = asyncio.run(verifier.async_call([], "pass", ["assert True"] * 17))
+    assert result.score == 1.0
+    assert len(session.payloads[0]["tests"]) == batch_size
+    assert all(len(p["tests"]) * seconds <= 16 for p in session.payloads)
+
+
+@pytest.mark.parametrize("seconds", [0, -1, float("nan"), float("inf"), 17])
+def test_invalid_execution_budget(seconds):
+    with pytest.raises(ValueError, match="execution time"):
+        candidate_code.CompleteCodeVerifier(
+            candidate_code.Config(api_url="https://svc/test_program", max_execution_time=seconds)
+        )
