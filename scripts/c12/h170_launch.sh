@@ -66,8 +66,8 @@ $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
 $SUP 1.0"
 # H170: the arm's own cache (built by scripts/c12/h170_cache.sh) and its packed-instance count.
-CACHE=__CACHE__
-I_ARM=__I_ARM__
+CACHE=e2dadaee27-6068a350-rowaligned
+I_ARM=505623   # c12_pack.py on the cache (Beaker 01M6E2NPV7V19MDZSCTFG5H87S); S = 18,339
 EPOCH_STEPS=$((I_ARM / 16))
 # S = round(phi x floor(I / 16)), phi = 16,303 / 28,092 (H167's ctrl S over its batches per pass).
 S_ARM=$(python3 -c "print(round(16303 / 28092 * $EPOCH_STEPS))")
