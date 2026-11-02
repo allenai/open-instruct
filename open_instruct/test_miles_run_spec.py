@@ -460,10 +460,11 @@ def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
     default = spec(tmp_path).compile().core
     assert default.compiler_cache_max_storage_bytes == 8 * 1024**3
     assert default.compiler_cache_publish_interval_seconds == 600
-    run = spec(tmp_path, compiler_cache={"max_storage_bytes": 1024, "publish_interval_seconds": 30})
+    run = spec(tmp_path, compiler_cache={"max_storage_bytes": 1024, "publish_interval_seconds": 30, "tilelang": True})
     config = run.compile().core
     assert config.compiler_cache_max_storage_bytes == 1024
     assert config.compiler_cache_publish_interval_seconds == 30
+    assert config.compiler_cache_tilelang is True
     restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "other.toml").compile().core
     assert restored == config
     assert spec(tmp_path, compiler_cache={"max_storage_bytes": 0}).compile().core.compiler_cache_max_storage_bytes == 0
@@ -479,6 +480,7 @@ def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
         ("publish_interval_seconds", -1),
         ("publish_interval_seconds", True),
         ("publish_interval_seconds", float("nan")),
+        ("tilelang", "false"),
     ],
 )
 def test_invalid_cache_publication_controls_are_rejected(tmp_path, field, value):
