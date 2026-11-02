@@ -18,11 +18,13 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import advisories, inference_profiles, topology
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.execution.timing import stage
 from open_instruct.miles.infrastructure import artifacts
 from open_instruct.miles.rewards import judging
 
@@ -255,13 +257,15 @@ def parse_runtime(config):
 
 
 def train_config(config, *, export_hf=None, background_evaluation=None):
-    args = parse_runtime(config)
+    with stage(SimpleNamespace(save=config.miles.get("save")), "runtime_argument_parsing"):
+        args = parse_runtime(config)
     args.background_evaluation = background_evaluation
     args.core_evaluation_snapshot = (
         "open_instruct.miles.evaluation.evaluation.training_snapshot" if background_evaluation else None
     )
     os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
-    driver = importlib.import_module("open_instruct.miles.execution.driver")
+    with stage(args, "driver_module_import"):
+        driver = importlib.import_module("open_instruct.miles.execution.driver")
     return asyncio.run(driver.train(args, export_hf=export_hf))
 
 
@@ -310,23 +314,27 @@ def run_directory(spec):
 
 def execute(spec):
     with run_directory(spec) as (root, state):
-        hf = prepare_model(spec)
-        data = importlib.import_module("open_instruct.miles.datasets.run_data")
+        timing_args = SimpleNamespace(save=root)
+        with stage(timing_args, "model_preparation"):
+            hf = prepare_model(spec)
+        with stage(timing_args, "data_module_import"):
+            data = importlib.import_module("open_instruct.miles.datasets.run_data")
         planned = spec.compile({"hf_checkpoint": hf})
-        prepared = data.prepare_data(
-            spec.data,
-            Path(hf),
-            root / "prepared" / "data",
-            max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
-            seed=planned.miles.get("seed", 17),
-            registry_overrides={
-                name: {
-                    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
-                    "config": {"name": name},
-                }
-                for name in spec.judges["judging"]["bindings"]
-            },
-        )
+        with stage(timing_args, "data_preparation"):
+            prepared = data.prepare_data(
+                spec.data,
+                Path(hf),
+                root / "prepared" / "data",
+                max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
+                seed=planned.miles.get("seed", 17),
+                registry_overrides={
+                    name: {
+                        "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+                        "config": {"name": name},
+                    }
+                    for name in spec.judges["judging"]["bindings"]
+                },
+            )
         registry_module = importlib.import_module("open_instruct.miles.rewards.judge_registry")
         resolved = judging.registry(spec.judges)
         if spec.judges["judging"]["bindings"]:
