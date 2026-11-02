@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Overlap independent MILES judge, Ray, preparation and disaggregated trainer/inference startup with explicit readiness barriers and stage timings (PR pending).
+- Overlap independent MILES judge, Ray, preparation and disaggregated trainer/inference startup with explicit readiness barriers and stage timings (https://github.com/allenai/open-instruct/pull/2143).
 - Separate MILES Triton cache compatibility from Python provenance, explain cache misses and record compiler timings; add opt-in TileLang persistence with verified private restores and avoid redundant FLA convolution specialization (https://github.com/allenai/open-instruct/pull/2140).
 - Overlap one future-version MILES refresh batch with training while retaining checkpoint recovery and the existing queue budget (https://github.com/allenai/open-instruct/pull/2138).
 - Pin Olmo-SGLang to merged main commit `069dc0a`, retaining the FP32 KDA snapshot fix and aligning declared compatibility with the pinned SGLang runtime (https://github.com/allenai/open-instruct/pull/2132).
