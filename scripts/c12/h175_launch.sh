@@ -59,8 +59,8 @@ MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt2-256k-amt/step2
 HF_REF=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf/olmo35-small-mm-ckpt2-256k-amt-step22240-base-h149-c12seed
 # C12 as frozen (ledger experiments/c12/a7/freeze/freeze_receipt.json): paths and weights exactly as the cache build.
 P=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/data/parquets-a3
-# H175: plus P1's parquet (ledger experiments/h175/receipts/p1_receipt.json) at 1.0.
-SCIMCQ=/weka/olmo-3p5-post-checkpoints/chrisg/h175/data/out/h175-scimcq-aaa4ca80.parquet  # sha256 aaa4ca80d2ad91b1
+# H175: plus P1's parquet under Amendment 1 (ledger experiments/h175/receipts/p1_receipt_a1.json) at 1.0.
+SCIMCQ=/weka/olmo-3p5-post-checkpoints/chrisg/h175/data/out-a1/h175-scimcq-6a60033f.parquet  # Amendment 1; sha256 6a60033f4290f542
 MIXER="$P/dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 \
 $P/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
 $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
