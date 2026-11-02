@@ -1,7 +1,7 @@
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
 # Changelog
 
-- Avoid repeated backtracking in candidate quoted-format verification and capture failed verifier inputs (https://github.com/allenai/open-instruct/pull/2156).
+- Avoid repeated backtracking in candidate quoted-format verification and capture failed verifier inputs with original timeout messages. Minimum-line checks now return success once satisfied, avoiding errors from irrelevant trailing lines (https://github.com/allenai/open-instruct/pull/2156).
 
 - Add qualified candidate dataset catalogs and verifier controls (https://github.com/allenai/open-instruct/pull/2141).
 

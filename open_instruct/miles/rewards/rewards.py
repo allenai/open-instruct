@@ -303,7 +303,7 @@ def _registry(path):
 
 
 def _capture_verifier_failure(args, sample, spec, response, error):
-    """Keep the first failed verification per process/run, before batch capture.
+    """Capture the first registered-verifier call exception per process/run.
 
     Normal rollout dumps contain already-scored batches and cannot diagnose a
     verifier that raises. Preserve the full text/target here without converting
@@ -312,6 +312,7 @@ def _capture_verifier_failure(args, sample, spec, response, error):
     save = getattr(args, "save", None)
     if not save or save in _FAILURE_CAPTURED:
         return
+    # Bound capture attempts even if storage is failing during a burst of errors.
     _FAILURE_CAPTURED.add(save)
     try:
         root = Path(save) / "verifier_failures"

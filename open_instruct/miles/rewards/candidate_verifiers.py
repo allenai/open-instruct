@@ -18,6 +18,8 @@ import regex
 
 from open_instruct.miles.rewards import task_verifiers
 
+_QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
+
 
 @dataclass
 class Result:
@@ -189,8 +191,10 @@ def _format_score(final, value):
             )
         matches = 0
         for line in final.split("\n"):
+            # Equivalence is established only for this exact pattern. Variants
+            # retain regex semantics and the existing timeout guard.
             matches += any(
-                _quoted_pair_line(line) if p == r'".+":\s*".+"' else regex.search(p, line, timeout=0.1)
+                _quoted_pair_line(line) if p == _QUOTED_PAIR_PATTERN else regex.search(p, line, timeout=0.1)
                 for p in value["verify_regex"]
             )
             if matches >= value.get("verify_min_matches", 1):
@@ -200,7 +204,8 @@ def _format_score(final, value):
         # A verifier failure is unknown, not a valid zero reward. Preserve the
         # exception, but identify the contract in native rollout error records.
         raise TimeoutError(
-            f"Formatting verifier timed out: pattern_id={value.get('pattern_id')!r}, response_chars={len(final)}"
+            f"Formatting verifier timed out: pattern_id={value.get('pattern_id')!r}, "
+            f"response_chars={len(final)}; original_error={error}"
         ) from error
 
 
