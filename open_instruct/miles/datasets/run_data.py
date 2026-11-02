@@ -300,7 +300,7 @@ def _verify_resumed_if_training_data(result):
     if not names:
         return
     for path in result.get("train_sources", [result["prompt_data"]]):
-        with Path(path).open() as stream:
+        with Path(path).open(encoding="utf-8") as stream:
             for index, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
