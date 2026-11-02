@@ -84,6 +84,30 @@ def get_commit_hash(
     return commit_hash
 
 
+def get_local_file_sha256(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def get_local_directory_sha256(path: str) -> str:
+    # Hash every regular file under the directory, in sorted relative-path
+    # order, as "<relative path>\n<per-file sha256>\n" lines. Relative paths
+    # keep the key stable when the whole directory is moved unchanged, while
+    # renaming, adding, or removing a file changes it even when the bytes are
+    # identical, because which rows a directory load returns depends on the
+    # file names as well as their contents.
+    dir_hash = hashlib.sha256()
+    for root, dir_names, file_names in os.walk(path):
+        dir_names.sort()
+        for file_name in sorted(file_names):
+            file_path = os.path.join(root, file_name)
+            if not os.path.isfile(file_path):
+                continue
+            relative_path = os.path.relpath(file_path, path)
+            dir_hash.update(f"{relative_path}\n{get_local_file_sha256(file_path)}\n".encode())
+    return dir_hash.hexdigest()
+
+
 def get_file_hash(
     model_name_or_path: str, revision: str | None, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
@@ -2282,18 +2306,29 @@ class DatasetConfig:
                 "parquet", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()
             )
         else:
+            # A local directory of shards has no commit hash either, so key
+            # the cache on its contents: otherwise rewriting a shard in place
+            # silently reuses the stale cache. Hash before loading, so a
+            # concurrent rewrite cannot store the old rows under the new
+            # content's key. A local directory has nothing to download, so
+            # the post-load ordering the HF lookup below needs does not
+            # apply here.
+            is_local_directory = os.path.isdir(self.dataset_name)
+            if is_local_directory:
+                self.dataset_commit_hash = get_local_directory_sha256(self.dataset_name)
             dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,
                 revision=self.dataset_revision,
                 num_proc=max_num_processes(),
             )
-            # Commit hash only works for hf datasets. Resolve it only after
-            # load_dataset: the lookup is cache-only, so on a fresh machine it
-            # returns None until the download has populated the HF hub cache.
-            self.dataset_commit_hash = get_commit_hash(
-                self.dataset_name, self.dataset_revision, "README.md", "dataset"
-            )
+            if not is_local_directory:
+                # Commit hash only works for hf datasets. Resolve it only after
+                # load_dataset: the lookup is cache-only, so on a fresh machine it
+                # returns None until the download has populated the HF hub cache.
+                self.dataset_commit_hash = get_commit_hash(
+                    self.dataset_name, self.dataset_revision, "README.md", "dataset"
+                )
         assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
         self.dataset = dataset
         if self.dataset_range is None:
