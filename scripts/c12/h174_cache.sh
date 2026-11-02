@@ -27,6 +27,11 @@ sha256sum /tmp/c12_pack.py /tmp/tokenizer_check.py /tmp/h174_cache_guard.py $SCI
 mkdir -p $H/cache $H/hf-tok $H/pack-work
 PYTHONPATH=. python /tmp/tokenizer_check.py config
 python /tmp/h174_cache_guard.py $H/cache
+# Memory only (2026-11-02): open-instruct loads the saved transformed dataset with keep_in_memory=True, which
+# outgrew 400 GiB at ~30B tokens and 1 TiB nodes cannot hold more. Memory-map it instead; no computed value changes.
+[ \$(grep -c 'load_from_disk(cache_path, keep_in_memory=True)' open_instruct/dataset_transformation.py) = 2 ] || { echo H174-PATCH-MISMATCH; exit 7; }
+sed -i 's/load_from_disk(cache_path, keep_in_memory=True)/load_from_disk(cache_path, keep_in_memory=False)/' open_instruct/dataset_transformation.py
+echo H174-PATCH keep_in_memory=False \$(grep -c 'load_from_disk(cache_path, keep_in_memory=False)' open_instruct/dataset_transformation.py)
 env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$H/hf-tok PYTHONUNBUFFERED=1 python open_instruct/olmo_core_finetune.py \
   --model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
   --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
@@ -48,7 +53,7 @@ task = {"name": "h174-cache", "image": {"beaker": "$IMAGE"}, "command": ["/bin/b
                     {"name": "HF_HOME", "value": "$H/hf-home"}],
         "datasets": [{"mountPath": f"/weka/{b}", "source": {"weka": b}} for b in
                      ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
-        "result": {"path": "/output"}, "resources": {"cpuCount": 96, "memory": "1000GiB"},
+        "result": {"path": "/output"}, "resources": {"cpuCount": 64, "memory": "500GiB"},
         "context": {"priority": "high", "minRuntime": "8h"},
         "constraints": {"cluster": ["ai2/neptune", "ai2/saturn"]},
         "timeout": "16h"}
