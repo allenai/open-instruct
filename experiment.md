@@ -1531,3 +1531,15 @@ the500-update main job. State/identifiers are in
 log `/tmp/olmicro-native-controller-20261102.log`. Unknown submission outcomes
 fail closed rather than being retried automatically. Record actual GPU experiment
 IDs here after submission; prepared specs are not runtime qualification.
+
+2026-11-02 scheduling revision: user selected `ai2/open-instruct-dev` instead of
+scaling-ladders, then explicitly chose preemptible jobs with minimum runtime0.
+The current Rhea allocation lookup for open-instruct-dev is empty; no two-hour
+protection is claimed. Both smoke/main retain autoResume=true,4A6000s split2+2,
+and their existing2h/24h attempt timeouts and0/3 failure retry limits. Main config
+changes pushed on companion branch `codex/hybrid-mainline` (68bd75cb3 workspace,
+73ae3f03e minimum runtime). Rendered smoke/main payloads verified minRuntime0s,
+autoResume and4GPUs;95launcher tests passed. The controller and monitoring target
+now use open-instruct-dev and no longer wait for scaling-ladders permission or
+an allocation. Build01M6DBW1JGQK8YKYFKDW1A1F0T remains the only submitted job;
+native smoke/main will be gated on its published image and lifecycle validation.

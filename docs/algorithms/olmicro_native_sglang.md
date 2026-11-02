@@ -1,8 +1,8 @@
 # Olmicro: native SGLang migration and the 450m GSM8K run
 
 Updated November 2, 2026. Status: **native integration implemented; image build
-submitted; native end-to-end RL not yet run**. Training submission is blocked by
-read-only access to `ai2/scaling-ladders` for `michaeln`. See the
+submitted; native end-to-end RL not yet run**. The user selected
+`ai2/open-instruct-dev` and fully preemptible scheduling (minimum runtime zero). See the
 [launch preparation](../../experiment.md#native-sglang-450m-gsm8k-launch-preparation-2026-11-02)
 for build identifiers and the one-time launch controller.
 
@@ -158,7 +158,7 @@ prefetch must be reported separately from the 8,000 consumed completions.
 
 Use **one Rhea node with four A6000 GPUs: two OLMo-core learners and two
 independent TP1 native SGLang engines**, matching the completed Core/vLLM
-baseline. The workspace is **`ai2/scaling-ladders`**, selected by the user, under
+baseline. The workspace is **`ai2/open-instruct-dev`**, selected by the user, under
 budget **`ai2/oe-other`**. Keep the same requested host memory, mounts and GPU
 split. This removes the GPU-model confound from the planned training comparison.
 
@@ -169,16 +169,19 @@ backend supported on A6000, retaining the numerical reports and gates. Do not
 silently fall back to the HF bridge or move the main run to different hardware.
 N2 remains gated on the A6000 smoke.
 
-The user requested a **two-hour minimum runtime**. Proposed main scheduling:
-normal/preemptible priority, minimum runtime 2h, 24h attempt timeout, auto-resume,
-128 GiB requested host memory and 32 GiB shared memory. These are distinct
-durations: a minimum runtime is not a two-hour job timeout. The smoke needs a
-wall-time cap at least as long as its minimum runtime.
+The user initially requested a two-hour minimum runtime, then explicitly chose
+**fully preemptible jobs with minimum runtime 0** on November 2 to use
+`ai2/open-instruct-dev`, which has no Rhea allocation. Current scheduling is
+normal priority, minimum runtime 0, auto-resume enabled; smoke timeout 2h and
+zero failure retries, main timeout 24h and three failure retries. Requested host
+memory remains 128 GiB with 32 GiB shared memory. Both runs may be preempted
+immediately; verify checkpoint restoration rather than assuming auto-resume
+preserves unsaved progress.
 
-The earlier allocation check found a Rhea allocation for `ai2/scaling-ladders`;
-verify current capacity and minimum-runtime eligibility before submission. The
-workspace choice is now resolved. This document records the run plan; no new
-job has been submitted.
+The scaling-ladders permission blocker no longer applies to the selected
+workspace. The native image build remains queued on a CPU node; the controller
+will submit the native smoke when the image is ready, then the main only after
+the smoke/resume gate passes.
 
 ### Required integration work before N1
 

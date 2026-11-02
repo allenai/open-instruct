@@ -1088,3 +1088,10 @@ read-only permission in ai2/scaling-ladders. The one-time controller will gate
 main submission on image publication, write permission and a native3-update
 smoke that restores checkpoint2in a separate training process. See
 [launch preparation](experiment.md#native-sglang-450m-gsm8k-launch-preparation-2026-11-02).
+
+Later November2: user selected open-instruct-dev and explicitly authorized
+minRuntime0/preemptible scheduling instead of waiting for an allocation. The
+workspace-permission blocker is resolved by this selection; the controller now
+waits only for the image build before submitting native qualification. No GPU
+experiment is claimed submitted yet. Auto-resume/checkpoint validation remains
+required because the selected scheduling provides no protected runtime.
