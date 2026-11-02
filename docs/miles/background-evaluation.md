@@ -170,7 +170,7 @@ overrides, not arbitrary upstream presets. Local model paths, existing server
 endpoints and tasks with all evaluation milestones disabled are exempt.
 
 The image and CLI/config checks do not establish full-panel correctness, GPU
-memory fit or completion within the starter three-hour timeout. Run small samples
+memory fit or completion within the configured timeout. Run small samples
 of every task, inspect predictions and judge/code failures, then measure a full
 panel before setting production resource bounds. For qualification, verify all
 25 entries completed at both expected checkpoints and were published; training
@@ -335,10 +335,13 @@ background evaluations select `provider.kind=sglang` and
 explicit HTTP exception described above. The runner checks the installed
 olmo-eval revision against the receipt before evaluating.
 
-Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
-which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
-The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
-image `01M632ZP67Y4WMV060J74FSC3R` with isolated vLLM judges. Both recipes build evaluator dependencies
+The node example pins olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`
+and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node pins
+`ede61eb914c0cae312c9c8112389afbe524fb096` and sandbox-enabled image
+`01M6C79N2DVBVQ79MDBV4S2BZ1` with isolated vLLM judges. The latter backports
+only the null-override parser fix from [olmo-eval PR 517](https://github.com/allenai/olmo-eval/pull/517)
+onto the original revision, with adapted regression tests. Both include the
+[native SGLang provider](https://github.com/allenai/olmo-eval/pull/506). Both recipes build evaluator dependencies
 at image construction; benchmark sandboxes may have their own upstream setup steps.
 The revision change can also change task defaults; do not compare scores across
 revisions as though the benchmark protocol were unchanged.
@@ -433,3 +436,29 @@ Include this module in the custom worker's content manifest and import its
 `score_one(row, item)` for development tasks. Check the actual panel's label
 schema, not just synthetic scalar-label canaries. Version corrected bundles;
 never modify a running experiment's immutable dataset in place.
+
+## Reasoning-panel response budgets
+
+The three-node panel uses `gpqa_diamond:cot` and `gpqa_main:cot`. The plain
+`gpqa_diamond` task is a short-answer protocol with a 1,024-token default; it can
+truncate almost every response from a reasoning policy. These are different
+protocols: do not compare their scores as interchangeable.
+
+OMEGA sets `generation = { max_tokens = "null" }`: the CLI parses this as no
+fixed response cap, so SGLang generates within the remaining model context.
+This follows the existing GPQA CoT and IF protocols and retains the qualified
+34,816-token serving profile. A fixed 32,768-token response request would instead
+be rejected whenever the prompt exceeds 2,048 tokens. Requests and predictions
+retain prompt/completion lengths and finish reasons. The full panel allows
+12 hours per job, with completed-task reuse after preemption.
+
+SciCode's HTTP server translates Hugging Face's `top_k=0` (disabled) into SGLang's
+`top_k=-1` in a local symlink view of the checkpoint. The original weights and
+generation configuration remain unchanged; temperature, top-p and all other
+settings are preserved. A normalization receipt records the original config hash.
+The view lives outside the results directory to avoid copying model weights into
+Beaker artifacts.
+
+A failed task is recorded in `task-failures.json`; subsequent independent tasks
+still execute. The collection remains failed until every task validates. Retrying
+reuses successful task attempts and reruns the failures.
