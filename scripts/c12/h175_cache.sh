@@ -3,7 +3,7 @@
 # packed instances (I) the way olmo_core_finetune builds them (ledger experiments/c12/c12_pack.py), and run the
 # tokenizer asserts on the saved tokenizer. The cache-hash arguments are h175_launch.sh's, verbatim (MIXER, tokenizer
 # and revision, chat template, promoted <think>/</think>, row-aligned parts, max_seq_length 65536, --seed 33333);
-# training checks the name through EXPECTED_NUMPY_CACHE. The cache is written under $H/cache (BEAKER_JOB_ID unset so
+# training checks the name through EXPECTED_NUMPY_CACHE. The cache is written under $H/cache-a1 (BEAKER_JOB_ID unset so
 # --local_cache_dir is honoured); the training jobs reach it through a symlink in the deletable cache dir (H167's way).
 #
 #   scripts/c12/h175_cache.sh <ledger checkout>     (DRY_RUN=1 prints the spec)
@@ -22,19 +22,19 @@ echo H175-CACHE-START \$(date -u +%FT%TZ) nproc \$(nproc)
 printf %s '$PACK' | base64 -d | gunzip > /tmp/c12_pack.py
 printf %s '$TCHK' | base64 -d | gunzip > /tmp/tokenizer_check.py
 sha256sum /tmp/c12_pack.py /tmp/tokenizer_check.py $SCIMCQ
-mkdir -p $H/cache $H/hf-tok $H/pack-work
+mkdir -p $H/cache-a1 $H/hf-tok $H/pack-work
 PYTHONPATH=. python /tmp/tokenizer_check.py config
 env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$H/hf-tok PYTHONUNBUFFERED=1 python open_instruct/olmo_core_finetune.py \
   --model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
   --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
   --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
   --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
-  --mixer_list $MIXER --local_cache_dir $H/cache --seed 33333 --cache_dataset_only
-NAME=\$(ls $H/cache/numpy_sft/); [ \$(echo \"\$NAME\" | wc -l) -eq 1 ] || { echo \"expected one cache dir: \$NAME\"; exit 3; }
+  --mixer_list $MIXER --local_cache_dir $H/cache-a1 --seed 33333 --cache_dataset_only
+NAME=\$(ls $H/cache-a1/numpy_sft/); [ \$(echo \"\$NAME\" | wc -l) -eq 1 ] || { echo \"expected one cache dir: \$NAME\"; exit 3; }
 echo H175-CACHE \$NAME
-PYTHONPATH=. python /tmp/tokenizer_check.py dir $H/cache/numpy_sft/\$NAME/tokenizer
-cp $H/cache/numpy_sft/\$NAME/dataset_statistics.json /output/ 2>/dev/null || find $H/cache/numpy_sft/\$NAME -maxdepth 2 -name dataset_statistics.json -exec cp {} /output/ \;
-PYTHONPATH=. python /tmp/c12_pack.py $H/pack-work $H/cache/numpy_sft/\$NAME | tee /output/pack.log
+PYTHONPATH=. python /tmp/tokenizer_check.py dir $H/cache-a1/numpy_sft/\$NAME/tokenizer
+cp $H/cache-a1/numpy_sft/\$NAME/dataset_statistics.json /output/ 2>/dev/null || find $H/cache-a1/numpy_sft/\$NAME -maxdepth 2 -name dataset_statistics.json -exec cp {} /output/ \;
+PYTHONPATH=. python /tmp/c12_pack.py $H/pack-work $H/cache-a1/numpy_sft/\$NAME | tee /output/pack.log
 echo H175-CACHE-DONE \$(date -u +%FT%TZ)"
 SPEC=$(mktemp -t h175cache.XXXXXX)
 CMD="$CMD" python3 - "$SPEC" <<PY
