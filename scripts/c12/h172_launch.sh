@@ -3,7 +3,8 @@
 # h161-gpu-hero@92f6a55a2, arm ctrl) with one change, the DATA: C12's four frozen parquets at their frozen weights plus
 # H172 P1's IF-Chat v2 parquet at 1.0. Changed from the parent, and nothing else: MIXER, CACHE and the steps (the phi
 # rule on this cache's packed instances), OUT_ROOT, run names, the chrisg_ secrets and the spec description. Workspace
-# ai2/olmo-instruct as before.
+# ai2/olmo-instruct as before. --with_tracking is dropped: W&B off by the owner's decision 2026-11-02 (chrisg_WANDB_API_KEY
+# gets a 403 on ai2-llm/open_instruct_internal); the trainer logs every step to stdout (--logging_steps 1).
 #
 #   scripts/c12/h172_launch.sh arm <34521|34522> <smoke|resume|train>
 #
@@ -70,7 +71,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
---no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
+--no_save_async --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
