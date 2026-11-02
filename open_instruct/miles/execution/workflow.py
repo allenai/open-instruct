@@ -44,8 +44,19 @@ def fingerprint(document):
     return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
 
 
+COMPILER_CACHE_CORE_KEYS = (
+    "compiler_cache",
+    "compiler_cache_root",
+    "compiler_cache_restore",
+    "compiler_cache_diagnostics",
+    "compiler_cache_tilelang",
+    "compiler_cache_max_storage_bytes",
+    "compiler_cache_publish_interval_seconds",
+)
+
+
 def recovery_configuration_matches(root, previous, document):
-    """Allow recovery policy changes and normalize historical launch defaults.
+    """Allow recovery policy and compiler-cache changes and normalize historical launch defaults.
 
     Authenticate the recorded full specification before normalizing it, including
     older runs that hashed auto_resume or predate the explicit host-memory field.
@@ -67,7 +78,19 @@ def recovery_configuration_matches(root, previous, document):
     for key in ("auto_resume", "max_retries"):
         if key in document["launch"]:
             recorded.setdefault("launch", {})[key] = document["launch"][key]
+    # Compiler-cache persistence is an optimization (a miss compiles locally), so a
+    # resumed run may move or disable its cache, e.g. when the shared root is full.
+    adopt_keys(recorded, document, ("compiler_cache",))
+    if isinstance(recorded.get("core"), dict) and isinstance(document.get("core"), dict):
+        adopt_keys(recorded["core"], document["core"], COMPILER_CACHE_CORE_KEYS)
     return recorded == document
+
+
+def adopt_keys(recorded, document, keys):
+    for key in keys:
+        recorded.pop(key, None)
+        if key in document:
+            recorded[key] = document[key]
 
 
 def record_attempt(root, limit):

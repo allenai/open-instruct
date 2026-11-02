@@ -34,6 +34,12 @@ launch. Expired artifacts are simply cold misses, so no cleanup job is needed.
 Without the default WEKA mount, persistence is skipped and logged. Limits and
 intervals are operational and do not change the cache key.
 
+Compiler-cache settings (the `[compiler_cache]` table and the `core.compiler_cache*`
+options) are not part of a run's resume identity: a resumed run under the same
+`output.root` may change the shared root, disable restore or persistence, or
+enable TileLang without "Run configuration changed". Every other field must still
+match the recorded specification.
+
 ## What is cached
 
 Each trainer rank and TP1 serving engine restores into a new `/tmp/core-triton-*`
