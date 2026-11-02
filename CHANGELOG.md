@@ -4,7 +4,9 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add opt-in `core.max_run_resumable` for MILES wall-clock stops: the stop saves a checkpoint and leaves the run resumable (status `stopped`, no final HF export or final evaluation) instead of completing it, so long runs can continue across jobs under the same `output.root`; the default final-stop behaviour is unchanged (https://github.com/allenai/open-instruct/pull/2150).
+- MILES wall-clock stops (`core.max_run_seconds`) are now resumable by default: the stop saves a checkpoint and leaves the run `stopped`, with no final HF export or final evaluation, so the same specification resubmitted under the same `output.root` continues; set `core.max_run_final = true` for the previous export-and-complete behaviour (https://github.com/allenai/open-instruct/pull/2150).
+- Exclude MILES compiler-cache settings from the recovery check, so a resumed run can move or disable its compiler cache (for example when the shared root is full) without choosing a new `output.root`; every other recorded field must still match (https://github.com/allenai/open-instruct/pull/2149).
+- Overlap independent MILES judge, Ray, preparation and disaggregated trainer/inference startup with explicit readiness barriers and stage timings (https://github.com/allenai/open-instruct/pull/2143).
 - Separate MILES Triton cache compatibility from Python provenance, explain cache misses and record compiler timings; add opt-in TileLang persistence with verified private restores and avoid redundant FLA convolution specialization (https://github.com/allenai/open-instruct/pull/2140).
 - Overlap one future-version MILES refresh batch with training while retaining checkpoint recovery and the existing queue budget (https://github.com/allenai/open-instruct/pull/2138).
 - Pin Olmo-SGLang to merged main commit `069dc0a`, retaining the FP32 KDA snapshot fix and aligning declared compatibility with the pinned SGLang runtime (https://github.com/allenai/open-instruct/pull/2132).

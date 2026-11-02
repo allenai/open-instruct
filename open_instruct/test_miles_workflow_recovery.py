@@ -88,3 +88,44 @@ def test_recovery_does_not_restart_completed_runs(tmp_path):
     spec = SimpleNamespace(output=document["output"], launch=document["launch"], to_dict=lambda: document)
     with pytest.raises(InputError, match="already completed"), workflow.run_directory(spec):
         pytest.fail("Completed run was entered")
+
+
+def saved_cached_run(tmp_path):
+    document, previous = saved_run(tmp_path)
+    document["compiler_cache"] = {"enabled": True, "shared_root": "/shared/cache"}
+    document["core"] = {"compiler_cache_root": "/shared/cache", "seed": 17}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    return document, previous
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["compiler_cache"].update(shared_root="/local/cache"),
+        lambda d: d["compiler_cache"].update(enabled=False, tilelang=True),
+        lambda d: d["core"].pop("compiler_cache_root"),
+        lambda d: d["core"].update(compiler_cache_restore=False),
+        lambda d: d.pop("compiler_cache"),
+    ],
+)
+def test_recovery_ignores_compiler_cache_settings(tmp_path, change):
+    document, previous = saved_cached_run(tmp_path)
+    document["launch"]["auto_resume"] = True
+    change(document)
+    assert workflow.recovery_configuration_matches(tmp_path, previous, document)
+
+
+def test_compiler_cache_change_cannot_hide_recipe_change(tmp_path):
+    document, previous = saved_cached_run(tmp_path)
+    document["compiler_cache"]["shared_root"] = "/local/cache"
+    document["core"]["seed"] = 18
+    assert not workflow.recovery_configuration_matches(tmp_path, previous, document)
+
+
+def test_compiler_cache_change_cannot_authenticate_a_modified_saved_spec(tmp_path):
+    document, previous = saved_cached_run(tmp_path)
+    changed = copy.deepcopy(document)
+    changed["compiler_cache"]["shared_root"] = "/local/cache"
+    workflow.write_json(tmp_path / "run-spec.json", changed)
+    assert not workflow.recovery_configuration_matches(tmp_path, previous, changed)
