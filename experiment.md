@@ -1574,5 +1574,23 @@ commit82239c58c,95launcher tests passed. Image publication still targets
 open-instruct-dev, which does not constrain the GPU experiment workspace.
 The restarted one-time controller now waits for the native image alias, not the
 canceled CPU build experiment; native smoke/main remain gated as before.
-Shared guides now document regular CPU-session creation, Ctrl-b d detachment,
+Shared guides now document regular CPU-session creation, configured-prefix detachment,
 and verification that both session/build survive disconnects.
+
+Interactive attachment test: real `beakera` successfully attached to the regular
+session. Live tmux reports `prefix C-a` and `bind-key -T prefix d detach-client`;
+the correct user key sequence is Ctrl-a then d, superseding earlier Ctrl-b advice.
+Detaching the client ended the attachment with exit0and `[detached (from session
+beaker)]`; the Beaker session and both bash/native-image tmux windows remained
+running. Shared instructions and migration document were corrected.
+
+Read-only input verification from Hammond: train7473examples, SHA256
+e9cada8580c8bb5c2ca47c99b80846aba94ddbe5ecb6bf32cc92da040344a190;
+Platinum eval1209examples, SHA256
+66d1ea10ec07fdecb95e3457758074da5fdb770d8e210b2b978e606fce69a7f0;
+verifier configuration SHA256
+c05365a248c523f144e1338e0de3c66c71ae335baae45271bd244839248f39f3.
+450m checkpoint config SHA256
+a95be8ab405291b0f3b7a643848eb72dbf637abfbc9a84b316cb5b986d301e22
+matches the standalone native qualification. Full provenance saved as
+data-provenance.json beside the Weka build log.

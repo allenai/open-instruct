@@ -180,7 +180,7 @@ verified; the original protected-runtime plan is restored.
 Build images in the user's regular persistent Hammond CPU session. Session
 `01M6DDCN3587ZFS04WXTM70HP6` currently hosts detached tmux window `native-image`.
 Its Weka build directory contains build.log and exit-status receipts. Creating
-with `beakernew` (which uses `--detach`) and disconnecting via Ctrl-b then d leaves the session
+with `beakernew` (which uses `--detach`) and disconnecting via Ctrl-a then d (the configured prefix) leaves the session
 running; these session identifiers must be rechecked before future use. Do not
 create a separate CPU build job when this regular environment can be reused.
 The native image can live in open-instruct-dev while GPU experiments use
