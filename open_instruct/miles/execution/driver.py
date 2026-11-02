@@ -26,7 +26,7 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
-from open_instruct.miles.execution import serving
+from open_instruct.miles.execution import serving, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -47,6 +47,7 @@ async def train(args, *, export_hf=None):
     manager = None
     inference = None
     learner = None
+    rollouts_per_epoch = None
     failure = None
     completed = []
     rolling = None
@@ -62,6 +63,8 @@ async def train(args, *, export_hf=None):
         # Start local Ray before W&B creates WANDB_SERVICE. Otherwise raylet
         # inherits the driver's service connection, and offline worker writers
         # collide with the primary run. Preserve an already connected cluster.
+        with stage(args, "ray_readiness_wait"):
+            await startup.wait_ready("ray")
         if not ray.is_initialized():
             ray.init(address=os.environ.get("RAY_ADDRESS") or "local")
         # Tracking assigns the run ID before Miles serializes args into worker
@@ -71,10 +74,32 @@ async def train(args, *, export_hf=None):
         with stage(args, "placement"):
             worker_manager = wiring.launch_worker_manager(args, transform_specs=partial(serving.configure_specs, args))
         object_store.init_instance(args, contribute_segment=False)
-        with stage(args, "serving_startup"):
-            inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
-        with stage(args, "trainer_startup"):
-            learner, _ = await placement_group.create_training_models(args, manager)
+        # Colocated/offloaded models share memory; epoch-derived schedules need the
+        # rollout dataset length before trainer initialization. Keep those sequential.
+        parallel = not getattr(args, "colocate", True) and not args.offload_rollout and args.num_rollout is not None
+        logger.info("Parallel trainer/inference startup enabled: %s", parallel)
+        models = None
+
+        async def start_serving():
+            nonlocal inference, manager, rollouts_per_epoch
+            with stage(args, "serving_startup"):
+                inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
+
+        async def start_trainer():
+            nonlocal models, learner
+            with stage(args, "trainer_startup"):
+                models = await placement_group.initialize_training_models(args)
+                # Keep ownership immediately, including when the sibling fails.
+                learner = models.actor.handle
+
+        if parallel:
+            await startup.join(start_serving(), start_trainer())
+            with stage(args, "trainer_rollout_connection"):
+                await placement_group.connect_training_models(args, models, manager)
+        else:
+            await start_serving()
+            with stage(args, "trainer_startup"):
+                learner, _ = await placement_group.create_training_models(args, manager)
 
         async def publish(rollout_id=None):
             # Refresh safety belongs to the engine pause/update/resume boundary.
@@ -122,6 +147,10 @@ async def train(args, *, export_hf=None):
 
         with stage(args, "initial_publication"):
             await publish()
+        # No generation/evaluation may use a judge until its canaries pass. GPU
+        # initialization and initial publication can finish while qualification runs.
+        with stage(args, "judge_readiness_wait"):
+            await startup.wait_ready("judges")
         if args.olmo_core.publication_mode == "engine_drain":
             rolling = RollingPublication(args, learner, manager, inference)
             with stage(args, "engine_drain_startup"):
