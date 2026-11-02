@@ -148,6 +148,118 @@ class TestConfigHash(unittest.TestCase):
         self.assertEqual(calls, ["load_dataset", "get_commit_hash"])
         self.assertEqual(dc.dataset_commit_hash, "abc123")
 
+    @parameterized.expand([("jsonl",), ("parquet",)])
+    def test_config_hash_changes_when_local_directory_rewritten(self, extension):
+        # Local shard directories have no commit hash, so the cache key must
+        # cover their contents: rewriting a shard in place must not reuse
+        # the stale cache.
+        tc = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shard_dir = os.path.join(temp_dir, "shards")
+            os.makedirs(shard_dir)
+            path = os.path.join(shard_dir, f"shard-00000.{extension}")
+
+            def write_and_hash(content):
+                dataset = datasets.Dataset.from_dict({"messages": [[{"role": "user", "content": content}]]})
+                if extension == "jsonl":
+                    dataset.to_json(path)
+                else:
+                    dataset.to_parquet(path)
+                dc = open_instruct.dataset_transformation.DatasetConfig(
+                    dataset_name=shard_dir, dataset_split="train", dataset_revision="main"
+                )
+                return open_instruct.dataset_transformation.compute_config_hash([dc], tc)
+
+            original_hash = write_and_hash("original")
+            self.assertEqual(write_and_hash("original"), original_hash)
+            self.assertNotEqual(write_and_hash("rewritten"), original_hash)
+
+    def test_config_hash_changes_when_shard_added_removed_or_renamed(self):
+        tc = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            shard_dir = os.path.join(temp_dir, "shards")
+            os.makedirs(shard_dir)
+
+            def write_shard(name, content):
+                dataset = datasets.Dataset.from_dict({"messages": [[{"role": "user", "content": content}]]})
+                dataset.to_parquet(os.path.join(shard_dir, name))
+
+            def config_hash():
+                dc = open_instruct.dataset_transformation.DatasetConfig(
+                    dataset_name=shard_dir, dataset_split="train", dataset_revision="main"
+                )
+                return open_instruct.dataset_transformation.compute_config_hash([dc], tc)
+
+            write_shard("shard-00000.parquet", "original")
+            original_hash = config_hash()
+
+            write_shard("shard-00001.parquet", "extra")
+            self.assertNotEqual(config_hash(), original_hash)
+
+            os.remove(os.path.join(shard_dir, "shard-00001.parquet"))
+            self.assertEqual(config_hash(), original_hash)
+
+            # Same bytes under a different name are a different directory:
+            # which rows a directory load returns depends on the file names
+            # and their order, not only on the contents.
+            os.rename(os.path.join(shard_dir, "shard-00000.parquet"), os.path.join(shard_dir, "shard-00001.parquet"))
+            self.assertNotEqual(config_hash(), original_hash)
+
+    def test_local_directory_hash_uses_relative_paths_and_covers_nested_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+
+            def build_tree(root, nested_content):
+                os.makedirs(os.path.join(root, "train"), exist_ok=True)
+                with open(os.path.join(root, "train", "shard-00000.jsonl"), "w") as f:
+                    f.write(nested_content)
+                with open(os.path.join(root, "shard-00001.jsonl"), "w") as f:
+                    f.write("top level")
+
+            first = os.path.join(temp_dir, "first")
+            second = os.path.join(temp_dir, "second")
+            build_tree(first, "original")
+            build_tree(second, "original")
+            # The same tree at a different absolute path hashes the same:
+            # moving a dataset directory must not invalidate its cache.
+            self.assertEqual(
+                open_instruct.dataset_transformation.get_local_directory_sha256(first),
+                open_instruct.dataset_transformation.get_local_directory_sha256(second),
+            )
+            build_tree(second, "rewritten")
+            self.assertNotEqual(
+                open_instruct.dataset_transformation.get_local_directory_sha256(first),
+                open_instruct.dataset_transformation.get_local_directory_sha256(second),
+            )
+
+    def test_single_local_file_does_not_take_the_directory_path(self):
+        # A single local file keeps its own branch: it loads the rows that
+        # were written, repeated configs hash identically, and it is not
+        # keyed by the directory hash of its parent.
+        tc = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "data.jsonl")
+            dataset = datasets.Dataset.from_dict({"messages": [[{"role": "user", "content": "original"}]]})
+            dataset.to_json(path)
+
+            dc = open_instruct.dataset_transformation.DatasetConfig(
+                dataset_name=path, dataset_split="train", dataset_revision="main"
+            )
+            self.assertEqual(dc.dataset[0]["messages"], [{"role": "user", "content": "original"}])
+            self.assertNotEqual(
+                dc.dataset_commit_hash, open_instruct.dataset_transformation.get_local_directory_sha256(temp_dir)
+            )
+            first_hash = open_instruct.dataset_transformation.compute_config_hash([dc], tc)
+            dc_again = open_instruct.dataset_transformation.DatasetConfig(
+                dataset_name=path, dataset_split="train", dataset_revision="main"
+            )
+            self.assertEqual(open_instruct.dataset_transformation.compute_config_hash([dc_again], tc), first_hash)
+
 
 class TestCachedDataset(unittest.TestCase):
     def setUp(self):
