@@ -7,6 +7,9 @@
 #
 #   scripts/c12/h175_launch.sh scimcq <34521|34522> <smoke|resume|train>
 #
+# W&B off (no --with_tracking) by the owner's decision, 2026-11-02: chrisg_WANDB_API_KEY gets a 403 on
+# ai2-llm/open_instruct_internal. Loss is read from the trainer's stdout in the Beaker logs (logging_steps 1).
+#
 # (H161's original header follows.)
 #
 #   scripts/c12/h161_gpu_launch.sh <hero|ctrl> <34521|34522> <smoke|resume|train>
@@ -101,7 +104,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
---no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
+--no_save_async --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
