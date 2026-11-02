@@ -12,6 +12,10 @@ def validate_schema(schema):
     while pending:
         node = pending.pop()
         if isinstance(node, dict):
+            if {"pattern", "patternProperties"} & node.keys():
+                raise ValueError(
+                    "Regex schema keywords pattern/patternProperties are not supported without bounded matching"
+                )
             # Conservatively reject reference-like keys even in instance literals
             # or property maps. Preparation qualifies this restricted schema subset;
             # runtime never fetches a URL.

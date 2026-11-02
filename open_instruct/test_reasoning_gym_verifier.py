@@ -1,6 +1,8 @@
 """Regression controls using real entries and scorers from the pinned optional library."""
 
 import asyncio
+import copy
+import json
 from importlib import metadata
 
 import pytest
@@ -55,3 +57,22 @@ def test_custom_scorers_preserve_their_semantics(task):
     for answer in [entry["answer"], entry["answer"] + " wrong", "unrelated", ""]:
         expected = dataset.score_answer(answer=answer, entry=entry)
         assert asyncio.run(verifier.async_call([], answer, entry)).score == expected
+
+
+@pytest.mark.parametrize("task", ["arc_agi", "rearc"])
+def test_arc_parity_after_json_round_trip(task):
+    dataset = library.create_dataset(task, seed=17, size=1)
+    raw = dataset[0]
+    prepared = json.loads(json.dumps(raw))
+    before = copy.deepcopy(prepared)
+    verifier = rg.ReasoningGymVerifier()
+    # JSON arrays must be converted back to tuples for the library's grid equality.
+    assert isinstance(raw["metadata"]["output"], tuple)
+    assert dataset.score_answer(answer=raw["answer"], entry=raw) == 1.0
+    assert dataset.score_answer(answer=raw["answer"], entry=prepared) != 1.0
+    for answer in [raw["answer"], "0", "not a grid", ""]:
+        expected = dataset.score_answer(answer=answer, entry=raw)
+        assert asyncio.run(verifier.async_call([], answer, prepared)).score == expected
+    assert prepared == before  # Coercion must not mutate the saved reference.
+    with pytest.raises(ValueError, match="Invalid ReasoningGym grid target"):
+        asyncio.run(verifier.async_call([], raw["answer"], raw))

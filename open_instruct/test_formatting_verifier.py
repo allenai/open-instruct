@@ -261,3 +261,38 @@ def test_returned_timeout_cannot_consume_exception_capture_slot(tmp_path, monkey
     assert "without an error message" in by_kind["timeout"]["error"]
     assert by_kind["exception"]["response"] == "fatal response"
     assert "later fatal verifier error" in by_kind["exception"]["error"]
+
+
+@pytest.mark.parametrize("mode", ["lines", "patterns", "quoted", "string_match"])
+def test_response_deadline_bounds_many_individually_fast_checks(monkeypatch, mode):
+    elapsed, budgets = [0.0], []
+    monkeypatch.setattr(cv, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+
+    def fast_check(*args, timeout):
+        budgets.append(timeout)
+        elapsed[0] += 0.04  # Each operation is below the individual 100ms cap.
+        return None
+
+    def fast_finditer(*args, timeout):
+        fast_check(timeout=timeout)
+        yield SimpleNamespace(group=lambda: "match")
+
+    monkeypatch.setattr(cv.regex, "search", fast_check)
+    monkeypatch.setattr(cv.regex, "finditer", fast_finditer)
+    monkeypatch.setattr(cv, "_quoted_pair_line", fast_check)
+    value = {"type": "regex", "verify_regex": ["miss"]}
+    text = "\n".join(["line"] * 1000)
+    if mode == "patterns":
+        value["verify_regex"] *= 1000
+        text = "one line"
+    elif mode == "quoted":
+        value["verify_regex"] = [cv._QUOTED_PAIR_PATTERN]
+    elif mode == "string_match":
+        value = {"type": "string_match", "expected_markers": ["match"], "patterns": ["match"] * 1000}
+        text = "match"
+    with pytest.raises(cv.FormattingVerifierTimeout, match="response matching deadline exceeded"):
+        cv.score(text, {"kind": "format", "value": value})
+    assert 1 < len(budgets) < 1000
+    assert all(0 < budget <= cv._FORMAT_SEARCH_TIMEOUT_SECONDS for budget in budgets)
+    assert budgets[-1] < budgets[0]  # Calls near the deadline get only the remaining budget.
+    assert cv._FORMAT_RESPONSE_TIMEOUT_SECONDS <= elapsed[0] < cv._FORMAT_RESPONSE_TIMEOUT_SECONDS + 0.05

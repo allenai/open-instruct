@@ -448,8 +448,9 @@ to false; the later GPU audit writes `source-gpu-receipts.json` under the covera
 run directory without modifying that immutable catalog. Use those separate
 receipts for completed GPU coverage. The local qualification tools in
 `scripts/data/rl_readiness/` check positive, wrong, empty, and capped responses
-through the real reward registry, then exercise native data preparation, source
-attribution, cursor restoration, and mixed/all-zero group filtering. Their input
+through the real reward registry. CPU qualification exercises native data
+preparation, mixture-provider source attribution, cursor restoration, and
+mixed/all-zero group filtering. Their input
 export must come from a reviewed adapter with immutable source provenance and
 existing hygiene receipts.
 
@@ -461,6 +462,10 @@ original extraction rules. The JSON-schema factory grades schema conformance,
 not factual content. ReasoningGym uses the pinned optional dependency listed in
 `scripts/data/rl_readiness/requirements.txt`, with explicit family coverage.
 No factory executes code supplied in a dataset or fetches external schema URLs.
+The schema subset rejects `pattern` and `patternProperties` because the schema
+library uses unbounded Python regex matching. This conservative recursive check
+also rejects those names inside property maps or instance literals. Such schemas
+must be deferred during preparation, not silently have constraints removed.
 
 H169's explicit `mcqa_final_choice` target kind also accepts a bare choice letter,
 an `Answer: LETTER` final answer or a boxed letter. Multiple explicit answers and
@@ -486,7 +491,12 @@ docker build -f scripts/data/rl_readiness/Dockerfile --build-arg BASE_IMAGE=YOUR
 The image copies the readiness package under `/opt/core-rl/scripts/data/` and
 checks all three module entry points with `--help` during the build.
 
-Formatting regex searches retain a 100 ms per-search budget. A timeout defaults
+Formatting matching shares a one-second monotonic deadline across the response,
+with each regex call additionally capped at 100 ms or the remaining time,
+whichever is shorter. The deadline is checked between lines, markers, matches and
+patterns, including the quoted-pair fast path. These are in-process checks, not
+process isolation: linear string operations and target validation are not
+forcibly interrupted. A timeout defaults
 to fallback zero with `verifier_diagnostics.status="timeout"`, the original error,
 and elapsed time. It is an ungraded response, not evidence of an incorrect answer.
 `OI_MILES_FORMAT_TIMEOUT_POLICY=raise` stops on the error; `zero` continues. When
@@ -515,7 +525,10 @@ pass uses shuffling disabled to check source order and cursor restoration; it is
 not evidence for a particular shuffled training sequence.
 
 The local GPU coverage tool uses one actual prompt per qualified named source,
-four short completions, and a tiny model. It disables zero-variance filtering
+four short completions, and a tiny model. It loads plain prompt data and verifies
+that each row's existing sample/source labels survive rollout; it does not exercise
+mixture-provider runtime attribution on GPU. That provider attribution is checked
+separately during CPU qualification. It disables zero-variance filtering
 because the random model generally earns zero; the separate controls test the
 real filter. Router auxiliary losses can produce optimizer updates even with
 zero task rewards. This is a training-machinery check, not evidence of learning,

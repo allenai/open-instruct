@@ -92,6 +92,20 @@ def test_schema_local_reference_and_instance_errors():
         asyncio.run(verifier.async_call([], "{}", {"$ref": "https://example.invalid/schema"}))
 
 
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string", "pattern": "^(a|aa)+$"},
+        {"type": "object", "patternProperties": {"^(a|aa)+$": {"type": "number"}}},
+        {"type": "array", "items": {"type": "string", "pattern": "^safe$"}},
+        {"$defs": {"text": {"pattern": "^(a|aa)+$"}}, "$ref": "#/$defs/text"},
+    ],
+)
+def test_schema_regex_keywords_are_rejected_as_invalid_targets(schema):
+    with pytest.raises(ValueError, match="Regex schema keywords"):
+        asyncio.run(json_schema.JSONSchemaVerifier().async_call([], '"a!"', schema))
+
+
 def catalog(tmp_path):
     prompts, registry = tmp_path / "p.jsonl", tmp_path / "r.json"
     prompts.write_text('{"input":"question"}\n')

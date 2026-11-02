@@ -22,6 +22,8 @@ from open_instruct import logger_utils
 from open_instruct.miles.rewards import task_verifiers
 
 _QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
+_FORMAT_SEARCH_TIMEOUT_SECONDS = 0.1
+_FORMAT_RESPONSE_TIMEOUT_SECONDS = 1.0
 logger = logger_utils.setup_logger(__name__)
 
 
@@ -179,7 +181,7 @@ def countdown_value(expression, nums):
         return None
 
 
-def _quoted_pair_line(line):
+def _quoted_pair_line(line, *, timeout=None):
     r"""Boolean equivalent of `".+":\s*".+"` on one newline-free line.
 
     The original unanchored search can retry every opening quote against the
@@ -190,32 +192,56 @@ def _quoted_pair_line(line):
     first, last = line.find('"'), line.rfind('"')
     if first < 0 or last - first < 6:
         return False
-    return any(match.start() >= first + 2 and last >= match.end() + 2 for match in regex.finditer(r'":\s*(?=")', line))
+    return any(
+        match.start() >= first + 2 and last >= match.end() + 2
+        for match in regex.finditer(r'":\s*(?=")', line, timeout=timeout)
+    )
+
+
+def _format_search_budget(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Formatting response matching deadline exceeded")
+    return min(_FORMAT_SEARCH_TIMEOUT_SECONDS, remaining)
 
 
 def _format_score(final, value):
+    deadline = time.monotonic() + _FORMAT_RESPONSE_TIMEOUT_SECONDS
     try:
         if value["type"] == "string_match":
             expected = set(value["expected_markers"])
-            return float(
-                all(m in final for m in expected)
-                and not any(
-                    match.group() not in expected
-                    for pattern in value.get("patterns", [])
-                    for match in regex.finditer(pattern, final, timeout=0.1)
-                )
-            )
+            for marker in expected:
+                _format_search_budget(deadline)
+                present = marker in final
+                _format_search_budget(deadline)
+                if not present:
+                    return 0.0
+            for pattern in value.get("patterns", []):
+                for match in regex.finditer(pattern, final, timeout=_format_search_budget(deadline)):
+                    _format_search_budget(deadline)
+                    if match.group() not in expected:
+                        return 0.0
+                _format_search_budget(deadline)
+            return 1.0
         # inline_prose uses the same minimum-matching-lines contract as regex.
         matches = 0
         for line in final.split("\n"):
             # Equivalence is established only for this exact pattern. Variants
             # retain regex semantics and the existing timeout guard.
-            matches += any(
-                _quoted_pair_line(line) if p == _QUOTED_PAIR_PATTERN else regex.search(p, line, timeout=0.1)
-                for p in value["verify_regex"]
-            )
+            for pattern in value["verify_regex"]:
+                budget = _format_search_budget(deadline)
+                matched = (
+                    _quoted_pair_line(line, timeout=budget)
+                    if pattern == _QUOTED_PAIR_PATTERN
+                    else regex.search(pattern, line, timeout=budget)
+                )
+                _format_search_budget(deadline)
+                if matched:
+                    matches += 1
+                    break
             if matches >= value.get("verify_min_matches", 1):
                 return 1.0
+        _format_search_budget(deadline)
         return 0.0
     except TimeoutError as error:
         # A verifier failure is unknown, not a valid zero reward. Preserve the
