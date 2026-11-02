@@ -161,6 +161,49 @@ def countdown_value(expression, nums):
         return None
 
 
+def _quoted_pair_line(line):
+    r"""Boolean equivalent of `".+":\s*".+"` on one newline-free line.
+
+    The original unanchored search can retry every opening quote against the
+    same failing suffix. Search the key/value separator once instead. The first
+    and last quotes maximize the available key and value lengths; each must
+    contain at least one character. Quotes inside either value remain allowed.
+    """
+    first, last = line.find('"'), line.rfind('"')
+    if first < 0 or last - first < 6:
+        return False
+    return any(match.start() >= first + 2 and last >= match.end() + 2 for match in regex.finditer(r'":\s*(?=")', line))
+
+
+def _format_score(final, value):
+    try:
+        if value["type"] == "string_match":
+            expected = set(value["expected_markers"])
+            return float(
+                all(m in final for m in expected)
+                and not any(
+                    match.group() not in expected
+                    for pattern in value.get("patterns", [])
+                    for match in regex.finditer(pattern, final, timeout=0.1)
+                )
+            )
+        matches = 0
+        for line in final.split("\n"):
+            matches += any(
+                _quoted_pair_line(line) if p == r'".+":\s*".+"' else regex.search(p, line, timeout=0.1)
+                for p in value["verify_regex"]
+            )
+            if matches >= value.get("verify_min_matches", 1):
+                return 1.0
+        return 0.0
+    except TimeoutError as error:
+        # A verifier failure is unknown, not a valid zero reward. Preserve the
+        # exception, but identify the contract in native rollout error records.
+        raise TimeoutError(
+            f"Formatting verifier timed out: pattern_id={value.get('pattern_id')!r}, response_chars={len(final)}"
+        ) from error
+
+
 def score(text, target):
     kind = validate_target(target)  # Broken targets must not become model failures.
     final = answer_text(text)
@@ -181,20 +224,7 @@ def score(text, target):
         match = re.fullmatch(r"Answer:\s*([A-Z])\s*", final.split("\n")[-1])
         return float(match is not None and match[1] == value)
     if kind == "format":
-        if value["type"] == "string_match":
-            expected = set(value["expected_markers"])
-            return float(
-                all(m in final for m in expected)
-                and not any(
-                    match.group() not in expected
-                    for pattern in value.get("patterns", [])
-                    for match in regex.finditer(pattern, final, timeout=0.1)
-                )
-            )
-        matches = sum(
-            any(regex.search(p, line, timeout=0.1) for p in value["verify_regex"]) for line in final.split("\n")
-        )
-        return float(matches >= value.get("verify_min_matches", 1))
+        return _format_score(final, value)
     if kind == "countdown":
         boxes = re.findall(r"\\boxed\{([^{}]+)\}", final)
         expressions = boxes[-1:] or final.split("\n")[-1:]
