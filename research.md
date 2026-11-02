@@ -1095,3 +1095,8 @@ workspace-permission blocker is resolved by this selection; the controller now
 waits only for the image build before submitting native qualification. No GPU
 experiment is claimed submitted yet. Auto-resume/checkpoint validation remains
 required because the selected scheduling provides no protected runtime.
+
+Build-location correction: use the user's existing Hammond job. The dedicated
+queued build was canceled before start and the controller intentionally stopped.
+Waiting for the existing session/job identifier because current API listings
+show none running under michaeln; image/GPU qualification has not happened yet.

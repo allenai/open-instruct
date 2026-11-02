@@ -1543,3 +1543,13 @@ autoResume and4GPUs;95launcher tests passed. The controller and monitoring targe
 now use open-instruct-dev and no longer wait for scaling-ladders permission or
 an allocation. Build01M6DBW1JGQK8YKYFKDW1A1F0T remains the only submitted job;
 native smoke/main will be gated on its published image and lifecycle validation.
+
+2026-11-02 build-location correction: user requested using their existing Hammond
+job instead of allocating a dedicated CPU build job. Canceled queued build
+01M6DBW1JGQK8YKYFKDW1A1F0T before start and stopped the one-time controller
+intentionally; this is not an application/build failure. API queries currently
+show no running Hammond session or assigned Hammond execution owned by michaeln,
+so the user was asked for the existing job/session ID or URL. Build context is
+preserved; no image was built and no GPU job submitted. Shared Beaker access and
+Docker build guides now require reusing the existing Hammond job first, and
+asking for its identifier when not visible instead of creating a replacement.
