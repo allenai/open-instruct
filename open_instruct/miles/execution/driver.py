@@ -12,6 +12,7 @@ from pathlib import Path
 
 import ray
 import wandb
+
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
 from miles.backends.core_utils.rollout import prepared_batch
 from miles.ray import placement_group, wiring
@@ -22,7 +23,6 @@ from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_utils.config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
-
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
@@ -89,7 +89,8 @@ async def train(args, *, export_hf=None):
             nonlocal models, learner
             with stage(args, "trainer_startup"):
                 models = await placement_group.initialize_training_models(args)
-                # Keep ownership immediately, including when the sibling fails.
+                # Dispose completed initialization through the learner handle.
+                # If this await fails/cancels, the worker manager owns partial actors.
                 learner = models.actor.handle
 
         if parallel:

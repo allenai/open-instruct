@@ -80,8 +80,17 @@ def require_layout(nodes, expected):
 class Supervisor:
     def __init__(self, spec, root, rank, count):
         self.spec, self.root, self.rank, self.count = spec, root, rank, count
-        self.started = time.monotonic()
         self.startup_timeout = infra_timeouts.seconds(spec.launch["coordination"]["startup_timeout"])
+        # Rendezvous has established a fresh attempt. Rank zero publishes one
+        # budget for all subsequent startup work, including inventory/launch.
+        deadline = time.time() + self.startup_timeout
+        if rank == 0:
+            write(root / "startup.json", {"deadline_unix": deadline})
+        while not (root / "startup.json").is_file():
+            if time.time() >= deadline:
+                raise TimeoutError("Replica zero did not publish the startup deadline")
+            time.sleep(1)
+        self.startup_deadline = startup.deadline(root)
         self.heartbeat_timeout = infra_timeouts.seconds(spec.launch["coordination"]["heartbeat_timeout"])
         self.heartbeat_warning_at = {}
         self.children = []
@@ -126,7 +135,7 @@ class Supervisor:
             else:
                 self.peer_heartbeats[rank] = observed
             if observed is None:
-                if time.monotonic() - self.started > self.startup_timeout:
+                if now >= self.startup_deadline:
                     raise TimeoutError(f"Replica {rank} did not rendezvous")
             else:
                 age = now - observed
@@ -153,7 +162,7 @@ class Supervisor:
                     if response.status != 200:
                         raise OSError(f"Judge HTTP status {response.status}")
             except OSError as error:
-                if time.monotonic() - self.started > self.startup_timeout:
+                if time.time() >= self.startup_deadline:
                     raise TimeoutError(f"Judge {name} did not become ready before the startup deadline") from error
                 continue
             self.health[name] = url
@@ -195,23 +204,25 @@ class Supervisor:
             raise RuntimeError(f"Peer failure: {read(failures[0])}")
 
     def wait(self, predicate, *, timeout=None):
-        deadline = time.monotonic() + (self.startup_timeout if timeout is None else infra_timeouts.seconds(timeout))
+        # Explicit timeouts are for post-training completion, which must not
+        # inherit an already expired startup deadline.
+        deadline = self.startup_deadline if timeout is None else time.time() + infra_timeouts.seconds(timeout)
         started = time.monotonic()
         next_warning = started + 30
         while True:
             if time.monotonic() >= next_warning:
                 infra_timeouts.logger.warning(
-                    "Cluster readiness still waiting: replica=%s elapsed_s=%.1f deadline_s=%.1f",
+                    "Cluster readiness still waiting: replica=%s elapsed_s=%.1f remaining_s=%.1f",
                     self.rank,
                     time.monotonic() - started,
-                    deadline - started,
+                    max(0, deadline - time.time()),
                 )
                 next_warning = time.monotonic() + 30
             self.check()
             result = predicate()
             if result:
                 return result
-            if time.monotonic() > deadline:
+            if time.time() >= deadline:
                 raise TimeoutError("Cluster startup/readiness deadline expired")
             time.sleep(1)
 
@@ -381,7 +392,7 @@ def run(path):
         env["RAY_ADDRESS"] = ray_address
         env["OI_MILES_INFERENCE_REPORT_DIR"] = str(root)
         if address == head:
-            start_workflow(spec, path, supervisor, env, assignments, registry)
+            start_workflow(path, supervisor, env, assignments, registry)
             write(root / "complete.json", {"status": "complete", "time": time.time()})
         else:
             # No startup timeout on the training phase; Beaker's run timeout is
@@ -400,50 +411,46 @@ def run(path):
         write(root / f"cleanup-{rank}.json", {"complete": True})
 
 
-def start_workflow(spec, path, supervisor, env, assignments, registry):
+def start_workflow(path, supervisor, env, assignments, registry):
     """Start preparation immediately, with separate Ray and judge readiness gates."""
     root, rank = supervisor.root, supervisor.rank
     # Endpoint discovery is complete; readiness is deliberately separate.
     # The driver can prepare model/data while Ray and judges initialize.
     write(root / "expected-ray.json", {ip: n["ray_gpus"] for ip, n in assignments.items()})
     write(root / "registry.json", registry)
-    write(
-        root / "startup.json",
-        {"deadline_unix": time.time() + max(0, supervisor.startup_timeout - (time.monotonic() - supervisor.started))},
-    )
     env[startup.REPORT_DIR_ENV] = str(root)
     for label, option in (("ray-readiness", "--probe"), ("judge-readiness", "--probe-judges")):
         supervisor.start_task(
             label, [sys.executable, "-m", "open_instruct.miles.execution.cluster", str(path), option, str(root)], env
         )
-    if getattr(spec, "training", {}).get("algorithm", "grpo") != "grpo":
-        # Other drivers retain their established all-services-ready boundary.
-        supervisor.wait(lambda: (root / "ray-ready.json").exists() and (root / "judges-ready.json").exists())
     print(f"Startup branches launched; preparing Core workflow. Driver log: {root}/driver-{rank}.log", flush=True)
     supervisor.run_child("driver", [sys.executable, "-m", "open_instruct.miles", "train", str(path)], env)
 
 
-def probe(spec, root):
-    ray = importlib.import_module("ray")
-    ray.init(address=os.environ["RAY_ADDRESS"])
-    expected = read(root / "expected-ray.json")
-    deadline = time.monotonic() + infra_timeouts.seconds(spec.launch["coordination"]["startup_timeout"])
-    try:
-        while True:
-            nodes = ray.nodes()
-            if len([n for n in nodes if n.get("Alive")]) >= len(expected):
-                require_layout(nodes, expected)
-                break
-            if time.monotonic() > deadline:
-                raise TimeoutError("Ray replicas did not join")
-            time.sleep(2)
-        write(root / "ray-layout.json", {"expected": expected, "actual": nodes})
-    finally:
-        ray.shutdown()
-    write(root / "ray-ready.json", {"ready_unix": time.time()})
+def probe(root):
+    with stage(SimpleNamespace(save=root / "ray-readiness"), "ray_cluster_readiness"):
+        deadline = startup.deadline(root)
+        ray = importlib.import_module("ray")
+        ray.init(address=os.environ["RAY_ADDRESS"])
+        expected = read(root / "expected-ray.json")
+        try:
+            while True:
+                if time.time() >= deadline:
+                    raise TimeoutError("Ray replicas did not join before the startup deadline")
+                nodes = ray.nodes()
+                if len([n for n in nodes if n.get("Alive")]) >= len(expected):
+                    require_layout(nodes, expected)
+                    break
+                time.sleep(1)
+            write(root / "ray-layout.json", {"expected": expected, "actual": nodes})
+        finally:
+            ray.shutdown()
+        write(root / "ray-ready.json", {"ready_unix": time.time()})
 
 
 def probe_judges(spec, root):
+    timing_args = SimpleNamespace(save=root / "judge-readiness")
+
     async def qualify():
         registry = judging.registry(spec.judges)
         paths = [
@@ -451,21 +458,16 @@ def probe_judges(spec, root):
             for name, service in registry["judges"].items()
             if service["mode"] == "managed"
         ]
-        with stage(SimpleNamespace(save=root), "judge_http_readiness"):
+        with stage(timing_args, "judge_http_readiness"):
             while not all(path.is_file() for path in paths):
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(1)
         if spec.judges["judging"]["bindings"]:
-            with stage(SimpleNamespace(save=root), "judge_canaries"):
+            with stage(timing_args, "judge_canaries"):
                 await judge_registry.probe(root / "judge-canaries.json")
         write(root / "judges-ready.json", {"ready_unix": time.time()})
 
-    remaining = read(root / "startup.json")["deadline_unix"] - time.time()
-    asyncio.run(asyncio_wait(qualify(), remaining))
-
-
-async def asyncio_wait(operation, timeout):
-    # This absolute deadline already includes the infrastructure multiplier.
-    return await asyncio.wait_for(operation, timeout=max(0, timeout))
+    remaining = startup.deadline(root) - time.time()
+    asyncio.run(asyncio.wait_for(qualify(), timeout=max(0, remaining)))
 
 
 def main():
@@ -476,8 +478,7 @@ def main():
     probes.add_argument("--probe-judges", type=Path)
     args = parser.parse_args()
     if args.probe:
-        with stage(SimpleNamespace(save=args.probe), "ray_cluster_readiness"):
-            probe(RunSpec.load(args.config), args.probe)
+        probe(args.probe)
     elif args.probe_judges:
         probe_judges(RunSpec.load(args.config), args.probe_judges)
     else:

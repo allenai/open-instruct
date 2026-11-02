@@ -120,7 +120,7 @@ def test_judge_loading_does_not_count_as_liveness_failure(tmp_path, monkeypatch)
 @pytest.mark.parametrize("status", [503, None])
 def test_pending_judge_has_a_deadline(tmp_path, monkeypatch, status):
     owner = supervisor(tmp_path)
-    owner.started -= 31
+    monkeypatch.setattr(cluster.time, "time", lambda: owner.startup_deadline + 1)
     owner.pending_health["judge"] = "http://localhost/health"
     http = (
         Mock(side_effect=OSError("loading"))
@@ -162,13 +162,15 @@ def test_judge_qualification_waits_for_http_without_waiting_for_ray(tmp_path, mo
     monkeypatch.setattr(cluster.judge_registry, "probe", probe)
     cluster.probe_judges(spec, tmp_path)
     assert (tmp_path / "judges-ready.json").exists()
-    stages = [json.loads(line)["stage"] for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
+    stages = [
+        json.loads(line)["stage"]
+        for line in (tmp_path / "judge-readiness" / "driver_timing.jsonl").read_text().splitlines()
+    ]
     assert stages == ["judge_http_readiness", "judge_canaries"]
 
 
-@pytest.mark.parametrize("algorithm", ["grpo", "opd"])
-def test_workflow_preparation_overlaps_readiness_only_for_supported_driver(tmp_path, algorithm):
-    spec = SimpleNamespace(training={"algorithm": algorithm})
+def test_workflow_preparation_overlaps_readiness_without_resetting_deadline(tmp_path):
+    cluster.write(tmp_path / "startup.json", {"deadline_unix": 123})
     events = []
 
     def start_task(name, command, env):
@@ -177,29 +179,81 @@ def test_workflow_preparation_overlaps_readiness_only_for_supported_driver(tmp_p
         assert cluster.read(tmp_path / "registry.json") == {"endpoint": "known"}
         assert not (tmp_path / "judges-ready.json").exists()
 
-    def wait(predicate):
-        assert not predicate()
-        cluster.write(tmp_path / "ray-ready.json", {})
-        cluster.write(tmp_path / "judges-ready.json", {})
-        assert predicate()
-        events.append("wait")
-
     def run_child(name, command, env):
         assert name == "driver"
-        assert (tmp_path / "judges-ready.json").exists() == (algorithm != "grpo")
+        assert not (tmp_path / "judges-ready.json").exists()
+        assert startup.deadline(tmp_path) == 123
         events.append("prepare")
 
-    owner = SimpleNamespace(
-        root=tmp_path,
-        rank=0,
-        started=time.monotonic(),
-        startup_timeout=30,
-        start_task=start_task,
-        run_child=run_child,
-        wait=wait,
-    )
-    cluster.start_workflow(spec, "config.json", owner, {}, {"node": {"ray_gpus": 2}}, {"endpoint": "known"})
-    assert events == ["ray-readiness", "judge-readiness"] + (["wait"] if algorithm != "grpo" else []) + ["prepare"]
+    owner = SimpleNamespace(root=tmp_path, rank=0, start_task=start_task, run_child=run_child)
+    cluster.start_workflow("config.json", owner, {}, {"node": {"ray_gpus": 2}}, {"endpoint": "known"})
+    assert events == ["ray-readiness", "judge-readiness", "prepare"]
+
+
+def test_late_replica_driver_and_judge_share_deadline_but_cleanup_gets_own_budget(tmp_path, monkeypatch):
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(cluster.time, "time", lambda: clock.now)
+    monkeypatch.setattr(cluster.time, "sleep", lambda seconds: setattr(clock, "now", clock.now + seconds))
+    first = supervisor(tmp_path)
+    clock.now += 20
+    late = cluster.Supervisor(first.spec, tmp_path, 1, 2)
+    assert first.startup_deadline == late.startup_deadline == startup.deadline(tmp_path) == 1030
+    clock.now = 1031
+    for owner in (first, late):
+        with pytest.raises(TimeoutError, match="Cluster startup"):
+            owner.wait(lambda: False)
+    late.pending_health["judge"] = "http://localhost/health"
+    monkeypatch.setattr(cluster.request, "urlopen", Mock(side_effect=OSError("loading")))
+    with pytest.raises(TimeoutError, match="Judge judge"):
+        late.probe_health()
+    monkeypatch.setenv(startup.REPORT_DIR_ENV, str(tmp_path))
+    with pytest.raises(TimeoutError, match="Startup barrier ray"):
+        asyncio.run(startup.wait_ready("ray"))
+    with pytest.raises(TimeoutError):
+        cluster.probe_judges(SimpleNamespace(judges={}), tmp_path)
+    late.wait(lambda: clock.now >= 1033, timeout=5)
+    assert clock.now == 1033
+
+
+def test_missing_deadline_publication_is_bounded(tmp_path, monkeypatch):
+    clock = SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(cluster.time, "time", lambda: clock.now)
+    monkeypatch.setattr(cluster.time, "sleep", lambda seconds: setattr(clock, "now", clock.now + seconds))
+    spec = SimpleNamespace(launch={"coordination": {"startup_timeout": 2, "heartbeat_timeout": 30}})
+    with pytest.raises(TimeoutError, match="Replica zero"):
+        cluster.Supervisor(spec, tmp_path, 1, 2)
+    assert clock.now == 1002
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_ray_probe_uses_remaining_attempt_budget_and_separate_timeline(tmp_path, monkeypatch, ready):
+    clock = SimpleNamespace(now=1028.0)
+    monkeypatch.setattr(cluster.time, "time", lambda: clock.now)
+    monkeypatch.setattr(cluster.time, "sleep", lambda seconds: setattr(clock, "now", clock.now + seconds))
+    cluster.write(tmp_path / "startup.json", {"deadline_unix": 1030})
+    cluster.write(tmp_path / "expected-ray.json", {"node": 2})
+    nodes = [{"Alive": True, "NodeManagerAddress": "node", "Resources": {"GPU": 2}}]
+    ray = SimpleNamespace(init=Mock(), shutdown=Mock(), nodes=Mock(return_value=nodes if ready else []))
+    monkeypatch.setattr(cluster.importlib, "import_module", lambda name: ray)
+    monkeypatch.setenv("RAY_ADDRESS", "node:1234")
+    if ready:
+        cluster.probe(tmp_path)
+        assert (tmp_path / "ray-ready.json").is_file()
+    else:
+        with pytest.raises(TimeoutError, match="Ray replicas"):
+            cluster.probe(tmp_path)
+        assert clock.now == 1030
+        assert not (tmp_path / "ray-ready.json").exists()
+    ray.shutdown.assert_called_once()
+    monkeypatch.setattr(cluster.judging, "registry", lambda _: {"judges": {}})
+    # The judge timeline cannot append to (or overwrite) the Ray timeline.
+    ray_log = tmp_path / "ray-readiness" / "driver_timing.jsonl"
+    recorded = ray_log.read_bytes()
+    clock.now = 1029
+    cluster.probe_judges(SimpleNamespace(judges={"judging": {"bindings": {}}}), tmp_path)
+    assert ray_log.read_bytes() == recorded
+    assert (tmp_path / "judge-readiness" / "driver_timing.jsonl").is_file()
+    assert not (tmp_path / "driver_timing.jsonl").exists()
 
 
 def test_process_is_not_leaked_if_start_receipt_fails(tmp_path, monkeypatch):

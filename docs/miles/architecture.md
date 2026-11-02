@@ -149,14 +149,18 @@ concurrently after assigning GPUs and discovering judge endpoint addresses. Ray
 readiness and judge known-answer canaries run in separate supervised subprocesses.
 The driver waits for the exact Ray layout before placement; it waits for judge
 qualification before generation or evaluation. Readiness files live in the fresh
-attempt directory, with a bounded deadline and peer-failure propagation.
+attempt directory, with peer-failure propagation. After replica rendezvous, rank
+zero writes one `startup.json` deadline shared by all supervisors, readiness
+probes, and driver barriers. Inventory and service launch consume that same
+budget; starting a later stage does not reset it. Post-training completion has
+its own timeout.
 
 On disaggregated runs with an explicit rollout count and resident inference,
 trainer initialization/cache restoration overlaps inference initialization.
 Connecting trainer parallelism metadata and restoring the rollout cursor remains
 a barrier after both branches finish, before initial weight publication. Colocated,
 offloaded-inference, and epoch-derived schedules retain sequential initialization.
-Other algorithm drivers retain the all-services-ready boundary before execution.
+OPD uses its separate launcher and does not pass through this GRPO supervisor.
 
 A failed or cancelled initialization joins its sibling tasks before driver cleanup;
 the worker manager owns partially initialized remote workers. Cluster supervision
@@ -164,7 +168,8 @@ also terminates outstanding readiness subprocesses. Judge liveness monitoring
 starts only after its HTTP endpoint becomes ready.
 
 For measurement, the attempt directory contains process start receipts, readiness
-timestamps and `driver_timing.jsonl` for Ray readiness and judge canaries. The run
+timestamps. Each probe writes its own timeline under `ray-readiness/driver_timing.jsonl`
+or `judge-readiness/driver_timing.jsonl`, avoiding concurrent appends on WEKA. The run
 root has preparation-stage timings; the checkpoint directory has runtime parsing,
 module import, readiness waits, serving/trainer initialization, connection and
 publication timings. Overlapping stage durations must not be added together as

@@ -11,6 +11,11 @@ from open_instruct.miles.infrastructure import infra_timeouts
 REPORT_DIR_ENV = "OI_MILES_STARTUP_REPORT_DIR"
 
 
+def deadline(root):
+    """Read the shared attempt deadline, already scaled for infrastructure delays."""
+    return json.loads((Path(root) / "startup.json").read_text())["deadline_unix"]
+
+
 async def join(*operations):
     """On failure/cancellation, join every sibling before resource cleanup starts."""
     tasks = [asyncio.create_task(operation) for operation in operations]
@@ -29,8 +34,7 @@ async def wait_ready(name):
     if not location:
         return
     root = Path(location)
-    state = json.loads((root / "startup.json").read_text())
-    remaining = state["deadline_unix"] - time.time()
+    remaining = deadline(root) - time.time()
     failures = list(root.glob("failed-*.json"))
     if failures:
         raise RuntimeError(f"Cluster startup failed: {failures[0].read_text()}")
@@ -44,7 +48,7 @@ async def wait_ready(name):
                 raise RuntimeError(f"Cluster startup failed: {failures[0].read_text()}")
             if (root / f"{name}-ready.json").is_file():
                 return
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(1)
 
     # The cluster already applies the infrastructure multiplier to this deadline.
     with infra_timeouts.watch(f"startup barrier={name}"):
