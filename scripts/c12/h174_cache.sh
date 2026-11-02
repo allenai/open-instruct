@@ -46,8 +46,8 @@ task = {"name": "h174-cache", "image": {"beaker": "$IMAGE"}, "command": ["/bin/b
         "datasets": [{"mountPath": f"/weka/{b}", "source": {"weka": b}} for b in
                      ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
         "result": {"path": "/output"}, "resources": {"cpuCount": 64, "memory": "400GiB"},
-        "context": {"priority": "high"},
-        "constraints": {"cluster": ["ai2/neptune", "ai2/saturn", "ai2/jupiter", "ai2/ceres", "ai2/hammond", "ai2/phobos"]},
+        "context": {"priority": "high", "minRuntime": "4h"},
+        "constraints": {"cluster": ["ai2/neptune", "ai2/saturn"]},
         "timeout": "16h"}
 json.dump({"version": "v2", "budget": "ai2/oe-other", "description": "ledger H174: arm cache build + packed-instance count",
            "tasks": [task]}, open(sys.argv[1], "w"), indent=1)
