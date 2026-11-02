@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import copy
 import hashlib
+import importlib
 import json
 import time
 from collections import defaultdict
@@ -18,12 +19,12 @@ from miles.rollout.filter_hub import common_filters
 from miles.utils.types import Sample
 from rdkit import Chem
 from rdkit.Chem import Descriptors
+from scripts.data.rl_readiness import checks
 from transformers import AutoTokenizer
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.datasets import run_data
-from open_instruct.miles.rewards import rewards
-from open_instruct.miles.rollout import provider_source
+from open_instruct.miles.rewards import reasoning_gym, rewards
 
 FACTORIES = {
     "open_instruct.ground_truth_utils.MathVerifier",
@@ -86,6 +87,24 @@ async def controls(entry, args):
     values = await rewards.registered_reward(args, samples)
     if values != [1.0, 0.0, 0.0, 0.0]:
         raise ValueError(f"positive/wrong/empty/cap controls: {values}")
+    extra_values = []
+    for spec in row["metadata"]["verifiers"]:
+        if entry["registry"][spec["name"]]["factory"] != (
+            "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier"
+        ):
+            continue
+        target = spec["target"]
+        if target["metadata"]["source_dataset"] in reasoning_gym.DEFAULT_EXACT_TASKS:
+            gold = target["answer"].strip()
+            wrong = [f"1{gold}", f"{gold}1", f"The answer is {gold}"]
+            extra_values = await rewards.registered_reward(
+                args, [sample(row, text, i) for i, text in enumerate(wrong)]
+            )
+            if any(v != 0.0 for v in extra_values):
+                raise ValueError(f"Gold-containing wrong answers earned reward: {extra_values}")
+    for s in samples:
+        if any(d.get("status") == "timeout" for d in s.metadata.get("verifier_diagnostics", {}).values()):
+            raise ValueError("Qualification control timed out; fallback zero cannot qualify a verifier")
     for s, value in zip(samples, values, strict=True):
         s.reward = value
     if not common_filters.apply_reward_nonzero_std_filter(args, samples).keep:
@@ -94,7 +113,13 @@ async def controls(entry, args):
         s.reward = 0.0
     if common_filters.apply_reward_nonzero_std_filter(args, samples).keep:
         raise ValueError("Native filter accepted all-zero group")
-    return {"values": values, "mixed_kept": True, "all_zero_filtered": True, "cap_is_valid_zero": True}
+    return {
+        "values": values,
+        "gold_containing_wrong": extra_values,
+        "mixed_kept": True,
+        "all_zero_filtered": True,
+        "cap_is_valid_zero": True,
+    }
 
 
 def loader_args(prepared, hf, root):
@@ -166,7 +191,9 @@ async def main(args):
                 print(f"controls {len(receipts)}/{len(entries)}", flush=True)
 
     await asyncio.gather(*(check(entry) for entry in entries))
-    write(root / "controls.json", receipts)
+    write(root / "controls.json", sorted(receipts, key=lambda r: (r["source"], r["id"])))
+    # Reward controls can run without importing the serving/loader dependencies.
+    provider_source = importlib.import_module("open_instruct.miles.rollout.provider_source")
     tokenizer = AutoTokenizer.from_pretrained(args.hf)
     catalog = {
         "schema_version": 1,
@@ -206,13 +233,20 @@ async def main(args):
             loader = provider_source.ProviderRolloutDataSource(loader_args(prepared, args.hf, root))
             groups = loader.get_samples(len(rows))
             actual_ids = [group[0].metadata["sample_id"] for group in groups]
-            assert actual_ids == [row["metadata"]["sample_id"] for row in rows]
-            assert all(len(group) == 4 for group in groups)
-            assert all(s.metadata["mixture_source"] == name for group in groups for s in group)
+            checks.require(
+                actual_ids == [row["metadata"]["sample_id"] for row in rows], "Loader changed sample identity/order"
+            )
+            checks.require(all(len(group) == 4 for group in groups), "Loader did not produce four samples per group")
+            checks.require(
+                all(s.metadata["mixture_source"] == name for group in groups for s in group),
+                "Incorrect mixture attribution",
+            )
             state = copy.deepcopy(loader.provider.state_dict())
             expected = loader.provider.next_samples(1)[0].metadata
             loader.provider.load_state_dict(state)
-            assert loader.provider.next_samples(1)[0].metadata == expected
+            checks.require(
+                loader.provider.next_samples(1)[0].metadata == expected, "Cursor restore changed next sample"
+            )
             record.update(status="qualified", native_loader_passed=True, resume_cursor_passed=True)
             # The GPU pass visits every source deterministically, using one of its actual rows.
             representative = min(rows, key=lambda row: len(tokenizer.encode(row["input"], add_special_tokens=False)))

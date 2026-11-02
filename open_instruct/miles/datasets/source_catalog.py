@@ -19,6 +19,8 @@ def resolve(catalog_path, weights):
     catalog = json.loads(path.read_text())
     if catalog.get("schema_version") != 1:
         raise InputError("Unsupported source catalog version")
+    if not isinstance(catalog.get("sources"), dict):
+        raise InputError("Source catalog requires a sources mapping")
     sources = []
     for name, fraction in weights.items():
         entry = catalog["sources"].get(name)
@@ -48,10 +50,14 @@ def main():
     args = parser.parse_args()
     weights = {}
     for item in args.source:
-        name, value = item.rsplit("=", 1)
+        try:
+            name, value = item.rsplit("=", 1)
+            fraction = float(value)
+        except ValueError:
+            parser.error(f"Expected NAME=FRACTION, got {item!r}")
         if name in weights:
             parser.error(f"Repeated source {name}")
-        weights[name] = float(value)
+        weights[name] = fraction
     data = resolve(args.catalog, weights)
     lines = ["[data]", "seed = 17", "shuffle = true", ""]
     for source in data["sources"]:

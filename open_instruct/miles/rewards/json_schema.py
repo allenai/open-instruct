@@ -12,7 +12,9 @@ def validate_schema(schema):
     while pending:
         node = pending.pop()
         if isinstance(node, dict):
-            # Preparation resolves/qualifies local references; runtime never fetches a URL.
+            # Conservatively reject reference-like keys even in instance literals
+            # or property maps. Preparation qualifies this restricted schema subset;
+            # runtime never fetches a URL.
             if any(
                 not isinstance(v, str) or not v.startswith("#")
                 for k, v in node.items()
@@ -40,6 +42,8 @@ class JSONSchemaVerifier:
         try:
             value = candidate_verifiers.strict_json(candidate_verifiers.answer_text(prediction))
         except (ValueError, RecursionError):
-            return candidate_verifiers.Result(0.0)
+            return candidate_verifiers.Result(0.0, diagnostics={"kind": "json_schema_v1", "status": "invalid_json"})
         # Schema resolution failures propagate; only instance failures are reward zero.
-        return candidate_verifiers.Result(float(validator.is_valid(value)))
+        return candidate_verifiers.Result(
+            float(validator.is_valid(value)), diagnostics={"kind": "json_schema_v1", "status": "ok"}
+        )

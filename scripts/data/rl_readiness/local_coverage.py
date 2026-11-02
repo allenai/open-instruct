@@ -17,6 +17,7 @@ import ray
 
 
 def main(options):
+    options.catalog = options.catalog.resolve()
     root = options.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     hf = root / "hf"

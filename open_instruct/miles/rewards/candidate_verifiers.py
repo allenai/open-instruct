@@ -8,7 +8,9 @@ Formatting rewards measure formatting only, not factual answer correctness.
 import ast
 import json
 import math
+import os
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -16,7 +18,15 @@ from fractions import Fraction
 
 import regex
 
+from open_instruct import logger_utils
 from open_instruct.miles.rewards import task_verifiers
+
+_QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
+logger = logger_utils.setup_logger(__name__)
+
+
+class FormattingVerifierTimeout(TimeoutError):
+    """A valid formatting contract exceeded its response-matching budget."""
 
 
 @dataclass
@@ -46,7 +56,13 @@ def strict_json(text):
     def constant(value):
         raise ValueError(f"Nonfinite JSON constant: {value}")
 
-    return json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError(f"Nonfinite JSON number: {value}")
+        return result
+
+    return json.loads(text, object_pairs_hook=pairs, parse_constant=constant, parse_float=finite_float)
 
 
 def typed_equal(left, right):
@@ -121,6 +137,8 @@ def validate_target(target):
             )
         ):
             raise ValueError("Invalid named knight/knave assignment")
+        if len({name.casefold() for name in value}) != len(value):
+            raise ValueError("Knight/knave names must be distinct ignoring case")
     elif kind == "numeric":
         if not isinstance(value, str) or re.fullmatch(r"[-+]?\d+(?:\.\d+)?", value) is None:
             raise ValueError("Numeric target must be a finite decimal string")
@@ -160,15 +178,22 @@ def countdown_value(expression, nums):
         return None
 
 
-def score(text, target):
-    kind = validate_target(target)  # Broken targets must not become model failures.
-    final = answer_text(text)
-    value = target["value"]
-    if kind == "mcqa":
-        # Preparation appends this exact contract; never search reasoning for a letter.
-        match = re.fullmatch(r"Answer:\s*([A-Z])\s*", final.split("\n")[-1])
-        return float(match is not None and match[1] == value)
-    if kind == "format":
+def _quoted_pair_line(line):
+    r"""Boolean equivalent of `".+":\s*".+"` on one newline-free line.
+
+    The original unanchored search can retry every opening quote against the
+    same failing suffix. Search the key/value separator once instead. The first
+    and last quotes maximize the available key and value lengths; each must
+    contain at least one character. Quotes inside either value remain allowed.
+    """
+    first, last = line.find('"'), line.rfind('"')
+    if first < 0 or last - first < 6:
+        return False
+    return any(match.start() >= first + 2 and last >= match.end() + 2 for match in regex.finditer(r'":\s*(?=")', line))
+
+
+def _format_score(final, value):
+    try:
         if value["type"] == "string_match":
             expected = set(value["expected_markers"])
             return float(
@@ -179,10 +204,37 @@ def score(text, target):
                     for match in regex.finditer(pattern, final, timeout=0.1)
                 )
             )
-        matches = sum(
-            any(regex.search(p, line, timeout=0.1) for p in value["verify_regex"]) for line in final.split("\n")
-        )
-        return float(matches >= value.get("verify_min_matches", 1))
+        # inline_prose uses the same minimum-matching-lines contract as regex.
+        matches = 0
+        for line in final.split("\n"):
+            # Equivalence is established only for this exact pattern. Variants
+            # retain regex semantics and the existing timeout guard.
+            matches += any(
+                _quoted_pair_line(line) if p == _QUOTED_PAIR_PATTERN else regex.search(p, line, timeout=0.1)
+                for p in value["verify_regex"]
+            )
+            if matches >= value.get("verify_min_matches", 1):
+                return 1.0
+        return 0.0
+    except TimeoutError as error:
+        # A verifier failure is unknown, not a valid zero reward. Preserve the
+        # exception, but identify the contract in native rollout error records.
+        raise FormattingVerifierTimeout(
+            f"Formatting verifier timed out: pattern_id={value.get('pattern_id')!r}, "
+            f"response_chars={len(final)}; original_error={error}"
+        ) from error
+
+
+def score(text, target):
+    kind = validate_target(target)  # Broken targets must not become model failures.
+    final = answer_text(text)
+    value = target["value"]
+    if kind == "mcqa":
+        # Preparation appends this exact contract; never search reasoning for a letter.
+        match = re.fullmatch(r"Answer:\s*([A-Z])\s*", final.split("\n")[-1])
+        return float(match is not None and match[1] == value)
+    if kind == "format":
+        return _format_score(final, value)
     if kind == "countdown":
         boxes = re.findall(r"\\boxed\{([^{}]+)\}", final)
         expressions = boxes[-1:] or final.split("\n")[-1:]
@@ -220,7 +272,32 @@ class CandidateVerifier:
         pass
 
     async def async_call(self, tokens, prediction, label, **kwargs):
-        result = score(prediction, label)
+        policy = "zero"
+        if isinstance(label, dict) and label.get("kind") == "format":
+            policy = os.environ.get(
+                "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
+            )
+        if policy not in ("zero", "raise"):
+            raise ValueError(
+                "OI_MILES_FORMAT_TIMEOUT_POLICY (or inherited OI_MILES_MATH_TIMEOUT_POLICY) must be zero or raise"
+            )
+        start = time.monotonic()
+        try:
+            result = score(prediction, label)
+        except FormattingVerifierTimeout as error:
+            if policy == "raise":
+                raise
+            logger.warning("Formatting verifier timeout; assigning fallback zero reward: %s", error)
+            return Result(
+                0.0,
+                diagnostics={
+                    "kind": "format",
+                    "status": "timeout",
+                    "error": str(error),
+                    "failure_policy": policy,
+                    "elapsed_seconds": time.monotonic() - start,
+                },
+            )
         if not math.isfinite(result):
             raise ValueError("Nonfinite candidate reward")
         return Result(result)

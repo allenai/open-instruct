@@ -22,6 +22,8 @@ TASKS = frozenset(
         "word_sorting",
     }
 )
+# Pinned-version coverage for qualification's gold-containing wrong controls.
+DEFAULT_EXACT_TASKS = frozenset({"base_conversion", "leg_counting", "simple_equations"})
 
 
 class ReasoningGymVerifier:
@@ -31,6 +33,7 @@ class ReasoningGymVerifier:
         if metadata.version("reasoning-gym") != "0.1.25":
             raise ValueError("This contract requires reasoning-gym==0.1.25")
         self.library = importlib.import_module("reasoning_gym")
+        self.default_scorer = importlib.import_module("reasoning_gym.dataset").ProceduralDataset.score_answer
         self.scorers = {}
 
     async def async_call(self, tokens, prediction, label, **kwargs):
@@ -41,6 +44,10 @@ class ReasoningGymVerifier:
         final = candidate_verifiers.answer_text(prediction)
         tagged = re.findall(r"<answer>(.*?)</answer>", final, re.S)
         boxes = re.findall(r"\\boxed\{([^{}]+)\}", final)
+        # Multiple explicit answers cannot be resolved by picking the last one.
+        ambiguous = len(tagged) > 1 or len(boxes) > 1
+        if tagged and boxes and tagged[0].strip() != boxes[0].strip():
+            ambiguous = True
         answer = tagged[-1].strip() if tagged else boxes[-1].strip() if boxes else final
         if task in {"arc_agi", "rearc"}:
             grid = entry["metadata"]["output"]
@@ -62,7 +69,18 @@ class ReasoningGymVerifier:
         else:
             if task not in self.scorers:
                 self.scorers[task] = self.library.get_score_answer_fn(task)
-            result = float(self.scorers[task](answer=answer, entry=entry))
+            scorer = self.scorers[task]
+            # The library default rewards any answer containing the gold string,
+            # including wrong numbers. Only task-specific scorers may grade softly.
+            if getattr(scorer, "__func__", None) is self.default_scorer:
+                result = float(answer.strip() == entry["answer"].strip())
+            else:
+                result = float(scorer(answer=answer, entry=entry))
+        if ambiguous:
+            result = 0.0
         if not math.isfinite(result) or not 0 <= result <= 1:
             raise ValueError("Invalid ReasoningGym reward")
-        return candidate_verifiers.Result(result, diagnostics={"kind": "reasoning_gym_0.1.25", "status": "ok"})
+        return candidate_verifiers.Result(
+            result,
+            diagnostics={"kind": "reasoning_gym_0.1.25", "status": "ok", "scoring_protocol": "exact_default_v2"},
+        )

@@ -48,7 +48,9 @@ def test_positive_wrong_empty_and_final_region(target, positive, negative):
     assert cv.score(positive + "</think>" + negative, target) == 0
 
 
-@pytest.mark.parametrize("value", ['{"a": 1, "a": 2}', "NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize(
+    "value", ['{"a": 1, "a": 2}', "NaN", "Infinity", "-Infinity", "1e999", "-1e999", '{"x":[1e999]}']
+)
 def test_json_does_not_accept_ambiguous_or_nonfinite(value):
     with pytest.raises(ValueError):
         cv.strict_json(value)
@@ -59,6 +61,7 @@ def test_invalid_target_is_not_a_wrong_answer():
         {},
         {"kind": "mcqa", "value": "C", "choices": ["A", "B"]},
         {"kind": "format", "value": {"type": "regex", "verify_regex": []}},
+        {"kind": "knights", "value": {"Ann": True, "ann": False}},
     ):
         with pytest.raises(ValueError):
             cv.score("", target)
@@ -82,6 +85,9 @@ def test_schema_local_reference_and_instance_errors():
     verifier = json_schema.JSONSchemaVerifier()
     assert asyncio.run(verifier.async_call([], '{"x": 1}', schema)).score == 1
     assert asyncio.run(verifier.async_call([], '{"x": "1"}', schema)).score == 0
+    assert asyncio.run(verifier.async_call([], '{"x": 1e999}', schema)).score == 0
+    assert asyncio.run(verifier.async_call([], "1e999", {"type": "number"})).score == 0
+    assert asyncio.run(verifier.async_call([], "1e100", {"type": "number"})).score == 1
     with pytest.raises(ValueError, match="local schema"):
         asyncio.run(verifier.async_call([], "{}", {"$ref": "https://example.invalid/schema"}))
 

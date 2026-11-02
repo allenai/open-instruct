@@ -16,6 +16,7 @@ from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.nn import attention
 from olmo_core.nn.hf import config as hf_config_utils
 from olmo_core.nn.moe.v2 import olmo3
+from scripts.data.rl_readiness import checks
 from transformers import AutoModelForCausalLM
 
 from open_instruct.miles.configuration.config import CoreConfig
@@ -35,14 +36,20 @@ async def audit(options):
         path = root / f"rollouts/{index}.pt"
         data = torch.load(path, weights_only=False, map_location="cpu")
         timestamps.append(path.stat().st_mtime)
-        assert data["rollout_id"] == index and len(data["samples"]) == 4
+        checks.require(
+            data["rollout_id"] == index and len(data["samples"]) == 4, f"Invalid rollout/group size: {index}"
+        )
         for raw in data["samples"]:
-            assert raw["prompt"] == prompt["input"] and raw["label"] == prompt["label"]
-            assert raw["metadata"]["sample_id"] == prompt["metadata"]["sample_id"]
-            assert raw["metadata"]["source_name"] == prompt["metadata"]["source_name"]
-            assert raw["response_length"] > 0
-            assert len(raw["rollout_log_probs"]) == raw["response_length"]
-            assert all(math.isfinite(v) for v in raw["rollout_log_probs"])
+            checks.require(
+                raw["prompt"] == prompt["input"] and raw["label"] == prompt["label"], "Prompt/target mismatch"
+            )
+            checks.require(raw["metadata"]["sample_id"] == prompt["metadata"]["sample_id"], "Sample identity mismatch")
+            checks.require(
+                raw["metadata"]["source_name"] == prompt["metadata"]["source_name"], "Source attribution mismatch"
+            )
+            checks.require(raw["response_length"] > 0, "Empty coverage completion")
+            checks.require(len(raw["rollout_log_probs"]) == raw["response_length"], "Logprob/response length mismatch")
+            checks.require(all(math.isfinite(v) for v in raw["rollout_log_probs"]), "Nonfinite rollout logprob")
             status = Sample.Status(raw["status"])
             sample = Sample(
                 prompt=raw["prompt"],
@@ -54,11 +61,13 @@ async def audit(options):
                 response_length=raw["response_length"],
             )
             independent = await rewards.registered_reward(args, sample)
-            assert independent == raw["reward"]
+            checks.require(independent == raw["reward"], "Recomputed reward differs from rollout reward")
             statuses[status.value] += 1
             counts[prompt["metadata"]["source_name"]] += 1
             spans = [span for call in raw["weight_versions"] for span in call]
-            assert spans and {span["version"] for span in spans} == {str(index)}
+            checks.require(
+                spans and {span["version"] for span in spans} == {str(index)}, "Wrong rollout weight version"
+            )
             rows.append(
                 {
                     "source": prompt["metadata"]["source_name"],
@@ -74,7 +83,7 @@ async def audit(options):
     last = len(prompts) - 1
     complete_path = root / f"save/core/rollout_{last:07d}/complete.json"
     complete = json.loads(complete_path.read_text())
-    assert complete["clock"]["completed_steps"] == len(prompts)
+    checks.require(complete["clock"]["completed_steps"] == len(prompts), "Missing optimizer steps")
     hf_config_utils._register_olmo3moe_auto_classes()
     reference = AutoModelForCausalLM.from_pretrained(root / "hf", torch_dtype=torch.bfloat16)
     native = olmo3.build_olmo3_moe_config_from_hf_config(
@@ -89,8 +98,11 @@ async def audit(options):
         name: (value.reshape(tensor.shape).float() - tensor.float()).abs().max().item()
         for (name, tensor), value in zip(initial.items(), values, strict=True)
     }
-    assert all(math.isfinite(v) for v in differences.values()) and max(differences.values()) > 0
-    assert all(count == 4 for count in counts.values())
+    checks.require(
+        all(math.isfinite(v) for v in differences.values()) and max(differences.values()) > 0,
+        "Optimizer did not produce finite parameter changes",
+    )
+    checks.require(all(count == 4 for count in counts.values()), "Incomplete or duplicate source coverage")
     summary = {
         "status": "passed",
         "groups": len(prompts),
