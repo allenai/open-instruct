@@ -1594,3 +1594,31 @@ c05365a248c523f144e1338e0de3c66c71ae335baae45271bd244839248f39f3.
 a95be8ab405291b0f3b7a643848eb72dbf637abfbc9a84b316cb5b986d301e22
 matches the standalone native qualification. Full provenance saved as
 data-provenance.json beside the Weka build log.
+
+Native image build completed inside the persistent Hammond session, target
+`michaeln/olmicro-native-450m-04f283df82`, immutable image
+01M6DDZ5KW8RB3MRXSKZMCX6ZD. Docker image ID
+sha256:8ca923cf16174b0773eddcefd4f8f8182414a715b4c8e9a196c36c10aa8d38bd.
+The build window exited after publication; the regular CPU session/tmux remain.
+Native image layers contain the committed native SGLang overlay, MILES525732e5
+and Open-Instruct application04f283df8. Current launcher/config revision82239c58c
+only changes scheduling relative to that application image.
+
+The first smoke submission was rejected before creating an experiment because
+scaling-ladders lacked michaeln_WANDB_API_KEY/HF_TOKEN secret references. Copied
+only these two user credentials from open-instruct-dev to same-named workspace
+secrets using the Beaker API in memory; no values logged, written to files or
+embedded in image/spec. Reconciled that no native experiment existed before retry.
+
+Native lifecycle/resume smoke submitted06:10:11UTC:
+[01M6DE2C7Q06V9J7RKPSJFSM4K](https://beaker.org/ex/01M6DE2C7Q06V9J7RKPSJFSM4K),
+job01M6DE2CH9M00PJFKYWKJ494DR. Scheduled06:10:29UTC; acquired4GPUs at06:10:36
+and began pulling the new image. Actual submitted payload checked: workspace
+ai2/scaling-ladders, budget ai2/oe-other, Rhea4GPUs split2+2, minRuntime2h,
+autoResume=true, timeout2h, zero application-failure retries, BF16, nativeflag1,
+HF bridge/reference flags0,3updates with debug stop after2, checkpoint/eval each
+update,8held-out examples and diagnostic publication everyupdate. Actual W&B
+destination mnoukhov/open_instruct_internal, group
+hybrid-450m-native-sglang-smoke-rhea4-20261102. No optimizer/runtime qualification
+claimed at image-pull stage. Controller is waiting for this smoke's native and
+checkpoint-resume receipts before submitting the separate500-update main.

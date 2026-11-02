@@ -1107,3 +1107,10 @@ native build in a detached tmux window. Session/build persist after SSH exits.
 Scaling-ladders write access and Rhea allocation are now verified; configs return
 to that workspace and original2h minimum runtime. Native GPU qualification is
 still pending image publication and the lifecycle gate.
+
+Native image01M6DDZ5KW8RB3MRXSKZMCX6ZD is now published. Lifecycle/resume
+smoke[01M6DE2C7Q06V9J7RKPSJFSM4K](https://beaker.org/ex/01M6DE2C7Q06V9J7RKPSJFSM4K)
+scheduled on Rhea and acquired4GPUs; image pull started06:10:36UTC. Actual native
+selection,2+2topology, BF16, scaling-ladders/minRuntime2h and personal W&B
+destination verified in the submitted payload. Qualification requires actual
+updates/publication/restore receipts; the500-update main remains gated.
