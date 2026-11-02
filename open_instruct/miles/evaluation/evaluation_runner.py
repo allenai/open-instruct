@@ -88,6 +88,10 @@ def command(receipt, output):
         "provider.trust_remote_code": True,
         "provider.kwargs.model_registration": "olmo_sglang:register",
         "provider.kwargs.tensor_parallel_size": receipt["evaluation"]["gpus"],
+        "provider.kwargs.profile": "auto",
+        # The provider recommends a sequence budget after checking actual engine
+        # capacity. olmo-eval counts expanded samples (e.g. pass@32) against it.
+        "batching.chunk_size": "auto",
         **{f"provider.kwargs.{key}": value for key, value in receipt["evaluation"]["provider_kwargs"].items()},
     }.items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
@@ -100,6 +104,50 @@ def command(receipt, output):
         for key, value in task["scoring"].items():
             args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     return [*args, "--output-dir", str(output), "--save-predictions", "--save-requests"]
+
+
+def scicode_server_options(provider_kwargs):
+    """Translate serving aliases and reject options owned by the inline provider."""
+    options = dict(provider_kwargs)
+    unsupported = {"add_bos_token", "prompt_format", "force_download"}.intersection(options)
+    if unsupported:
+        raise ValueError(
+            "SciCode's HTTP server does not accept native-provider-only options: "
+            f"{', '.join(sorted(unsupported))}. Remove them from evaluation.provider_kwargs, "
+            "or use a separate native-only evaluation configuration."
+        )
+    for alias, key in (("max_model_len", "context_length"), ("max_concurrency", "max_running_requests")):
+        if alias in options:
+            if key in options and options[key] != options[alias]:
+                raise ValueError(f"SciCode serving options {alias} and {key} must agree")
+            options[key] = options.pop(alias)
+    return options
+
+
+def serve(receipt, output):
+    """Give SciCode's HTTP policy server the native evaluator's GPU/model profile."""
+    options = scicode_server_options(receipt["evaluation"]["provider_kwargs"])
+    selector = options.pop("profile", "auto")
+    options.update(
+        model_path=receipt["checkpoint"],
+        tokenizer_path=receipt["checkpoint"],
+        trust_remote_code=True,
+        tp_size=receipt["evaluation"]["gpus"],
+        host="127.0.0.1",
+        port=30000,
+    )
+    profiles = importlib.import_module("olmo_eval.inference.providers.sglang_profiles")
+    report = profiles.prepare_profile(selector, options, "olmo_sglang:register")
+    options = {**report["defaults"], **options}
+    write_json(Path(output) / "sglang-external-profile.json", {**report, "effective_options": options})
+    print(f"SciCode SGLang profile: {report}", flush=True)
+    importlib.import_module("sglang.srt.plugins").load_plugins()
+    importlib.import_module("olmo_sglang").register()
+    server_args = importlib.import_module("sglang.srt.server_args").ServerArgs(**options)
+    try:
+        importlib.import_module("sglang.launch_server").run_server(server_args)
+    finally:
+        importlib.import_module("sglang.srt.utils").kill_process_tree(os.getpid(), include_parent=False)
 
 
 def result_roots(output):
@@ -457,23 +505,28 @@ def run_evaluation_locked(receipt, output):
         # SciCode currently requires VLLMServerProvider; all regular tasks use the inline engine.
         if any(task.get("kind") == "external" for task in pending):
             env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
-            server_args = [
-                sys.executable,
-                "-m",
-                "sglang.launch_server",
-                "--model-path",
-                checkpoint,
-                "--trust-remote-code",
-                "--tokenizer-path",
-                checkpoint,
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "30000",
-                "--tp-size",
-                str(receipt["evaluation"]["gpus"]),
-                *receipt["evaluation"]["external_server_args"],
-            ]
+            if not receipt["evaluation"]["external_server_args"]:
+                server_receipt = output / "server-receipt.json"
+                write_json(server_receipt, receipt)
+                server_args = [sys.executable, __file__, "serve", str(server_receipt), "--results", str(output)]
+            else:
+                server_args = [
+                    sys.executable,
+                    "-m",
+                    "sglang.launch_server",
+                    "--model-path",
+                    checkpoint,
+                    "--trust-remote-code",
+                    "--tokenizer-path",
+                    checkpoint,
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "30000",
+                    "--tp-size",
+                    str(receipt["evaluation"]["gpus"]),
+                    *receipt["evaluation"]["external_server_args"],
+                ]
             with (output / "server.log").open("a") as log:
                 server = subprocess.Popen(server_args, env=env, stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 600
@@ -511,7 +564,7 @@ def run_evaluation_locked(receipt, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("run", "publish"))
+    parser.add_argument("command", choices=("run", "publish", "serve"))
     parser.add_argument("receipt", type=Path)
     parser.add_argument("--results", type=Path)
     parser.add_argument("--wandb-run", help="entity/project/run_id, after offline training has been synced")
@@ -519,6 +572,8 @@ def main():
     receipt = json.loads(args.receipt.read_text())
     if args.command == "run":
         run_evaluation(receipt)
+    elif args.command == "serve":
+        serve(receipt, args.results or result_directory(receipt))
     elif not try_publish(receipt, args.results or result_directory(receipt), wandb_run=args.wandb_run):
         raise SystemExit(1)
 

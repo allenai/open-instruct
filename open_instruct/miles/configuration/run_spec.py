@@ -231,7 +231,7 @@ class RunSpec:
             validation.number(
                 cache["publish_interval_seconds"], "compiler_cache.publish_interval_seconds", exclusive_min=True
             )
-        for key in ("enabled", "restore", "diagnostics"):
+        for key in ("enabled", "restore", "diagnostics", "tilelang"):
             if key in cache:
                 _boolean(cache[key], f"compiler_cache.{key}")
         if "shared_root" in cache:
@@ -412,6 +412,7 @@ class RunSpec:
             validation.mapping(launch[key], f"launch.{key}")
             if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in launch[key]):
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
+        validation.ray_cpus(launch["env"])
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         if launch["cluster"] in COMPAT_DRIVER_CLUSTERS and "LD_LIBRARY_PATH" not in launch["secrets"]:
@@ -564,6 +565,7 @@ class RunSpec:
             "shared_root": "compiler_cache_root",
             "restore": "compiler_cache_restore",
             "diagnostics": "compiler_cache_diagnostics",
+            "tilelang": "compiler_cache_tilelang",
             "max_storage_bytes": "compiler_cache_max_storage_bytes",
             "publish_interval_seconds": "compiler_cache_publish_interval_seconds",
         }.items():
@@ -693,6 +695,7 @@ class RunSpec:
             "rollout_shuffle": self.data["shuffle"],
             "loss_type": "policy_loss",
             "advantage_estimator": "grpo",
+            "calculate_per_token_loss": False,
             "use_rollout_logprobs": False,
             "grpo_std_normalization": False,
             "eps_clip": 0.2,
@@ -735,8 +738,6 @@ class RunSpec:
         )
         miles.setdefault("global_batch_size", miles["rollout_batch_size"] * miles["n_samples_per_prompt"])
         miles.setdefault("sglang_max_total_tokens", max(524288, miles["sglang_max_running_requests"] * length))
-        if miles.get("use_rollout_routing_replay"):
-            miles.setdefault("use_miles_router", True)
         if controls.get("policy_drift_action", ("fail", ""))[0] != "fail":
             raise InputError("policy_drift_action=warn is not implemented by Core; select fail")
         correction = controls.get("off_policy_correction", ("tis", ""))[0]

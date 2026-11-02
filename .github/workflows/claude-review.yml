@@ -207,7 +207,7 @@ jobs:
             --strict-mcp-config
             --mcp-config '{"mcpServers":{}}'
             --permission-mode dontAsk
-            --max-turns 30
+            --max-turns 60
             --json-schema '{"type":"object","properties":{"review":{"type":"string","minLength":1}},"required":["review"],"additionalProperties":false}'
           prompt: |
             Review PR #${{ steps.pr.outputs.number }} in ${{ github.repository }}.

@@ -142,6 +142,40 @@ Before changing the pin again, verify CPU imports, an application build and GPU
 forward/backward and training on the intended hardware. CPU imports alone do not
 establish GPU correctness.
 
+## Startup dependencies
+
+Managed GRPO starts judge loading, Ray startup, and workflow model/data preparation
+concurrently after assigning GPUs and discovering judge endpoint addresses. Ray
+readiness and judge known-answer canaries run in separate supervised subprocesses.
+The driver waits for the exact Ray layout before placement; it waits for judge
+qualification before generation or evaluation. Readiness files live in the fresh
+attempt directory, with peer-failure propagation. After replica rendezvous, rank
+zero writes one `startup.json` deadline shared by all supervisors, readiness
+probes, and driver barriers. Inventory and service launch consume that same
+budget; starting a later stage does not reset it. Post-training completion has
+its own timeout.
+
+On disaggregated runs with an explicit rollout count and resident inference,
+trainer initialization/cache restoration overlaps inference initialization.
+Connecting trainer parallelism metadata and restoring the rollout cursor remains
+a barrier after both branches finish, before initial weight publication. Colocated,
+offloaded-inference, and epoch-derived schedules retain sequential initialization.
+OPD uses its separate launcher and does not pass through this GRPO supervisor.
+
+A failed or cancelled initialization joins its sibling tasks before driver cleanup;
+the worker manager owns partially initialized remote workers. Cluster supervision
+also terminates outstanding readiness subprocesses. Judge liveness monitoring
+starts only after its HTTP endpoint becomes ready.
+
+For measurement, the attempt directory contains process start receipts, readiness
+timestamps. Each probe writes its own timeline under `ray-readiness/driver_timing.jsonl`
+or `judge-readiness/driver_timing.jsonl`, avoiding concurrent appends on WEKA. The run
+root has preparation-stage timings; the checkpoint directory has runtime parsing,
+module import, readiness waits, serving/trainer initialization, connection and
+publication timings. Overlapping stage durations must not be added together as
+elapsed startup time. Small-model integration validates ordering and cleanup;
+full-model wall-time savings require measurement on the intended hardware.
+
 ## Local development
 
 The ordinary CPU suite covers configuration, planning, launch specifications,

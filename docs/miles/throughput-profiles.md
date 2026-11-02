@@ -77,7 +77,7 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
    Both producer and HTTP capacity need headroom: raising only one leaves the
    other as a bottleneck. Two waves are a starting point, not a measured guarantee
    of full occupancy; monitor response latency, host memory and stale work.
-   The examples explicitly limit unfinished samples to 1,024 for node and 1,536
+   The examples explicitly limit unfinished samples to 1,024 for node and 3,840
    for three-node. These bounded starting points do not guarantee full engine
    occupancy or steady throughput. Explicit budgets win.
    Larger fleets can produce much more work than the
@@ -258,11 +258,12 @@ supplies the trainer fast enough; the advisory alone is not a reason to raise it
 
 Omitted producer budgets still use two waves of resolved capacity, rounded to
 whole groups (or one collection, whichever is larger). The examples explicitly
-use 1,024 unfinished samples for node and 1,536 for three-node. Without those
-limits their presets would resolve to 6,144 and 19,456 respectively.
-Generic configurations with omitted budgets give 768/2,432 for those topologies.
-Explicit budgets win. Batch 256 and lag 6 are unchanged. One full wave across six
-512-slot engines represents 12 batches, but keeping those slots occupied is a
+use 1,024 unfinished samples for node and 3,840 for three-node. Without those
+limits their presets would resolve to 6,144 and 15,360 respectively.
+Generic configurations with omitted budgets give 1,024/1,920 for those topologies.
+Explicit budgets win. Both learning examples use 128 prompts × 8 responses,
+batch 1,024 and lag 12. One full wave across six
+512-slot engines represents three batches, but keeping those slots occupied is a
 different objective from keeping the trainer supplied. Neither batch-equivalents
 nor a static lag limit predicts drain time or actual policy age.
 Measure useful consumption, queue age/discards and publication latency in the
@@ -378,6 +379,41 @@ compilation can occur.
 
 ## How the limits interact
 
+Core refresh routing replay is decoded in distributed HTTP workers before Ray
+returns the numeric arrays to the producer. The same workers also turn the
+engine's per-token logprob records, one small list per generated token, into
+two flat arrays, so Ray moves buffers into the producer instead of rebuilding
+several Python objects per token there. Python's garbage collector schedules
+full collections by counting container allocations, and each full collection
+walks every live container the producer holds, so bursts of nested per-token
+records were the main trigger for producer event-loop pauses. Worker logs
+separate replay decode and record compaction wall time, thread CPU time, and
+sizes from JSON parsing. The producer still validates replay shape and policy
+metadata. Decoding remains synchronous within each HTTP actor; it does not
+remove batch preparation from the coordinator, and converted samples still
+hold their token, mask and logprob lists. The earlier transport runs used a completed
+buffer of eight optimizer batches (512 groups / 4,096 samples) with a
+policy-lag limit of six. The current three-node template uses the same group
+capacity, now four batches of 1,024 samples, with lag 12. Capacity alone does
+not guarantee all queued work stays usable.
+
+The three-node template gives the trainer a full node (8 GPUs, EP8) and runs
+15 engines plus one judge on the other two. This candidate split was validated
+together with compact token/logprob transport. The
+[preceding EP4 run](https://beaker.org/ex/01M68BB0VMHXJE0SZXK6FYMGF1) and
+[combined EP8 run](https://beaker.org/ex/01M68M0GR6GJXYNEMYG6BSQZ2T) both completed
+32 updates. HTTP-worker-to-producer delivery fell from 41.34 s mean / 164.60 s
+p95 to 0.152 s / 0.218 s with similar response sizes. Across updates 22–32,
+accepted response throughput rose from 26,327 to 33,109 tokens/s; counting all
+32 updates, including early compilation, the gain was about 4%.
+
+The runs changed both transport and placement, and accepted response lengths
+differed. Late-run optimizer time per million model tokens was nearly unchanged
+(16.89 s with EP4 versus 16.64 s with EP8), so this comparison does not establish
+an independent training-efficiency benefit from EP8 or an optimal GPU split.
+Watch trainer wait and stale-group discards after changing the split; the
+producer budget is 256 unfinished samples per engine.
+
 | Control | What it limits | External constraint and tuning signal |
 |---|---|---|
 | Trainer GPUs / EP | Model and optimizer distribution, training time | Expert divisibility, model memory, collective bandwidth; compare training time at the same optimization batch. |
@@ -432,3 +468,78 @@ and explicit GPU allocation. Minimum runtimes vary by tier; see
 separate CPU scheduling policy. Multi-node auto-resume covers the ordinary
 restart path; forced preemption, and restarts of runs carrying a managed judge,
 are not yet supported paths.
+
+
+## Monitoring lag and batch-size trials
+
+Refresh-mode PPO clipping and PPO ESS compare against the trainer's pre-update
+policy. When that anchor comes from the same training forward, they are not
+behavior-policy drift measurements. Use the separate `train/behavior/*` metrics:
+
+| Metric family | Meaning |
+|---|---|
+| `train/behavior/{all,age/*,length/*}/*` | Globally token-weighted trainer-versus-generating-policy log ratios, absolute-error tails, TIS clipping fractions and unclamped behavior-ratio ESS. Age-zero values include numerical serving/training mismatch. |
+| `train/behavior/length/*/{historical_prefix,latest_forward}/*` | The same diagnostics separately for prefixes generated before the final replay version and the final-version suffix, within each response-length bucket. |
+| `train/collection_score/length_*/mean_abs` | Existing score-difference length buckets, now published to tracking as well as JSON. |
+| `rollout/fully_async/completed_queue/*` | Delivered/dropped samples and tokens, with discard fractions by response length and oldest group age. |
+| `rollout/fully_async/*staleness*`, `*generation_version_span*` | Oldest/newest version ages, token-weighted lag and generation version spans. These are policy-update ages, not wall-clock durations. |
+| `train/allocator/rank_*/*` | Allocated, reserved, peak-reserved and inactive-split bytes, plus allocation-retry and OOM counter deltas for each update. Global maxima and counter sums are also logged. |
+| `train/run_consumed_response_tokens` | Cumulative active response tokens, persisted with native checkpoints and restored on resume. Legacy checkpoints without this count warn and omit the metric because their prior total is unknown. Use alongside wall time when comparing batch sizes. |
+
+Behavior ESS measures dispersion of token weights, not independent trajectory
+count. Empty buckets report zero tokens; do not interpret their zero-valued
+summaries as drift. Absolute-error quantiles are histogram upper bounds, with
+an explicit overflow flag. TIS clamps weights rather than dropping clipped
+tokens. None of these diagnostics modifies the loss or admission rules.
+
+For online trial dashboards, set `tracking.wandb_mode = "online"` and bind
+`launch.secrets.WANDB_API_KEY` to your existing workspace secret. Confirm the
+run URL and uploaded metrics after startup; offline mode only stores local data.
+For the allocator trial, use
+`miles.train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }`.
+This is applied to trainer workers before CUDA initialization, rather than to
+all engines through `launch.env`.
+
+A trial combining lag 12, batch 1,024 (128 prompts × 8 responses), four completed
+batches and the existing 3,840 unfinished-sample budget tests length survival
+and drift jointly. Four batches retain the previous 4,096-response capacity.
+Capacity divided by batch size is planning headroom, not a hard bound on age:
+sample backfill can retain additional finished siblings and generation latency
+varies. Budget compilation separately and inspect steady-state length survival;
+this combined trial cannot attribute a change to batch size versus lag alone.
+## Ready-batch and trainer profiling validation
+
+`core.layer_profile_interval = 4` samples every fourth optimizer update, starting
+with update 1; `0` disables it. The Core trainer records block forward/backward
+CUDA-event intervals, host durations and the slowest rank/layer in
+`training_contract_rank*.jsonl`, and publishes per-layer rank maxima to W&B under
+`train/profile/`. Inclusive device intervals include stream waits and CPU enqueue
+gaps; checkpoint recomputation can overlap the forward/backward categories.
+Do not sum these intervals as an exclusive decomposition of trainer time.
+
+Profiled replay updates also record actual per-pack expert-destination skew,
+even with expert-balanced packing disabled. Update-wide router histograms remain
+available on every step. Use both measurements: an overloaded expert is not
+necessarily the slowest layer, and update averages can conceal per-pack skew.
+The current expert-aware scheduler requires multiple EP replicas; an EP8 trainer
+on eight GPUs cannot enable it. EP4 with two replicas is a separate configuration
+candidate once timing identifies a plausible benefit.
+
+Core ready queues drain through the usual per-group staleness and disposition
+checks without scheduling one task per ready group. They yield after an 8 ms
+draining budget. Empty queues retain the worker-failure/cancellation-aware wait.
+Sampled training diagnostics use one bounded writer process: copying happens
+before conversion, writes run asynchronously, and completion/errors are checked
+at the next submission and at shutdown. W&B distinguishes snapshot cost, writer
+backpressure, metric computation, conversion and object-store handoff. Rollout
+metric computation remains synchronous and is measured separately.
+
+Trainer preparation builds token packs once, then binds newly computed scores,
+advantages and returns to those packs. `batch_preparation` records separate
+fetch, packing and validation durations. Existing allocator, staleness, length
+survival and behavior-logprob metrics remain required for validation.
+
+Keep activation recomputation enabled until a representative longest pack has
+been checked on the target GPU. Low PyTorch reserved memory from a checkpointed
+run alone does not establish the peak without checkpointing or account for all
+communication-library allocations.

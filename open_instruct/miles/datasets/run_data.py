@@ -266,6 +266,7 @@ _IF_FACTORIES = frozenset(
         "open_instruct.ground_truth_utils.IFEvalVerifier",
         "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
         "open_instruct.miles.datasets.run_data.ManifestIFVerifier",
+        # Former import path recorded in pre-reorganization reward registries.
         "open_instruct.miles.run_data.ManifestIFVerifier",
     }
 )

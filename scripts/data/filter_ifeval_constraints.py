@@ -4,6 +4,7 @@
 Supports MILES metadata.verifiers and legacy dataset/ground_truth routing. Custom
 verifier aliases must be explicitly trusted with --verifier-name. Rows are never
 rewritten, and existing files (including path aliases) are never overwritten.
+Destination filesystems must support hard links.
 """
 
 import argparse
@@ -137,7 +138,6 @@ def audit(input_path, report_path, *, output_path=None, verifier_names=("ifeval"
                             record["id"] = row["sample_id"]
                         elif isinstance(row.get("metadata"), dict) and "sample_id" in row["metadata"]:
                             record["id"] = row["metadata"]["sample_id"]
-                        metadata = row.get("metadata")
                         for key in ("prepared_sample_id", "custom_id"):
                             if key in row:
                                 record[key] = row[key]
@@ -157,6 +157,7 @@ def audit(input_path, report_path, *, output_path=None, verifier_names=("ifeval"
                 "output": str(output_path.resolve()) if output_path is not None else None,
                 "input_sha256": input_hash.hexdigest(),
                 "output_sha256": kept_hash.hexdigest() if output_path is not None else None,
+                # Also report the would-be output hash in audit-only mode.
                 "kept_sha256": kept_hash.hexdigest(),
                 "verifier_names": sorted(names),
                 **counts,

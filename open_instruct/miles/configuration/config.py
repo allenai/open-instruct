@@ -27,17 +27,20 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
-    reward_zero_truncated: bool = False
+    reward_zero_truncated: bool = True
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
+    layer_profile_interval: int = 0
     pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     publication_mode: str = "barrier"
+    # One batch ahead for disaggregated refresh with one optimizer update per collection.
+    prepared_batch_overlap: bool = True
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
     refresh_request_timeout: float = 1800.0
@@ -47,6 +50,7 @@ class CoreConfig:
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
+    compiler_cache_tilelang: bool = False
     compiler_cache_max_storage_bytes: int = 8 * 1024**3
     compiler_cache_publish_interval_seconds: float = 600.0
     checkpoint_profile: bool = False
@@ -111,6 +115,7 @@ class CoreConfig:
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
+        validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
         for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):
@@ -152,7 +157,7 @@ class CoreConfig:
             raise constraints.error("core.row_specialization must be static or dynamic")
         if self.expert_publication not in ("per_expert", "fused"):
             raise constraints.error("core.expert_publication must be per_expert or fused")
-        for name in ("diagnostic_interval", "scoring_check_interval"):
+        for name in ("diagnostic_interval", "scoring_check_interval", "layer_profile_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
         if self.pipeline_observation_interval < 0:
@@ -173,6 +178,7 @@ class CoreConfig:
             "compiler_cache",
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
+            "compiler_cache_tilelang",
             "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",
@@ -285,8 +291,19 @@ class RunConfig:
     inference_profile: dict[str, Any] | None = None
 
     def resolved_miles(self) -> dict[str, Any]:
-        """Resolve the default group filter for plans, native argv and direct CLI callers."""
+        """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
+        options.setdefault("calculate_per_token_loss", False)
+        if not options.get("use_miles_router", False):
+            # Mirror the pinned MILES Core invariant during offline planning.
+            # Core owns request retries and weight-ready membership. Refuse
+            # conflicting overrides rather than silently restoring serving defaults.
+            for name in ("router_disable_retries", "router_disable_health_check", "router_disable_circuit_breaker"):
+                if options.get(name) is False:
+                    raise constraints.error(f"Core Rust routing requires miles.{name}=true")
+                options[name] = True
+            if not options.get("sglang_router_policy"):
+                options.setdefault("router_policy", "round_robin")
         if self.core.fp32_lm_head:
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
@@ -514,11 +531,9 @@ class RunConfig:
                 raise constraints.error(
                     f"Core RL has no implementation for miles.{name}", constraints.Category.NOT_IMPLEMENTED
                 )
-        if options.get("use_rollout_routing_replay", False) and not options.get("use_miles_router", False):
-            raise constraints.NATIVE_CONSTRAINTS["use_rollout_routing_replay"].error()
         if self.core.replay_diagnostics and not options.get("use_rollout_routing_replay", False):
             raise constraints.error(
-                "core.replay_diagnostics requires rollout routing replay; set miles.use_rollout_routing_replay=true and miles.use_miles_router=true, or disable replay_diagnostics."
+                "core.replay_diagnostics requires rollout routing replay; set miles.use_rollout_routing_replay=true, or disable replay_diagnostics."
             )
         if options.get("fully_async", False):
             if options.get("colocate", False) or options.get("offload_rollout", False):
@@ -611,8 +626,6 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
-        if not options.get("use_miles_router", False):
-            raise constraints.error("refresh requires miles.use_miles_router=true to retain policy-span metadata")
         if not options.get("use_tis", False) or options.get("use_rollout_logprobs", False):
             raise constraints.error("refresh requires miles.use_tis=true and miles.use_rollout_logprobs=false")
         if options.get("advantage_estimator", "grpo") != "grpo":

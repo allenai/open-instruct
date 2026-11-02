@@ -398,7 +398,8 @@ def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
     assert judge["CUDA_VISIBLE_DEVICES"] == "MIG-a,MIG-b"
 
 
-def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch):
+@pytest.mark.parametrize("manual", [False, True])
+def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch, manual):
     runner = evaluation_runner
     task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
     task = {**task, "arguments": {**task["arguments"], "h5py_host_path": str(tmp_path / "data.h5")}}
@@ -407,6 +408,9 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     checkpoint.mkdir()
     for filename in ("config.json", "tokenizer_config.json"):
         (checkpoint / filename).write_text("{}")
+    if manual:
+        three_node.evaluation["provider_kwargs"] = {"profile": "generic"}
+        three_node.evaluation["external_server_args"] = ["--disable-cuda-graph"]
     receipt = {"tasks": [task], "checkpoint": str(checkpoint), "evaluation": three_node.evaluation}
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,7")
     policy, evaluator = runner.gpu_environments(receipt)
@@ -425,8 +429,14 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     monkeypatch.setattr(runner, "try_publish", Mock())
     runner.run_evaluation_locked(receipt, tmp_path)
     args = start.call_args.args[0]
-    assert "sglang.launch_server" in args
-    assert args[args.index("--model-path") + 1] == str(checkpoint)
+    if manual:
+        assert "sglang.launch_server" in args
+        assert args[args.index("--model-path") + 1] == str(checkpoint)
+        assert "--disable-cuda-graph" in args
+    else:
+        assert args[2] == "serve"
+        frozen = json.loads(Path(args[3]).read_text())
+        assert frozen["checkpoint"] == str(checkpoint)
+        assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
     assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
-    assert "--context-length" in args
     server.terminate.assert_called_once()

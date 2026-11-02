@@ -3,6 +3,7 @@ import json
 import pytest
 
 from open_instruct import ifeval_constraints
+from open_instruct.IFEvalG import instructions
 
 
 def bundle(instruction_id="count:lowercase_counting", **kwargs):
@@ -78,6 +79,16 @@ def test_invalid_n(n, instruction_id, prefix):
 @pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 100])
 def test_positive_lowercase_repetition_caps_are_kept(n):
     assert ifeval_constraints.if_training_issues(bundle(N=n)) == []
+
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_admitted_lowercase_caps_match_checker_semantics(n):
+    target = bundle(N=n)
+    assert ifeval_constraints.if_training_issues(target) == []
+    checker = instructions.LowercaseCountingChecker("count:lowercase_counting")
+    checker.build_description(**target["kwargs"][0])
+    assert checker.check_following("one two three four")
+    assert not checker.check_following(" ".join(["repeat"] * (n + 1)))
 
 
 @pytest.mark.parametrize("n", [1, 2, 3])

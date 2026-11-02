@@ -272,6 +272,24 @@ def test_repeatable_toml_overrides_before_compilation(tmp_path):
         RunSpec.load(path, ["model.source=unquoted"])
 
 
+@pytest.mark.parametrize("value", ["false", "true", '"false"'])
+def test_prepared_batch_overlap_toml_round_trip_and_type(tmp_path, value):
+    path = tmp_path / "run.toml"
+    path.write_text(
+        'schema_version=1\nname="test"\n[model]\nsource="model"\n[output]\nroot="run"\n'
+        '[[data.tasks]]\ntask="gsm8k"\ntrain_count=8\neval_count=4\n'
+        f"[core]\nprepared_batch_overlap={value}\n"
+    )
+    if value == '"false"':
+        with pytest.raises(ValueError, match="prepared_batch_overlap"):
+            RunSpec.load(path).compile()
+        return
+    run = RunSpec.load(path)
+    restored = RunSpec.from_dict(run.to_dict(), config_path=path)
+    assert run.compile().core.prepared_batch_overlap is (value == "true")
+    assert restored.compile().core.prepared_batch_overlap is (value == "true")
+
+
 @pytest.mark.parametrize(
     "override,match",
     [
@@ -384,7 +402,7 @@ def test_all_researcher_examples_compile_to_native_arguments():
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
             assert config.core.publication_mode == "refresh"
-            assert config.core.max_policy_lag == 6
+            assert config.core.max_policy_lag == 12
         else:
             assert config.core.publication_mode == "barrier"
             assert config.core.filter_zero_std_groups is False
@@ -460,10 +478,11 @@ def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
     default = spec(tmp_path).compile().core
     assert default.compiler_cache_max_storage_bytes == 8 * 1024**3
     assert default.compiler_cache_publish_interval_seconds == 600
-    run = spec(tmp_path, compiler_cache={"max_storage_bytes": 1024, "publish_interval_seconds": 30})
+    run = spec(tmp_path, compiler_cache={"max_storage_bytes": 1024, "publish_interval_seconds": 30, "tilelang": True})
     config = run.compile().core
     assert config.compiler_cache_max_storage_bytes == 1024
     assert config.compiler_cache_publish_interval_seconds == 30
+    assert config.compiler_cache_tilelang is True
     restored = RunSpec.from_dict(run.to_dict(), config_path=tmp_path / "other.toml").compile().core
     assert restored == config
     assert spec(tmp_path, compiler_cache={"max_storage_bytes": 0}).compile().core.compiler_cache_max_storage_bytes == 0
@@ -479,6 +498,7 @@ def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
         ("publish_interval_seconds", -1),
         ("publish_interval_seconds", True),
         ("publish_interval_seconds", float("nan")),
+        ("tilelang", "false"),
     ],
 )
 def test_invalid_cache_publication_controls_are_rejected(tmp_path, field, value):

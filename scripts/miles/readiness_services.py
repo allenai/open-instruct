@@ -74,7 +74,8 @@ def exercise(upstream):
             ("exhausted-gateway", [503] * (retries + 1), True, 0.0, False),
             ("healthy-after-exhaustion", [], True, 1.0, False),
             ("rate-limit-retry-after", [429], True, 1.0, False),
-            ("sample-rejection", [500], True, 0.0, False),
+            ("transient-500", [500], True, 1.0, False),
+            ("sample-rejection", [500] * (len(code_rewards.HTTP_500_RETRY_SLEEPS) + 1), True, 0.0, False),
         ):
             state.update(statuses=statuses.copy(), attempts=[], forwarded=0)
             started = time.monotonic()

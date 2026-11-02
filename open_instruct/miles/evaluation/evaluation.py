@@ -19,6 +19,7 @@ from pathlib import Path
 
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.evaluation import evaluation_runner
 from open_instruct.miles.infrastructure import artifacts as state
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -121,6 +122,9 @@ def parse(value, launch):
         raise InputError(
             "evaluation.provider_kwargs cannot override snapshot, tokenizer, model registration or GPU allocation"
         )
+    # Resolve against the checkpoint and assigned GPU inside the evaluator, not
+    # the training cluster. Explicit generic remains available for unqualified models.
+    value["provider_kwargs"] = kwargs = {"profile": "auto", **kwargs}
     server_args = value["external_server_args"]
     if not isinstance(server_args, list) or any(not isinstance(arg, str) for arg in server_args):
         raise InputError("evaluation.external_server_args must be a list of SGLang arguments for SciCode")
@@ -157,6 +161,16 @@ def parse(value, launch):
         if kind not in ("task", "external"):
             raise InputError("evaluation task kind must be task or external")
         if kind == "external":
+            if server_args and kwargs["profile"] != "generic":
+                raise InputError(
+                    "Profiled SciCode evaluation uses evaluation.provider_kwargs for serving settings. "
+                    "Remove external_server_args, or select profile=generic for a manually configured server."
+                )
+            if not server_args:
+                try:
+                    evaluation_runner.scicode_server_options(kwargs)
+                except ValueError as error:
+                    raise InputError(str(error)) from error
             if name != "scicode":
                 raise InputError("Only scicode external evaluation has a supported artifact validation contract")
             if any(task.get(key) for key in ("generation", "scoring", "harness", "harness_preset")):
