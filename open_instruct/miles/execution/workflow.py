@@ -61,25 +61,27 @@ def recovery_configuration_matches(root, previous, document):
 
 
 def record_attempt(root, limit):
-    """Append this start to the run's attempt ledger, refusing once the cap is reached.
+    """Record starts; standalone runs cap retries and Beaker owns managed failure caps.
 
-    Beaker restarts a preempted task without limit, so a run that is preempted before it
-    can save advances nothing and restarts forever. Each restart is a fresh process with
-    no memory of the last, so the ledger on the shared filesystem is the only thing that
-    can count them.
-
-    `limit` counts *retries*, so the first start is never refused and -1 disables the cap.
-    It counts every restart, including ones that made progress; a cap on unproductive
-    restarts alone would need the checkpoint state, which is not resolved this early.
+    Beaker allowedTaskRetries bounds application failures while scheduler
+    preemptions are independently resumable. A second all-start cap here would
+    exhaust the failure budget on preemption before a checkpoint can be saved.
+    Standalone runs retain the local cap, with -1 disabling it.
     """
     path = Path(root) / "attempts.json"
     attempts = json.loads(path.read_text()) if path.is_file() else []
-    if limit >= 0 and len(attempts) > limit:
+    # Beaker caps failed-task retries separately from scheduler preemptions.
+    # Keep the local cap for standalone runs; record all managed starts without
+    # making a scheduler preemption consume the application failure budget.
+    beaker_managed = bool(os.environ.get("BEAKER_JOB_ID") and os.environ.get("BEAKER_WORKLOAD_ID"))
+    if not beaker_managed and limit >= 0 and len(attempts) > limit:
         raise InputError(
             f"Run reached launch.max_retries={limit} after {len(attempts)} starts: {root}. "
             "Raise launch.max_retries to allow more, or choose a new output.root."
         )
-    attempts.append(dict(attempt=len(attempts), started_unix=time.time()))
+    attempts.append(
+        dict(attempt=len(attempts), started_unix=time.time(), beaker_job_id=os.environ.get("BEAKER_JOB_ID"))
+    )
     write_json(path, attempts)
     return attempts
 

@@ -321,3 +321,15 @@ def test_a_run_recorded_before_the_cap_existed_still_resumes(spec):
     previous = json.loads((root / "workflow.json").read_text())
     previous["spec_sha256"] = workflow.fingerprint(recorded)
     assert workflow.recovery_configuration_matches(root, previous, spec.to_dict())
+
+
+def test_beaker_retry_cap_is_owned_by_scheduler(spec, monkeypatch):
+    monkeypatch.setenv("BEAKER_JOB_ID", "job-1")
+    monkeypatch.setenv("BEAKER_WORKLOAD_ID", "experiment-1")
+    spec.launch["max_retries"] = 0
+    for _ in range(5):
+        with workflow.run_directory(spec):
+            pass
+    attempts = json.loads((Path(spec.output["root"]) / "attempts.json").read_text())
+    assert len(attempts) == 5
+    assert attempts[-1]["beaker_job_id"] == "job-1"

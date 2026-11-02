@@ -74,7 +74,9 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     [({}, "256 GiB", "200 GiB"), ({"memory": "128 GiB", "shared_memory": "32 GiB"}, "128 GiB", "32 GiB")],
 )
 def test_launch_memory_request(tmp_path, settings, memory, shared):
-    run = spec(tmp_path, trainer={"gpus": 1}, inference={"gpus": 1, "placement_mode": "disaggregated"}, launch=settings)
+    run = spec(
+        tmp_path, trainer={"gpus": 1}, inference={"gpus": 1, "placement_mode": "disaggregated"}, launch=settings
+    )
     resources = launch.specification(IMAGE_ID, run)["tasks"][0]["resources"]
     assert resources == {"gpuCount": 2, "memory": memory, "sharedMemory": shared}
 
@@ -655,3 +657,12 @@ def test_image_wrapper_dispatches_to_package_without_a_debug_script(tmp_path, fa
 def test_the_preflight_script_accepts_every_backend_the_launcher_emits():
     source = (Path(launch.__file__).parent / "preflight_attention.py").read_text()
     assert "choices=config.PREFLIGHT_ATTENTION_BACKENDS" in source
+
+
+def test_native_lifecycle_smoke_dispatch_and_native_requirement(tmp_path):
+    run = spec(tmp_path, launch={"env": {"OI_NATIVE_LIFECYCLE_SMOKE": "1", "MILES_HYBRID_NATIVE": "1"}})
+    command = launch.specification(IMAGE_ID, run)["tasks"][0]["arguments"][0]
+    assert "execution.native_smoke /output/submitted-run.json" in command
+    run.launch["env"]["MILES_HYBRID_NATIVE"] = "0"
+    with pytest.raises(Exception, match="requires a single-node native"):
+        launch.specification(IMAGE_ID, run)

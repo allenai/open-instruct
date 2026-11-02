@@ -90,6 +90,10 @@ def specification(image, spec, *, hostnames=None):
         if host_networking
         else "python -m open_instruct.miles train /output/submitted-run.json"
     )
+    if spec.launch["env"].get("OI_NATIVE_LIFECYCLE_SMOKE") == "1":
+        if host_networking or spec.launch["env"].get("MILES_HYBRID_NATIVE") != "1":
+            raise InputError("Native lifecycle smoke requires a single-node native serving run")
+        workload = preflight + "python -m open_instruct.miles.execution.native_smoke /output/submitted-run.json"
     command = (
         "set -euo pipefail\ncd /opt/core-rl\nmkdir -p /output\n"
         f"python -c {shlex.quote(setup)}\n"

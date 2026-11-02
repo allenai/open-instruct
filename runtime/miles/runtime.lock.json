@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Temporary MainlineLadder port: five-scale BF16 HF-backbone serving qualified on Rhea; end-to-end native RL validation pending",
+  "status": "Native Olmicro serving overlay; Rhea end-to-end qualification pending",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "a5ec0c61e1105262746cf7313a9d40960b79166b",
+      "revision": "525732e57e8344264811b430785debbe11975413",
       "private": true
     },
     "olmo-sglang": {
@@ -25,5 +25,11 @@
       "revision": "0fb485ce38733103f7da73973cdf0e74b0fc75db",
       "private": true
     }
+  },
+  "native_sglang": {
+    "upstream_revision": "3145136dcd1238754e0ea2b2ffd546532119c71c",
+    "overlay_revision": "986877f4cd38b090ce2338e685f914cd65c18e8c",
+    "patch_sha256": "845f980958e89e2987158c78437ebe0de7b37fb15e6aa998152b80683ee4346c",
+    "parent_image": "01M607Z48PYPNN0KHVZ5PGYJEG"
   }
 }
