@@ -282,6 +282,49 @@ def test_reserved_batch_does_not_expand_queue_budget(harness):
     asyncio.run(asyncio.wait_for(scenario(), 5))
 
 
+@pytest.mark.parametrize("cancel_after_transfer", [False, True])
+def test_cancel_during_cross_loop_handoff_keeps_checkpoint_prompts(harness, monkeypatch, cancel_after_transfer):
+    h = harness
+
+    async def scenario():
+        await on_producer(seed(h))
+        await h.executor.core_prefetch(1)
+        await h.executor._core_prepared_batch.task
+        h.executor.set_weight_version(3)
+        loop = asyncio.get_running_loop()
+        original = h.producer.release_reservation
+
+        async def transfer(*, consume):
+            if not consume:
+                return await original(consume=False)
+            groups = await original(consume=True) if cancel_after_transfer else None
+            # Cancel on the executor loop after producer-side transfer, before
+            # the cross-thread future can deliver its result to the consumer.
+            loop.call_soon_threadsafe(consumer.cancel)
+            await asyncio.sleep(0.01)
+            return groups if cancel_after_transfer else await original(consume=True)
+
+        monkeypatch.setattr(h.producer, "release_reservation", transfer)
+        consumer = asyncio.create_task(h.executor.core_get_prepared(1))
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+        assert len(h.source._pending_groups) == 2
+        await h.executor.core_cancel_prepared()
+        assert h.producer._reserved_groups is None
+        assert h.producer._output._delegate._capacity == 2
+        assert len(h.removed) == 1
+        h.source.save(0)
+        restored = make_source(h.root, load=h.root)
+        restored.load(0)
+        recovered = restored.get_samples(2)
+        assert [g[0].group_index for g in recovered] == [0, 1]
+        assert all(not sample.tokens for group in recovered for sample in group)
+        await h.executor.core_cancel_prepared()
+        assert len(h.removed) == 1
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
 @pytest.mark.parametrize(
     "override",
     [
