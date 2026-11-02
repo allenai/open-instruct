@@ -62,6 +62,7 @@ def test_startup_assigns_one_port_batch_to_ray_and_local_judges(tmp_path, monkey
         def __init__(self, *args):
             self.thread = SimpleNamespace(start=lambda: None)
             self.health = {}
+            self.pending_health = {}
 
         def wait(self, predicate):
             assert predicate()
