@@ -80,7 +80,8 @@ nonpositive `N` for lowercase and total-letter counting; invalid total-letter
 relations; and total-letter `less than` limits with `N <= 3`. Such tiny total-letter
 limits encourage answers with almost no letters. It also rejects missing or
 invalid paragraph counts/indices and first words, including indices beyond the
-declared paragraph count. These rules apply only to training admission and do
+declared paragraph count and first words containing whitespace or punctuation
+that the checker truncates (`. , ? ! ' "`). These rules apply only to training admission and do
 not change checkers, held-out data or scoring. They are not a complete quality or
 relevance check; admitting a row does not certify it. Explicit response-language
 constraints remain supported.

@@ -136,8 +136,8 @@ def audit(input_path, report_path, *, output_path=None, verifier_names=("ifeval"
                             record["id"] = row["id"]
                         elif "sample_id" in row:
                             record["id"] = row["sample_id"]
-                        elif isinstance(row.get("metadata"), dict) and "sample_id" in row["metadata"]:
-                            record["id"] = row["metadata"]["sample_id"]
+                        elif isinstance(metadata, dict) and "sample_id" in metadata:
+                            record["id"] = metadata["sample_id"]
                         for key in ("prepared_sample_id", "custom_id"):
                             if key in row:
                                 record[key] = row[key]

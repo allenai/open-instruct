@@ -140,6 +140,29 @@ def test_invalid_paragraph_first_word(first_word, reason):
     ) == [f"nth_paragraph_first_word_{reason}_first_word"]
 
 
+@pytest.mark.parametrize(
+    "first_word",
+    ["hello world", " hello", "hello ", "hello\tworld", "hello\nworld"] + [f"hello{char}" for char in ".,?!'\""],
+)
+def test_unmatchable_paragraph_first_word(first_word):
+    args = {"num_paragraphs": 1, "nth_paragraph": 1, "first_word": first_word}
+    assert ifeval_constraints.if_training_issues(bundle("length_constraints:nth_paragraph_first_word", **args)) == [
+        "nth_paragraph_first_word_invalid_first_word"
+    ]
+    checker = instructions.ParagraphFirstWordCheck("length_constraints:nth_paragraph_first_word")
+    checker.build_description(**args)
+    assert not checker.check_following(first_word + " rest")
+
+
+@pytest.mark.parametrize("first_word", ["hello", "Hello", "世界", "hello-world", "hello:world"])
+def test_matchable_paragraph_first_word(first_word):
+    args = {"num_paragraphs": 1, "nth_paragraph": 1, "first_word": first_word}
+    assert ifeval_constraints.if_training_issues(bundle("length_constraints:nth_paragraph_first_word", **args)) == []
+    checker = instructions.ParagraphFirstWordCheck("length_constraints:nth_paragraph_first_word")
+    checker.build_description(**args)
+    assert checker.check_following(first_word + " rest")
+
+
 def test_out_of_bounds_paragraph_and_valid_final_paragraph():
     target = bundle(
         "length_constraints:nth_paragraph_first_word", num_paragraphs=2, nth_paragraph=3, first_word="世界"

@@ -15,6 +15,8 @@ def parse_constraint_bundle(target) -> dict:
 
     Return a fresh dictionary with validated parallel instruction_id/kwargs arrays;
     null kwargs entries become empty dictionaries. Invalid targets raise ValueError.
+    Unwrapping is deliberately more permissive than runtime verifiers: this screen
+    detects unsuitable constraints, not whether a target encoding is scoreable.
     """
     value = target
     for _ in range(32):
@@ -63,6 +65,7 @@ def if_training_issues(target) -> list[str]:
 
     Malformed bundles return ``malformed_target``; callers needing parse details
     should call parse_constraint_bundle directly. No checker or RNG is invoked.
+    Missing arguments are rejected because checkers otherwise choose random defaults.
     """
     try:
         bundle = parse_constraint_bundle(target)
@@ -90,6 +93,12 @@ def if_training_issues(target) -> list[str]:
                 issues.append("nth_paragraph_first_word_nth_exceeds_num_paragraphs")
             if args.get("first_word") is None:
                 issues.append("nth_paragraph_first_word_missing_first_word")
-            elif not isinstance(args["first_word"], str) or not args["first_word"].strip():
+            elif (
+                not isinstance(args["first_word"], str)
+                or not args["first_word"]
+                # The checker extracts one whitespace-delimited token and stops
+                # at these punctuation characters, but compares the whole target.
+                or any(char.isspace() or char in ".,?!'\"" for char in args["first_word"])
+            ):
                 issues.append("nth_paragraph_first_word_invalid_first_word")
     return list(dict.fromkeys(issues))
