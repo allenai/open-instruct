@@ -3,7 +3,9 @@
 # changes: MIXER (C12's four frozen parquets and weights unchanged, plus H170 P1's Superior-Reasoning math/science
 # parquet at 1.0), the arm `sup` with S = round(phi x floor(I / 16)), phi = 16,303 / 28,092 (H167's ctrl), I the
 # arm's packed instance count from its own cache (CACHE, I_ARM below), OUT_ROOT, run names, chrisg_ secrets and the
-# timeout scaled to S. Workspace ai2/olmo-instruct as before. H161's text below is kept for the modes.
+# timeout scaled to S, and no --with_tracking (W&B off by the owner's decision 2026-11-02: chrisg_WANDB_API_KEY gets
+# 403 on ai2-llm; losses are read from the trainer's stdout, logging_steps 1). Workspace ai2/olmo-instruct as before.
+# H161's text below is kept for the modes.
 #
 #   scripts/c12/h170_launch.sh sup <34521|34522> <smoke|resume|train>
 #
@@ -100,7 +102,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
---no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
+--no_save_async --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
