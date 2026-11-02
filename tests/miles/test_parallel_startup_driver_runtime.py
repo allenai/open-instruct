@@ -10,10 +10,14 @@ from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import driver
 
 
-@pytest.mark.parametrize("failure", [None, "serving", "trainer", "connection", "judges", "cancel"])
+@pytest.mark.parametrize(
+    "failure",
+    [None, "serving", "trainer", "serving-after-ready", "trainer-after-ready", "connection", "judges", "cancel"],
+)
 def test_parallel_driver_startup_join_publication_and_cleanup(monkeypatch, tmp_path, failure):
     events = []
     entered = {name: asyncio.Event() for name in ("serving", "trainer")}
+    ready = {name: asyncio.Event() for name in ("serving", "trainer")}
     args = SimpleNamespace(
         olmo_core=CoreConfig(publication_mode="refresh", compiler_cache=False, prepared_batch_overlap=False),
         colocate=False,
@@ -46,7 +50,11 @@ def test_parallel_driver_startup_join_publication_and_cleanup(monkeypatch, tmp_p
                 raise RuntimeError(failure)
             if failure in {"serving", "trainer", "cancel"}:
                 await asyncio.Event().wait()
+            if failure == f"{name}-after-ready":
+                await ready["trainer" if name == "serving" else "serving"].wait()
+                raise RuntimeError(failure)
             events.append(name + "-ready")
+            ready[name].set()
             return (inference, manager, 1) if name == "serving" else models
         finally:
             events.append(name + "-joined")
@@ -113,7 +121,8 @@ def test_parallel_driver_startup_join_publication_and_cleanup(monkeypatch, tmp_p
     else:
         assert events.index("judges-barrier") > events.index("published")
         learner.train.assert_awaited_once()
-    if failure in {None, "connection", "judges"}:
+    if failure in {None, "connection", "judges", "trainer-after-ready"}:
         manager.dispose.assert_awaited_once()
-        learner.dispose.assert_awaited_once()
         inference.dispose.assert_awaited_once()
+    if failure in {None, "connection", "judges", "serving-after-ready"}:
+        learner.dispose.assert_awaited_once()
