@@ -45,7 +45,7 @@ task = {"name": "h174-cache", "image": {"beaker": "$IMAGE"}, "command": ["/bin/b
                     {"name": "HF_HOME", "value": "$H/hf-home"}],
         "datasets": [{"mountPath": f"/weka/{b}", "source": {"weka": b}} for b in
                      ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
-        "result": {"path": "/output"}, "resources": {"cpuCount": 96, "memory": "700GiB"},
+        "result": {"path": "/output"}, "resources": {"cpuCount": 64, "memory": "400GiB"},
         "context": {"priority": "high"},
         "constraints": {"cluster": ["ai2/neptune", "ai2/saturn", "ai2/jupiter", "ai2/ceres", "ai2/hammond", "ai2/phobos"]},
         "timeout": "16h"}
