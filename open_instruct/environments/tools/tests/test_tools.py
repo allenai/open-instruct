@@ -1,4 +1,4 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, YouSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, YouSearchTool, OutcrawlSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
 
 import asyncio
 import dataclasses
@@ -19,6 +19,8 @@ from open_instruct.environments.tools.tools import (
     Crawl4AIBrowseToolConfig,
     JinaBrowseTool,
     JinaBrowseToolConfig,
+    OutcrawlSearchTool,
+    OutcrawlSearchToolConfig,
     PythonCodeTool,
     PythonCodeToolConfig,
     S2SearchTool,
@@ -999,6 +1001,103 @@ class TestYouSearchTool(unittest.TestCase):
     @patch("open_instruct.environments.tools.tools.make_api_request")
     def test_no_results_returns_error(self, mock_api_request):
         result = self._run(APIResponse(data={"results": {"web": []}}), mock_api_request)
+
+        self.assertEqual(result.result, "Query returned no results.")
+
+
+class TestOutcrawlSearchTool(unittest.TestCase):
+    """Tests for OutcrawlSearchTool (keyed Outcrawl Search API)."""
+
+    def setUp(self):
+        patcher = patch.dict("os.environ", {"OUTCRAWL_API_KEY": "test_key"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tool = OutcrawlSearchTool(call_name="search", num_results=2)
+
+    def _run(self, api_response, mock_api_request, tool=None):
+        async def mock_response(*args, **kwargs):
+            return api_response
+
+        mock_api_request.side_effect = mock_response
+        tool = tool or self.tool
+        return asyncio.run(tool.step(EnvCall(id="", name="search", args={"query": "test query"})))
+
+    def test_registry_and_config(self):
+        self.assertIs(TOOL_REGISTRY["outcrawl_search"], OutcrawlSearchToolConfig)
+        self.assertEqual(OutcrawlSearchToolConfig.tool_class, OutcrawlSearchTool)
+        self.assertEqual(OutcrawlSearchToolConfig().num_results, 5)
+        self.assertEqual(self.tool.parameters["required"], ["query"])
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        with self.assertRaisesRegex(ValueError, "Missing OUTCRAWL_API_KEY environment variable"):
+            OutcrawlSearchTool(call_name="search")
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_successful_search(self, mock_api_request):
+        data = {
+            "hits": [
+                {"url": "https://example.com/1", "title": "Result 1", "snippet": "Snippet 1", "rank": 1},
+                {"url": "https://example.com/2", "title": "Result 2", "snippet": "", "rank": 2},
+                {"url": "https://example.com/3", "title": "Result 3", "snippet": "Snippet 3", "rank": 3},
+            ],
+            "usage": {"credits": "0.5"},
+        }
+        result = self._run(APIResponse(data=data), mock_api_request)
+
+        self.assertEqual(result.result, "**Result 1**\nSnippet 1\nSource: https://example.com/1")
+        self.assertEqual(result.metadata["error"], "")
+        kwargs = mock_api_request.call_args.kwargs
+        self.assertEqual(kwargs["url"], "https://api.outcrawl.ai/v1/search")
+        self.assertEqual(kwargs["json_payload"], {"query": "test query", "limit": 2})
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer test_key")
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_limit_is_capped_at_twenty(self, mock_api_request):
+        tool = OutcrawlSearchTool(call_name="search", num_results=50)
+        self._run(APIResponse(data={"hits": []}), mock_api_request, tool=tool)
+
+        self.assertEqual(mock_api_request.call_args.kwargs["json_payload"]["limit"], 20)
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_empty_query_skips_request(self, mock_api_request):
+        result = asyncio.run(self.tool.step(EnvCall(id="", name="search", args={"query": "  "})))
+
+        mock_api_request.assert_not_called()
+        self.assertIn("Empty query", result.metadata["error"])
+
+    @parameterized.expand(
+        [
+            ("unauthorized", "HTTP error: 401 Unauthorized", "OUTCRAWL_API_KEY is valid"),
+            ("payment_required", "HTTP error: 402 Payment Required", "out of credits"),
+            ("rate_limited", "HTTP error: 429 Too Many Requests", "rate limited"),
+        ]
+    )
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_http_errors(self, name, api_error, expected_hint, mock_api_request):
+        result = self._run(APIResponse(error=api_error), mock_api_request)
+
+        self.assertIn(api_error, result.result)
+        self.assertIn(expected_hint, result.metadata["error"])
+        self.assertFalse(result.metadata["timeout"])
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_timeout(self, mock_api_request):
+        result = self._run(APIResponse(error="Timeout after 10 seconds", timed_out=True), mock_api_request)
+
+        self.assertTrue(result.metadata["timeout"])
+        self.assertIn("Timeout after 10 seconds", result.result)
+
+    @parameterized.expand([("not_a_dict", ["unexpected"]), ("hits_not_a_list", {"hits": "oops"})])
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_malformed_response(self, name, data, mock_api_request):
+        result = self._run(APIResponse(data=data), mock_api_request)
+
+        self.assertEqual(result.metadata["error"], "Malformed response from the Outcrawl Search API.")
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_no_results_returns_error(self, mock_api_request):
+        result = self._run(APIResponse(data={"hits": []}), mock_api_request)
 
         self.assertEqual(result.result, "Query returned no results.")
 

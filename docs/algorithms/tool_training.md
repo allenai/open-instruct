@@ -61,6 +61,14 @@ The key implementation idea is that you configure the rollout from the script la
 - **Usage costs:** keyed requests are billed per You.com's pricing. See [you.com/platform](https://you.com/platform?utm_source=allenai-open-instruct&utm_medium=oss_integration&utm_campaign=2026-10-oss-integrations&utm_content=docs) for current rates and credits. Every tool call during rollouts is a billed request.
 - **Attribution:** requests to You.com send `User-Agent: youdotcom-integration/allenai-open-instruct` so You.com can attribute the traffic. The header is set only on requests to You.com, not on other tools' traffic.
 
+### Optional search backend: Outcrawl (`outcrawl_search`)
+
+`outcrawl_search` is another optional alternative to `serper_search`. It takes the same `query` argument and formats results the same way (title, snippet text, source URL).
+
+- **Configuration:** set `OUTCRAWL_API_KEY` to an Outcrawl API key and pass `--tools outcrawl_search`. `num_results` (default 5, at most 20) and `timeout` (default 10 seconds) can be set through the tool config, as with Serper. If `OUTCRAWL_API_KEY` is unset, the tool raises a configuration error when it is created.
+- **API:** requests go to `POST https://api.outcrawl.ai/v1/search`, with the key in an `Authorization: Bearer` header. There is no keyless fallback.
+- **Usage costs:** keyed requests use Outcrawl credits; the free tier includes 1,000 credits a month. See [outcrawl.ai](https://outcrawl.ai) for current rates. Every tool call during rollouts is a billed request.
+
 ## Adding Your Own Tools or Environments
 
 When adding your own tool or environment, there are three potential options:

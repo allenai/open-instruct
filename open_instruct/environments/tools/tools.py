@@ -471,6 +471,107 @@ class YouSearchToolConfig(BaseEnvConfig):
     """Timeout in seconds for the API request."""
 
 
+OUTCRAWL_SEARCH_URL = "https://api.outcrawl.ai/v1/search"
+_OUTCRAWL_HTTP_ERROR_HINTS = {
+    "401": "check that OUTCRAWL_API_KEY is valid",
+    "402": "the Outcrawl account is out of credits",
+    "429": "rate limited by the Outcrawl Search API",
+}
+
+
+class OutcrawlSearchTool(Tool):
+    """
+    Search tool using the Outcrawl Search API (keyed).
+    Requires OUTCRAWL_API_KEY environment variable.
+    """
+
+    config_name = "outcrawl_search"
+    description = "Web search via the Outcrawl Search API"
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "The search query for the web"}},
+        "required": ["query"],
+    }
+
+    def __init__(self, call_name: str, num_results: int = 5, timeout: int = 10) -> None:
+        self.call_name = call_name
+        self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("OUTCRAWL_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "Missing OUTCRAWL_API_KEY environment variable. The outcrawl_search tool requires an Outcrawl API key."
+            )
+
+    async def step(self, call: EnvCall) -> StepResult:
+        """Search the web via the Outcrawl Search API for documents matching the query."""
+        args = coerce_args(self.parameters, call.args)
+        query = args.get("query", "")
+        if not query or not query.strip():
+            result = StepResult(
+                result="", metadata={"error": "Empty query. Please provide a search query.", "runtime": 0}
+            )
+            log_env_call(self.call_name, query or "", result)
+            return result
+
+        start_time = time.time()
+        api_response = await make_api_request(
+            url=OUTCRAWL_SEARCH_URL,
+            timeout_seconds=self.timeout,
+            # The API accepts 1-20 results per request.
+            json_payload={"query": query, "limit": max(1, min(self.num_results, 20))},
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+        )
+
+        error = api_response.error
+        if error:
+            status = error.removeprefix("HTTP error: ")[:3]
+            if error.startswith("HTTP error: ") and status in _OUTCRAWL_HTTP_ERROR_HINTS:
+                error = f"{error} ({_OUTCRAWL_HTTP_ERROR_HINTS[status]})"
+        else:
+            data = api_response.data
+            hits = data.get("hits") if isinstance(data, dict) else None
+            if not isinstance(hits, list):
+                error = "Malformed response from the Outcrawl Search API."
+
+        if error:
+            result = StepResult(
+                result=error,
+                metadata={"error": error, "timeout": api_response.timed_out, "runtime": time.time() - start_time},
+            )
+            log_env_call(self.call_name, query, result)
+            return result
+
+        snippets = []
+        for item in hits[: self.num_results]:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title", "")
+            snippet = item.get("snippet", "")
+            link = item.get("url", "")
+            if snippet:
+                snippets.append(f"**{title}**\n{snippet}\nSource: {link}")
+
+        error = "" if snippets else "Query returned no results."
+        output = "\n\n".join(snippets).strip() if snippets else error
+
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, query, result)
+        return result
+
+
+@dataclass
+class OutcrawlSearchToolConfig(BaseEnvConfig):
+    """Configuration for the Outcrawl Search API tool."""
+
+    tool_class: ClassVar[type[Tool]] = OutcrawlSearchTool
+
+    num_results: int = 5
+    """Number of results to return from the Outcrawl Search API (at most 20)."""
+    timeout: int = 10
+    """Timeout in seconds for the API request."""
+
+
 def _parse_crawl4ai_response(data: dict, include_html: bool, max_content_length: int | None) -> tuple[str, str]:
     """Parse Crawl4AI API response and extract content.
 
@@ -758,6 +859,7 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
     YouSearchToolConfig.tool_class.config_name: YouSearchToolConfig,
+    OutcrawlSearchToolConfig.tool_class.config_name: OutcrawlSearchToolConfig,
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
