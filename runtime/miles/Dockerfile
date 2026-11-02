@@ -37,3 +37,7 @@ RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
 
 RUN python -c "import sglang; import sglang.srt.server_args; import sglang.srt.entrypoints.engine; from importlib.metadata import version; assert sglang.__file__.startswith('/opt/core-rl/sources/sglang/python/'); assert version('sglang-kernel') == '0.4.7'"
+
+# Candidate qualification dependencies pinned for H169.
+RUN uv pip install --system reasoning-gym==0.1.25 rdkit==2025.9.3 openapi-schema-validator==0.6.3
+COPY scripts/data/rl_readiness /opt/core-rl/scripts/data/rl_readiness

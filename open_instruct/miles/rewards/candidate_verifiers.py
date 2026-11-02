@@ -62,6 +62,7 @@ def typed_equal(left, right):
 def validate_target(target):
     if not isinstance(target, dict) or target.get("kind") not in {
         "mcqa",
+        "mcqa_final_choice",
         "format",
         "countdown",
         "knights",
@@ -72,7 +73,7 @@ def validate_target(target):
         raise ValueError("Unsupported candidate target")
     kind = target["kind"]
     value = target.get("value")
-    if kind == "mcqa":
+    if kind in {"mcqa", "mcqa_final_choice"}:
         choices = target.get("choices")
         if (
             not isinstance(choices, list)
@@ -164,6 +165,17 @@ def score(text, target):
     kind = validate_target(target)  # Broken targets must not become model failures.
     final = answer_text(text)
     value = target["value"]
+    if kind == "mcqa_final_choice":
+        # Accept common explicit final-answer forms without searching reasoning.
+        # Multiple/conflicting explicit answers are invalid, including answer dumps.
+        answers = re.findall(r"\\boxed\{\s*([A-Z])\s*\}|(?i:answer)\s*:\s*([A-Z])\b", final)
+        letters = [a or b for a, b in answers]
+        if letters:
+            if len(letters) != 1:
+                return 0.0
+            tail = re.search(r"(?:\\boxed\{\s*([A-Z])\s*\}|(?i:answer)\s*:\s*([A-Z]))[.\s]*$", final)
+            return float(tail is not None and letters[0] == value)
+        return float(re.fullmatch(r"\s*" + re.escape(value) + r"[.\s]*", final) is not None)
     if kind == "mcqa":
         # Preparation appends this exact contract; never search reasoning for a letter.
         match = re.fullmatch(r"Answer:\s*([A-Z])\s*", final.split("\n")[-1])
