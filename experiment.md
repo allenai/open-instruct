@@ -1553,3 +1553,26 @@ so the user was asked for the existing job/session ID or URL. Build context is
 preserved; no image was built and no GPU job submitted. Shared Beaker access and
 Docker build guides now require reusing the existing Hammond job first, and
 asking for its identifier when not visible instead of creating a replacement.
+
+2026-11-02 persistent Hammond environment: user directed creating their regular
+session with `beakernew`. Removed that helper's obsolete `--host-networking`
+line, preserving standard mounts/image/secrets/priority/workspace, then created
+session01M6DDCN3587ZFS04WXTM70HP6 (ai2/michaeln, ai2/oe-other, no GPUs).
+Started05:58:47UTC on hammond-cs-aus-452.reviz.ai2.in. SSH-then-session-exec,
+Docker27.5.1 and tmux verified. Detached tmux session `beaker` and window
+`native-image` remain alive after SSH exits. Build context fetched to
+`/weka/oe-adapt-default/michaeln/olmicro/build-native-20261102-04f283df8`;
+build.log and exit-status are the durable build receipts. Trimmed trailing
+whitespace from BEAKER_TOKEN in the build process only to fix an invalid
+Authorization-header error; no token printed or shared credential modified.
+Parent-image download is active; no published native image claimed yet.
+
+User then reported new scaling-ladders access. Live API confirms requesterAuth=write
+and a Rhea allocation, effective slot limit30. GPU configs/controller switched back
+to ai2/scaling-ladders and original minRuntime2h; budget unchanged. Companion
+commit82239c58c,95launcher tests passed. Image publication still targets
+open-instruct-dev, which does not constrain the GPU experiment workspace.
+The restarted one-time controller now waits for the native image alias, not the
+canceled CPU build experiment; native smoke/main remain gated as before.
+Shared guides now document regular CPU-session creation, Ctrl-b d detachment,
+and verification that both session/build survive disconnects.

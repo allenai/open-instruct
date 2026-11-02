@@ -1100,3 +1100,10 @@ Build-location correction: use the user's existing Hammond job. The dedicated
 queued build was canceled before start and the controller intentionally stopped.
 Waiting for the existing session/job identifier because current API listings
 show none running under michaeln; image/GPU qualification has not happened yet.
+
+Follow-up: created the user's regular persistent Hammond CPU session via the
+corrected beakernew helper, verified SSH/exec, Docker and tmux, and started the
+native build in a detached tmux window. Session/build persist after SSH exits.
+Scaling-ladders write access and Rhea allocation are now verified; configs return
+to that workspace and original2h minimum runtime. Native GPU qualification is
+still pending image publication and the lifecycle gate.

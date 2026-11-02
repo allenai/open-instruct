@@ -1,8 +1,9 @@
 # Olmicro: native SGLang migration and the 450m GSM8K run
 
 Updated November 2, 2026. Status: **native integration implemented; image build
-submitted; native end-to-end RL not yet run**. The user selected
-`ai2/open-instruct-dev` and fully preemptible scheduling (minimum runtime zero). See the
+running in the persistent Hammond session; native end-to-end RL not yet run**.
+Scaling-ladders write access is now verified and GPU runs again target that
+workspace with a two-hour minimum runtime. See the
 [launch preparation](../../experiment.md#native-sglang-450m-gsm8k-launch-preparation-2026-11-02)
 for build identifiers and the one-time launch controller.
 
@@ -158,7 +159,7 @@ prefetch must be reported separately from the 8,000 consumed completions.
 
 Use **one Rhea node with four A6000 GPUs: two OLMo-core learners and two
 independent TP1 native SGLang engines**, matching the completed Core/vLLM
-baseline. The workspace is **`ai2/open-instruct-dev`**, selected by the user, under
+baseline. The workspace is **`ai2/scaling-ladders`**, selected by the user, under
 budget **`ai2/oe-other`**. Keep the same requested host memory, mounts and GPU
 split. This removes the GPU-model confound from the planned training comparison.
 
@@ -169,19 +170,22 @@ backend supported on A6000, retaining the numerical reports and gates. Do not
 silently fall back to the HF bridge or move the main run to different hardware.
 N2 remains gated on the A6000 smoke.
 
-The user initially requested a two-hour minimum runtime, then explicitly chose
-**fully preemptible jobs with minimum runtime 0** on November 2 to use
-`ai2/open-instruct-dev`, which has no Rhea allocation. Current scheduling is
-normal priority, minimum runtime 0, auto-resume enabled; smoke timeout 2h and
-zero failure retries, main timeout 24h and three failure retries. Requested host
-memory remains 128 GiB with 32 GiB shared memory. Both runs may be preempted
-immediately; verify checkpoint restoration rather than assuming auto-resume
-preserves unsaved progress.
+Current scheduling is normal priority, **minimum runtime 2h**, auto-resume enabled;
+smoke timeout 2h and zero failure retries, main timeout 24h and three failure
+retries. Requested host memory remains 128 GiB with 32 GiB shared memory.
+The earlier open-instruct-dev/minimum-zero choice was a temporary fallback while
+scaling-ladders was read-only. Write access and its Rhea allocation are now
+verified; the original protected-runtime plan is restored.
 
-The scaling-ladders permission blocker no longer applies to the selected
-workspace. The native image build remains queued on a CPU node; the controller
-will submit the native smoke when the image is ready, then the main only after
-the smoke/resume gate passes.
+Build images in the user's regular persistent Hammond CPU session. Session
+`01M6DDCN3587ZFS04WXTM70HP6` currently hosts detached tmux window `native-image`.
+Its Weka build directory contains build.log and exit-status receipts. Creating
+with `beakernew` (which uses `--detach`) and disconnecting via Ctrl-b then d leaves the session
+running; these session identifiers must be rechecked before future use. Do not
+create a separate CPU build job when this regular environment can be reused.
+The native image can live in open-instruct-dev while GPU experiments use
+scaling-ladders. The controller will submit the native smoke when the image is
+published, then the main only after the smoke/resume gate passes.
 
 ### Required integration work before N1
 
