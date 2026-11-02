@@ -29,6 +29,7 @@ CUDA initialization and a short training run when the image or driver changes.
 
 
 # Workflow
+- For Olmicro experiment launches, update and show `/home/mnoukhov/olmicro/Plan.md` in chat before every launch: current state, next steps and stoppages. Keep it short and distinguish queued from verified training; add the actual Beaker link after submission. This is the sole maintained project plan. Preserve detailed receipts with run artifacts; legacy experiment/research documents are historical evidence.
 - Begin every GitHub comment published by Codex with a GitHub note alert:
   ```markdown
   > [!NOTE]

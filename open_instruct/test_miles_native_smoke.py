@@ -8,6 +8,19 @@ import pytest
 from open_instruct.miles.execution import native_smoke
 
 
+def test_smoke_requires_actual_nonzero_gradient_evidence():
+    log = "\n".join(
+        [
+            "Core optimizer step 1: {'train/grad_norm': 0.0}",
+            "Core optimizer step 2: {'train/grad_norm': 0.25}",
+            "Core optimizer step 2: {'train/grad_norm': 0.25}",
+            "Core optimizer step 3: {'train/loss': 0.1}",
+        ]
+    )
+    assert native_smoke.nonzero_updates(log) == [2]
+    assert native_smoke.nonzero_updates("checkpoint restored at update 2") == []
+
+
 def test_smoke_rejects_changed_cursor(tmp_path):
     root = tmp_path / "checkpoints"
     path = root / "core/rollout_0000001"
