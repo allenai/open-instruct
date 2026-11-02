@@ -325,6 +325,7 @@ STRUCTURED_FIELDS = {
     "conversion": {"hf_output"},
     "compiler_cache": {
         "diagnostics",
+        "tilelang",
         "enabled",
         "max_storage_bytes",
         "publish_interval_seconds",

@@ -112,6 +112,7 @@ def make_worker(root, world, packed, auxiliary, checkpointing, **router_options)
     sys.argv = ["packing-contract", *run.arguments()]
     args = arguments.parse_args()
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+    worker._observed_response_tokens = 0
     worker.args = args
     worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
     worker.model, worker.optimizer = worker.train_module.model, worker.train_module.optim

@@ -39,6 +39,8 @@ class CoreConfig:
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     publication_mode: str = "barrier"
+    # One batch ahead for disaggregated refresh with one optimizer update per collection.
+    prepared_batch_overlap: bool = True
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
     refresh_request_timeout: float = 1800.0
@@ -48,6 +50,7 @@ class CoreConfig:
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
+    compiler_cache_tilelang: bool = False
     compiler_cache_max_storage_bytes: int = 8 * 1024**3
     compiler_cache_publish_interval_seconds: float = 600.0
     checkpoint_profile: bool = False
@@ -112,6 +115,7 @@ class CoreConfig:
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
+        validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
         for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):
@@ -174,6 +178,7 @@ class CoreConfig:
             "compiler_cache",
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
+            "compiler_cache_tilelang",
             "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",

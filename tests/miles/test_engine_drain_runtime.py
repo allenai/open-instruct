@@ -351,6 +351,7 @@ def test_stale_excess_queue_wakes_producer_without_a_successful_dequeue():
         producer._publication_paused = False
         producer._producer_resumed = asyncio.Event()
         producer._draining_groups = []
+        producer._reserved_groups = None
         producer._interrupted_groups = []
         producer._output = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(buffer_args(), discarded.append))
         original = await producer._output.reserve_drain_capacity(1)

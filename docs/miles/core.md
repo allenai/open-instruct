@@ -304,3 +304,36 @@ The option targets training-versus-serving probability mismatch; its effect on
 learning is not established. FP32 logits double that output tensor's storage;
 measure training memory and step cost for the chosen token/vocabulary sizes. See
 [development defaults](development-defaults.md#opt-in-features).
+
+
+## Prepared batch overlap
+
+`core.prepared_batch_overlap` defaults to `true`. It applies to fully asynchronous,
+disaggregated refresh runs with one optimizer update per collection, publication
+every update, and completed-buffer capacity of at least one collection. Other
+schedules retain sequential acquisition; set the option to `false` to disable it.
+Startup logs report the first unmet eligibility condition when overlap is disabled.
+
+While update N trains, the executor reserves and prepares one batch for the
+currently published policy version plus one. It runs the existing sample
+postprocessing, diagnostic submission, reward normalization, conversion and
+object-store handoff. GPU packing, current-policy scoring and trainer validation
+still run on the trainer. Publication must report the predicted version before
+this batch can be consumed; an unexpected version fails rather than training on
+an incorrectly selected batch.
+
+Reserved prompt groups remain in the checkpoint ledger until consumption. They
+also occupy their original completed-buffer slots, so prefetch does not increase
+the configured pipeline depth. Checkpoints regenerate prepared-but-unused prompts
+on resume. Cancellation joins collection on the producer loop, requeues pristine
+prompts and releases prepared object-store references. Shared-engine evaluation
+keeps sequential acquisition because its generation-drain boundary temporarily
+changes buffer capacity.
+
+`rollout/prepared_batch/*` reports preparation duration, executor-side consumer
+wait and how long the batch was ready before consumption. Continue using the
+driver's `generation_wait` stage for the full exposed wait: executor metrics do
+not include RPC dispatch delay. The completed-queue consumer-wait metric identifies
+waiting for eligible generations within preparation. A longer preparation time
+can therefore be harmless overlap, or genuine inference wait; inspect these
+metrics together.
