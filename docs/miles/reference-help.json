@@ -205,7 +205,7 @@
     "compiler_cache.max_storage_bytes": "Nonnegative bytes per shared cache key; maps to core.compiler_cache_max_storage_bytes (default 8 GiB).",
     "compiler_cache.publish_interval_seconds": "Positive minimum seconds between changed-cache publications; maps to core.compiler_cache_publish_interval_seconds (default 600).",
     "compiler_cache.restore": "Boolean; maps to core.compiler_cache_restore (default true).",
-    "compiler_cache.tilelang": "Boolean; maps to core.compiler_cache_tilelang (default false); experimental TileLang archive restoration.",
+    "compiler_cache.tilelang": "Boolean; maps to core.compiler_cache_tilelang (default false); experimental TileLang persistence (restore and publish), with native-library stamping and private compiler scratch.",
     "compiler_cache.shared_root": "Shared cache path; maps to core.compiler_cache_root. Default shared TTL root documented in cache guide.",
     "conversion.hf_output": "Prepared HF descriptor/export path; default output.root/prepared/hf.",
     "data.eval_prompt_data": "List alternating dataset names and held-out JSONL paths; paths resolve relative to TOML.",

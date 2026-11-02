@@ -10,10 +10,11 @@ import shutil
 import subprocess
 import sys
 import time
+from importlib import util
 from pathlib import Path
 from types import SimpleNamespace
 
-from miles.utils.compiler_cache import startup_cache, tilelang_cache
+from miles.utils.compiler_cache import startup_cache
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
@@ -60,17 +61,15 @@ def child(root, phase):
     args = SimpleNamespace(
         **config.miles,
         olmo_core=dataclasses.replace(
-            config.core, compiler_cache_root=str(root / "shared"), compiler_cache_diagnostics=True
+            config.core,
+            compiler_cache_root=str(root / "shared"),
+            compiler_cache_diagnostics=True,
+            compiler_cache_tilelang=True,
         ),
     )
-    application = Path(importlib.util.find_spec("open_instruct").submodule_search_locations[0]).parent
+    application = Path(util.find_spec("open_instruct").submodule_search_locations[0]).parent
     startup_cache.prepare(args, application_root=application)
-    descriptor = dict(
-        args.olmo_core_startup_cache,
-        slot="trainer-engine-actor-0-0",
-        report_dir=str(run / "reports"),
-        tilelang_runtime=tilelang_cache.compiler_identity(),
-    )
+    descriptor = dict(args.olmo_core_startup_cache, slot="trainer-engine-actor-0-0", report_dir=str(run / "reports"))
     (run / "reports").mkdir()
     os.environ[startup_cache.ENV] = json.dumps(descriptor)
     startup_cache.setup_worker()
@@ -109,17 +108,7 @@ def main():
         child(root, args.phase)
         return
     root.mkdir(parents=True)
-    environment = dict(
-        os.environ,
-        PYTHONDONTWRITEBYTECODE="1",
-        RANK="0",
-        WORLD_SIZE="1",
-        LOCAL_RANK="0",
-        MASTER_ADDR="127.0.0.1",
-        MASTER_PORT="29671",
-        TILELANG_JIT_DIAGNOSTICS="1",
-        TILELANG_KERNEL_CACHE_USE_LIB_STAMP="1",
-    )
+    environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     subprocess.run(
         [
             sys.executable,
@@ -134,7 +123,20 @@ def main():
     for phase in ("cold", "warm"):
         shutil.copytree(root / "fixture", root / phase)
         subprocess.run(
-            [sys.executable, __file__, "--output", str(root), "--phase", phase],
+            [
+                sys.executable,
+                "-m",
+                "torch.distributed.run",
+                "--standalone",
+                "--nnodes=1",
+                "--nproc-per-node=1",
+                "--max-restarts=0",
+                __file__,
+                "--output",
+                str(root),
+                "--phase",
+                phase,
+            ],
             check=True,
             env=environment,
             timeout=900,
@@ -150,6 +152,8 @@ def main():
     assert summaries[0]["events"].get("compile_miss", 0) > 0, summaries
     assert summaries[1]["restore"]["status"] == "hit", summaries
     assert summaries[1]["events"].get("compile_miss", 0) == 0, summaries
+    assert summaries[0]["tilelang"]["publish"]["status"] == "published", summaries
+    assert summaries[1]["tilelang"]["restore"]["status"] == "hit", summaries
     (root / "summary.json").write_text(
         json.dumps({"numerical_checks": "bitwise_equal", "phases": summaries}, indent=2) + "\n"
     )

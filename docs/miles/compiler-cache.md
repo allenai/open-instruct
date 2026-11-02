@@ -70,7 +70,8 @@ remain required.
 
 ## Experimental TileLang persistence
 
-`compiler_cache.tilelang = true` additionally persists TileLang in a separate
+`compiler_cache.tilelang = true` (mapped to `core.compiler_cache_tilelang`)
+additionally persists TileLang in a separate
 `core-tilelang-v1` envelope. This remains opt-in; qualify reuse on the intended
 model, hardware and topology. The pinned
 FLA KDA backward path uses TileLang, so a Triton hit alone cannot eliminate that
@@ -83,8 +84,8 @@ Each worker gets a private TileLang directory and separate compiler scratch.
 Publication rejects active staging exports and snapshots that change during
 copying; it never publishes a partially exported kernel. Restore verifies the
 archive before loading executable artifacts. Each TileLang key has its own
-storage cap. Receipts include a separate `tilelang` restore/publication result;
-`diagnostics = true` also enables TileLang's native JIT phase logs.
+storage cap. Receipts include a separate `tilelang` restore/publication result.
+With `tilelang = true`, `diagnostics = true` also enables TileLang's native JIT phase logs.
 
 ## Publication
 

@@ -151,6 +151,7 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
         )
         monkeypatch.setattr(actor.distributed_utils, "get_gloo_group", lambda: dist.group.WORLD)
         worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+        worker._observed_response_tokens = 0
         worker.args = args
         dense_olmo = json.loads((Path(args.hf_checkpoint) / "config.json").read_text())["model_type"] == "olmo3"
         backend_kinds = []
@@ -328,6 +329,7 @@ def test_row_specialization_training_parity(parsed_args, tmp_path, monkeypatch, 
                 args.olmo_core, row_specialization=mode, activation_checkpointing=recompute
             )
             worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+            worker._observed_response_tokens = 0
             worker.args = args
             worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
             worker.model = worker.train_module.model
@@ -388,6 +390,7 @@ def _single_rank_worker(args, tmp_path, monkeypatch, name):
     args.save = str(tmp_path / name)
     monkeypatch.setattr(actor.distributed_utils, "get_gloo_group", lambda: dist.group.WORLD)
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+    worker._observed_response_tokens = 0
     worker.args = args
     worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
     worker.model = worker.train_module.model
