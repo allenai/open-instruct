@@ -32,12 +32,18 @@ python /tmp/h174_cache_guard.py $H/cache
 [ \$(grep -c 'load_from_disk(cache_path, keep_in_memory=True)' open_instruct/dataset_transformation.py) = 2 ] || { echo H174-PATCH-MISMATCH; exit 7; }
 sed -i 's/load_from_disk(cache_path, keep_in_memory=True)/load_from_disk(cache_path, keep_in_memory=False)/' open_instruct/dataset_transformation.py
 echo H174-PATCH keep_in_memory=False \$(grep -c 'load_from_disk(cache_path, keep_in_memory=False)' open_instruct/dataset_transformation.py)
+# Speed (2026-11-02): memory-mapped over WEKA the collect loop ran at ~40 rows/s (in RAM ~1,500). Stage the verified
+# transformed dataset on node-local disk and point --local_cache_dir there; numpy_sft links back to WEKA, so the cache
+# lands in $H/cache/numpy_sft as before. The cache name does not depend on --local_cache_dir.
+LC=/tmp/h174-lc; mkdir -p \$LC; df -h /tmp | tail -1
+for d in $H/cache/*/; do [ -d \$d ] || continue; n=\$(basename \$d); [ \"\$n\" = numpy_sft ] && continue; SZ=\$(du -sb \$d | cut -f1); AV=\$(df -B1 --output=avail /tmp | tail -1); echo H174-STAGE \$n size \$SZ avail \$AV; [ \$AV -gt \$((SZ + 53687091200)) ] || { echo H174-STAGE-NOSPACE; exit 8; }; cp -r \$d \$LC/\$n; echo H174-STAGED \$n \$(date -u +%FT%TZ); done
+ln -sfn $H/cache/numpy_sft \$LC/numpy_sft
 env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$H/hf-tok PYTHONUNBUFFERED=1 python open_instruct/olmo_core_finetune.py \
   --model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
   --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
   --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
   --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
-  --mixer_list $MIXER --local_cache_dir $H/cache --seed 33333 --cache_dataset_only
+  --mixer_list $MIXER --local_cache_dir \$LC --seed 33333 --cache_dataset_only
 NAME=\$(ls $H/cache/numpy_sft/); [ \$(echo \"\$NAME\" | wc -l) -eq 1 ] || { echo \"expected one cache dir: \$NAME\"; exit 3; }
 echo H174-CACHE \$NAME
 PYTHONPATH=. python /tmp/tokenizer_check.py dir $H/cache/numpy_sft/\$NAME/tokenizer
