@@ -15,12 +15,15 @@ H=/weka/olmo-3p5-post-checkpoints/chrisg/h175
 eval "$(sed -n '/^MODEL=/p;/^P=/p;/^SCIMCQ=/p;/^MIXER=/,/1.0"$/p' "$HERE/h175_launch.sh")"
 [[ "$SCIMCQ" != __* ]] || { echo "set SCIMCQ in h175_launch.sh first" >&2; exit 1; }
 PACK=$(gzip -9c "$LEDGER/experiments/c12/c12_pack.py" | base64 | tr -d '\n')
+# The image (built at 37a119ffd) predates scripts/c12/tokenizer_check.py, so it is shipped like c12_pack.py.
+TCHK=$(gzip -9c "$HERE/tokenizer_check.py" | base64 | tr -d '\n')
 CMD="set -euo pipefail
 echo H175-CACHE-START \$(date -u +%FT%TZ) nproc \$(nproc)
 printf %s '$PACK' | base64 -d | gunzip > /tmp/c12_pack.py
-sha256sum /tmp/c12_pack.py $SCIMCQ
+printf %s '$TCHK' | base64 -d | gunzip > /tmp/tokenizer_check.py
+sha256sum /tmp/c12_pack.py /tmp/tokenizer_check.py $SCIMCQ
 mkdir -p $H/cache $H/hf-tok $H/pack-work
-python scripts/c12/tokenizer_check.py config
+PYTHONPATH=. python /tmp/tokenizer_check.py config
 env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$H/hf-tok PYTHONUNBUFFERED=1 python open_instruct/olmo_core_finetune.py \
   --model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
   --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
@@ -29,7 +32,7 @@ env -u BEAKER_JOB_ID HF_DATASETS_CACHE=$H/hf-tok PYTHONUNBUFFERED=1 python open_
   --mixer_list $MIXER --local_cache_dir $H/cache --seed 33333 --cache_dataset_only
 NAME=\$(ls $H/cache/numpy_sft/); [ \$(echo \"\$NAME\" | wc -l) -eq 1 ] || { echo \"expected one cache dir: \$NAME\"; exit 3; }
 echo H175-CACHE \$NAME
-python scripts/c12/tokenizer_check.py dir $H/cache/numpy_sft/\$NAME/tokenizer
+PYTHONPATH=. python /tmp/tokenizer_check.py dir $H/cache/numpy_sft/\$NAME/tokenizer
 cp $H/cache/numpy_sft/\$NAME/dataset_statistics.json /output/ 2>/dev/null || find $H/cache/numpy_sft/\$NAME -maxdepth 2 -name dataset_statistics.json -exec cp {} /output/ \;
 PYTHONPATH=. python /tmp/c12_pack.py $H/pack-work $H/cache/numpy_sft/\$NAME | tee /output/pack.log
 echo H175-CACHE-DONE \$(date -u +%FT%TZ)"
