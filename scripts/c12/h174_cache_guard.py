@@ -38,6 +38,16 @@ def readable(d):
 
 
 def main(root):
+    # A numpy cache dir is complete only once open-instruct writes its dataset_statistics.json. Partial part files
+    # left by a preempted conversion make the next run "resume", and a fully written set then fails with an
+    # off-by-one IndexError (2026-11-02). Regenerate from the transformed dataset instead of resuming.
+    np_root = os.path.join(root, "numpy_sft")
+    for n in sorted(os.listdir(np_root)) if os.path.isdir(np_root) else []:
+        d = os.path.join(np_root, n)
+        if os.path.isdir(d) and not os.path.isfile(os.path.join(d, "dataset_statistics.json")):
+            dest = os.path.join(os.path.dirname(root.rstrip("/")), f"numpy-partial-{n}-{int(time.time())}")
+            print(f"H174-GUARD-MOVED {d} -> {dest}: no dataset_statistics.json (partial conversion)", flush=True)
+            shutil.move(d, dest)
     for n in sorted(os.listdir(root)):
         d = os.path.join(root, n)
         if n == "numpy_sft" or not os.path.isdir(d):
