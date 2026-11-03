@@ -504,3 +504,10 @@ def test_cache_storage_limit_and_time_cadence_compile_and_roundtrip(tmp_path):
 def test_invalid_cache_publication_controls_are_rejected(tmp_path, field, value):
     with pytest.raises(ValueError, match=field):
         spec(tmp_path, compiler_cache={field: value}).compile()
+
+
+@pytest.mark.parametrize("save", [True, False])
+def test_wall_clock_stop_is_final_without_checkpoint_saving(tmp_path, save):
+    run = spec(tmp_path, core={"max_run_seconds": 60}, training={"save_checkpoints": save})
+    assert run.compile().core.max_run_final is not save
+    assert any("cannot be resumed" in warning for warning in run.plan()["launch_warnings"]) is not save

@@ -174,6 +174,37 @@ def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, 
         workflow.execute(spec)
 
 
+def test_resumable_time_stop_leaves_the_run_open(spec, monkeypatch):
+    root = Path(spec.output["root"])
+    training_calls = []
+
+    def prepare_data(data, hf_checkpoint, output, **kwargs):
+        output.mkdir(exist_ok=True)
+        (output / "train.jsonl").write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
+        (output / "verifiers.json").write_text("{}")
+        return {"prompt_data": str(output / "train.jsonl"), "reward_config": str(output / "verifiers.json")}
+
+    def train(config, *, export_hf):
+        training_calls.append(dict(config.miles))
+        if len(training_calls) == 1:
+            checkpoint = Path(config.miles["save"])
+            checkpoint.mkdir()
+            (checkpoint / "core-latest.json").write_text("{}")
+        return {
+            "completed_rollout_ids": [0],
+            "stopped_for_time": True,
+            "time_stop_resumable": len(training_calls) == 1,
+        }
+
+    monkeypatch.setattr(run_data, "prepare_data", prepare_data)
+    monkeypatch.setattr(workflow, "train_config", train)
+    assert workflow.execute(spec)["status"] == "stopped"
+    assert workflow.execute(spec)["status"] == "complete"
+    assert training_calls[1]["load"] == str(root / "checkpoints")
+    with pytest.raises(InputError, match="already completed"):
+        workflow.execute(spec)
+
+
 @pytest.mark.parametrize("verifier", ["general-quality", "custom-quality"])
 def test_execute_rechecks_missing_judges_before_training_on_resume(spec, tmp_path, monkeypatch, verifier):
     prompt = tmp_path / "train.jsonl"
