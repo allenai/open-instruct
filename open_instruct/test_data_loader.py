@@ -11,6 +11,7 @@ from datasets import Dataset
 
 from open_instruct import data_loader, data_types, model_utils, rl_utils
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
+from open_instruct.rubrics import rubric_utils
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
@@ -214,6 +215,35 @@ class TestMaskTruncatedCompletions(unittest.TestCase):
         self.assertEqual(len(records), 8)
         self.assertEqual([r["finish_reason"] for r in records], finish_reasons)
         self.assertEqual([r["response_tokens"] for r in records], [[i] for i in range(8)])
+
+    @parameterized.parameterized.expand([("immediate", True), ("delayed", False)])
+    def test_saved_traces_keep_scoring_rubrics(self, _name, save_immediately):
+        result, batch = _make_result_and_batch(self.SCORES, ["stop"] * 8)
+        batch.ground_truths = [
+            [json.dumps({"query": f"Q{i // 4}", "rubrics": [{"description": "Original", "weight": 1.0}]})]
+            for i in range(8)
+        ]
+        original_ground_truths = list(batch.ground_truths)
+        advantages = data_loader.compute_group_advantages(np.array(self.SCORES), 4, "standard")
+        evolving_rubrics = [
+            {"positive_rubrics": [{"description": "New", "title": "New"}], "negative_rubrics": []} for _ in range(2)
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rl_utils._rollout_executor, "submit") as submit:
+            if save_immediately:
+                submit.side_effect = lambda fn, *args: fn(*args)
+            rl_utils.save_rollouts_to_disk(tmp, "run", 0, batch, result, advantages, 4, 0)
+            # RubricManager's update replaces entries in the live ground-truth list after saving is queued.
+            rubric_utils.update_ground_truths_with_evolving_rubrics(batch.ground_truths, evolving_rubrics, 4)
+            if not save_immediately:
+                fn, *args = submit.call_args.args
+                fn(*args)
+
+            with open(os.path.join(tmp, "run_rollouts_000000.jsonl")) as f:
+                records = [json.loads(line) for line in f]
+
+        self.assertTrue(all(len(json.loads(gt[0])["rubrics"]) == 2 for gt in batch.ground_truths))
+        self.assertEqual([record["ground_truth"] for record in records], original_ground_truths)
 
 
 if __name__ == "__main__":

@@ -159,12 +159,16 @@ def save_rollouts_to_disk(
     # (e.g. the truncation filter reassigns `responses` and `finish_reasons`). Snapshot the
     # field bindings now so the saver sees the result as it was when traces were requested.
     result_snapshot = copy.copy(result)
+    # Evolving rubrics replace entries in the live batch's ground-truth list after scoring.
+    # Keep the original scoring rubrics regardless of when the worker writes the trace.
+    batch_snapshot = copy.copy(batch)
+    batch_snapshot.ground_truths = list(batch.ground_truths)
     _rollout_executor.submit(
         _save_rollouts,
         save_path,
         run_name,
         step,
-        batch,
+        batch_snapshot,
         result_snapshot,
         advantages,
         num_samples_per_prompt,

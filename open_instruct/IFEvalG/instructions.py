@@ -891,7 +891,10 @@ class JsonFormat(Instruction):
         )
         try:
             json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # Deeply nested output (e.g. "[[[[...") can exceed the JSON decoder's recursion limit. Such output is not
+            # necessarily invalid JSON, but the check cannot confirm it, so it fails this constraint instead of
+            # letting the error escape the verifier and stop training.
             return False
         return True
 
@@ -917,9 +920,11 @@ class ParagraphFirstWordCheck(Instruction):
         if self._num_paragraphs is None or self._num_paragraphs < 0:
             self._num_paragraphs = random.randint(1, _NUM_PARAGRAPHS)
 
+        # A given nth_paragraph is kept even when it exceeds num_paragraphs: the prompt then asks for the
+        # impossible and every answer fails. Redrawing it here made the reward random per call.
         self._nth_paragraph = nth_paragraph
-        if self._nth_paragraph is None or self._nth_paragraph <= 0 or self._nth_paragraph > self._num_paragraphs:
-            self._nth_paragraph = random.randint(1, self._num_paragraphs + 1)
+        if self._nth_paragraph is None or self._nth_paragraph <= 0:
+            self._nth_paragraph = random.randint(1, max(self._num_paragraphs, 1))
 
         self._first_word = first_word
         if self._first_word is None:
@@ -2305,9 +2310,14 @@ class LowercaseCountingChecker(Instruction):
         return ["N"]
 
     def check_following(self, value):
-        """Checks that the response does not contain lowercase words more than N times."""
-        lowercase_words = re.findall(r"\b[a-z]+\b", value)
-        return len(lowercase_words) <= self._N
+        """Checks that no lowercase word appears more than N times.
+
+        The instruction caps how often each lowercase word repeats. Counting all lowercase words together
+        capped the whole answer at N (2-3) lowercase words, which only an empty, all-caps or non-Latin answer
+        could meet.
+        """
+        counts = collections.Counter(re.findall(r"\b[a-z]+\b", value))
+        return max(counts.values(), default=0) <= self._N
 
 
 class LetterCountingChecker(Instruction):
@@ -2341,8 +2351,11 @@ class LetterCountingChecker(Instruction):
         return ["N", "relation"]
 
     def check_following(self, value):
-        """Checks that the response does not contain lowercase words more than N times."""
-        letters = re.findall(r"[a-zA-Z]", value)
+        """Checks the number of letters in the response against N.
+
+        Letters of every script count, so a non-Latin answer cannot meet "less than N letters" for free.
+        """
+        letters = [c for c in value if c.isalpha()]
         if self._relation == "at least":
             return len(letters) >= self._N
         elif self._relation == "less than":
@@ -2389,13 +2402,16 @@ class CountingCompositionChecker(Instruction):
         Returns:
           True if the response meets the requirements; otherwise, False.
         """
-        paragraphs = re.split(r"\s?\*\*\*\s?", value)
+        # Match the instructed spaced divider on its own Markdown line. Allow
+        # horizontal whitespace and CRLF without treating inline stars as dividers.
+        paragraphs = re.split(r"^[ \t]*\*[ \t]+\*[ \t]+\*[ \t]*\r?$", value, flags=re.MULTILINE)
         num_paragraphs = len(paragraphs)
 
         for index, paragraph in enumerate(paragraphs):
             if not paragraph.strip():
                 if index == 0 or index == len(paragraphs) - 1:
                     num_paragraphs -= 1
+                    continue
                 else:
                     return False
 
@@ -2406,8 +2422,9 @@ class CountingCompositionChecker(Instruction):
                 return False
 
             for sentence in sentences:
-                words = instructions_util.nltk.word_tokenize(sentence)
-                num_words = len(words)
+                # split_into_sentences keeps each sentence's terminal ".", which
+                # must not count toward the n_words total.
+                num_words = len(instructions_util.word_tokens(sentence))
 
                 if num_words != self._n_words:
                     return False
@@ -2432,7 +2449,9 @@ class CountUniqueChecker(Instruction):
 
     def check_following(self, value):
         """Checks that the response contains unique words."""
-        words = instructions_util.nltk.word_tokenize(value)
+        # Compare words only; pure-punctuation tokens (".", ",") must not count as
+        # repeated words.
+        words = instructions_util.word_tokens(value)
         unique_words = set(words)
         return len(words) == len(unique_words)
 

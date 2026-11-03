@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# The recorded original General run used olmo_thinker at d928a7c.
+# That template has changed on main; this script is not the original recipe.
+# See "RL Zero chat templates" in scripts/train/olmo3/README.md.
+
 # OLMo 3 model
 MODEL_NAME_OR_PATH="/weka/oe-training-default/ai2-llm/checkpoints/tylerr/long-context/olmo25_7b_lc_64k_6T_M100B_round5-sparkle_6634-pre_s2pdf_gzip2080_cweN-yake-all-olmo_packing_yarn-fullonly_50B-fb13a737/step11921-hf"
 
