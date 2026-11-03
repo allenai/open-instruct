@@ -1,5 +1,6 @@
 """Post-training panel configuration, execution boundaries and completion checks."""
 
+import base64
 import copy
 import hashlib
 import json
@@ -399,7 +400,8 @@ def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
 
 
 @pytest.mark.parametrize("manual", [False, True])
-def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch, manual):
+@pytest.mark.parametrize("normalize", [False, True])
+def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch, manual, normalize):
     runner = evaluation_runner
     task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
     task = {**task, "arguments": {**task["arguments"], "h5py_host_path": str(tmp_path / "data.h5")}}
@@ -408,6 +410,8 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     checkpoint.mkdir()
     for filename in ("config.json", "tokenizer_config.json"):
         (checkpoint / filename).write_text("{}")
+    if normalize:
+        (checkpoint / "generation_config.json").write_text(json.dumps({"top_k": 0, "top_p": 0.9}))
     if manual:
         three_node.evaluation["provider_kwargs"] = {"profile": "generic"}
         three_node.evaluation["external_server_args"] = ["--disable-cuda-graph"]
@@ -431,12 +435,98 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     args = start.call_args.args[0]
     if manual:
         assert "sglang.launch_server" in args
-        assert args[args.index("--model-path") + 1] == str(checkpoint)
+        model_path = args[args.index("--model-path") + 1]
+        assert args[args.index("--served-model-name") + 1] == str(checkpoint)
         assert "--disable-cuda-graph" in args
     else:
         assert args[2] == "serve"
         frozen = json.loads(Path(args[3]).read_text())
-        assert frozen["checkpoint"] == str(checkpoint)
+        model_path = frozen["checkpoint"]
+        assert frozen["served_model_name"] == str(checkpoint)
         assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
+    if normalize:
+        assert model_path != str(checkpoint)
+        assert json.loads((Path(model_path) / "generation_config.json").read_text()) == {"top_k": -1, "top_p": 0.9}
+        assert json.loads((checkpoint / "generation_config.json").read_text())["top_k"] == 0
+    else:
+        assert model_path == str(checkpoint)
     assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
     server.terminate.assert_called_once()
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 1, 50, None])
+def test_sglang_checkpoint_only_translates_disabled_top_k(tmp_path, top_k):
+    source = tmp_path / "hf"
+    source.mkdir()
+    config = {"temperature": 0.7, "top_p": 0.95, "eos_token_id": [1, 2]}
+    if top_k is not None:
+        config["top_k"] = top_k
+    original = json.dumps(config).encode()
+    (source / "generation_config.json").write_bytes(original)
+    (source / "model.safetensors").write_bytes(b"weights")
+    output = tmp_path / "results"
+    checkpoint = evaluation_runner.sglang_checkpoint(str(source), output)
+    view = Path(checkpoint)
+    expected = {**config, "top_k": -1} if top_k == 0 else config
+    assert json.loads((view / "generation_config.json").read_text()) == expected
+    assert (source / "generation_config.json").read_bytes() == original
+    if top_k == 0:
+        assert view != source and (view / "model.safetensors").is_symlink()
+        assert (view / "model.safetensors").resolve() == source / "model.safetensors"
+        assert not view.is_relative_to(output)
+        report = json.loads((output / "sglang-generation-config.json").read_text())
+        assert report["original"] == config and report["normalized"] == expected
+    else:
+        assert view == source
+    assert source.is_dir()
+
+
+def test_sglang_checkpoint_without_generation_config(tmp_path):
+    checkpoint = evaluation_runner.sglang_checkpoint(str(tmp_path), tmp_path / "results")
+    assert checkpoint == str(tmp_path)
+    assert not (tmp_path / "generation_config.json").exists()
+
+
+def test_scicode_reports_original_http_error_without_accepting_zero(scicode_result):
+    path, result = scicode_result
+    result["predictions"][0]["error"] = "BadRequestError: Error code: 400 - top_k must be -1 or at least 1, got 0"
+    path.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match="SciCode problem .* failed: BadRequestError: Error code: 400"):
+        evaluation_runner.completed_scores(path.parent, [{"task": "scicode"}])
+
+
+@pytest.mark.parametrize("name,model", [("wg_judge", "allenai/wildguard"), ("sr_judge", "google/gemma-2b")])
+def test_judge_startup_defaults_preserve_explicit_overrides_and_external_servers(name, model):
+    prefix = f"auxiliary_providers.{name}"
+    harness = {f"{prefix}.kind": "vllm_server", f"{prefix}.model": model}
+    key = f"{prefix}.kwargs.startup_timeout"
+    assert evaluation_runner.judge_harness_defaults(harness) == {**harness, key: 1200}
+    assert key not in harness
+    for extra in ({key: 600}, {f"{prefix}.base_url": "http://judge/v1"}, {f"{prefix}.model": "/local/judge"}):
+        explicit = {**harness, **extra}
+        assert evaluation_runner.judge_harness_defaults(explicit) == explicit
+
+
+def test_new_panel_records_judge_defaults_and_embeds_fixed_runner(three_node):
+    judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
+    assert len(judges) == 6
+    for task in judges:
+        name = "sr_judge" if task["task"].startswith("strongreject") else "wg_judge"
+        key = f"auxiliary_providers.{name}.kwargs.startup_timeout"
+        assert task["harness"][key] == 1200
+        receipt = {
+            "checkpoint": "/frozen/hf",
+            "tasks": [task],
+            "evaluation": three_node.evaluation,
+            "training": {"name": "new-panel"},
+            "update": 100,
+            "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+        }
+        receipt["evaluation"] = {**receipt["evaluation"], "mounts": []}
+        argv = evaluation_runner.command(receipt, "/output")
+        assert argv.index(f"{key}=1200") < argv.index("--task")
+        spec = evaluation.specification(receipt)
+        assert (
+            base64.b64encode(Path(evaluation_runner.__file__).read_bytes()).decode()
+            in spec["tasks"][0]["arguments"][0]
+        )

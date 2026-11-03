@@ -149,6 +149,13 @@ infrastructure errors even when upstream reports success with numeric zero score
 SciCode's sandbox installs its pinned scientific dependencies from the upstream
 lock; account for startup time and registry/package access when qualifying jobs.
 
+SciCode's SGLang serving boundary translates an exported HF `top_k=0` to
+SGLang's equivalent `top_k=-1` using a temporary local checkpoint view. Positive
+values and every other generation setting are preserved; the frozen checkpoint
+is never edited. `sglang-generation-config.json` records the source config hash
+and the exact translation. Infrastructure errors in SciCode predictions remain
+fatal and include the original error in the runner diagnostic.
+
 Safety tasks configure olmo-eval managed WildGuard and StrongREJECT providers.
 WildGuard serves `allenai/wildguard`; StrongREJECT serves `google/gemma-2b` with
 the `qylu4156/strongreject-15k-v1` adapter and its tokenizer. The sandbox evaluator
@@ -156,6 +163,16 @@ image includes the pinned vLLM extra in an isolated environment selected through
 `VLLM_PYTHON`, preserving the policy serving environment. Model access credentials
 (including gated Gemma access) belong in `evaluation.secrets`. Record resolved
 judge revisions and serving settings with qualification results.
+
+The maintained managed WildGuard and Gemma StrongREJECT configurations default
+`auxiliary_providers.<name>.kwargs.startup_timeout` to 1200 seconds. Explicit
+values win; external endpoints and other model configurations are unchanged.
+The resolved value is recorded in new panel receipts and passed to the evaluator's
+server lifecycle, not the vLLM CLI. Readiness still detects exited processes early
+and retains startup logs. This allowance does not change the overall Beaker job
+timeout or any sampling/scoring settings. Slow startup alone does not establish
+whether loading, compilation, or another cause was responsible.
+
 
 Planning rejects the maintained managed `vllm_server` judges that download
 `allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless

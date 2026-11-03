@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -52,6 +53,47 @@ def result_directory(receipt):
     key = receipt["group_id"]
     assert names
     return Path(receipt["evaluation"]["root"]) / "evaluation" / "results" / f"update-{receipt['update']:08d}-{key}"
+
+
+def judge_harness_defaults(harness):
+    """Allow bounded startup time for the maintained, locally managed safety judges."""
+    harness = dict(harness)
+    for name, model in (("wg_judge", "allenai/wildguard"), ("sr_judge", "google/gemma-2b")):
+        prefix = f"auxiliary_providers.{name}"
+        if (
+            harness.get(f"{prefix}.kind") == "vllm_server"
+            and harness.get(f"{prefix}.model") == model
+            and not harness.get(f"{prefix}.base_url")
+        ):
+            harness.setdefault(f"{prefix}.kwargs.startup_timeout", 1200)
+    return harness
+
+
+def sglang_checkpoint(checkpoint, output):
+    """Translate HF's disabled top-k sentinel without changing the frozen snapshot."""
+    source = Path(checkpoint).resolve()
+    config = source / "generation_config.json"
+    original = json.loads(config.read_text()) if config.is_file() else {}
+    if original.get("top_k") != 0:
+        return checkpoint
+    # Keep the view local: result archival must not follow links into model weights.
+    view = Path(tempfile.mkdtemp(prefix="sglang-hf-"))
+    for path in source.iterdir():
+        if path.name != "generation_config.json":
+            (view / path.name).symlink_to(path, target_is_directory=path.is_dir())
+    normalized = {**original, "top_k": -1}
+    write_json(view / "generation_config.json", normalized)
+    write_json(
+        Path(output) / "sglang-generation-config.json",
+        {
+            "source": str(source),
+            "source_config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+            "original": original,
+            "normalized": normalized,
+        },
+    )
+    print("SGLang generation config: normalized HF top_k=0 to top_k=-1", flush=True)
+    return str(view)
 
 
 def command(receipt, output):
@@ -95,7 +137,7 @@ def command(receipt, output):
         **{f"provider.kwargs.{key}": value for key, value in receipt["evaluation"]["provider_kwargs"].items()},
     }.items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
-    for key, value in first.get("harness", {}).items():
+    for key, value in judge_harness_defaults(first.get("harness", {})).items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     for task in receipt["tasks"]:
         args.extend(["--task", task["task"]])
@@ -130,6 +172,7 @@ def serve(receipt, output):
     selector = options.pop("profile", "auto")
     options.update(
         model_path=receipt["checkpoint"],
+        served_model_name=receipt.get("served_model_name", receipt["checkpoint"]),
         tokenizer_path=receipt["checkpoint"],
         trust_remote_code=True,
         tp_size=receipt["evaluation"]["gpus"],
@@ -192,6 +235,8 @@ def validate_predictions(output):
 def validate_scicode(path):
     """SciCode can report success and zero scores after per-problem infrastructure errors."""
     result = json.loads(path.read_text())
+    if result.get("error"):
+        raise ValueError(f"SciCode evaluation failed: {result['error']}")
     rows = result.get("predictions")
     if result.get("name") != "scicode" or result.get("success") is not True or result.get("error") or not rows:
         raise ValueError("Incomplete SciCode evaluation results")
@@ -200,6 +245,8 @@ def validate_scicode(path):
     for row in rows:
         count = row.get("total")
         problem = row.get("problem_id")
+        if row.get("error"):
+            raise ValueError(f"SciCode problem {problem} failed: {row['error']}")
         if (
             not problem
             or problem in ids
@@ -504,10 +551,13 @@ def run_evaluation_locked(receipt, output):
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")
         # SciCode currently requires VLLMServerProvider; all regular tasks use the inline engine.
         if any(task.get("kind") == "external" for task in pending):
+            checkpoint = sglang_checkpoint(checkpoint, output)
             env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
             if not receipt["evaluation"]["external_server_args"]:
                 server_receipt = output / "server-receipt.json"
-                write_json(server_receipt, receipt)
+                write_json(
+                    server_receipt, {**receipt, "checkpoint": checkpoint, "served_model_name": receipt["checkpoint"]}
+                )
                 server_args = [sys.executable, __file__, "serve", str(server_receipt), "--results", str(output)]
             else:
                 server_args = [
@@ -516,6 +566,8 @@ def run_evaluation_locked(receipt, output):
                     "sglang.launch_server",
                     "--model-path",
                     checkpoint,
+                    "--served-model-name",
+                    receipt["checkpoint"],
                     "--trust-remote-code",
                     "--tokenizer-path",
                     checkpoint,

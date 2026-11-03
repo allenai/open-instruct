@@ -192,6 +192,8 @@ def parse(value, launch):
             raise InputError("evaluation task harness must be a table of flat olmo-eval harness overrides")
         if any(key == "provider" or key.startswith("provider.") for key in harness):
             raise InputError("evaluation task harness cannot override the frozen checkpoint provider")
+        if kind != "external":
+            task["harness"] = evaluation_runner.judge_harness_defaults(harness)
         task.setdefault("interval", value["interval"])
         if type(task["interval"]) is not int or task["interval"] < 0:
             raise InputError("evaluation task interval must be a nonnegative integer (0 disables periodic evaluation)")
