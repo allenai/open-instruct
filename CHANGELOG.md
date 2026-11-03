@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add `outcrawl_search`, an optional search tool backed by the keyed Outcrawl Search API (`https://api.outcrawl.ai/v1/search`, `OUTCRAWL_API_KEY`), mirroring `serper_search`'s query schema and result formatting.
+- Add `outcrawl_search`, an optional search tool backed by the keyed Outcrawl Search API (`https://api.outcrawl.ai/v1/search`, `OUTCRAWL_API_KEY`), mirroring `serper_search`'s query schema and result formatting (https://github.com/allenai/open-instruct/pull/2166).
 - Separate MILES Triton cache compatibility from Python provenance, explain cache misses and record compiler timings; add opt-in TileLang persistence with verified private restores and avoid redundant FLA convolution specialization (https://github.com/allenai/open-instruct/pull/2140).
 - Overlap one future-version MILES refresh batch with training while retaining checkpoint recovery and the existing queue budget (https://github.com/allenai/open-instruct/pull/2138).
 - Pin Olmo-SGLang to merged main commit `069dc0a`, retaining the FP32 KDA snapshot fix and aligning declared compatibility with the pinned SGLang runtime (https://github.com/allenai/open-instruct/pull/2132).
