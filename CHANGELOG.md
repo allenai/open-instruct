@@ -1,6 +1,6 @@
 # Changelog
 
-- Normalize HF disabled top-k for SciCode serving, surface original SciCode errors, and give managed safety judges a bounded 20-minute startup allowance.
+- Normalize HF disabled top-k for SciCode serving, surface original SciCode errors, and give managed safety judges a bounded 20-minute startup allowance (https://github.com/allenai/open-instruct/pull/2170).
 
 All notable changes to this project will be documented in this file.
 
