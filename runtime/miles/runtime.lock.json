@@ -1,24 +1,34 @@
 {
   "schema_version": 1,
-  "status": "Native Olmicro decode graphs; GPU qualification pending",
+  "status": "Upstream MILES with native Olmicro; GPU requalification pending",
   "base_image": {
-    "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
-    "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
+    "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
   },
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
-      "revision": "7e97bc43ff25d080ae4fd0eab1050a79caf80e55"
+      "revision": "6ceda6530625caa5d23e3be8a455c600f62a7338"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "525732e57e8344264811b430785debbe11975413",
-      "private": true
+      "revision": "a80add10a58434236e76db8e3bd6e2f17ec56003"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "92b35cdf2771353a9e2c527a5b96b29cbb3d38c8",
-      "private": true
+      "revision": "069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"
+    },
+    "sglang": {
+      "repository": "https://github.com/sgl-project/sglang.git",
+      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+    },
+    "megatron-lm": {
+      "repository": "https://github.com/radixark/Megatron-LM.git",
+      "revision": "235952df607b3820716e5e67728a5ab470ca33ae"
+    },
+    "megatron-bridge": {
+      "repository": "https://github.com/radixark/Megatron-Bridge.git",
+      "revision": "8cd3466d14d2337c8492827b3712482c2b3e4866"
     },
     "scaling-ladders": {
       "repository": "https://github.com/allenai/scaling-ladders.git",
@@ -27,9 +37,8 @@
     }
   },
   "native_sglang": {
-    "upstream_revision": "3145136dcd1238754e0ea2b2ffd546532119c71c",
-    "overlay_revision": "a562a2c24dc095436bc0bb1d0821db7119dcb228",
-    "patch_sha256": "b6663493f0f61e63ea5016024c5ffdf557222a89b24d8cb81cd6698d061c1881",
-    "parent_image": "01M607Z48PYPNN0KHVZ5PGYJEG"
+    "upstream_revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02",
+    "overlay_revision": "4a0d164fe74fd660a9b0a11d2350d1a16ea7e425",
+    "patch_sha256": "f8a98ea3db125fa1b1bba24e0522a89ae1be7fb91839a4dfa2cefab6c020ef9c"
   }
 }

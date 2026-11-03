@@ -61,8 +61,10 @@ def test_core_guards(changes, match):
 )
 def test_miles_guards(changes, match):
     config = configuration()
+    # Exercise expert-packing restrictions independently of the truncation guard.
+    core = dataclasses.replace(config.core, reward_zero_truncated=False)
     with pytest.raises(ValueError, match=match):
-        RunConfig(config.core, {**config.miles, **changes}).validate()
+        RunConfig(core, {**config.miles, **changes}).validate()
 
 
 def test_enabled_hook_and_disabled_native_arguments():

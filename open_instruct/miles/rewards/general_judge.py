@@ -38,7 +38,7 @@ import requests
 from open_instruct import judge_utils, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry, service
+from open_instruct.miles.rewards import judge_registry, judging, service
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -96,7 +96,11 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
         service.number_setting(args, "llm_judge_max_context_length", "OI_MILES_JUDGE_MAX_CONTEXT_LENGTH", 32768)
     )
     temperature = float(service.number_setting(args, "llm_judge_temperature", "OI_MILES_JUDGE_TEMPERATURE", 1.0))
-    timeout = float(service.number_setting(args, "llm_judge_timeout", "OI_MILES_JUDGE_TIMEOUT", 600.0))
+    timeout = float(
+        service.number_setting(
+            args, "llm_judge_timeout", "OI_MILES_JUDGE_TIMEOUT", float(judging.DEFAULT_REQUEST_TIMEOUT)
+        )
+    )
     seed = int(service.number_setting(args, "seed", "OI_MILES_JUDGE_SEED", 1))
     max_concurrent_calls = int(
         service.number_setting(args, "llm_judge_max_concurrent_calls", "OI_MILES_JUDGE_MAX_CONCURRENT_CALLS", 256)

@@ -10,6 +10,7 @@ No packages are installed or existing checkouts modified.
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -62,6 +63,17 @@ def prepare_source(name, source, target, *, cache=None, token_file=None):
     print(f"Prepared {name} at {source['revision']}")
 
 
+def apply_native_overlay(destination, overlay):
+    patch = destination / "miles/patches/sglang-olmicro-native/sglang.patch"
+    if hashlib.sha256(patch.read_bytes()).hexdigest() != overlay["patch_sha256"]:
+        raise ValueError("Native SGLang patch digest mismatch")
+    target = destination / "sglang"
+    if run("git", "rev-parse", "HEAD", cwd=target) != overlay["upstream_revision"]:
+        raise ValueError("Native SGLang patch base mismatch")
+    run("git", "apply", "--check", str(patch.resolve()), cwd=target)
+    run("git", "apply", str(patch.resolve()), cwd=target)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
@@ -76,6 +88,8 @@ def main():
         prepare_source(
             name, source, options.destination / name, cache=caches.get(name), token_file=options.github_token_file
         )
+    if overlay := lock.get("native_sglang"):
+        apply_native_overlay(options.destination, overlay)
     (options.destination / "runtime.lock.json").write_text(json.dumps(lock, indent=2) + "\n")
 
 

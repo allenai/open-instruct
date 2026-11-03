@@ -5,7 +5,6 @@ import json
 import select
 import subprocess
 import sys
-from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -25,7 +24,13 @@ def receipt(tmp_path):
         "update": 1000,
         "group_id": "two-tasks",
         "tasks": [{"task": name, "generation": {"temperature": 0.8}, "scoring": {}} for name in ("a", "b")],
-        "evaluation": {"root": str(tmp_path), "revision": "pinned", "image": "image", "gpus": 1, "server_args": []},
+        "evaluation": {
+            "root": str(tmp_path),
+            "revision": "pinned",
+            "image": "image",
+            "gpus": 1,
+            "provider_kwargs": {},
+        },
         "training": {"wandb": {"mode": "offline"}},
     }
 
@@ -57,7 +62,6 @@ def runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(runner.subprocess, "Popen", start)
     monkeypatch.setattr(runner.subprocess, "run", evaluate)
     monkeypatch.setattr(runner.subprocess, "check_output", lambda *a, **kw: "pinned\n")
-    monkeypatch.setattr(runner.request, "urlopen", lambda *a, **kw: nullcontext(Mock(status=200)))
     copytree = runner.shutil.copytree
 
     def copy_results(src, dst, *args, **kwargs):
@@ -89,7 +93,7 @@ def test_preemption_skips_completed_task_and_preserves_failed_attempt(receipt, r
 
     # A retry after completion neither loads a server nor repeats generation.
     runner.run_evaluation({**receipt, "experiment_id": "replacement"})
-    assert start.call_count == 2
+    start.assert_not_called()
     assert calls == ["a", "b", "b"]
 
 
@@ -103,7 +107,37 @@ def test_retry_after_last_task_before_group_marker_needs_no_server(receipt, runt
     start.assert_not_called()
 
 
-@pytest.mark.parametrize("change", ["checkpoint", "tasks", "revision", "worker"])
+def test_failed_subprocess_prints_bounded_log_and_preserves_error(receipt, monkeypatch, capsys):
+    args = [
+        sys.executable,
+        "-c",
+        "import sys; print('old output\\n' * 2000); print('missing sandbox monitor.sh', file=sys.stderr); sys.exit(7)",
+    ]
+    monkeypatch.setattr(runner, "command", lambda *a: args)
+    # Flush stdout before stderr so the diagnostic is at the end of the log.
+    monkeypatch.setenv("PYTHONUNBUFFERED", "1")
+    with runner.evaluation_output(receipt) as output, pytest.raises(subprocess.CalledProcessError) as error:
+        runner.run_tasks(receipt, output)
+    assert error.value.returncode == 7
+    assert error.value.cmd == args
+    stderr = capsys.readouterr().err
+    assert "missing sandbox monitor.sh" in stderr
+    assert "olmo-eval.log" in stderr
+    assert stderr.count("old output") < 80
+    logs = list(output.rglob("olmo-eval.log"))
+    assert len(logs) == 1
+    assert logs[0].read_text().count("old output") == 2000
+    assert not list(output.rglob("complete.json"))
+
+
+def test_unreadable_failure_log_is_nonfatal(tmp_path, capsys):
+    runner.print_failure_log(tmp_path / "missing.log")
+    assert "Could not read evaluator log" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "change", ["checkpoint", "tasks", "revision", "worker", "provider_kwargs", "external_server_args", "gpus"]
+)
 def test_resume_refuses_changed_inputs_without_overwriting_provenance(receipt, change):
     with runner.evaluation_output(receipt) as output:
         original = (output / "provenance.json").read_bytes()

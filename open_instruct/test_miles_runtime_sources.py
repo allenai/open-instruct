@@ -1,10 +1,9 @@
 """Runtime source preparation fetches immutable commits without modifying them."""
 
-import base64
+import hashlib
 import json
 import shutil
 import sys
-from pathlib import Path
 
 import pytest
 from scripts.miles import build_image, prepare_runtime
@@ -42,60 +41,53 @@ def test_prepare_sources(tmp_path, source_repo, use_cache):
         prepare_runtime.prepare_source("example", source, target)
 
 
-def test_private_fetch_credentials_are_ephemeral(tmp_path, source_repo, monkeypatch):
-    _, source = source_repo
-    source["private"] = True
-    token_file = tmp_path / "token"
-    token_file.write_text("test-token\n")
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Existing")
-    calls = []
-    original_run = prepare_runtime.run
-
-    def record(*args, **kwargs):
-        calls.append((args, kwargs))
-        return original_run(*args, **kwargs)
-
-    monkeypatch.setattr(prepare_runtime, "run", record)
-    target = tmp_path / "prepared"
-    prepare_runtime.prepare_source("example", source, target, token_file=token_file)
-    fetch_args, fetch_kwargs = next(call for call in calls if call[0][:2] == ("git", "fetch"))
-    env = fetch_kwargs["env"]
-    encoded = base64.b64encode(b"x-access-token:test-token").decode()
-    assert env["GIT_CONFIG_COUNT"] == "2"
-    assert env["GIT_CONFIG_KEY_1"] == "http.https://github.com/.extraheader"
-    assert env["GIT_CONFIG_VALUE_1"] == f"AUTHORIZATION: basic {encoded}"
-    assert "test-token" not in str(fetch_args)
-    assert all(not kwargs.get("env") for args, kwargs in calls if args[:2] != ("git", "fetch"))
-    config = (target / ".git/config").read_text()
-    assert "test-token" not in config and encoded not in config and "extraheader" not in config
+def test_native_overlay_validates_digest_and_base(tmp_path, source_repo):
+    repo, source = source_repo
+    destination = tmp_path / "sources"
+    target = destination / "sglang"
+    prepare_runtime.prepare_source("sglang", source, target)
+    patch = destination / "miles/patches/sglang-olmicro-native/sglang.patch"
+    patch.parent.mkdir(parents=True)
+    (repo / "source.txt").write_text("native overlay\n")
+    patch.write_text(prepare_runtime.run("git", "diff", cwd=repo) + "\n")
+    overlay = {"patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest(), "upstream_revision": source["revision"]}
+    with pytest.raises(ValueError, match="digest mismatch"):
+        prepare_runtime.apply_native_overlay(destination, {**overlay, "patch_sha256": "wrong"})
+    with pytest.raises(ValueError, match="base mismatch"):
+        prepare_runtime.apply_native_overlay(destination, {**overlay, "upstream_revision": "wrong"})
+    assert (target / "source.txt").read_text() == "original\n"
+    prepare_runtime.apply_native_overlay(destination, overlay)
+    assert (target / "source.txt").read_text() == "native overlay\n"
 
 
-@pytest.mark.parametrize("credential_source", ["GH_TOKEN", "GITHUB_TOKEN", "gh"])
-def test_image_build_passes_token_as_secret(monkeypatch, credential_source):
-    root = Path(__file__).resolve().parents[1]
-    lock = json.loads((root / "runtime/miles/runtime.lock.json").read_text())
-    monkeypatch.delenv("GH_TOKEN", raising=False)
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    if credential_source != "gh":
-        monkeypatch.setenv(credential_source, "test-token")
-    monkeypatch.setattr(sys, "argv", ["build_image.py", "--base-image", "base", "--tag", "result"])
+@pytest.mark.parametrize("target", ["runtime-base", "application"])
+@pytest.mark.parametrize("base_matches", [True, False])
+def test_image_build_validates_base_and_records_revision(tmp_path, monkeypatch, target, base_matches):
+    lock_path = tmp_path / "runtime/miles/runtime.lock.json"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(json.dumps({"base_image": {"docker_id": "base-digest"}, "sources": {}}))
+    monkeypatch.setattr(build_image, "__file__", str(tmp_path / "scripts/miles/build_image.py"))
+    monkeypatch.setattr(sys, "argv", ["build_image.py", "--base-image", "base", "--tag", "result", "--target", target])
 
     def output(args, **kwargs):
         if args[:3] == ["docker", "image", "inspect"]:
-            return lock["base_image"]["docker_id"]
-        if args[:2] == ["git", "rev-parse"]:
-            return "application-revision"
-        assert args == ["gh", "auth", "token"] and credential_source == "gh"
-        return "test-token\n"
+            return "base-digest" if base_matches else "other-digest"
+        assert args == ["git", "rev-parse", "HEAD"]
+        return "application-revision"
 
     calls = []
     monkeypatch.setattr(build_image.subprocess, "check_output", output)
-    monkeypatch.setattr(build_image.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(build_image.subprocess, "run", lambda args, **kwargs: calls.append(args))
+    if not base_matches:
+        with pytest.raises(ValueError, match="Base image differs"):
+            build_image.main()
+        assert not calls
+        return
     build_image.main()
-    args, kwargs = calls[0]
+    assert len(calls) == 1
+    args = calls[0]
     assert args[args.index("--platform") + 1] == "linux/amd64"
-    assert args[args.index("--secret") + 1] == "id=github_token,env=MILES_BUILD_GITHUB_TOKEN"
-    assert "test-token" not in str(args)
-    assert kwargs["env"]["MILES_BUILD_GITHUB_TOKEN"] == "test-token"
+    assert args[args.index("--target") + 1] == target
+    assert "BASE_IMAGE=base" in args
+    assert "SOURCE_REVISION=application-revision" in args
+    assert "--secret" not in args

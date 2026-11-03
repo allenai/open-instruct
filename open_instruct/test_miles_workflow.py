@@ -21,7 +21,7 @@ class Spec:
         self.launch = {"auto_resume": True, "max_retries": -1}
         self.data = {"tasks": [{"task": "multiplication", "train_count": 1}]}
         self.evaluation = {"mode": "shared"}
-        self.judges = {"judging": {"bindings": {}}}
+        self.judges = {"judges": {}, "rubrics": {}, "judging": {"bindings": {}}}
 
     def to_dict(self):
         return {key: getattr(self, key) for key in ("model", "conversion", "output", "launch", "data")}
@@ -141,6 +141,8 @@ def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, 
     def prepare_data(data, hf_checkpoint, output, **kwargs):
         preparation_calls.append((data.copy(), hf_checkpoint, output, kwargs))
         output.mkdir(exist_ok=True)
+        (output / "train.jsonl").write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
+        (output / "verifiers.json").write_text("{}")
         return {
             "prompt_data": str(output / "train.jsonl"),
             "eval_prompt_data": [],
@@ -170,6 +172,30 @@ def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, 
     assert training_calls[1][1] == spec.output["hf_dir"]
     with pytest.raises(InputError, match="already completed"):
         workflow.execute(spec)
+
+
+@pytest.mark.parametrize("verifier", ["general-quality", "custom-quality"])
+def test_execute_rechecks_missing_judges_before_training_on_resume(spec, tmp_path, monkeypatch, verifier):
+    prompt = tmp_path / "train.jsonl"
+    prompt.write_text(json.dumps({"metadata": {"verifiers": [{"name": verifier, "target": ""}]}}) + "\n")
+    registry = tmp_path / "verifiers.json"
+    registry.write_text(
+        json.dumps({verifier: {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"}})
+    )
+
+    def prepared(*args, **kwargs):
+        assert kwargs["registry_overrides"] == {}
+        return {"prompt_data": str(prompt), "reward_config": str(registry)}
+
+    monkeypatch.setattr(run_data, "prepare_data", prepared)
+    monkeypatch.setattr(workflow, "train_config", lambda *args, **kwargs: pytest.fail("training must not start"))
+    for _ in range(2):
+        with pytest.raises(InputError, match=f"Missing named judge binding.*{verifier}") as error:
+            workflow.execute(spec)
+        assert f'[judging.bindings."{verifier}"]' in str(error.value)
+        state = json.loads((Path(spec.output["root"]) / "workflow.json").read_text())
+        assert state["status"] == "failed"
+        assert "training_started_unix" not in state
 
 
 def test_auto_resume_false_blocks_retry(spec):

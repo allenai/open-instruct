@@ -355,7 +355,13 @@ def audit(options):
         for sample in data["samples"]:
             assert sample["prompt"] == prompts[rollout_id]["input"]
             assert sample["label"] == prompts[rollout_id]["label"]
-            assert set(sample["weight_versions"]) == {str(rollout_id)}
+            spans = [span for call in sample["weight_versions"] for span in call]
+            assert spans and {span["version"] for span in spans} == {str(rollout_id)}
+            cursor = len(sample["tokens"]) - sample["response_length"]
+            for span in spans:
+                assert span["abs_start"] == cursor and span["abs_end"] > cursor
+                cursor = span["abs_end"]
+            assert cursor == len(sample["tokens"])
             assert len(sample["rollout_log_probs"]) == sample["response_length"]
             assert torch.isfinite(torch.tensor(sample["rollout_log_probs"])).all()
             if options.routing_replay:

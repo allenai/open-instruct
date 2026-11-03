@@ -25,7 +25,7 @@ def nonzero_updates(log):
 
 
 def graph_probe(document, root):
-    probe = "/sgl-workspace/sglang/test/manual/olmicro/probe_backend.py"
+    probe = "/opt/core-rl/sources/sglang/test/manual/olmicro/probe_backend.py"
     reports = []
     for mode in ("eager", "graph"):
         output = root / f"{mode}-probe.json"

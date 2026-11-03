@@ -87,6 +87,7 @@ nav:
     - algorithms/trained_model_location.md
     - algorithms/finetune.md
     - algorithms/sft_running_guide.md
+    - algorithms/tpu_sft_guide.md
     - algorithms/dpo.md
     - algorithms/grpo.md
     - algorithms/olmo_core_sharding.md

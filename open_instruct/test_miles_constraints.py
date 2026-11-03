@@ -18,7 +18,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 
 ROOT = Path(__file__).resolve().parents[1]
-SMALL = ROOT / "configs/miles/examples/small.toml"
+DEV = ROOT / "configs/miles/examples/dev.toml"
 
 
 @pytest.mark.parametrize(
@@ -80,9 +80,9 @@ def test_native_collection_preserves_explicit_only_options_and_false_values():
 )
 def test_structured_cli_constraints_still_stop_before_training(override, category):
     with pytest.raises(InputError, match=category.value):
-        RunSpec.load(SMALL, [override])
+        RunSpec.load(DEV, [override])
     result = subprocess.run(
-        [sys.executable, "-m", "open_instruct.miles", "plan", str(SMALL), "--set", override],
+        [sys.executable, "-m", "open_instruct.miles", "plan", str(DEV), "--set", override],
         capture_output=True,
         text=True,
         timeout=20,
@@ -122,3 +122,39 @@ def test_refresh_preserves_categories_from_shared_publication_checks(change, cat
     assert message.startswith(category.value + ":")
     assert message.count(category.value) == 1
     assert "refresh" in message and "engine_drain" not in message
+
+
+@pytest.mark.parametrize(
+    "external",
+    [
+        {"rollout_external_engine_addrs": ["localhost:30000"]},
+        {"custom_inference_engine_provider_path": "custom.provider"},
+    ],
+)
+def test_native_validation_keeps_external_pool_inputs(external):
+    args = SimpleNamespace(
+        hf_checkpoint="fixture",
+        global_batch_size=4,
+        rollout_batch_size=2,
+        n_samples_per_prompt=2,
+        fully_async=True,
+        **external,
+    )
+    fields = constraints.native_values(args, set())
+    with pytest.raises(InputError, match="external rollout"):
+        RunConfig(CoreConfig(publication_mode="engine_drain", max_policy_lag=2), fields).validate()
+
+
+def test_native_default_provider_is_not_external():
+    args = SimpleNamespace(
+        hf_checkpoint="fixture",
+        global_batch_size=4,
+        rollout_batch_size=2,
+        n_samples_per_prompt=2,
+        fully_async=True,
+        rollout_external=False,
+        custom_inference_engine_provider_path="miles.ray.specs.inference.create_backend_engine_provider",
+    )
+    fields = constraints.native_values(args, set())
+    assert "custom_inference_engine_provider_path" not in fields
+    RunConfig(CoreConfig(publication_mode="engine_drain", max_policy_lag=2), fields).validate()

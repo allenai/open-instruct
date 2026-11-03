@@ -113,9 +113,6 @@ NATIVE_CONSTRAINTS = {
         "Async Core training requires resident disaggregated rollout engines; set miles.colocate=false and miles.offload_rollout=false.",
         Category.NOT_IMPLEMENTED,
     ),
-    "use_rollout_routing_replay": Constraint(
-        "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
-    ),
 }
 
 # Structured migration errors are distinct from native backend restrictions.
@@ -243,7 +240,8 @@ NATIVE_VALIDATION_OPTIONS = (
             "rewards_normalization",
             "rollout_all_samples_process_path",
             "rollout_batch_size",
-            "rollout_external",
+            "rollout_external_engine_addrs",
+            "custom_inference_engine_provider_path",
             "rollout_function_path",
             "rollout_num_gpus_per_engine",
             "rollout_sample_filter_path",
@@ -270,11 +268,22 @@ NATIVE_VALIDATION_OPTIONS = (
 )
 
 
+def external_rollout(options):
+    return any(
+        options.get(name) is not None
+        for name in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")
+    )
+
+
 def native_values(args, supplied_flags):
     """Select native arguments for the same validator used by CPU planning."""
     fields = {
         name: value for name in sorted(NATIVE_VALIDATION_OPTIONS) if (value := getattr(args, name, None)) is not None
     }
+    # Upstream fills in its internal provider path after deriving this boolean.
+    # Do not reinterpret that generated default as a user-supplied external pool.
+    if getattr(args, "rollout_external", None) is False:
+        fields.pop("custom_inference_engine_provider_path", None)
     for name in EXPLICIT_NATIVE_OPTIONS:
         if "--" + name.replace("_", "-") in supplied_flags:
             fields[name] = getattr(args, name)
@@ -283,7 +292,17 @@ def native_values(args, supplied_flags):
 
 # Closed structured schemas, also consumed by documentation coverage checks.
 STRUCTURED_FIELDS = {
-    "data": {"eval_prompt_data", "prompt_data", "recipe", "reward_config", "rl_manifest", "seed", "shuffle", "tasks"},
+    "data": {
+        "eval_prompt_data",
+        "prompt_data",
+        "recipe",
+        "reward_config",
+        "rl_manifest",
+        "seed",
+        "shuffle",
+        "tasks",
+        "sources",
+    },
     "launch": {
         "auto_resume",
         "budget",
@@ -306,6 +325,7 @@ STRUCTURED_FIELDS = {
     "conversion": {"hf_output"},
     "compiler_cache": {
         "diagnostics",
+        "tilelang",
         "enabled",
         "max_storage_bytes",
         "publish_interval_seconds",
@@ -319,6 +339,7 @@ STRUCTURED_FIELDS = {
         "backend",
         "chat_template",
         "context_extension",
+        "cuda_graphs",
         "endpoint",
         "gpus",
         "max_concurrent_calls",
@@ -337,6 +358,7 @@ STRUCTURED_FIELDS = {
 # Map special run-file controls to their compiler branch. Ordinary aliases use
 # FIELD_MAP; these need transformations or deferred multi-field resolution.
 SPECIAL_CONTROLS = {
+    "profile": "inference_profile",
     "gpus": "gpus",
     "placement_mode": "deferred",
     "max_context_length": "deferred",
