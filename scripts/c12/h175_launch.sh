@@ -205,7 +205,7 @@ task = {
     "hostNetworking": True,
     "propagateFailure": True,
     "propagatePreemption": True,
-    "synchronizedStartTimeout": "10m",
+    "synchronizedStartTimeout": "${SYNC_START_TIMEOUT:-10m}",
     "timeout": "$TIMEOUT",
 }
 spec = {"version": "v2", "budget": "ai2/oe-other",
