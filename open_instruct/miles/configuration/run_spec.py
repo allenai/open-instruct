@@ -871,12 +871,6 @@ class RunSpec:
         )
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
-        if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
-            raise InputError(
-                "core.reward_final_answer_only is incompatible with judging.bindings "
-                "(managed or external named judges); set reward_final_answer_only=false "
-                "or use text verifiers without named judge bindings."
-            )
         return result
 
     def launch_warnings(self, miles) -> list[str]:

@@ -1,5 +1,7 @@
 # Changelog
 
+- Support final-answer-only rewards with named MILES judges while preserving full rollout records (PR link pending).
+
 All notable changes to this project will be documented in this file.
 
 

@@ -123,6 +123,17 @@ When zero-variance group filtering is enabled, it also considers only finished
 responses: groups with fewer than two finished responses or no variation in
 their rewards are dropped before occupying training batch slots.
 
+## Final-answer-only rewards
+
+Set `core.reward_final_answer_only=true` to grade only text after the last literal
+`</think>`. A missing closing marker or whitespace-only final answer receives zero
+without calling a verifier. This applies to text/code verifiers and named judges;
+judge rubrics retain their normal answer-tag extraction within that final region.
+The full response and its token IDs remain available for training and recording.
+
+This option defaults to false and assumes the Olmo thinking format. It permits
+multiple closing markers, so it is not an exactly-one-tag format validator.
+
 ## Runtime images
 
 Build an application image from the source revision you intend to run, using the
