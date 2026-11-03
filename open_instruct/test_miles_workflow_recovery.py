@@ -129,3 +129,25 @@ def test_compiler_cache_change_cannot_authenticate_a_modified_saved_spec(tmp_pat
     changed["compiler_cache"]["shared_root"] = "/local/cache"
     workflow.write_json(tmp_path / "run-spec.json", changed)
     assert not workflow.recovery_configuration_matches(tmp_path, previous, changed)
+
+
+@pytest.mark.parametrize(
+    "section,key,value",
+    [
+        ("inference", "profile", "olmo35-b300-12.5@0.8"),
+        ("miles", "pause_generation_mode", "in_place"),
+        ("miles", "sglang_disable_radix_cache", True),
+    ],
+)
+def test_recovery_rejects_changed_serving_recipe(tmp_path, section, key, value):
+    document, previous = saved_run(tmp_path)
+    document["inference"] = {"profile": "olmo35-b300-v1"}
+    document["miles"] = {"pause_generation_mode": "retract", "sglang_disable_radix_cache": False}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    workflow.write_json(tmp_path / "workflow.json", previous)
+    document["launch"]["auto_resume"] = True
+    document[section][key] = value
+    spec = SimpleNamespace(output=document["output"], launch=document["launch"], to_dict=lambda: document)
+    with pytest.raises(InputError, match="Run configuration changed"), workflow.run_directory(spec):
+        pytest.fail("Changed serving settings must not enter the existing run")

@@ -59,7 +59,7 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
    request at full context in the nominal capacity calculation. Verify the
    resolved token capacity and retractions after startup; this does not prevent
-   retractions required by mid-sequence weight refresh.
+   retractions requested by retract-mode weight refresh.
 3. Keep `sglang_max_mamba_cache_size` at least `R` with radix caching off. The
    pinned Olmo hybrid backend also supports the qualified cached path; see
    [model limits](moe-model-support.md#current-limits).
@@ -147,8 +147,15 @@ use `generic` and write them explicitly.** There are two behaviors:
   values count too. Incompatible model, hardware or topology is an error, never
   a fallback to different settings. `auto` is not a supported selector.
 
-The learning examples pin `profile = "olmo35-b300-v1"` on Holmes. To use Jupiter,
-change both the cluster and the profile to `olmo35-h100-v1`. A wrong cluster error
+The learning examples pin `profile = "olmo35-b300-12.5@0.8"` on Holmes. It is the
+current recommended B300 starting point based on our experiments. We keep one
+recommendation per GPU. The suffix is **total@active parameters in billions**:
+approximately 12.5B total and 0.8B active per token, including embeddings and the
+output head. B300 v1 remains available for reproducing older cached configurations;
+`olmo35-h100-v1` remains a compatibility alias for the H100 preset. Neither old
+name is suggested by the advisor.
+To use Jupiter,
+change both the cluster and the profile to `olmo35-h100-12.5@0.8`. A wrong cluster error
 names the matching hardware's preset. The planner checks known hardware,
 dedicated TP1 placement, context/response caps and cached-KDA prerequisites
 without needing model metadata.
@@ -162,10 +169,17 @@ not treated as evidence of the source checkpoint's geometry.
 
 | Preset | Cache | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Memory fraction |
 |---|---|---:|---:|---:|---:|
-| `olmo35-b300-v1` | On, `extra_buffer` | 512 | 17,825,792 | 3,072 | 0.7 |
-| `olmo35-h100-v1` | Off | 512 | 6,684,672 | 512 | 0.9 |
+| `olmo35-b300-v1` (historical) | On, `extra_buffer` | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-b300-12.5@0.8` (recommended) | Off | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-h100-12.5@0.8` | Off | 512 | 6,684,672 | 512 | 0.9 |
 
-Both use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
+The recommended B300 profile preserves 3,072 recurrent slots to match the
+retained-state qualification. Explicit pool sizes are still allocated with radix
+off; its inherited `extra_buffer` strategy is inactive. The earlier 1,024-slot
+cache-off serving alternative is an explicit generic-mode experiment, not the
+qualified retained-state learning default. Pool reduction remains a follow-up.
+
+All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
 The preset owns those fields, cache enablement/strategy, admission, HTTP concurrency,
 graph ceiling, KV-token pool, recurrent pool and memory fraction. Settings outside
 that set, such as topology, context/response caps, metrics, producer budget,
@@ -190,7 +204,7 @@ For example, this is an editable B300 preset with admission deliberately reduced
 ```toml
 [inference]
 profile = "generic"
-sglang_disable_radix_cache = false
+sglang_disable_radix_cache = true
 sglang_mamba_radix_cache_strategy = "extra_buffer"
 sglang_max_running_requests = 256
 sglang_server_concurrency = 512
@@ -224,7 +238,7 @@ and `inference-profile.json`.
 
 | Code | Meaning |
 |---|---|
-| `inference_profile_available` | Tip: the model, hardware and topology are compatible with a measured preset. Names the setting to add; changes nothing. |
+| `inference_profile_available` | Tip: the model, hardware and topology are compatible with a measured preset. Names the setting to add; changes nothing. For a cache-off preset in retract mode, explicitly notes that prefix reuse is disabled; compatibility does not establish a speedup. |
 | `inference_pool_hardware_mismatch` | Tip: explicit KV and recurrent pools equal a preset for a different GPU. Review before running; this is a heuristic, not a memory-fit check. |
 | `inference_metadata_unavailable` | The model metadata for this generic run is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
 | `inference_model_guard_deferred` | A named preset is selected; its model guard must pass after preparation before training. |
@@ -543,3 +557,47 @@ Keep activation recomputation enabled until a representative longest pack has
 been checked on the target GPU. Low PyTorch reserved memory from a checkpointed
 run alone does not establish the peak without checkpointing or account for all
 communication-library allocations.
+
+
+## Retained-state weight publication
+
+The one-node and three-node learning examples use `miles.pause_generation_mode =
+"in_place"`. At publication, Core pauses active generation, transfers and finalizes
+weights, publishes the new version, and resumes the same requests without flushing
+their attention KV or hybrid recurrent state. Original token log-probabilities and
+version spans remain the behavior-policy record used for importance sampling.
+This state intentionally contains computations under older weights.
+
+Cross-request radix caching must be disabled, so a new prompt cannot reuse an
+old-weight prefix. The named B300 retained-state preset enforces that setting while
+preserving the original preset's pools, graphs and model/hardware guards. Core and
+the CPU planner reject in-place mode with prefix reuse or colocated serving.
+The single-GPU `dev.toml` remains a colocated retract-mode mechanics check.
+Standalone evaluation and judge servers do not receive these live weight updates;
+their profiles are unchanged.
+
+To restore the previous behavior, set `miles.pause_generation_mode = "retract"`.
+On B300, select `inference.profile = "olmo35-b300-v1"` as well to restore the
+previous prefix-cache configuration. H100's `olmo35-h100-12.5@0.8` already disables
+prefix caching, but the retained-state performance and learning measurements below
+were collected on B300, not H100.
+
+| Qualification | Evidence |
+|---|---|
+| Tiny hybrid live-update mechanics | [One GPU](https://beaker.org/ex/01M6G1ERM883BMPMGJDHT7446K): unchanged-weight updates preserved tokens/log-probs exactly; changed weights continued with valid provenance; fresh requests reused no cached prefix. |
+| One-node learning | [10 updates](https://beaker.org/ex/01M6G2BZV92DG7G32Q6BMHGP6T): short-run divergence qualification, not a demonstrated throughput gain. |
+| Three-node learning | [50 updates](https://beaker.org/ex/01M6GA8H3EM4B8AG0A725KHZHW), admission 3,840: 115.1K consumed response tokens/s versus 82.5K for the [retract baseline](https://beaker.org/ex/01M6EHWDE8R8FQB5D7M6QNEDC0), measured from completion of update 25 to completion of update 50, including intervening checkpoint overhead. |
+
+Mean trainer-versus-rollout KL over updates 25–50 was 0.000178 versus 0.000887
+in the baseline. Token-weighted KL on historical prefixes in responses longer
+than 16K was 0.000143 across 72 million active tokens, with no TIS clipping.
+The retained run had zero stale discards, allocator retries and OOMs. Its runtime
+patch was tested at MILES `1dbe38b3fe3ffa1eb4b7549b581da00ff1be80e1`, before
+rebasing onto newer main. These are short-run stability results, not proof of
+long-run learning equivalence or a universal 40% speedup. Admission is unchanged
+in the examples; raising it remains a separate experiment.
+
+Monitor `train/train_rollout_kl`, `train/train_rollout_logprob_abs_diff`, and the
+`train/behavior/*` token-weighted KL, saturation, TIS clipping and ESS metrics,
+especially by token age, response length and historical prefix. Refresh-mode
+PPO KL and PPO ESS are fixed by construction and do not measure behavior mismatch.

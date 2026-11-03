@@ -72,6 +72,8 @@ router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
 
 [miles]
+# Retained-state publication requires dedicated inference GPUs; this smoke test is colocated.
+pause_generation_mode = "retract"
 calculate_per_token_loss = false
 
 [compiler_cache]

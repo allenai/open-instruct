@@ -406,10 +406,10 @@ def test_transport_failure_logs_request_identity_without_resampling(monkeypatch,
         assert value.rollout_log_probs == original_scores
         assert f"request={payload['rid']} group=0 sample=17" in caplog.text
         assert "delivery=unknown" in caplog.text
-        assert f"error={type(failure).__name__}" in caplog.text
+        assert f"detail={type(failure).__name__}" in caplog.text
         assert "secret prompt" not in caplog.text
         if failure_type == "status":
-            assert "status=503" in caplog.text
+            assert '"status": 503' in caplog.text
 
     asyncio.run(scenario())
 
