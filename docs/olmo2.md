@@ -233,10 +233,10 @@ done
 
 ### 1B
 
-The 1B OLMo 2 model has two RL stages run in sequence. The first is on MATH, GSM8K, and IF constraints. 
+The 1B OLMo 2 model has two RL stages run in sequence. The first is on MATH, GSM8K, and IF constraints.
 A modern reproduction with commit 65fc1b99 would be:
 ```
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1 
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 python open_instruct/grpo_fast.py \
     --add_bos \
     --apply_verifiable_reward true \
@@ -280,7 +280,7 @@ python open_instruct/grpo_fast.py \
     --with_tracking
 ```
 
-The original command, run on an older version of open-instruct, was: 
+The original command, run on an older version of open-instruct, was:
 ```
 python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name 0423_grpo_seed_1_lr_7e-7 \
@@ -333,7 +333,7 @@ For those internal to Ai2, see the [wandb logs](https://wandb.ai/ai2-llm/open_in
 
 Next, on MATH only, the modern reproduction on commit 65fc1b99 would be
 ```
-export VLLM_ALLOW_INSECURE_SERIALIZATION=1 
+export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 python open_instruct/grpo_fast.py \
     --add_bos \
     --apply_verifiable_reward true \

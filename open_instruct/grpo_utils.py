@@ -1,3 +1,4 @@
+import contextlib
 import enum
 import itertools
 import math
@@ -28,6 +29,11 @@ from open_instruct.utils import (
 )
 
 logger = logger_utils.setup_logger(__name__)
+
+DeepSpeedCPUAdam = None
+with contextlib.suppress(Exception):
+    from deepspeed.ops.adam import DeepSpeedCPUAdam
+
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 
 
@@ -69,6 +75,19 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
+
+
+def create_optimizer(optim_params, args: "GRPOExperimentConfig") -> torch.optim.Optimizer:
+    """Builds the policy optimizer: DeepSpeedCPUAdam if ``args.use_cpu_adam``, else ``torch.optim.AdamW``."""
+    if args.use_cpu_adam:
+        if DeepSpeedCPUAdam is None:
+            raise RuntimeError(
+                "`use_cpu_adam=True` requires DeepSpeed to be installed. Install it with: pip install deepspeed"
+            )
+        return DeepSpeedCPUAdam(optim_params, lr=args.learning_rate, weight_decay=args.weight_decay)
+    return torch.optim.AdamW(
+        optim_params, lr=args.learning_rate, fused=args.fused_optimizer, weight_decay=args.weight_decay
+    )
 
 
 @dataclass
@@ -173,6 +192,8 @@ class GRPOExperimentConfig(
     """whether to offload parameters to CPU (reduces GPU memory usage)"""
     deepspeed_offload_optimizer: bool = False
     """whether to offload optimizer states to CPU (reduces GPU memory usage)"""
+    use_cpu_adam: bool = False
+    """whether to use DeepSpeedCPUAdam instead of torch.optim.AdamW; required when deepspeed_offload_optimizer=True"""
     deepspeed_checkpoint_load_universal: bool = False
     """DeepSpeed checkpoint.load_universal: load checkpoints across different parallel configs"""
     gather_whole_model: bool = True
@@ -322,6 +343,20 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.deepspeed_offload_param and self.deepspeed_stage != 3:
+            raise ValueError("`deepspeed_offload_param` requires `deepspeed_stage` to be 3!")
+        if self.use_cpu_adam and self.deepspeed_stage == 0:
+            raise ValueError("`use_cpu_adam` requires a DeepSpeed stage (`deepspeed_stage` > 0)!")
+        if self.use_cpu_adam and not self.deepspeed_offload_optimizer:
+            raise ValueError(
+                "`use_cpu_adam` requires `deepspeed_offload_optimizer`: DeepSpeedCPUAdam only steps parameters "
+                "that live on the CPU, so the optimizer must be offloaded (`--deepspeed_offload_optimizer`)!"
+            )
+        if self.deepspeed_offload_optimizer and not self.use_cpu_adam:
+            raise ValueError(
+                "`deepspeed_offload_optimizer` requires `use_cpu_adam`: DeepSpeed optimizer offload requires "
+                "a CPU optimizer (`--use_cpu_adam`)!"
+            )
         if self.use_rho_correction:
             if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
                 raise ValueError(
