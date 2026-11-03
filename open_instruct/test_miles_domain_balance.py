@@ -116,3 +116,44 @@ def test_runtime_preflight_tests_do_not_inherit_the_run_switch():
     environment = {domain_balance.ENV: "1", "OI_DPPO_THRESHOLD": "0.1"}
     assert domain_balance.test_environment(environment) == {"OI_DPPO_THRESHOLD": "0.1"}
     assert environment[domain_balance.ENV] == "1"
+
+
+def test_domain_shares_split_the_token_mean_by_the_given_ratio():
+    samples = [sample("math", 8000), sample("ifeval", 300), sample("code", 2000)]
+    weights = domain_balance.weights(samples, {"ifeval": 2})
+    weighted = {item.metadata["domain"]: weight * item.response_length for item, weight in zip(samples, weights)}
+    total = sum(item.response_length for item in samples)
+    assert weighted == pytest.approx({"math": total / 4, "ifeval": total / 2, "code": total / 4})
+    # Shares renormalize over the domains present in the rollout.
+    assert domain_balance.weights([sample("math", 30), sample("code", 10)], {"ifeval": 2}) == pytest.approx(
+        [40 / 60, 40 / 20]
+    )
+
+
+def test_domain_weights_map_to_the_shares_environment(tmp_path):
+    doc = qwen35_async_dppo()
+    doc["training"]["loss_aggregation"] = "domain"
+    doc["training"]["domain_weights"] = {"ifeval": 2}
+    doc["output"]["root"] = str(tmp_path / "root")
+    spec = specs.from_dict(doc)
+    environment = domain_balance.environment("domain", spec.document["training"]["domain_weights"])
+    assert environment == {domain_balance.ENV: "1", domain_balance.SHARES_ENV: '{"ifeval": 2}'}
+    assert domain_balance.shares(environment) == {"ifeval": 2}
+    assert domain_balance.shares({}) == {}
+    assert domain_balance.test_environment(environment) == {}
+
+
+@pytest.mark.parametrize(
+    ("aggregation", "weights", "match"),
+    [
+        ("domain", {"ifeval": 0}, "positive"),
+        ("domain", {"ifeval": "2"}, "positive"),
+        ("token", {"ifeval": 2}, "requires"),
+    ],
+)
+def test_domain_weights_are_validated(aggregation, weights, match):
+    doc = qwen35_async_dppo()
+    doc["training"]["loss_aggregation"] = aggregation
+    doc["training"]["domain_weights"] = weights
+    with pytest.raises(InputError, match=match):
+        specs.from_dict(doc)

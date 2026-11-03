@@ -81,7 +81,7 @@ def execute(spec):
                 grpo_hooks.OUTPUT_ENV: str(root),
                 **grpo_hooks.reward_environment(prepared["data"]["reward_config"], spec.document["reward"]),
                 **(dppo.environment() if dppo else {}),
-                **domain_balance.environment(training["loss_aggregation"]),
+                **domain_balance.environment(training["loss_aggregation"], training["domain_weights"]),
             }
         )
         converter_path = miles_root / "tools/convert_hf_to_torch_dist.py"

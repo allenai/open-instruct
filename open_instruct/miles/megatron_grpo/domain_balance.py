@@ -11,24 +11,32 @@ The reward post-process hooks see the whole rollout, compute the weights, and st
 sample's ``train_metadata``; the DPPO loss scales each sample's advantages by its weight. DPPO's
 trust-region mask depends only on the advantage's sign, so a positive scale multiplies that sample's
 loss exactly. One optimizer step per rollout is required: the weights are normalized over the rollout.
+
+``training.domain_weights`` (GRPO only) replaces the equal split with relative shares: with shares
+``s``, domain ``d``'s tokens get weight ``T * s_d / (S * T_d)``, where ``S`` sums the active domains'
+shares (unlisted domains have share 1). The weights still sum to ``T``.
 """
 
+import json
 import os
 
 ENV = "OI_DPPO_DOMAIN_BALANCE"
+SHARES_ENV = "OI_DPPO_DOMAIN_SHARES"
 WEIGHT_KEY = "oi_domain_weight"
 DOMAIN_KEY = "domain"
 
 
-def environment(loss_aggregation):
-    """The ``OI_DPPO_DOMAIN_BALANCE`` setting for a run file's ``training.loss_aggregation``."""
-    return {ENV: "1"} if loss_aggregation == "domain" else {}
+def environment(loss_aggregation, domain_weights=None):
+    """The domain-balance settings for a run file's ``training.loss_aggregation`` and ``domain_weights``."""
+    if loss_aggregation != "domain":
+        return {}
+    return {ENV: "1", **({SHARES_ENV: json.dumps(domain_weights, sort_keys=True)} if domain_weights else {})}
 
 
 def test_environment(environment):
     """``environment`` for the runtime preflight tests: the switch is a run setting, and the tests' own
     samples carry no domain, so they set it themselves when they exercise it."""
-    return {key: value for key, value in environment.items() if key != ENV}
+    return {key: value for key, value in environment.items() if key not in (ENV, SHARES_ENV)}
 
 
 def enabled(environment=None):
@@ -42,8 +50,14 @@ def _training_tokens(sample):
     return int(sum(mask)) if mask is not None else int(sample.response_length)
 
 
-def weights(samples):
+def shares(environment=None):
+    """``{domain: relative loss share}`` from ``OI_DPPO_DOMAIN_SHARES``; empty means equal shares."""
+    return json.loads((os.environ if environment is None else environment).get(SHARES_ENV, "{}"))
+
+
+def weights(samples, domain_shares=None):
     """Per-sample domain weights over one rollout; samples without training tokens get 1.0."""
+    domain_shares = shares() if domain_shares is None else domain_shares
     domains = []
     for sample in samples:
         metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
@@ -56,7 +70,9 @@ def weights(samples):
         per_domain[domain] = per_domain.get(domain, 0) + count
     active = {domain: count for domain, count in per_domain.items() if count > 0}
     total = sum(active.values())
-    return [total / (len(active) * active[domain]) if domain in active else 1.0 for domain in domains]
+    share = {domain: float(domain_shares.get(domain, 1.0)) for domain in active}
+    norm = sum(share.values())
+    return [total * share[domain] / (norm * active[domain]) if domain in active else 1.0 for domain in domains]
 
 
 def attach(samples):

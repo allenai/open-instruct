@@ -26,7 +26,8 @@ EVAL_ONLY_ENV = "OI_GRPO_EVAL_ONLY"
 DEFAULTS = {
     "model": {"source": "", "architecture": "qwen3-1.7B", "native_checkpoint": {}},
     # eval_only runs the pre-training eval of the starting model, then stops without training.
-    "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo", "eval_only": False},
+    # domain_weights: relative loss shares per domain under loss_aggregation="domain" (default equal).
+    "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo", "eval_only": False, "domain_weights": {}},
     "trainer": dict(opd_config.DEFAULTS["trainer"]),
     "inference": {**opd_config.DEFAULTS["inference"], "max_prompt_length": 2048, "max_context_length": 4096},
     "optimizer": {**opd_config.DEFAULTS["optimizer"], "adam_beta2": 0.95, "adam_eps": 1e-8, "clip_grad": 1.0},
@@ -151,6 +152,12 @@ class MegatronGRPORunSpec:
         validation.choice(training["loss_aggregation"], "training.loss_aggregation", opd_config.LOSS_AGGREGATIONS)
         if training["loss_aggregation"] == "domain" and document["objective"]["policy_loss"] != "dppo":
             raise InputError('training.loss_aggregation="domain" requires objective.policy_loss="dppo"')
+        validation.mapping(training["domain_weights"], "training.domain_weights")
+        for domain, share in training["domain_weights"].items():
+            if isinstance(share, bool) or not isinstance(share, (int, float)) or share <= 0:
+                raise InputError(f"training.domain_weights.{domain} must be a positive number")
+        if training["domain_weights"] and training["loss_aggregation"] != "domain":
+            raise InputError('training.domain_weights requires training.loss_aggregation="domain"')
         for section_name, section, keys in (
             ("trainer", trainer, ("gpus", "tensor_parallel_size")),
             (
