@@ -222,6 +222,7 @@
   {"dest":"seed","type":"int"},
   {"dest":"clip_grad","type":"float"},
   {"const":true,"default":false,"dest":"calculate_per_token_loss","kind":"switch","nargs":0},
+  {"dest":"loss_constant_token_denominator","type":"int"},
   {"dest":"num_critic_only_steps","type":"int"},
   {"dest":"critic_load","type":"str"},
   {"dest":"critic_save","type":"str"},
