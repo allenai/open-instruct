@@ -1,4 +1,4 @@
-"""Portable calendar and pinned NeMo instruction-following contracts."""
+"""Portable calendar and NeMo-target adapters using maintained Open Instruct IF checkers."""
 
 import importlib
 import json
@@ -90,9 +90,8 @@ def instruction_contract(serialized):
     label = json.loads(serialized)
     family, target = label["family"], label["target"]
     if family != "nemo":
-        raise ValueError("Only the pinned NeMo instruction family is supported")
-    modules = {"nemo": "verifiable_instructions.instructions_registry"}
-    registry = importlib.import_module(modules[family]).INSTRUCTION_DICT
+        raise ValueError("Only the prepared NeMo instruction target schema is supported")
+    registry = importlib.import_module("open_instruct.IFEvalG.instructions_registry").INSTRUCTION_DICT
     ids = target["instruction_id_list"]
     arguments = target["kwargs"]
     issues = ifeval_constraints.if_training_issues({"instruction_id": ids, "kwargs": arguments})
@@ -105,7 +104,7 @@ def instruction_contract(serialized):
         if name in {"language:response_language", "change_case:english_capital", "change_case:english_lowercase"}:
             raise ValueError("Language classification needs separate calibration")
         if name in {"letters:letter_counting", "count:lowercase_counting"}:
-            raise ValueError("Pinned NeMo checker predates the reviewed counting fixes")
+            raise ValueError("Counting families excluded from this qualified pool; requalify before enabling")
         checker = registry[name](name)
         args = {k: v for k, v in (args or {}).items() if v is not None}
         if set(args) != set(checker.get_instruction_args_keys()):
@@ -149,34 +148,10 @@ class InstructionVerifier(CalendarVerifier):
         if not final:
             return common.Result(0.0)
         passed = []
-        for name, checker, args in compiled:
-            value = (
-                check_repeat_phrase(final, **args) if name == "copy:repeat_phrase" else checker.check_following(final)
-            )
+        for name, checker, _args in compiled:
+            value = checker.check_following(final)
             if type(value) is not bool:
                 raise ValueError(f"IF checker {name!r} returned {type(value).__name__}, expected bool")
             passed.append(value)
         fraction = label.get("target", {}).get("grading_mode") == "fraction"
         return common.Result(sum(passed) / len(passed) if fraction else float(all(passed)))
-
-
-def check_repeat_phrase(value: str, phrase: str, small_n: int) -> bool:
-    """Repair the pinned NeMo checker's fallthrough and last-repetition-only check.
-
-    Retain its case-sensitive, single-line phrase-span extraction, treating the
-    supplied endpoint words literally. Every span must change exactly one
-    interior word, preserving the phrase length and endpoints.
-    """
-    reference = phrase.split()
-    if len(reference) < 3:
-        raise ValueError("copy:repeat_phrase needs an interior word to replace")
-    pattern = rf"{re.escape(reference[0])} .*? {re.escape(reference[-1])}"
-    count = 0
-    for match in re.finditer(pattern, value):
-        count += 1
-        words = match.group().split()
-        if count > small_n or len(words) != len(reference):
-            return False
-        if sum(word != gold for word, gold in zip(words, reference, strict=True)) != 1:
-            return False
-    return count == small_n

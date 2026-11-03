@@ -4,4 +4,3 @@
 reasoning-gym==0.1.25
 rdkit==2025.9.3
 openapi-schema-validator==0.6.3
-verifiable-instructions @ git+https://github.com/abukharin-nv/verifiable-instructions.git@f46a5ac87b1400a4f8973039844b6be9b56e3faf

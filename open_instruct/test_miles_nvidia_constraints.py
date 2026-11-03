@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from open_instruct.IFEvalG import instructions_registry
 from open_instruct.miles.rewards import nvidia_constraints as nv
 
 
@@ -41,7 +42,6 @@ def test_calendar_invalid_target_is_not_reward_zero():
 
 
 def test_nemo_native_parity_and_final_region():
-    pytest.importorskip("verifiable_instructions")
     label = {
         "family": "nemo",
         "target": {
@@ -60,7 +60,6 @@ def test_nemo_native_parity_and_final_region():
 
 
 def test_nemo_rejects_arguments_that_native_would_repair():
-    pytest.importorskip("verifiable_instructions")
     label = {
         "family": "nemo",
         "target": {
@@ -89,16 +88,12 @@ def test_nemo_rejects_arguments_that_native_would_repair():
     ],
 )
 def test_repeat_phrase_requires_one_interior_change_in_every_repetition(text, expected):
-    assert nv.check_repeat_phrase(text, "Live each day to the fullest", 2) is expected
-
-
-def test_repeat_phrase_endpoints_are_literal():
-    assert nv.check_repeat_phrase("A+ replacement Z?", "A+ middle Z?", 1) is True
-    assert nv.check_repeat_phrase("AA replacement Z", "A+ middle Z?", 1) is False
+    checker = instructions_registry.INSTRUCTION_DICT["copy:repeat_phrase"]("copy:repeat_phrase")
+    checker.build_description(phrase="Live each day to the fullest", small_n=2)
+    assert checker.check_following(text) is expected
 
 
 def test_nemo_repeat_phrase_regressions():
-    pytest.importorskip("verifiable_instructions")
     label = {
         "family": "nemo",
         "target": {
@@ -106,6 +101,8 @@ def test_nemo_repeat_phrase_regressions():
             "kwargs": [{"phrase": "Live each day to the fullest", "small_n": 2}, {}],
         },
     }
+    _, compiled = nv.instruction_contract(json.dumps(label))
+    assert type(compiled[0][1]) is instructions_registry.INSTRUCTION_DICT["copy:repeat_phrase"]
     verifier = nv.InstructionVerifier()
     exact = "Live each day to the fullest"
     changed = "Live each night to the fullest"
