@@ -592,6 +592,7 @@ def test_b300_advisor_recommends_only_current_profile(mode):
     assert len(tips) == 1
     assert "olmo35-b300-12.5@0.8" in tips[0]["message"]
     assert "olmo35-b300-v1" not in tips[0]["message"]
+    assert ("disables cross-request prefix caching" in tips[0]["message"]) == (mode == "retract")
 
 
 def test_wrong_hardware_points_to_current_b300_profile():

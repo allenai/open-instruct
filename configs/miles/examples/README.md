@@ -171,6 +171,9 @@ Both learning examples set `miles.pause_generation_mode = "in_place"`: active
 requests keep their attention KV and hybrid recurrent state across weight updates,
 avoiding re-prefill of their generated prefixes. The original `olmo35-b300-v1`
 preset still enables radix caching with `extra_buffer` and requires retract mode.
+Runs started from the old examples must resume with their recorded settings;
+switching profile or pause/cache mode under the same `output.root` fails the
+recovery configuration check. Use a new root for the updated recipe.
 The one-GPU colocated `dev.toml` explicitly keeps retract mode; retained state
 requires dedicated inference GPUs. See the [retained-state qualification](../../../docs/miles/throughput-profiles.md#retained-state-weight-publication).
 Cached hybrid serving requires FP32 tracked-state snapshots in the pinned
@@ -194,14 +197,22 @@ training. Preset settings remain identical before and after preparation.
 
 Omitted or `generic` profiles preserve generic defaults and explicit settings.
 The default recurrent pool is 128 slots. A separately measured **cache-off B300
-alternative uses 1,024 recurrent slots**; configure that alternative explicitly
-in generic mode. A cached-320 H100 alternative uses 4,456,448 KV tokens and 1,920
+alternative uses 1,024 recurrent slots**; it predates the retained-state learning
+qualification and is an explicit generic-mode experiment, not the current default.
+Use the named B300 preset for the qualified learning baseline: its 3,072-slot pool
+was deliberately kept fixed from the prior profile for those runs. SGLang still
+allocates all explicitly requested slots with radix off; the inherited
+`extra_buffer` strategy has no effect while radix is disabled. Reducing the pool
+could save memory but needs separate retained-state qualification before changing
+the recommendation. A cached-320 H100 alternative uses 4,456,448 KV tokens and 1,920
 recurrent slots and likewise requires explicit generic settings. Neither alternative
 is selected automatically. `dev` retains its explicit small colocated configuration.
 
 The planner offers read-only tips when a preset matches or explicit pools resemble
 a preset for different hardware. Tips appear in a stderr box and
 `plan.runtime.inference_profile.tips`; routine warnings remain plain lines.
+A cache-off recommendation for retract mode explicitly notes that it disables
+prefix reuse; compatibility is not a claim of higher throughput for that mode.
 There is no `auto` selector. Topology, metrics, producer budget and trainer controls
 remain separate. To experiment, follow
 [departing from a preset](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-preset).

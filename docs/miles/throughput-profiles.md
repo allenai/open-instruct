@@ -173,6 +173,12 @@ not treated as evidence of the source checkpoint's geometry.
 | `olmo35-b300-12.5@0.8` (recommended) | Off | 512 | 17,825,792 | 3,072 | 0.7 |
 | `olmo35-h100-12.5@0.8` | Off | 512 | 6,684,672 | 512 | 0.9 |
 
+The recommended B300 profile preserves 3,072 recurrent slots to match the
+retained-state qualification. Explicit pool sizes are still allocated with radix
+off; its inherited `extra_buffer` strategy is inactive. The earlier 1,024-slot
+cache-off serving alternative is an explicit generic-mode experiment, not the
+qualified retained-state learning default. Pool reduction remains a follow-up.
+
 All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
 The preset owns those fields, cache enablement/strategy, admission, HTTP concurrency,
 graph ceiling, KV-token pool, recurrent pool and memory fraction. Settings outside
@@ -232,7 +238,7 @@ and `inference-profile.json`.
 
 | Code | Meaning |
 |---|---|
-| `inference_profile_available` | Tip: the model, hardware and topology are compatible with a measured preset. Names the setting to add; changes nothing. |
+| `inference_profile_available` | Tip: the model, hardware and topology are compatible with a measured preset. Names the setting to add; changes nothing. For a cache-off preset in retract mode, explicitly notes that prefix reuse is disabled; compatibility does not establish a speedup. |
 | `inference_pool_hardware_mismatch` | Tip: explicit KV and recurrent pools equal a preset for a different GPU. Review before running; this is a heuristic, not a memory-fit check. |
 | `inference_metadata_unavailable` | The model metadata for this generic run is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
 | `inference_model_guard_deferred` | A named preset is selected; its model guard must pass after preparation before training. |

@@ -44,8 +44,6 @@ def test_example_cache_mode_matches_explicit_preset(profile):
     miles = RunSpec.load(EXAMPLE.with_name(f"{profile}.toml")).compile().miles
     assert miles["sglang_disable_radix_cache"] is True
     assert miles["pause_generation_mode"] == ("retract" if profile == "dev" else "in_place")
-    if profile != "dev":
-        assert miles["sglang_mamba_radix_cache_strategy"] == "extra_buffer"
     assert miles["sglang_max_mamba_cache_size"] >= miles["sglang_max_running_requests"]
 
 

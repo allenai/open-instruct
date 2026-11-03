@@ -410,6 +410,9 @@ class RunConfig:
         validation.runtime_values(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
             raise constraints.error("Core weight publication supports retract or in_place pause mode")
+        # This preflight checks top-level settings. Refresh/engine_drain reject
+        # sglang_config below; barrier-mode server-group overrides are resolved
+        # and cache-validated by Core at actor startup.
         if options.get("pause_generation_mode") == "in_place":
             if options.get("colocate"):
                 raise constraints.error("Core in_place publication requires non-colocated serving")
