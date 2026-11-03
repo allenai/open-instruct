@@ -56,7 +56,7 @@ COMPILER_CACHE_CORE_KEYS = (
 
 
 def recovery_configuration_matches(root, previous, document):
-    """Allow recovery policy and compiler-cache changes and normalize historical launch defaults.
+    """Allow operational recovery, cache, and artifact-cadence changes on resume.
 
     Authenticate the recorded full specification before normalizing it, including
     older runs that hashed auto_resume or predate the explicit host-memory field.
@@ -83,6 +83,17 @@ def recovery_configuration_matches(root, previous, document):
     adopt_keys(recorded, document, ("compiler_cache",))
     if isinstance(recorded.get("core"), dict) and isinstance(document.get("core"), dict):
         adopt_keys(recorded["core"], document["core"], COMPILER_CACHE_CORE_KEYS)
+    # Checkpoint/evaluation cadence changes only future artifact production.
+    # Keep training horizon, evaluation tasks/scorers, and all recipe fields strict.
+    if isinstance(recorded.get("training"), dict) and isinstance(document.get("training"), dict):
+        adopt_keys(recorded["training"], document["training"], ("save_interval",))
+    if isinstance(recorded.get("evaluation"), dict) and isinstance(document.get("evaluation"), dict):
+        adopt_keys(recorded["evaluation"], document["evaluation"], ("interval",))
+        old_tasks = recorded["evaluation"].get("tasks", [])
+        new_tasks = document["evaluation"].get("tasks", [])
+        if len(old_tasks) == len(new_tasks):
+            for old_task, new_task in zip(old_tasks, new_tasks):
+                adopt_keys(old_task, new_task, ("interval",))
     return recorded == document
 
 
