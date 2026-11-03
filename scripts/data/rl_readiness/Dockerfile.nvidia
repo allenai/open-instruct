@@ -1,0 +1,6 @@
+# Build from a committed MILES application image, using the repository root as context.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY scripts/data/rl_readiness /opt/core-rl/scripts/data/rl_readiness
+RUN uv pip install --system --no-deps -r /opt/core-rl/scripts/data/rl_readiness/requirements.txt
+RUN python -c "from open_instruct.miles.rewards import nvidia_constraints; nvidia_constraints.instruction_contract('{\"family\":\"nemo\",\"target\":{\"instruction_id_list\":[\"punctuation:no_comma\"],\"kwargs\":[{}]}}')"

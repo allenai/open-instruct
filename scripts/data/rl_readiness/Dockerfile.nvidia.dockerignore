@@ -1,0 +1,6 @@
+**
+!scripts/
+!scripts/data/
+!scripts/data/rl_readiness/
+!scripts/data/rl_readiness/**
+**/__pycache__/
