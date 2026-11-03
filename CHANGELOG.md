@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Enable retained-state weight publication in the MILES one-node and three-node learning examples, with a guarded B300 serving preset, safe prefix-cache settings, behavior-divergence metrics, and the supporting runtime pin (PR link pending).
+- Enable retained-state weight publication in the MILES one-node and three-node learning examples, with a guarded B300 serving preset, safe prefix-cache settings, behavior-divergence metrics, and the supporting runtime pin (https://github.com/allenai/open-instruct/pull/2167).
 - MILES wall-clock stops (`core.max_run_seconds`) are now resumable by default: the stop saves a checkpoint and leaves the run `stopped`, with no final HF export or final evaluation, so the same specification resubmitted under the same `output.root` continues; set `core.max_run_final = true` for the previous export-and-complete behaviour (https://github.com/allenai/open-instruct/pull/2150).
 - Exclude MILES compiler-cache settings from the recovery check, so a resumed run can move or disable its compiler cache (for example when the shared root is full) without choosing a new `output.root`; every other recorded field must still match (https://github.com/allenai/open-instruct/pull/2149).
 - Overlap independent MILES judge, Ray, preparation and disaggregated trainer/inference startup with explicit readiness barriers and stage timings (https://github.com/allenai/open-instruct/pull/2143).
