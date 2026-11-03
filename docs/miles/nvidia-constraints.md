@@ -20,6 +20,16 @@ reject unsupported or randomly repaired targets. The scorer also applies the
 existing unsuitable-IF-target policy. Language classification and the pinned
 library's known outdated letter/lowercase counters are excluded.
 
+`copy:repeat_phrase` uses a local correction: every repetition must preserve the
+phrase length and endpoints and replace exactly one interior word. The pinned
+native checker falls through to `None` for unchanged repetitions and checks the
+one-word-change requirement only on its last repetition. The correction retains
+its case-sensitive, single-line span extraction, with literal endpoint words.
+Regression controls cover unchanged repetitions, mixed unchanged/changed
+repetitions in both orders, wrong counts, and multiple word changes. Other
+unexpected checker return types still raise, with the checker name and return
+type in the diagnostic; they are not silently converted to zero rewards.
+
 The registered reward wrapper handles thinking extraction and truncated-response
 zeros. Invalid targets raise rather than become incorrect model answers. These
 contracts measure constraint compliance, not factual quality or endpoint transfer.

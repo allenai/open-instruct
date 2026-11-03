@@ -123,6 +123,8 @@ def instruction_contract(serialized):
                 raise ValueError(f"Nonpositive argument {key}; qualify separately")
         if name == "length_constraints:nth_paragraph_first_word" and args["nth_paragraph"] > args["num_paragraphs"]:
             raise ValueError("Unsatisfiable paragraph position")
+        if name == "copy:repeat_phrase" and len(args["phrase"].split()) < 3:
+            raise ValueError("copy:repeat_phrase needs an interior word to replace")
         try:
             checker.build_description(**args)
         except (AttributeError, TypeError) as exc:
@@ -147,10 +149,34 @@ class InstructionVerifier(CalendarVerifier):
         if not final:
             return common.Result(0.0)
         passed = []
-        for _name, checker, _args in compiled:
-            value = checker.check_following(final)
+        for name, checker, args in compiled:
+            value = (
+                check_repeat_phrase(final, **args) if name == "copy:repeat_phrase" else checker.check_following(final)
+            )
             if type(value) is not bool:
-                raise ValueError("IF checker did not return a Boolean")
+                raise ValueError(f"IF checker {name!r} returned {type(value).__name__}, expected bool")
             passed.append(value)
         fraction = label.get("target", {}).get("grading_mode") == "fraction"
         return common.Result(sum(passed) / len(passed) if fraction else float(all(passed)))
+
+
+def check_repeat_phrase(value: str, phrase: str, small_n: int) -> bool:
+    """Repair the pinned NeMo checker's fallthrough and last-repetition-only check.
+
+    Retain its case-sensitive, single-line phrase-span extraction, treating the
+    supplied endpoint words literally. Every span must change exactly one
+    interior word, preserving the phrase length and endpoints.
+    """
+    reference = phrase.split()
+    if len(reference) < 3:
+        raise ValueError("copy:repeat_phrase needs an interior word to replace")
+    pattern = rf"{re.escape(reference[0])} .*? {re.escape(reference[-1])}"
+    count = 0
+    for match in re.finditer(pattern, value):
+        count += 1
+        words = match.group().split()
+        if count > small_n or len(words) != len(reference):
+            return False
+        if sum(word != gold for word, gold in zip(words, reference, strict=True)) != 1:
+            return False
+    return count == small_n
