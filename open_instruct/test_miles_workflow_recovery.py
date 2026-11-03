@@ -151,3 +151,27 @@ def test_recovery_rejects_changed_serving_recipe(tmp_path, section, key, value):
     spec = SimpleNamespace(output=document["output"], launch=document["launch"], to_dict=lambda: document)
     with pytest.raises(InputError, match="Run configuration changed"), workflow.run_directory(spec):
         pytest.fail("Changed serving settings must not enter the existing run")
+
+
+@pytest.mark.parametrize("invalid_change", [None, "lr", "horizon", "task", "sampling", "saved_spec"])
+def test_recovery_changes_artifact_cadence_only(tmp_path, invalid_change):
+    document, previous = saved_run(tmp_path)
+    document["training"] = {"save_interval": 25, "num_rollouts": 200}
+    document["evaluation"] = {"interval": 0, "tasks": [{"task": "ifeval", "interval": 25}]}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    if invalid_change == "saved_spec":
+        corrupt = copy.deepcopy(document)
+        corrupt["training"]["save_interval"] = 50
+        workflow.write_json(tmp_path / "run-spec.json", corrupt)
+    document["training"]["save_interval"] = 100
+    document["evaluation"]["tasks"][0]["interval"] = 50
+    if invalid_change == "lr":
+        document["optimizer"]["learning_rate"] = 2e-6
+    elif invalid_change == "horizon":
+        document["training"]["num_rollouts"] = 300
+    elif invalid_change == "task":
+        document["evaluation"]["tasks"][0]["task"] = "aime"
+    elif invalid_change == "sampling":
+        document["evaluation"]["tasks"][0]["generation"] = {"temperature": 0.5}
+    assert workflow.recovery_configuration_matches(tmp_path, previous, document) == (invalid_change is None)
