@@ -191,7 +191,7 @@ def test_shared_gpu_inventory_preserves_mask_order_and_unknown_memory(monkeypatc
     inventory = gpu_hardware.inventory()
     assert [device["id"] for device in inventory] == ["0", "2"]
     assert inventory[0]["memory_mib"] is None
-    report = profiles.resolve("olmo35-h100-v1", "ai2/jupiter", model(), options())
+    report = profiles.resolve("olmo35-h100-12.5@0.8", "ai2/jupiter", model(), options())
     with pytest.raises(ValueError, match="expects H100"):
         profiles.validate_hardware(report, [("NVIDIA H100", None)])
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "MIG-example")
@@ -502,7 +502,7 @@ def test_commands_emit_same_warning_set_and_json_is_clean(tmp_path, monkeypatch,
     assert messages[0] == messages[1] == messages[2]
     assert "Producer budget 8" in messages[0]
     assert "Configuration tips (settings unchanged)" in messages[0]
-    assert "olmo35-b300-v2" in messages[0]
+    assert "olmo35-b300-12.5@0.8" in messages[0]
 
 
 def test_measured_http_equality_does_not_ask_for_different_preset(tmp_path):
@@ -562,12 +562,12 @@ def test_malformed_inventory_json_keeps_file_context(tmp_path):
 
 
 def test_retained_preset_preserves_cached_geometry_and_requires_known_hardware():
-    retained = profiles.resolve("olmo35-b300-v2", "ai2/holmes", model(), options())
+    retained = profiles.resolve("olmo35-b300-12.5@0.8", "ai2/holmes", model(), options())
     assert retained["preset_values"] == profiles.PRESETS["olmo35-b300-v1"] | {"sglang_disable_radix_cache": True}
     with pytest.raises(InputError, match="expects B300"):
-        profiles.resolve("olmo35-b300-v2", "ai2/jupiter", model(), options())
+        profiles.resolve("olmo35-b300-12.5@0.8", "ai2/jupiter", model(), options())
     with pytest.raises(InputError, match="geometry"):
-        profiles.resolve("olmo35-b300-v2", "ai2/holmes", model() | {"hidden_size": 2048}, options())
+        profiles.resolve("olmo35-b300-12.5@0.8", "ai2/holmes", model() | {"hidden_size": 2048}, options())
 
 
 @pytest.mark.parametrize(
@@ -585,15 +585,22 @@ def test_retained_state_rejects_unsafe_options_at_plan_time(example, overrides, 
 
 
 @pytest.mark.parametrize("mode", ["retract", "in_place"])
-def test_b300_advisor_recommends_only_current_version(mode):
+def test_b300_advisor_recommends_only_current_profile(mode):
     values = options() | {"pause_generation_mode": mode}
     report = profiles.resolve("generic", "ai2/holmes", model(), values)
     _, tips = profiles.advise(report, "ai2/holmes", model(), values, set(values))
     assert len(tips) == 1
-    assert "olmo35-b300-v2" in tips[0]["message"]
+    assert "olmo35-b300-12.5@0.8" in tips[0]["message"]
     assert "olmo35-b300-v1" not in tips[0]["message"]
 
 
-def test_wrong_hardware_points_to_current_b300_version():
-    with pytest.raises(InputError, match="choose olmo35-b300-v2"):
-        profiles.resolve("olmo35-h100-v1", "ai2/holmes", model(), options())
+def test_wrong_hardware_points_to_current_b300_profile():
+    with pytest.raises(InputError, match="choose olmo35-b300-12.5@0.8"):
+        profiles.resolve("olmo35-h100-12.5@0.8", "ai2/holmes", model(), options())
+
+
+def test_legacy_h100_name_preserves_settings_without_another_recommendation():
+    old = profiles.resolve("olmo35-h100-v1", "ai2/jupiter", model(), options())
+    current = profiles.resolve("olmo35-h100-12.5@0.8", "ai2/jupiter", model(), options())
+    assert old["preset_values"] == current["preset_values"]
+    assert profiles.RECOMMENDED_PROFILES["h100"] == "olmo35-h100-12.5@0.8"

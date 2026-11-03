@@ -147,12 +147,15 @@ use `generic` and write them explicitly.** There are two behaviors:
   values count too. Incompatible model, hardware or topology is an error, never
   a fallback to different settings. `auto` is not a supported selector.
 
-The learning examples pin `profile = "olmo35-b300-v2"` on Holmes. It is the
+The learning examples pin `profile = "olmo35-b300-12.5@0.8"` on Holmes. It is the
 current recommended B300 starting point based on our experiments. We keep one
-recommendation per GPU, updating its version as the evidence changes; v1 remains
-available for reproducing older configurations and is not suggested by the advisor.
+recommendation per GPU. The suffix is **total@active parameters in billions**:
+approximately 12.5B total and 0.8B active per token, including embeddings and the
+output head. B300 v1 remains available for reproducing older cached configurations;
+`olmo35-h100-v1` remains a compatibility alias for the H100 preset. Neither old
+name is suggested by the advisor.
 To use Jupiter,
-change both the cluster and the profile to `olmo35-h100-v1`. A wrong cluster error
+change both the cluster and the profile to `olmo35-h100-12.5@0.8`. A wrong cluster error
 names the matching hardware's preset. The planner checks known hardware,
 dedicated TP1 placement, context/response caps and cached-KDA prerequisites
 without needing model metadata.
@@ -167,8 +170,8 @@ not treated as evidence of the source checkpoint's geometry.
 | Preset | Cache | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Memory fraction |
 |---|---|---:|---:|---:|---:|
 | `olmo35-b300-v1` (historical) | On, `extra_buffer` | 512 | 17,825,792 | 3,072 | 0.7 |
-| `olmo35-b300-v2` (recommended) | Off | 512 | 17,825,792 | 3,072 | 0.7 |
-| `olmo35-h100-v1` | Off | 512 | 6,684,672 | 512 | 0.9 |
+| `olmo35-b300-12.5@0.8` (recommended) | Off | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-h100-12.5@0.8` | Off | 512 | 6,684,672 | 512 | 0.9 |
 
 All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
 The preset owns those fields, cache enablement/strategy, admission, HTTP concurrency,
@@ -569,7 +572,7 @@ their profiles are unchanged.
 
 To restore the previous behavior, set `miles.pause_generation_mode = "retract"`.
 On B300, select `inference.profile = "olmo35-b300-v1"` as well to restore the
-previous prefix-cache configuration. H100's `olmo35-h100-v1` already disables
+previous prefix-cache configuration. H100's `olmo35-h100-12.5@0.8` already disables
 prefix caching, but the retained-state performance and learning measurements below
 were collected on B300, not H100.
 

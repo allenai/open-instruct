@@ -158,11 +158,12 @@ HTTP server uses the same profile. See the
 [evaluation guide](../../../docs/miles/background-evaluation.md) for compatibility,
 batch-boundary limits and full-panel qualification still required.
 
-The learning examples pin `inference.profile = "olmo35-b300-v2"` on Holmes.
+The learning examples pin `inference.profile = "olmo35-b300-12.5@0.8"` on Holmes.
 This is the current recommended B300 starting point, based on the experiments
-below. Profile versions record revisions of that recommendation, not a menu of
-optimization variants. The planner recommends v2; v1 remains only for reproducing
-older configurations.
+below. The suffix is **total@active parameters in billions**: approximately
+12.5B total and 0.8B active per token for the measured model, including embeddings
+and the output head. The planner recommends one current preset per GPU. The old
+B300 v1 preset remains only for reproducing older cached configurations.
 The preset sets **512 running requests, 512 HTTP permits and decode graphs through
 batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
 0.7 and prefill chunks of 8,192. It disables cross-request radix caching.
@@ -177,10 +178,11 @@ Cached hybrid serving requires FP32 tracked-state snapshots in the pinned
 pins change. See [model limits](../../../docs/miles/moe-model-support.md#current-limits).
 
 To move an example to Jupiter, change both the cluster and profile to
-`olmo35-h100-v1`. This preset also uses admission/HTTP/graph batch 512 and prefill
+`olmo35-h100-12.5@0.8`. This preset also uses admission/HTTP/graph batch 512 and prefill
 chunks of 8,192, but disables caching and uses 6,684,672 KV tokens, 512 recurrent
 slots and memory fraction 0.9. Both presets require the studied BF16 Olmo 3.5
 geometry, dedicated TP1 engines and 34,816 context / 32,768 response caps.
+The old `olmo35-h100-v1` name remains a compatibility alias for the H100 preset.
 These settings are starting points, not universal memory-fit or throughput guarantees.
 
 Named presets apply whole. Any explicit preset-owned key conflicts, even an equal

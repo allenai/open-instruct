@@ -52,7 +52,8 @@ tracked-state snapshots written directly from FP32 accumulators. Casting BF16
 intermediate states to FP32 does not satisfy this contract. Rebuild the runtime
 image when updating the adapter pin; older images reject tracked prefill batches.
 The named `olmo35-b300-v1` preset enables caching for its supported geometry;
-`olmo35-h100-v1` disables it. Named presets apply whole: an explicit
+the current `olmo35-b300-12.5@0.8` and `olmo35-h100-12.5@0.8` presets disable it.
+Named presets apply whole: an explicit
 `inference.radix_cache` value conflicts, even when equal. To change cache mode,
 select `inference.profile = "generic"` and configure serving settings explicitly.
 Generic and colocated setups default to disabled caching; recurrent state storage

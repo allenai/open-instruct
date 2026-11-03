@@ -14,9 +14,15 @@ from open_instruct.miles.infrastructure import gpu_hardware
 MEASURED_CONTEXT = 34816
 MEASURED_RESPONSE = 32768
 MINIMUM_MEMORY_MIB = {"b300": 270000, "h100": 80000}
-PROFILES = {"olmo35-b300-v1": "b300", "olmo35-b300-v2": "b300", "olmo35-h100-v1": "h100"}
-# One recommended starting point per GPU; old versions remain reproducible.
-RECOMMENDED_PROFILES = {"b300": "olmo35-b300-v2", "h100": "olmo35-h100-v1"}
+PROFILES = {
+    "olmo35-b300-v1": "b300",
+    "olmo35-b300-12.5@0.8": "b300",
+    "olmo35-h100-12.5@0.8": "h100",
+    "olmo35-h100-v1": "h100",  # Compatibility alias; not another recommendation.
+}
+# Suffix is total@active parameters in billions, rounded for the measured model.
+# One recommended starting point per GPU; old names remain reproducible.
+RECOMMENDED_PROFILES = {"b300": "olmo35-b300-12.5@0.8", "h100": "olmo35-h100-12.5@0.8"}
 PROFILE_KEYS = (
     "sglang_disable_radix_cache",
     "sglang_mamba_radix_cache_strategy",
@@ -95,7 +101,7 @@ PRESETS = {
         "sglang_max_mamba_cache_size": 3072,
         "sglang_mem_fraction_static": 0.7,
     },
-    "olmo35-h100-v1": _COMMON
+    "olmo35-h100-12.5@0.8": _COMMON
     | {
         "sglang_disable_radix_cache": True,
         "sglang_max_total_tokens": 192 * MEASURED_CONTEXT,
@@ -104,9 +110,10 @@ PRESETS = {
     },
 }
 
-# Preserve the original cached preset for existing configs. Recommended
-# v2 keeps its measured pools and graphs, but forbids cross-request reuse.
-PRESETS["olmo35-b300-v2"] = PRESETS["olmo35-b300-v1"] | {"sglang_disable_radix_cache": True}
+# Preserve the original cached preset for existing configs. The recommendation
+# keeps its measured pools and graphs, but forbids cross-request reuse.
+PRESETS["olmo35-b300-12.5@0.8"] = PRESETS["olmo35-b300-v1"] | {"sglang_disable_radix_cache": True}
+PRESETS["olmo35-h100-v1"] = PRESETS["olmo35-h100-12.5@0.8"]
 
 
 def editable_toml(name):
@@ -124,7 +131,7 @@ def incompatibility(name, cluster, model, options):
         alternative = RECOMMENDED_PROFILES.get(cluster_gpu, "generic")
         return f"Preset expects {gpu.upper()}, but {cluster} uses {cluster_gpu.upper()}; choose {alternative} or change the cluster"
     if options.get("pause_generation_mode") == "in_place" and not PRESETS[name]["sglang_disable_radix_cache"]:
-        return "Core in_place publication requires sglang_disable_radix_cache=true; use olmo35-b300-v2 on B300"
+        return "Core in_place publication requires sglang_disable_radix_cache=true; use olmo35-b300-12.5@0.8 on B300"
     if options.get("colocate") or options.get("rollout_num_gpus_per_engine", 1) != 1:
         return "Measured presets require dedicated TP1 inference engines"
     if any(options.get(key) for key in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")):
