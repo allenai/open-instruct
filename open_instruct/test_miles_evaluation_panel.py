@@ -377,6 +377,7 @@ def test_managed_judge_rejects_insufficient_gpus(monkeypatch):
 
 
 def test_panel_manages_safety_judges(three_node):
+    assert "harness" not in next(task for task in three_node.evaluation["tasks"] if task["task"] == "gsm8k")
     judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
     assert len(judges) == 6
     assert all(not any(key.endswith("base_url") for key in task["harness"]) for task in judges)
@@ -508,6 +509,7 @@ def test_judge_startup_defaults_preserve_explicit_overrides_and_external_servers
 
 
 def test_new_panel_records_judge_defaults_and_embeds_fixed_runner(three_node):
+    assert "harness" not in next(task for task in three_node.evaluation["tasks"] if task["task"] == "gsm8k")
     judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
     assert len(judges) == 6
     for task in judges:
