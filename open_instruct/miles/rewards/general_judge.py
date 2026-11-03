@@ -279,7 +279,9 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
         raise RuntimeError(f"general judge request failed for {config.api_url}: {error}") from error
 
 
-async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any) -> float:
+async def general_judge_score(
+    args: Any, sample: Any, *, name: str, target: Any, prediction: str | None = None
+) -> float:
     """Score one response with the configured OpenAI-compatible general judge."""
     metadata = getattr(sample, "metadata", None)
     if not isinstance(metadata, dict):
@@ -287,13 +289,15 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
     query = metadata.get("judge_query")
     if not isinstance(query, str) or not query:
         raise ValueError("general-quality samples require metadata.judge_query")
-    resolved = judge_registry.resolve_request(args, name, query, str(sample.response), target)
+    # Keep the original sample for training/records while grading the selected answer.
+    prediction = str(sample.response) if prediction is None else prediction
+    resolved = judge_registry.resolve_request(args, name, query, prediction, target)
     binding = None
     rubric_sha256 = None
     if resolved:
         config, prompt, prompt_sha256, parser, binding, rubric_sha256 = resolved
     else:
-        prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=str(sample.response), target=target)
+        prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=prediction, target=target)
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
