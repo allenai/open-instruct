@@ -147,7 +147,11 @@ use `generic` and write them explicitly.** There are two behaviors:
   values count too. Incompatible model, hardware or topology is an error, never
   a fallback to different settings. `auto` is not a supported selector.
 
-The learning examples pin `profile = "olmo35-b300-retained-v1"` on Holmes. To use Jupiter,
+The learning examples pin `profile = "olmo35-b300-v2"` on Holmes. It is the
+current recommended B300 starting point based on our experiments. We keep one
+recommendation per GPU, updating its version as the evidence changes; v1 remains
+available for reproducing older configurations and is not suggested by the advisor.
+To use Jupiter,
 change both the cluster and the profile to `olmo35-h100-v1`. A wrong cluster error
 names the matching hardware's preset. The planner checks known hardware,
 dedicated TP1 placement, context/response caps and cached-KDA prerequisites
@@ -162,8 +166,8 @@ not treated as evidence of the source checkpoint's geometry.
 
 | Preset | Cache | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Memory fraction |
 |---|---|---:|---:|---:|---:|
-| `olmo35-b300-v1` | On, `extra_buffer` | 512 | 17,825,792 | 3,072 | 0.7 |
-| `olmo35-b300-retained-v1` | Off | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-b300-v1` (historical) | On, `extra_buffer` | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-b300-v2` (recommended) | Off | 512 | 17,825,792 | 3,072 | 0.7 |
 | `olmo35-h100-v1` | Off | 512 | 6,684,672 | 512 | 0.9 |
 
 All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.

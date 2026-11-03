@@ -158,7 +158,11 @@ HTTP server uses the same profile. See the
 [evaluation guide](../../../docs/miles/background-evaluation.md) for compatibility,
 batch-boundary limits and full-panel qualification still required.
 
-The learning examples pin `inference.profile = "olmo35-b300-retained-v1"` on Holmes.
+The learning examples pin `inference.profile = "olmo35-b300-v2"` on Holmes.
+This is the current recommended B300 starting point, based on the experiments
+below. Profile versions record revisions of that recommendation, not a menu of
+optimization variants. The planner recommends v2; v1 remains only for reproducing
+older configurations.
 The preset sets **512 running requests, 512 HTTP permits and decode graphs through
 batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
 0.7 and prefill chunks of 8,192. It disables cross-request radix caching.

@@ -96,7 +96,7 @@ max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
 # Presets apply whole. To tune their settings, select generic and copy the preset block.
-profile = "olmo35-b300-retained-v1"
+profile = "olmo35-b300-v2"
 
 [tracking]
 wandb_mode = "offline"
