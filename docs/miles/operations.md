@@ -206,6 +206,12 @@ is outside that publication wait, so it is not an absolute shutdown deadline.
 
 ## Checkpoints while inference continues
 
+On resume, `training.save_interval`, `evaluation.interval`, and individual
+`evaluation.tasks[].interval` may change to reduce future artifact production.
+The saved specification is authenticated first; training horizon, recipe,
+evaluation tasks and scoring settings must still match. Changing an interval
+does not delete existing checkpoints or automatically retry missed evaluations.
+
 Native trainer checkpoints are saved between optimizer updates without draining
 inference, including mixed-policy refresh and rolling engine publication. The
 driver saves the dataset cursor and pending-prompt ledger, writes the trainer's
