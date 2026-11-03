@@ -10,13 +10,13 @@ RUN --mount=type=secret,id=github_token,required=true \
 RUN uv pip install --system --no-deps /opt/core-rl/sources/scaling-ladders/ladders/mainline/transformers_plugin
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 # Install metadata/entrypoints; the existing source overlay does not load optional Rust extensions.
-# SGLang needs torch to build optional Rust modules; with those disabled, reuse
-# the qualified binary stack rather than downloading another torch into isolation.
+# SGLang and Megatron Bridge declare torch as a build dependency. Reuse the
+# qualified binary stack for metadata installs (SGLang Rust modules are disabled).
 RUN uv pip install --system "setuptools-scm>=8.0" "setuptools-rust>=1.11"
 # Keep isolated-build downloads for the other packages out of the runtime image.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     SGLANG_BUILD_RUST_EXTS=none UV_LINK_MODE=copy uv pip install --system --no-deps \
-    --no-build-isolation-package sglang \
+    --no-build-isolation-package sglang --no-build-isolation-package megatron-bridge \
     -e /opt/core-rl/sources/olmo-core -e /opt/core-rl/sources/miles \
     -e /opt/core-rl/sources/olmo-sglang -e /opt/core-rl/sources/sglang/python \
     -e /opt/core-rl/sources/megatron-lm -e /opt/core-rl/sources/megatron-bridge
