@@ -44,3 +44,6 @@ RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
 
 RUN python -c "import sglang; import sglang.srt.server_args; import sglang.srt.entrypoints.engine; from importlib.metadata import version; assert sglang.__file__.startswith('/opt/core-rl/sources/sglang/python/'); assert version('sglang-kernel') == '0.4.7'"
+
+# Native serving imports must resolve before allocating GPU qualification runs.
+RUN python -c "from sglang.srt.models import mainline_ladder; assert mainline_ladder.EntryClass.__name__ == 'MainlineLadderForCausalLM'"
