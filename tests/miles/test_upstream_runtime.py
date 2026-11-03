@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+
 from miles.backends.core_utils import actor
 from miles.backends.core_utils.publication import policy_versions
 from miles.backends.core_utils.publication.engine_drain import WeightSnapshot
@@ -20,7 +21,6 @@ from miles.utils.compiler_cache import startup_cache
 from miles.utils.ft_utils.health_checker import ActivenessTracker
 from miles.utils.types import WeightVersionSpan, WeightVersionsPerCall
 from miles.utils.workers.worker_spec import CommandWorkerSpec, SchedulingSpec, WorkerLaunchContext
-
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.execution import serving
 
@@ -114,7 +114,11 @@ def test_startup_hooks_reject_missing_worker_pools(names):
 def test_core_publication_never_aborts_live_decoding(monkeypatch, mode):
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
     worker.args = SimpleNamespace(
-        olmo_core=CoreConfig(publication_mode=mode), colocate=False, update_weight_buffer_size=1024, save=None
+        olmo_core=CoreConfig(publication_mode=mode),
+        colocate=False,
+        update_weight_buffer_size=1024,
+        save=None,
+        pause_generation_mode="retract",
     )
     worker.clock = SimpleNamespace(completed_steps=3, published_step=2, published=Mock())
     worker.weight_updater = Mock()
