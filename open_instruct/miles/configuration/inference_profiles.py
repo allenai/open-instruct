@@ -14,7 +14,7 @@ from open_instruct.miles.infrastructure import gpu_hardware
 MEASURED_CONTEXT = 34816
 MEASURED_RESPONSE = 32768
 MINIMUM_MEMORY_MIB = {"b300": 270000, "h100": 80000}
-PROFILES = {"olmo35-b300-v1": "b300", "olmo35-h100-v1": "h100"}
+PROFILES = {"olmo35-b300-v1": "b300", "olmo35-b300-retained-v1": "b300", "olmo35-h100-v1": "h100"}
 PROFILE_KEYS = (
     "sglang_disable_radix_cache",
     "sglang_mamba_radix_cache_strategy",
@@ -102,6 +102,10 @@ PRESETS = {
     },
 }
 
+# Preserve the original cached preset for existing configs. The retained-state
+# variant keeps its measured pools and graphs, but forbids cross-request reuse.
+PRESETS["olmo35-b300-retained-v1"] = PRESETS["olmo35-b300-v1"] | {"sglang_disable_radix_cache": True}
+
 
 def editable_toml(name):
     """Render the complete preset as an editable generic configuration."""
@@ -117,6 +121,10 @@ def incompatibility(name, cluster, model, options):
     if cluster_gpu not in (None, gpu):
         alternative = next((key for key, value in PROFILES.items() if value == cluster_gpu), "generic")
         return f"Preset expects {gpu.upper()}, but {cluster} uses {cluster_gpu.upper()}; choose {alternative} or change the cluster"
+    if options.get("pause_generation_mode") == "in_place" and not PRESETS[name]["sglang_disable_radix_cache"]:
+        return (
+            "Core in_place publication requires sglang_disable_radix_cache=true; use olmo35-b300-retained-v1 on B300"
+        )
     if options.get("colocate") or options.get("rollout_num_gpus_per_engine", 1) != 1:
         return "Measured presets require dedicated TP1 inference engines"
     if any(options.get(key) for key in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")):
@@ -188,6 +196,11 @@ def advise(report, cluster, model, options, explicit_keys):
     if selected == "generic":
         cluster_gpu = gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu")
         for name, preset in PRESETS.items():
+            # Suggest one B300 preset, matching the requested publication mode.
+            if PROFILES[name] == "b300" and ("retained" in name) != (
+                options.get("pause_generation_mode") == "in_place"
+            ):
+                continue
             if (
                 model is not None
                 and cluster_gpu == PROFILES[name]

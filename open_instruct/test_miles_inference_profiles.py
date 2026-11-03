@@ -559,3 +559,19 @@ def test_malformed_inventory_json_keeps_file_context(tmp_path):
     (tmp_path / "inference-profile-0.json").write_text("not JSON")
     with pytest.raises(ValueError, match="Cannot qualify rollout hardware from .*inference-profile-0.json"):
         profiles.check_cluster_hardware(report, tmp_path, {"replicas": 1, "nodes": [{"rollout_gpus": 1}]})
+
+
+def test_retained_preset_preserves_cached_geometry_and_requires_known_hardware():
+    retained = profiles.resolve("olmo35-b300-retained-v1", "ai2/holmes", model(), options())
+    assert retained["preset_values"] == profiles.PRESETS["olmo35-b300-v1"] | {"sglang_disable_radix_cache": True}
+    with pytest.raises(InputError, match="expects B300"):
+        profiles.resolve("olmo35-b300-retained-v1", "ai2/jupiter", model(), options())
+    with pytest.raises(InputError, match="geometry"):
+        profiles.resolve("olmo35-b300-retained-v1", "ai2/holmes", model() | {"hidden_size": 2048}, options())
+
+
+def test_retained_state_rejects_prefix_reuse_and_colocation_at_plan_time():
+    with pytest.raises(InputError, match="sglang_disable_radix_cache"):
+        RunSpec.load("configs/miles/examples/node.toml", overrides=['inference.profile="olmo35-b300-v1"']).compile()
+    with pytest.raises(InputError, match="disaggregated"):
+        RunSpec.load("configs/miles/examples/dev.toml", overrides=['miles.pause_generation_mode="in_place"']).compile()

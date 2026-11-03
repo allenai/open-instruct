@@ -158,10 +158,16 @@ HTTP server uses the same profile. See the
 [evaluation guide](../../../docs/miles/background-evaluation.md) for compatibility,
 batch-boundary limits and full-panel qualification still required.
 
-The learning examples pin `inference.profile = "olmo35-b300-v1"` on Holmes.
+The learning examples pin `inference.profile = "olmo35-b300-retained-v1"` on Holmes.
 The preset sets **512 running requests, 512 HTTP permits and decode graphs through
 batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
-0.7 and prefill chunks of 8,192. It enables radix caching with `extra_buffer`.
+0.7 and prefill chunks of 8,192. It disables cross-request radix caching.
+Both learning examples set `miles.pause_generation_mode = "in_place"`: active
+requests keep their attention KV and hybrid recurrent state across weight updates,
+avoiding re-prefill of their generated prefixes. The original `olmo35-b300-v1`
+preset still enables radix caching with `extra_buffer` and requires retract mode.
+The one-GPU colocated `dev.toml` explicitly keeps retract mode; retained state
+requires dedicated inference GPUs. See the [retained-state qualification](../../../docs/miles/throughput-profiles.md#retained-state-weight-publication).
 Cached hybrid serving requires FP32 tracked-state snapshots in the pinned
 [runtime](../../../runtime/miles/runtime.lock.json); rebuild the image when its
 pins change. See [model limits](../../../docs/miles/moe-model-support.md#current-limits).

@@ -96,7 +96,7 @@ max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
 # Presets apply whole. To tune their settings, select generic and copy the preset block.
-profile = "olmo35-b300-v1"
+profile = "olmo35-b300-retained-v1"
 
 [tracking]
 wandb_mode = "offline"
@@ -117,6 +117,8 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
+# Keep active-request KV/recurrent state across weight updates; the preset disables prefix reuse.
+pause_generation_mode = "in_place"
 # HTTP workers decode replies before handing them to the producer.
 use_distributed_post = true
 http_post_actors_per_node = 16

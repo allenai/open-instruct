@@ -408,6 +408,13 @@ class RunConfig:
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
+        if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
+            raise constraints.error("Core weight publication supports retract or in_place pause mode")
+        if options.get("pause_generation_mode") == "in_place":
+            if options.get("colocate"):
+                raise constraints.error("Core in_place publication requires disaggregated serving")
+            if not options.get("sglang_disable_radix_cache"):
+                raise constraints.error("Core in_place publication requires sglang_disable_radix_cache=true")
         if self.core.records_root is not None and not options.get("fully_async", False):
             # The completed buffer that records groups exists only in fully async runs.
             raise constraints.error(
