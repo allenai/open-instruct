@@ -570,11 +570,18 @@ def test_retained_preset_preserves_cached_geometry_and_requires_known_hardware()
         profiles.resolve("olmo35-b300-v2", "ai2/holmes", model() | {"hidden_size": 2048}, options())
 
 
-def test_retained_state_rejects_prefix_reuse_and_colocation_at_plan_time():
-    with pytest.raises(InputError, match="sglang_disable_radix_cache"):
-        RunSpec.load("configs/miles/examples/node.toml", overrides=['inference.profile="olmo35-b300-v1"']).compile()
-    with pytest.raises(InputError, match="disaggregated"):
-        RunSpec.load("configs/miles/examples/dev.toml", overrides=['miles.pause_generation_mode="in_place"']).compile()
+@pytest.mark.parametrize(
+    "example,overrides,message",
+    [
+        ("node", ['inference.profile="olmo35-b300-v1"'], "sglang_disable_radix_cache"),
+        ("node", ['inference.profile="generic"', "inference.radix_cache=true"], "sglang_disable_radix_cache"),
+        ("dev", ['miles.pause_generation_mode="in_place"'], "non-colocated"),
+        ("node", ['miles.pause_generation_mode="abort"'], "supports retract or in_place"),
+    ],
+)
+def test_retained_state_rejects_unsafe_options_at_plan_time(example, overrides, message):
+    with pytest.raises(InputError, match=message):
+        RunSpec.load(f"configs/miles/examples/{example}.toml", overrides=overrides).compile()
 
 
 @pytest.mark.parametrize("mode", ["retract", "in_place"])
