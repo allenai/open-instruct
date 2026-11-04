@@ -47,6 +47,7 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
@@ -110,18 +111,16 @@ class HFDataLoader(data_loader.DataLoaderBase):
             drop_last: If True, drop the last incomplete batch. If False, pad the last batch
                 with repeated indices to fill a complete batch.
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
-            max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
-                to the trainer for batch-size validation.
+            max_seq_length: Maximum sequence length.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
             This is automatically added by get_cached_dataset_tulu(). For custom datasets,
             add it with: dataset.add_column('index', range(len(dataset)))
         """
-        # OLMo-core's trainer expects global_batch_size in tokens, not sequences.
         super().__init__(
             work_dir=work_dir,
-            global_batch_size=batch_size * max_seq_length,
+            global_batch_size=batch_size,  # Note: dummy unused value
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             fs_local_rank=fs_local_rank if fs_local_rank is not None else dp_rank,
@@ -147,15 +146,16 @@ class HFDataLoader(data_loader.DataLoaderBase):
             )
         self._per_rank_batch_size = batch_size // dp_world_size
         self._collator = collator if collator is not None else (lambda x: {"examples": x})
+        self._packing = isinstance(collator, TensorDataCollatorWithFlattening)
         self._automatic_reshuffle = automatic_reshuffle
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
-        self._overflow: list[dict[str, Any]] = []
         self._precomputed_batch_sizes: list[int] | None = None
         self._num_padding_batches: int = 0
         self._epoch: int = 0
         self._current_iter: Iterator[dict[str, Any]] | None = None
         self._device = device
+        self._max_seq_length = max_seq_length
 
         self._reshard(epoch=0)
 
@@ -204,18 +204,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
             example = self.dataset[i]
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
-                all_examples = self._overflow + batch_examples
-                batch = to_device(self._collator(all_examples), self._device)
-                self._overflow = all_examples[len(batch["index"]) :]
-                yield batch
+                yield to_device(self._collator(batch_examples), self._device)
                 batch_examples = []
-        while self._overflow:
-            batch = to_device(self._collator(self._overflow), self._device)
-            assert len(batch["index"]) > 0, (
-                f"Collator consumed 0 examples from {len(self._overflow)} overflow examples"
-            )
-            self._overflow = self._overflow[len(batch["index"]) :]
-            yield batch
 
     @property
     def total_batches(self) -> int:
@@ -274,14 +264,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
-        packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
-        if packing_enabled:
+        if self._packing:
             self._reshard_with_packing(all_indices)
             return
 
         self._precomputed_batch_sizes = None
         self._num_padding_batches = 0
-        self._overflow = []
 
         global_size = len(all_indices)
         total_batches = global_size // self._batch_size
@@ -302,43 +290,50 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
 
-    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
-        """Reshard with world-aware packing so all ranks get the same batch count.
-
-        Instead of distributing examples to ranks and letting each rank pack
-        independently (which can produce different batch counts due to variable
-        overflow), this packs globally first and then distributes packed batches
-        round-robin to ranks.
-        """
-        max_seq_length = self._collator.max_seq_length
+    def _pack_all_batches(self, all_indices: np.ndarray) -> list[list[int]]:
         column_names = self._full_dataset.column_names
-        subset = self._full_dataset.select(all_indices.tolist())
-        if "chosen_input_ids" in column_names:
-            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
-        else:
-            lengths = [[len(x)] for x in subset["input_ids"]]
+        is_dpo = "chosen_input_ids" in column_names
 
-        num_streams = len(lengths[0])
+        subset = self._full_dataset.select(all_indices.tolist())
+        if is_dpo:
+            lengths = [len(c) + len(r) for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
+            # Max seq length is the individual token cap on chosen/rejected, so we double for the concatenated cap
+            pack_length = 2 * self._max_seq_length
+        else:
+            lengths = [len(x) for x in subset["input_ids"]]
+            pack_length = self._max_seq_length
+
         batches: list[list[int]] = []
         current_batch: list[int] = []
-        running_totals = [0] * num_streams
+        running_total = 0
 
         for i in range(len(all_indices)):
-            new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
-            would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
+            new_total = running_total + lengths[i]
+            would_exceed = len(current_batch) > 0 and new_total > pack_length
             at_max_samples = len(current_batch) >= self._per_rank_batch_size
 
             if would_exceed or at_max_samples:
                 batches.append(current_batch)
                 current_batch = [i]
-                running_totals = list(lengths[i])
+                running_total = lengths[i]
             else:
                 current_batch.append(i)
-                running_totals = new_totals
+                running_total = new_total
 
         if current_batch:
             batches.append(current_batch)
 
+        return batches
+
+    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
+        """Reshard with world-aware packing so all ranks get the same batch count.
+
+        Instead of distributing examples to ranks and letting each rank pack
+        independently (which can produce different batch counts because packed
+        batch sizes vary), this packs globally first and then distributes packed
+        batches round-robin to ranks.
+        """
+        batches = self._pack_all_batches(all_indices)
         num_batches = len(batches)
         padding_start = num_batches
         if self._drop_last:
@@ -370,7 +365,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
         Used by the trainer to do a dry-run of the
         forward and backward pass before training officially starts.
         """
-        num_examples = min(self._per_rank_batch_size, len(self.dataset))
+        if self._precomputed_batch_sizes:
+            num_examples = self._precomputed_batch_sizes[0]
+        else:
+            num_examples = min(self._per_rank_batch_size, len(self.dataset))
         examples = [self.dataset[i] for i in range(num_examples)]
         return to_device(self._collator(examples), self._device)
 

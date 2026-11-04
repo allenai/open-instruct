@@ -46,7 +46,7 @@ class TestWorldAwarePacking(unittest.TestCase):
         self, _name, max_seq_length, global_batch_size, dp_world_size, drop_last, num_samples
     ):
         dataset = _make_dpo_dataset(num_samples, max_seq_length)
-        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+        collator = TensorDataCollatorWithFlatteningDPO()
 
         with tempfile.TemporaryDirectory() as work_dir:
             loaders = [
@@ -59,6 +59,7 @@ class TestWorldAwarePacking(unittest.TestCase):
                     work_dir=work_dir,
                     collator=collator,
                     drop_last=drop_last,
+                    max_seq_length=max_seq_length,
                 )
                 for rank in range(dp_world_size)
             ]
