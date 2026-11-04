@@ -17,9 +17,9 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Use a `4x4x8`** (guide: What the cluster is). Since 2026-10-21 the cluster is seven `4x4x8`s and three `8x8x16`s;
-  the `8x8x8` is gone. The `8x8x16`s are hero's, borrowed only. Check the live layout before planning (command in the
-  guide); it changes when the cluster is resliced.
+- **Use a `4x4x8` for the 16-row recipe** (guide: What the cluster is). Since 2026-11-03 the cluster is three
+  `4x4x8`s, one `8x8x8` and hero's `8x8x48`. Check the live layout before planning (command in the guide); it changes
+  when the cluster is resliced.
 - **For `ici_context_parallelism` > 1, set `context_parallel_load_balance=False`** and require step-1 `LOSS-PARTS` CE
   to match an HF forward of the same batch within 1e-3 before training. With load balancing on, dense Olmo 3 7B's CE
   was off by +0.39 (cp4) and +1.98 (cp8); with it off, cp4 matched (guide: Traps).
