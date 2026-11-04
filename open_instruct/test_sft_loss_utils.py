@@ -14,7 +14,7 @@ from unittest import mock
 import torch
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState, GradientState
-from accelerate.utils import DistributedType, GradientAccumulationPlugin
+from accelerate.utils import DeepSpeedPlugin, DistributedType, GradientAccumulationPlugin
 from accelerate.utils.deepspeed import DeepSpeedEngineWrapper
 from deepspeed.runtime import engine as ds_engine
 from deepspeed.runtime import state_dict_factory
@@ -483,6 +483,29 @@ class TestSftLossNormalization(unittest.TestCase):
             sft_loss_utils.gradient_reduction_divisor(accelerator, 2)
         with self.assertRaisesRegex(ValueError, "divide the process count"):
             sft_loss_utils.gradient_reduction_divisor(accelerator, 3)
+
+    def test_deepspeed_config_accumulation_override_is_rejected(self):
+        # CLI GAS=1, DeepSpeed config GAS=8: Accelerate's DeepSpeed prepare adopts 8.
+        # Stop it at deepspeed.initialize, after that resolution has run.
+        accelerator = Accelerator(cpu=True, gradient_accumulation_plugin=GradientAccumulationPlugin(num_steps=1))
+        plugin = DeepSpeedPlugin(
+            hf_ds_config={
+                "gradient_accumulation_steps": 8,
+                "train_micro_batch_size_per_gpu": 1,
+                "zero_optimization": {"stage": 2},
+            }
+        )
+        model = _TokenModel()
+        with (
+            mock.patch.object(Accelerator, "deepspeed_plugin", plugin),
+            mock.patch("deepspeed.initialize", side_effect=RuntimeError("stop at initialize")),
+            self.assertRaisesRegex(RuntimeError, "stop at initialize"),
+        ):
+            accelerator._prepare_deepspeed(model, torch.optim.SGD(model.parameters(), lr=0.1))
+        self.assertEqual(accelerator.gradient_accumulation_steps, 8)
+        with self.assertRaisesRegex(ValueError, "gradient_accumulation_steps=8"):
+            sft_loss_utils.check_gradient_accumulation_steps(accelerator, 1)
+        sft_loss_utils.check_gradient_accumulation_steps(accelerator, 8)
 
     def _assert_distributed_matches_reference(self, mode, world_size, sp_size):
         expected_weight, expected_gradients = _reference(world_size, sp_size, aux=mode.startswith("sp"))

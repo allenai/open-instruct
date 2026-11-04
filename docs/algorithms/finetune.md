@@ -92,6 +92,10 @@ shards use the labels that Ulysses already shifted before sharding. A short fina
 accumulation window uses its actual token count. SP supports ZeRO-1/2 and ZeRO-3
 with `reduce_scatter=true`. ZeRO-3 SP with `reduce_scatter=false` is rejected
 because DeepSpeed mixes gradient divisors depending on bucket size.
+DeepSpeed's `gradient_accumulation_steps` must be `"auto"` or equal
+`--gradient_accumulation_steps`; a mismatch is rejected after `prepare()`.
+Ulysses checkpoints saved before this change name optimizer shards with mixed
+`mp_rank_*` suffixes; their optimizer state needs migrating before a resume.
 
 This token mean has a different scale from the historical summed loss used for
 Tulu 3 SFT. Reproducing a released checkpoint requires the original training code,

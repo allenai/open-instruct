@@ -49,6 +49,18 @@ def sequence_parallel_checkpoint(model, sequence_parallel_size: int = 1):
         model.mpu = mpu
 
 
+def check_gradient_accumulation_steps(accelerator: Accelerator, requested: int) -> None:
+    # prepare() adopts a DeepSpeed config's gradient_accumulation_steps over the
+    # plugin's. Windowing, the scheduler and step/resume accounting use the
+    # requested value, so a mismatch would update at the wrong boundaries.
+    effective = accelerator.gradient_accumulation_steps
+    if effective != requested:
+        raise ValueError(
+            f"The DeepSpeed config sets gradient_accumulation_steps={effective}, but "
+            f"--gradient_accumulation_steps={requested}. Set the config value to 'auto' or make them match."
+        )
+
+
 def resume_epoch_and_batch(completed_steps: int, batches_per_epoch: int, accumulation_steps: int) -> tuple[int, int]:
     # Each epoch can end in a short optimizer window. Multiplying the global
     # step by GAS would count its nonexistent padding as batches of the next epoch.

@@ -733,6 +733,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    sft_loss_utils.check_gradient_accumulation_steps(accelerator, args.gradient_accumulation_steps)
 
     # DataLoaderShard's device controls automatic input placement. Buffer on CPU,
     # then move one microbatch in the training loop. Keep the Ulysses wrapper's
