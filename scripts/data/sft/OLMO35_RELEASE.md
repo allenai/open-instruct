@@ -1,6 +1,6 @@
 # Olmo 3.5 release-data preparation
 
-Implements the CPU preparation for [release-data-fixes (#1964)](https://github.com/allenai/open-instruct/issues/1964): exact audited exclusions, replacement identity examples, and a shared training/serving tokenizer. It does not retrain a model or establish a knowledge cutoff. **The concrete tokenizer and final identity dataset remain pending a verified cutoff.** Do not use the Dolci creation date as a substitute for training-data provenance.
+Implements the CPU preparation for [release-data-fixes (#1964)](https://github.com/allenai/open-instruct/issues/1964): exact audited exclusions, replacement identity examples, and a check that the release tokenizer states a real cutoff. It does not retrain a model or establish a knowledge cutoff. **The cutoff is filled upstream in the tokenizer's chat template ([template-cutoff-placeholder (#2171)](https://github.com/allenai/open-instruct/issues/2171)); the final identity dataset remains pending that revision.** Do not use the Dolci creation date as a substitute for training-data provenance.
 
 ## Audited exclusions
 
@@ -22,29 +22,28 @@ For an already-filtered input such as C12, add `--allow-missing-ids`. The receip
 
 ## Cutoff, tokenizer and identity
 
-Once the cutoff is verified, prepare the exact tokenizer used by training, HF export and serving:
+The cutoff is filled once, upstream, as a new commit of `allenai/dolma2-tokenizer-olmo35` (#2171); nothing here edits a template. `$CUTOFF_REVISION` below is that commit's full SHA. Check it, then build the identity rows from it:
 
 ```bash
-uv run python scripts/tokenizers/prepare_olmo35_release.py \
+uv run python scripts/tokenizers/check_olmo35_release.py \
   --tokenizer allenai/dolma2-tokenizer-olmo35 \
-  --revision 8b9717061fae09d5be814373d189919a62a9a00d \
-  --cutoff-date "$VERIFIED_CUTOFF" --output "$PREP/tokenizer"
+  --revision "$CUTOFF_REVISION" --output "$PREP/tokenizer_receipt.json"
 
 uv run python scripts/data/sft/build_olmo35_identity.py \
-  --tokenizer "$PREP/tokenizer" --output "$PREP/identity" \
+  --tokenizer allenai/dolma2-tokenizer-olmo35 --revision "$CUTOFF_REVISION" --output "$PREP/identity" \
   --context-length "$VERIFIED_CONTEXT_LENGTH" --context-source "$CONTEXT_SOURCE"
 ```
 
-`VERIFIED_CUTOFF` is a month and year backed by the release's data provenance. It has no default. `VERIFIED_CONTEXT_LENGTH` and `CONTEXT_SOURCE` record the exact release checkpoint's supported token count and a pinned model-card/config reference; the issue's original 64K target must not silently carry into a different checkpoint. All saved tokenizer files are hashed in the receipt, including special-token configuration.
+The check refuses a revision whose templates still contain `[CUTOFF_DATE]`, and requires the default system prompt to say `knowledge cutoff is <Month YYYY>` exactly once. Its receipt records the revision, the cutoff, the rendered default system prompt, and template and backend hashes. `VERIFIED_CONTEXT_LENGTH` and `CONTEXT_SOURCE` record the exact release checkpoint's supported token count and a pinned model-card/config reference; the issue's original 64K target must not silently carry into a different checkpoint.
 
 The identity bank supplies new concise answers to all 58 audited prompts, with no copied reasoning or citations to hidden system instructions. A canonical hash checks the original IDs and prompts against the audit. The explicit Spanish request gets a Spanish answer; English capability questions get English answers with qualified language claims, consistent with C12's exception for requested languages. Each answer has a no-system-turn variant and an explicit-default-system variant. The default template injects its system turn when none is supplied, so these variants intentionally render identically; they are not two distinct conditioning contexts. Include the 116 replacement rows once in the release mix after excluding the old IDs, and record their mixing weight as two copies of 58 unique prompts.
 
-For SFT use `--tokenizer_name_or_path "$PREP/tokenizer" --chat_template_name tokenizer_default`. The historical `olmo35` template name is no longer registered. Keep the recipe's existing reserved-slot-token settings. Tokenization hashes include the resolved template, so the changed cutoff produces a new cache key. Do not reuse a forced `--dataset_config_hash` or an old NumPy output directory. The conversion saves the exact resolved tokenizer under the NumPy cache's `tokenizer/` directory; use that directory for subsequent export when reserved slots were promoted during tokenization.
+For SFT use `--tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision "$CUTOFF_REVISION" --chat_template_name tokenizer_default`. The historical `olmo35` template name is no longer registered. Keep the recipe's existing reserved-slot-token settings. Tokenization hashes include the resolved template, so the filled cutoff produces a new cache key. Data tokenized outside open-instruct, such as MaxText caches, must be rebuilt from the same revision. Do not reuse a forced `--dataset_config_hash` or an old NumPy output directory. The conversion saves the exact resolved tokenizer under the NumPy cache's `tokenizer/` directory; use that directory for subsequent export when reserved slots were promoted during tokenization.
 
-For `scripts/train/convert_olmo_core_to_hf.py`, pass `--tokenizer-name` pointing at that saved training tokenizer. Serving must use the tokenizer saved with the exported checkpoint. A training-only template override is insufficient because this exporter otherwise reloads its own tokenizer. A MILES `hf_template` directory override must likewise use the saved training tokenizer. This preparation only changes tokenizer assets; preserve the checkpoint's generation configuration and stop-token settings.
+For `scripts/train/convert_olmo_core_to_hf.py`, pass `--tokenizer-name` pointing at that saved training tokenizer. Serving must use the tokenizer saved with the exported checkpoint. A training-only template override is insufficient because this exporter otherwise reloads its own tokenizer. A MILES `hf_template` directory override must likewise use the saved training tokenizer. The cutoff changes only tokenizer assets; preserve the checkpoint's generation configuration and stop-token settings.
 
 ## Release checks still required
 
-Run the 32 prompts in `olmo35_cutoff_probe.json` on the actual release candidate after training. Save responses, the model and tokenizer revisions, generation settings, and the verified cutoff with the judgments. No probe results are claimed here.
+Run the 32 prompts in `olmo35_cutoff_probe.json` on the actual release candidate after training. Save responses, the model and tokenizer revisions, generation settings, and the cutoff from the tokenizer receipt with the judgments. No probe results are claimed here.
 
 For the safety change, report XSTest benign compliance and harmful refusal separately, WJ-benign compliance, and WildGuardTest harmful compliance/refusal. WJ-harmful supplies a jailbreak regression check. Use explicit distinct seeds for repeated runs; WJ-benign can be near its ceiling. Follow the ledger workflow before launching a comparison meant to establish a model-quality result. The exact-ID cleanup receipt alone does not establish safety or multilingual quality.

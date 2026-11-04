@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build hand-coded identity SFT rows only after preparing a dated release tokenizer.
+"""Build hand-coded identity SFT rows from a tokenizer whose cutoff is filled upstream.
 
 The output directory contains identity.jsonl and manifest.json. Each seed gets
 an implicit-system and an explicit-default-system variant with identical renders.
@@ -10,10 +10,8 @@ import hashlib
 import json
 import re
 import tempfile
-from datetime import datetime
+from importlib import util
 from pathlib import Path
-
-from open_instruct import tokenizer_utils
 
 SEEDS = Path(__file__).with_name("olmo35_identity_seed.json")
 SOURCE = "olmo35-identity-hand-coded"
@@ -22,72 +20,33 @@ SOURCE = "olmo35-identity-hand-coded"
 # Source: k3-audit/verify-ho2/u05-identity-stale--mass-and-recall/03_identity_rows.parquet
 # File SHA256: 32ef847c6b0a18c027ccc9fe18e4d9cb0facd2cb20bbea0b32c98515a93cf60d
 AUDITED_PROMPTS_SHA256 = "94948894630e308362e49c17b81ed4413c90d1fb95dc50c1203f1cf25553b991"
+CHECKER = Path(__file__).resolve().parents[2] / "tokenizers/check_olmo35_release.py"
+
+
+def _load_checker():
+    spec = util.spec_from_file_location("check_olmo35_release", CHECKER)
+    assert spec is not None and spec.loader is not None
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+release_tokenizer = _load_checker()
 
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _load_prepared_tokenizer(directory: Path):
-    receipt_file = directory / "release_tokenizer.json"
-    if not receipt_file.is_file():
-        raise ValueError("A prepared tokenizer with release_tokenizer.json is required; cutoff remains pending")
-    receipt = json.loads(receipt_file.read_text())
-    if not isinstance(receipt, dict):
-        raise ValueError("Invalid prepared-tokenizer receipt")
-    for key in ("source", "revision", "cutoff_date"):
-        if not isinstance(receipt.get(key), str) or not receipt[key]:
-            raise ValueError(f"Invalid prepared-tokenizer receipt field: {key}")
-    for key in ("source_template_sha256", "template_sha256", "backend_sha256"):
-        if not isinstance(receipt.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", receipt[key]):
-            raise ValueError(f"Invalid prepared-tokenizer receipt field: {key}")
-    try:
-        date = datetime.strptime(receipt["cutoff_date"], "%B %Y")
-    except ValueError as error:
-        raise ValueError("Prepared tokenizer must have an explicit Month YYYY cutoff") from error
-    if date.strftime("%B %Y") != receipt["cutoff_date"]:
-        raise ValueError("Prepared tokenizer must have an explicit Month YYYY cutoff")
-    files = {
-        path.relative_to(directory).as_posix(): _sha256(path.read_bytes())
-        for path in sorted(directory.rglob("*"))
-        if path.is_file() and path != receipt_file
-    }
-    if not files or files != receipt.get("files_sha256"):
-        raise ValueError("Prepared tokenizer files do not match its receipt")
-    tokenizer = tokenizer_utils.load_tokenizer(directory)
-    template = tokenizer.chat_template
-    if _sha256(json.dumps(template, sort_keys=True).encode()) != receipt["template_sha256"]:
-        raise ValueError("Prepared tokenizer template hash does not match its receipt")
-    if _sha256(tokenizer.backend_tokenizer.to_str().encode()) != receipt["backend_sha256"]:
-        raise ValueError("Prepared tokenizer backend hash does not match its receipt")
-    if "[CUTOFF_DATE]" in json.dumps(template):
-        raise ValueError("Prepared tokenizer still contains [CUTOFF_DATE]")
-    return tokenizer, receipt
-
-
-def _default_system(tokenizer, cutoff_date: str) -> str:
-    rendered = tokenizer.apply_chat_template(
-        [{"role": "user", "content": "Hello"}], tokenize=False, add_generation_prompt=False
-    )
-    prefix, separator, _ = rendered.partition("<|im_start|>user\n")
-    if tokenizer.bos_token and prefix.startswith(tokenizer.bos_token):
-        prefix = prefix.removeprefix(tokenizer.bos_token)
-    start, end = "<|im_start|>system\n", "<|im_end|>\n"
-    if not separator or not prefix.startswith(start) or not prefix.endswith(end):
-        raise ValueError("Expected an Olmo template with one default system turn")
-    system = prefix[len(start) : -len(end)]
-    if "<|im_start|>" in system or "<|im_end|>" in system or cutoff_date not in system:
-        raise ValueError("Default system must contain the prepared cutoff and no additional turns")
-    return system
-
-
-def build_identity(tokenizer_dir: Path, output: Path, *, context_length: int, context_source: str) -> dict:
+def build_identity(
+    tokenizer_name: str, revision: str, output: Path, *, context_length: int, context_source: str
+) -> dict:
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"Output must be a fresh directory: {output}")
     if type(context_length) is not int or context_length <= 0 or not context_source.strip():
         raise ValueError("A positive context length and its verification source are required")
-    tokenizer, receipt = _load_prepared_tokenizer(tokenizer_dir)
-    system = _default_system(tokenizer, receipt["cutoff_date"])
+    tokenizer, receipt = release_tokenizer.load_checked_tokenizer(tokenizer_name, revision)
+    system = receipt["default_system"]
     seeds = json.loads(SEEDS.read_text())
     if len(seeds) != 58 or len({seed["id"] for seed in seeds}) != 58:
         raise ValueError("Expected exactly 58 distinct identity seeds")
@@ -128,7 +87,6 @@ def build_identity(tokenizer_dir: Path, output: Path, *, context_length: int, co
         "audited_prompts_sha256": AUDITED_PROMPTS_SHA256,
         "context_length": context_length,
         "context_source": context_source,
-        "tokenizer": str(tokenizer_dir.resolve()),
         "tokenizer_receipt": receipt,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -147,8 +105,9 @@ def build_identity(tokenizer_dir: Path, output: Path, *, context_length: int, co
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tokenizer", required=True, help="Hub tokenizer ID or local tokenizer directory")
     parser.add_argument(
-        "--tokenizer", type=Path, required=True, help="Prepared tokenizer directory with cutoff receipt"
+        "--revision", required=True, help="Full Hub commit SHA with the cutoff filled (open-instruct#2171)"
     )
     parser.add_argument("--output", type=Path, required=True, help="Fresh output directory")
     parser.add_argument(
@@ -160,7 +119,11 @@ def main() -> None:
     args = parser.parse_args()
     try:
         manifest = build_identity(
-            args.tokenizer, args.output, context_length=args.context_length, context_source=args.context_source
+            args.tokenizer,
+            args.revision,
+            args.output,
+            context_length=args.context_length,
+            context_source=args.context_source,
         )
     except (ValueError, OSError) as error:
         parser.error(str(error))
