@@ -80,3 +80,30 @@ A worker process and a configurable response deadline (`timeout_seconds`, defaul
 follow `OI_MILES_FORMAT_TIMEOUT_POLICY`, falling back to the math policy (`zero`
 by default; `raise` preserves a scoring failure). Configuration errors propagate.
 The old `JSONSchemaVerifier` remains unchanged.
+
+## Native instruction and calendar sources
+
+`open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier` uses the
+maintained `IFEvalG` instruction registry. Targets have `family="nemo"` and a
+`target` object with parallel `instruction_id_list` and `kwargs` arrays. The
+optional `grading_mode` is `all` (default) or `fraction`. Unknown modes and native
+argument repairs are errors, rather than silently changing the task. This
+adapter applies the existing IF training admission policy, including rejection
+of impossible paragraph positions and tiny total-letter limits. It admits the
+corrected lowercase-repetition and Unicode letter-counting checkers. Language
+classification and English case-plus-language families remain deferred pending
+calibration; this is not a claim that every native family has passed controls.
+
+`CalendarVerifier` in the same module validates the full final JSON calendar
+against `exp_cal_state`: event IDs, durations, non-overlap, windows and explicit
+before/after/at/between constraints. Empty target calendars are supported. This
+version scores schedule feasibility, not event-name paraphrase or dialogue
+quality. Both adapters use the isolated verifier worker path. Their extraction
+uses the final answer after reasoning, like the other candidate verifiers.
+
+Existing control replay: 112 positive/negative pairs across 36 native instruction
+families passed; one impossible paragraph constraint was rejected. The dedicated
+unit controls include gold-containing/constraint-violating answers, Unicode
+letters, per-word repetition, fractional versus all-constraints scoring, calendar
+near misses and real subprocess execution. These are integration checks, not a
+new representative policy screen or qualification of an entire raw dataset.
