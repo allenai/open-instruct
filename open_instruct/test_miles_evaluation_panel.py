@@ -493,11 +493,13 @@ def test_scicode_checkpoint_without_generation_config(tmp_path):
     assert not (tmp_path / "generation_config.json").exists()
 
 
-def test_scicode_reports_original_http_error_without_accepting_zero(scicode_result):
+@pytest.mark.parametrize("level", ["result", "problem"])
+def test_scicode_reports_original_http_error_without_accepting_zero(scicode_result, level):
     path, result = scicode_result
-    result["predictions"][0]["error"] = "BadRequestError: Error code: 400 - top_k must be -1 or at least 1, got 0"
+    target = result if level == "result" else result["predictions"][0]
+    target["error"] = "BadRequestError: Error code: 400 - top_k must be -1 or at least 1, got 0"
     path.write_text(json.dumps(result))
-    with pytest.raises(ValueError, match="SciCode problem .* failed: BadRequestError: Error code: 400"):
+    with pytest.raises(ValueError, match="SciCode .*failed: BadRequestError: Error code: 400"):
         evaluation_runner.completed_scores(path.parent, [{"task": "scicode"}])
 
 
@@ -594,5 +596,5 @@ def test_manual_scicode_cannot_override_client_model_name(three_node, arguments)
     document = three_node.to_dict()
     document["evaluation"]["provider_kwargs"] = {"profile": "generic"}
     document["evaluation"]["external_server_args"] = arguments
-    with pytest.raises(InputError, match="cannot override"):
+    with pytest.raises(InputError, match="cannot override snapshot, served model name"):
         RunSpec.from_dict(document)

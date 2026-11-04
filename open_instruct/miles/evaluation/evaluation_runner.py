@@ -530,6 +530,7 @@ def run_tasks(receipt, output):
             write_json(attempt / "command.json", args)
             log_path = attempt / "olmo-eval.log"
             try:
+                # Create/truncate the log before the relay opens its reader.
                 with log_path.open("w") as log, startup_progress(log_path):
                     subprocess.run(
                         args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]

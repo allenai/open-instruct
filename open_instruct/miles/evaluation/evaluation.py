@@ -139,7 +139,9 @@ def parse(value, launch):
         "--served-model-name",
     }
     if any(arg.split("=")[0] in server_reserved for arg in server_args):
-        raise InputError("evaluation.external_server_args cannot override snapshot, tokenizer, port or GPU allocation")
+        raise InputError(
+            "evaluation.external_server_args cannot override snapshot, served model name, tokenizer, port or GPU allocation"
+        )
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise InputError("evaluation.tasks must be a nonempty list of olmo-eval tasks")

@@ -155,6 +155,8 @@ values and every other generation setting are preserved; the frozen checkpoint
 is never edited. `scicode-sampling-normalization.json` records the source config hash
 and the exact translation. Infrastructure errors in SciCode predictions remain
 fatal and include the original error in the runner diagnostic.
+The view lives outside the results directory to avoid copying model weights into
+Beaker artifacts.
 
 Safety tasks configure olmo-eval managed WildGuard and StrongREJECT providers.
 WildGuard serves `allenai/wildguard`; StrongREJECT serves `google/gemma-2b` with
@@ -169,8 +171,9 @@ The maintained managed WildGuard and Gemma StrongREJECT configurations default
 values win; external endpoints and other model configurations are unchanged.
 The runner resolves the value when building each evaluator command and records it
 in the attempt's `command.json`. It reaches the evaluator's server lifecycle, not
-the vLLM CLI. Implicit defaults leave saved run specs and evaluation claims unchanged. Readiness still detects exited processes early
-and retains startup logs. This allowance does not change the overall Beaker job
+the vLLM CLI. Implicit defaults leave saved run specs and evaluation claims
+unchanged. Readiness still detects exited processes early and retains startup
+logs. This allowance does not change the overall Beaker job
 timeout or any sampling/scoring settings. Slow startup alone does not establish
 whether loading, compilation, or another cause was responsible.
 
@@ -181,7 +184,6 @@ child logs. Unknown phases remain explicit; timeout errors are distinct from
 process exits. Older evaluator images receive the profile timeout but need the
 startup image below for phase diagnostics. Submitted jobs embed their runner, so
 regenerate their specifications from the fixed checkout to receive the live relay.
-
 
 Planning rejects the maintained managed `vllm_server` judges that download
 `allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless
