@@ -1932,6 +1932,13 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
             self.assertEqual(zork_id in self.tokenizer.encode(text, add_special_tokens=False), matches, text)
             self.assertEqual(self.keeps([{"role": "assistant", "content": text}]), not matches, text)
 
+    def test_allowed_token_containing_a_banned_one_is_kept(self):
+        # Leftmost-longest matching encodes `<think>` as the allowed tag, never as the banned `think`.
+        self.promote_think_tags()
+        self.tokenizer.add_tokens(["think"])
+        self.assertTrue(self.keeps([{"role": "assistant", "content": "<think>x</think>4"}]))
+        self.assertFalse(self.keeps([{"role": "assistant", "content": "I think so."}]))
+
     def test_find_reports_each_matched_string_once(self):
         messages = [
             {"role": "user", "content": "<|im_start|> and <|im_start|>"},
