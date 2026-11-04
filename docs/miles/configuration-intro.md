@@ -126,9 +126,13 @@ score-reuse audits (`core.scoring_check_interval=0`); the raw Core default is 50
 Their optional weight-equality audit is disabled, while the dev mechanics example
 enables it. These are recipe choices, not universal runtime defaults.
 
-Replay is independent:
-use_rollout_routing_replay requires use_miles_router; structured compilation supplies
-the latter when omitted. The Megatron use_routing_replay option is not the Core switch.
+Replay is independent: `use_rollout_routing_replay=true` works with the default
+Rust router. Core disables router retries, health recovery, and circuit breakers;
+the controller owns weight-ready membership and the producer owns whole-group
+retries. `use_miles_router=true` remains an explicit Python-router override. Existing replay configs
+that omitted `use_miles_router` now select Rust instead of the former implicit
+Python router. Set `miles.use_miles_router=true` to preserve the previous choice.
+The Megatron `use_routing_replay` option is not the Core switch.
 
 For conditional constraints see [run controls](run-controls.md), [packing](sequence-packing.md),
 [topology](topology.md), and [managed judges](managed-judges.md). For all native

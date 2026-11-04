@@ -113,9 +113,6 @@ NATIVE_CONSTRAINTS = {
         "Async Core training requires resident disaggregated rollout engines; set miles.colocate=false and miles.offload_rollout=false.",
         Category.NOT_IMPLEMENTED,
     ),
-    "use_rollout_routing_replay": Constraint(
-        "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
-    ),
 }
 
 # Structured migration errors are distinct from native backend restrictions.
@@ -295,7 +292,17 @@ def native_values(args, supplied_flags):
 
 # Closed structured schemas, also consumed by documentation coverage checks.
 STRUCTURED_FIELDS = {
-    "data": {"eval_prompt_data", "prompt_data", "recipe", "reward_config", "rl_manifest", "seed", "shuffle", "tasks"},
+    "data": {
+        "eval_prompt_data",
+        "prompt_data",
+        "recipe",
+        "reward_config",
+        "rl_manifest",
+        "seed",
+        "shuffle",
+        "tasks",
+        "sources",
+    },
     "launch": {
         "auto_resume",
         "budget",
@@ -318,6 +325,7 @@ STRUCTURED_FIELDS = {
     "conversion": {"hf_output"},
     "compiler_cache": {
         "diagnostics",
+        "tilelang",
         "enabled",
         "max_storage_bytes",
         "publish_interval_seconds",

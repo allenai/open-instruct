@@ -58,7 +58,7 @@ def resolve_request(args, name, query, prediction, target):
 
 
 def validate_data(prepared, value):
-    paths = [prepared["prompt_data"], *prepared.get("eval_prompt_data", [])[1::2]]
+    paths = [*prepared.get("train_sources", [prepared["prompt_data"]]), *prepared.get("eval_prompt_data", [])[1::2]]
     verifiers = json.loads(Path(prepared["reward_config"]).read_text()) if prepared.get("reward_config") else {}
     seen = set()
     for path in paths:

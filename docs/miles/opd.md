@@ -46,8 +46,11 @@ of copying the old Core adapter back into Open Instruct.
 - CP1 packed attention retains the separate padding-sequence layout needed
   by the Qwen/Blackwell FlashAttention path. The GPU test uses the current
   input-aligned loss-mask field.
-- OPD evaluation calls the shared verifier with the historical whole-answer,
-  nonzero-truncation protocol explicitly, independently of GRPO reward defaults.
+- OPD verifier evaluation follows the demo baseline: length-truncated responses
+  score zero. This changes the previous evaluation protocol that could reward
+  unfinished text; compare historical evaluation scores with that caveat. OPD's
+  teacher loss remains separate, with response aggregation by default and explicit
+  `training.loss_aggregation="token"` available for a documented experiment.
 
 ## Local and runtime checks
 

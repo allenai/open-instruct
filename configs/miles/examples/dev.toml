@@ -63,11 +63,18 @@ wandb_project = "open-instruct-miles"
 wandb_group = "core-workflow-basic"
 
 [core]
+# A response cut off at max_response_length scores 0 (capped = wrong).
+reward_zero_truncated = true
 checkpoint_keep_last = 2
 attention_backend = "torch"
 max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
+
+[miles]
+# Retained-state publication requires dedicated inference GPUs; this smoke test is colocated.
+pause_generation_mode = "retract"
+calculate_per_token_loss = false
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

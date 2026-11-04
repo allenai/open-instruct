@@ -1,4 +1,6 @@
-[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml)
+[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg?event=merge_group)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml)
+[![Papers with Code: Olmo 3 Think 32B on BBH](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge.svg?eval=8028&live=1)](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge-link?eval=8028)
+[![Papers with Code: Olmo 3.1 Think 32B on MATH](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge.svg?eval=8025&live=1)](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge-link?eval=8025)
 
 # Training Open Instruction-Following Language Models
 
@@ -8,10 +10,7 @@ This repo serves as an open effort on instruction-tuning and post-training popul
 2. Code for DPO, preference finetuning and reinforcement learning with verifiable rewards (RLVR).
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
-**Olmo 3 results:** The live Papers with Code badges below track **Olmo 3 Think 32B** on BBH and **Olmo 3.1 Think 32B** on MATH. See [Table 14 of the Olmo 3 paper](https://arxiv.org/html/2512.13961v2#S4.T14) for the reported scores.
-
-[![Papers with Code: Olmo 3 Think 32B on BBH](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge.svg?eval=8028&live=1)](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge-link?eval=8028)
-[![Papers with Code: Olmo 3.1 Think 32B on MATH](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge.svg?eval=8025&live=1)](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge-link?eval=8025)
+**Olmo 3 results:** The live Papers with Code badges above track **Olmo 3 Think 32B** on BBH and **Olmo 3.1 Think 32B** on MATH. See [Table 14 of the Olmo 3 paper](https://arxiv.org/html/2512.13961v2#S4.T14) for the reported scores.
 
 We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
 

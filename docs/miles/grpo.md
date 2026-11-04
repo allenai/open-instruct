@@ -85,13 +85,33 @@ example explicitly disables filtering to permit all-zero-reward checks. See
 [data and evaluation](data-and-evaluation.md#online-group-filtering) for metrics,
 batch semantics and the opt-out.
 
-## Excluding truncated responses
+## Truncated responses
 
-By default a response that reaches `max_response_length` is scored like any other:
-the verifier reads the unfinished text, and an answer mentioned mid-reasoning can earn
-reward. To leave truncated responses out of training (overlong filtering), set:
+The demo configs are the baseline for configuration choices unless a run explicitly
+states otherwise. GRPO uses **per-response loss weighting** and **zero reward for
+length-truncated responses**. The Core reward default also scores truncations zero,
+so omitting the field does not silently change the objective. The examples make
+these choices explicit:
 
 ```toml
+[core]
+reward_zero_truncated = true
+
+[miles]
+calculate_per_token_loss = false
+```
+
+This works with every verifier, managed judges included; only
+`reward_final_answer_only` is restricted to text verifiers. It cannot be combined
+with a `custom_reward_post_process_path`.
+
+For an explicitly documented overlong-filtering experiment that excludes truncated
+responses from training instead, override the baseline with:
+
+```toml
+[core]
+reward_zero_truncated = false
+
 [miles]
 custom_reward_post_process_path = "open_instruct.miles.rewards.truncation.exclude_truncated"
 ```
@@ -102,6 +122,17 @@ response-averaged loss, excluded responses still count in the batch denominator.
 When zero-variance group filtering is enabled, it also considers only finished
 responses: groups with fewer than two finished responses or no variation in
 their rewards are dropped before occupying training batch slots.
+
+## Final-answer-only rewards
+
+Set `core.reward_final_answer_only=true` to grade only text after the last literal
+`</think>`. A missing closing marker or whitespace-only final answer receives zero
+without calling a verifier. This applies to text/code verifiers and named judges;
+judge rubrics retain their normal answer-tag extraction within that final region.
+The full response and its token IDs remain available for training and recording.
+
+This option defaults to false and assumes the Olmo thinking format. It permits
+multiple closing markers, so it is not an exactly-one-tag format validator.
 
 ## Runtime images
 

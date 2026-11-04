@@ -21,7 +21,7 @@ from open_instruct.miles.configuration import (
     validation,
 )
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
-from open_instruct.miles.datasets import run_data
+from open_instruct.miles.datasets import mixture, run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import gpu_hardware
@@ -231,7 +231,7 @@ class RunSpec:
             validation.number(
                 cache["publish_interval_seconds"], "compiler_cache.publish_interval_seconds", exclusive_min=True
             )
-        for key in ("enabled", "restore", "diagnostics"):
+        for key in ("enabled", "restore", "diagnostics", "tilelang"):
             if key in cache:
                 _boolean(cache[key], f"compiler_cache.{key}")
         if "shared_root" in cache:
@@ -291,6 +291,7 @@ class RunSpec:
                     "compiler_cache_root",
                     "records_root",
                     "selection_table",
+                    "prompt_mixture",
                 }:
                     payload[section][key] = _path(value, self.config_path.parent, f"{section}.{key}")
         return payload
@@ -312,15 +313,29 @@ class RunSpec:
         allowed = constraints.STRUCTURED_FIELDS["data"]
         if unknown := set(data) - allowed:
             raise InputError(f"Unknown [data] fields: {sorted(unknown)}")
-        selectors = [key for key in ("tasks", "recipe", "rl_manifest", "prompt_data") if key in data]
+        selectors = [key for key in ("tasks", "sources", "recipe", "rl_manifest", "prompt_data") if key in data]
         if len(selectors) != 1:
             raise InputError(
-                f"data must select exactly one of tasks, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
+                f"data must select exactly one of tasks, sources, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
             )
         data.setdefault("seed", 17)
         if type(data["seed"]) is not int or data["seed"] < 0:
             raise InputError("data.seed must be a nonnegative integer")
         data["shuffle"] = _boolean(data.get("shuffle", True), "data.shuffle")
+        if "sources" in data:
+            run_data.validate_data(data)
+            data["sources"] = [
+                {
+                    "name": source["name"],
+                    "fraction": source["fraction"],
+                    **{
+                        key: value
+                        for key, value in RunSpec._data(mixture.source_data(source, data), base).items()
+                        if key not in ("seed", "shuffle")
+                    },
+                }
+                for source in data["sources"]
+            ]
         for key in ("rl_manifest", "prompt_data", "reward_config"):
             if key in data:
                 data[key] = _path(data[key], base, f"data.{key}")
@@ -397,6 +412,7 @@ class RunSpec:
             validation.mapping(launch[key], f"launch.{key}")
             if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in launch[key]):
                 raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
+        validation.ray_cpus(launch["env"])
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         if launch["cluster"] in COMPAT_DRIVER_CLUSTERS and "LD_LIBRARY_PATH" not in launch["secrets"]:
@@ -450,6 +466,8 @@ class RunSpec:
             "eval_prompt_data",
             "reward_config",
             "manifest",
+            "prompt_mixture",
+            "train_sources",
         }:
             raise InputError(f"Unknown prepared fields: {sorted(unknown)}")
         root = Path(self.output["root"])
@@ -472,7 +490,7 @@ class RunSpec:
                     section, key = "core", "max_policy_lag"
                     target = "core.max_policy_lag"
             if (section == "miles" and key in PATH_OPTIONS) or (
-                section == "core" and key in ("model_config", "reward_config", "compiler_cache_root")
+                section == "core" and key in ("model_config", "reward_config", "compiler_cache_root", "prompt_mixture")
             ):
                 value = _path(value, base, target)
             try:
@@ -530,7 +548,14 @@ class RunSpec:
                 else:
                     put(f"miles.{key}", value, origin)
         for key, value in self.core.items():
-            if key in ("model_config", "reward_config", "compiler_cache_root", "records_root", "selection_table"):
+            if key in (
+                "model_config",
+                "reward_config",
+                "compiler_cache_root",
+                "records_root",
+                "selection_table",
+                "prompt_mixture",
+            ):
                 value = _path(value, base, f"core.{key}")
             put(f"core.{key}", value, f"core.{key}")
         for key, value in options.normalize_options(self.miles).items():
@@ -540,6 +565,7 @@ class RunSpec:
             "shared_root": "compiler_cache_root",
             "restore": "compiler_cache_restore",
             "diagnostics": "compiler_cache_diagnostics",
+            "tilelang": "compiler_cache_tilelang",
             "max_storage_bytes": "compiler_cache_max_storage_bytes",
             "publish_interval_seconds": "compiler_cache_publish_interval_seconds",
         }.items():
@@ -669,6 +695,7 @@ class RunSpec:
             "rollout_shuffle": self.data["shuffle"],
             "loss_type": "policy_loss",
             "advantage_estimator": "grpo",
+            "calculate_per_token_loss": False,
             "use_rollout_logprobs": False,
             "grpo_std_normalization": False,
             "eps_clip": 0.2,
@@ -711,8 +738,6 @@ class RunSpec:
         )
         miles.setdefault("global_batch_size", miles["rollout_batch_size"] * miles["n_samples_per_prompt"])
         miles.setdefault("sglang_max_total_tokens", max(524288, miles["sglang_max_running_requests"] * length))
-        if miles.get("use_rollout_routing_replay"):
-            miles.setdefault("use_miles_router", True)
         if controls.get("policy_drift_action", ("fail", ""))[0] != "fail":
             raise InputError("policy_drift_action=warn is not implemented by Core; select fail")
         correction = controls.get("off_policy_correction", ("tis", ""))[0]
@@ -748,9 +773,27 @@ class RunSpec:
             miles.setdefault("save_interval", miles["num_rollout"])
         elif "miles.save_interval" in origins:
             raise InputError("save_checkpoints=false conflicts with an explicit save_interval")
+        elif core.get("max_run_seconds") is not None:
+            # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
+            core["max_run_final"] = True
+        if "sources" in self.data:
+            put("core.prompt_provider", "mixture", "data.sources")
+            put(
+                "core.prompt_mixture",
+                prepared.get("prompt_mixture", str(root / "prepared" / "data" / "mixture.json")),
+                "data.sources",
+            )
         generated = {
             "hf_checkpoint": self.conversion["hf_output"],
-            "prompt_data": self.data.get("prompt_data", str(root / "prepared" / "data" / "train.jsonl")),
+            "prompt_data": self.data.get(
+                "prompt_data",
+                str(
+                    root
+                    / "prepared"
+                    / "data"
+                    / (f"source-{self.data['sources'][0]['name']}.jsonl" if "sources" in self.data else "train.jsonl")
+                ),
+            ),
             "reward_config": self.data.get("reward_config", str(root / "prepared" / "data" / "verifiers.json")),
         }
         for key in generated:
@@ -759,6 +802,14 @@ class RunSpec:
             if target in origins and values[target.split(".")[0]][key] != value:
                 raise InputError(f"{target} conflicts with workflow preparation; set model/data fields instead")
             values[target.split(".")[0]][key] = value
+        mixture_evals = []
+        for source in self.data.get("sources", []):
+            labels = source.get("eval_prompt_data", [])[::2]
+            if source.get("rl_manifest") or any(task.get("eval_count") for task in source.get("tasks", [])):
+                labels = ["eval"]
+            for label in labels:
+                name = f"eval-{source['name']}-{label}"
+                mixture_evals.extend([name, str(root / "prepared" / "data" / f"{name}.jsonl")])
         if self.evaluation["mode"] == "background":
             conflicts = [
                 key
@@ -768,6 +819,7 @@ class RunSpec:
             ]
             if (
                 conflicts
+                or mixture_evals
                 or self.data.get("eval_prompt_data")
                 or any(task.get("eval_count") for task in self.data.get("tasks", []))
             ):
@@ -778,7 +830,9 @@ class RunSpec:
             miles.pop("eval_interval", None)
             miles["skip_eval_before_train"] = True
         else:
-            eval_data = prepared.get("eval_prompt_data", self.data.get("eval_prompt_data"))
+            eval_data = prepared.get(
+                "eval_prompt_data", mixture_evals if "sources" in self.data else self.data.get("eval_prompt_data")
+            )
             if eval_data is None and (
                 "tasks" not in self.data or any(task.get("eval_count") for task in self.data["tasks"])
             ):
@@ -820,16 +874,15 @@ class RunSpec:
         )
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
-        if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
-            raise InputError(
-                "core.reward_final_answer_only is incompatible with judging.bindings "
-                "(managed or external named judges); set reward_final_answer_only=false "
-                "or use text verifiers without named judge bindings."
-            )
         return result
 
-    def launch_warnings(self, miles) -> list[str]:
+    def launch_warnings(self, miles, core=None) -> list[str]:
         warnings = []
+        if core is not None and core.max_run_seconds is not None and "save_interval" not in miles:
+            warnings.append(
+                "training.save_checkpoints=false: the core.max_run_seconds stop cannot be resumed, so it is "
+                "final (HF export, final evaluation, workflow complete)."
+            )
         min_runtime = validation.duration(self.launch["min_runtime"], "launch.min_runtime")
         timeout = validation.duration(self.launch["timeout"], "launch.timeout")
         if min_runtime > BEAKER_MIN_RUNTIME_LIMIT_SECONDS:
@@ -864,7 +917,7 @@ class RunSpec:
             "data": self.data,
             "output": self.output,
             "launch": self.launch,
-            "launch_warnings": self.launch_warnings(compiled.miles),
+            "launch_warnings": self.launch_warnings(compiled.miles, compiled.core),
             "compiler_cache": self.compiler_cache,
             "records": self.records,
             "selection": self.selection,
