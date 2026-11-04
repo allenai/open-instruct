@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Stream screening prompts through bounded inference workers and summarize saved draws incrementally; store prompt/group evidence as JSONL with versioned contracts and resumable draw files (https://github.com/allenai/open-instruct/pull/2178).
 - Add `miles screen --all` to generate and score every prepared source row, mutually exclusive with fixed-count sampling (https://github.com/allenai/open-instruct/pull/2178).
 - Gate complete candidate bundles on whole-pool loader validation and per-stratum runtime reward controls; add explicit reference-judge routing and document remaining environment coverage (https://github.com/allenai/open-instruct/pull/2178).
 - Add full-population, hash-pinned candidate source preparation with original messages, explicit omissions and shared runtime adapters, including Litmus scalar answer formats (https://github.com/allenai/open-instruct/pull/2177).

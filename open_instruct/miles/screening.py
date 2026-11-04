@@ -16,7 +16,7 @@ import json
 import math
 import os
 import random
-from collections import Counter, defaultdict
+from collections import Counter
 from importlib import metadata as package_metadata
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,8 +34,21 @@ def digest(value):
     return hashlib.sha256(run_data._encoded(value)).hexdigest()
 
 
+def jsonl_rows(path):
+    """Read JSONL one record at a time (Unicode line separators are not records)."""
+    with Path(path).open(encoding="utf-8") as stream:
+        for line in stream:
+            if line.strip():
+                yield json.loads(line)
+
+
+def file_digest(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
 def select_prompts(prepared, count, seed):
-    """Sample without replacement, or select every admitted row when count is None."""
+    """Return a lazy selection and population counts, preserving historical sample IDs."""
     if count is not None and count < 1:
         raise InputError("prompts-per-source must be positive")
     if prepared.get("prompt_mixture"):
@@ -44,25 +57,62 @@ def select_prompts(prepared, count, seed):
         sources = [{**s, "path": str(path.parent / s["path"])} for s in sources]
     else:
         sources = [{"name": "train", "fraction": 1.0, "path": prepared["prompt_data"]}]
-    selected, populations = [], []
-    for source in sources:
-        rows = run_data._rows(Path(source["path"]).read_bytes())
-        rng = random.Random(f"{seed}:{source['name']}")
-        indices = range(len(rows)) if count is None else sorted(rng.sample(range(len(rows)), min(count, len(rows))))
-        populations.append({"name": source["name"], "rows": len(rows), "fraction": source["fraction"]})
-        for index in indices:
-            row = copy.deepcopy(rows[index])
-            # Attribution is supplied by the mixture provider at training runtime.
-            row["metadata"]["source_name"] = source["name"]
-            selected.append(
-                {
-                    "id": digest([source["name"], index, rows[index]]),
-                    "source": source["name"],
-                    "row_index": index,
-                    "row": row,
-                }
-            )
-    return selected, populations
+    populations = [
+        {"name": s["name"], "rows": sum(1 for _ in jsonl_rows(s["path"])), "fraction": s["fraction"]} for s in sources
+    ]
+
+    def selected():
+        for source, population in zip(sources, populations, strict=True):
+            size = population["rows"]
+            # All-row selection never builds an index list. Fixed-size selection keeps
+            # only the requested indices and preserves the previous random.sample rule.
+            indices = None
+            if count is not None and count < size:
+                indices = set(random.Random(f"{seed}:{source['name']}").sample(range(size), count))
+            for index, row in enumerate(jsonl_rows(source["path"])):
+                if indices is not None and index not in indices:
+                    continue
+                identity = digest([source["name"], index, row])
+                row["metadata"]["source_name"] = source["name"]
+                yield {"id": identity, "source": source["name"], "row_index": index, "row": row}
+
+    return selected(), populations
+
+
+def write_prompt_manifest(prompts, path):
+    """Validate the entire selection before generation, spooling prompt identities to disk."""
+    count = 0
+    checksum = hashlib.sha256()
+    with path.open("wb") as stream:
+        for prompt in prompts:
+            if prompt["row"]["metadata"].get("tools") or prompt["row"].get("tools"):
+                raise InputError("Interactive tool rows require an environment screen, not single-turn generation")
+            data = run_data._encoded(prompt)
+            stream.write(data)
+            checksum.update(data)
+            count += 1
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {"path": "prompts.jsonl", "sha256": checksum.hexdigest(), "rows": count}
+
+
+async def run_workers(jobs, work, concurrency):
+    """Only workers are tasks; even cached draws cannot create an unbounded task backlog."""
+    iterator = iter(jobs)
+
+    async def worker():
+        for job in iterator:
+            await work(*job)
+            # Cached results and test transports may not otherwise yield.
+            await asyncio.sleep(0)
+
+    tasks = [asyncio.create_task(worker()) for _ in range(concurrency)]
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def score_completion(config, prompt, completion):
@@ -90,64 +140,121 @@ async def score_completion(config, prompt, completion):
         }
 
 
-def summarize(records, ks=(1, 4, 8, 16)):
-    """Finite-sample pass/mixed estimates, with incomplete groups kept separate."""
-    grouped = defaultdict(list)
-    for record in records:
-        grouped[(record["source"], record["id"])].append(record)
-    sources = defaultdict(list)
-    for (source, identity), rows in grouped.items():
-        scored = [r for r in rows if r.get("score") is not None]
-        n = len(rows)
-        values = [r["score"] for r in scored]
-        complete = len(scored) == n
-        binary = complete and all(v in (0.0, 1.0) for v in values)
-        successes = sum(v == 1 for v in values)
-        metrics = {}
-        for k in ks:
-            if k > n:
-                continue
-            denominator = math.comb(n, k)
-            variation = 1 - sum(math.comb(c, k) if c >= k else 0 for c in Counter(values).values()) / denominator
-            metrics[str(k)] = {
-                "pass": 1 - (math.comb(n - successes, k) if n - successes >= k else 0) / denominator
-                if binary
-                else None,
-                "varying_reward": variation if complete else None,
-            }
-        sources[source].append(
-            {
-                "id": identity,
-                "attempted": n,
-                "scored": len(scored),
-                "complete": complete,
-                "successes": successes if binary else None,
-                "rewards": values,
-                "metrics": metrics,
-                "completion_tokens": sum(r.get("completion_tokens", 0) for r in rows),
-                "truncated": sum(r.get("truncated", False) for r in rows),
-            }
-        )
-    result = {}
-    for source, groups in sources.items():
-        metrics = {}
-        for k in map(str, ks):
-            metrics[k] = {}
-            for field in ("pass", "varying_reward"):
-                values = [
-                    g["metrics"][k][field] for g in groups if k in g["metrics"] and g["metrics"][k][field] is not None
-                ]
-                metrics[k][field] = sum(values) / len(values) if values else None
-                metrics[k][field + "_groups"] = len(values)
-        result[source] = {
-            "prompts": len(groups),
-            "complete_groups": sum(g["complete"] for g in groups),
-            "unresolved_groups": sum(not g["complete"] for g in groups),
-            "metrics": metrics,
-            "success_histogram": dict(Counter(g["successes"] for g in groups if g["successes"] is not None)),
-            "groups": groups,
+def summarize_group(identity, rows, ks=(1, 4, 8, 16)):
+    """Finite-sample estimates from one prompt's compact draw records."""
+    values = [r["score"] for r in rows if r.get("score") is not None]
+    n = len(rows)
+    complete = len(values) == n
+    binary = complete and all(v in (0.0, 1.0) for v in values)
+    successes = sum(v == 1 for v in values)
+    metrics = {}
+    for k in ks:
+        if k > n:
+            continue
+        denominator = math.comb(n, k)
+        variation = 1 - sum(math.comb(c, k) if c >= k else 0 for c in Counter(values).values()) / denominator
+        metrics[str(k)] = {
+            "pass": 1 - (math.comb(n - successes, k) if n - successes >= k else 0) / denominator if binary else None,
+            "varying_reward": variation if complete else None,
         }
-    return result
+    return {
+        "id": identity,
+        "attempted": n,
+        "scored": len(values),
+        "complete": complete,
+        "successes": successes if binary else None,
+        "rewards": values,
+        "metrics": metrics,
+        "completion_tokens": sum(r.get("completion_tokens", 0) for r in rows),
+        "truncated": sum(r.get("truncated", False) for r in rows),
+    }
+
+
+class SourceSummary:
+    """Accumulate scalar statistics, never response text or a list of prompt groups."""
+
+    def __init__(self, ks=(1, 4, 8, 16)):
+        self.ks = ks
+        self.sources = {}
+
+    def add(self, source, group):
+        if source not in self.sources:
+            self.sources[source] = {
+                "prompts": 0,
+                "complete_groups": 0,
+                "unresolved_groups": 0,
+                "completion_tokens": 0,
+                "truncated": 0,
+                "success_histogram": Counter(),
+                "metrics": {str(k): {field: [0.0, 0] for field in ("pass", "varying_reward")} for k in self.ks},
+            }
+        result = self.sources[source]
+        result["prompts"] += 1
+        result["complete_groups"] += group["complete"]
+        result["unresolved_groups"] += not group["complete"]
+        result["completion_tokens"] += group["completion_tokens"]
+        result["truncated"] += group["truncated"]
+        if group["successes"] is not None:
+            result["success_histogram"][group["successes"]] += 1
+        for k, fields in group["metrics"].items():
+            for field, value in fields.items():
+                if value is not None:
+                    result["metrics"][k][field][0] += value
+                    result["metrics"][k][field][1] += 1
+
+    def finish(self):
+        result = copy.deepcopy(self.sources)
+        for source in result.values():
+            source["success_histogram"] = dict(source["success_histogram"])
+            for fields in source["metrics"].values():
+                for field in ("pass", "varying_reward"):
+                    total, count = fields[field]
+                    fields[field] = total / count if count else None
+                    fields[field + "_groups"] = count
+        return result
+
+
+def draw_path(output, prompt, number):
+    # Avoid millions of directory entries in one directory on full-corpus studies.
+    return output / "draws" / prompt["id"][:2] / f"{prompt['id']}-{number:03d}.json"
+
+
+def read_draw(path, prompt, number, contract_hash):
+    record = json.loads(path.read_text())
+    expected = {"contract_sha256": contract_hash, "id": prompt["id"], "source": prompt["source"], "draw": number}
+    if any(record.get(key) != value for key, value in expected.items()):
+        raise InputError(f"Draw contract/identity mismatch: {path}")
+    return record
+
+
+def summarize_saved(output, prompt_path, draws, contract_hash):
+    """Stream one prompt group at a time; publish a small summary and JSONL group evidence."""
+    summary = SourceSummary()
+    temporary = output / "groups.pending.jsonl"
+    count = 0
+    checksum = hashlib.sha256()
+    with temporary.open("wb") as stream:
+        for prompt in jsonl_rows(prompt_path):
+            rows = []
+            for number in range(draws):
+                record = read_draw(draw_path(output, prompt, number), prompt, number, contract_hash)
+                rows.append(
+                    {
+                        key: record.get(key, default)
+                        for key, default in (("score", None), ("completion_tokens", 0), ("truncated", False))
+                    }
+                )
+                del record
+            group = {"source": prompt["source"], **summarize_group(prompt["id"], rows)}
+            summary.add(prompt["source"], group)
+            data = run_data._encoded(group)
+            stream.write(data)
+            checksum.update(data)
+            count += 1
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(output / "groups.jsonl")
+    return summary.finish(), {"path": "groups.jsonl", "sha256": checksum.hexdigest(), "rows": count}
 
 
 def generation_settings(config):
@@ -184,8 +291,9 @@ async def run(options):
         raise InputError("Named rewards require the same resolved judge registry used by training")
     judge_registry.validate_data(prepared, resolved)
     prompts, populations = select_prompts(prepared, options.prompts_per_source, options.seed)
-    if any(p["row"]["metadata"].get("tools") or p["row"].get("tools") for p in prompts):
-        raise InputError("Interactive tool rows require an environment screen, not single-turn generation")
+    pending_prompts = output / "prompts.pending.jsonl"
+    selection = write_prompt_manifest(prompts, pending_prompts)
+    prompt_path = output / selection["path"]
     tokenizer = run_data._tokenizer(options.tokenizer)
     sampling = generation_settings(config)
     timeout = aiohttp.ClientTimeout(total=options.request_timeout)
@@ -196,7 +304,7 @@ async def run(options):
         if model_info.get("model_path") != spec.model["source"]:
             raise InputError("Serving checkpoint differs from model.source in the training run file")
         contract = {
-            "schema_version": 1,
+            "schema_version": 2,
             "model": spec.model,
             "server_model_info": model_info,
             "prepared_manifest": json.loads(Path(prepared["manifest"]).read_text()),
@@ -206,7 +314,7 @@ async def run(options):
             "draws": options.draws,
             "seed": options.seed,
             "populations": populations,
-            "prompt_ids": [p["id"] for p in prompts],
+            "selection": selection,
             "screen_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "reward_bridge_sha256": hashlib.sha256(Path(rewards.__file__).read_bytes()).hexdigest(),
             "application_python_sha256": digest(
@@ -230,18 +338,18 @@ async def run(options):
         path = output / "contract.json"
         if path.exists() and json.loads(path.read_text()) != contract:
             raise InputError("Screen contract changed; use a new output directory")
+        if prompt_path.exists() and file_digest(prompt_path) != selection["sha256"]:
+            raise InputError("Saved prompt manifest changed; use a new output directory")
+        pending_prompts.replace(prompt_path)
         artifacts.atomic_json(path, contract)
         contract_hash = digest(contract)
         (output / "draws").mkdir(exist_ok=True)
-        semaphore = asyncio.Semaphore(options.concurrency)
 
         async def draw(prompt, number):
-            path = output / "draws" / f"{prompt['id']}-{number:03d}.json"
+            path = draw_path(output, prompt, number)
             if path.exists():
-                previous = json.loads(path.read_text())
-                if previous.get("contract_sha256") != contract_hash:
-                    raise InputError(f"Draw contract mismatch: {path}")
-                return previous
+                read_draw(path, prompt, number, contract_hash)
+                return
             record = {
                 "id": prompt["id"],
                 "source": prompt["source"],
@@ -250,38 +358,40 @@ async def run(options):
                 "score": None,
                 "status": "generation_error",
             }
-            async with semaphore:
-                try:
-                    ids = tokenizer.encode(prompt["row"]["input"], add_special_tokens=False)
-                    params = {**sampling, "sampling_seed": int(digest([options.seed, prompt["id"], number])[:8], 16)}
-                    payload = {"input_ids": ids, "sampling_params": params, "return_logprob": True}
-                    async with session.post(options.server.rstrip("/") + "/generate", json=payload) as response:
-                        response.raise_for_status()
-                        value = await response.json()
-                    meta = value["meta_info"]
-                    token_ids = [v[1] for v in meta["output_token_logprobs"]]
-                    if len(token_ids) != meta["completion_tokens"]:
-                        raise InputError("Missing generated token IDs; cannot reproduce the training reward input")
-                    reason = meta["finish_reason"]["type"]
-                    if reason not in {"stop", "length"}:
-                        raise InputError(f"Unresolved generation finish reason: {reason}")
-                    completion = {
-                        "response": value["text"],
-                        "token_ids": token_ids,
-                        "completion_tokens": len(token_ids),
-                        "truncated": reason == "length",
-                    }
-                    record.update(completion)
-                    record.update(await score_completion(config, prompt, completion))
-                except Exception as error:
-                    record.update(error=type(error).__name__, detail=str(error))
-                artifacts.atomic_json(path, record)
-            return record
+            try:
+                ids = tokenizer.encode(prompt["row"]["input"], add_special_tokens=False)
+                params = {**sampling, "sampling_seed": int(digest([options.seed, prompt["id"], number])[:8], 16)}
+                payload = {"input_ids": ids, "sampling_params": params, "return_logprob": True}
+                async with session.post(options.server.rstrip("/") + "/generate", json=payload) as response:
+                    response.raise_for_status()
+                    value = await response.json()
+                meta = value["meta_info"]
+                token_ids = [v[1] for v in meta["output_token_logprobs"]]
+                if len(token_ids) != meta["completion_tokens"]:
+                    raise InputError("Missing generated token IDs; cannot reproduce the training reward input")
+                reason = meta["finish_reason"]["type"]
+                if reason not in {"stop", "length"}:
+                    raise InputError(f"Unresolved generation finish reason: {reason}")
+                completion = {
+                    "response": value["text"],
+                    "token_ids": token_ids,
+                    "completion_tokens": len(token_ids),
+                    "truncated": reason == "length",
+                }
+                record.update(completion)
+                record.update(await score_completion(config, prompt, completion))
+            except Exception as error:
+                record.update(error=type(error).__name__, detail=str(error))
+            artifacts.atomic_json(path, record)
 
-        records = await asyncio.gather(*(draw(p, n) for p in prompts for n in range(options.draws)))
+        jobs = ((prompt, n) for prompt in jsonl_rows(prompt_path) for n in range(options.draws))
+        await run_workers(jobs, draw, options.concurrency)
+    sources, groups = summarize_saved(output, prompt_path, options.draws, contract_hash)
     report = {
         "contract_sha256": contract_hash,
-        "sources": summarize(records),
+        "schema_version": 2,
+        "sources": sources,
+        "groups": groups,
         "limits": "Per-source results. Pass@k uses complete binary-reward groups only; unknowns are not zero. No mixture-weight or transfer claim.",
     }
     artifacts.atomic_json(output / "summary.json", report)

@@ -43,9 +43,15 @@ omitting both retains the 96-prompts-per-source default. `--all` visits rows in
 prepared order and does not deduplicate across sources or weight their exposure
 by mixture fractions. It covers the prepared pools, including any previously
 declared preparation restrictions, rather than restoring excluded raw rows.
-The current client retains selected prompts and completion records in memory;
-`--concurrency` bounds active requests, not total host memory. Large whole-corpus
-studies need explicitly partitioned prepared inputs and separate output directories.
+After shared data preparation, the client streams prompts from disk and runs a
+fixed pool of `--concurrency` workers. Each draw is saved atomically when it
+finishes, then released from memory. It does not create a task for every draw
+or retain the corpus of responses. Summary generation reads one draw at a time,
+retaining only one prompt's compact scores and per-source totals. The shared
+training-data preparation/validation step is unchanged and still requires memory
+for source data; this is bounded-memory inference and reporting, not a rewrite
+of that preprocessing stage. Fixed-count sampling also stores the requested
+sample indices; `--all` needs no such index list.
 
 Training's temperature, top-p, top-k, stops, response budget and reward policies
 are reused. Capped outputs follow `core.reward_zero_truncated`; failures to
@@ -55,9 +61,16 @@ reward variation is also reported for complete nonbinary groups. Both report
 their denominators. Inspect unresolved groups before interpreting the rates.
 
 Individual completions, token IDs, rewards, verifier diagnostics and source
-identities are saved under `draws/`. Rerunning the same command reuses completed
+identities are saved under `draws/<ID-prefix>/`. Rerunning the same command reuses completed
 records and generates missing ones. Changed contracts require a fresh output
 directory. Error records are preserved; they are not silently retried or replaced.
+The version-2 contract references a hashed `prompts.jsonl` instead of embedding
+every selected ID. `summary.json` contains source aggregates and a descriptor for
+`groups.jsonl`, which holds one compact per-prompt result per line, including its
+source. It no longer embeds per-source group arrays. Group evidence and summaries
+are rebuilt from saved draws on resume without regenerating completed draws.
+Existing version-1 screens remain readable as archived artifacts; use a fresh
+output directory for this version rather than mixing contracts or output layouts.
 Keep model weights fixed throughout a screen: matching the advertised model path
 does not authenticate a server whose weights are being updated in place.
 
