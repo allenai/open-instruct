@@ -20,6 +20,7 @@ def target(name, args, **extra):
         ("letters:letter_counting", {"N": 4, "relation": "at least"}, "中文中文", "cat"),
         ("keywords:existence", {"keywords": ["apple"]}, "an apple", "a pear"),
         ("punctuation:no_comma", {}, "one two", "one, two"),
+        ("count:count_increment_word", {"keyword1": ["plan"], "keyword2": ["let"]}, "plan let let", "plan let"),
         ("detectable_format:json_format", {}, '{"a":1}', "hello"),
     ],
 )

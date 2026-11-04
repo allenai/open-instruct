@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Gate complete candidate bundles on whole-pool loader validation and per-stratum runtime reward controls; add explicit reference-judge routing and document remaining environment coverage (PR pending).
 - Add full-population, hash-pinned candidate source preparation with original messages, explicit omissions and shared runtime adapters, including Litmus scalar answer formats (https://github.com/allenai/open-instruct/pull/2177).
 - Add shared, isolated native instruction and calendar reward adapters with strict target validation and explicit grading modes (https://github.com/allenai/open-instruct/pull/2176).
 - Add opt-in, process-isolated structured output rewards for JSON, YAML, TOML, XML and CSV with explicit schema/coercion policies and a response deadline (https://github.com/allenai/open-instruct/pull/2175).

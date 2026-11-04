@@ -107,3 +107,5 @@ unit controls include gold-containing/constraint-violating answers, Unicode
 letters, per-word repetition, fractional versus all-constraints scoring, calendar
 near misses and real subprocess execution. These are integration checks, not a
 new representative policy screen or qualification of an entire raw dataset.
+
+See [candidate source preparation](candidate-source-preparation.md) for the adapter catalog, whole-pool qualification, named judge routing and explicit coverage gaps.
