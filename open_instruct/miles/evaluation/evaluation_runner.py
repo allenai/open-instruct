@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -479,6 +480,38 @@ def print_failure_log(path):
         print(f"Could not read evaluator log {path}: {error}", file=sys.stderr, flush=True)
 
 
+@contextmanager
+def startup_progress(log_path):
+    """Relay evaluator lifecycle messages live while retaining the complete log."""
+    stopped = threading.Event()
+
+    def relay():
+        with log_path.open() as stream:
+            pending = ""
+            while True:
+                chunk = stream.read(65536)
+                if chunk:
+                    lines = (pending + chunk).split("\n")
+                    pending = lines.pop()[-16384:]
+                    for line in lines:
+                        if "[vllm-startup]" in line:
+                            print(line, flush=True)
+                elif stopped.is_set():
+                    if "[vllm-startup]" in pending:
+                        print(pending, flush=True)
+                    return
+                else:
+                    stopped.wait(0.2)
+
+    thread = threading.Thread(target=relay, name="judge-startup-progress", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join(timeout=2)
+
+
 def run_tasks(receipt, output):
     completed = []
     for task in receipt["tasks"]:
@@ -492,7 +525,7 @@ def run_tasks(receipt, output):
             write_json(attempt / "command.json", args)
             log_path = attempt / "olmo-eval.log"
             try:
-                with log_path.open("w") as log:
+                with log_path.open("w") as log, startup_progress(log_path):
                     subprocess.run(
                         args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
                     )

@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import threading
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -536,3 +537,25 @@ def test_new_panel_records_judge_defaults_and_embeds_fixed_runner(three_node):
             base64.b64encode(Path(evaluation_runner.__file__).read_bytes()).decode()
             in spec["tasks"][0]["arguments"][0]
         )
+
+
+def test_startup_progress_relays_live_phases_and_retains_full_log(tmp_path, monkeypatch):
+    emitted = []
+    ready = threading.Event()
+
+    def capture(message, **kwargs):
+        emitted.append(message)
+        ready.set()
+
+    monkeypatch.setattr("builtins.print", capture)
+    path = tmp_path / "olmo-eval.log"
+    path.touch()
+    with evaluation_runner.startup_progress(path):
+        with path.open("a") as log:
+            log.write("ordinary evaluator output\n[vllm-startup] loading weights\n")
+            log.flush()
+        assert ready.wait(2), "startup phase must be visible before evaluator exit"
+        with path.open("a") as log:
+            log.write("[vllm-startup] ready")
+    assert emitted == ["[vllm-startup] loading weights", "[vllm-startup] ready"]
+    assert "ordinary evaluator output" in path.read_text()
