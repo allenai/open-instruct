@@ -300,7 +300,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   reaches, set `STEPS` above the test, and deactivate the workload once the steps you need are logged: Tunix saves the
   full state when `train()` returns (Tunix's README), ~870 GB for Olmo 3.5 small (the pretraining hero).
 - **Keep the first failure of a gate run.** A JobSet restart deletes the failed pods and their logs. Render test
-  JobSets with `maxRestarts: 0` (patch `/spec/failurePolicy/maxRestarts` as `k8s/instruct-sft-4x4x8/` does) and save the failing pods' logs before cleanup.
+  JobSets with `maxRestarts: 0` (patch `/spec/failurePolicy/maxRestarts` to 0; `k8s/instruct-sft-4x4x8/` shows the patch, with value 3) and save the failing pods' logs before cleanup.
 - **Zero steps, exit 0.** `train_sft` exits 0 with no steps when the data iterator fails. The launcher's step guard
   catches it; keep that guard.
 - **KDA all-gathers on a new mesh.** Under `olmo35-cp-ep` on the `8x8x8`, the KDA chunk scan's inputs and states were
