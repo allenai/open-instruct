@@ -173,6 +173,14 @@ and retains startup logs. This allowance does not change the overall Beaker job
 timeout or any sampling/scoring settings. Slow startup alone does not establish
 whether loading, compilation, or another cause was responsible.
 
+The maintained three-node evaluator also emits live `[vllm-startup]` messages
+with elapsed time, deadline, full log path, and the last phase observed in judge
+logs. It checks process exit independently of HTTP probes and preserves INFO-level
+child logs. Unknown phases remain explicit; timeout errors are distinct from
+process exits. Older evaluator images receive the profile timeout but need the
+startup image below for phase diagnostics. Submitted jobs embed their runner, so
+regenerate their specifications from the fixed checkout to receive the live relay.
+
 
 Planning rejects the maintained managed `vllm_server` judges that download
 `allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless
@@ -352,13 +360,15 @@ background evaluations select `provider.kind=sglang` and
 explicit HTTP exception described above. The runner checks the installed
 olmo-eval revision against the receipt before evaluating.
 
-Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
-which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
-The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
-image `01M632ZP67Y4WMV060J74FSC3R` with isolated vLLM judges. Both recipes build evaluator dependencies
-at image construction; benchmark sandboxes may have their own upstream setup steps.
-The revision change can also change task defaults; do not compare scores across
-revisions as though the benchmark protocol were unchanged.
+The node example pins olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`
+and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. The three-node safety panel pins
+`ba0ff700e8f9b301cfd8ed5fd462df9d83dddfe1` and image
+`01M6J0KMAD3CXVGT07V1BHR1VH`, retaining H169's qualified sandbox and isolated vLLM
+runtime. Its only evaluator code change from H169's `ede61eb9` image is the shared
+startup lifecycle fix ([olmo-eval PR 541](https://github.com/allenai/olmo-eval/pull/541));
+the earlier `3536fe75` to `ede61eb9` change fixes explicit CLI `null` overrides.
+Neither change alters benchmark prompts, sampling defaults, or scoring. The
+startup image recipe is `runtime/miles/Dockerfile.evaluator-startup`.
 
 Replace the old `evaluation.server_args` with typed `evaluation.provider_kwargs`
 using Python option names, for example `context_length = 34816`. Let the selected
