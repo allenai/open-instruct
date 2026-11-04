@@ -6,8 +6,10 @@ image="${1:?Pass the built Beaker image}"
 mode="${2:-full}"
 [[ "$mode" == full || "$mode" == diagnostic ]] || { echo "Unknown parity mode: $mode" >&2; exit 1; }
 commit=$(git rev-parse HEAD)
+# build_image_and_launch.sh records `git rev-parse --short HEAD`, whose length varies by checkout.
+short_commit=$(git rev-parse --short HEAD)
 description=$(beaker image get "$image" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["description"])')
-if [[ "$description" != *"${commit:0:9}"* ]]; then
+if [[ "$description" != *"$short_commit"* ]]; then
     echo "Image/source commit mismatch: $description; source $commit. Rebuild before launch." >&2
     exit 1
 fi
