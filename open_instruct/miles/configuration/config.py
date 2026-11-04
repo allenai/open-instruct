@@ -296,6 +296,10 @@ class RunConfig:
         """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
         options.setdefault("calculate_per_token_loss", False)
+        if options.get("loss_constant_token_denominator") is not None and not options["calculate_per_token_loss"]:
+            raise constraints.error(
+                "miles.loss_constant_token_denominator requires miles.calculate_per_token_loss=true"
+            )
         if not options.get("use_miles_router", False):
             # Mirror the pinned MILES Core invariant during offline planning.
             # Core owns request retries and weight-ready membership. Refuse

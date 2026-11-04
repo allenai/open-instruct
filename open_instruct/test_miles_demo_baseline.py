@@ -63,3 +63,14 @@ def test_explicit_experiments_remain_possible():
     ).compile()
     assert config.core.reward_zero_truncated is False
     assert "--calculate-per-token-loss" in config.arguments()
+
+
+def test_constant_token_denominator_requires_token_loss():
+    config = RunSpec.load(
+        Path("configs/miles/examples/node.toml"),
+        ["miles.calculate_per_token_loss=true", "miles.loss_constant_token_denominator=32768"],
+    ).compile()
+    arguments = config.arguments()
+    assert arguments[arguments.index("--loss-constant-token-denominator") + 1] == "32768"
+    with pytest.raises(Exception, match="requires miles.calculate_per_token_loss=true"):
+        RunConfig(CoreConfig(), {"loss_constant_token_denominator": 32768}).resolved_miles()
