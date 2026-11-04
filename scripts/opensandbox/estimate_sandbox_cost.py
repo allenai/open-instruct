@@ -169,7 +169,8 @@ def main() -> int:
         help="Directly price each sandbox-hour at this $ rate, bypassing the "
         "vCPU/GiB pod model and --pricing entirely. Use for whole-node billing "
         "on GKE Standard, where each cpu=2 sandbox occupies a full "
-        "e2-standard-4 spot node (~0.040 $/hr in us-west1).",
+        "e2-standard-4 spot node (~0.094 $/hr in us-west1: 4 vCPU x 0.01309 + "
+        "16 GiB x 0.001754 compute, plus ~0.014 for the 100 GB pd-balanced boot disk).",
     )
     args = parser.parse_args()
 
