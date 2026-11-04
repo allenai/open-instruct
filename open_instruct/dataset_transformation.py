@@ -1997,7 +1997,7 @@ def sft_added_token_strings_filter_v1(
     """
     if sft_messages_key not in row:
         raise KeyError(
-            f"sft_added_token_strings_filter_v1 needs the {sft_messages_key!r} column; list it before the "
+            f"The added-token-strings filter needs the {sft_messages_key!r} column; list it before the "
             "tokenization function in the transform list, which drops that column."
         )
     return not find_added_token_strings(row[sft_messages_key], tokenizer, allowed_strings)
@@ -2010,6 +2010,8 @@ def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[st
         if isinstance(message, Mapping):
             if isinstance(message.get("reasoning_content"), str):
                 texts.append(message["reasoning_content"])
+            # JSON is a superset of what the template renders (it adds keys such as `id`), and no
+            # added token holds a character JSON escapes, so a literal survives `json.dumps`.
             if message.get("tool_calls"):
                 texts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
     # Decoded as the SFT tokenizers decode it, so a JSON-escaped spelling reads as the token.
@@ -2028,13 +2030,16 @@ def sft_added_token_strings_filter_v2(
     """`sft_added_token_strings_filter_v1`, also checking `reasoning_content`, `tool_calls` and `tools`.
 
     The olmo35 template renders all three, so a literal `<|im_end|>` in a tool-call argument
-    trains the control id just as one in content does. v1 is unchanged, so a v1 cache key still
-    names the content-only rule. Use it in v1's place, ahead of the tokenizer.
+    trains the control id just as one in content does. `allowed_strings` applies to content only:
+    these fields allow no added token, since the template wraps `reasoning_content` in
+    `<think>`...`</think>` itself and a literal `</think>` there would close the block early. v1 is
+    unchanged, so a v1 cache key still names the content-only rule. Use it in v1's place, ahead
+    of the tokenizer.
     """
     if not sft_added_token_strings_filter_v1(row, tokenizer, sft_messages_key, allowed_strings):
         return False
     texts = _non_content_texts(row, sft_messages_key)
-    return not find_added_token_strings([{"content": text} for text in texts], tokenizer, allowed_strings)
+    return not find_added_token_strings([{"content": text} for text in texts], tokenizer, allowed_strings=())
 
 
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):

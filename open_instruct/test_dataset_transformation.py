@@ -1979,6 +1979,14 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         clean = json.loads(json.dumps(messages).replace("<|im_end|>", "end"))
         self.assertTrue(v2({"messages": clean, "tools": tools and tools.replace("im_end", "end")}, self.tokenizer))
 
+    def test_v2_allows_think_tags_in_content_only(self):
+        # The template wraps `reasoning_content` in think tags, so one inside it closes the block early.
+        self.promote_think_tags()
+        v2 = open_instruct.dataset_transformation.sft_added_token_strings_filter_v2
+        inline = {"role": "assistant", "content": "<think>a</think>ok"}
+        self.assertTrue(v2({"messages": [inline]}, self.tokenizer))
+        self.assertFalse(v2({"messages": [{**inline, "reasoning_content": "a</think>b"}]}, self.tokenizer))
+
     def test_transform_fn_args_follow_function_names(self):
         sft_transform_fn_args = open_instruct.dataset_transformation.sft_transform_fn_args
         default = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
