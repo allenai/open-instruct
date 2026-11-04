@@ -167,8 +167,9 @@ judge revisions and serving settings with qualification results.
 The maintained managed WildGuard and Gemma StrongREJECT configurations default
 `auxiliary_providers.<name>.kwargs.startup_timeout` to 1200 seconds. Explicit
 values win; external endpoints and other model configurations are unchanged.
-The resolved value is recorded in new panel receipts and passed to the evaluator's
-server lifecycle, not the vLLM CLI. Readiness still detects exited processes early
+The runner resolves the value when building each evaluator command and records it
+in the attempt's `command.json`. It reaches the evaluator's server lifecycle, not
+the vLLM CLI. Implicit defaults leave saved run specs and evaluation claims unchanged. Readiness still detects exited processes early
 and retains startup logs. This allowance does not change the overall Beaker job
 timeout or any sampling/scoring settings. Slow startup alone does not establish
 whether loading, compilation, or another cause was responsible.
@@ -361,7 +362,7 @@ explicit HTTP exception described above. The runner checks the installed
 olmo-eval revision against the receipt before evaluating.
 
 The node example pins olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`
-and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. The three-node safety panel pins
+and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. The three-node example pins
 `ba0ff700e8f9b301cfd8ed5fd462df9d83dddfe1` and image
 `01M6J0KMAD3CXVGT07V1BHR1VH`, retaining H169's qualified sandbox and isolated vLLM
 runtime. Its only evaluator code change from H169's `ede61eb9` image is the shared

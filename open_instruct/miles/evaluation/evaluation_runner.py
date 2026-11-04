@@ -71,7 +71,7 @@ def judge_harness_defaults(harness):
 
 
 def sglang_checkpoint(checkpoint, output):
-    """Translate HF's disabled top-k sentinel without changing the frozen snapshot."""
+    """Translate disabled top-k in a view linking the HF snapshot's top-level entries."""
     source = Path(checkpoint).resolve()
     config = source / "generation_config.json"
     original = json.loads(config.read_text()) if config.is_file() else {}
@@ -239,7 +239,7 @@ def validate_scicode(path):
     if result.get("error"):
         raise ValueError(f"SciCode evaluation failed: {result['error']}")
     rows = result.get("predictions")
-    if result.get("name") != "scicode" or result.get("success") is not True or result.get("error") or not rows:
+    if result.get("name") != "scicode" or result.get("success") is not True or not rows:
         raise ValueError("Incomplete SciCode evaluation results")
     ids = set()
     total = 0
@@ -251,7 +251,6 @@ def validate_scicode(path):
         if (
             not problem
             or problem in ids
-            or row.get("error")
             or type(count) is not int
             or count < 1
             or len(row.get("step_results", [])) != count
@@ -486,7 +485,7 @@ def startup_progress(log_path):
     stopped = threading.Event()
 
     def relay():
-        with log_path.open() as stream:
+        with log_path.open(encoding="utf-8", errors="replace") as stream:
             pending = ""
             while True:
                 chunk = stream.read(65536)

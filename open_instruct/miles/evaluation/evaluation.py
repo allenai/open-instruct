@@ -128,7 +128,16 @@ def parse(value, launch):
     server_args = value["external_server_args"]
     if not isinstance(server_args, list) or any(not isinstance(arg, str) for arg in server_args):
         raise InputError("evaluation.external_server_args must be a list of SGLang arguments for SciCode")
-    server_reserved = {"--model", "--model-path", "--tokenizer-path", "--port", "--host", "--tp", "--tp-size"}
+    server_reserved = {
+        "--model",
+        "--model-path",
+        "--tokenizer-path",
+        "--port",
+        "--host",
+        "--tp",
+        "--tp-size",
+        "--served-model-name",
+    }
     if any(arg.split("=")[0] in server_reserved for arg in server_args):
         raise InputError("evaluation.external_server_args cannot override snapshot, tokenizer, port or GPU allocation")
     tasks = value.get("tasks")
@@ -192,8 +201,6 @@ def parse(value, launch):
             raise InputError("evaluation task harness must be a table of flat olmo-eval harness overrides")
         if any(key == "provider" or key.startswith("provider.") for key in harness):
             raise InputError("evaluation task harness cannot override the frozen checkpoint provider")
-        if harness:
-            task["harness"] = evaluation_runner.judge_harness_defaults(harness)
         task.setdefault("interval", value["interval"])
         if type(task["interval"]) is not int or task["interval"] < 0:
             raise InputError("evaluation task interval must be a nonnegative integer (0 disables periodic evaluation)")

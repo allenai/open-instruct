@@ -16,6 +16,7 @@ import pytest
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner
+from open_instruct.miles.execution import workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -508,7 +509,7 @@ def test_judge_startup_defaults_preserve_explicit_overrides_and_external_servers
         assert evaluation_runner.judge_harness_defaults(explicit) == explicit
 
 
-def test_new_panel_records_judge_defaults_and_embeds_fixed_runner(three_node):
+def test_new_panel_resolves_judge_defaults_and_embeds_fixed_runner(three_node):
     raw_tasks = json.loads(json.dumps(three_node.to_dict()["evaluation"]["tasks"]))
     plain = next(task for task in raw_tasks if not task.get("auxiliary_gpus") and task.get("kind", "task") == "task")
     plain.pop("harness", None)
@@ -520,7 +521,7 @@ def test_new_panel_records_judge_defaults_and_embeds_fixed_runner(three_node):
     for task in judges:
         name = "sr_judge" if task["task"].startswith("strongreject") else "wg_judge"
         key = f"auxiliary_providers.{name}.kwargs.startup_timeout"
-        assert task["harness"][key] == 1200
+        assert key not in task["harness"]
         receipt = {
             "checkpoint": "/frozen/hf",
             "tasks": [task],
@@ -539,6 +540,29 @@ def test_new_panel_records_judge_defaults_and_embeds_fixed_runner(three_node):
         )
 
 
+def test_preexisting_judge_run_keeps_resume_identity_and_evaluation_claims(three_node, tmp_path):
+    legacy = three_node.to_dict()
+    legacy["output"]["root"] = str(tmp_path)
+    # Historical run-spec.json: explicit evaluator pins, without implicit judge timeouts.
+    legacy["evaluation"]["image"] = "01M632ZP67Y4WMV060J74FSC3R"
+    legacy["evaluation"]["revision"] = "3536fe751e40162cc33d5e647085e986375aadce"
+    for task in legacy["evaluation"]["tasks"]:
+        for name in ("wg_judge", "sr_judge"):
+            task.get("harness", {}).pop(f"auxiliary_providers.{name}.kwargs.startup_timeout", None)
+    (tmp_path / "run-spec.json").write_text(json.dumps(legacy))
+    previous = {"spec_sha256": workflow.fingerprint(legacy)}
+    resumed = RunSpec.from_dict(copy.deepcopy(legacy))
+    assert workflow.recovery_configuration_matches(tmp_path, previous, resumed.to_dict())
+
+    old_config = {**legacy["evaluation"], "root": str(tmp_path), "total_updates": 2500}
+    old_claims = evaluation.Coordinator(old_config, {})._receipts(2500, "/frozen/hf", busy=False)
+    assert old_claims
+    before = {path: path.read_bytes() for _, path in old_claims}
+    new_config = {**old_config, **resumed.evaluation}
+    assert evaluation.Coordinator(new_config, {})._receipts(2500, "/frozen/hf", busy=False) == []
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+
+
 def test_startup_progress_relays_live_phases_and_retains_full_log(tmp_path, monkeypatch):
     emitted = []
     ready = threading.Event()
@@ -551,11 +575,20 @@ def test_startup_progress_relays_live_phases_and_retains_full_log(tmp_path, monk
     path = tmp_path / "olmo-eval.log"
     path.touch()
     with evaluation_runner.startup_progress(path):
-        with path.open("a") as log:
-            log.write("ordinary evaluator output\n[vllm-startup] loading weights\n")
+        with path.open("ab") as log:
+            log.write(b"ordinary evaluator output\xff\n[vllm-startup] loading weights\n")
             log.flush()
         assert ready.wait(2), "startup phase must be visible before evaluator exit"
         with path.open("a") as log:
             log.write("[vllm-startup] ready")
     assert emitted == ["[vllm-startup] loading weights", "[vllm-startup] ready"]
-    assert "ordinary evaluator output" in path.read_text()
+    assert b"ordinary evaluator output\xff" in path.read_bytes()
+
+
+@pytest.mark.parametrize("arguments", [["--served-model-name", "other"], ["--served-model-name=other"]])
+def test_manual_scicode_cannot_override_client_model_name(three_node, arguments):
+    document = three_node.to_dict()
+    document["evaluation"]["provider_kwargs"] = {"profile": "generic"}
+    document["evaluation"]["external_server_args"] = arguments
+    with pytest.raises(InputError, match="cannot override"):
+        RunSpec.from_dict(document)

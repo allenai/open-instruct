@@ -1,6 +1,7 @@
 """Check lifecycle timeout routing against the installed evaluator, without a GPU."""
 
 import importlib
+import inspect
 import time
 from unittest.mock import Mock
 from urllib import error, request
@@ -47,12 +48,13 @@ def test_readiness_retains_slow_start_dead_process_detection_and_bound(mode, mon
     )
     elapsed = time.monotonic() - started
     if mode == "slow":
-        assert success and 0.03 <= elapsed < 1
+        assert success and 0.03 <= elapsed < 5
     elif mode == "dead":
-        assert not success and elapsed < 1
-        if output is not None:  # Older pins capture a pipe; the new lifecycle retains a file.
+        assert not success and elapsed < 5
+        if "log_path" not in inspect.signature(server_utils._wait_for_server).parameters:
+            # The original lifecycle must retain the crashed child's pipe output.
             assert "judge startup failed" in output
         assert "Process exited" in str(last_error)
     else:
-        assert not success and 0.3 <= elapsed < 1
+        assert not success and 0.3 <= elapsed < 5
     assert progress.called

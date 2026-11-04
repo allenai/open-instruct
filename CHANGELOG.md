@@ -1,11 +1,10 @@
 # Changelog
 
-- Normalize HF disabled top-k for SciCode serving, surface original SciCode errors, and give managed safety judges a bounded 20-minute startup allowance (https://github.com/allenai/open-instruct/pull/2170).
-
 All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Normalize HF disabled top-k for SciCode serving, surface original SciCode errors, and give managed safety judges a bounded 20-minute startup allowance (https://github.com/allenai/open-instruct/pull/2170).
 - Add an optional calendar verifier and a prepared NeMo-target adapter reusing Open Instruct’s maintained IF checkers for NVIDIA source trials (https://github.com/allenai/open-instruct/pull/2164).
 - Exclude MILES compiler-cache settings from the recovery check, so a resumed run can move or disable its compiler cache (for example when the shared root is full) without choosing a new `output.root`; every other recorded field must still match (https://github.com/allenai/open-instruct/pull/2149).
 - Overlap independent MILES judge, Ray, preparation and disaggregated trainer/inference startup with explicit readiness barriers and stage timings (https://github.com/allenai/open-instruct/pull/2143).
