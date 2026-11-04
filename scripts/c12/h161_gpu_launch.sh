@@ -9,6 +9,8 @@
 #          OLMo-core's loader drops each epoch's partial last batch (449,487 = 16 x 28,092 + 15), so step 56,185
 #          would open a third epoch; the trainer reshuffles epoch 2 with seed + epoch.
 #   ctrl   H149's c12-b2 length S = 16,303 steps (phi = 0.5803 of one pass), --num_epochs 1.
+#   b1r    ledger H182 (b1-c12r-gpu): base B1 (step20000), peak LR 2e-4, plus the 10% LC replay dir as
+#          --extra_numpy_dirs; S_R=<steps> is required (H182 R4', per seed, from the offline loader replay).
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -62,13 +64,22 @@ I_C12=449487
 EPOCH_STEPS=$((I_C12 / 16))   # 28,092
 OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
 
+LR=5e-5
+EXTRA_ARGS=""
+DESC="ledger H161 GPU companion (draft)"
 case "$ARM" in
+    b1r) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
+         HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"
+         STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
 esac
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
+[[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -86,13 +97,13 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
---per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate 5e-5 --warmup_ratio 0.03 \
+--per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate $LR --warmup_ratio 0.03 \
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
 --no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
---seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR"
+--seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
@@ -150,7 +161,8 @@ if [ \"\$BEAKER_REPLICA_RANK\" = 0 ]; then
   fi
 fi
 exit \$RC"
-    EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},'
+    EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},
+    {"name": "H161_BATCH_HASH", "value": "1"},'
 else
     CMD="$WAIT
 $TORCHRUN"
@@ -195,7 +207,7 @@ task = {
     "timeout": "$TIMEOUT",
 }
 spec = {"version": "v2", "budget": "ai2/oe-other",
-        "description": "ledger H161 GPU companion (draft): $RUN_NAME, $STEPS steps, 2x8 B300, seq 65536, lr 5e-5",
+        "description": "$DESC: $RUN_NAME, $STEPS steps, 2x8 B300, seq 65536, lr $LR",
         "tasks": [task]}
 if int("${MAX_RETRIES:-0}"):
     spec["retry"] = {"allowedTaskRetries": int("${MAX_RETRIES:-0}")}
