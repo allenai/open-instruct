@@ -342,22 +342,8 @@ def execute(spec):
             hf = prepare_model(spec)
         with stage(timing_args, "data_module_import"):
             data = importlib.import_module("open_instruct.miles.datasets.run_data")
-        planned = spec.compile({"hf_checkpoint": hf})
         with stage(timing_args, "data_preparation"):
-            prepared = data.prepare_data(
-                spec.data,
-                Path(hf),
-                root / "prepared" / "data",
-                max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
-                seed=planned.miles.get("seed", 17),
-                registry_overrides={
-                    name: {
-                        "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
-                        "config": {"name": name},
-                    }
-                    for name in spec.judges["judging"]["bindings"]
-                },
-            )
+            prepared = data.prepare_run_data(spec, Path(hf), root / "prepared" / "data")
         registry_module = importlib.import_module("open_instruct.miles.rewards.judge_registry")
         resolved = judging.registry(spec.judges)
         if spec.judges["judging"]["bindings"]:

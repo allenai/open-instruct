@@ -535,6 +535,25 @@ def _sources(data, tokenizer, template, inputs, seed):
     return partitions, provenance, registry, training
 
 
+def prepare_run_data(spec, hf_checkpoint: Path, output: Path) -> dict:
+    """Prepare identical source populations and judge bindings for training and screening."""
+    planned = spec.compile({"hf_checkpoint": str(hf_checkpoint)})
+    return prepare_data(
+        spec.data,
+        hf_checkpoint,
+        output,
+        max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
+        seed=planned.miles.get("seed", 17),
+        registry_overrides={
+            name: {
+                "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+                "config": {"name": name},
+            }
+            for name in spec.judges["judging"]["bindings"]
+        },
+    )
+
+
 def prepare_data(
     data: dict,
     hf_checkpoint: Path,

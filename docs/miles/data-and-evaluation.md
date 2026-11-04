@@ -592,3 +592,7 @@ because the random model generally earns zero; the separate controls test the
 real filter. Router auxiliary losses can produce optimizer updates even with
 zero task rewards. This is a training-machinery check, not evidence of learning,
 endpoint transfer, or a recommendation to use four samples in a real run.
+
+## Fixed-policy source screening
+
+Use the [dataset screening command](dataset-screening.md) to sample prepared training sources and score completions through the same runtime verifiers, preserving unknown scores and source provenance.

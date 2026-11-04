@@ -24,6 +24,9 @@ from open_instruct.miles.errors import InputError
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["screen"]:
+        importlib.import_module("open_instruct.miles.screening").main(sys.argv[2:])
+        return
     if sys.argv[1:2] == ["records"]:
         module = (
             "open_instruct.miles.datasets.record_selection"
