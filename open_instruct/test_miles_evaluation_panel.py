@@ -1,9 +1,11 @@
 """Post-training panel configuration, execution boundaries and completion checks."""
 
+import base64
 import copy
 import hashlib
 import json
 import subprocess
+import threading
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ import pytest
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner
+from open_instruct.miles.execution import workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -403,16 +406,18 @@ def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
 
 
 @pytest.mark.parametrize("manual", [False, True])
-def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch, manual):
+@pytest.mark.parametrize("normalize", [False, True])
+def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch, manual, normalize):
     runner = evaluation_runner
     task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
     task = {**task, "arguments": {**task["arguments"], "h5py_host_path": str(tmp_path / "data.h5")}}
     (tmp_path / "data.h5").touch()
     checkpoint = tmp_path / "hf"
     checkpoint.mkdir()
-    (checkpoint / "generation_config.json").write_text('{"top_k": 0, "temperature": 0.6}')
     for filename in ("config.json", "tokenizer_config.json"):
         (checkpoint / filename).write_text("{}")
+    if normalize:
+        (checkpoint / "generation_config.json").write_text(json.dumps({"top_k": 0, "top_p": 0.9}))
     if manual:
         three_node.evaluation["provider_kwargs"] = {"profile": "generic"}
         three_node.evaluation["external_server_args"] = ["--disable-cuda-graph"]
@@ -436,15 +441,160 @@ def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, mon
     args = start.call_args.args[0]
     if manual:
         assert "sglang.launch_server" in args
-        assert Path(args[args.index("--model-path") + 1]) != checkpoint
+        model_path = args[args.index("--model-path") + 1]
         assert args[args.index("--served-model-name") + 1] == str(checkpoint)
         assert "--disable-cuda-graph" in args
     else:
         assert args[2] == "serve"
         frozen = json.loads(Path(args[3]).read_text())
-        assert frozen["checkpoint"] != str(checkpoint)
+        model_path = frozen["checkpoint"]
         assert frozen["served_model_name"] == str(checkpoint)
-        assert json.loads((Path(frozen["checkpoint"]) / "generation_config.json").read_text())["top_k"] == -1
         assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
+    if normalize:
+        assert model_path != str(checkpoint)
+        assert json.loads((Path(model_path) / "generation_config.json").read_text()) == {"top_k": -1, "top_p": 0.9}
+        assert json.loads((checkpoint / "generation_config.json").read_text())["top_k"] == 0
+    else:
+        assert model_path == str(checkpoint)
     assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
     server.terminate.assert_called_once()
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 1, 50, None])
+def test_scicode_checkpoint_only_translates_disabled_top_k(tmp_path, top_k):
+    source = tmp_path / "hf"
+    source.mkdir()
+    config = {"temperature": 0.7, "top_p": 0.95, "eos_token_id": [1, 2]}
+    if top_k is not None:
+        config["top_k"] = top_k
+    original = json.dumps(config).encode()
+    (source / "generation_config.json").write_bytes(original)
+    (source / "model.safetensors").write_bytes(b"weights")
+    output = tmp_path / "results"
+    checkpoint = evaluation_runner.scicode_checkpoint(str(source), output)
+    view = Path(checkpoint)
+    expected = {**config, "top_k": -1} if top_k == 0 else config
+    assert json.loads((view / "generation_config.json").read_text()) == expected
+    assert (source / "generation_config.json").read_bytes() == original
+    if top_k == 0:
+        assert view != source and (view / "model.safetensors").is_symlink()
+        assert (view / "model.safetensors").resolve() == source / "model.safetensors"
+        assert not view.is_relative_to(output)
+        report = json.loads((output / "scicode-sampling-normalization.json").read_text())
+        assert report["original_top_k"] == 0 and report["normalized_top_k"] == -1
+    else:
+        assert view == source
+    assert source.is_dir()
+
+
+def test_scicode_checkpoint_without_generation_config(tmp_path):
+    checkpoint = evaluation_runner.scicode_checkpoint(str(tmp_path), tmp_path / "results")
+    assert checkpoint == str(tmp_path)
+    assert not (tmp_path / "generation_config.json").exists()
+
+
+@pytest.mark.parametrize("level", ["result", "problem"])
+def test_scicode_reports_original_http_error_without_accepting_zero(scicode_result, level):
+    path, result = scicode_result
+    target = result if level == "result" else result["predictions"][0]
+    target["error"] = "BadRequestError: Error code: 400 - top_k must be -1 or at least 1, got 0"
+    path.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match="SciCode .*failed: BadRequestError: Error code: 400"):
+        evaluation_runner.completed_scores(path.parent, [{"task": "scicode"}])
+
+
+@pytest.mark.parametrize("name,model", [("wg_judge", "allenai/wildguard"), ("sr_judge", "google/gemma-2b")])
+def test_judge_startup_defaults_preserve_explicit_overrides_and_external_servers(name, model):
+    prefix = f"auxiliary_providers.{name}"
+    harness = {f"{prefix}.kind": "vllm_server", f"{prefix}.model": model}
+    key = f"{prefix}.kwargs.startup_timeout"
+    assert evaluation_runner.judge_harness_defaults(harness) == {**harness, key: 1200}
+    assert key not in harness
+    for extra in ({key: 600}, {f"{prefix}.base_url": "http://judge/v1"}, {f"{prefix}.model": "/local/judge"}):
+        explicit = {**harness, **extra}
+        assert evaluation_runner.judge_harness_defaults(explicit) == explicit
+
+
+def test_new_panel_resolves_judge_defaults_and_embeds_fixed_runner(three_node):
+    raw_tasks = json.loads(json.dumps(three_node.to_dict()["evaluation"]["tasks"]))
+    plain = next(task for task in raw_tasks if not task.get("auxiliary_gpus") and task.get("kind", "task") == "task")
+    plain.pop("harness", None)
+    document = three_node.to_dict()
+    document["evaluation"]["tasks"] = [plain]
+    assert "harness" not in RunSpec.from_dict(document).evaluation["tasks"][0]
+    judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
+    assert len(judges) == 6
+    for task in judges:
+        name = "sr_judge" if task["task"].startswith("strongreject") else "wg_judge"
+        key = f"auxiliary_providers.{name}.kwargs.startup_timeout"
+        assert key not in task["harness"]
+        receipt = {
+            "checkpoint": "/frozen/hf",
+            "tasks": [task],
+            "evaluation": three_node.evaluation,
+            "training": {"name": "new-panel"},
+            "update": 100,
+            "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+        }
+        receipt["evaluation"] = {**receipt["evaluation"], "mounts": []}
+        argv = evaluation_runner.command(receipt, "/output")
+        assert argv.index(f"{key}=1200") < argv.index("--task")
+        spec = evaluation.specification(receipt)
+        assert (
+            base64.b64encode(Path(evaluation_runner.__file__).read_bytes()).decode()
+            in spec["tasks"][0]["arguments"][0]
+        )
+
+
+def test_preexisting_judge_run_keeps_resume_identity_and_evaluation_claims(three_node, tmp_path):
+    legacy = three_node.to_dict()
+    legacy["output"]["root"] = str(tmp_path)
+    # Historical run-spec.json: explicit evaluator pins, without implicit judge timeouts.
+    legacy["evaluation"]["image"] = "01M632ZP67Y4WMV060J74FSC3R"
+    legacy["evaluation"]["revision"] = "3536fe751e40162cc33d5e647085e986375aadce"
+    for task in legacy["evaluation"]["tasks"]:
+        for name in ("wg_judge", "sr_judge"):
+            task.get("harness", {}).pop(f"auxiliary_providers.{name}.kwargs.startup_timeout", None)
+    (tmp_path / "run-spec.json").write_text(json.dumps(legacy))
+    previous = {"spec_sha256": workflow.fingerprint(legacy)}
+    resumed = RunSpec.from_dict(copy.deepcopy(legacy))
+    assert workflow.recovery_configuration_matches(tmp_path, previous, resumed.to_dict())
+
+    old_config = {**legacy["evaluation"], "root": str(tmp_path), "total_updates": 2500}
+    old_claims = evaluation.Coordinator(old_config, {})._receipts(2500, "/frozen/hf", busy=False)
+    assert old_claims
+    before = {path: path.read_bytes() for _, path in old_claims}
+    new_config = {**old_config, **resumed.evaluation}
+    assert evaluation.Coordinator(new_config, {})._receipts(2500, "/frozen/hf", busy=False) == []
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+
+
+def test_startup_progress_relays_live_phases_and_retains_full_log(tmp_path, monkeypatch):
+    emitted = []
+    ready = threading.Event()
+
+    def capture(message, **kwargs):
+        emitted.append(message)
+        ready.set()
+
+    monkeypatch.setattr("builtins.print", capture)
+    path = tmp_path / "olmo-eval.log"
+    path.touch()
+    with evaluation_runner.startup_progress(path):
+        with path.open("ab") as log:
+            log.write(b"ordinary evaluator output\xff\n[vllm-startup] loading weights\n")
+            log.flush()
+        assert ready.wait(2), "startup phase must be visible before evaluator exit"
+        with path.open("a") as log:
+            log.write("[vllm-startup] ready")
+    assert emitted == ["[vllm-startup] loading weights", "[vllm-startup] ready"]
+    assert b"ordinary evaluator output\xff" in path.read_bytes()
+
+
+@pytest.mark.parametrize("arguments", [["--served-model-name", "other"], ["--served-model-name=other"]])
+def test_manual_scicode_cannot_override_client_model_name(three_node, arguments):
+    document = three_node.to_dict()
+    document["evaluation"]["provider_kwargs"] = {"profile": "generic"}
+    document["evaluation"]["external_server_args"] = arguments
+    with pytest.raises(InputError, match="cannot override snapshot, served model name"):
+        RunSpec.from_dict(document)

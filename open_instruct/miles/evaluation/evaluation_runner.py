@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -53,6 +54,20 @@ def result_directory(receipt):
     key = receipt["group_id"]
     assert names
     return Path(receipt["evaluation"]["root"]) / "evaluation" / "results" / f"update-{receipt['update']:08d}-{key}"
+
+
+def judge_harness_defaults(harness):
+    """Allow bounded startup time for the maintained, locally managed safety judges."""
+    harness = dict(harness)
+    for name, model in (("wg_judge", "allenai/wildguard"), ("sr_judge", "google/gemma-2b")):
+        prefix = f"auxiliary_providers.{name}"
+        if (
+            harness.get(f"{prefix}.kind") == "vllm_server"
+            and harness.get(f"{prefix}.model") == model
+            and not harness.get(f"{prefix}.base_url")
+        ):
+            harness.setdefault(f"{prefix}.kwargs.startup_timeout", 1200)
+    return harness
 
 
 def command(receipt, output):
@@ -96,7 +111,7 @@ def command(receipt, output):
         **{f"provider.kwargs.{key}": value for key, value in receipt["evaluation"]["provider_kwargs"].items()},
     }.items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
-    for key, value in first.get("harness", {}).items():
+    for key, value in judge_harness_defaults(first.get("harness", {})).items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     for task in receipt["tasks"]:
         args.extend(["--task", task["task"]])
@@ -226,18 +241,21 @@ def validate_predictions(output):
 def validate_scicode(path):
     """SciCode can report success and zero scores after per-problem infrastructure errors."""
     result = json.loads(path.read_text())
+    if result.get("error"):
+        raise ValueError(f"SciCode evaluation failed: {result['error']}")
     rows = result.get("predictions")
-    if result.get("name") != "scicode" or result.get("success") is not True or result.get("error") or not rows:
+    if result.get("name") != "scicode" or result.get("success") is not True or not rows:
         raise ValueError("Incomplete SciCode evaluation results")
     ids = set()
     total = 0
     for row in rows:
         count = row.get("total")
         problem = row.get("problem_id")
+        if row.get("error"):
+            raise ValueError(f"SciCode problem {problem} failed: {row['error']}")
         if (
             not problem
             or problem in ids
-            or row.get("error")
             or type(count) is not int
             or count < 1
             or len(row.get("step_results", [])) != count
@@ -466,6 +484,38 @@ def print_failure_log(path):
         print(f"Could not read evaluator log {path}: {error}", file=sys.stderr, flush=True)
 
 
+@contextmanager
+def startup_progress(log_path):
+    """Relay evaluator lifecycle messages live while retaining the complete log."""
+    stopped = threading.Event()
+
+    def relay():
+        with log_path.open(encoding="utf-8", errors="replace") as stream:
+            pending = ""
+            while True:
+                chunk = stream.read(65536)
+                if chunk:
+                    lines = (pending + chunk).split("\n")
+                    pending = lines.pop()[-16384:]
+                    for line in lines:
+                        if "[vllm-startup]" in line:
+                            print(line, flush=True)
+                elif stopped.is_set():
+                    if "[vllm-startup]" in pending:
+                        print(pending, flush=True)
+                    return
+                else:
+                    stopped.wait(0.2)
+
+    thread = threading.Thread(target=relay, name="judge-startup-progress", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join(timeout=2)
+
+
 def run_tasks(receipt, output):
     completed = []
     failures = []
@@ -480,7 +530,8 @@ def run_tasks(receipt, output):
             write_json(attempt / "command.json", args)
             log_path = attempt / "olmo-eval.log"
             try:
-                with log_path.open("w") as log:
+                # Create/truncate the log before the relay opens its reader.
+                with log_path.open("w") as log, startup_progress(log_path):
                     subprocess.run(
                         args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
                     )
