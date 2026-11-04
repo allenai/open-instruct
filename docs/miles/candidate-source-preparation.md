@@ -151,3 +151,28 @@ browser/tool interaction and distillation-only records must not be presented as
 single-turn end-to-end training support. They need an actual environment or
 objective implementation. Licensing and scientific validity remain properties of
 the source and its evidence; successful parsing is not either kind of approval.
+
+## Local mixture mechanics receipt
+
+The 2026-11-03 RTX 4090 check ran this stack's pinned application/runtime through
+shared preparation, the actual `MixturePromptProvider`, SGLang generation and
+Core optimization. A seeded uniform mixture visited 75 source/verifier slices
+from 42 candidate datasets plus five synthetic structured-format probes in 320
+updates (eight responses each). Every included slice appeared in the actual
+rollouts; this was checked against the native provider's preflight schedule.
+The audit checked all 2,560 draws' attribution, prompt/target identity, rewards
+and weight versions, verified cursor replay, and found finite changes in 24
+parameter tensors. All 320 reward controls and 240 eight-response group-filter
+controls passed. The successful workflow took 139.9 seconds; its median steady
+rollout/update interval was 0.213 seconds. Only the final checkpoint was saved.
+See the [compact receipt](measurements/dataset-kitchen-sink-local-20261103.json)
+for hashes and local artifact locations.
+
+These were short historical control representatives and explicit probes, not the
+full newly expanded populations. The random toy model earned zero on every draw
+(2,559 truncated, one completed). Constant-reward filtering was disabled, and
+explicit router auxiliary losses drove parameter changes. The real-run promotion
+must use full reviewed source bundles, remove synthetic probes, retain eight
+responses, and restore the intended learning recipe rather than copying these
+mechanics-only settings. Code backends, web-search, legacy unsupported IF families
+and judge/tool environments were not exercised by this run.
