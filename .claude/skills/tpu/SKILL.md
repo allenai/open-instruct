@@ -17,7 +17,7 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Use a `4x4x8` for the 16-row recipe** (guide: What the cluster is). Since 2026-11-03 the cluster is three
+- **Use a `4x4x8` for the tiny SFT recipe (H045)** (guide: What the cluster is). Since 2026-11-03 the cluster is three
   `4x4x8`s, one `8x8x8` and hero's `8x8x48`. Check the live layout before planning (command in the guide); it changes
   when the cluster is resliced.
 - **For `ici_context_parallelism` > 1, set `context_parallel_load_balance=False`** and require step-1 `LOSS-PARTS` CE

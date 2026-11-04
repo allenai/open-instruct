@@ -1,11 +1,11 @@
 # Running SFT on TPU: a known-good starting point
 
-Olmo 3.5 tiny (`olmo35-tiny`, the 4T EMO base) on Dolci-Think with H045's recipe, on **one TPU v4 `4x4x8` slice (128 chips)** of
+Olmo 3.5 tiny (`olmo35-tiny`, the 4T EMO base, called "small" before 2026-11) on Dolci-Think with H045's recipe, on **one TPU v4 `4x4x8` slice (128 chips)** of
 the `gke-tpu-v4` cluster, through MaxText + Tunix.
 
 Measured cost and outcome: 11,768 steps of 16 × 65,536 tokens at a median 3.94 s/step, 13.5 h wall clock from submit
 to the last step. The loss matches H045's GPU runs (parity windows in [open-instruct#1933](https://github.com/allenai/open-instruct/issues/1933)). The GPU recipe takes 5 h 54 m on
-2×8 H100, so the TPU path is slower per run. Its advantage is capacity: four of these runs fit at once without
+2×8 H100, so the TPU path is slower per run. Its advantage is capacity: three of these runs fit at once without
 touching Beaker.
 
 The recipe is `scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8/`.
@@ -52,7 +52,7 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 (128 chips), one `8x8x8` (512) and hero's `8x8x48` (3,072), with 128 chips held back so GKE can auto-repair failed
 nodes. The layout changes as the cluster's admins reslice it, so check it before planning:
 `kubectl get nodes -L cloud.google.com/gke-tpu-topology --no-headers | awk '{print $NF}' | sort | uniq -c` (hosts per
-topology: 32 per `4x4x8`, 128 per `8x8x8`). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
+topology, 32 per `4x4x8`; the 2026-11-03 layout prints 96 `4x4x8`, 128 `8x8x8` and 768 `8x8x48`). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
 
 | Queue | Who | Preempted by |
 |---|---|---|
@@ -84,7 +84,7 @@ Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on ei
 resume.
 
 - **Use a `4x4x8` for this recipe.** Among the measured configurations it used the fewest chip-hours per token.
-  The `8x8x8` rows above date from before its 2026-10-21 split; it was recreated on 2026-11-03. The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
+  The `8x8x8` rows above date from before its 2026-10-21 split; it was recreated on 2026-11-03 and they have not been re-measured since. The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
   differs from the `4x4x8` recipe's, so an arm on it needed a control on the same slice and config. Without the shim
   the `8x8x8` is projected at ~1.09x the chip-hours of the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
   not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
@@ -132,7 +132,8 @@ The loader reads an Orbax parameter tree (`…/0/items`) from GCS.
   ```
 
   It keeps OLMo-core's padded 100,352 vocabulary, whose padded rows were trained. The 4T EMO base is already at
-  `gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items`.
+  `gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items` (named before the small→tiny
+  rename; it is the tiny base).
 - **Olmo 3.5 small (MaxText pretraining checkpoint).** No conversion: point `LOAD_PARAMETERS_PATH` at the run's
   `checkpoints/<step>/items` with `scan_layers=False`, since the hero saves unscanned layers. It restores in ~94 s on
   the `8x8x8`, also with fewer layers (`base_num_decoder_layers=16`) for a memory probe.
@@ -297,15 +298,15 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   is on, and Tunix builds its Orbax checkpoint manager regardless, so the run dies at trainer setup with
   `Distributed system is not available`. For a short test, keep checkpointing on with a `checkpoint_period` it never
   reaches, set `STEPS` above the test, and deactivate the workload once the steps you need are logged: Tunix saves the
-  full state when `train()` returns (README), ~870 GB for the pretraining hero small.
+  full state when `train()` returns (Tunix's README), ~870 GB for the pretraining hero small.
 - **Keep the first failure of a gate run.** A JobSet restart deletes the failed pods and their logs. Render test
-  JobSets with `maxRestarts: 0` and save the failing pods' logs before cleanup.
+  JobSets with `maxRestarts: 0` (patch `/spec/failurePolicy/maxRestarts` as `k8s/instruct-sft-4x4x8/` does) and save the failing pods' logs before cleanup.
 - **Zero steps, exit 0.** `train_sft` exits 0 with no steps when the data iterator fails. The launcher's step guard
   catches it; keep that guard.
 - **KDA all-gathers on a new mesh.** Under `olmo35-cp-ep` on the `8x8x8`, the KDA chunk scan's inputs and states were
   sharded on the chunk axis, so XLA all-gathered them inside every scan iteration: 97.6% of a 475 s step. Logical
   constraints in `_delta_rule_chunked_subblock` (abhishekraok/maxtext c5f1251d) bring the step to 3.33 s. CPU runs never
-  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh. On small (40 layers, f32 KDA
+  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh. On Olmo 3.5 hero small (40 layers, f32 KDA
   state), two more gathers made the compile need 43.7 GB of HBM: the per-chunk readout gathered every chunk's states over
   heads and value dim, and the reshard of q/k/v from (context, expert) on the sequence gathered the full `[B, T, H, dv]`.
   Constraining the readout to the chunk axis and resharding in two steps (abhishekraok/maxtext e43a7ee3, image suffix
@@ -344,7 +345,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 
   Olmo 3.5 small (hero step58000, 72.6B total, 4.1B active) on the `8x8x8`, 16 rows of 65,536 tokens, `olmo35-cp-ep`
   fsdp 16 x context 4 x expert 8, `remat_policy=full`, image `-ks5932379d`: 6.5 s/step, 315 tokens/s/chip. At
-  `ragged_buffer_factor=3.0` it dropped 1.1% of routed assignments (up to 9.2% in one layer); layers needed up to 8.5.
+  `ragged_buffer_factor=3.0` it dropped 1.1% of routed assignments (up to 9.2% in one layer); dropping none would need `ragged_buffer_factor` up to 8.5 in the worst layer.
 
   Each mesh was picked to keep r2's per-device layout, not tuned. No sweep of the parallelism split, remat policy or
   per-device batch has been run, so these are known-good points, not optima. Any other slice or mesh needs its own
