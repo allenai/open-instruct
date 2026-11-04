@@ -210,7 +210,10 @@ On resume, `training.save_interval`, `evaluation.interval`, and individual
 `evaluation.tasks[].interval` may change to reduce future artifact production.
 The saved specification is authenticated first; training horizon, recipe,
 evaluation tasks and scoring settings must still match. Changing an interval
-does not delete existing checkpoints or automatically retry missed evaluations.
+does not delete existing checkpoints or backfill past evaluation milestones.
+Evaluation claim IDs include task intervals: if recovery revisits an update
+after an interval change, it may submit a new evaluation even when an older
+claim exists for that checkpoint. Existing claims and jobs remain unchanged.
 
 Native trainer checkpoints are saved between optimizer updates without draining
 inference, including mixed-policy refresh and rolling engine publication. The
