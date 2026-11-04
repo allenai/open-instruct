@@ -298,7 +298,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   is on, and Tunix builds its Orbax checkpoint manager regardless, so the run dies at trainer setup with
   `Distributed system is not available`. For a short test, keep checkpointing on with a `checkpoint_period` it never
   reaches, set `STEPS` above the test, and deactivate the workload once the steps you need are logged: Tunix saves the
-  full state when `train()` returns (Tunix's README), ~870 GB for the pretraining hero small.
+  full state when `train()` returns (Tunix's README), ~870 GB for Olmo 3.5 small (the pretraining hero).
 - **Keep the first failure of a gate run.** A JobSet restart deletes the failed pods and their logs. Render test
   JobSets with `maxRestarts: 0` (patch `/spec/failurePolicy/maxRestarts` as `k8s/instruct-sft-4x4x8/` does) and save the failing pods' logs before cleanup.
 - **Zero steps, exit 0.** `train_sft` exits 0 with no steps when the data iterator fails. The launcher's step guard
@@ -306,7 +306,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 - **KDA all-gathers on a new mesh.** Under `olmo35-cp-ep` on the `8x8x8`, the KDA chunk scan's inputs and states were
   sharded on the chunk axis, so XLA all-gathered them inside every scan iteration: 97.6% of a 475 s step. Logical
   constraints in `_delta_rule_chunked_subblock` (abhishekraok/maxtext c5f1251d) bring the step to 3.33 s. CPU runs never
-  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh. On Olmo 3.5 hero small (40 layers, f32 KDA
+  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh. On Olmo 3.5 small, the pretraining hero (40 layers, f32 KDA
   state), two more gathers made the compile need 43.7 GB of HBM: the per-chunk readout gathered every chunk's states over
   heads and value dim, and the reshard of q/k/v from (context, expert) on the sequence gathered the full `[B, T, H, dv]`.
   Constraining the readout to the chunk axis and resharding in two steps (abhishekraok/maxtext e43a7ee3, image suffix
@@ -341,7 +341,7 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   | `4x4x8` | `olmo35-ep-as-cp`, fsdp 16 x expert 8 | 16 | 3.94 | 2,080 | r2 and A0'; the recipe |
   | `8x8x8` | `olmo35-ep-as-cp`, fsdp 64 x expert 8 | 64 | 4.28 | 1,910 | H078's 4x batch; `ragged_buffer_factor=3.0`; 1,887 tokens/s/chip without the shim, see [Cost](#cost-per-slice) |
   | `8x8x8` | `olmo35-cp-ep` + c5f1251d | 16 | 3.33 | 620 | runs, but numerics differ from the `4x4x8` (#1933) |
-  | `8x8x16` | `olmo35-cp-ep`, fsdp 64 x context 2 x expert 8 | 64 | - | - | never reached step 1 (egress quota, then a TPU core halt) |
+  | `8x8x16` | `olmo35-cp-ep`, fsdp 64 x context 2 x expert 8 | 64 | - | - | never reached step 1 (egress quota, then a TPU core halt); shape no longer in the cluster |
 
   Olmo 3.5 small (hero step58000, 72.6B total, 4.1B active) on the `8x8x8`, 16 rows of 65,536 tokens, `olmo35-cp-ep`
   fsdp 16 x context 4 x expert 8, `remat_policy=full`, image `-ks5932379d`: 6.5 s/step, 315 tokens/s/chip. At

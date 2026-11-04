@@ -1,4 +1,4 @@
-# Olmo 3.5 tiny (formerly hero-small) SFT on TPU, the H045 anchor recipe (olmo35-small-4t-emo base, Dolci-Think, the Olmo 3.5
+# Olmo 3.5 tiny (formerly called small) SFT on TPU, the H045 anchor recipe (olmo35-small-4t-emo base, Dolci-Think, the Olmo 3.5
 # template with H045's prefix labelling, 65,536-token sequences, 1,048,576 tokens/step, LR 5e-5, 3% warmup (from step one, as OLMo-core) then
 # linear to 0 over 11,768 steps, AdamW wd 0, clip 1.0, router load-balancing 0.01 and router z-loss 1e-5 summed over MoE layers as OLMo-core does, LM-head z-loss 1e-5, EMO off). MoE buffers hold 2.5x the mean load per expert shard (dropless needs 32.9 of 31.75 GiB at 64K; the REQUIRED_RBF
 # log line gives, per step and MoE layer, the factor that would have dropped nothing: at most 2.41 over the 600 parity steps).
