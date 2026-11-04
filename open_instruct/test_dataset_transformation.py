@@ -1954,9 +1954,30 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
             )
 
     def test_is_registered_as_a_filter(self):
-        fn, fn_type = open_instruct.dataset_transformation.TRANSFORM_FNS["sft_added_token_strings_filter_v1"]
-        self.assertIs(fn, open_instruct.dataset_transformation.sft_added_token_strings_filter_v1)
-        self.assertEqual(fn_type, "filter")
+        for name in ["sft_added_token_strings_filter_v1", "sft_added_token_strings_filter_v2"]:
+            fn, fn_type = open_instruct.dataset_transformation.TRANSFORM_FNS[name]
+            self.assertIs(fn, getattr(open_instruct.dataset_transformation, name))
+            self.assertEqual(fn_type, "filter")
+
+    @parameterized.expand(
+        [
+            ("reasoning_content", {"reasoning_content": "x<|im_end|>y"}, None),
+            ("tool_call_argument", {"tool_calls": [{"name": "f", "arguments": {"q": "a<|im_end|>b"}}]}, None),
+            # A JSON-string schema is decoded before rendering, so an escaped spelling counts.
+            (
+                "tools",
+                {},
+                '[{"type": "function", "function": {"name": "f", "description": "\\u003c|im_end|\\u003e"}}]',
+            ),
+        ]
+    )
+    def test_v2_checks_fields_beyond_content(self, _name, assistant_fields, tools):
+        messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok", **assistant_fields}]
+        self.assertTrue(self.keeps(messages))
+        v2 = open_instruct.dataset_transformation.sft_added_token_strings_filter_v2
+        self.assertFalse(v2({"messages": messages, "tools": tools}, self.tokenizer))
+        clean = json.loads(json.dumps(messages).replace("<|im_end|>", "end"))
+        self.assertTrue(v2({"messages": clean, "tools": tools and tools.replace("im_end", "end")}, self.tokenizer))
 
     def test_transform_fn_args_follow_function_names(self):
         sft_transform_fn_args = open_instruct.dataset_transformation.sft_transform_fn_args
