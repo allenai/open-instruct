@@ -1,7 +1,13 @@
 # Screening training sources
 
-`python -m open_instruct.miles screen` measures a fixed policy on the **same
-prepared source population and registered rewards** as its MILES training run.
+`python -m open_instruct.miles screen` is an optional research tool for studying
+dataset difficulty, reward variation and verifier behavior under a fixed policy.
+It supports exploratory analysis of particular situations; it is **not a required
+stage, admission gate, or routine operation of the RL pipeline**. Normal RL runs
+can train directly on prepared sources without first running this command.
+
+The command measures a fixed policy on the **same prepared source population and
+registered rewards** as its MILES training run.
 It calls the shared `prepare_run_data` entry point and `registered_reward` bridge;
 there is no separate screening adapter, answer-extraction rule, or eligibility
 filter. Existing training configurations keep their behavior.
@@ -30,6 +36,16 @@ Sampling is uniform without replacement **within each prepared source**, up to
 the requested count. Source fractions and pool sizes are recorded, but aggregate
 mixture performance is not inferred from equally sized source panels. Retain
 each source's intended internal subtask proportions in its prepared pool.
+
+Replace `--prompts-per-source 96` with `--all` to generate `--draws` completions
+for **every row in every prepared source**. These options are mutually exclusive;
+omitting both retains the 96-prompts-per-source default. `--all` visits rows in
+prepared order and does not deduplicate across sources or weight their exposure
+by mixture fractions. It covers the prepared pools, including any previously
+declared preparation restrictions, rather than restoring excluded raw rows.
+The current client retains selected prompts and completion records in memory;
+`--concurrency` bounds active requests, not total host memory. Large whole-corpus
+studies need explicitly partitioned prepared inputs and separate output directories.
 
 Training's temperature, top-p, top-k, stops, response budget and reward policies
 are reused. Capped outputs follow `core.reward_zero_truncated`; failures to

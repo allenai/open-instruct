@@ -36,6 +36,10 @@ def test_screen_samples_training_artifacts_without_rewriting_targets(environment
     assert populations == [{"name": "arithmetic", "rows": 12, "fraction": 1}]
     assert len(selected) == len({p["id"] for p in selected}) == 8
     assert screening.select_prompts(prepared, 8, 17)[0] == selected
+    every_row, _ = screening.select_prompts(prepared, None, 17)
+    assert [p["row_index"] for p in every_row] == list(range(12))
+    assert len({p["id"] for p in every_row}) == 12
+    assert screening.select_prompts(prepared, None, 99)[0] == every_row
     for prompt in selected:
         expected = copy.deepcopy(original[prompt["row_index"]])
         expected["metadata"]["source_name"] = "arithmetic"
@@ -124,7 +128,8 @@ def test_generation_settings_preserve_training_stops_and_sampling():
     assert params["no_stop_trim"] and not params["spaces_between_special_tokens"]
 
 
-def test_screen_generation_resume_and_contract_change(environment, tmp_path, monkeypatch):
+@pytest.mark.parametrize("count,expected_prompts", [(2, 2), (None, 3)])
+def test_screen_generation_resume_and_contract_change(environment, tmp_path, monkeypatch, count, expected_prompts):
     hf, _, tokenizer = environment
     spec = test_miles_run_spec.spec(tmp_path, data={"tasks": [{"task": "multiplication", "train_count": 3}]})
     monkeypatch.setattr(screening.specs, "load", lambda _: spec)
@@ -172,7 +177,7 @@ def test_screen_generation_resume_and_contract_change(environment, tmp_path, mon
         config=tmp_path / "run.toml",
         tokenizer=hf,
         output=tmp_path / "screen",
-        prompts_per_source=2,
+        prompts_per_source=count,
         draws=4,
         seed=17,
         request_timeout=30,
@@ -180,11 +185,28 @@ def test_screen_generation_resume_and_contract_change(environment, tmp_path, mon
         concurrency=2,
     )
     first = asyncio.run(screening.run(options))
-    assert len(calls) == 8
-    assert first["sources"]["train"]["complete_groups"] == 2
+    assert len(calls) == expected_prompts * 4
+    assert first["sources"]["train"]["complete_groups"] == expected_prompts
     assert first["sources"]["train"]["metrics"]["4"]["pass"] == 0
     assert asyncio.run(screening.run(options)) == first
-    assert len(calls) == 8
+    assert len(calls) == expected_prompts * 4
     options.draws = 8
     with pytest.raises(InputError, match="Screen contract changed"):
         asyncio.run(screening.run(options))
+
+
+def test_cli_all_is_exclusive_and_default_remains_sampled(tmp_path, monkeypatch):
+    counts = []
+
+    async def capture(options):
+        counts.append(options.prompts_per_source)
+
+    monkeypatch.setattr(screening, "run", capture)
+    args = ["run.toml", "--tokenizer", "hf", "--server", "http://fixture", "--output", str(tmp_path)]
+    screening.main(args)
+    screening.main([*args, "--all"])
+    screening.main([*args, "--prompts-per-source", "7"])
+    assert counts == [96, None, 7]
+    with pytest.raises(SystemExit) as error:
+        screening.main([*args, "--all", "--prompts-per-source", "7"])
+    assert error.value.code == 2

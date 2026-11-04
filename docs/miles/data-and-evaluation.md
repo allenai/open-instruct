@@ -595,4 +595,4 @@ endpoint transfer, or a recommendation to use four samples in a real run.
 
 ## Fixed-policy source screening
 
-Use the [dataset screening command](dataset-screening.md) to sample prepared training sources and score completions through the same runtime verifiers, preserving unknown scores and source provenance.
+For exploratory fixed-policy studies, the optional [dataset screening command](dataset-screening.md) samples prepared training sources and scores completions through the same runtime verifiers, preserving unknown scores and source provenance. It is not a required stage or routine operation of the RL pipeline; normal training does not depend on a preceding screen.

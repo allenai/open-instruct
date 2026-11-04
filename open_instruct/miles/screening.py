@@ -1,5 +1,6 @@
-"""Fixed-policy screens of the exact prepared MILES sources and registered rewards.
+"""Exploratory fixed-policy studies of prepared MILES sources and registered rewards.
 
+This is an optional research tool, not a required stage of the normal RL pipeline.
 Run with an already serving, fixed-weight SGLang checkpoint. No trainer, optimizer,
 zero-variance filter or separate offline verifier dispatch is involved. Per-source
 uniform samples are reported separately, with the training fractions recorded.
@@ -34,8 +35,8 @@ def digest(value):
 
 
 def select_prompts(prepared, count, seed):
-    """Uniform sampling without replacement, after the training admission checks."""
-    if count < 1:
+    """Sample without replacement, or select every admitted row when count is None."""
+    if count is not None and count < 1:
         raise InputError("prompts-per-source must be positive")
     if prepared.get("prompt_mixture"):
         path = Path(prepared["prompt_mixture"])
@@ -47,7 +48,7 @@ def select_prompts(prepared, count, seed):
     for source in sources:
         rows = run_data._rows(Path(source["path"]).read_bytes())
         rng = random.Random(f"{seed}:{source['name']}")
-        indices = sorted(rng.sample(range(len(rows)), min(count, len(rows))))
+        indices = range(len(rows)) if count is None else sorted(rng.sample(range(len(rows)), min(count, len(rows))))
         populations.append({"name": source["name"], "rows": len(rows), "fraction": source["fraction"]})
         for index in indices:
             row = copy.deepcopy(rows[index])
@@ -281,7 +282,7 @@ async def run(options):
     report = {
         "contract_sha256": contract_hash,
         "sources": summarize(records),
-        "limits": "Per-source uniform samples. Pass@k uses complete binary-reward groups only; unknowns are not zero. No mixture-weight or transfer claim.",
+        "limits": "Per-source results. Pass@k uses complete binary-reward groups only; unknowns are not zero. No mixture-weight or transfer claim.",
     }
     artifacts.atomic_json(output / "summary.json", report)
     return report
@@ -293,13 +294,23 @@ def main(argv=None):
     parser.add_argument("--tokenizer", type=Path, required=True, help="Local HF tokenizer for that checkpoint")
     parser.add_argument("--server", required=True, help="Fixed-weight SGLang server URL")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--prompts-per-source", type=int, default=96)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--prompts-per-source", type=int, default=96)
+    selection.add_argument(
+        "--all",
+        dest="prompts_per_source",
+        action="store_const",
+        const=None,
+        help="Generate draws for every row in every prepared source, without subsampling",
+    )
     parser.add_argument("--draws", type=int, default=16)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--concurrency", type=int, default=64)
     parser.add_argument("--request-timeout", type=float, default=3600)
     options = parser.parse_args(argv)
-    if min(options.draws, options.prompts_per_source, options.concurrency, options.request_timeout) <= 0:
+    if min(options.draws, options.concurrency, options.request_timeout) <= 0 or (
+        options.prompts_per_source is not None and options.prompts_per_source <= 0
+    ):
         parser.error("Counts, concurrency and timeout must be positive")
     options.output.mkdir(parents=True, exist_ok=True)
     with (options.output / ".screen.lock").open("a") as lock:
