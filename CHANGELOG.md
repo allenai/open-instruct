@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add opt-in, process-isolated structured output rewards for JSON, YAML, TOML, XML and CSV with explicit schema/coercion policies and a response deadline (PR pending).
 - Add fixed-policy dataset screening through the same MILES preparation and registered reward path as training (https://github.com/allenai/open-instruct/pull/2174).
 - Enable retained-state weight publication in the MILES one-node and three-node learning examples, with model-sized B300/H100 profile names (12.5B total, 0.8B active), safe prefix-cache settings, behavior-divergence metrics, and the supporting runtime pin. Existing runs must retain their recorded profile/pause/cache settings to resume under the same `output.root`, or use a new root for the updated recipe. The runtime also changes transport-failure logs from `error=` to `detail=` and HTTP status to JSON (for example, `"status": 503`); update matching log scrapers (https://github.com/allenai/open-instruct/pull/2167).
 - MILES wall-clock stops (`core.max_run_seconds`) are now resumable by default: the stop saves a checkpoint and leaves the run `stopped`, with no final HF export or final evaluation, so the same specification resubmitted under the same `output.root` continues; set `core.max_run_final = true` for the previous export-and-complete behaviour (https://github.com/allenai/open-instruct/pull/2150).
