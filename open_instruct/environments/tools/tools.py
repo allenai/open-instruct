@@ -366,6 +366,111 @@ class SerperSearchToolConfig(BaseEnvConfig):
     """Timeout in seconds for the API request."""
 
 
+YOU_SEARCH_URL = "https://ydc-index.io/v1/search"
+# Attribution token sent only on requests to You.com.
+YOU_USER_AGENT = "youdotcom-integration/allenai-open-instruct"
+_YOU_HTTP_ERROR_HINTS = {
+    "401": "check that YDC_API_KEY is valid",
+    "402": "the You.com account is out of credits",
+    "403": "YDC_API_KEY lacks access to the Search API",
+    "429": "rate limited by the You.com Search API",
+}
+
+
+class YouSearchTool(Tool):
+    """
+    Search tool using the You.com Search API (keyed).
+    Requires YDC_API_KEY environment variable.
+    """
+
+    config_name = "you_search"
+    description = "Web search via the You.com Search API"
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "The search query for the web"}},
+        "required": ["query"],
+    }
+
+    def __init__(self, call_name: str, num_results: int = 5, timeout: int = 10) -> None:
+        self.call_name = call_name
+        self.num_results = num_results
+        self.timeout = timeout
+        self.api_key = os.environ.get("YDC_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "Missing YDC_API_KEY environment variable. The you_search tool requires a You.com API key."
+            )
+
+    async def step(self, call: EnvCall) -> StepResult:
+        """Search the web via the You.com Search API for documents matching the query."""
+        args = coerce_args(self.parameters, call.args)
+        query = args.get("query", "")
+        if not query or not query.strip():
+            result = StepResult(
+                result="", metadata={"error": "Empty query. Please provide a search query.", "runtime": 0}
+            )
+            log_env_call(self.call_name, query or "", result)
+            return result
+
+        start_time = time.time()
+        api_response = await make_api_request(
+            url=YOU_SEARCH_URL,
+            timeout_seconds=self.timeout,
+            json_payload={"query": query, "count": self.num_results},
+            headers={"X-API-Key": self.api_key, "Content-Type": "application/json", "User-Agent": YOU_USER_AGENT},
+        )
+
+        error = api_response.error
+        if error:
+            status = error.removeprefix("HTTP error: ")[:3]
+            if error.startswith("HTTP error: ") and status in _YOU_HTTP_ERROR_HINTS:
+                error = f"{error} ({_YOU_HTTP_ERROR_HINTS[status]})"
+        else:
+            data = api_response.data
+            web = data.get("results", {}).get("web", []) if isinstance(data, dict) else None
+            if not isinstance(web, list):
+                error = "Malformed response from the You.com Search API."
+
+        if error:
+            result = StepResult(
+                result=error,
+                metadata={"error": error, "timeout": api_response.timed_out, "runtime": time.time() - start_time},
+            )
+            log_env_call(self.call_name, query, result)
+            return result
+
+        snippets = []
+        for item in web[: self.num_results]:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title", "")
+            snippet = " ".join(s for s in item.get("snippets") or [] if isinstance(s, str)) or item.get(
+                "description", ""
+            )
+            link = item.get("url", "")
+            if snippet:
+                snippets.append(f"**{title}**\n{snippet}\nSource: {link}")
+
+        error = "" if snippets else "Query returned no results."
+        output = "\n\n".join(snippets).strip() if snippets else error
+
+        result = StepResult(result=output, metadata={"error": error, "runtime": time.time() - start_time})
+        log_env_call(self.call_name, query, result)
+        return result
+
+
+@dataclass
+class YouSearchToolConfig(BaseEnvConfig):
+    """Configuration for the You.com Search API tool."""
+
+    tool_class: ClassVar[type[Tool]] = YouSearchTool
+
+    num_results: int = 5
+    """Number of results to return from the You.com Search API."""
+    timeout: int = 10
+    """Timeout in seconds for the API request."""
+
+
 def _parse_crawl4ai_response(data: dict, include_html: bool, max_content_length: int | None) -> tuple[str, str]:
     """Parse Crawl4AI API response and extract content.
 
@@ -652,6 +757,7 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     JinaBrowseToolConfig.tool_class.config_name: JinaBrowseToolConfig,
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
+    YouSearchToolConfig.tool_class.config_name: YouSearchToolConfig,
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,

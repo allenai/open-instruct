@@ -100,7 +100,7 @@ def make_worker(root, world, packed, auxiliary, checkpointing, **router_options)
             prompt_data=str(root / "prompts.jsonl"),
             lr=1e-4,
             clip_grad=1e9,
-            calculate_per_token_loss=True,
+            calculate_per_token_loss=False,
             use_rollout_routing_replay=True,
             use_miles_router=True,
             use_tis=True,
@@ -112,6 +112,7 @@ def make_worker(root, world, packed, auxiliary, checkpointing, **router_options)
     sys.argv = ["packing-contract", *run.arguments()]
     args = arguments.parse_args()
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+    worker._observed_response_tokens = 0
     worker.args = args
     worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
     worker.model, worker.optimizer = worker.train_module.model, worker.train_module.optim

@@ -11,6 +11,8 @@ import torch
 from olmo_core.nn.attention import AttentionBackendName
 from torch.nn import functional as F
 
+from open_instruct.miles.configuration import config
+
 
 def check(backend_name):
     torch.manual_seed(17)
@@ -48,7 +50,7 @@ def check(backend_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=["torch", "flash_4"], default="flash_4")
+    parser.add_argument("--backend", choices=config.PREFLIGHT_ATTENTION_BACKENDS, default="flash_4")
     args = parser.parse_args()
     check(args.backend)
 

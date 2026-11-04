@@ -38,6 +38,7 @@ _MATH_FACTORIES = {
 }
 _POOLS = weakref.WeakKeyDictionary()
 _CHILDREN = set()
+_FAILURE_CAPTURED = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
 
 
@@ -301,6 +302,42 @@ def _registry(path):
     return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
 
 
+def _capture_verifier_failure(args, sample, spec, response, error, *, capture_kind="exception"):
+    """Capture one raised exception and one returned timeout per run/process.
+
+    Normal rollout dumps contain already-scored batches and cannot diagnose a
+    verifier that raises. Preserve the full text/target here without converting
+    that error to a model reward or masking it if storage is unavailable. A returned
+    timeout uses a separate slot so it cannot hide a later raised exception.
+    """
+    save = getattr(args, "save", None)
+    key = (save, capture_kind)
+    if not save or key in _FAILURE_CAPTURED:
+        return
+    # Bound capture attempts even if storage is failing during a burst of errors.
+    _FAILURE_CAPTURED.add(key)
+    try:
+        root = Path(save) / "verifier_failures"
+        root.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema_version": 1,
+            "capture_kind": capture_kind,
+            "error": f"{type(error).__name__}: {error}",
+            "verifier": spec,
+            "prompt": sample.prompt,
+            "response": sample.response,
+            "scored_response": response,
+            "group_index": getattr(sample, "group_index", None),
+            "sample_index": getattr(sample, "index", None),
+        }
+        path = root / f"{os.getpid()}-{time.time_ns()}.json"
+        with path.open("x") as stream:
+            json.dump(record, stream, ensure_ascii=False, default=str)
+        logger.error("Saved failed verifier input to %s", path)
+    except Exception:
+        logger.exception("Could not save failed verifier input; preserving original verifier exception")
+
+
 async def _score(args, sample):
     registry = _registry(args.olmo_core.reward_config)
     metadata = sample.metadata
@@ -339,22 +376,28 @@ async def _score(args, sample):
             # reasoning's tokens alongside an extracted final-answer string.
             tokens = []
         if judge_registry.bound(name):
-            if args.olmo_core.reward_final_answer_only:
-                raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")
             score = await general_judge.general_judge_score(
-                args, sample, name=name, target=copy.deepcopy(spec["target"])
+                args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response
             )
             total += weight * score
             components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
             continue
-        result = await registry[name].async_call(
-            tokens,
-            response,
-            # Verifiers may consume dictionary labels; preserve the original targets.
-            copy.deepcopy(spec["target"]),
-            query=metadata.get("query", sample.prompt),
-            rollout_state=metadata.get("rollout_state"),
-        )
+        try:
+            result = await registry[name].async_call(
+                tokens,
+                response,
+                # Verifiers may consume dictionary labels; preserve the original targets.
+                copy.deepcopy(spec["target"]),
+                query=metadata.get("query", sample.prompt),
+                rollout_state=metadata.get("rollout_state"),
+            )
+        except Exception as error:
+            _capture_verifier_failure(args, sample, spec, response, error)
+            raise
+        diagnostics = getattr(result, "diagnostics", None)
+        if isinstance(diagnostics, dict) and diagnostics.get("status") == "timeout":
+            error = TimeoutError(diagnostics.get("error") or "Verifier timed out without an error message")
+            _capture_verifier_failure(args, sample, spec, response, error, capture_kind="timeout")
         score = _finite(result.score, "verifier score")
         total += weight * score
         components.append({"name": name, "score": score, "weight": weight, "cost": result.cost})

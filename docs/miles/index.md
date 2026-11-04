@@ -47,6 +47,7 @@ choosing a backend. Introducing MILES does not deprecate the existing GRPO train
 | [Packing](sequence-packing.md) | Understanding document isolation and loss semantics |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
 | [Inference records](inference-records.md) | Recording every scored group's outcome by prompt and checkpoint for later selection and analysis |
+| [Experimental Megatron OPD](opd.md) | Running sampled-token on-policy distillation with a Megatron learner and SGLang teacher |
 | [Run-control semantics](run-controls.md) | Comparing Core controls with the Megatron implementation's terminology |
 | [Router auxiliary objectives](core.md#router-auxiliary-objectives) | Selecting grouping, averaging, count source and coefficients |
 | [Implementation contracts](core.md) | Reviewing detailed trainer, replay and publication checks |

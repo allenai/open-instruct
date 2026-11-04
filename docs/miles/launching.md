@@ -35,7 +35,7 @@ replace checkpoint/output paths, usernames and image placeholders.
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/small.toml runs/my-grpo.toml
+cp configs/miles/examples/dev.toml runs/my-grpo.toml
 # Edit name/output.root to use your username and a fresh run path.
 # Select a tiny checkpoint that fits on one trainer GPU; this starter uses two GPUs.
 python -m open_instruct.miles plan runs/my-grpo.toml
@@ -50,7 +50,7 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
-Choose a starter from the four maintained examples and an image built from the
+Choose a starter from the three maintained examples and an image built from the
 intended application revision and runtime lock. Building requires access to the
 private sources described in [architecture](architecture.md#runtime-sources-and-images).
 Supply model/data paths and any secrets needed by your run. Beaker resource
@@ -74,6 +74,11 @@ calls `open_instruct.miles.execution.preflight_network` and
 `open_instruct.miles.execution.preflight_attention`; an image missing these
 entrypoints must be rebuilt.
 
+The cached B300 preset also requires the FP32 tracked-state snapshot implementation
+in the current runtime lock. `plan` and image-ID validation do not check that an
+existing image contains it. Verify its build records against
+`runtime/miles/runtime.lock.json`, or rebuild before allocating a run.
+
 To deploy source changes, commit them and build the source overlay instead.
 Read the immutable base identity from the lock and pull it into local Docker:
 
@@ -86,7 +91,8 @@ python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 The builder checks the loaded Docker image ID against the lock, builds the source
-overlay, uploads it to Beaker, then submits. It reuses a matching image when one
+overlay, uploads it to Beaker, then submits. The base already contains FA2, FA3
+and FA4; this path does not compile attention kernels. It reuses a matching image when one
 already exists for the commit. This is not an automatic blessed-image resolver.
 Do not use the general Open Instruct/vLLM auto image for MILES.
 
@@ -96,10 +102,31 @@ before building, including mount coverage. The MILES image wrapper passes the
 frozen configuration directly to `open_instruct.miles.execution.submit`; no
 debug launch script is involved.
 
+## Host memory and allocated GPU slots
+
+MILES replica startup queries `nvidia-smi` for device identity and memory, including
+generic runs with an explicit numeric `CUDA_VISIBLE_DEVICES` mask. An unavailable
+or malformed inventory, or a query exceeding 15 seconds, stops startup. An
+explicitly empty mask or `-1` exposes no GPUs; an unset mask selects all devices.
+
+`launch.memory` requests host RAM per Beaker replica (default `"256 GiB"`);
+`launch.shared_memory` separately sizes shared memory. Both GRPO and OPD launchers
+honor these fields. They do not set SGLang GPU memory pools.
+
+Beaker can assign extra GPU slots to satisfy a host-memory request. During an
+H100 inference check on Jupiter, one requested GPU with 256 GiB of host RAM
+received two GPU slots. Inspect the assigned resources in job events and record
+both requested/active GPUs and allocated GPUs when reporting throughput or cost.
+For a small inference-only workload, a lower request such as `launch.memory =
+"128 GiB"` with `launch.shared_memory = "64 GiB"` may avoid this extra allocation.
+Check the host working set, model loading and response-buffer peaks before
+reducing it; do not copy that limit into a full trainer job without measurement.
+
 ## Jupiter CUDA compatibility
 
-For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"` automatically sets
-the compatibility library path inside the Beaker job. The resolved value appears
+For MILES GPU runs, selecting `launch.cluster="ai2/jupiter"`, `"ai2/saturn"`, or
+`"ai2/titan"` automatically sets the compatibility library path inside the Beaker job.
+The resolved value appears
 in `plan`, the submitted configuration and the launch receipt:
 
 ```toml
@@ -137,6 +164,10 @@ libraries already present in the image; it does not upgrade the host driver or
 establish support for arbitrary image/driver combinations. After changing either,
 verify CUDA initialization and a short training lifecycle on the target hardware.
 Size the workload for Jupiter's H100 memory instead of copying B300 memory budgets.
+FlashAttention 4 (`flash_4`, the default elsewhere) supports only Blackwell, so Jupiter (H100) runs
+default `core.attention_backend` to `flash_3` and Saturn (A100) runs to `flash_2`; the pinned runtime
+provides both through `runtime/miles/Dockerfile`. An explicit
+value takes precedence.
 
 Then follow the image selection and `plan`/`validate`/`run` steps above, using a
 fresh output path. This setting does not change scheduling or checkpoint recovery.
@@ -270,8 +301,8 @@ collective health; local `validate` cannot inspect the future container's networ
 ## Placement, secrets and results
 
 At AI2, GPU examples use Holmes, `ai2/open-instruct-dev`, high priority and
-minimum runtimes of one hour (dev/small), four hours (medium) or eight hours
-(large). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
+minimum runtimes of one hour (dev), four hours (node) or eight hours
+(three-node). CPU-only WEKA jobs are unallocated (no `context.minRuntime`, keep the
 timeout and mounts) and run on Saturn, falling back to Jupiter after canceling
 an unschedulable attempt; not on Holmes.
 Set every model/template/data/output/cache filesystem in `launch.weka_mounts`.

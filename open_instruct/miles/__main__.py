@@ -17,9 +17,9 @@ import json
 import sys
 from pathlib import Path
 
-from open_instruct.miles.configuration import validation
+from open_instruct.miles.configuration import advisories, specs, validation
 from open_instruct.miles.configuration.config import RunConfig
-from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.distillation import opd_config
 from open_instruct.miles.errors import InputError
 
 
@@ -65,12 +65,14 @@ def execute(parser, options):
     payload = validation.read_document(options.config)
     structured = "schema_version" in payload or "model" in payload
     config = (
-        RunSpec.from_dict(payload, config_path=options.config, overrides=options.overrides)
+        specs.from_dict(payload, config_path=options.config, overrides=options.overrides)
         if structured
         else RunConfig.from_dict(payload, options.overrides)
     )
     if options.command == "plan":
-        print(json.dumps(config.plan(), indent=2))
+        planned = config.plan()
+        advisories.emit(planned)
+        print(json.dumps(planned, indent=2))
         return
     if options.command in ("run", "status"):
         if not structured:
@@ -81,19 +83,19 @@ def execute(parser, options):
         else:
             print(json.dumps(launch.status(config), indent=2))
         return
+    if isinstance(config, opd_config.OPDRunSpec):
+        if options.command == "validate":
+            config.plan()
+            print("OPD schema and allocation validated; runtime/model checks run in the candidate image")
+        else:
+            runtime = importlib.import_module("open_instruct.miles.distillation.opd_runtime")
+            runtime.execute(config)
+        return
     workflow = importlib.import_module("open_instruct.miles.execution.workflow")
     if options.command == "validate":
         if structured:
             planned_spec = config.plan()  # Validate physical allocation as well as trainer options.
-            for warning in planned_spec["launch_warnings"]:
-                print(f"Warning: {warning}", file=sys.stderr)
-            compiled = config.compile()
-            compiled.arguments()
-            planned = compiled.plan()
-            for warning in planned["async_capacity"]["warnings"]:
-                print(f"Warning: {warning}", file=sys.stderr)
-            for warning in planned["throughput"]["warnings"]:
-                print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
+            advisories.emit(planned_spec)
             print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
         else:
             workflow.parse_runtime(config)
