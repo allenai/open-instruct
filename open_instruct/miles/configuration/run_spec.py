@@ -773,6 +773,9 @@ class RunSpec:
             miles.setdefault("save_interval", miles["num_rollout"])
         elif "miles.save_interval" in origins:
             raise InputError("save_checkpoints=false conflicts with an explicit save_interval")
+        elif core.get("max_run_seconds") is not None:
+            # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
+            core["max_run_final"] = True
         if "sources" in self.data:
             put("core.prompt_provider", "mixture", "data.sources")
             put(
@@ -879,8 +882,13 @@ class RunSpec:
             )
         return result
 
-    def launch_warnings(self, miles) -> list[str]:
+    def launch_warnings(self, miles, core=None) -> list[str]:
         warnings = []
+        if core is not None and core.max_run_seconds is not None and "save_interval" not in miles:
+            warnings.append(
+                "training.save_checkpoints=false: the core.max_run_seconds stop cannot be resumed, so it is "
+                "final (HF export, final evaluation, workflow complete)."
+            )
         min_runtime = validation.duration(self.launch["min_runtime"], "launch.min_runtime")
         timeout = validation.duration(self.launch["timeout"], "launch.timeout")
         if min_runtime > BEAKER_MIN_RUNTIME_LIMIT_SECONDS:
@@ -915,7 +923,7 @@ class RunSpec:
             "data": self.data,
             "output": self.output,
             "launch": self.launch,
-            "launch_warnings": self.launch_warnings(compiled.miles),
+            "launch_warnings": self.launch_warnings(compiled.miles, compiled.core),
             "compiler_cache": self.compiler_cache,
             "records": self.records,
             "selection": self.selection,

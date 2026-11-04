@@ -114,7 +114,11 @@ def test_startup_hooks_reject_missing_worker_pools(names):
 def test_core_publication_never_aborts_live_decoding(monkeypatch, mode):
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
     worker.args = SimpleNamespace(
-        olmo_core=CoreConfig(publication_mode=mode), colocate=False, update_weight_buffer_size=1024, save=None
+        olmo_core=CoreConfig(publication_mode=mode),
+        colocate=False,
+        update_weight_buffer_size=1024,
+        save=None,
+        pause_generation_mode="retract",
     )
     worker.clock = SimpleNamespace(completed_steps=3, published_step=2, published=Mock())
     worker.weight_updater = Mock()
