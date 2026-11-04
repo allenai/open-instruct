@@ -81,6 +81,11 @@ def test_complete_source_qualifies_and_resolves(tmp_path, monkeypatch):
     assert receipt["sources"]["toy"]["controls"][0]["cases"][-1]["actual"] == 0
     data = source_catalog.resolve(tmp_path / "qualified/catalog.json", {"toy": 1.0})
     assert data["sources"][0]["name"] == "toy"
+    # Existing catalogs use a human-readable qualification annotation.
+    legacy = json.loads((tmp_path / "qualified/catalog.json").read_text())
+    legacy["sources"]["toy"]["qualification"] = "Native controls and loader passed"
+    (tmp_path / "qualified/legacy.json").write_text(json.dumps(legacy))
+    assert source_catalog.resolve(tmp_path / "qualified/legacy.json", {"toy": 1.0})["sources"][0]["name"] == "toy"
     (tmp_path / "qualified/qualification.json").write_text("{}")
     with pytest.raises(ValueError, match="receipt hash"):
         source_catalog.resolve(tmp_path / "qualified/catalog.json", {"toy": 1.0})

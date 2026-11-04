@@ -26,7 +26,7 @@ def resolve(catalog_path, weights):
         entry = catalog["sources"].get(name)
         if not entry or entry.get("status") != "qualified":
             raise InputError(f"Source {name!r} is not qualified in this catalog")
-        if receipt := entry.get("qualification"):
+        if isinstance(receipt := entry.get("qualification"), dict):
             receipt_path = (path.parent / receipt["path"]).resolve()
             if (
                 not receipt_path.is_relative_to(path.parent)
