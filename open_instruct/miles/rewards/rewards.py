@@ -376,10 +376,8 @@ async def _score(args, sample):
             # reasoning's tokens alongside an extracted final-answer string.
             tokens = []
         if judge_registry.bound(name):
-            if args.olmo_core.reward_final_answer_only:
-                raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")
             score = await general_judge.general_judge_score(
-                args, sample, name=name, target=copy.deepcopy(spec["target"])
+                args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response
             )
             total += weight * score
             components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
