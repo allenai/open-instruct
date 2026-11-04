@@ -6,7 +6,7 @@ from open_instruct.miles.configuration.config import CoreConfig
 
 
 def test_cache_controls_validate_types():
-    for key in ("compiler_cache", "compiler_cache_restore", "compiler_cache_diagnostics"):
+    for key in ("compiler_cache", "compiler_cache_restore", "compiler_cache_diagnostics", "compiler_cache_tilelang"):
         with pytest.raises(ValueError, match=key):
             CoreConfig(**{key: "false"})
 
@@ -14,6 +14,8 @@ def test_cache_controls_validate_types():
 def test_cache_is_opt_out():
     assert CoreConfig().compiler_cache is True
     assert CoreConfig(compiler_cache=False).compiler_cache is False
+    assert CoreConfig().compiler_cache_tilelang is False
+    assert CoreConfig(compiler_cache_tilelang=True).compiler_cache_tilelang is True
 
 
 @pytest.mark.parametrize(

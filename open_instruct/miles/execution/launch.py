@@ -10,14 +10,14 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import topology
-from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.configuration import advisories, specs, topology
+from open_instruct.miles.configuration import config as miles_config
+from open_instruct.miles.distillation import opd_config, opd_launch
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import workflow
 
@@ -30,9 +30,13 @@ def receipt_path(spec):
     return directory / f"{spec.name}-{key}.json"
 
 
-def specification(image, spec, *, hostnames=None):
-    config = spec.compile()
-    layout = topology.plan(spec)
+def specification(image, spec, *, hostnames=None, compiled=None):
+    if isinstance(spec, opd_config.OPDRunSpec):
+        if hostnames is not None:
+            raise InputError("OPD uses a single cluster allocation; hostname overrides are unsupported")
+        return opd_launch.specification(image, spec)
+    config = compiled if compiled is not None else spec.compile()
+    layout = topology.plan(spec, config)
     host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])
     allocated = layout["gpus_per_replica"]
     mounts = spec.launch["weka_mounts"]
@@ -75,7 +79,7 @@ def specification(image, spec, *, hostnames=None):
     )
     collect = f"from open_instruct.miles.execution.launch import collect_results; collect_results({spec.output['root']!r}, '/output')"
     preflight = ""
-    if config.core.attention_backend in ("torch", "flash_4"):
+    if config.core.attention_backend in miles_config.PREFLIGHT_ATTENTION_BACKENDS:
         preflight = (
             f"python -m open_instruct.miles.execution.preflight_attention --backend {config.core.attention_backend}\n"
         )
@@ -109,7 +113,11 @@ def specification(image, spec, *, hostnames=None):
         arguments=[command],
         datasets=[{"mountPath": mount["mount_path"], "source": {"weka": mount["weka"]}} for mount in mounts],
         result={"path": "/output"},
-        resources={"gpuCount": allocated, "memory": "256 GiB", "sharedMemory": spec.launch["shared_memory"]},
+        resources={
+            "gpuCount": allocated,
+            "memory": spec.launch["memory"],
+            "sharedMemory": spec.launch["shared_memory"],
+        },
         context={
             "priority": spec.launch["priority"],
             "minRuntime": spec.launch["min_runtime"],
@@ -184,11 +192,16 @@ def collect_results(root, destination):
 
 
 def run(path, overrides):
-    spec = RunSpec.load(path, overrides)
-    # Validate launch feasibility before spending time building an image.
-    specification("pending-build", spec)
-    for warning in spec.launch_warnings(spec.compile().miles):
-        print(f"Warning: {warning}", file=sys.stderr)
+    spec = specs.load(path, overrides)
+    # Reuse one compilation for allocation, validation and warning output.
+    if isinstance(spec, opd_config.OPDRunSpec):
+        specification("pending-build", spec)
+        planned = spec.plan()
+    else:
+        compiled = spec.compile()
+        specification("pending-build", spec, compiled=compiled)
+        planned = spec.plan(compiled)
+    advisories.emit(planned)
     with tempfile.TemporaryDirectory(prefix="miles-submitted-run-") as directory:
         frozen = Path(directory) / "run.json"
         workflow.write_json(frozen, spec.to_dict())
@@ -201,7 +214,8 @@ def submit(image, spec):
     images = json.loads(subprocess.check_output(["beaker", "image", "get", image, "--format", "json"], text=True))
     metadata = images[0] if isinstance(images, list) else images
     resolved_image = metadata["id"]
-    document = specification(resolved_image, spec)
+    compiled = None if isinstance(spec, opd_config.OPDRunSpec) else spec.compile()
+    document = specification(resolved_image, spec, compiled=compiled)
     # Preserve the exact submitted source, parameters, and image in the receipt.
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     with tempfile.TemporaryDirectory(prefix="miles-workflow-") as directory:
@@ -220,7 +234,7 @@ def submit(image, spec):
         revision=revision,
         spec_sha256=workflow.fingerprint(spec.to_dict()),
         spec=spec.to_dict(),
-        allocation=topology.plan(spec),
+        allocation=spec.allocation() if isinstance(spec, opd_config.OPDRunSpec) else topology.plan(spec, compiled),
         placements=[
             {
                 "task": task["name"],

@@ -27,7 +27,7 @@ def test_real_http_retry_budget_and_recovery(monkeypatch):
     monkeypatch.setattr(code_rewards, "RETRY", code_rewards.RETRY.new(backoff_factor=0))
     try:
         report = readiness_services.exercise(f"http://127.0.0.1:{server.server_port}")
-        assert report["passed"] and len(report["cases"]) == 6
+        assert report["passed"] and len(report["cases"]) == 7
         exhausted = report["cases"][2]
         assert exhausted["forwarded"] == 0
         assert len(exhausted["attempts"]) == code_rewards.RETRY.total + 1

@@ -26,7 +26,7 @@ async def test_failure_retains_cause_and_releases_request_count(caplog):
     instance.worker_request_counts = {"http://worker:1": 128}
     instance.client = SimpleNamespace(request=fail)
     with pytest.raises(HTTPException) as caught:
-        await instance.do_proxy(SimpleNamespace(method="POST"), "generate", b"private prompt", {})
+        await instance.do_proxy(SimpleNamespace(method="POST", headers={}), "generate", b"private prompt", {})
     assert caught.value.status_code == 503
     assert caught.value.__cause__ is failure
     assert len(calls) == 1
@@ -87,7 +87,7 @@ async def test_forwarding_preserves_request_id_without_logging_payload(caplog):
     instance._finish_url = finished.append
     instance.client = SimpleNamespace(request=forward)
     result = await instance.do_proxy(
-        SimpleNamespace(method="POST"), "generate", b"secret prompt", {"x-miles-request-id": "request-18"}
+        SimpleNamespace(method="POST", headers={}), "generate", b"secret prompt", {"x-miles-request-id": "request-18"}
     )
     assert result["status_code"] == 200
     assert calls[0][2]["headers"]["x-miles-request-id"] == "request-18"

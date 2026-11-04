@@ -13,7 +13,7 @@ from miles.backends.core_utils.rollout import refreshing_rollout
 from miles.backends.core_utils.rollout.async_buffer import RefreshPolicyDataBuffer
 from miles.backends.core_utils.rollout.generation_admission import GenerationAdmission
 from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
-from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_function
+from miles.backends.training_utils.loss.hub.corrections import vanilla_tis_function
 from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.rollout.inference_rollout import inference_rollout_common
@@ -208,6 +208,41 @@ def test_failed_publication_never_reopens_and_shutdown_cancels_owned_work():
     asyncio.run(scenario())
 
 
+def test_failed_run_aborts_without_refresh_gate_or_generation_progress(monkeypatch):
+    async def scenario():
+        p = producer()
+        entered = asyncio.Event()
+        child_done = asyncio.Event()
+
+        async def request():
+            entered.set()
+            try:
+                await asyncio.Event().wait()  # An engine that never resumes.
+            finally:
+                child_done.set()
+
+        async def worker():
+            await asyncio.gather(request())
+
+        async def forbidden_drain():
+            pytest.fail("Failed refresh must cancel, not drain paused engines")
+
+        monkeypatch.setattr(p, "prepare_publication", forbidden_drain)
+        p._worker = asyncio.create_task(worker())
+        await entered.wait()
+        assert not p._refreshing and p._producer_resumed.is_set()
+        await asyncio.wait_for(p.shutdown(abort=True), 1)
+        assert child_done.is_set() and p._worker.cancelled()
+        assert p._shutdown_complete and p._stopping and p._generation_admission.paused
+        assert not p._producer_resumed.is_set()
+        await p.shutdown()  # Executor disposal must not try to drain again.
+        assert not p._producer_resumed.is_set()
+        with pytest.raises(RuntimeError, match="Cannot resume"):
+            await p.finish_publication()
+
+    asyncio.run(scenario())
+
+
 def test_existing_tis_uses_original_prefix_denominator_without_masking():
     behavior = torch.tensor([-0.8, -1.2, -0.6])
     scored = behavior + torch.tensor([0.1, -0.2, 0.0])
@@ -362,14 +397,19 @@ def test_transport_failure_logs_request_identity_without_resampling(monkeypatch,
         assert caught.value is failure
         assert len(calls) == 1
         _, payload, kwargs = calls[0]
-        assert kwargs == {"max_retries": 1, "headers": {"x-miles-request-id": payload["rid"]}}
+        assert kwargs == {
+            "max_retries": 1,
+            "headers": {"x-miles-request-id": payload["rid"]},
+            "decode_routed_experts": False,
+            "compact_token_logprobs": True,
+        }
         assert value.rollout_log_probs == original_scores
         assert f"request={payload['rid']} group=0 sample=17" in caplog.text
         assert "delivery=unknown" in caplog.text
-        assert f"error={type(failure).__name__}" in caplog.text
+        assert f"detail={type(failure).__name__}" in caplog.text
         assert "secret prompt" not in caplog.text
         if failure_type == "status":
-            assert "status=503" in caplog.text
+            assert '"status": 503' in caplog.text
 
     asyncio.run(scenario())
 

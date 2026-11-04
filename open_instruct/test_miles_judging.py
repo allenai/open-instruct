@@ -14,7 +14,7 @@ from open_instruct.miles.configuration import topology
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.execution import cluster, launch
+from open_instruct.miles.execution import cluster, launch, workflow
 from open_instruct.miles.rewards import general_judge, judge_registry, judging, rewards
 
 
@@ -40,6 +40,59 @@ def document(tmp_path):
         "rubrics": {"quality": {"profile": "open-instruct/general-quality"}},
         "judging": {"bindings": {"general-quality": {"judge": "general", "rubric": "quality"}}},
     }
+
+
+@pytest.mark.parametrize("mode", ["managed", "external"])
+@pytest.mark.parametrize("timeout", [None, 37])
+def test_judge_timeout_defaults_and_overrides_reach_request_config(document, monkeypatch, mode, timeout):
+    if mode == "external":
+        document["judges"]["general"] = {
+            "mode": "external",
+            "model": "Qwen/Qwen3-32B",
+            "endpoint": "http://judge.example/v1",
+        }
+    if timeout is not None:
+        document["judges"]["general"]["timeout"] = timeout
+    run = RunSpec.from_dict(document)
+    value = judging.registry(run.judges)
+    value["judges"]["general"]["endpoint"] = "http://judge.example/v1"
+    monkeypatch.setenv(judging.REGISTRY_ENV, json.dumps(value))
+    monkeypatch.delenv("OI_MILES_JUDGE_TIMEOUT", raising=False)
+    args = SimpleNamespace(llm_judge_api_base="http://judge.example/v1", llm_judge_timeout=timeout)
+    config, *_ = judge_registry.resolve_request(args, "general-quality", "Question", "Answer", None)
+    expected = 600 if timeout is None else timeout
+    assert config.timeout == general_judge.general_judge_config(args).timeout == expected
+    overridden = RunSpec.from_dict(document, overrides=["judges.general.timeout=45"])
+    assert overridden.judges["judges"]["general"]["timeout"] == 45
+
+
+def test_explicit_eager_judge_retains_distinct_run_fingerprint(document):
+    omitted = RunSpec.from_dict(document).to_dict()
+    assert "cuda_graphs" not in omitted["judges"]["general"]
+    document["judges"]["general"]["cuda_graphs"] = False
+    explicit = RunSpec.from_dict(document).to_dict()
+    assert explicit["judges"]["general"]["cuda_graphs"] is False
+    assert workflow.fingerprint(explicit) != workflow.fingerprint(omitted)
+    for resolved in (omitted, explicit):
+        assert workflow.fingerprint(RunSpec.from_dict(resolved).to_dict()) == workflow.fingerprint(resolved)
+    del explicit["judges"]["general"]["cuda_graphs"]
+    assert explicit == omitted
+
+
+def test_external_judge_error_names_all_managed_fields(document):
+    document["judges"]["general"] = {
+        "mode": "external",
+        "model": "Qwen/Qwen3-32B",
+        "endpoint": "http://judge.example/v1",
+        "gpus": 1,
+        "cuda_graphs": False,
+        "backend": "sglang",
+    }
+    with pytest.raises(InputError) as error:
+        RunSpec.from_dict(document)
+    assert str(error.value) == (
+        "external judge cannot specify managed fields in judges.general: backend, cuda_graphs, gpus"
+    )
 
 
 def test_production_topology_and_growth_are_additive(document):
@@ -131,7 +184,7 @@ def test_invalid_judge_contracts_fail_before_gpu_submission(document, mutate):
 
 @pytest.mark.parametrize("mode", ["managed", "external"])
 @pytest.mark.parametrize("section", ["core", "training"])
-def test_final_answer_only_with_named_judges_fails_before_submission(document, mode, section):
+def test_final_answer_only_with_named_judges_compiles(document, mode, section):
     if mode == "external":
         document["judges"]["general"] = {
             "mode": "external",
@@ -140,8 +193,7 @@ def test_final_answer_only_with_named_judges_fails_before_submission(document, m
         }
     assert RunSpec.from_dict(document).compile().core.reward_final_answer_only is False
     document[section] = {"reward_final_answer_only": True}
-    with pytest.raises(InputError, match=r"core.reward_final_answer_only.*judging.bindings"):
-        RunSpec.from_dict(document)
+    assert RunSpec.from_dict(document).compile().core.reward_final_answer_only is True
 
 
 def test_final_answer_only_without_named_judges_remains_supported(document):
@@ -227,7 +279,19 @@ def test_transport_failure_is_not_reward_zero(server):
         general_judge._request(config, "input")
 
 
-def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatch, tmp_path, server):
+@pytest.mark.parametrize("final_only", [False, True])
+@pytest.mark.parametrize(
+    "response, extracted",
+    [
+        ("Answer", None),
+        ("scratch </think> Answer", " Answer"),
+        ("scratch </think>   ", None),
+        ("<answer>scratch answer</answer> </think> draft </think> submitted answer", " submitted answer"),
+    ],
+)
+def test_named_reward_uses_full_query_and_keeps_diagnostics(
+    document, monkeypatch, tmp_path, server, final_only, response, extracted
+):
     config, state = server
     value = judging.registry(judging.parse(document))
     value["judges"]["general"]["endpoint"] = config.api_url.removesuffix("/chat/completions")
@@ -246,7 +310,7 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatc
     sample = SimpleNamespace(
         tokens=[1],
         response_length=1,
-        response="Answer",
+        response=response,
         prompt="rendered",
         metadata={
             "query": "last user message",
@@ -254,9 +318,23 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatc
             "verifiers": [{"name": "general-quality", "target": "", "weight": 1}],
         },
     )
-    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path)), seed=17)
-    assert asyncio.run(rewards.registered_reward(args, sample)) == 0.8
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path), reward_final_answer_only=final_only), seed=17)
+    score = asyncio.run(rewards.registered_reward(args, sample))
+    assert sample.response == response
+    assert sample.tokens == [1]
+    if final_only and extracted is None:
+        assert score == 0.0
+        assert sample.metadata["reward_gate"] == "missing_final_answer"
+        assert state["requests"] == []
+        return
+    assert score == 0.8
     request = state["requests"][-1][1]["messages"][0]["content"]
+    expected, _ = general_judge.build_judge_prompt(
+        "general-quality", query="entire conversation", prediction=extracted if final_only else response, target=""
+    )
+    assert request == expected
+    if final_only:
+        assert "scratch answer" not in request and " draft " not in request
     assert "entire conversation" in request and "last user message" not in request
     assert sample.metadata["verifier_diagnostics"]["general-quality"]["raw_reply"]
 
@@ -281,6 +359,37 @@ def test_missing_reference_and_unused_bindings_are_rejected(document, tmp_path):
     path.write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
     with pytest.raises(ValueError, match="absent"):
         judge_registry.validate_data({"prompt_data": str(path)}, value)
+
+
+@pytest.mark.parametrize("split", ["train", "eval"])
+@pytest.mark.parametrize("verifier", ["general-quality", "custom-quality"])
+def test_missing_binding_checked_with_no_judges_in_train_and_eval(document, tmp_path, split, verifier):
+    paths = {name: tmp_path / f"{name}.jsonl" for name in ("train", "eval")}
+    for name, path in paths.items():
+        path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "judge_query": "Question",
+                        "verifiers": [{"name": verifier if name == split else "gsm8k", "target": "42"}],
+                    }
+                }
+            )
+            + "\n"
+        )
+    reward = tmp_path / "verifiers.json"
+    reward.write_text(
+        json.dumps({verifier: {"factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"}})
+    )
+    prepared = {
+        "prompt_data": str(paths["train"]),
+        "eval_prompt_data": ["heldout", str(paths["eval"])],
+        "reward_config": str(reward),
+    }
+    with pytest.raises(InputError, match=f"Missing named judge binding.*{verifier}"):
+        judge_registry.validate_data(prepared, judging.registry(judging.parse({})))
+    document["judging"]["bindings"] = {verifier: {"judge": "general", "rubric": "quality"}}
+    judge_registry.validate_data(prepared, judging.registry(judging.parse(document)))
 
 
 def test_health_probe_tolerates_transient_failures_but_bounds_outage(document, tmp_path, monkeypatch):

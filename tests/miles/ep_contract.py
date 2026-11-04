@@ -173,6 +173,7 @@ def run(root, mode, checkpointing, *, token_average=False, clip_grad=1e9, captur
         worker.model = worker.train_module.model
         worker.optimizer = worker.train_module.optim
         worker.lr_scheduler = scheduler.CoreLRScheduler(args, worker.optimizer)
+        worker._observed_response_tokens = 0
         worker.clock = PolicyClock()
         worker.clock.published()
         worker.ref_module = None
