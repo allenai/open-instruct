@@ -11,6 +11,8 @@
 #   ctrl   H149's c12-b2 length S = 16,303 steps (phi = 0.5803 of one pass), --num_epochs 1.
 #   b1r    ledger H182 (b1-c12r-gpu): base B1 (step20000), peak LR 2e-4, plus the 10% LC replay dir as
 #          --extra_numpy_dirs; S_R=<steps> is required (H182 R4', per seed, from the offline loader replay).
+#   b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq   ledger H183-H186: b1r plus one source parquet at 1.0 (the
+#          source screen's cache) and the arm's own replay dir; S_R from the arm's R4'.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -68,11 +70,26 @@ LR=5e-5
 EXTRA_ARGS=""
 DESC="ledger H161 GPU companion (draft)"
 case "$ARM" in
-    b1r) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
+    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq)
+         MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
          HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
-         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
-         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"
-         STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14 ;;
+         LR=2e-4; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"; HOURS=14
+         # H183-H186: H182 plus one source parquet at 1.0, tokenized as the source's B2 screen cache (CACHE), and a per-arm
+         # replay dir (the first I_R,arm documents of the H182 list, 0.10 x the arm chat loss tokens).
+         SRC="${ARM#b1r}"; SRC="${SRC#-}"; D=/weka/olmo-3p5-post-checkpoints/chrisg
+         case "$SRC" in
+             (superior) HYP=h183; ADD=$D/h170/data/superior-ms-668e5738.parquet; CACHE=e2dadaee27-6068a350-rowaligned ;;
+             (ifchatv2) HYP=h184; ADD=$D/h172/data/out/h172-ifchatv2-0c970d80.parquet; CACHE=4a39ea0b8c-6068a350-rowaligned ;;
+             (sciv1) HYP=h185; ADD=$D/h174/data/sciv1-b41afb5d.parquet; CACHE=e55fb4bb90-6068a350-rowaligned ;;
+             (scimcq) HYP=h186; ADD=$D/h175/data/out-a1/h175-scimcq-6a60033f.parquet; CACHE=125b9c5edc-6068a350-rowaligned ;;
+         esac
+         if [[ -n "$SRC" ]]; then
+             MIXER="$MIXER $ADD 1.0"; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP/replay-$SRC
+             OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP-gpu; DESC="ledger $HYP $SRC-b1-gpu"; HOURS=16
+         fi
+         EXTRA_ARGS="--extra_numpy_dirs $REPLAY"
+         STEPS="${S_R:?S_R=<steps from the arm R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)) ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -80,6 +97,7 @@ esac
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
+[[ "$ARM" == b1r-* ]] && RUN_NAME="${HYP}gpu-${SRC}-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
