@@ -79,6 +79,11 @@ def validate_target(target):
 
 
 class UniqueYAMLLoader(yaml.SafeLoader):
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise ValueError("YAML aliases are not supported")
+        return super().compose_node(parent, index)
+
     def construct_mapping(self, node, deep=False):
         self.flatten_mapping(node)
         mapping = {}
@@ -125,6 +130,17 @@ class StructuredConfig:
     timeout_seconds: float = 1.0
 
 
+def timeout_policy():
+    policy = os.environ.get("OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero"))
+    if policy not in {"zero", "raise"}:
+        raise ValueError("Structured timeout policy must be zero or raise")
+    return policy
+
+
+def timeout_result(error):
+    return common.Result(0.0, diagnostics={"kind": "structured_v1", "status": "timeout", "error": str(error)})
+
+
 class StructuredOutputVerifier:
     get_config_class = staticmethod(lambda: StructuredConfig)
 
@@ -134,28 +150,29 @@ class StructuredOutputVerifier:
             raise ValueError("Structured verifier timeout must be in (0, 30] seconds")
 
     async def async_call(self, tokenized_prediction, prediction, label, **kwargs):
-        result = await rewards.isolated_verifier_call(
-            {
-                "factory": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
-                "config": {"timeout_seconds": self.config.timeout_seconds},
-            },
-            tokenized_prediction,
-            prediction,
-            label,
-            **kwargs,
-        )
-        return result
+        policy = timeout_policy()
+        try:
+            return await rewards.isolated_verifier_call(
+                {
+                    "factory": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
+                    "config": {"timeout_seconds": self.config.timeout_seconds},
+                },
+                tokenized_prediction,
+                prediction,
+                label,
+                **kwargs,
+            )
+        except rewards.MathVerifierTimeout as error:
+            if policy == "raise":
+                raise
+            return timeout_result(error)
 
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
         # This synchronous entry point executes on the verifier worker's main thread.
         def expired(signum, frame):
             raise TimeoutError("Structured response exceeded its verification budget")
 
-        policy = os.environ.get(
-            "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-        )
-        if policy not in {"zero", "raise"}:
-            raise ValueError("Structured timeout policy must be zero or raise")
+        policy = timeout_policy()
         previous = signal.signal(signal.SIGALRM, expired)
         timer = signal.setitimer(signal.ITIMER_REAL, self.config.timeout_seconds)
         try:
@@ -183,7 +200,7 @@ class StructuredOutputVerifier:
         except TimeoutError as error:
             if policy == "raise":
                 raise
-            return common.Result(0.0, diagnostics={"kind": "structured_v1", "status": "timeout", "error": str(error)})
+            return timeout_result(error)
         finally:
             signal.setitimer(signal.ITIMER_REAL, *timer)
             signal.signal(signal.SIGALRM, previous)

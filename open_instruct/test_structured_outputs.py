@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from unittest import mock
 
 import pytest
 from referencing import exceptions
@@ -29,6 +30,25 @@ def test_four_formats_same_schema(kind, answer):
     verifier = structured.StructuredOutputVerifier()
     assert verifier([], answer, target(kind)).score == 1
     assert verifier([], answer.replace("3", "bad"), target(kind)).score == 0
+
+
+def test_xml_root_with_multiple_fields():
+    schema = {
+        "type": "object",
+        "properties": {
+            "root": {
+                "type": "object",
+                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                "required": ["a", "b"],
+            }
+        },
+        "required": ["root"],
+    }
+    verifier = structured.StructuredOutputVerifier()
+    label = target("xml", schema=schema)
+    assert verifier([], "<root><a>1</a><b>2</b></root>", label).score == 1
+    assert verifier([], "<root><a>1</a></root>", label).score == 0
+    assert verifier([], "<root><a>bad</a><b>2</b></root>", label).score == 0
 
 
 def test_csv_types_and_width():
@@ -87,6 +107,41 @@ def test_registry_refuses_external_retrieval(monkeypatch):
 )
 def test_ambiguous_or_unsafe_parse_is_zero(kind, text):
     assert structured.StructuredOutputVerifier()([], text, target(kind)).score == 0
+
+
+@pytest.mark.parametrize("text", ["n: &n [*n]", "a: &a [1, 2]\nb: &b [*a, *a]\nc: [*b, *b]"])
+def test_yaml_aliases_rejected_before_expansion(text):
+    result = structured.StructuredOutputVerifier()([], text, target("yaml", schema={}))
+    assert result.score == 0 and result.diagnostics["status"] == "parse_error"
+    assert "aliases" in result.diagnostics["error"]
+
+
+@pytest.mark.parametrize("policy", ["zero", "raise"])
+@pytest.mark.parametrize("setting", ["OI_MILES_FORMAT_TIMEOUT_POLICY", "OI_MILES_MATH_TIMEOUT_POLICY"])
+def test_outer_worker_timeout_policy(monkeypatch, policy, setting):
+    monkeypatch.delenv("OI_MILES_FORMAT_TIMEOUT_POLICY", raising=False)
+    monkeypatch.setenv(setting, policy)
+    monkeypatch.setattr(
+        structured.rewards,
+        "isolated_verifier_call",
+        mock.AsyncMock(side_effect=structured.rewards.MathVerifierTimeout("worker deadline")),
+    )
+    call = structured.StructuredOutputVerifier().async_call([], "{}", target())
+    if policy == "raise":
+        with pytest.raises(structured.rewards.MathVerifierTimeout):
+            asyncio.run(call)
+    else:
+        result = asyncio.run(call)
+        assert result.score == 0 and result.diagnostics["status"] == "timeout"
+
+
+def test_unexpected_worker_failure_propagates(monkeypatch):
+    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")
+    monkeypatch.setattr(
+        structured.rewards, "isolated_verifier_call", mock.AsyncMock(side_effect=RuntimeError("worker exited"))
+    )
+    with pytest.raises(RuntimeError, match="worker exited"):
+        asyncio.run(structured.StructuredOutputVerifier().async_call([], "{}", target()))
 
 
 def test_pathological_schema_regex_has_one_response_deadline(monkeypatch):

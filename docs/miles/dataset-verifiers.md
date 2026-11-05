@@ -23,10 +23,23 @@ CSV boolean subschemas are left unchanged for schema validation rather than type
 coercion. YAML mapping keys must be strings to match the JSON Schema data model.
 Unlike the legacy JSON-only slice, the contract does not silently strengthen a
 schema: the policy is part of every target and therefore the artifact hash.
-Duplicate mapping keys, nonfinite values, external schema references and XML
-entities are rejected. Local references and regex schema keywords are supported.
+Duplicate mapping keys, YAML aliases, nonfinite values, external schema references
+and XML entities are rejected. Local references and regex schema keywords are supported.
 A worker process and a configurable response deadline (`timeout_seconds`, default
 1 second) bound parsing and schema regex matching together. Timeout diagnostics
 follow `OI_MILES_FORMAT_TIMEOUT_POLICY`, falling back to the math policy (`zero`
-by default; `raise` preserves a scoring failure). Configuration errors propagate.
+by default; `raise` preserves a scoring failure), including the outer worker
+timeout. The response budget includes target validation; slow targets can exhaust
+it. Invalid schema/configuration exceptions propagate, as do unexpected worker failures.
 The old `JSONSchemaVerifier` remains unchanged.
+
+XML preserves its root element: `<root><a>1</a><b>2</b></root>` needs a schema
+whose top-level `properties.root` contains the `a` and `b` properties. Coercion
+applies only to XML/CSV; `coerce_types` has no effect on JSON/YAML/TOML. Answers
+must contain the format itself, without Markdown code fences.
+
+With `as_declared`, use `required` and `minItems` where the task demands nonempty
+objects or arrays: an empty TOML document or header-only CSV can otherwise satisfy
+the schema. `nemo_strict_v1` retains the native helper's traversal and does not
+add array length requirements; qualification controls must validate each target's
+intended behavior. The qualification script uses the default one-second budget.
