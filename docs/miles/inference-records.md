@@ -249,6 +249,10 @@ table = "/weka/.../selection/all-zero-v1.json"
 sha256 = "<digest printed by records select>"
 ```
 
+This global selection table cannot be combined with the mixture or ReMind
+providers. Mixtures would need exclusions within each source's eligible pool to
+preserve allocation; per-source exclusion files are not implemented yet.
+
 At startup the data source checks three things and fails the run on any mismatch:
 
 - the file's SHA-256 against the pinned digest;

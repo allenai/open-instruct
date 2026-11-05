@@ -38,7 +38,7 @@ import requests
 from open_instruct import judge_utils, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry, service
+from open_instruct.miles.rewards import judge_registry, judging, service
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -96,7 +96,11 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
         service.number_setting(args, "llm_judge_max_context_length", "OI_MILES_JUDGE_MAX_CONTEXT_LENGTH", 32768)
     )
     temperature = float(service.number_setting(args, "llm_judge_temperature", "OI_MILES_JUDGE_TEMPERATURE", 1.0))
-    timeout = float(service.number_setting(args, "llm_judge_timeout", "OI_MILES_JUDGE_TIMEOUT", 600.0))
+    timeout = float(
+        service.number_setting(
+            args, "llm_judge_timeout", "OI_MILES_JUDGE_TIMEOUT", float(judging.DEFAULT_REQUEST_TIMEOUT)
+        )
+    )
     seed = int(service.number_setting(args, "seed", "OI_MILES_JUDGE_SEED", 1))
     max_concurrent_calls = int(
         service.number_setting(args, "llm_judge_max_concurrent_calls", "OI_MILES_JUDGE_MAX_CONCURRENT_CALLS", 256)
@@ -275,7 +279,9 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
         raise RuntimeError(f"general judge request failed for {config.api_url}: {error}") from error
 
 
-async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any) -> float:
+async def general_judge_score(
+    args: Any, sample: Any, *, name: str, target: Any, prediction: str | None = None
+) -> float:
     """Score one response with the configured OpenAI-compatible general judge."""
     metadata = getattr(sample, "metadata", None)
     if not isinstance(metadata, dict):
@@ -283,13 +289,15 @@ async def general_judge_score(args: Any, sample: Any, *, name: str, target: Any)
     query = metadata.get("judge_query")
     if not isinstance(query, str) or not query:
         raise ValueError("general-quality samples require metadata.judge_query")
-    resolved = judge_registry.resolve_request(args, name, query, str(sample.response), target)
+    # Keep the original sample for training/records while grading the selected answer.
+    prediction = str(sample.response) if prediction is None else prediction
+    resolved = judge_registry.resolve_request(args, name, query, prediction, target)
     binding = None
     rubric_sha256 = None
     if resolved:
         config, prompt, prompt_sha256, parser, binding, rubric_sha256 = resolved
     else:
-        prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=str(sample.response), target=target)
+        prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=prediction, target=target)
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")

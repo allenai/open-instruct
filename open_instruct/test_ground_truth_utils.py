@@ -4,6 +4,7 @@ Test script for verifier functionality in Python
 """
 
 import asyncio
+import json
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -175,6 +176,21 @@ class TestGSM8KVerifier(unittest.TestCase):
         result = self.verifier([], prediction, label)
         self.assertEqual(result.score, expected_score)
 
+    @parameterized.expand(
+        [
+            ("trailing_zero_decimal", "The total cost is $96.00", "96", 1.0),
+            ("decimal_label_integer_answer", "The answer is 42", "42.0", 1.0),
+            ("thousands_separator_in_answer", "It takes 1,350 minutes", "1350", 1.0),
+            ("thousands_separator_in_label", "It takes 1350 minutes", "1,350", 1.0),
+            ("different_value", "The total cost is $96.50", "96", 0.0),
+            ("rounding_is_not_equality", "About 0.33 of them", "0.3333", 0.0),
+            ("non_numeric_label_uses_string_match", "The answer is 7", "seven", 0.0),
+        ]
+    )
+    def test_numeric_equivalence(self, _name, prediction, label, expected_score):
+        result = self.verifier([], prediction, label)
+        self.assertEqual(result.score, expected_score)
+
 
 def _make_litellm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5):
     return SimpleNamespace(
@@ -242,6 +258,76 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         label = str([{"instruction_id": [], "kwargs": []}])
         result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
         self.assertEqual(result.score, 0.0)
+
+
+class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
+    """Regression test: detectable_format:json_format called json.loads on the response and caught only ValueError,
+    so a degenerate, deeply nested response raised RecursionError out of the verifier and stopped an RL run."""
+
+    def test_deeply_nested_response_fails_the_constraint(self):
+        checker = instructions_registry.INSTRUCTION_DICT["detectable_format:json_format"](
+            "detectable_format:json_format"
+        )
+        checker.build_description()
+        response = "[" * 100_000 + "]" * 100_000
+        with self.assertRaises(RecursionError):
+            json.loads(response)
+        self.assertFalse(checker.check_following(response))
+        self.assertTrue(checker.check_following('```json\n{"a": [1, 2]}\n```'))
+
+    def test_legacy_json_verifier_rejects_deep_nesting(self):
+        verifier = ground_truth_utils.IFEvalVerifierOld()
+        response = "[" * 100_000 + "]" * 100_000
+        self.assertEqual(verifier([], response, {"func_name": "validate_json_format"}).score, 0.0)
+        self.assertEqual(verifier([], '{"a": [1, 2]}', {"func_name": "validate_json_format"}).score, 1.0)
+        self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
+
+
+class TestIFEvalGDegenerateConstraints(unittest.TestCase):
+    """Regression tests for constraints that rewarded degenerate answers (marin-community/marin#10320).
+
+    count:lowercase_counting capped the total number of lowercase words at N (2-3), so only an empty, all-caps
+    or non-Latin answer passed; letters:letter_counting counted only ASCII letters, so a non-Latin answer met
+    "less than N letters"; length_constraints:nth_paragraph_first_word redrew an out-of-range paragraph index
+    at random on every check."""
+
+    @staticmethod
+    def _checker(key, **kwargs):
+        checker = instructions_registry.INSTRUCTION_DICT[key](key)
+        checker.build_description(**kwargs)
+        return checker
+
+    def test_lowercase_counting_caps_each_word(self):
+        checker = self._checker("count:lowercase_counting", N=2)
+        self.assertTrue(checker.check_following("The cat sat on a mat, then the dog sat."))
+        self.assertFalse(checker.check_following("the cat and the dog and the bird"))
+        self.assertTrue(checker.check_following(""))
+
+    def test_letter_counting_counts_every_script(self):
+        less = self._checker("letters:letter_counting", N=3, relation="less than")
+        self.assertTrue(less.check_following("42"))
+        self.assertFalse(less.check_following("答案是四十二"))
+        self.assertFalse(less.check_following("Forty-two"))
+        at_least = self._checker("letters:letter_counting", N=3, relation="at least")
+        self.assertTrue(at_least.check_following("答案是四十二"))
+
+    def test_out_of_range_paragraph_is_kept_and_fails(self):
+        key = "length_constraints:nth_paragraph_first_word"
+        response = "\n\n".join(["guest one"] * 7)
+        for _ in range(50):
+            checker = self._checker(key, num_paragraphs=7, nth_paragraph=8, first_word="guest")
+            self.assertEqual(checker.get_instruction_args()["nth_paragraph"], 8)
+            self.assertFalse(checker.check_following(response))
+        self.assertTrue(
+            self._checker(key, num_paragraphs=7, nth_paragraph=7, first_word="guest").check_following(response)
+        )
+
+    def test_random_paragraph_index_is_in_range(self):
+        for _ in range(200):
+            args = self._checker(
+                "length_constraints:nth_paragraph_first_word", num_paragraphs=3
+            ).get_instruction_args()
+            self.assertLessEqual(args["nth_paragraph"], 3)
 
 
 class TestIFEvalGWordCounting(unittest.TestCase):

@@ -179,7 +179,7 @@ esac
     assert (logs / "bad.log").read_text() == "previous snapshot"
 
 
-@pytest.mark.parametrize("image", ["image", "image-olmo35-rf"])
+@pytest.mark.parametrize("image", ["image", "image-olmo35-rf", "image-olmo35-fs"])
 @pytest.mark.parametrize("service_account", ["", "projects/test/serviceAccounts/builder@example.com"])
 def test_image_build_config_is_portable_and_account_is_optional(tmp_path, image, service_account):
     root = tmp_path / "maxtext"
@@ -216,7 +216,11 @@ done
     config = yaml.safe_load(capture.read_text())
     assert config.get("serviceAccount", "") == service_account
     digest = hashlib.sha256((root / image / "Dockerfile").read_bytes() + b"test patch\n").hexdigest()[:8]
-    prefix = "e259ed61-p" if image == "image" else "51f8cc4b-p907d86f3-rf"
+    prefix = {
+        "image": "e259ed61-p",
+        "image-olmo35-rf": "51f8cc4b-p907d86f3-rf",
+        "image-olmo35-fs": "51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea-fs",
+    }[image]
     assert config["images"][0].endswith(prefix + digest)
     assert not list(tmp_path.glob("maxtext-build.*"))
 

@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -12,6 +13,7 @@ import types
 import unittest
 from unittest import mock
 
+import numpy as np
 from olmo_core import data as oc_data
 from parameterized import parameterized
 
@@ -236,6 +238,202 @@ class MissingCacheCommandTest(unittest.TestCase):
             self.assertTrue(tokenize.call_args.args[1].dataset.cache_dataset_only)
 
 
+_EXTRA_EOS = 2
+_EXTRA_PAD = 1
+# Above 2**16, so OLMo-core reads uint32 tokens, as for the Olmo tokenizer.
+_EXTRA_VOCAB = 100_352
+
+
+def _write_parts(numpy_dir: str, docs_per_part: list[list[tuple[list[int], bool]]], token_dtype=np.uint32) -> None:
+    """Write converter-layout parts: each doc is (EOS-terminated tokens, loss on every token)."""
+    os.makedirs(numpy_dir, exist_ok=True)
+    for index, docs in enumerate(docs_per_part):
+        tokens = np.array([t for doc, _ in docs for t in doc], dtype=token_dtype)
+        mask = np.array([loss for doc, loss in docs for _ in doc], dtype=np.bool_)
+        tokens.tofile(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.npy"))
+        mask.tofile(os.path.join(numpy_dir, f"labels_mask_part_{index:04d}.npy"))
+        with gzip.open(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.csv.gz"), "wt") as f:
+            start = 0
+            for doc, _ in docs:
+                f.write(f"{start},{start + len(doc)}\n")
+                start += len(doc)
+
+
+class ExtraNumpyDirsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.tokenizer = oc_data.TokenizerConfig(
+            vocab_size=_EXTRA_VOCAB, eos_token_id=_EXTRA_EOS, pad_token_id=_EXTRA_PAD
+        )
+        # Chat rows: prompt tokens (10-19) unmasked, so the cache mask is mixed; two parts.
+        self.cache = os.path.join(self.tmp, "cache")
+        _write_parts(self.cache, [[([10, 11, 12, _EXTRA_EOS], False)] * 3, [([13, 14, _EXTRA_EOS], False)] * 2])
+        # Raw documents (tokens >= 50,000), loss on every token; the second dir has two parts.
+        self.extra_a = os.path.join(self.tmp, "extra_a")
+        _write_parts(self.extra_a, [[([50_000, 50_001, 50_002, 50_003, 50_004, _EXTRA_EOS], True)] * 2])
+        self.extra_b = os.path.join(self.tmp, "extra_b")
+        _write_parts(
+            self.extra_b, [[([60_000, 60_001, _EXTRA_EOS], True)], [([60_002, 60_003, 60_004, _EXTRA_EOS], True)] * 3]
+        )
+
+    def _config(self, extra_numpy_dirs=(), sequence_length=8):
+        return olmo_core_finetune._numpy_dataset_config(
+            self.cache,
+            self.tokenizer,
+            work_dir=os.path.join(self.tmp, "work"),
+            sequence_length=sequence_length,
+            document_boundary_kwargs={},
+            extra_numpy_dirs=extra_numpy_dirs,
+        )
+
+    def _check(self, extra_numpy_dirs, sequence_length=8):
+        return olmo_core_finetune._check_extra_numpy_dirs(
+            extra_numpy_dirs, self.cache, self.tokenizer, sequence_length=sequence_length, require_metadata=False
+        )
+
+    def test_empty_flag_leaves_config_unchanged(self) -> None:
+        self.assertEqual(self._config([]), self._config())
+        self.assertEqual(
+            self._config(),
+            olmo_core_finetune._numpy_dataset_config(
+                self.cache,
+                self.tokenizer,
+                work_dir=os.path.join(self.tmp, "work"),
+                sequence_length=8,
+                document_boundary_kwargs={},
+            ),
+        )
+        self.assertEqual(self._check([]), {})
+
+    def test_paths_and_masks_are_aligned_cache_first(self) -> None:
+        config = self._config([self.extra_b, self.extra_a])
+        dirs = [self.cache, self.extra_b, self.extra_a]
+        self.assertEqual(config.paths, [os.path.join(d, "token_ids_part_*.npy") for d in dirs])
+        self.assertEqual(config.label_mask_paths, [os.path.join(d, "labels_mask_part_*.npy") for d in dirs])
+        # What OLMo-core actually pairs after expanding the globs.
+        paths, _, masks = config._resolve_paths_metadata(allow_mix=True, label_mask_paths=config.label_mask_paths)
+        expected = [
+            (d, f"{i:04d}") for d, n in ((self.cache, 2), (self.extra_b, 2), (self.extra_a, 1)) for i in range(n)
+        ]
+        self.assertEqual(len(paths), len(expected))
+        for path, mask, (d, index) in zip(paths, masks, expected):
+            self.assertEqual(path, os.path.join(d, f"token_ids_part_{index}.npy"))
+            self.assertEqual(mask, os.path.join(d, f"labels_mask_part_{index}.npy"))
+
+    def test_extras_pack_apart_from_chat_rows_with_full_loss(self) -> None:
+        self._check([self.extra_a, self.extra_b])
+        dataset = self._config([self.extra_a, self.extra_b]).build()
+        dataset.prepare()
+        seen_extra_tokens = 0
+        for i in range(len(dataset)):
+            item = dataset[i]
+            ids, mask = item["input_ids"], item["label_mask"]
+            real = ids != _EXTRA_PAD
+            is_extra = ids >= 50_000
+            # One source file per instance: never chat rows and raw documents together.
+            self.assertTrue(bool(is_extra[real & (ids != _EXTRA_EOS)].all()) or not bool(is_extra.any()))
+            if is_extra.any():
+                self.assertTrue(bool(mask[real].all()))
+                seen_extra_tokens += int(real.sum())
+            else:
+                self.assertFalse(bool(mask.any()))
+        self.assertEqual(seen_extra_tokens, 2 * 6 + 3 + 3 * 4)
+
+    def test_logs_counts_for_cache_and_extras(self) -> None:
+        with self.assertLogs(olmo_core_finetune.logger.name, level="INFO") as logs:
+            stats = self._check([self.extra_a, self.extra_b], sequence_length=5)
+        self.assertEqual(stats[self.extra_a].num_tokens, 12)
+        self.assertEqual(stats[self.extra_a].num_loss_tokens, 12)
+        self.assertEqual(stats[self.extra_a].num_docs_over_length, 2)
+        self.assertEqual(stats[self.extra_a].num_tokens_truncated, 2)
+        self.assertEqual(stats[self.extra_b].num_parts, 2)
+        self.assertEqual(stats[self.extra_b].num_tokens, 15)
+        joined = "\n".join(logs.output)
+        self.assertIn("Chat cache", joined)
+        self.assertIn("18 tokens, 0 loss tokens", joined)
+        self.assertIn("27 tokens, 27 loss tokens", joined)
+
+    def test_missing_dir(self) -> None:
+        with self.assertRaisesRegex(FileNotFoundError, "not a local directory"):
+            self._check([os.path.join(self.tmp, "nope")])
+
+    def test_no_token_parts(self) -> None:
+        os.makedirs(os.path.join(self.tmp, "empty"))
+        with self.assertRaisesRegex(FileNotFoundError, "no token_ids_part"):
+            self._check([os.path.join(self.tmp, "empty")])
+
+    def test_missing_mask_part(self) -> None:
+        os.remove(os.path.join(self.extra_b, "labels_mask_part_0001.npy"))
+        with self.assertRaisesRegex(ValueError, r"token parts without a label mask: \['0001'\]"):
+            self._check([self.extra_b])
+
+    def test_mask_length_mismatch(self) -> None:
+        np.ones(5, dtype=np.bool_).tofile(os.path.join(self.extra_a, "labels_mask_part_0000.npy"))
+        with self.assertRaisesRegex(ValueError, "one-byte elements"):
+            self._check([self.extra_a])
+
+    def test_wrong_token_dtype(self) -> None:
+        # uint16 tokens: the mask then has twice as many entries as OLMo-core would read tokens.
+        _write_parts(self.extra_a, [[([500, 501, _EXTRA_EOS], True)] * 2], token_dtype=np.uint16)
+        with self.assertRaisesRegex(ValueError, "uint32"):
+            self._check([self.extra_a])
+
+    def test_non_binary_mask(self) -> None:
+        np.full(12, 7, dtype=np.uint8).tofile(os.path.join(self.extra_a, "labels_mask_part_0000.npy"))
+        with self.assertRaisesRegex(ValueError, "not a bool/uint8 label mask"):
+            self._check([self.extra_a])
+
+    def test_part_must_end_with_eos(self) -> None:
+        _write_parts(self.extra_a, [[([50_000, 50_001], True)]])
+        with self.assertRaisesRegex(ValueError, "does not end with EOS"):
+            self._check([self.extra_a])
+
+    def test_rejects_repeated_dir_alias_and_cache(self) -> None:
+        link = os.path.join(self.tmp, "extra_a_link")
+        os.symlink(self.extra_a, link)
+        for dirs in (
+            [self.extra_a, self.extra_a],
+            [self.extra_a, link],
+            [self.extra_a, os.path.join(self.extra_a, ".")],
+            [self.cache],
+        ):
+            with self.subTest(dirs=dirs), self.assertRaisesRegex(ValueError, "repeats a directory or the chat cache"):
+                self._check(dirs)
+
+    def test_rejects_glob_match_that_is_not_an_indexed_part(self) -> None:
+        for name in ("token_ids_part_backup.npy", "labels_mask_part_backup.npy", "token_ids_part_0000.old.npy"):
+            stray = os.path.join(self.extra_a, name)
+            with open(stray, "wb") as f:
+                f.write(b"\0" * 4)
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, re.escape(f"['{stray}']")):
+                    self._check([self.extra_a])
+            finally:
+                os.remove(stray)
+
+    def test_stats_follow_the_selected_boundary_source(self) -> None:
+        # One 12-token row with an EOS inside: two documents by EOS, one by metadata.
+        _write_parts(self.extra_a, [[([50_000, 50_001, 50_002, 50_003, 50_004, _EXTRA_EOS] * 2, True)]])
+        by_eos = self._check([self.extra_a])[self.extra_a]
+        self.assertEqual((by_eos.num_docs, by_eos.num_docs_over_length), (2, 0))
+        by_metadata = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_a]
+        self.assertEqual(
+            (by_metadata.num_docs, by_metadata.num_docs_over_length, by_metadata.num_tokens_truncated), (1, 1, 4)
+        )
+
+    def test_metadata_required_with_metadata_boundaries(self) -> None:
+        os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
+        self._check([self.extra_a])
+        with self.assertRaisesRegex(ValueError, "csv.gz"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+
 # EMO routing exists only in newer OLMo-core.
 emo = importlib.import_module("olmo_core.nn.moe.emo") if importlib.util.find_spec("olmo_core.nn.moe.emo") else None
 
@@ -384,6 +582,65 @@ class TestCheckpointerDefaults(unittest.TestCase):
             with self.subTest(interval=interval):
                 callback = olmo_core_utils.build_checkpointer_callback(345, interval)
                 self.assertIsNone(callback.ephemeral_save_interval)
+
+
+class TestBuildWandbConfig(unittest.TestCase):
+    _BEAKER_CONFIG = utils.BeakerRuntimeConfig(
+        beaker_workload_id="01TEST",
+        beaker_node_hostname=["node-1"],
+        beaker_experiment_url=["https://beaker.org/ex/01TEST/"],
+        beaker_dataset_ids=["ds-1"],
+        beaker_dataset_id_urls=["https://beaker.org/ds/ds-1"],
+    )
+
+    def test_beaker_fields_are_merged_into_the_config(self) -> None:
+        with mock.patch.object(utils, "maybe_get_beaker_config", return_value=self._BEAKER_CONFIG):
+            config = olmo_core_utils.build_wandb_config({"learning_rate": 1e-5})
+
+        self.assertEqual(config["learning_rate"], 1e-5)
+        self.assertEqual(config["beaker_workload_id"], "01TEST")
+        self.assertEqual(config["beaker_experiment_url"], ["https://beaker.org/ex/01TEST/"])
+
+    def test_config_is_unchanged_off_beaker(self) -> None:
+        with mock.patch.object(utils, "maybe_get_beaker_config", return_value=None):
+            config = olmo_core_utils.build_wandb_config({"learning_rate": 1e-5})
+
+        self.assertEqual(config, {"learning_rate": 1e-5})
+
+    def test_the_caller_dict_is_not_mutated(self) -> None:
+        """The same dict is passed to BeakerCallbackV2 and ConfigSaverCallback, so it must be copied."""
+        original = {"learning_rate": 1e-5}
+        with mock.patch.object(utils, "maybe_get_beaker_config", return_value=self._BEAKER_CONFIG):
+            config = olmo_core_utils.build_wandb_config(original)
+
+        self.assertEqual(original, {"learning_rate": 1e-5})
+        self.assertIsNot(config, original)
+
+    def test_build_base_callbacks_passes_beaker_fields_to_wandb(self) -> None:
+        """The wiring the issue is about: the wandb callback, not just the helper, gets the fields."""
+        with mock.patch.object(utils, "maybe_get_beaker_config", return_value=self._BEAKER_CONFIG):
+            callbacks = olmo_core_utils.build_base_callbacks(
+                config_dict={"learning_rate": 1e-5},
+                run_name="test-run",
+                checkpointing_steps=500,
+                ephemeral_save_interval=250,
+                with_tracking=True,
+                wandb_project="test-project",
+            )
+
+        self.assertEqual(callbacks["wandb"].config["beaker_workload_id"], "01TEST")
+        self.assertEqual(callbacks["wandb"].config["learning_rate"], 1e-5)
+
+    def test_non_zero_ranks_skip_the_beaker_cli_lookup(self) -> None:
+        """maybe_get_beaker_config shells out to the Beaker CLI, so only rank 0 should call it."""
+        with (
+            mock.patch.object(olmo_core_utils, "get_rank", return_value=1),
+            mock.patch.object(utils, "maybe_get_beaker_config") as mock_get_config,
+        ):
+            config = olmo_core_utils.build_wandb_config({"learning_rate": 1e-5})
+
+        mock_get_config.assert_not_called()
+        self.assertEqual(config, {"learning_rate": 1e-5})
 
 
 if __name__ == "__main__":

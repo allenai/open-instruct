@@ -64,7 +64,11 @@ def command(service, port):
         str(service["tensor_parallel_size"]),
         "--context-length",
         str(service["max_context_length"]),
-        "--disable-cuda-graph",
+        *(
+            ["--cuda-graph-max-bs-decode", str(service["max_concurrent_calls"])]
+            if service.get("cuda_graphs", False)
+            else ["--disable-cuda-graph"]
+        ),
         "--chat-template",
         prepared["template"],
         "--max-running-requests",

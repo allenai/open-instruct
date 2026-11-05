@@ -5,7 +5,7 @@ import pytest
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 
-EXAMPLE = "configs/miles/examples/small.toml"
+EXAMPLE = "configs/miles/examples/dev.toml"
 
 
 def test_capture_defaults_off():

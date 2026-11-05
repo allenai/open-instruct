@@ -206,6 +206,15 @@ is outside that publication wait, so it is not an absolute shutdown deadline.
 
 ## Checkpoints while inference continues
 
+On resume, `training.save_interval`, `evaluation.interval`, and individual
+`evaluation.tasks[].interval` may change to reduce future artifact production.
+The saved specification is authenticated first; training horizon, recipe,
+evaluation tasks and scoring settings must still match. Changing an interval
+does not delete existing checkpoints or backfill past evaluation milestones.
+Evaluation claim IDs include task intervals: if recovery revisits an update
+after an interval change, it may submit a new evaluation even when an older
+claim exists for that checkpoint. Existing claims and jobs remain unchanged.
+
 Native trainer checkpoints are saved between optimizer updates without draining
 inference, including mixed-policy refresh and rolling engine publication. The
 driver saves the dataset cursor and pending-prompt ledger, writes the trainer's
@@ -307,12 +316,21 @@ being checked. Use `--help` on the CLI tools for their remaining options.
 
 ## Bounded wall-clock runs
 
-Set `core.max_run_seconds` to a positive number to finish at a completed collection
-after that many driver wall-clock seconds, including driver startup. This is a
-soft deadline: a running collection, checkpoint, export, and teardown can extend
-past it. Leave headroom in `launch.timeout`. With checkpoint saving enabled, the
-deadline forces a native checkpoint; `output.export_hf=true` also produces the
-final HF export. Background evaluation with `final=true` requests evaluation at
-the actual final update, including off-cadence stops. Submission remains
-best-effort: inspect receipts and explicitly resubmit a failed or skipped final
-evaluation. Debug exits retain their separate resumable, non-final semantics.
+A `core.max_run_seconds` stop is resumable, for runs longer than one job's time
+limit. Set it to a positive number of driver wall-clock seconds, including driver
+startup; the run stops at the next completed collection after that, forces a
+native checkpoint, and records `stopped` in `workflow.json`, with no final HF
+export or final background evaluation. Resubmit the same specification with
+`launch.auto_resume = true` under the same `output.root` to continue; the final
+export and evaluation run when the run reaches `num_rollout`. This is a soft
+deadline: a running collection, checkpoint and teardown can extend past it, so
+leave headroom in `launch.timeout`.
+
+Set `core.max_run_final = true` to make the stop final instead: it saves when
+checkpoint saving is enabled, `output.export_hf=true` produces the final HF
+export, background evaluation with `final=true` is requested at the stopped
+update (submission is best-effort: inspect receipts and resubmit a failed or
+skipped final evaluation), and `workflow.json` records `complete`. With
+`training.save_checkpoints = false` there is nothing to resume from, so the stop
+is final regardless, and `validate` warns. Debug exits keep their separate
+resumable, non-final semantics.

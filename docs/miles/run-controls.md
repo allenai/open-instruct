@@ -13,6 +13,9 @@ field help, use the [configuration reference](configuration.md). Native parser
 acceptance does not establish backend support.
 
 Start with a [maintained example](../../configs/miles/examples/README.md).
+The demo configs are the baseline for configuration options unless otherwise
+stated. Keep their per-response loss weighting and zero reward for truncated
+responses in throughput trials; record intentional objective changes explicitly.
 Use the [generated recipe tables](configuration.md#example-recipes) for its current
 settings, [admission sizing](throughput-profiles.md#size-engine-admission-from-memory)
 for serving budgets, and [async defaults](async-pipeline.md#structured-defaults-and-overrides)
@@ -83,7 +86,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Producer capacity | `async_data_buffer_capacity_factor`, `async_max_concurrent_samples`, `async_unused_samples_handler`, `rollout_submission_granularity`. Barrier/engine-drain buffers enforce homogeneous policy versions within prompt groups. Refresh preserves whole groups but permits per-token policy spans, with staleness checked against the oldest token version. See [publication modes](grpo.md#publication-modes). |
 | Collection / optimizer batch | `rollout_batch_size * n_samples_per_prompt` is samples per collection; `global_batch_size` is samples per optimizer step. Collections must contain whole steps and the lag budget must cover their final step. `num_rollout` counts collections. |
 | Scoring row specialization | `core.row_specialization` (`static` / `dynamic`), resolved at model construction. Core defaults to static; the starting RL profiles select dynamic to avoid compiling for every activation-buffer capacity. Arithmetic and direct wave/backward callers are unchanged. |
-| Standalone scoring pass | Runs only when the recipe needs it: more than one optimizer step per collection (`rollout_batch_size × n_samples_per_prompt / global_batch_size`), a nonzero `kl_coef`, or dropout in the model configuration. Otherwise old log-probabilities are read from the training forward at unchanged weights (or from rollout log-probabilities when `use_rollout_logprobs=true`), the trainer-anchor PPO ratio is 1 at this forward (a rollout anchor can still differ), and the behavior-policy agreement gate runs on the training forward before the optimizer step. `core.scoring_pass_required=true` forces the pass every update. Skipped runs still run the pass on the first update of every process and every `core.scoring_check_interval` updates (default 50; 0 keeps only the first), comparing it to the training forward and failing above `core.scoring_check_tolerance` (default 1e-3 mean absolute). `plan` reports the decision under `scoring_pass`; each optimizer record carries `scoring_pass` as `standalone`, `checked` or `skipped`. |
+| Standalone scoring pass | Runs only when the recipe needs it: more than one optimizer step per collection (`rollout_batch_size × n_samples_per_prompt / global_batch_size`), a nonzero `kl_coef`, or dropout in the model configuration. Otherwise old log-probabilities are read from the training forward at unchanged weights (or from rollout log-probabilities when `use_rollout_logprobs=true`), the trainer-anchor PPO ratio is 1 at this forward (a rollout anchor can still differ), and the behavior-policy agreement gate runs on the training forward before the optimizer step. `core.scoring_pass_required` defaults to `false`; `true` forces the pass every update. Forcing it costs a full forward pass over every collected token per update, which can be the largest part of training time (about 250 of 330 training seconds per update in the 16K-response MoE run reported in [#2030](https://github.com/allenai/open-instruct/pull/2030)); keep it for like-for-like trainer comparisons against a backend that always scores, or for debugging the anchor. Skipping gives the same optimizer step when the conditions above hold. Skipped runs still run the pass on the first update of every process and every `core.scoring_check_interval` updates (default 50; 0 keeps only the first), comparing it to the training forward and failing above `core.scoring_check_tolerance` (default 1e-3 mean absolute). `plan` reports the decision under `scoring_pass`; each optimizer record carries `scoring_pass` as `standalone`, `checked` or `skipped`. |
 | Microbatch / recomputation | `micro_batch_size=1`; `core.activation_checkpointing`. Core accumulates unpadded samples; `max_tokens_per_gpu` is rejected because it does not control Core batching. Megatron packing, selective recompute modules and dynamic microbatch selection do not translate directly. |
 | Lengths | Set `rollout_max_response_len`, `rollout_max_context_len`, `rollout_max_prompt_len`, `sglang_context_length`, and `core.max_sequence_length` consistently. |
 | Admission / cache | `sglang_server_concurrency`, `sglang_max_running_requests`, `sglang_mem_fraction_static`, `sglang_max_total_tokens`, `sglang_max_mamba_cache_size`; `sglang_disable_radix_cache=false` enables radix cache. Most promising for long, reused prefixes; long prompts alone are insufficient. See [when radix caching is useful](topology.md#when-radix-caching-is-useful). |
@@ -95,13 +98,13 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Dial | open-instruct control and semantics |
 | --- | --- |
 | Training input | `prompt_data`, `input_key`, `label_key`, `metadata_key`; `custom_rm_path` selects the reward function. `core.reward_config` configures registered open-instruct verifiers. Prepare prompts with one chat-template application. |
-| Task catalog / recipe / manifest | Structured `data.tasks` and supported `data.rl_manifest` invoke explicit preparation/adoption with immutable manifests. Named `data.recipe` selection is rejected. Named tasks currently include GSM8K, math, IF and generated multiplication; see the workflow guide for limits. Raw `miles.prompt_data` expects prepared JSONL, not a manifest. |
+| Task catalog / recipe / manifest | Structured `data.tasks` and supported `data.rl_manifest` invoke explicit preparation/adoption with immutable manifests. Named `data.recipe` selection is rejected. Named tasks include GSM8K, math, IF, generated multiplication and SynLogic Sudoku; `data.sources` selects fixed allocation over separate source datasets; see the workflow guide for limits. Raw `miles.prompt_data` expects prepared JSONL, not a manifest. |
 | Held-out in-loop eval | `eval_prompt_data=[name,path,...]`, `eval_interval`, `skip_eval_before_train=false`, `n_samples_per_eval_prompt`; explicit `eval_temperature`, `eval_top_p`, `eval_top_k`, `eval_max_response_len`, `eval_max_prompt_len`. Retain source indices and dataset hashes for comparisons. |
 | Learning rate / Adam | `lr`, `lr_decay_style`, `lr_decay_iters`, `lr_warmup_iters` or `lr_warmup_fraction`, `min_lr`, `weight_decay`, `adam_beta1`, `adam_beta2`, `adam_eps`, `clip_grad`. Core uses AdamW; changing `optimizer` to another family is rejected. |
-| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. Structured run files default to std normalization off and upper clipping 0.28 (separate choices); raw MILES parser defaults differ. |
+| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. The demo baseline is per-response loss (`calculate_per_token_loss=false`) and `core.reward_zero_truncated=true`, retaining truncated responses' policy loss masks. Structured run files default to std normalization off and upper clipping 0.28 (separate choices); raw MILES parser defaults differ. |
 | Reference KL | Enable `use_kl_loss`, set `kl_loss_coef`, and provide the reference initialization through `ref_load` as required by MILES. This creates a frozen reference and adds scoring. In raw files a coefficient alone is not the enable switch; the structured compiler enables reference KL for a positive coefficient and initializes the reference from the prepared starting HF model. |
 | Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (no ICEPOP helper is bundled); explicitly choose the policy-ratio anchor. Structured async defaults to trainer-scored old logprobs with TIS; these are algorithm changes, not just async throughput controls. |
-| Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` requires `use_miles_router=true`. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. `core.replay_diagnostics=true` opts into per-layer returned-route and recomputation checks (adds synchronization overhead). |
+| Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` works with the default Rust router; `use_miles_router=true` selects the Python router explicitly. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. `core.replay_diagnostics=true` opts into per-layer returned-route and recomputation checks (adds synchronization overhead). |
 
 ## Checkpoints, reporting and operational controls
 
@@ -167,3 +170,32 @@ Core RL enables persistent Triton caches by default. Structured run files use
 the WEKA TTL (expiry) naming convention. Custom WEKA roots require a TTL component
 and are validated before launch. See the [cache guide](compiler-cache.md)
 for the cache lifecycle, key contract and scope limits.
+
+### Core Rust-router lifecycle
+
+Core defaults to the pinned standard SGLang Rust router. It resolves
+`router_disable_retries=true`, `router_disable_health_check=true`, and
+`router_disable_circuit_breaker=true`; conflicting explicit values are rejected.
+The default policy is `round_robin`, and explicit routing-policy settings are
+preserved. The three-node template keeps 3,840 unfinished-sample admission; the
+router migration does not raise GPU batch/cache limits.
+
+The controller registers an engine only after successful weight publication,
+and waits for registration to become visible and ready. Its small `/health`
+probes quarantine failing engines by confirmed removal. Health recovery alone
+cannot readmit a trainable engine; successful publication must confirm its weights.
+Ordinary refresh keeps healthy workers registered and preserves in-flight requests.
+A failed or ambiguous removal blocks endpoint replacement. An empty router registry
+can be rebuilt at a successful publication boundary; an unknown existing worker
+identity is refused rather than adopted. This does not enable Core fault tolerance
+or automatic controller takeover, which remain outside refresh's supported scope.
+
+With `use_distributed_post=true`, native HTTP actors receive and parse response
+JSON before returning it to the producer. Their observation reports include body
+size, body-ready time, and JSON decode wall/thread-CPU time. The producer records
+parsed-result receipt and sample conversion separately. Without distributed POST,
+the HTTP client and JSON parsing remain local to the producer.
+
+The rollout producer still owns replay-array conversion, reward coordination,
+complete-group assembly, policy-lag checks and trainer-buffer insertion. Rust
+replaces response transport; it does not change these buffer or training contracts.
