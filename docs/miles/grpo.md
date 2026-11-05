@@ -131,6 +131,30 @@ without calling a verifier. This applies to text/code verifiers and named judges
 judge rubrics retain their normal answer-tag extraction within that final region.
 The full response and its token IDs remain available for training and recording.
 
+Verifiers with their own raw-response boundary checks can implement
+`async_call_final_answer(tokens, prediction, label, **kwargs)`. The adapter calls
+that method only after the missing/empty-final and truncation gates; `prediction`
+is the extracted suffix and `tokens` is empty. Without this method, text verifiers
+continue to receive the suffix through `async_call`. Raw-response mode always
+uses `async_call`.
+
+For the qualified Dolci IF image, use this reward-registry entry in **both** arms:
+
+```json
+"ifeval": {
+  "factory": "open_instruct.miles.rewards.task_verifiers.QualifiedIFVerifier",
+  "config": {"module": "experimental_ifeval_reward_v2"}
+}
+```
+
+This wrapper keeps the qualified module and its dependency-pin checks. Raw mode
+uses its original `IFVerifier`; final-answer-only mode uses its `grade_answer`
+function, which validates the target and grades constraints without requiring a
+second closing marker. Registering the old external `IFVerifier` directly does
+not opt into this interface and remains incompatible with suffix-only input.
+Changing the registry and application image is required; changing only the flag
+or running code from an older image does not apply this repair.
+
 This option defaults to false and assumes the Olmo thinking format. It permits
 multiple closing markers, so it is not an exactly-one-tag format validator.
 

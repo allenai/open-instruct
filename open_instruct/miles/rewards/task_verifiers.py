@@ -84,3 +84,34 @@ class ManifestIFVerifier(MultiplicationVerifier):
         # and the lightweight preparation verifiers work without that stack.
         factory = importlib.import_module("open_instruct.ground_truth_utils").IFEvalVerifier
         return await factory().async_call(tokens, prediction, repr([target]), **kwargs)
+
+
+@dataclasses.dataclass
+class QualifiedIFConfig:
+    module: str = "experimental_ifeval_reward_v2"
+
+
+class QualifiedIFVerifier:
+    """Use a qualified IF module's raw-response or extracted-answer entry point.
+
+    The module retains ownership of its target validation, constraint grading and
+    dependency pins. Raw responses still use its IFVerifier unchanged. In final-
+    answer-only mode the reward adapter owns the boundary gate, so grade_answer
+    must receive the selected suffix without a fabricated closing marker.
+    """
+
+    def __init__(self, verifier_config=None):
+        config = verifier_config or QualifiedIFConfig()
+        module = importlib.import_module(config.module)
+        self.verifier = module.IFVerifier(verifier_config=module.IFVerifier.get_config_class()())
+        self.grade_answer = module.grade_answer
+
+    @classmethod
+    def get_config_class(cls):
+        return QualifiedIFConfig
+
+    async def async_call(self, tokens, prediction, label, **kwargs):
+        return await self.verifier.async_call(tokens, prediction, label, **kwargs)
+
+    async def async_call_final_answer(self, tokens, prediction, label, **kwargs):
+        return self.grade_answer(prediction, label)

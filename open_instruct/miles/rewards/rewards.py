@@ -284,7 +284,7 @@ def _math_worker():
 
 
 def _finite(value, field):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         raise ValueError(f"{field} must be a finite number")
     return float(value)
 
@@ -379,7 +379,13 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 diagnostics = metadata.get("verifier_diagnostics", {}).get(name, {})
                 cost = 0.0
             else:
-                result = await registry[name].async_call(
+                # A verifier that validates raw thinking boundaries needs a separate
+                # entry point after this adapter has already validated/extracted the final.
+                verifier = registry[name]
+                score_response = verifier.async_call
+                if args.olmo_core.reward_final_answer_only:
+                    score_response = getattr(verifier, "async_call_final_answer", score_response)
+                result = await score_response(
                     tokens,
                     response,
                     # Verifiers may consume dictionary labels; preserve the original targets.
