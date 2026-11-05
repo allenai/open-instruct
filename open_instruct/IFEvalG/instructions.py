@@ -1844,7 +1844,7 @@ class ExcludeWordHarderChecker(Instruction):
 
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
-        return " " + self._keyword + " " not in value
+        return re.search(r"(?<!\w)" + re.escape(self._keyword) + r"(?!\w)", value, flags=re.IGNORECASE) is None
 
 
 class ParagraphBasicChecker(Instruction):
