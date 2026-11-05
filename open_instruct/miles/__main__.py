@@ -26,7 +26,9 @@ from open_instruct.miles.errors import InputError
 def main() -> None:
     if sys.argv[1:2] == ["records"]:
         module = (
-            "open_instruct.miles.datasets.record_selection"
+            "open_instruct.miles.datasets.replay_summary"
+            if sys.argv[2:3] == ["replay-pool"]
+            else "open_instruct.miles.datasets.record_selection"
             if sys.argv[2:3] == ["select"]
             else "miles.utils.record_summary"
         )
@@ -38,7 +40,7 @@ def main() -> None:
                     "Record analysis requires the MILES package; run it in the pinned runtime."
                 ) from error
             raise
-        command.main(sys.argv[3:] if sys.argv[2:3] == ["select"] else sys.argv[2:])
+        command.main(sys.argv[3:] if sys.argv[2:3] in (["select"], ["replay-pool"]) else sys.argv[2:])
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "validate", "train", "run", "status"))

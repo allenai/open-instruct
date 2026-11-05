@@ -7,7 +7,7 @@ import torch
 from miles.utils.types import Sample
 
 from miles.rollout.data_source import RolloutDataSourceWithBuffer, compute_global_dataset_state_path
-from open_instruct.miles.rollout import mixture_provider, prompt_provider, remind_provider
+from open_instruct.miles.rollout import mixture_provider, prompt_provider, remind_provider, replay_provider
 
 
 class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
@@ -37,13 +37,36 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = prompt_provider.ShuffledPromptProvider(
                 lambda: self.dataset, shuffle=bool(getattr(args, "rollout_shuffle", False))
             )
+        if getattr(core, "prompt_replay_enabled", False):
+            if self.provider.requires_feedback:
+                raise ValueError("Prompt replay supports shuffle or mixture, not another feedback provider")
+            if isinstance(self.provider, mixture_provider.MixturePromptProvider):
+                templates = []
+                for source in self.provider.sources:
+                    for original in source["dataset"].origin_samples:
+                        sample = copy.copy(original)
+                        sample.metadata = (sample.metadata or {}) | {"mixture_source": source["name"]}
+                        templates.append(sample)
+            else:
+                templates = self.dataset.origin_samples if self.dataset is not None else []
+            prepared_dataset = self.dataset
+            self.provider = replay_provider.ReplayPromptProvider(
+                self.provider,
+                templates,
+                fraction=core.prompt_replay_fraction,
+                length_drop=core.prompt_replay_length_drop,
+                window=core.prompt_replay_window,
+                max_successes=core.prompt_replay_max_successes,
+                truncation=core.prompt_replay_truncation,
+                dataset_guard=lambda: self.dataset is prepared_dataset,
+            )
         self._sync_legacy_cursor()
 
     def _sync_legacy_cursor(self):
         # These compatibility fields describe fresh-data traversal, not reviews.
-        provider = (
-            self.provider.base if isinstance(self.provider, remind_provider.ReMindPromptProvider) else self.provider
-        )
+        provider = self.provider
+        while isinstance(provider, (remind_provider.ReMindPromptProvider, replay_provider.ReplayPromptProvider)):
+            provider = provider.base
         if isinstance(provider, prompt_provider.ShuffledPromptProvider):
             self.epoch_id = provider.epoch_id
             self.sample_offset = provider.sample_offset
@@ -60,7 +83,8 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
                 raise ValueError(f"buffer_filter_path returned {len(groups)} groups; requested {num_samples}")
             if len(groups) == num_samples:
                 return groups
-            provider_state = copy.deepcopy(self.provider.state_dict())
+            snapshot = getattr(self.provider, "selection_state_dict", self.provider.state_dict)
+            provider_state = copy.deepcopy(snapshot())
             prompts = self.provider.next_samples(num_samples - len(groups))
             if len(prompts) != num_samples - len(groups):
                 raise ValueError("Prompt provider must return exactly the requested number of prompts")
@@ -80,7 +104,8 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.buffer[:] = buffered
             self.sample_group_index, self.sample_index = counters
             if provider_state is not None:
-                self.provider.load_state_dict(provider_state)
+                restore = getattr(self.provider, "load_selection_state_dict", self.provider.load_state_dict)
+                restore(provider_state)
             raise
         self._sync_legacy_cursor()
         return groups
