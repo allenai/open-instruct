@@ -281,6 +281,27 @@ class ExtraNumpyDirsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not end with EOS"):
             self._check([self.extra_a])
 
+    def test_rejects_repeated_dir_alias_and_cache(self) -> None:
+        link = os.path.join(self.tmp, "extra_a_link")
+        os.symlink(self.extra_a, link)
+        for dirs in (
+            [self.extra_a, self.extra_a],
+            [self.extra_a, link],
+            [self.extra_a, os.path.join(self.extra_a, ".")],
+            [self.cache],
+        ):
+            with self.subTest(dirs=dirs), self.assertRaisesRegex(ValueError, "repeats a directory or the chat cache"):
+                self._check(dirs)
+
+    def test_rejects_glob_match_that_is_not_an_indexed_part(self) -> None:
+        for name in ("token_ids_part_backup.npy", "labels_mask_part_backup.npy", "token_ids_part_0000.old.npy"):
+            stray = os.path.join(self.extra_a, name)
+            with open(stray, "wb") as f:
+                f.write(b"\0" * 4)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not one indexed part each"):
+                self._check([self.extra_a])
+            os.remove(stray)
+
     def test_metadata_required_with_metadata_boundaries(self) -> None:
         os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
         self._check([self.extra_a])

@@ -210,6 +210,15 @@ def _check_extra_numpy_dir(
     mask_parts = _part_files(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)
     if not token_parts:
         raise FileNotFoundError(f"{numpy_dir} has no {numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB} parts.")
+    # OLMo-core trains on every file its glob matches, so a match that is not exactly one indexed part
+    # (e.g. token_ids_part_backup.npy) would be trained on without the checks below.
+    for pattern, parts in (
+        (numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB, token_parts),
+        (numpy_dataset_conversion.LABELS_MASK_NPY_GLOB, mask_parts),
+    ):
+        unchecked = sorted(set(glob.glob(os.path.join(numpy_dir, pattern))) - set(parts.values()))
+        if unchecked:
+            raise ValueError(f"{numpy_dir}: {pattern} matches files that are not one indexed part each: {unchecked}")
     if set(token_parts) != set(mask_parts):
         raise ValueError(
             f"{numpy_dir}: token parts without a label mask: {sorted(set(token_parts) - set(mask_parts))}; "
@@ -305,8 +314,12 @@ def _check_extra_numpy_dirs(
     """Validate every extra dir, then log token and loss-token totals for the cache and the extras."""
     if not extra_numpy_dirs:
         return {}
-    if len(set(extra_numpy_dirs)) != len(extra_numpy_dirs):
-        raise ValueError(f"--extra_numpy_dirs lists a directory more than once: {list(extra_numpy_dirs)}")
+    # Compare resolved paths, so an alias or symlink of the cache or of another extra is not trained twice.
+    resolved = [os.path.realpath(d) for d in (cache_dir, *extra_numpy_dirs)]
+    if len(set(resolved)) != len(resolved):
+        raise ValueError(
+            f"--extra_numpy_dirs repeats a directory or the chat cache {cache_dir}: {list(extra_numpy_dirs)}"
+        )
     token_dtype = oc_data.NumpyPackedFSLDatasetConfig(tokenizer=tokenizer, paths=[], sequence_length=1).get_dtype()
     stats = {
         numpy_dir: _check_extra_numpy_dir(numpy_dir, tokenizer, token_dtype, sequence_length, require_metadata)
