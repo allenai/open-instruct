@@ -15,13 +15,30 @@ echo "$output"
 
 exp_url=$(echo "$output" | grep -oP 'https://beaker.org/ex/[^\s]+' | head -1)
 exp_id=$(echo "$exp_url" | grep -oP 'https://beaker.org/ex/\K[^\s]+')
+# For the workflow's cancellation cleanup step.
+if [ -n "${RUNNER_TEMP:-}" ]; then
+    echo "$exp_id" > "$RUNNER_TEMP/gpu_test_experiment_id"
+fi
 echo ""
 echo "=========================================="
 echo "Waiting for tests to finish on Beaker: $exp_url"
 echo "=========================================="
 echo ""
 
-beaker experiment await "$exp_id" 0 --index finalized --timeout 25m
+# Stop the experiment if we exit before it finishes (a timeout, or Ctrl-C when run by hand), so it does
+# not take a GPU later for a result nobody reads. In CI, a cancelled run is handled by tests.yml.
+finalized=false
+stop_unfinished() {
+    if [ "$finalized" != "true" ]; then
+        echo "Stopping unfinished experiment $exp_id"
+        beaker experiment stop "$exp_id" || true
+    fi
+}
+trap stop_unfinished EXIT
+trap 'exit 130' INT TERM
+
+beaker experiment await "$exp_id" 0 --index finalized --timeout 40m
+finalized=true
 status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs[0].status.exitCode')
 if [ "$status" != "0" ]; then
     echo "GPU tests failed with exit code $status"

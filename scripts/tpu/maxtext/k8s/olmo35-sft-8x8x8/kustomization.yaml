@@ -5,7 +5,7 @@
 # its data order differs from the 4x4x8 recipe's: compare it only with a control on the same slice and config.
 # Whether this recipe matches the 4x4x8's quality is H078's question (LR 5e-5); until it reads, it is not an anchor.
 # The image is the one H088 measured: the restore-fix image plus the shim (abhishekraok/maxtext 736b296c), inactive here.
-# Olmo 3.5 hero-small SFT on TPU, the H045 anchor recipe (olmo35-small-4t-emo base, Dolci-Think, the Olmo 3.5
+# Olmo 3.5 tiny (formerly called small) SFT on TPU, the H045 anchor recipe (olmo35-small-4t-emo base, Dolci-Think, the Olmo 3.5
 # template with H045's prefix labelling, 65,536-token sequences, 4,194,304 tokens/step here, LR 5e-5, 3% warmup (from step one, as OLMo-core) then
 # linear to 0 over 2,942 steps here, AdamW wd 0, clip 1.0, router load-balancing 0.01 and router z-loss 1e-5 summed over MoE layers as OLMo-core does, LM-head z-loss 1e-5, EMO off). MoE buffers hold 3.0x (the 4x4x8 holds 2.5x) the mean load per expert shard (dropless needs 32.9 of 31.75 GiB at 64K; the REQUIRED_RBF
 # log line gives, per step and MoE layer, the factor that would have dropped nothing: at most 2.41 over the 600 parity steps).
