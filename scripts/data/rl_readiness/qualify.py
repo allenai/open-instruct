@@ -27,6 +27,7 @@ from open_instruct.miles.datasets import run_data
 from open_instruct.miles.rewards import reasoning_gym, rewards
 
 FACTORIES = {
+    "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.miles.rewards.candidate_verifiers.CandidateVerifier",
     "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
