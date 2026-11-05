@@ -27,8 +27,9 @@ Rules an agent follows:
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
   does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). On the `8x8x8`, a short sweep of the
-  parallelism split, batch, vocab tiling and XLA collective flags found nothing reliably faster than the recipe for
-  tiny, and small fits only its one config. A new slice or mesh needs an xprof of one TPU step first (in-loop
+  parallelism split, batch, vocab tiling and XLA collective flags found only data 8 x fsdp 8 faster for tiny (+8%), and
+  small fits only its one config. Tiny's loss went NaN in 5 of 8 short runs on the recreated `8x8x8`: run a new slice to
+  well past step 20 before trusting it. A new slice or mesh needs an xprof of one TPU step first (in-loop
   all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.

@@ -366,13 +366,14 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   fsdp 16 x context 4 x expert 8, `remat_policy=full`, image `-ks5932379d`: 6.5 s/step, 315 tokens/s/chip. At
   `ragged_buffer_factor=3.0` it dropped 1.1% of routed assignments (up to 9.2% in one layer); dropping none would need `ragged_buffer_factor` up to 8.5 in the worst layer.
 
-  Each mesh was picked to keep r2's per-device layout. A short sweep on the `8x8x8` on 2026-11-05 (12-30 steps per
-  config, profiler off, median of steps from 3) found nothing reliably faster than these points:
+  Each mesh was picked to keep r2's per-device layout. A short sweep on the `8x8x8` on 2026-11-05 (up to 20 steps per
+  config, profiler off, median of steps from 3) found one faster split, but no tiny config ran reliably finite there:
 
   | tiny, 64 rows, change from the recipe | s/step | tokens/s/chip | result |
   |---|---|---|---|
   | none (fsdp 64 x expert 8) | 4.24 | 1,934 | ~3.6% MFU (TFLOP/s/device ÷ 275) |
-  | data 8 x fsdp 8 x expert 8 | 3.95 | 2,073 | +7%, but NaN at step 13; repeat pending |
+  | data 8 x fsdp 8 x expert 8 | 3.93-3.95 | 2,073-2,085 | +7-8%; NaN at step 13 in one run, finite to step 20 in its repeat |
+  | data 4 x fsdp 16 x expert 8 | - | - | NaN at step 3 |
   | `num_vocab_tiling=4` (from 16) | 4.15 | 1,972 | NaN at step 10 |
   | async collective-fusion `LIBTPU_INIT_ARGS` | 4.24 | 1,930 | no gain |
   | 128 rows (per-device batch 0.25) | - | - | compile OOM (33.8 of 31.75 GB) |
@@ -382,8 +383,10 @@ Each of these trained silently on wrong data or a wrong model before it was foun
     The collective-fusion flags left it at 6.47 s/step; every fourth step takes ~7.4 s.
   - libtpu on v4 rejects `--xla_tpu_enable_async_collective_fusion_fuse_all_gather=true` ("not supported" outside
     Viperlite); the rest of that flag set loads.
-  - Tiny hit NaN in 3 of the 5 runs that passed step 10 on this slice (the unchanged config once, in the xprof
-    run), so a finite run of a few steps does not clear a config.
+  - Tiny's loss went NaN in 5 of 8 runs on this slice, across four configs, between steps 3 and 13; the unchanged
+    config went NaN in 2 of its 3 runs. H078 trained the unchanged config to the end on the `8x8x8` before its
+    2026-10-21 split. Whether the recreated slice or the newer image causes the NaN is not tested, so treat the
+    recreated `8x8x8` as unproven for training.
 
   Speedups beyond these need code changes. Any other slice or mesh needs its own same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
