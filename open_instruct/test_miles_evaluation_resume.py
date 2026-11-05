@@ -5,7 +5,6 @@ import json
 import select
 import subprocess
 import sys
-from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -25,7 +24,13 @@ def receipt(tmp_path):
         "update": 1000,
         "group_id": "two-tasks",
         "tasks": [{"task": name, "generation": {"temperature": 0.8}, "scoring": {}} for name in ("a", "b")],
-        "evaluation": {"root": str(tmp_path), "revision": "pinned", "image": "image", "gpus": 1, "server_args": []},
+        "evaluation": {
+            "root": str(tmp_path),
+            "revision": "pinned",
+            "image": "image",
+            "gpus": 1,
+            "provider_kwargs": {},
+        },
         "training": {"wandb": {"mode": "offline"}},
     }
 
@@ -57,7 +62,6 @@ def runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(runner.subprocess, "Popen", start)
     monkeypatch.setattr(runner.subprocess, "run", evaluate)
     monkeypatch.setattr(runner.subprocess, "check_output", lambda *a, **kw: "pinned\n")
-    monkeypatch.setattr(runner.request, "urlopen", lambda *a, **kw: nullcontext(Mock(status=200)))
     copytree = runner.shutil.copytree
 
     def copy_results(src, dst, *args, **kwargs):
@@ -89,7 +93,7 @@ def test_preemption_skips_completed_task_and_preserves_failed_attempt(receipt, r
 
     # A retry after completion neither loads a server nor repeats generation.
     runner.run_evaluation({**receipt, "experiment_id": "replacement"})
-    assert start.call_count == 2
+    start.assert_not_called()
     assert calls == ["a", "b", "b"]
 
 
@@ -103,7 +107,37 @@ def test_retry_after_last_task_before_group_marker_needs_no_server(receipt, runt
     start.assert_not_called()
 
 
-@pytest.mark.parametrize("change", ["checkpoint", "tasks", "revision", "worker"])
+def test_failed_subprocess_prints_bounded_log_and_preserves_error(receipt, monkeypatch, capsys):
+    args = [
+        sys.executable,
+        "-c",
+        "import sys; print('old output\\n' * 2000); print('missing sandbox monitor.sh', file=sys.stderr); sys.exit(7)",
+    ]
+    monkeypatch.setattr(runner, "command", lambda *a: args)
+    # Flush stdout before stderr so the diagnostic is at the end of the log.
+    monkeypatch.setenv("PYTHONUNBUFFERED", "1")
+    with runner.evaluation_output(receipt) as output, pytest.raises(subprocess.CalledProcessError) as error:
+        runner.run_tasks(receipt, output)
+    assert error.value.returncode == 7
+    assert error.value.cmd == args
+    stderr = capsys.readouterr().err
+    assert "missing sandbox monitor.sh" in stderr
+    assert "olmo-eval.log" in stderr
+    assert stderr.count("old output") < 160
+    logs = list(output.rglob("olmo-eval.log"))
+    assert len(logs) == 2
+    assert logs[0].read_text().count("old output") == 2000
+    assert not list(output.rglob("complete.json"))
+
+
+def test_unreadable_failure_log_is_nonfatal(tmp_path, capsys):
+    runner.print_failure_log(tmp_path / "missing.log")
+    assert "Could not read evaluator log" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "change", ["checkpoint", "tasks", "revision", "worker", "provider_kwargs", "external_server_args", "gpus"]
+)
 def test_resume_refuses_changed_inputs_without_overwriting_provenance(receipt, change):
     with runner.evaluation_output(receipt) as output:
         original = (output / "provenance.json").read_bytes()
@@ -182,3 +216,41 @@ def test_lock_excludes_other_process_and_is_released_after_kill(receipt):
         child.stdout.close()
     with runner.evaluation_output(receipt) as output:
         assert (output / "provenance.json").is_file()
+
+
+def test_failed_task_does_not_block_later_tasks(receipt, runtime):
+    calls, state, _ = runtime
+    receipt["tasks"].append({"task": "c", "generation": {}, "scoring": {}})
+    output = runner.result_directory(receipt)
+    with pytest.raises(subprocess.CalledProcessError):
+        runner.run_evaluation(receipt)
+    assert calls == ["a", "b", "c"]
+    assert runner.saved_task(output, receipt["tasks"][2])[1] is not None
+    assert json.loads((output / "task-failures.json").read_text())[0]["task"] == "b"
+    state["fail"] = None
+    runner.run_evaluation(receipt)
+    assert calls == ["a", "b", "c", "b"]
+    assert json.loads((output / "task-failures.json").read_text()) == []
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 20, None])
+def test_scicode_normalizes_only_hf_disabled_top_k(tmp_path, top_k):
+    checkpoint = tmp_path / "hf"
+    checkpoint.mkdir()
+    original = {"top_k": top_k, "temperature": 0.6, "top_p": 0.95, "eos_token_id": [1, 2]}
+    config = checkpoint / "generation_config.json"
+    config.write_text(json.dumps(original))
+    weights = checkpoint / "model.safetensors"
+    weights.write_bytes(b"unchanged weights")
+    output = tmp_path / "output"
+    output.mkdir()
+    view = Path(runner.scicode_checkpoint(str(checkpoint), output))
+    assert json.loads(config.read_text()) == original
+    if top_k == 0:
+        assert view != checkpoint
+        assert (view / weights.name).is_symlink()
+        assert (view / weights.name).resolve() == weights
+        assert json.loads((view / config.name).read_text()) == {**original, "top_k": -1}
+        assert Path(runner.scicode_checkpoint(str(checkpoint), output)).is_dir()
+    else:
+        assert view == checkpoint

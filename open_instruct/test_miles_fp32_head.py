@@ -21,7 +21,7 @@ def test_fp32_head_rejects_explicit_serving_conflict_and_bad_type():
 
 
 def test_structured_fp32_head_option():
-    spec = RunSpec.load("configs/miles/examples/small.toml", ["trainer.fp32_lm_head=true"])
+    spec = RunSpec.load("configs/miles/examples/dev.toml", ["trainer.fp32_lm_head=true"])
     assert spec.compile().core.fp32_lm_head
     assert "--sglang-enable-fp32-lm-head" in spec.compile().arguments()
     assert spec.compile().resolved_miles()["sglang_enable_fp32_lm_head"] is True

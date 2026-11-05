@@ -7,7 +7,7 @@ import pytest
 import torch
 from expert_schedule_helpers import hook_args, sample_groups
 from miles.backends.core_utils import expert_schedule
-from miles.backends.training_utils.loss_hub import advantages
+from miles.backends.training_utils.loss.hub import advantages
 from miles.ray.rollout import rollout_data_conversion, train_data_conversion
 from miles.utils import arguments
 from miles.utils.function_registry import load_function
@@ -32,6 +32,7 @@ def test_hook_through_real_reward_normalization_and_partition(tmp_path):
     args.disable_rollout_trim_samples = False
     args.balance_data = False
     args.multi_lora = False
+    args.rollout_top_logprobs_num = 0
     original = sample_groups(36, Sample)
     for group in original:
         for sample in group:

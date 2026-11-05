@@ -17,18 +17,23 @@ Rules an agent follows:
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Start on a `4x4x8`; use the `8x8x8` only when no `4x4x8` is free** (guide: Cost per slice). The `4x4x8` is the
-  cheapest per chip-hour. The `8x8x8` overlay (`k8s/olmo35-sft-8x8x8/`, 64 rows) is projected at ~1.09x the chip-hours,
-  ~3.6x sooner (steady state, not yet a measured whole run). Its data order differs from the `4x4x8`'s, so compare it
-  only with a control on the same slice. The 1.09x holds only without the data-order shim
-  (`MAXTEXT_R2_DATA_EMULATION`) and `MAXTEXT_LOG_BATCH_HASH=1`. With them a step in eight stalls 20-35 s
-  (1.8-1.9x the chip-hours).
+- **Use a `4x4x8` for the tiny SFT recipe (H045)** (guide: What the cluster is). Since 2026-11-03 the cluster is three
+  `4x4x8`s, one `8x8x8` and hero's `8x8x48`. Check the live layout before planning (command in the guide); it changes
+  when the cluster is resliced.
+- **For `ici_context_parallelism` > 1, set `context_parallel_load_balance=False`** and require step-1 `LOSS-PARTS` CE
+  to match an HF forward of the same batch within 1e-3 before training. With load balancing on, dense Olmo 3 7B's CE
+  was off by +0.39 (cp4) and +1.98 (cp8); with it off, cp4 matched (guide: Traps).
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
   does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). None of them has been tuned. A new slice or
   mesh needs an xprof of one TPU step first (in-loop all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.
+- **Mount only the folders a job reads, never one that holds checkpoints.** gcsfuse's metadata prefetch lists
+  everything under `only-dir` on every host at every pod start, so a mount of `post-training/` lists every run's
+  checkpoints each time. Mount `post-training/data`
+  and `post-training/tokenizers` separately at their old paths (`k8s/narrow_mounts.py`); read and write checkpoints
+  over `gs://`. Jobs launched with a wide mount keep it until relaunched.
 - **Stagger big-slice launches.** Two slices loading at once hit the GCS egress quota.
 - **Keep one slice shape per experiment.** The data order depends on the host count, so arms and their control share
   a shape.

@@ -74,7 +74,7 @@ a policy boundary; inspect retained token spans and `refresh_scores` observation
 ## Policy lag and TIS
 
 Structured asynchronous runs default to **six optimizer updates** of permitted
-policy lag. Medium and large explicitly select six; synchronous dev/small retain
+policy lag. Node and three-node inherit six; synchronous dev retains
 zero. Set `async.max_weight_staleness` in structured runs. Configuration files
 also accept `core.max_policy_lag` and `miles.max_weight_staleness` as aliases:
 any explicit value overrides the default, and conflicting explicit values are
@@ -115,6 +115,7 @@ resolves at compile time to:
 
 ```
 engines = inference GPUs / GPUs per engine
+server concurrency = 2 × max running requests  # when omitted in structured async configs
 requested_slots = engines × min(server concurrency, max running requests)
 producer_samples = round_up_to_whole_group(max(collection_samples, 2 × requested_slots))
 completed_buffer_groups = floor(buffer_factor × rollout_batch_size)
@@ -126,7 +127,13 @@ including tensor parallelism, rather than physical node count. It does not chang
 model memory allocation, routing, group submission order, or the optimizer batch.
 It is not a strict cap on every resident partial group under sample backfill.
 
-The completed buffer retains the existing default factor **2**, tied to collection
+HTTP permits cover the whole generation call, including response transport and
+processing outside the GPU. Giving the producer two waves while limiting HTTP
+to one wave can still underfill engines. The structured async default now gives
+both limits two waves; explicit overrides remain unchanged and `plan` warns when
+their combined limit leaves no headroom above engine capacity.
+
+The completed buffer defaults to factor **1**, tied to collection
 size instead of inference node count. Increasing trainer GPU count alone does not
 change either batch size or completed buffer size. A large inference fleet should
 not silently generate a proportionally large backlog of aging completed samples.
@@ -136,7 +143,7 @@ not silently generate a proportionally large backlog of aging completed samples.
 fully_async = true
 # Omit async_max_concurrent_samples to derive it from the requested engine fleet.
 # An explicit value is preserved; e.g. async_max_concurrent_samples = 128.
-async_data_buffer_capacity_factor = 2.0
+async_data_buffer_capacity_factor = 1.0
 rollout_submission_granularity = "sample"
 ```
 

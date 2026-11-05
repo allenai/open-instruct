@@ -83,6 +83,7 @@ def test_single_response_requires_explicit_opt_out():
 @pytest.mark.parametrize("enabled", [True, False])
 def test_truncation_exclusion_selects_matching_group_filter(mode, enabled):
     config = configured(mode, enabled, custom_reward_post_process_path=EXCLUDE_TRUNCATED)
+    config = dataclasses.replace(config, core=dataclasses.replace(config.core, reward_zero_truncated=False))
     plan = config.plan()
     assert plan["miles"].get("dynamic_sampling_filter_path") == (FINISHED_STD_FILTER if enabled else None)
     if enabled:
@@ -108,11 +109,10 @@ def test_switch_requires_a_boolean(value):
         dataclasses.replace(CoreConfig(), filter_zero_std_groups=value)
 
 
-@pytest.mark.parametrize("name", ["dev", "small", "medium", "large"])
+@pytest.mark.parametrize("name", ["dev", "node", "three-node"])
 def test_maintained_examples_explain_their_filtering_choice(name):
     path = Path(__file__).resolve().parents[1] / "configs/miles/examples" / f"{name}.toml"
     run = RunSpec.load(path)
-    enabled = name in ("medium", "large")
-    assert run.sections["training"]["filter_zero_std_groups"] is enabled
+    enabled = name in ("node", "three-node")
     assert run.compile().core.filter_zero_std_groups is enabled
     assert ("--dynamic-sampling-filter-path" in run.compile().arguments()) is enabled
